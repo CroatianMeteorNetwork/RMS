@@ -625,9 +625,9 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
     # Convert x,y to RA/Dec using a fast cython function
     RA_data, dec_data = cyXYToRADec(JD_data, np.array(X_data, dtype=np.float64), \
         np.array(Y_data, dtype=np.float64), float(platepar.lat), float(platepar.lon), float(platepar.X_res), \
-        float(platepar.Y_res), float(platepar.Ho), float(platepar.RA_d), float(platepar.dec_d), \
-        float(platepar.pos_angle_ref), float(platepar.F_scale), platepar.x_poly_fwd, platepar.y_poly_fwd, \
-        unicode(platepar.distortion_type), refraction=platepar.refraction, \
+        float(platepar.Y_res), float(platepar.Ho), float(platepar.JD), float(platepar.RA_d), 
+        float(platepar.dec_d), float(platepar.pos_angle_ref), float(platepar.F_scale), platepar.x_poly_fwd, 
+        platepar.y_poly_fwd, unicode(platepar.distortion_type), refraction=platepar.refraction, \
         equal_aspect=platepar.equal_aspect, force_distortion_centre=platepar.force_distortion_centre, \
         asymmetry_corr=platepar.asymmetry_corr)
 
@@ -675,11 +675,11 @@ def raDecToXYPP(RA_data, dec_data, jd, platepar):
 
     # Use the cythonized funtion insted of the Python function
     X_data, Y_data = cyraDecToXY(RA_data, dec_data, float(jd), float(platepar.lat), float(platepar.lon),
-        float(platepar.X_res), float(platepar.Y_res), float(platepar.Ho), float(platepar.RA_d), \
-        float(platepar.dec_d), float(platepar.pos_angle_ref), platepar.F_scale, platepar.x_poly_rev, \
-        platepar.y_poly_rev, unicode(platepar.distortion_type), refraction=platepar.refraction, \
-        equal_aspect=platepar.equal_aspect, force_distortion_centre=platepar.force_distortion_centre, \
-        asymmetry_corr=platepar.asymmetry_corr)
+        float(platepar.X_res), float(platepar.Y_res), float(platepar.Ho), float(platepar.JD),  
+        float(platepar.RA_d), float(platepar.dec_d), float(platepar.pos_angle_ref), platepar.F_scale, 
+        platepar.x_poly_rev, platepar.y_poly_rev, unicode(platepar.distortion_type), 
+        refraction=platepar.refraction, equal_aspect=platepar.equal_aspect, 
+        force_distortion_centre=platepar.force_distortion_centre, asymmetry_corr=platepar.asymmetry_corr)
 
     return X_data, Y_data
 

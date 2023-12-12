@@ -763,12 +763,12 @@ def cyApparentAltAz2TrueRADec_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] azim_arr, np
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
-def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
-    np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data, double jd, double lat, double lon, double x_res, \
-    double y_res, double h0, double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
-    np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev, \
-    str dist_type, bool refraction=True, bool equal_aspect=False, bool force_distortion_centre=False, \
-    bool asymmetry_corr=True):
+def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
+    np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data, double jd, double lat, double lon, double x_res,
+    double y_res, double h0, double jd_ref, double ra_ref, double dec_ref, double pos_angle_ref, 
+    double pix_scale, np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, 
+    np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev, str dist_type, bool refraction=True, bool equal_aspect=False, 
+    bool force_distortion_centre=False, bool asymmetry_corr=True):
     """ Convert RA, Dec to distorion corrected image coordinates. 
 
     Arguments:
@@ -780,6 +780,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
         x_res: [int] X resolution of the camera.
         y_res: [int] Y resolution of the camera.
         h0: [float] Reference hour angle (deg).
+        jd_ref: [float] Reference Julian date of plate solution.
         ra_ref: [float] Reference right ascension of the image centre (degrees).
         dec_ref: [float] Reference declination of the image centre (degrees).
         pos_angle_ref: [float] Rotation from the celestial meridial (degrees).
@@ -824,6 +825,9 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
     if refraction:
         ra_centre, dec_centre = eqRefractionTrueToApparent(ra_centre, dec_centre, jd, radians(lat), \
             radians(lon))
+
+    # Precess the FOV centre to J2000 (otherwise the FOV centre drifts with time)
+    ra_centre, dec_centre = equatorialCoordPrecession(jd_ref, J2000_DAYS, ra_centre, dec_centre)
 
 
     # If the radial distortion is used, unpack radial parameters
@@ -1072,7 +1076,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data, \
 @cython.cdivision(True)
 def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_t, ndim=1] x_data, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] y_data, double lat, double lon, double x_res, double y_res, \
-    double h0, double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
+    double h0, double jd_ref, double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, \
     str dist_type, bool refraction=True, bool equal_aspect=False, bool force_distortion_centre=False,\
     bool asymmetry_corr=True):
@@ -1086,6 +1090,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         x_res: [int] Image size, X dimension (px).
         y_res: [int] Image size, Y dimenstion (px).
         h0: [float] Reference hour angle (deg).
+        jd_ref: [float] Reference Julian date when the plate was fit.
         ra_ref: [float] Reference right ascension of the image centre (degrees).
         dec_ref: [float] Reference declination of the image centre (degrees).
         pos_angle_ref: [float] Field rotation parameter (degrees).
@@ -1357,7 +1362,6 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         # Compute the reference RA centre at the given JD by adding the hour angle difference
         ra_ref_now = (ra_ref + radians(cyjd2LST(jd, 0)) - radians(h0) + 2*pi)%(2*pi)
 
-
         # Correct the FOV centre for refraction
         if refraction:
             ra_ref_now_corr, dec_ref_corr = eqRefractionTrueToApparent(ra_ref_now, dec_ref, jd, \
@@ -1366,6 +1370,12 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         else:
             ra_ref_now_corr = ra_ref_now
             dec_ref_corr = dec_ref
+
+
+        # Precess the reference RA and dec to current epoch (needs to be used to avoid FOV centre drift over 
+        # time)
+        ra_ref_now_corr, dec_ref_corr = equatorialCoordPrecession(jd_ref, J2000_DAYS, ra_ref_now_corr, \
+            dec_ref_corr)
 
 
         # Compute declination
