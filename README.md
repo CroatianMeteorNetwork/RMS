@@ -85,7 +85,8 @@ Alternatively, if you are using Anaconda Python on your Linux PC, you can instal
 
 ```
 conda install -y numpy scipy gitpython cython matplotlib
-conda install -y -c conda-forge pyephem Pillow imreg_dft imageio pyqtgraph'<=0.12.1'
+conda install -y -c conda-forge Pillow imreg_dft imageio pyqtgraph'<=0.12.1'
+conda install -y -c anaconda ephem
 conda install -y -c astropy astropy
 pip install rawpy
 ```
