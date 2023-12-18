@@ -802,7 +802,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     """
 
     cdef int i
-    cdef double ra_centre, dec_centre, ra, dec
+    cdef double ra_centre, dec_centre, ra, dec, ra_centre_j2000, ra_diff
     cdef double radius, sin_ang, cos_ang, theta, x, y, r, dx, dy, x_img, y_img, r_corr, r_scale
     cdef double x0, y0, xy, a1, a2, k1, k2, k3, k4, k5
     cdef int index_offset
@@ -827,7 +827,14 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
             radians(lon))
 
     # Precess the FOV centre to J2000 (otherwise the FOV centre drifts with time)
-    ra_centre, dec_centre = equatorialCoordPrecession(jd_ref, J2000_DAYS, ra_centre, dec_centre)
+    ra_centre_j2000, dec_centre = equatorialCoordPrecession(jd_ref, J2000_DAYS, ra_centre, dec_centre)
+
+    # The position angle needs to be corrected for precession, otherwise the FOV rotates with time
+    # Applying the difference in RA between the current and the reference epoch fixes the position angle
+    ra_diff = (ra_centre - ra_centre_j2000 + pi)%(2*pi) - pi
+    pos_angle_ref = (pos_angle_ref - degrees(ra_diff) + 360)%360
+
+    ra_centre = ra_centre_j2000
 
 
     # If the radial distortion is used, unpack radial parameters
@@ -1116,7 +1123,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     """
 
     cdef int i
-    cdef double jd, x_img, y_img, r, dx, x_corr, dy, y_corr, r_corr, r_scale
+    cdef double jd, x_img, y_img, r, dx, x_corr, dy, y_corr, r_corr, r_scale, ra_ref_now_corr_j2000
     cdef double x0, y0, xy, off_direction, a1, a2, k1, k2, k3, k4, k5
     cdef int index_offset
     cdef double radius, theta, sin_t, cos_t
@@ -1351,14 +1358,6 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 
         ### Convert gnomonic X, Y to RA, Dec ###
 
-        # Radius from FOV centre to sky coordinate
-        radius = radians(sqrt(x_corr**2 + y_corr**2))
-
-        # Compute theta - the direction angle between the FOV centre, sky coordinate, and the north 
-        #   celestial pole
-        theta = (pi/2 - radians(pos_angle_ref) + atan2(y_corr, x_corr))%(2*pi)
-
-
         # Compute the reference RA centre at the given JD by adding the hour angle difference
         ra_ref_now = (ra_ref + radians(cyjd2LST(jd, 0)) - radians(h0) + 2*pi)%(2*pi)
 
@@ -1374,8 +1373,23 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 
         # Precess the reference RA and dec to current epoch (needs to be used to avoid FOV centre drift over 
         # time)
-        ra_ref_now_corr, dec_ref_corr = equatorialCoordPrecession(jd_ref, J2000_DAYS, ra_ref_now_corr, \
+        ra_ref_now_corr_j2000, dec_ref_corr = equatorialCoordPrecession(jd_ref, J2000_DAYS, ra_ref_now_corr, \
             dec_ref_corr)
+
+        # The position angle needs to be corrected for precession, otherwise the FOV rotates with time
+        # Applying the difference in RA between the current and the reference epoch fixes the position angle
+        ra_diff = (ra_ref_now_corr - ra_ref_now_corr_j2000 + pi)%(2*pi) - pi
+        pos_angle_ref = (pos_angle_ref - degrees(ra_diff) + 360)%360
+
+        ra_ref_now_corr = ra_ref_now_corr_j2000
+
+        
+        # Radius from FOV centre to sky coordinate
+        radius = radians(sqrt(x_corr**2 + y_corr**2))
+
+        # Compute theta - the direction angle between the FOV centre, sky coordinate, and the north 
+        #   celestial pole
+        theta = (pi/2 - radians(pos_angle_ref) + atan2(y_corr, x_corr))%(2*pi)
 
 
         # Compute declination
