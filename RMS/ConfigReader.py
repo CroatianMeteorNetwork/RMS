@@ -365,7 +365,12 @@ class Config:
         self.event_monitor_remote_dir = "files/event_monitor"
         self.event_monitor_check_interval = 30
         self.event_monitor_check_interval_fast = 5
+        #tle_processing_level
+        #0 ignore TLEs
+        #1 Process only time bound TLEs
+        #2 Process unbound TLEs - continuous coverage mode
 
+        self.tle_processing_level = 1
 
 
 
@@ -1052,6 +1057,8 @@ def parseUpload(config, parser):
     if parser.has_option(section, "event_monitor_check_interval_fast"):
         config.event_monitor_check_interval_fast = parser.getint(section, "event_monitor_check_interval_fast")
 
+    if parser.has_option(section, "tle_processing_level"):
+        config.tle_processing_level = parser.getint(section, "tle_processing_level")
 
 def parseBuildArgs(config, parser):
     section = "Build"

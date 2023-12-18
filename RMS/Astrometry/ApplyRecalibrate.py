@@ -1038,7 +1038,7 @@ if __name__ == "__main__":
     config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
     # Initialize the logger
-    initLogging(config, 'recalibrate_')
+    initLogging(config, 'recalibrate_', safedir=dir_path)
 
     # Get the logger handle
     log = logging.getLogger("logger")

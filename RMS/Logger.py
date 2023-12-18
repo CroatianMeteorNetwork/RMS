@@ -25,12 +25,16 @@ import datetime
 from RMS.Misc import mkdirP
 
 
-def initLogging(config, log_file_prefix=""):
+def initLogging(config, log_file_prefix="", safedir=None):
     """ Initializes the logger. 
     
     Arguments:
+        config: [Config] Config object.
+    
+    Keyword arguments:
         log_file_prefix: [str] String which will be prefixed to the log file. Empty string by default.
-
+        safedir: [str] Path to the directory where the log files will always be able to be written to. It will
+            be used if the default log directory is not writable. None by default.
     """
 
     # Path to the directory with log files
@@ -39,6 +43,11 @@ def initLogging(config, log_file_prefix=""):
     # Make directories
     mkdirP(config.data_dir)
     mkdirP(log_path)
+
+    # If the log directory doesn't exist or is not writable, use the safe directory
+    if safedir is not None:
+        if not os.path.exists(log_path) or not os.access(log_path, os.W_OK):
+            log_path = safedir
 
     # Generate a file name for the log file
     log_file_name = log_file_prefix + "log_" + str(config.stationID) + "_" + datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S.%f') + ".log"
