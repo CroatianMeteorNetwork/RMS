@@ -2987,6 +2987,9 @@ class EventMonitor(multiprocessing.Process):
                     log.info("{}".format(this_event.tle_1))
                     log.info("{}".format(this_event.tle_2))
                 self.checkTLEEventWithoutTime(this_event, ev_con, test_mode)
+            elif this_event.stations_required != "":
+                log.info("Event at {}, calls for stations {}".format(this_event.dt, this_event.stations_required))
+
 
         if len(unprocessed) - future_events > 1:
             log.info("{} events were processed, EventMonitor work completed"
