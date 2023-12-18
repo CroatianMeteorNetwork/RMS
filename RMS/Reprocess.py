@@ -35,7 +35,7 @@ from Utils.MakeFlat import makeFlat
 from Utils.PlotFieldsums import plotFieldsums
 from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
 from Utils.ShowerAssociation import showerAssociation
-
+from Utils.PlotTimeIntervals import analyze_timestamps
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -393,6 +393,20 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             log.debug('Generating a timelapse failed with message:\n' + repr(e))
             log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
+    log.info('Plotting timestamp intervals...')
+
+    # Plot timestamp interval
+    try:
+        analyze_timestamps(night_data_dir)
+
+        timelapse_path = os.path.join(night_data_dir, timelapse_file_name)
+
+        # Add the timelapse to the extra files
+        extra_files.append(timelapse_path)
+
+    except Exception as e:
+        log.debug('Plotting timestamp interval failed with message:\n' + repr(e))
+        log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
 
     ### Add extra files to archive
