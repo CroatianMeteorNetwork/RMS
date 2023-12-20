@@ -246,7 +246,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         except:
             log.error("Cannot copy the config file to the capture directory!")
 
-    # Check and get an updated mask
+    # Check for and get an updated mask
     if config.mask_download_permissive:
         downloadNewMask(config)
 
@@ -797,6 +797,9 @@ if __name__ == "__main__":
     mkdirP(os.path.join(root_dir, config.captured_dir))
     mkdirP(os.path.join(root_dir, config.archived_dir))
 
+    # Check for and get an updated mask
+    if config.mask_download_permissive:
+        downloadNewMask(config)
 
     # If the duration of capture was given, capture right away for a specified time
     if cml_args.duration:
