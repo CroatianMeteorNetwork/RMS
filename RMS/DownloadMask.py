@@ -72,10 +72,6 @@ def downloadNewMask(config, port=22):
         log.error('Connecting to server failed!')
         return False
 
-    if not existsRemoteDirectory(sftp, dir_remote):
-        createRemoteDirectory(sftp, dir_remote)
-
-
     # Check that the remote directory exists
     try:
         sftp.stat(config.remote_dir)
