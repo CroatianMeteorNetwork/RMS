@@ -92,7 +92,6 @@ def downloadNewMask(config, port=22):
         createRemoteDirectory(sftp, remote_mask_path)
 
 
-
     # Change the directory into file
     remote_mask = remote_mask_path + config.mask_remote_name
 
