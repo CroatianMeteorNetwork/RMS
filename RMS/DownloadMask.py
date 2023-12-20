@@ -1,13 +1,10 @@
-""" Download a mask from the server if a new mask exists. """
+""" Download a mask from the server if a new mask exists.
 
-
-"""
-
-This section can be added to the .config file in the Calibration section 
+This section can be added to the .config file in the Calibration section
 
 ; Mask
 ; ----
-; Permit remote mask download 
+; Permit remote mask download
 mask_download_permissive: true
 ; Name of the new platepar file on the server
 mask_remote_name: mask_latest.bmp
@@ -18,6 +15,7 @@ remote_mask_dir: masks
 
 
 """
+
 
 from __future__ import print_function, division, absolute_import
 
@@ -30,6 +28,8 @@ import paramiko
 
 
 from RMS.UploadManager import _agentAuth
+
+
 
 
 # Get the logger from the main module
