@@ -99,30 +99,20 @@ def downloadNewMask(config, port=22):
 if __name__ == "__main__":
 
     from RMS.Logger import initLogging
+    import RMS.ConfigReader as cr
 
-    # Set up a fake config file
-    class FakeConf(object):
-        def __init__(self):
+    import argparse
 
-            self.username = 'dvida'
-
-            # remote hostname where SSH server is running
-            self.hostname = 'gmn.uwo.ca'
-            self.host_port = 22
-            self.remote_dir = 'files'
-            self.remote_mask_dir = 'masks'
-            self.stationID = 'dvida'
-            self.rsa_private_key = os.path.expanduser("~/.ssh/id_rsa")
-
-            self.upload_queue_file = 'FILES_TO_UPLOAD.inf'
-            self.mask_name = 'mask.bmp'
-            self.mask_remote_name = 'mask_latest.bmp'
-
-            self.data_dir = os.path.join(os.path.expanduser('~'), 'RMS_data')
-            self.log_dir = 'logs'
+    arg_parser = argparse.ArgumentParser(description="""Download an updated mask, and rename the remote copy. \
+        """, formatter_class=argparse.RawTextHelpFormatter)
 
 
-    config = FakeConf()
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
+                            help="Path to a config file which will be used instead of the default one.")
+
+
+    # Load the config file
+    config = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath('.'))
 
     # Init the logger
     initLogging(config)
