@@ -27,7 +27,7 @@ from os.path import exists as file_exists
 import paramiko
 
 
-from RMS.UploadManager import _agentAuth
+from RMS.UploadManager import _agentAuth, existsRemoteDirectory, createRemoteDirectory
 
 
 
@@ -72,6 +72,9 @@ def downloadNewMask(config, port=22):
         log.error('Connecting to server failed!')
         return False
 
+    if not existsRemoteDirectory(sftp, dir_remote):
+        createRemoteDirectory(sftp, dir_remote)
+
 
     # Check that the remote directory exists
     try:
@@ -84,6 +87,11 @@ def downloadNewMask(config, port=22):
 
     # Construct path to remote mask directory
     remote_mask_path = config.remote_dir + '/' + config.remote_mask_dir + '/'
+
+    if not existsRemoteDirectory(sftp, remote_mask_path):
+        createRemoteDirectory(sftp, remote_mask_path)
+
+
 
     # Change the directory into file
     remote_mask = remote_mask_path + config.mask_remote_name
