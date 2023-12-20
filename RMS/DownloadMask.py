@@ -99,7 +99,7 @@ def downloadNewMask(config, port=22):
 
 
     # Download the remote mask
-    sftp.get(remote_mask, os.path.join(config.config_file_path, config.mask_name))
+    sftp.get(remote_mask, os.path.join(config.config_file_path, config.mask_file))
 
     log.info('Latest mask downloaded!')
 
