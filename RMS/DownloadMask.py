@@ -41,6 +41,13 @@ log = logging.getLogger("logger")
 def downloadNewMask(config, port=22):
     """ Connect to the central server and download a new mask file, if available. """
 
+    if config.mask_download_permissive:
+        log.info("Mask download enabled")
+    else:
+        log.info("Mask download disabled")
+        return False
+
+
     log.info('Checking for new mask on the server...')
     if file_exists(config.rsa_private_key) is False:
         log.debug("Can't contact the server: RSA private key file not found.")
