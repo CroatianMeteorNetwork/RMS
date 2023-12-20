@@ -1449,13 +1449,13 @@ def parseCalibration(config, parser):
         config.min_matched_stars = parser.getint(section, "min_matched_stars")
 
     if parser.has_option(section, "mask_download_permissive"):
-        config.mask_download_permissive = parser.getint(section, "mask_download_permissive")
+        config.mask_download_permissive = parser.getboolean(section, "mask_download_permissive")
 
     if parser.has_option(section, "mask_remote_name"):
-        config.mask_remote_name = parser.getint(section, "mask_remote_name")
+        config.mask_remote_name = parser.get(section, "mask_remote_name")
 
     if parser.has_option(section, "remote_mask_dir"):
-        config.remote_mask_dir = parser.getint(section, "remote_mask_dir")
+        config.remote_mask_dir = parser.get(section, "remote_mask_dir")
 
 
 
