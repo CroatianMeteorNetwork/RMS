@@ -11,7 +11,7 @@ mask_remote_name: mask_latest.bmp
 ; Name of the directory on the server which contains masks
 remote_mask_dir: masks
 
-
+These are the default settings hard coded into ConfigReader.py
 
 
 """
