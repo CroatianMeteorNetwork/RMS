@@ -56,7 +56,7 @@ def downloadNewMask(config, port=22):
         return False
 
 
-    # Construct path to remote platepar directory
+    # Construct path to remote mask directory
     remote_mask_path = config.remote_dir + '/' + config.remote_mask_dir + '/'
 
     # Change the directory into file
@@ -72,7 +72,7 @@ def downloadNewMask(config, port=22):
         return False
 
 
-    # Download the remote platepar
+    # Download the remote mask
     sftp.get(remote_mask, os.path.join(config.config_file_path, config.mask))
 
     log.info('Latest mask downloaded!')
@@ -128,5 +128,5 @@ if __name__ == "__main__":
     initLogging(config)
 
 
-    # Test platepar downloading
+    # Test mask downloading
     downloadNewMask(config, port=22)
