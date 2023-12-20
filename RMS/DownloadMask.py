@@ -105,7 +105,7 @@ def downloadNewMask(config, port=22):
 
 
     ### Rename the remote mask file, add a timestamp of download
-    ### This prevents the same mask being downloaded and overwriting an operators more recent changes
+    ### This prevents the same mask being downloaded and overwriting an operator's more recent changes
 
     # Construct a new name with the time of the download included
     dl_mask_name = remote_mask_path + 'mask_dl_' \
