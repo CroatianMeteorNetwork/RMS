@@ -109,7 +109,7 @@ def downloadNewMask(config, port=22):
 
     # Construct a new name with the time of the download included
     dl_mask_name = remote_mask_path + 'mask_dl_' \
-        + datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S.%f') + '.cal'
+        + datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S.%f') + '.bmp'
 
     sftp.posix_rename(remote_mask, dl_mask_name)
 
