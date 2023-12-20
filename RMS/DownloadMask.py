@@ -1,5 +1,24 @@
 """ Download a mask from the server if a new mask exists. """
 
+
+"""
+
+This section can be added to the .config file in the Calibration section 
+
+; Mask
+; ----
+; Permit remote mask download 
+mask_download_permissive: true
+; Name of the new platepar file on the server
+mask_remote_name: mask_latest.bmp
+; Name of the directory on the server which contains masks
+remote_mask_dir: masks
+
+
+
+
+"""
+
 from __future__ import print_function, division, absolute_import
 
 import datetime
