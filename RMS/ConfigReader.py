@@ -497,6 +497,12 @@ class Config:
         self.platepar_remote_name = 'platepar_latest.cal'
         self.remote_platepar_dir = 'platepars'
 
+        # Name of the mask file on the server
+
+        self.mask_remote_name = 'mask_latest.bmp'
+        self.remote_mask_dir = 'masks'
+
+
         self.catalog_mag_limit = 5.5
 
         self.calstars_files_N = 400 # How many calstars FF files to evaluate
@@ -1441,6 +1447,13 @@ def parseCalibration(config, parser):
 
     if parser.has_option(section, "min_matched_stars"):
         config.min_matched_stars = parser.getint(section, "min_matched_stars")
+
+    if parser.has_option(section, "mask_remote_name"):
+        config.min_matched_stars = parser.getint(section, "mask_remote_name")
+
+    if parser.has_option(section, "remote_mask_dir"):
+        config.min_matched_stars = parser.getint(section, "remote_mask_dir")
+
 
 
 
