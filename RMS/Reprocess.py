@@ -17,6 +17,7 @@ from RMS.Astrometry.ApplyRecalibrate import recalibrateIndividualFFsAndApplyAstr
 from RMS.Astrometry.CheckFit import autoCheckFit
 import RMS.ConfigReader as cr
 from RMS.DownloadPlatepar import downloadNewPlatepar
+from RMS.DownloadMask import downloadNewMask
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteorsDirectory, saveDetections
 from RMS.Formats.CAL import writeCAL
 from RMS.Formats.FFfile import validFFName
@@ -43,7 +44,7 @@ log = logging.getLogger("logger")
 
 
 def getPlatepar(config, night_data_dir):
-    """ Downloads a new platepar from the server of uses an existing one.   
+    """ Downloads a new platepar from the server or uses an existing one.
     
     Arguments:  
         Config: [Config instance]  
