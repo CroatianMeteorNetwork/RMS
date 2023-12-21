@@ -95,18 +95,17 @@ def downloadNewMask(config, port=22):
         if captured_dirs != []:
             for captured_dir in captured_dirs:
                 most_recent_flat = os.path.join(os.path.expanduser(config.data_dir), config.captured_dir, captured_dir,config.flat_file)
-                log.info("Testing {}".format(most_recent_flat))
+
                 if file_exists(most_recent_flat):
-                    log.info("Found {}".format(most_recent_flat))
                     break
                 else:
-                    log.info("Not found {}".format(most_recent_flat))
                     most_recent_flat = ""
             log.info("Most recent flat {}".format(most_recent_flat))
 
             if file_exists(most_recent_flat):
-                log.info("Uploading to {}".format(remote_mask_path))
-                sftp.put(most_recent_flat, remote_mask_path + "/" + config.stationID + "_" + config.flat_file)
+                remote_flat_name = "{}_{}".format(config.stationID, config.flat_file)
+                log.info("Uploading to {} as {}".format(remote_mask_path, remote_flat_name))
+                sftp.put(most_recent_flat, remote_mask_path + "/" + remote_flat_name)
             else:
                 log.info("Did not find {}".format(most_recent_flat))
     except:
