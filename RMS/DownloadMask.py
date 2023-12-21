@@ -90,6 +90,7 @@ def downloadNewMask(config, port=22):
     else:
         log.info("{} exists".format(remote_mask_path))
 
+    # Add path separator
     remote_mask_path += "/"
 
     # Upload the most recent flat
