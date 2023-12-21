@@ -92,9 +92,10 @@ def downloadNewMask(config, port=22):
     captured_dirs.sort(reverse=True)
 
     try:
-        if latest_captured_dirs != []:
+        if captured_dirs != []:
             for captured_dir in captured_dirs:
                 most_recent_flat = os.path.join(os.path.expanduser(config.data_dir), config.captured_dir, captured_dir,config.flat_file)
+                log.info("Testing {}".format(most_recent_flat))
                 if os.path_exists(most_recent_flat):
                     continue
                 else:
