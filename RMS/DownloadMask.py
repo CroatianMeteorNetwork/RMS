@@ -85,6 +85,7 @@ def downloadNewMask(config, port=22):
     remote_mask_path = config.remote_dir + '/' + config.remote_mask_dir + '/'
 
     if not existsRemoteDirectory(sftp, remote_mask_path):
+        log.info("{} does not exist, creating")
         createRemoteDirectory(sftp, remote_mask_path)
 
     # Upload the most recent flat
