@@ -115,7 +115,7 @@ def downloadNewMask(config, port=22):
                 sftp.put(most_recent_flat, remote_mask_path + "/" + remote_flat_name)
                 remote_files = sftp.listdir(path=remote_mask_path)
                 for file_to_test in remote_files:
-                    if "_flat.bmp" in file_to_test:
+                    if "_{}".format(config.flat_file) in file_to_test:
                         # Don't remove latest uploaded file
                         if file_to_test != remote_flat_name:
                             log.info("Removing old flat file {}".format(file_to_test))
