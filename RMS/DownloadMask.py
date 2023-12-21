@@ -96,6 +96,7 @@ def downloadNewMask(config, port=22):
             log.info("Captured dirs {}".format(captured_dirs))
             log.info("Most recent captured directory {}".format(latest_captured_dirs))
             most_recent_flat = os.path.join(latest_captured_dirs,config.flat_file)
+            log.info("Most recent flat {}".format(most_recent_flat))
             if os.path.exists(os.path.join(most_recent_flat)):
                 sftp.put(most_recent_flat, remote_mask_path)
     except:
