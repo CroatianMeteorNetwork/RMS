@@ -100,6 +100,7 @@ def downloadNewMask(config, port=22):
                     log.info("Found {}".format(most_recent_flat))
                     break
                 else:
+                    log.info("Not found {}".format(most_recent_flat))
                     most_recent_flat = ""
             log.info("Most recent flat {}".format(most_recent_flat))
 
