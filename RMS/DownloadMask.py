@@ -104,8 +104,21 @@ def downloadNewMask(config, port=22):
     # Download the remote mask
     log.info("Downloading {} from {} to {}".format(remote_mask, remote_mask_path, os.path.join(config.config_file_path, config.mask_file)))
     sftp.get(remote_mask, os.path.join(config.config_file_path, config.mask_file))
-
     log.info('Latest mask downloaded!')
+
+    # Upload the most recent flat
+    captured_dirs = os.listdir(os.path.join(os.path.expanduser(config.data_dir), config.captured_dir))
+    captured_dirs.sort(reverse=True)
+    latest_captured_dirs = captured_dirs[0]
+    try:
+        if latest_captured_dirs != []:
+            log.info("Captured dirs {}".format(captured_dirs))
+            log.info("Most recent captured directory {}".format(latest_captured_dirs))
+            most_recent_flat = os.path.join(latest_captured_dirs,config.flat_file)
+            if os.path.exists(os.path.join(most_recent_flat)):
+                sftp.put(most_recent_flat, remote_mask_path )
+    except:
+        log.warning("Could not upload latest flat")
 
 
     ### Rename the remote mask file, add a timestamp of download
