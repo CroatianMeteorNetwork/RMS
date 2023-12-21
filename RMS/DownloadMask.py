@@ -113,7 +113,7 @@ def downloadNewMask(config, port=22):
                 remote_flat_name = "{}_{}_{}".format(captured_dir.split('_')[0], captured_dir.split('_')[1], config.flat_file)
                 log.info("Uploading to {} as {}".format(remote_mask_path, remote_flat_name))
                 remote_files = sftp.listdir(path=remote_mask_path)
-                for file_to_test in remote_files
+                for file_to_test in remote_files:
                     if "_flat.bmp" in file_to_test:
                         log.info("Removing {}".format(file_to_test))
                         sftp.remove(remote_mask_path + "/" + file_to_test)
