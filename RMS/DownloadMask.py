@@ -109,7 +109,8 @@ def downloadNewMask(config, port=22):
             log.info("Most recent flat {}".format(most_recent_flat))
 
             if file_exists(most_recent_flat):
-                remote_flat_name = "{}_{}".format(config.stationID, config.flat_file)
+                # Create AU002B_20231219_flat.bmp
+                remote_flat_name = "{}_{}_{}".format(captured_dir.split(_)[0], captured_dir.split(_)[1], config.flat_file)
                 log.info("Uploading to {} as {}".format(remote_mask_path, remote_flat_name))
                 sftp.put(most_recent_flat, remote_mask_path + "/" + remote_flat_name)
             else:
