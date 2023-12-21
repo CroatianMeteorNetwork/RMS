@@ -90,12 +90,15 @@ def downloadNewMask(config, port=22):
     # Upload the most recent flat
     captured_dirs = os.listdir(os.path.join(os.path.expanduser(config.data_dir), config.captured_dir))
     captured_dirs.sort(reverse=True)
-    latest_captured_dirs = captured_dirs[0]
+
     try:
         if latest_captured_dirs != []:
-            log.info("Captured dirs {}".format(captured_dirs))
-            log.info("Most recent captured directory {}".format(latest_captured_dirs))
-            most_recent_flat = os.path.join(os.path.expanduser(config.data_dir), config.captured_dir, latest_captured_dirs,config.flat_file)
+            for captured_dir in captured_dirs
+                most_recent_flat = os.path.join(os.path.expanduser(config.data_dir), config.captured_dir, captured_dir,config.flat_file)
+                if os.path_exists(most_recent_flat):
+                    continue
+                else:
+                    most_recent_flat = ""
             log.info("Most recent flat {}".format(most_recent_flat))
 
             if os.path.exists(most_recent_flat):
