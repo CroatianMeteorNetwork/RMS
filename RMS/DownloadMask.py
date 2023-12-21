@@ -87,6 +87,8 @@ def downloadNewMask(config, port=22):
     if not existsRemoteDirectory(sftp, remote_mask_path):
         log.info("{} does not exist, creating".format(remote_mask_path))
         createRemoteDirectory(sftp, remote_mask_path)
+    else:
+        log.info("{} exists".format(remote_mask_path))
 
     remote_mask_path += "/"
 
