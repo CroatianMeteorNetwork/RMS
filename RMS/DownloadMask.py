@@ -104,7 +104,7 @@ def downloadNewMask(config, port=22):
                     most_recent_flat = ""
             log.info("Most recent flat {}".format(most_recent_flat))
 
-            if os.path.exists(most_recent_flat):
+            if file_exists(most_recent_flat):
                 log.info("Uploading to {}".format(remote_mask_path))
                 sftp.put(most_recent_flat, remote_mask_path)
             else:
