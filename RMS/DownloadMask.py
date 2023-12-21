@@ -98,11 +98,11 @@ def downloadNewMask(config, port=22):
             most_recent_flat = os.path.join(os.path.expanduser(config.data_dir), latest_captured_dirs,config.flat_file)
             log.info("Most recent flat {}".format(most_recent_flat))
 
-            if os.path.exists(os.path.join(most_recent_flat)):
+            if os.path.exists(most_recent_flat):
                 log.info("Uploading to {}".format(remote_mask_path))
                 sftp.put(most_recent_flat, remote_mask_path)
             else:
-                log.info("Did not find {}".format(remote_mask_path))
+                log.info("Did not find {}".format(most_recent_flat))
     except:
         log.warning("Could not upload latest flat")
 
