@@ -179,7 +179,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         if config.ml_filter > 0:
 
             log.info("Filtering out detections using machine learning...")
-                
+
             ff_detected = filterFTPdetectinfoML(config, os.path.join(night_data_dir, ftpdetectinfo_name), \
                 threshold=config.ml_filter, keep_pngs=False)
 
