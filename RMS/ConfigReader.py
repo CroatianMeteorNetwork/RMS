@@ -236,11 +236,17 @@ class Config:
         self.cams_code = 0
 
 
+
         # Show this camera on the GMN weblog
         self.weblog_enable = True
 
         # The description that will be shown on the weblog (e.g. location, pointing direction)
         self.weblog_description = ""
+
+        # Camera network (e.g. national networks, used for grouping on the weblog)
+        self.network_name = None
+        # Camera group (e.g. a camera cluster or a location with multiple cameras)
+        self.camera_group_name = None
 
 
         self.external_script_run = False
@@ -307,6 +313,7 @@ class Config:
 
         # Automatically reprocess broken capture directories
         self.auto_reprocess = True
+        self.prioritize_capture_over_reprocess = False
 
         # Flag file which indicates that the previously processed files are loaded during capture resume
         self.capture_resume_flag_file = ".capture_resuming"
@@ -351,6 +358,15 @@ class Config:
 
         # 1 - Normal, 2 - Skip uploading FFs, 3 - Skip FFs and FRs
         self.upload_mode = 1
+
+        self.event_monitor_enabled = True
+        self.event_monitor_db_name = "event_monitor.db"
+        self.event_monitor_webpage = "https://globalmeteornetwork.org/events/event_watchlist.txt"
+        self.event_monitor_remote_dir = "files/event_monitor"
+        self.event_monitor_check_interval = 30
+        self.event_monitor_check_interval_fast = 5
+
+
 
 
         ##### Weave compilation arguments
@@ -518,6 +534,18 @@ class Config:
         # Path to flux showers
         self.showers_flux_file_name = 'flux_showers.csv'
 
+        # Path to file with shower activity parameters
+        self.shower_activity_file_name = "flux_activity.csv"
+
+        # Sporadic ZHR to be used in the dial on the flux website
+        self.background_sporadic_zhr = 25
+
+        # Path to the template flux dial SVG file
+        self.flux_dial_template_svg = os.path.join(self.rms_root_dir, 'share', 'flux_dial_template.svg')
+
+        # Name of the yearly ZHR overview plot
+        self.yearly_zhr_plot_name = 'yearly_zhr_overview.png'
+
         # colour scheme to use for showers
         self.shower_color_map = 'viridis'
 
@@ -533,6 +561,10 @@ class Config:
 
         # Maximum distance from shower radiant (degrees)
         self.shower_max_radiant_separation = 7.5
+
+        #### Event Monitor
+
+        self.event_monitor_db_name = "event_monitor.db"
 
 
 def normalizeParameter(param, config, binning=1):
@@ -716,6 +748,16 @@ def parseSystem(config, parser):
     if parser.has_option(section, "weblog_description"):
         config.weblog_description = parser.get(section, "weblog_description")
 
+    if parser.has_option(section, "network_name"):
+        config.network_name = parser.get(section, "network_name")
+        if config.network_name.lower() == "none":
+            config.network_name = None
+
+    if parser.has_option(section, "camera_group_name"):
+        config.camera_group_name = parser.get(section, "camera_group_name")
+        if config.camera_group_name.lower() == "none":
+            config.camera_group_name = None
+    
     if parser.has_option(section, "external_script_run"):
         config.external_script_run = parser.getboolean(section, "external_script_run")
 
@@ -724,6 +766,9 @@ def parseSystem(config, parser):
         config.auto_reprocess_external_script_run = parser.getboolean(section, \
             "auto_reprocess_external_script_run")
 
+    if parser.has_option(section, "prioritize_capture_over_reprocess"):
+        config.prioritize_capture_over_reprocess = parser.getboolean(section, \
+            "prioritize_capture_over_reprocess")
 
     if parser.has_option(section, "external_script_path"):
         config.external_script_path = parser.get(section, "external_script_path")
@@ -737,7 +782,10 @@ def parseSystem(config, parser):
 
     if parser.has_option(section, "reboot_lock_file"):
         config.reboot_lock_file = parser.get(section, "reboot_lock_file")
-        
+
+
+    if parser.has_option(section, "event_monitor_db_name"):
+        config.event_monitor_db_name = parser.get(section, "event_monitor_db_name")
 
 
 def parseCapture(config, parser):
@@ -914,6 +962,10 @@ def parseCapture(config, parser):
     if parser.has_option(section, "auto_reprocess"):
         config.auto_reprocess = parser.getboolean(section, "auto_reprocess")
 
+    # Prioritize capture over reprocessing - do not start reprocessing a new directory if should be capturing
+    if parser.has_option(section, "prioritize_capture_over_reprocess"):
+        config.prioritize_capture_over_reprocess = parser.getboolean(section, \
+            "prioritize_capture_over_reprocess")
 
     # Load name of the capture resume flag file
     if parser.has_option(section, "capture_resume_flag_file"):
@@ -976,7 +1028,29 @@ def parseUpload(config, parser):
     # SSH port
     if parser.has_option(section, "upload_mode"):
         config.upload_mode = parser.getint(section, "upload_mode")
-        
+
+    # Event monitor enabled
+    if parser.has_option(section, "event_monitor_enabled"):
+        config.event_monitor_enabled = parser.getboolean(section, "event_monitor_enabled")
+
+
+    # Name to use for eventmonitor database
+    if parser.has_option(section, "event_monitor_db_name"):
+        config.event_monitor_webpage = parser.get(section, "event_monitor_db_name")
+
+    # Address to look for watchlist
+    if parser.has_option(section, "event_monitor_webpage"):
+        config.event_monitor_webpage = parser.get(section, "event_monitor_webpage")
+
+    # Directory on the server where the events will be uploaded to
+    if parser.has_option(section, "event_monitor_remote_dir"):
+        config.event_monitor_remote_dir = parser.get(section, "event_monitor_remote_dir")
+
+    if parser.has_option(section, "event_monitor_check_interval"):
+        config.event_monitor_check_interval = parser.getint(section, "event_monitor_check_interval")
+
+    if parser.has_option(section, "event_monitor_check_interval_fast"):
+        config.event_monitor_check_interval_fast = parser.getint(section, "event_monitor_check_interval_fast")
 
 
 def parseBuildArgs(config, parser):

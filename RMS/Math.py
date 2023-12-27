@@ -1,7 +1,6 @@
 """ Common math functions. """
 
 import numpy as np
-from numpy.core.umath_tests import inner1d
 
 
 
@@ -83,7 +82,7 @@ def vectNorm(vect):
 def vectMag(vect):
     """ Calculate the magnitude of the given vector. """
 
-    return np.sqrt(inner1d(vect, vect))
+    return np.linalg.norm(vect)
 
 
 ##############################################################################################################

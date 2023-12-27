@@ -362,6 +362,9 @@ def deleteOldLogfiles(data_dir, config, days_to_keep=None):
 
             # If the file is older than the date to purge to, delete it
             if file_mtime < date_to_purge_to:
-
-                log.info("deleted {}".format(fl))
-                os.remove(log_file_path)
+                try:
+                    os.remove(log_file_path)
+                    log.info("deleted {}".format(fl))
+                except Exception as e:
+                    log.warning('unable to delete {}: '.format(log_file_path) + repr(e)) 
+                

@@ -139,8 +139,13 @@ def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=F
                     shutil.copy2(os.path.join(source_dir, file_name), os.path.join(dest_dir, file_name))
             except shutil.SameFileError:
                 pass
+            except FileNotFoundError:
+                log.warning('file {} not found '.format(os.path.join(source_dir, file_name)))
         else:
-            shutil.copy2(os.path.join(source_dir, file_name), os.path.join(dest_dir, file_name))
+            try:
+                shutil.copy2(os.path.join(source_dir, file_name), os.path.join(dest_dir, file_name))
+            except Exception as e:
+                log.warning(e)
 
 
     # Copy the additional files to the archive directory
@@ -153,8 +158,13 @@ def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=F
                         shutil.copy2(file_path, os.path.join(dest_dir, os.path.basename(file_path)))
                 except shutil.SameFileError:
                     pass
+                except FileNotFoundError:
+                    log.warning('file {} not found'.format(file_path))
             else:
-                shutil.copy2(file_path, os.path.join(dest_dir, os.path.basename(file_path)))
+                try:
+                    shutil.copy2(file_path, os.path.join(dest_dir, os.path.basename(file_path)))
+                except Exception as e:
+                    log.warning(e)
 
 
     # Compress the archive directory
@@ -249,6 +259,7 @@ class SegmentedScale(mscale.ScaleBase):
 
         def transform_non_affine(self, a):
             return np.interp(a, np.arange(len(self.points)), self.points)
+        
         def inverted(self):
             return SegmentedScale.SegTrans(self.lb, self.ub, self.points)
 
@@ -333,10 +344,10 @@ def checkListEquality(t1, t2):
     """
 
     # Check if they are tuples or lists
-    if not (type(t1) is list) and not(type(t1) is tuple):
+    if not (type(t1) is list) and not (type(t1) is tuple):
         return False
 
-    if not (type(t2) is list) and not(type(t2) is tuple):
+    if not (type(t2) is list) and not (type(t2) is tuple):
         return False
 
 

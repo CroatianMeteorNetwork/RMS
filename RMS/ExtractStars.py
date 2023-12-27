@@ -21,6 +21,7 @@ import time
 import sys
 import os
 import argparse
+import logging
 
 import cv2
 import matplotlib.pyplot as plt
@@ -41,8 +42,11 @@ from RMS.QueuedPool import QueuedPool
 # Morphology - Cython init
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-import RMS.Routines.MorphCy as morph
+#import RMS.Routines.MorphCy as morph
 
+
+# Get the logger from the main module
+log = logging.getLogger("logger")
 
 
 def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=10, neighborhood_size=10, 
@@ -85,7 +89,6 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
         neighborhood_size = config.neighborhood_size
         intensity_threshold = config.intensity_threshold
         
-
     # Load the FF bin file
     ff = FFfile.read(ff_dir, ff_name)
 
@@ -149,7 +152,7 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
 
     # Skip the image if there are too many maxima to process
     if num_objects > config.max_stars:
-        print('Too many candidate stars to process! {:d}/{:d}'.format(num_objects, config.max_stars))
+        log.warning('Too many candidate stars to process! {:d}/{:d}'.format(num_objects, config.max_stars))
         return error_return
 
     # Find centres of mass of each labeled objects
@@ -180,6 +183,7 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     fwhm = 2.355*sigma_fitted
 
 
+    log.info('extracted ' + str(len(xy)) + ' stars from ' + ff_name)
     return ff_name, x2, y2, amplitude, intensity, fwhm
 
 
@@ -470,17 +474,17 @@ def extractStarsAndSave(config, ff_dir):
 
     # Add jobs for the pool
     for ff_name in extraction_list:
-        print('Adding for extraction:', ff_name)
+        log.info('Adding for extraction: ' + ff_name)
         workpool.addJob([ff_dir, ff_name, config, None, None, None, None, flat_struct, dark, mask])
 
 
-    print('Starting pool...')
+    log.info('Starting pool...')
 
     # Start the detection
     workpool.startPool()
 
 
-    print('Waiting for the detection to finish...')
+    log.info('Waiting for the detection to finish...')
 
     # Wait for the detector to finish and close it
     workpool.closePool()
@@ -521,7 +525,7 @@ def extractStarsAndSave(config, ff_dir):
     # Delete QueudPool backed up files
     workpool.deleteBackupFiles()
 
-    print('Total time taken: {:.2f} s'.format(time.time() - time_start))
+    log.info('Total time taken: {:.2f} s'.format(time.time() - time_start))
 
 
     return star_list
@@ -552,14 +556,13 @@ if __name__ == "__main__":
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, cml_args.dir_path)
 
-    
     # Get paths to every FF bin file in a directory 
     ff_dir = os.path.abspath(cml_args.dir_path[0])
     ff_list = [ff_name for ff_name in os.listdir(ff_dir) if FFfile.validFFName(ff_name)]
 
     # Check if there are any file in the directory
-    if(len(ff_list) == None):
-        print("No files found!")
+    if len(ff_list) is None:
+        log.warning("No files found!")
         sys.exit()
 
 
@@ -610,7 +613,7 @@ if __name__ == "__main__":
     # Show the histogram of PSF FWHMs
     if cml_args.showstd:
 
-        print('Median FWHM:', np.median(fwhm_list))
+        print('Median FWHM: {:.3f}'.format(np.median(fwhm_list)))
 
         # Compute the bin number
         nbins = int(np.ceil(np.sqrt(len(fwhm_list))))

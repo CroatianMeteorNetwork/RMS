@@ -1,6 +1,6 @@
+from __future__ import print_function
 
-
-import os
+import os, sys
 import json
 import copy
 from glob import glob
@@ -10,13 +10,6 @@ import argparse
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
-
-try:
-    from tqdm import tqdm
-    got_tqdm = True
-except:
-    got_tqdm = False
-
 import RMS.ConfigReader as cr
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP
 from RMS.Astrometry.Conversions import date2JD, jd2Date
@@ -27,11 +20,16 @@ from RMS.Math import angularSeparation
 from Utils.ShowerAssociation import showerAssociation
 from Utils.DrawConstellations import drawConstellations
 from RMS.Routines.MaskImage import loadMask, MaskStructure
+import multiprocessing as mp
+import ctypes
+from RMS.QueuedPool import QueuedPool
+import time
+import datetime
 
 
 def trackStack(dir_paths, config, border=5, background_compensation=True, 
         hide_plot=False, showers=None, darkbackground=False, out_dir=None,
-        scalefactor=None, draw_constellations=False):
+        scalefactor=None, draw_constellations=False, one_core_free=False):
     """ Generate a stack with aligned stars, so the sky appears static. The folder should have a
         platepars_all_recalibrated.json file.
 
@@ -50,6 +48,7 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
         out_dir: target folder to save into
         scalefactor: factor to scale the canvas by; default 1, increase if image cropped
     """
+    start_time = time.time()
     # normalise the path in a platform neutral way
     # done here so that trackStack() can be called from other modules
     dir_paths = [os.path.normpath(dir_path) for dir_path in dir_paths]
@@ -70,23 +69,29 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
     print('Loaded recalibrated platepars JSON file for the calibration report...')
 
     # ###
-
+    associations = {}
     if showers is not None:
-        associations = {}
+
         # Get FTP file so we can filter by shower
         for dir_path in dir_paths: 
+
             if os.path.isfile(os.path.join(dir_path,'.config')):
                 tmpcfg = cr.loadConfigFromDirectory('.config', dir_path)
             else:
                 tmpcfg = config
+
             ftp_list = glob(os.path.join(dir_path, 'FTPdetectinfo_{}*.txt'.format(tmpcfg.stationID)))
             ftp_list = [x for x in ftp_list if 'backup' not in x and 'unfiltered' not in x]
             ftp_list.sort() 
+
             if len(ftp_list) < 1:
                 print('unable to find FTPdetect file in {}'.format(dir_path))
                 return False
+            
             ftp_file = ftp_list[0] 
-            print('Determining shower details from {}'.format(ftp_file))
+
+            print('Performing shower association using {}'.format(ftp_file))
+
             associations_per_dir, _ = showerAssociation(config, [ftp_file], 
                 shower_code=None, show_plot=False, save_plot=False, plot_activity=False)
             associations.update(associations_per_dir)
@@ -95,10 +100,11 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
         ff_list = []
         for key in associations:
             ff_list.append(key[0])
+
     else:
         # Get a list of FF files in the folder
         ff_list = []
-        for dir_path in dir_paths: 
+        for dir_path in dir_paths:
             for file_name in os.listdir(dir_path):
                 if validFFName(file_name):
                     ff_list.append(file_name)    
@@ -228,12 +234,10 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
     pp_stack.F_scale *= scale
     pp_stack.refraction = False
 
-
-    # Init the image
-    avg_stack_sum = np.zeros((img_size, img_size), dtype=float)
-    avg_stack_count = np.zeros((img_size, img_size), dtype=int)
-    max_deaveraged = np.zeros((img_size, img_size), dtype=np.uint8)
-
+    avg_stack_sum_shared = mp.Array(ctypes.c_float, img_size*img_size)
+    avg_stack_count_shared = mp.Array(ctypes.c_int, img_size*img_size)
+    max_deaveraged_shared = mp.Array(ctypes.c_uint8, img_size*img_size)
+    finished_count = mp.Value(ctypes.c_int, 0)
 
     # get number of images to include
     num_ffs = len(ff_found_list)
@@ -246,105 +250,34 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
 
     # Load individual FFs and map them to the stack
     num_plotted = 0
-    if got_tqdm is True:
-        enumlist = tqdm(ff_found_list)
-    else:
-        enumlist = ff_found_list
+
+    enumlist = ff_found_list
+    # Create task pool
+    cores = mp.cpu_count()
+    if one_core_free and cores > 1:
+        cores -= 1
+    thead_pool = QueuedPool(stackFrame, cores=cores, backup_dir=None, print_state=False, func_extra_args=(recalibrated_platepars, mask, border,
+                                                                                   pp_ref, img_size, jd_middle, pp_stack, config,
+                                                                                   avg_stack_sum_shared, avg_stack_count_shared, max_deaveraged_shared,
+                                                                                   background_compensation, finished_count, num_ffs))
+    thead_pool.startPool()
+    # add jobs
     for i, ff_name in enumerate(enumlist):
-        ff_basename = os.path.basename(ff_name)
-        if showers is not None:
-            try:
-                shower = associations[(ff_basename, 1.0)][1]
-            except:
-                shower = None
-            if shower is None:
-                showername = "..."
-            else:
-                showername = shower.name
+        if shouldInclude(showers, ff_name, associations):
+            num_plotted += 1
+            thead_pool.addJob([ff_name])
+    printProgress(0, num_plotted)
+    thead_pool.closePool()
 
-        if showers is not None and showername not in showers:
-            #print("Skipping, showername =", showername)
-            continue
-        num_plotted += 1
-        if not got_tqdm:
-            print("Stacking {:s}, {:.1f}% done".format(ff_basename, 100*num_plotted/num_ffs))
+    # End if the number of plotted FFs is zero
+    if num_plotted == 0:
+        print()
+        print("No FFs plotted! Check the shower association or the detections.")
+        return False
 
-        # Read the FF file
-        ff = readFF(*os.path.split(ff_name))
-
-        # Load the recalibrated platepar
-        pp_temp = Platepar()
-        pp_temp.loadFromDict(recalibrated_platepars[ff_name], use_flat=config.use_flat)
-
-        # Make a list of X and Y image coordinates
-        x_coords, y_coords = np.meshgrid(np.arange(border, pp_ref.X_res - border),
-                                         np.arange(border, pp_ref.Y_res - border))
-        x_coords = x_coords.ravel()
-        y_coords = y_coords.ravel()
-
-        # Map image pixels to sky
-        jd_arr, ra_coords, dec_coords, _ = xyToRaDecPP(
-            len(x_coords)*[getMiddleTimeFF(ff_basename, config.fps, ret_milliseconds=True)], x_coords, y_coords,
-            len(x_coords)*[1], pp_temp, extinction_correction=False)
-
-        # Map sky coordinates to stack image coordinates
-        stack_x, stack_y = raDecToXYPP(ra_coords, dec_coords, jd_middle, pp_stack)
-
-        # Round pixel coordinates
-        stack_x = np.round(stack_x, decimals=0).astype(int)
-        stack_y = np.round(stack_y, decimals=0).astype(int)
-
-        # Cut the image to limits
-        filter_arr = (stack_x > 0) & (stack_x < img_size) & (stack_y > 0) & (stack_y < img_size)
-        x_coords = x_coords[filter_arr].astype(int)
-        y_coords = y_coords[filter_arr].astype(int)
-        stack_x = stack_x[filter_arr]
-        stack_y = stack_y[filter_arr]
-
-
-        # Apply the mask to maxpixel and avepixel
-        maxpixel = copy.deepcopy(ff.maxpixel)
-        maxpixel[mask.img == 0] = 0
-        avepixel = copy.deepcopy(ff.avepixel)
-        avepixel[mask.img == 0] = 0
-
-        # Compute deaveraged maxpixel
-        max_deavg = maxpixel - avepixel
-
-
-        # Normalize the backgroud brightness by applying a large-kernel median filter to avepixel
-        if background_compensation:
-
-            # # Apply a median filter to the avepixel to get an estimate of the background brightness
-            # avepixel_median = scipy.ndimage.median_filter(ff.avepixel, size=101)
-            avepixel_median = cv2.medianBlur(ff.avepixel, 301)
-
-            # Make sure to avoid zero division
-            avepixel_median[avepixel_median < 1] = 1
-
-            # Normalize the avepixel by subtracting out the background brightness
-            avepixel = avepixel.astype(float)
-            avepixel /= avepixel_median
-            avepixel *= 50 # Normalize to a good background value, which is usually 50
-            avepixel = np.clip(avepixel, 0, 255)
-            avepixel = avepixel.astype(np.uint8)
-
-            # plt.imshow(avepixel, cmap='gray', vmin=0, vmax=255)
-            # plt.show()
-
-
-        # Add the average pixel to the sum
-        avg_stack_sum[stack_y, stack_x] += avepixel[y_coords, x_coords]
-
-        # Increment the counter image where the avepixel is not zero
-        ones_img = np.ones_like(avepixel)
-        ones_img[avepixel == 0] = 0
-        avg_stack_count[stack_y, stack_x] += ones_img[y_coords, x_coords]
-
-        # Set pixel values to the stack, only take the max values
-        max_deaveraged[stack_y, stack_x] = np.max(np.dstack([max_deaveraged[stack_y, stack_x],
-                                                             max_deavg[y_coords, x_coords]]), axis=2)
-
+    avg_stack_sum = getArray(img_size, avg_stack_sum_shared)
+    avg_stack_count = getArray(img_size, avg_stack_count_shared)
+    max_deaveraged = getArray(img_size, max_deaveraged_shared)
 
     # Compute the blended avepixel background
     stack_img = avg_stack_sum
@@ -376,7 +309,7 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
     fig.patch.set_facecolor("black")
     ax = fig.add_axes([0, 0, 1, 1])
 
-    vmin = 0 
+    vmin = 0
     if darkbackground is True:
         vmin = np.quantile(stack_img[stack_img>0], 0.05)
     plt.imshow(stack_img, cmap='gray', vmin=vmin, vmax=256, interpolation='nearest')
@@ -389,11 +322,11 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
     ax.set_xlim([0, stack_img.shape[1]])
     ax.set_ylim([stack_img.shape[0]+extrapix, 0])
 
-    if showers is not None: 
+    if showers is not None:
         msg = 'Filtered for {}'.format(showers)
         ax.text(10, stack_img.shape[0] - 10, msg, color='gray', fontsize=6, fontname='Source Sans Pro', weight='ultralight')
 
-    # Remove the margins (top and right are set to 0.9999, as setting them to 1.0 makes the image blank in 
+    # Remove the margins (top and right are set to 0.9999, as setting them to 1.0 makes the image blank in
     #   some matplotlib versions)
     plt.subplots_adjust(left=0, bottom=0, right=0.9999, top=0.9999, wspace=0, hspace=0)
 
@@ -404,11 +337,123 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
     plt.savefig(filenam, bbox_inches='tight', pad_inches=0, dpi=dpi, facecolor='k', edgecolor='k')
     print('saved to {}'.format(filenam))
     #
-
+    print("Stacking time: {}".format(datetime.timedelta(seconds=(int(time.time() - start_time)))))
     if hide_plot is False:
         plt.show()
 
     return True
+
+
+def stackFrame(ff_name, recalibrated_platepars, mask, border, pp_ref, img_size, jd_middle, pp_stack, conf, avg_stack_sum_arr,
+               avg_stack_count_arr, max_deaveraged_arr, background_compensation, finished_count, num_ffs):
+    ff_basename = os.path.basename(ff_name)
+
+    avg_stack_sum = getArray(img_size, avg_stack_sum_arr)
+    avg_stack_count = getArray(img_size, avg_stack_count_arr)
+    max_deaveraged = getArray(img_size, max_deaveraged_arr)
+
+    # Read the FF file
+    ff = readFF(*os.path.split(ff_name))
+
+    # Load the recalibrated platepar
+    pp_temp = Platepar()
+    pp_temp.loadFromDict(recalibrated_platepars[ff_name], use_flat=conf.use_flat)
+
+    # Make a list of X and Y image coordinates
+    x_coords, y_coords = np.meshgrid(np.arange(border, pp_ref.X_res - border),
+                                     np.arange(border, pp_ref.Y_res - border))
+    x_coords = x_coords.ravel()
+    y_coords = y_coords.ravel()
+    # Map image pixels to sky
+    jd_arr, ra_coords, dec_coords, _ = xyToRaDecPP(
+        len(x_coords) * [getMiddleTimeFF(ff_basename, conf.fps, ret_milliseconds=True)], x_coords, y_coords,
+        len(x_coords) * [1], pp_temp, extinction_correction=False)
+    # Map sky coordinates to stack image coordinates
+    stack_x, stack_y = raDecToXYPP(ra_coords, dec_coords, jd_middle, pp_stack)
+
+    # Round pixel coordinates
+    stack_x = np.round(stack_x, decimals=0).astype(int)
+    stack_y = np.round(stack_y, decimals=0).astype(int)
+
+    # Cut the image to limits
+    filter_arr = (stack_x > 0) & (stack_x < img_size) & (stack_y > 0) & (stack_y < img_size)
+    x_coords = x_coords[filter_arr].astype(int)
+    y_coords = y_coords[filter_arr].astype(int)
+    stack_x = stack_x[filter_arr]
+    stack_y = stack_y[filter_arr]
+
+    # Apply the mask to maxpixel and avepixel
+    maxpixel = copy.deepcopy(ff.maxpixel)
+    maxpixel[mask.img == 0] = 0
+    avepixel = copy.deepcopy(ff.avepixel)
+    avepixel[mask.img == 0] = 0
+
+    # Compute deaveraged maxpixel image
+    max_deavg = maxpixel - avepixel
+
+    # Normalize the backgroud brightness by applying a large-kernel median filter to avepixel
+    if background_compensation:
+
+        # # Apply a median filter to the avepixel to get an estimate of the background brightness
+        # avepixel_median = scipy.ndimage.median_filter(ff.avepixel, size=101)
+        avepixel_median = cv2.medianBlur(ff.avepixel, 301)
+
+        # Make sure to avoid zero division
+        avepixel_median[avepixel_median < 1] = 1
+
+        # Normalize the avepixel by subtracting out the background brightness
+        avepixel = avepixel.astype(float)
+        avepixel /= avepixel_median
+        avepixel *= 50 # Normalize to a good background value, which is usually 50
+        avepixel = np.clip(avepixel, 0, 255)
+        avepixel = avepixel.astype(np.uint8)
+
+        # plt.imshow(avepixel, cmap='gray', vmin=0, vmax=255)
+        # plt.show()
+
+    with avg_stack_sum_arr.get_lock():
+        # Add the average pixel to the sum
+        avg_stack_sum[stack_y, stack_x] += avepixel[y_coords, x_coords]
+
+    # Increment the counter image where the avepixel is not zero
+    ones_img = np.ones_like(avepixel)
+    ones_img[avepixel == 0] = 0
+    with avg_stack_count_arr.get_lock():
+        avg_stack_count[stack_y, stack_x] += ones_img[y_coords, x_coords]
+    with max_deaveraged_arr.get_lock():
+        # Set pixel values to the stack, only take the max values
+        max_deaveraged[stack_y, stack_x] = np.max(np.dstack([max_deaveraged[stack_y, stack_x],
+                                                             max_deavg[y_coords, x_coords]]), axis=2)
+    with finished_count.get_lock():
+        finished_count.value += 1
+    # print progress
+    printProgress(finished_count.value, num_ffs)
+
+
+def shouldInclude(shower_list, ff_name, associations):
+    if shower_list is None:
+        return True
+    else:
+        ff_basename = os.path.basename(ff_name)
+        try:
+            shower = associations[(ff_basename, 1.0)][1]
+            return shower.name in shower_list
+        except:
+            return False
+
+
+def printProgress(current, total):
+    progress_bar_len = 20
+    progress = int(progress_bar_len * current / total)
+    percent = 100 * current / total
+    print("\rStacking : {:02.0f}%|{}{}| {}/{} ".format(percent, "#" * progress, " " * (progress_bar_len - progress), current, total), end="")
+    if current == total:
+        print("")
+
+
+def getArray(size, shared_arr):
+    numpy_arr = np.ctypeslib.as_array(shared_arr.get_obj())
+    return numpy_arr.reshape(size, size)
 
 
 if __name__ == "__main__":
@@ -443,6 +488,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-d', '--darkbackground', action="store_true",
         help="""Darken the background. """)
 
+    arg_parser.add_argument('--freecore', action="store_true",
+                            help="""Leave at least one core free""")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -458,6 +506,6 @@ if __name__ == "__main__":
 
     dir_paths = [os.path.normpath(dir_path) for dir_path in cml_args.dir_paths]
     trackStack(dir_paths, config, background_compensation=(not cml_args.bkgnormoff),
-        hide_plot=cml_args.hideplot, showers=showers, 
+        hide_plot=cml_args.hideplot, showers=showers,
         darkbackground=cml_args.darkbackground, out_dir=cml_args.output, scalefactor=cml_args.scalefactor,
-        draw_constellations=cml_args.constellations)
+        draw_constellations=cml_args.constellations, one_core_free=cml_args.freecore)
