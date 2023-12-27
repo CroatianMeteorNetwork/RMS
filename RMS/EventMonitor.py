@@ -848,6 +848,7 @@ class EventMonitor(multiprocessing.Process):
         """
 
         log.error("Attempting to recover from database error")
+        self.delEventMonitorDB()
         self.createDB()
         log.info("Database recovered")
 
@@ -1361,7 +1362,9 @@ class EventMonitor(multiprocessing.Process):
             if len(platepar_file_list) > 0:
                 platepar_file = platepar_file_list[0]
             else:
-                log.warning("No platepar file found processing event at {}".format(event.dt))
+                platepar_file = os.path.join(self.syscon.rms_root_dir, self.syscon.platepar_name)
+                pass
+
         return platepar_file
 
 
@@ -1476,10 +1479,12 @@ class EventMonitor(multiprocessing.Process):
         file_list = []
 
         file_list += self.findEventFiles(event, self.getDirectoryList(event), [".fits", ".bin"])
+        #have to use system .config file_name here because we have not yet identified the files for the event
+        log.info("Using {} as .config file name".format(self.syscon.config_file_name))
         if len(self.getDirectoryList(event)) > 0:
-            file_list += self.getFile(".config", self.getDirectoryList(event)[0])
-            file_list += self.getFile(self.config.platepar_name, self.getDirectoryList(event)[0])
-
+            file_list += self.getFile(os.path.basename(self.syscon.config_file_name), self.getDirectoryList(event)[0])
+            file_list += [self.getPlateparFilePath(event)]
+            log.info("File list {}".format(file_list))
         return file_list
 
     def trajectoryVisible(self, rp, event):

@@ -1,4 +1,4 @@
-""" Function for computing atmosperic extiontion. """
+""" Function for computing atmospheric extinction. """
 
 import numpy as np
 
@@ -47,7 +47,7 @@ if __name__ == "__main__":
 
 	import matplotlib.pyplot as plt
 
-	# Plot absolute extionctions for difference elevations and heights above sea level
+	# Plot absolute extinctions for difference elevations and heights above sea level
 	ht_list = [0, 0.5, 1, 2, 3]
 
 	for ht in ht_list:
@@ -66,7 +66,7 @@ if __name__ == "__main__":
 
 
 
-	# Plot relative extionctions for difference elevations and heights above sea level
+	# Plot relative extinctions for difference elevations and heights above sea level
 	ht_list = [0, 0.5, 1, 2, 3]
 
 	for ht in ht_list:

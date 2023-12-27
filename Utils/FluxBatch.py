@@ -1401,10 +1401,11 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
             marker='o',
             linestyle='none',
             zorder=4,
+            capsize=3,
         )
 
         # Plot the flux to the meteor LM
-        ax[0].errorbar(
+        lm_flux_plot = ax[0].errorbar(
             fbr.comb_sol_tap_weighted%360,
             fbr.comb_flux_lm_m,
             yerr=[fbr.comb_flux_lm_m - fbr.comb_flux_lm_m_lower, 
@@ -1417,6 +1418,7 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
             marker='o',
             linestyle='none',
             zorder=4,
+            capsize=3,
         )
 
         # Set the minimum flux to 0
