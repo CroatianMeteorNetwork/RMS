@@ -82,6 +82,30 @@ def getNightDirs(dir_path, stationID):
 
 
 
+def getBz2Files(dir_path, stationID):
+    """ Returns a sorted list of bz2 files in the given directory which conform to the RMS compress archdir names. 
+
+    Arguments:
+        dir_path: [str] Path to the data directory.
+        stationID: [str] Name of the station. The file will have to contain this string to be taken 
+        as a compressed archdir.
+
+    Return:
+        dir_list: [list] A list of bz2 files in the data directory.
+
+    """
+
+    # Get a list of files in the given directory
+    bz2_list = [bz2_name for bz2_name in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, bz2_name))]
+
+    # Get a list of files which conform to the required pattern
+    bz2_list = [bz2_name for bz2_name in bz2_list if (len(bz2_name.split('_')) > 3) and (stationID in bz2_name)]
+    bz2_list = sorted(bz2_list)
+
+    return bz2_list
+
+
+
 def deleteNightFolders(dir_path, config, delete_all=False):
     """ Deletes captured data directories to free up disk space. Either only one directory will be deleted
         (the oldest one), or all directories will be deleted (if delete_all = True).
@@ -201,6 +225,9 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
 
     # clear down logs first
     deleteOldLogfiles(data_dir, config)
+
+    # next purge out any old ArchivedFiles folders and compressed files
+    deleteOldArchivedDirs(data_dir, config)
 
     # Calculate the approximate needed disk space for the next night
 
@@ -331,6 +358,28 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     return True
 
 
+def deleteOldArchivedDirs(data_dir, config):
+    archived_dir = os.path.join(data_dir, config.archived_dir)
+
+    if config.arch_dirs_to_keep > 0:
+        archdir_list = getNightDirs(archived_dir, config.stationID)
+        orig_count = len(archdir_list)
+        while len(archdir_list) >= config.arch_dirs_to_keep:
+            archdir_list = deleteNightFolders(archived_dir, config)
+        final_count = len(archdir_list)
+    log.info('Purged {} older folders from ArchivedFiles'.format(orig_count - final_count))
+
+    if config.bz2_files_to_keep > 0:
+        bz2_list = getBz2Files(archived_dir, config.stationID)
+        orig_count = len(bz2_list)
+        while len(bz2_list) >= config.bz2_files_to_keep:
+            os.remove(os.path.join(archived_dir, bz2_list[0]))
+            bz2_list.pop(0)
+        final_count = len(bz2_list)
+    log.info('Purged {} older bz2 files from ArchivedFiles'.format(orig_count - final_count))
+    return
+
+
 def deleteOldLogfiles(data_dir, config, days_to_keep=None):
     """ Deletes old observation directories to free up space for new ones.
 
@@ -343,7 +392,7 @@ def deleteOldLogfiles(data_dir, config, days_to_keep=None):
     
     # Date to purge before
     if days_to_keep is None:
-        days_to_keep = int(config.logdays_to_keep)
+        days_to_keep = int(config.log_days_to_keep)
     date_to_purge_to = datetime.datetime.now() - datetime.timedelta(days=days_to_keep)
     date_to_purge_to = timestamp(date_to_purge_to)
 
