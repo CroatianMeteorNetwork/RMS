@@ -17,7 +17,6 @@ from RMS.Astrometry.ApplyRecalibrate import recalibrateIndividualFFsAndApplyAstr
 from RMS.Astrometry.CheckFit import autoCheckFit
 import RMS.ConfigReader as cr
 from RMS.DownloadPlatepar import downloadNewPlatepar
-from RMS.DownloadMask import downloadNewMask
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteorsDirectory, saveDetections
 from RMS.Formats.CAL import writeCAL
 from RMS.Formats.FFfile import validFFName
