@@ -240,8 +240,8 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
 
         # Initialize the observer and find the time of next noon
         o = ephem.Observer()  
-        o.lat = config.latitude
-        o.long = config.longitude
+        o.lat = str(config.latitude)
+        o.long = str(config.longitude)
         o.elevation = config.elevation
         sun = ephem.Sun()
 
