@@ -109,7 +109,7 @@ def existsRemoteDirectory(sftp,path):
         else:
             return False
     except:
-        log.error("Failure to check that directory {} exists".format(path))
+        log.error("Failure whilst checking that directory {} exists".format(path))
         return False
 
 def createRemoteDirectory(sftp,path):
