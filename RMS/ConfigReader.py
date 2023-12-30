@@ -299,14 +299,13 @@ class Config:
 
         # ArchDirs and bzs to keep 
         # keep this many ArchDirs. Zero means keep them all
-        self.arch_dirs_to_keep = 30
+        self.arch_dirs_to_keep = 20
         # keep this many compressed ArchDirs. Zero means keep them all
         self.bz2_files_to_keep = 5
 
         # Extra space to leave on disk for the archive (in GB) after the captured files have been taken
         #   into account
-        self.extra_space_gb = 3
-
+        self.extra_space_gb = 6
 
         # Enable/disable showing maxpixel on the screen (off by default)
         self.live_maxpixel_enable = False
