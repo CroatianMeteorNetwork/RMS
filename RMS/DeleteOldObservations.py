@@ -10,10 +10,13 @@ import datetime
 import time
 import logging
 import glob
+import argparse
 
 import ephem
 
 from RMS.CaptureDuration import captureDuration
+from RMS.ConfigReader import loadConfigFromDirectory
+
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -417,3 +420,25 @@ def deleteOldLogfiles(data_dir, config, days_to_keep=None):
                 except Exception as e:
                     log.warning('unable to delete {}: '.format(log_file_path) + repr(e)) 
                 
+
+if __name__ == '__main__':
+    """ Delete old data to free up space for next night's run
+    """
+    arg_parser = argparse.ArgumentParser(description=""" Deleting old observations.""")
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, help="Path to a config file")
+    cml_args = arg_parser.parse_args()
+
+    cfg_path = os.path.abspath('.') # default to using config from current folder
+    cfg_file = '.config'
+    if cml_args.config:
+        if os.path.isfile(cml_args.config[0]):
+            cfg_path, cfg_file = os.path.split(cml_args.config[0])
+    config = loadConfigFromDirectory(cfg_file, cfg_path)
+
+    data_dir = config.data_dir
+    cap_dir = os.path.join(data_dir, config.captured_dir)
+    arch_dir = os.path.join(data_dir, config.archived_dir)
+    if not os.path.isdir(arch_dir) or not os.path.isdir(cap_dir):
+        log.info('Data Dir not found {}'.format(arch_dir))
+    else:
+        deleteOldObservations(data_dir, cap_dir, arch_dir, config)
