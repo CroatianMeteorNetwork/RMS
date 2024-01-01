@@ -35,7 +35,7 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
         platepars_all_recalibrated.json file.
 
     Arguments:
-        dir_path: [str] Path to the directory with image files.
+        dir_paths: [str] Path to the directory with image files.
         config: [Config instance]
 
     Keyword arguments:
@@ -48,6 +48,8 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
         darkbackground: [bool] force the sky background to be dark
         out_dir: target folder to save into
         scalefactor: factor to scale the canvas by; default 1, increase if image cropped
+        draw_constellations: [bool] Show constellation lines on stacked image
+        one_core_free: [bool] leave one core free whilst processing
         overlay_file_name: [bool] show the filename on the completed image
     """
     start_time = time.time()
