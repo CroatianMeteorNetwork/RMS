@@ -337,6 +337,8 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
     else:
         filenam = os.path.join(dir_path, os.path.basename(dir_path) + "_track_stack.jpg")
 
+    # Overlay the filename on the image
+
     if overlay_file_name:
         print("Overlaying filename: {}".format(os.path.basename(filenam)))
         ax.text(10, stack_img.shape[0] + 30, os.path.basename(filenam), color='grey', fontsize=6, fontname='Source Sans Pro',
