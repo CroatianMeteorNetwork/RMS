@@ -438,4 +438,5 @@ if __name__ == '__main__':
     if not os.path.isdir(config.data_dir):
         log.info('Data Dir not found {}'.format(config.data_dir))
     else:
+        print('deleting obs from {}'.format(config.data_dir))
         deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config)
