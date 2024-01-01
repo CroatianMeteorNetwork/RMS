@@ -819,13 +819,13 @@ def parseCapture(config, parser):
         config.log_dir = parser.get(section, "log_dir")
 
     if parser.has_option(section, "log_days_to_keep"):
-        config.log_days_to_keep = parser.get(section, "log_days_to_keep")
+        config.log_days_to_keep = int(parser.get(section, "log_days_to_keep"))
 
     if parser.has_option(section, "arch_dirs_to_keep"):
-        config.arch_dirs_to_keep = parser.get(section, "arch_dirs_to_keep")
+        config.arch_dirs_to_keep = int(parser.get(section, "arch_dirs_to_keep"))
 
     if parser.has_option(section, "bz2_files_to_keep"):
-        config.bz2_files_to_keep = parser.get(section, "bz2_files_to_keep")
+        config.bz2_files_to_keep = int(parser.get(section, "bz2_files_to_keep"))
 
     if parser.has_option(section, "captured_dir"):
         config.captured_dir = parser.get(section, "captured_dir")
