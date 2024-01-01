@@ -29,7 +29,8 @@ import datetime
 
 def trackStack(dir_paths, config, border=5, background_compensation=True, 
         hide_plot=False, showers=None, darkbackground=False, out_dir=None,
-        scalefactor=None, draw_constellations=False, one_core_free=False):
+        scalefactor=None, draw_constellations=False, one_core_free=False,
+        overlay_file_name=False):
     """ Generate a stack with aligned stars, so the sky appears static. The folder should have a
         platepars_all_recalibrated.json file.
 
@@ -47,6 +48,7 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
         darkbackground: [bool] force the sky background to be dark
         out_dir: target folder to save into
         scalefactor: factor to scale the canvas by; default 1, increase if image cropped
+        overlay_file_name: [bool] show the filename on the completed image
     """
     start_time = time.time()
     # normalise the path in a platform neutral way
@@ -334,6 +336,11 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
         filenam = os.path.join(out_dir, os.path.basename(dir_path) + "_track_stack.jpg")
     else:
         filenam = os.path.join(dir_path, os.path.basename(dir_path) + "_track_stack.jpg")
+
+    if overlay_file_name:
+        print("Overlaying filename: {}".format(os.path.basename(filenam)))
+        ax.text(10, stack_img.shape[0] + 30, os.path.basename(filenam), color='grey', fontsize=6, fontname='Source Sans Pro',
+                weight='ultralight')
     plt.savefig(filenam, bbox_inches='tight', pad_inches=0, dpi=dpi, facecolor='k', edgecolor='k')
     print('saved to {}'.format(filenam))
     #
@@ -476,6 +483,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-o', '--output', type=str,
         help="""folder to save the image in.""")
 
+    arg_parser.add_argument('-n', '--overlayfilename', action="store_true",
+                            help="""Overlay filename on image.""")
+
     arg_parser.add_argument('-f', '--scalefactor', type=int,
         help="""scale factor to apply. Increase if image is cropped""")
 
@@ -508,4 +518,5 @@ if __name__ == "__main__":
     trackStack(dir_paths, config, background_compensation=(not cml_args.bkgnormoff),
         hide_plot=cml_args.hideplot, showers=showers,
         darkbackground=cml_args.darkbackground, out_dir=cml_args.output, scalefactor=cml_args.scalefactor,
-        draw_constellations=cml_args.constellations, one_core_free=cml_args.freecore)
+        draw_constellations=cml_args.constellations, one_core_free=cml_args.freecore,
+        overlay_file_name = cml_args.overlayfilename)
