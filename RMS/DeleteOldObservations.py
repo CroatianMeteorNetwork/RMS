@@ -16,7 +16,7 @@ import ephem
 
 from RMS.CaptureDuration import captureDuration
 from RMS.ConfigReader import loadConfigFromDirectory
-
+from RMS.Logger import initLogging
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -227,9 +227,11 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     archived_dir = os.path.join(data_dir, archived_dir)
 
     # clear down logs first
+    log.info('clearing down log files')
     deleteOldLogfiles(data_dir, config)
 
     # next purge out any old ArchivedFiles folders and compressed files
+    log.info('clearing down old data from ArchivedFiles')
     deleteOldArchivedDirs(data_dir, config)
 
     # Calculate the approximate needed disk space for the next night
@@ -436,7 +438,10 @@ if __name__ == '__main__':
     config = loadConfigFromDirectory(cfg_file, cfg_path)
 
     if not os.path.isdir(config.data_dir):
-        log.info('Data Dir not found {}'.format(config.data_dir))
+        print('Data Dir not found {}'.format(config.data_dir))
     else:
         print('deleting obs from {}'.format(config.data_dir))
+        # Initialize the logger
+        initLogging(config)
+        log = logging.getLogger("logger")
         deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config)
