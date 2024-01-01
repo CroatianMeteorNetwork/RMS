@@ -435,10 +435,7 @@ if __name__ == '__main__':
             cfg_path, cfg_file = os.path.split(cml_args.config[0])
     config = loadConfigFromDirectory(cfg_file, cfg_path)
 
-    data_dir = config.data_dir
-    cap_dir = os.path.join(data_dir, config.captured_dir)
-    arch_dir = os.path.join(data_dir, config.archived_dir)
-    if not os.path.isdir(arch_dir) or not os.path.isdir(cap_dir):
-        log.info('Data Dir not found {}'.format(arch_dir))
+    if not os.path.isdir(config.data_dir):
+        log.info('Data Dir not found {}'.format(config.data_dir))
     else:
-        deleteOldObservations(data_dir, cap_dir, arch_dir, config)
+        deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config)
