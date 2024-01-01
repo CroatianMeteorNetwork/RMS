@@ -436,12 +436,12 @@ if __name__ == '__main__':
         if os.path.isfile(cml_args.config[0]):
             cfg_path, cfg_file = os.path.split(cml_args.config[0])
     config = loadConfigFromDirectory(cfg_file, cfg_path)
+    # Initialize the logger
+    initLogging(config)
+    log = logging.getLogger("logger")
 
     if not os.path.isdir(config.data_dir):
-        print('Data Dir not found {}'.format(config.data_dir))
+        log.info('Data Dir not found {}'.format(config.data_dir))
     else:
-        print('deleting obs from {}'.format(config.data_dir))
-        # Initialize the logger
-        initLogging(config)
-        log = logging.getLogger("logger")
+        log.info('deleting obs from {}'.format(config.data_dir))
         deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config)
