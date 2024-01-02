@@ -130,7 +130,7 @@ def write(ff, directory, filename, version=2):
             arr[0] = ff.maxpixel
             arr[1] = ff.maxframe
             arr[2] = ff.avepixel
-            arr[3] = ff.stdpixel
+            arr[3] = np.round(0.1 * ff.stdpixel)
         
         # Extract only the number from the camera code
         camno_num = int(re.findall('\d+', str(ff.camno))[0])
@@ -172,4 +172,3 @@ def write(ff, directory, filename, version=2):
 
         # Write image arrays
         arr.tofile(fid)
-        
