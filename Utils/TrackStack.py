@@ -30,7 +30,7 @@ import datetime
 def trackStack(dir_paths, config, border=5, background_compensation=True, 
         hide_plot=False, showers=None, darkbackground=False, out_dir=None,
         scalefactor=None, draw_constellations=False, one_core_free=False,
-        overlay_file_name=False):
+        textoption=0):
     """ Generate a stack with aligned stars, so the sky appears static. The folder should have a
         platepars_all_recalibrated.json file.
 
@@ -339,10 +339,18 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
     else:
         filenam = os.path.join(dir_path, os.path.basename(dir_path) + "_track_stack.jpg")
 
-    # Overlay the filename on the image
-    if overlay_file_name:
-        print("Overlaying filename: {}".format(os.path.basename(filenam)))
-        ax.text(10, stack_img.shape[0] + 30, os.path.basename(filenam), color='grey', fontsize=6, fontname='Source Sans Pro',
+    # Overlay the filename on the image\
+    bf = os.path.basename(filenam)
+
+    # Overlay filename only
+    if textoption[0] == 1:
+        ax.text(10, stack_img.shape[0] + 30, bf, color='grey', fontsize=6, fontname='Source Sans Pro',
+                weight='ultralight')
+
+    # Overlay stationID, YYYY-MM-DD Meteor count
+    if textoption[0] == 2:
+        annotation = "{}  {}-{}-{}      Meteors: {}".format(bf[0:6],bf[7:11],bf[11:13],bf[13:15],num_plotted)
+        ax.text(10, stack_img.shape[0] + 30, annotation, color='grey', fontsize=6, fontname='Source Sans Pro',
                 weight='ultralight')
 
     plt.savefig(filenam, bbox_inches='tight', pad_inches=0, dpi=dpi, facecolor='k', edgecolor='k')
@@ -487,8 +495,11 @@ if __name__ == "__main__":
     arg_parser.add_argument('-o', '--output', type=str,
         help="""folder to save the image in.""")
 
-    arg_parser.add_argument('-n', '--overlayfilename', action="store_true",
-                            help="""Overlay filename on image.""")
+    arg_parser.add_argument('-t', '--textoption', nargs=1, type=int,
+                            help="""Add text beneath image. 
+                                        0 - No text
+                                        1 - Filename 
+                                        2 - Station id, date, meteor count""")
 
     arg_parser.add_argument('-f', '--scalefactor', type=int,
         help="""scale factor to apply. Increase if image is cropped""")
@@ -523,4 +534,4 @@ if __name__ == "__main__":
         hide_plot=cml_args.hideplot, showers=showers,
         darkbackground=cml_args.darkbackground, out_dir=cml_args.output, scalefactor=cml_args.scalefactor,
         draw_constellations=cml_args.constellations, one_core_free=cml_args.freecore,
-        overlay_file_name = cml_args.overlayfilename)
+        textoption = cml_args.textoption)
