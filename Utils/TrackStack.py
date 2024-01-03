@@ -343,14 +343,15 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
     bf = os.path.basename(filenam)
 
     # Overlay filename only
-    if textoption[0] == 1:
-        ax.text(10, stack_img.shape[0] + 30, bf, color='grey', fontsize=6, fontname='Source Sans Pro',
-                weight='ultralight')
+    if textoption is not None:
+        if textoption[0] == 1:
+            ax.text(10, stack_img.shape[0] + 30, bf, color='grey', fontsize=6, fontname='Source Sans Pro',
+                    weight='ultralight')
 
     # Overlay stationID, YYYY-MM-DD Meteor count
-    if textoption[0] == 2:
-        annotation = "{}  {}-{}-{}      Meteors: {}".format(bf[0:6],bf[7:11],bf[11:13],bf[13:15],num_plotted)
-        ax.text(10, stack_img.shape[0] + 30, annotation, color='grey', fontsize=6, fontname='Source Sans Pro',
+        if textoption[0] == 2:
+            annotation = "{}  {}-{}-{}      Meteors: {}".format(bf[0:6],bf[7:11],bf[11:13],bf[13:15],num_plotted)
+            ax.text(10, stack_img.shape[0] + 30, annotation, color='grey', fontsize=6, fontname='Source Sans Pro',
                 weight='ultralight')
 
     plt.savefig(filenam, bbox_inches='tight', pad_inches=0, dpi=dpi, facecolor='k', edgecolor='k')
