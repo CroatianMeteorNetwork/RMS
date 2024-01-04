@@ -443,7 +443,6 @@ class PlateTool(QtWidgets.QMainWindow):
         # Store the mask
         self.camera_mask = camera_mask
 
-
         # Flat field
         self.flat_struct = None
 
@@ -1531,7 +1530,6 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.catalog_stars_filtered.append(star_radec)
 
             cat_stars_xy = np.array(cat_stars_xy)
-
 
         # Create a list of filtered catalog image coordinates
         self.catalog_x_filtered, self.catalog_y_filtered, catalog_mag_filtered = cat_stars_xy.T
@@ -2989,35 +2987,6 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.updateLeftLabels()
                 self.updateStars()
 
-            # Jump to faintest unmatched star
-            elif event.key() == QtCore.Qt.Key_Comma:
-
-                # in progress
-
-                self.platepar.az_centre, self.platepar.el_centre = self.faintestUnmatchedStar()
-
-                self.checkParamRange()
-                self.platepar.updateRefRADec(preserve_rotation=True)
-                self.checkParamRange()
-
-                self.tab.param_manager.updatePlatepar()
-                self.updateLeftLabels()
-                self.updateStars()
-
-            # Jump to brightest unmatched star
-            elif event.key() == QtCore.Qt.Key_Period:
-
-                # in progress
-                self.platepar.az_centre, self.platepar.el_centre = self.brightestUnmatchedStar()
-                self.checkParamRange()
-                self.platepar.updateRefRADec(preserve_rotation=True)
-                self.checkParamRange()
-
-                self.tab.param_manager.updatePlatepar()
-                self.updateLeftLabels()
-                self.updateStars()
-
-
             # Jump to furthest unmatched star
             elif event.key() == QtCore.Qt.Key_BracketRight:
 
@@ -3030,7 +2999,6 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.tab.param_manager.updatePlatepar()
                 self.updateLeftLabels()
                 self.updateStars()
-
 
             # Move rotation parameter
             elif event.key() == QtCore.Qt.Key_Q:
@@ -5568,25 +5536,21 @@ class PlateTool(QtWidgets.QMainWindow):
             pass
         self.time = time.time()
 
-    def brightestUnmatchedStar(self):
-
-
-        pass
-
-    def faintestUnmatchedStar(self):
-
-
-        pass
 
     def furthestStar(self):
 
+        """
+
+        Returns: (x,y) integers of the current screen location of the furthest star
+        away from all other matched stars
+
+        """
 
         #intialise
 
         next_index, max_dist = 0,0
         image_ra = [star[0] for star in self.catalog_stars_filtered]
         image_dec = [star[1] for star in self.catalog_stars_filtered]
-
 
         # get all the matched stars in sky coordinates
         matched_sky_coords = self.paired_stars.skyCoords()
