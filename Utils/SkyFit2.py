@@ -37,6 +37,7 @@ from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
 from RMS.Routines.CustomPyqtgraphClasses import *
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle, greatCirclePhase
 from RMS.Routines import RollingShutterCorrection
+from RMS.Routines.MaskImage import loadMask, MaskStructure, getMaskFile
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
@@ -339,7 +340,7 @@ class PairedStars(object):
 
 class PlateTool(QtWidgets.QMainWindow):
     def __init__(self, input_path, config, beginning_time=None, fps=None, gamma=None, use_fr_files=False, \
-        geo_points_input=None, startUI=True):
+        geo_points_input=None, startUI=True, camera_mask=None):
         """ SkyFit interactive window.
 
         Arguments:
@@ -438,6 +439,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Platepar format (json or txt)
         self.platepar_fmt = None
+
+        # Store the mask
+        self.camera_mask = camera_mask
 
 
         # Flat field
@@ -1340,7 +1344,7 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'A/D - Azimuth\n'
             text_str += 'S/W - Altitude\n'
             text_str += 'Q/E - Position angle\n'
-            text_str += ('\ - Furthest unmatched star\n')
+            text_str += ('] - Furthest unmatched star\n')
             text_str += 'Up/Down - Scale\n'
             text_str += 'T - Toggle refraction correction\n'
 
@@ -1510,11 +1514,21 @@ class PlateTool(QtWidgets.QMainWindow):
                                                 & (cat_stars_xy[:, 1] > 0) \
                                                 & (cat_stars_xy[:, 1] < self.platepar.Y_res)
 
+
         # Filter out catalog image stars
-        cat_stars_xy = cat_stars_xy[filtered_indices_all]
+        cat_stars_xy_unmasked = cat_stars_xy[filtered_indices_all]
 
         # Create a filtered catalog
-        self.catalog_stars_filtered = self.catalog_stars[filtered_indices_all]
+        self.catalog_stars_filtered_unmasked = self.catalog_stars[filtered_indices_all]
+
+        cat_stars_xy, self.catalog_stars_filtered = [], []
+        for star_xy, star_radec in zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked):
+            if self.camera_mask.img[int(star_xy[1]),int(star_xy[0])] != 0:
+                cat_stars_xy.append(star_xy)
+                self.catalog_stars_filtered.append(star_radec)
+
+        cat_stars_xy = np.array(cat_stars_xy)
+
 
         # Create a list of filtered catalog image coordinates
         self.catalog_x_filtered, self.catalog_y_filtered, catalog_mag_filtered = cat_stars_xy.T
@@ -3002,7 +3016,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
             # Jump to furthest unmatched star
-            elif event.key() == QtCore.Qt.Key_Backslash:
+            elif event.key() == QtCore.Qt.Key_BracketRight:
 
                 new_x, new_y = self.furthestStar()
                 new_x, new_y = int(new_x), int(new_y)
@@ -5655,6 +5669,10 @@ if __name__ == '__main__':
                                  "the image as seen from the perspective of the observer.")
 
 
+    arg_parser.add_argument('-m', '--mask', metavar='MASK_PATH', type=str,
+                            help="Path to a mask file which will be applied to the star catalog")
+
+
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -5695,9 +5713,16 @@ if __name__ == '__main__':
         # Load the config file
         config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
+
+        if cml_args.mask is not None:
+            print("Given a path to a mask at {}".format(cml_args.mask))
+            camera_mask = getMaskFile(os.path.expanduser(cml_args.mask), config)
+        else:
+            camera_mask = None
+
         # Init SkyFit
         plate_tool = PlateTool(input_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
-            gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints)
+            gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints, camera_mask = camera_mask)
 
 
     # Run the GUI app
