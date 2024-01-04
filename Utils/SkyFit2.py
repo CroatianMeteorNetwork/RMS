@@ -1340,6 +1340,7 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'A/D - Azimuth\n'
             text_str += 'S/W - Altitude\n'
             text_str += 'Q/E - Position angle\n'
+            text_str += (',/. - Next unmatched star\n')
             text_str += 'Up/Down - Scale\n'
             text_str += 'T - Toggle refraction correction\n'
 
@@ -2967,6 +2968,48 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.platepar.updateRefRADec(preserve_rotation=True)
                 self.checkParamRange()
 
+                self.tab.param_manager.updatePlatepar()
+                self.updateLeftLabels()
+                self.updateStars()
+
+            # Jump to faintest unmatched star
+            elif event.key() == QtCore.Qt.Key_Comma:
+
+                # in progress
+
+                self.platepar.az_centre, self.platepar.el_centre = self.faintestUnmatchedStar()
+
+                self.checkParamRange()
+                self.platepar.updateRefRADec(preserve_rotation=True)
+                self.checkParamRange()
+
+                self.tab.param_manager.updatePlatepar()
+                self.updateLeftLabels()
+                self.updateStars()
+
+            # Jump to brightest unmatched star
+            elif event.key() == QtCore.Qt.Key_Period:
+
+                # in progress
+                self.platepar.az_centre, self.platepar.el_centre = self.brightestUnmatchedStar()
+                self.checkParamRange()
+                self.platepar.updateRefRADec(preserve_rotation=True)
+                self.checkParamRange()
+
+                self.tab.param_manager.updatePlatepar()
+                self.updateLeftLabels()
+                self.updateStars()
+
+
+            # Jump to furthest unmatched star
+            elif event.key() == QtCore.Qt.Key_Backslash:
+
+                new_x, new_y = self.furthestStar()
+                new_x, new_y = int(new_x), int(new_y)
+                self.img_frame.setRange(xRange=(new_x+15, new_x-15), yRange=(new_y+15, new_y-15))
+                self.checkParamRange()
+                self.platepar.updateRefRADec(preserve_rotation=True)
+                self.checkParamRange()
                 self.tab.param_manager.updatePlatepar()
                 self.updateLeftLabels()
                 self.updateStars()
@@ -5508,6 +5551,76 @@ class PlateTool(QtWidgets.QMainWindow):
             pass
         self.time = time.time()
 
+    def brightestUnmatchedStar(self):
+
+
+        pass
+
+    def faintestUnmatchedStar(self):
+
+
+        pass
+
+    def furthestStar(self):
+
+
+        #intialise
+
+        next_index, max_dist = 0,0
+        image_ra = [star[0] for star in self.catalog_stars_filtered]
+        image_dec = [star[1] for star in self.catalog_stars_filtered]
+
+
+        # get all the matched stars in sky coordinates
+        matched_sky_coords = self.paired_stars.skyCoords()
+        ra_list, dec_list = [],[]
+        for coords in matched_sky_coords:
+            ra_list.append(coords[0])
+            dec_list.append(coords[1])
+
+        # convert to image coordinates, with the current platepar
+        matched_coords_x, matched_coords_y = raDecToXYPP(np.array(ra_list), np.array(dec_list),
+                                                         datetime2JD(self.img_handle.currentFrameTime(dt_obj=True)),
+                                                         self.platepar)
+
+        # Make into a list of integers of x and a list of integers of y
+        matched_im_x_list, matched_im_y_list = [],[]
+
+        # Iterate to discover the star which is the furthest away from all already matched stars
+        for im_coord_x, im_coord_y in zip(matched_coords_x, matched_coords_y):
+            matched_im_x_list.append(im_coord_x)
+            matched_im_y_list.append(im_coord_y)
+
+        # Find the unmatched star which is furthest away from all the already matched stars
+        for this_star_index, (x, y) in enumerate(zip(image_ra, image_dec)):
+
+            # Find the distance in image coordinates to closest matched star to this star
+            min_matched_distance = np.inf
+
+            # convert all the skycoordinates to image coordinates, with the current platepar
+            im_x, im_y = raDecToXYPP(np.array([x]), np.array([y]), datetime2JD(self.img_handle.currentFrameTime(dt_obj=True)),
+                                                             self.platepar)
+
+            # iterate to find the closest matched star to this star
+            for matched_x, matched_y in zip(matched_im_x_list, matched_im_y_list):
+                matched_distance = (matched_x - im_x) ** 2 + (matched_y - im_y) ** 2
+                if matched_distance < min_matched_distance:
+                    min_matched_distance = matched_distance
+
+            # if this star is further away from all stars checked so far, then it is the new furthest star
+            if min_matched_distance > max_dist and im_x[0] not in matched_im_x_list and im_y[0] not in matched_im_y_list:
+                max_dist, next_index = min_matched_distance, this_star_index
+
+        # convert the index to ra and dec
+        next_ra = np.array(self.catalog_stars_filtered[next_index][0])
+        next_dec = np.array(self.catalog_stars_filtered[next_index][1])
+
+        # return as image coordinates
+        next_x, next_y = raDecToXYPP(np.array([next_ra]), np.array([next_dec]), \
+                    datetime2JD(self.img_handle.currentFrameTime(dt_obj=True)),
+                    self.platepar)
+
+        return int(next_x),int(next_y)
 
 if __name__ == '__main__':
     ### COMMAND LINE ARGUMENTS
