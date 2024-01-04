@@ -5720,8 +5720,9 @@ if __name__ == '__main__':
         if cml_args.mask is not None:
             print("Given a path to a mask at {}".format(cml_args.mask))
             camera_mask = getMaskFile(os.path.expanduser(cml_args.mask), config)
-        else:
-            camera_mask = None
+        elif os.path.exists(os.path.join(config.rms_root_dir, config.mask_file)):
+            print("Loading mask from {}".format(os.path.join(config.rms_root_dir, config.mask_file)))
+            camera_mask = getMaskFile(config.rms_root_dir, config)
 
         # Init SkyFit
         plate_tool = PlateTool(input_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
