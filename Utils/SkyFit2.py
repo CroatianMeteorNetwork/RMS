@@ -1340,7 +1340,7 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'A/D - Azimuth\n'
             text_str += 'S/W - Altitude\n'
             text_str += 'Q/E - Position angle\n'
-            text_str += (',/. - Next unmatched star\n')
+            text_str += ('\ - Furthest unmatched star\n')
             text_str += 'Up/Down - Scale\n'
             text_str += 'T - Toggle refraction correction\n'
 
