@@ -1521,13 +1521,16 @@ class PlateTool(QtWidgets.QMainWindow):
         # Create a filtered catalog
         self.catalog_stars_filtered_unmasked = self.catalog_stars[filtered_indices_all]
 
-        cat_stars_xy, self.catalog_stars_filtered = [], []
-        for star_xy, star_radec in zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked):
-            if self.camera_mask.img[int(star_xy[1]),int(star_xy[0])] != 0:
-                cat_stars_xy.append(star_xy)
-                self.catalog_stars_filtered.append(star_radec)
+        if self.camera_mask is None:
+            cat_stars_xy = cat_stars_xy_unmasked
+        else:
+            cat_stars_xy, self.catalog_stars_filtered = [], []
+            for star_xy, star_radec in zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked):
+                if self.camera_mask.img[int(star_xy[1]),int(star_xy[0])] != 0:
+                    cat_stars_xy.append(star_xy)
+                    self.catalog_stars_filtered.append(star_radec)
 
-        cat_stars_xy = np.array(cat_stars_xy)
+            cat_stars_xy = np.array(cat_stars_xy)
 
 
         # Create a list of filtered catalog image coordinates
