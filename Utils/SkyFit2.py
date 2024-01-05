@@ -5771,7 +5771,7 @@ if __name__ == '__main__':
             print("No mask specified loading mask from {}".format(os.path.join(config.rms_root_dir, config.mask_file)))
             camera_mask = getMaskFile(config.rms_root_dir, config)
         elif os.path.exists("mask.bmp"):
-            camera_mask = getMaskFile(mask.bmp, config)
+            camera_mask = getMaskFile("mask.bmp", config)
         elif True:
             camera_mask = None
 
