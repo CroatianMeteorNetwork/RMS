@@ -366,9 +366,8 @@ class PlateTool(QtWidgets.QMainWindow):
         #   of position on frames and photometry
         self.mode = 'skyfit'
         self.mode_list = ['skyfit', 'manualreduction']
-        self.auto_pan = False
         self.max_radius_between_matched_stars = np.inf
-
+        self.autopan_mode = False
         self.input_path = input_path
         if os.path.isfile(self.input_path):
             self.dir_path = os.path.dirname(self.input_path)
@@ -973,6 +972,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigMeasGroundPointsToggled.connect(self.toggleMeasGroundPoints)
         self.tab.settings.sigGridToggled.connect(self.onGridChanged)
         self.tab.settings.sigInvertToggled.connect(self.toggleInvertColours)
+        self.tab.settings.sigAutoPanToggled.connect(self.toggleAutoPan)
         self.tab.settings.sigSingleClickPhotometryToggled.connect(self.toggleSingleClickPhotometry)
 
         layout.addWidget(self.tab, 0, 2)
@@ -1265,9 +1265,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Show mode for debugging purposes
 
-            if self.star_pick_mode and not self.auto_pan:
+            if self.star_pick_mode and not self.autopan_mode:
                 pass
-            elif self.star_pick_mode and self.auto_pan:
+            elif self.star_pick_mode and self.autopan_mode:
                 status_str += ", Auto pan"
 
             if self.max_radius_between_matched_stars != np.inf:
@@ -2267,6 +2267,8 @@ class PlateTool(QtWidgets.QMainWindow):
             if not hasattr(self.platepar, "vignetting_fixed"):
                 self.platepar.vignetting_fixed = False
 
+            if not hasattr(self.autopan_mode, "autopan_mode"):
+                self.autopan_mode = False
 
             if not hasattr(self.platepar, "measurement_apparent_to_true_refraction"):
                 self.platepar.measurement_apparent_to_true_refraction = False
@@ -2712,7 +2714,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Toggle auto levels
         if event.key() == QtCore.Qt.Key_A and (modifiers == QtCore.Qt.ControlModifier):
-            
+
             self.tab.hist.toggleAutoLevels()
             # This updates image automatically
 
@@ -3030,7 +3032,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
             elif event.key() == QtCore.Qt.Key_O and modifiers == QtCore.Qt.ControlModifier:
 
-                self.auto_pan = not self.auto_pan
+                self.toggleAutoPan()
+                self.tab.settings.updateAutoPan()
+
+
 
 
             # Move rotation parameter
@@ -3352,7 +3357,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         self.cursor.setMode(0)
                         self.updatePairedStars()
 
-                        if self.auto_pan:
+                        if self.autopan_mode:
                             new_x, new_y = self.furthestStar()
                             new_x, new_y = int(new_x), int(new_y)
                             self.img_frame.setRange(xRange=(new_x + 15, new_x - 15), yRange=(new_y + 15, new_y - 15))
@@ -3670,6 +3675,12 @@ class PlateTool(QtWidgets.QMainWindow):
     def toggleInvertColours(self):
         self.img.invert()
         self.img_zoom.invert()
+
+    def toggleAutoPan(self):
+
+        self.img.autopan()
+        self.autopan_mode = not self.autopan_mode
+
 
     def toggleSingleClickPhotometry(self):
         self.single_click_photometry = not self.single_click_photometry
