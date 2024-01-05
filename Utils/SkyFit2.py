@@ -1001,6 +1001,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.changeMode(self.mode)
 
 
+
+
     def changeMode(self, new_mode):
         """
         Changes the mode to either 'skyfit' or 'manualreduction', updating the gui accordingly. Will not 
@@ -2206,7 +2208,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 (not isinstance(v, float)):
 
                 # Remove class that inherits from something
-                to_remove.append(k)  
+                to_remove.append(k)
+                print(k,v)
 
         for remove in to_remove:
             del dic[remove]
@@ -2225,7 +2228,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.loadState(os.path.dirname(file_), os.path.basename(file_))
 
 
-    def loadState(self, dir_path, state_name, beginning_time=None):
+    def loadState(self, dir_path, state_name, beginning_time=None, camera_mask=None):
         """ Loads state with path to file dir_path and file name state_name. Works mid-program and at the start of
         the program (if done properly).
 
@@ -2373,6 +2376,11 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update the possibly missing begin time
         if not hasattr(self, "beginning_time"):
             self.beginning_time = beginning_time
+
+        # Add the mask
+        if not hasattr(self, "camera_mask"):
+            self.camera_mask = camera_mask
+
 
         if not hasattr(self, "pick_list"):
             self.pick_list = {}
@@ -5749,7 +5757,19 @@ if __name__ == '__main__':
         # Create plate_tool without calling its constructor then calling loadstate
         plate_tool = PlateTool.__new__(PlateTool)
         super(PlateTool, plate_tool).__init__()
-        plate_tool.loadState(dir_path, state_name, beginning_time=beginning_time)
+
+        if cml_args.mask is not None:
+            print("Given a path to a mask at {}".format(cml_args.mask))
+            camera_mask = getMaskFile(os.path.expanduser(cml_args.mask), config)
+        elif os.path.exists(os.path.join(config.rms_root_dir, config.mask_file)):
+            print("No mask specified loading mask from {}".format(os.path.join(config.rms_root_dir, config.mask_file)))
+            camera_mask = getMaskFile(config.rms_root_dir, config)
+        elif os.path.exists("mask.bmp"):
+            camera_mask = getMaskFile(".", config)
+        elif True:
+            camera_mask = None
+
+        plate_tool.loadState(dir_path, state_name, beginning_time=beginning_time, camera_mask = camera_mask)
 
     else:
 
@@ -5771,7 +5791,7 @@ if __name__ == '__main__':
             print("No mask specified loading mask from {}".format(os.path.join(config.rms_root_dir, config.mask_file)))
             camera_mask = getMaskFile(config.rms_root_dir, config)
         elif os.path.exists("mask.bmp"):
-            camera_mask = getMaskFile("mask.bmp", config)
+            camera_mask = getMaskFile(".", config)
         elif True:
             camera_mask = None
 
