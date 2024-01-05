@@ -1259,23 +1259,23 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # If ground points are measured, change the text for alt/az
             if self.meas_ground_points:
-                status_str += ",  Azim={:6.2f}° Alt={:6.2f}° (GROUND)".format(azim, alt)
+                status_str += ",  Azim={:6.2f} Alt={:6.2f} (GROUND)".format(azim, alt)
             else:
-                status_str += ",  Azim={:6.2f}° Alt={:6.2f}° (date)".format(azim, alt)
+                status_str += ",  Azim={:6.2f} Alt={:6.2f} (date)".format(azim, alt)
 
 
             # Add RA/Dec info
             status_str += ", RA={:6.2f} Dec={:+6.2f} (J2000)".format(ra[0], dec[0])
 
             # Show mode for debugging purposes
+            if False:
+                if self.star_pick_mode and not self.autopan_mode:
+                    pass
+                elif self.star_pick_mode and self.autopan_mode:
+                    status_str += ", Auto pan"
 
-            if self.star_pick_mode and not self.autopan_mode:
-                pass
-            elif self.star_pick_mode and self.autopan_mode:
-                status_str += ", Auto pan"
-
-            if self.max_radius_between_matched_stars != np.inf:
-                status_str += ", Angle {:3.2f} {}/{}".format(self.max_radius_between_matched_stars, len(self.paired_stars), len(self.catalog_x_filtered))
+                if self.max_radius_between_matched_stars != np.inf:
+                    status_str += ", Angle {:3.2f} {}/{}".format(self.max_radius_between_matched_stars, len(self.paired_stars), len(self.catalog_x_filtered))
 
 
         return status_str
