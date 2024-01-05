@@ -366,7 +366,7 @@ class PlateTool(QtWidgets.QMainWindow):
         #   of position on frames and photometry
         self.mode = 'skyfit'
         self.mode_list = ['skyfit', 'manualreduction']
-        self.auto_pan = True
+        self.auto_pan = False
         self.max_radius_between_matched_stars = np.inf
 
         self.input_path = input_path
@@ -1393,7 +1393,8 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'CTRL + D - Load dark\n'
             text_str += 'CTRL + F - Load flat\n'
             text_str += 'CTRL + G - Cycle grids\n'
-            text_str += 'CTRL + U - Pan to next unmatched star\n'
+            text_str += 'CTRL + U - Pan to next\n'
+            text_str += 'CTRL + O - Toggle auto pan\n'
             text_str += 'CTRL + X - astrometry.net img upload\n'
             text_str += 'CTRL + SHIFT + X - astrometry.net XY only\n'
             text_str += 'SHIFT + Z - Show zoomed window\n'
@@ -3012,6 +3013,11 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.tab.param_manager.updatePlatepar()
                 self.updateLeftLabels()
                 self.updateStars()
+
+            elif event.key() == QtCore.Qt.Key_O and modifiers == QtCore.Qt.ControlModifier:
+
+                self.auto_pan = not self.auto_pan
+
 
             # Move rotation parameter
             elif event.key() == QtCore.Qt.Key_Q:
