@@ -366,8 +366,8 @@ class PlateTool(QtWidgets.QMainWindow):
         #   of position on frames and photometry
         self.mode = 'skyfit'
         self.mode_list = ['skyfit', 'manualreduction']
-        self.auto_pan = False
-        self.max_radius_between_unmatched_stars = np.inf
+        self.auto_pan = True
+        self.max_radius_between_matched_stars = np.inf
 
         self.input_path = input_path
         if os.path.isfile(self.input_path):
@@ -1253,23 +1253,23 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # If ground points are measured, change the text for alt/az
             if self.meas_ground_points:
-                status_str += ",  Azim={:6.2f}  Alt={:6.2f} (GROUND)".format(azim, alt)
+                status_str += ",  Azim={:6.2f}° Alt={:6.2f}° (GROUND)".format(azim, alt)
             else:
-                status_str += ",  Azim={:6.2f}  Alt={:6.2f} (date)".format(azim, alt)
+                status_str += ",  Azim={:6.2f}° Alt={:6.2f}° (date)".format(azim, alt)
 
 
             # Add RA/Dec info
-            status_str += ", RA={:6.2f}  Dec={:+6.2f} (J2000)".format(ra[0], dec[0])
+            status_str += ", RA={:6.2f} Dec={:+6.2f} (J2000)".format(ra[0], dec[0])
 
             # Show mode for debugging purposes
 
             if self.star_pick_mode and not self.auto_pan:
-                status_str += ", Star picking"
+                pass
             elif self.star_pick_mode and self.auto_pan:
-                status_str += ", Star picking with auto pan"
+                status_str += ", Auto pan"
 
-            if self.max_radius_between_unmatched_stars != np.inf:
-                status_str += ", Unmatched radius: {:4.0f}px".format(self.max_radius_between_unmatched_stars)
+            if self.max_radius_between_matched_stars != np.inf:
+                status_str += ", Angle {:3.2f} {}/{}".format(self.max_radius_between_matched_stars, len(self.paired_stars), len(self.catalog_x_filtered))
 
 
         return status_str
@@ -3331,6 +3331,19 @@ class PlateTool(QtWidgets.QMainWindow):
                         # Switch back to centroiding mode
                         self.cursor.setMode(0)
                         self.updatePairedStars()
+
+                        if self.auto_pan:
+                            new_x, new_y = self.furthestStar()
+                            new_x, new_y = int(new_x), int(new_y)
+                            self.img_frame.setRange(xRange=(new_x + 15, new_x - 15), yRange=(new_y + 15, new_y - 15))
+                            self.checkParamRange()
+                            self.platepar.updateRefRADec(preserve_rotation=True)
+                            self.checkParamRange()
+                            self.tab.param_manager.updatePlatepar()
+                            self.updateLeftLabels()
+                            self.updateStars()
+
+
 
 
             elif event.key() == QtCore.Qt.Key_Escape:
@@ -5550,24 +5563,26 @@ class PlateTool(QtWidgets.QMainWindow):
         self.time = time.time()
 
 
-    def furthestStar(self, minimum_separation = 1):
-
+    def furthestStar(self, minimum_separation = 0.12):
 
         """
 
         Args:
             minimum_separation: minimum separation to avoid double stars default is 0.12 degrees
-            separation of Alpha_1 and Alpha_2 Capricorni
+            separation of Alpha_1 and Alpha_2 Cap as a reference
 
         Returns: (x,y) integers of the image location of the furthest star
         away from all other matched stars
 
         """
 
-
         #intialise
 
         next_index, max_dist, min_matched_radius = 0,0, np.inf
+        if self.max_radius_between_matched_stars < 360:
+            matched_radius = self.max_radius_between_matched_stars
+        else:
+            matched_radius = np.inf
         image_ra = [star[0] for star in self.catalog_stars_filtered]
         image_dec = [star[1] for star in self.catalog_stars_filtered]
 
@@ -5594,17 +5609,18 @@ class PlateTool(QtWidgets.QMainWindow):
         # Find the unmatched star which is furthest away from all the already matched stars
         for this_star_index, (x, y) in enumerate(zip(image_ra, image_dec)):
 
-            # Initialise double star avoidance loop
+            # Initialise avoidance of stars which are too close together for reliable picking
             min_ang_sep_deg = np.inf
             this_star_ra, this_star_dec = np.radians(x), np.radians(y)
 
             for double_check_index, (double_ra, double_dec) in enumerate(zip(image_ra, image_dec)):
-                    double_check_ra, double_check_dec = np.radians(double_ra),np.radians(double_dec)
-                    ang_sep_deg = np.degrees(angularSeparation(this_star_ra, this_star_dec, double_check_ra, double_check_dec))
 
                     # Exclude self
                     if this_star_index == double_check_index:
                         continue
+
+                    double_check_ra, double_check_dec = np.radians(double_ra),np.radians(double_dec)
+                    ang_sep_deg = np.degrees(angularSeparation(this_star_ra, this_star_dec, double_check_ra, double_check_dec))
 
                     # Record the lowest angular separation
                     if ang_sep_deg < min_ang_sep_deg:
@@ -5622,18 +5638,29 @@ class PlateTool(QtWidgets.QMainWindow):
                                                              self.platepar)
 
             # iterate to find the closest matched star to this star
-            for matched_x, matched_y in zip(matched_im_x_list, matched_im_y_list):
+            for match_index, (matched_x, matched_y) in enumerate(zip(matched_im_x_list, matched_im_y_list)):
+                # ignore self
+                if match_index == this_star_index:
+                    continue
                 #OK to use vector difference because these are cartesian image coordinates
                 matched_distance = (matched_x - im_x[0]) ** 2 + (matched_y - im_y[0]) ** 2
+                # if this is the smallest matched distance, but not the same star
                 if matched_distance < min_matched_distance:
                     min_matched_distance = matched_distance
-                    min_matched_radius = np.degrees(angularSeparation(np.radians(x),np.radians(y),
-                                                           np.radians(image_ra[this_star_index]),
-                                                           np.radians(image_dec[this_star_index])))
+                    _, ra_matched, dec_matched, _ = xyToRaDecPP([self.img.img_handle.currentTime()],
+                                                                [matched_x], [matched_y],
+                                                                [1], self.platepar, extinction_correction=False)
+
+                    if x != ra_matched and y != dec_matched:
+
+                        min_matched_radius = np.degrees(angularSeparation(np.radians(x),np.radians(y),
+                                                           np.radians(ra_matched),
+                                                           np.radians(dec_matched)))[0]
+
 
             # if this star is further away from all stars checked so far, then it is the new furthest star
             if min_matched_distance > max_dist and im_x[0] not in matched_im_x_list and im_y[0] not in matched_im_y_list:
-                max_dist, next_index, matched_radius = min_matched_distance, this_star_index, min_matched_radius
+                    max_dist, next_index, matched_radius = min_matched_distance, this_star_index, min_matched_radius
 
 
         # convert the index to ra and dec
@@ -5644,7 +5671,7 @@ class PlateTool(QtWidgets.QMainWindow):
         next_x, next_y = raDecToXYPP(np.array([next_ra]), np.array([next_dec]), \
                     datetime2JD(self.img_handle.currentFrameTime(dt_obj=True)),
                     self.platepar)
-        self.max_radius_between_unmatched_stars = matched_radius
+        self.max_radius_between_matched_stars = matched_radius
         return int(next_x),int(next_y)
 
 if __name__ == '__main__':
