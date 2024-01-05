@@ -366,7 +366,7 @@ class PlateTool(QtWidgets.QMainWindow):
         #   of position on frames and photometry
         self.mode = 'skyfit'
         self.mode_list = ['skyfit', 'manualreduction']
-
+        self.auto_jump = False
 
         self.input_path = input_path
         if os.path.isfile(self.input_path):
@@ -1260,6 +1260,12 @@ class PlateTool(QtWidgets.QMainWindow):
             # Add RA/Dec info
             status_str += ", RA={:6.2f}  Dec={:+6.2f} (J2000)".format(ra[0], dec[0])
 
+            # Show mode for debugging purposes
+
+            if self.star_pick_mode and not self.auto_pan:
+                status_str += ", Star picking"
+            elif self.star_pick_mode and self.auto_pan:
+                status_str += ", Star picking with auto pan"
 
 
         return status_str
