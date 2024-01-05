@@ -366,7 +366,7 @@ class PlateTool(QtWidgets.QMainWindow):
         #   of position on frames and photometry
         self.mode = 'skyfit'
         self.mode_list = ['skyfit', 'manualreduction']
-        self.auto_jump = False
+        self.auto_pan = False
 
         self.input_path = input_path
         if os.path.isfile(self.input_path):
@@ -1390,6 +1390,7 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'CTRL + D - Load dark\n'
             text_str += 'CTRL + F - Load flat\n'
             text_str += 'CTRL + G - Cycle grids\n'
+            text_str += 'CTRL + P - Pan to next unmatched star'
             text_str += 'CTRL + X - astrometry.net img upload\n'
             text_str += 'CTRL + SHIFT + X - astrometry.net XY only\n'
             text_str += 'SHIFT + Z - Show zoomed window\n'
@@ -2814,7 +2815,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateLeftLabels()
             self.tab.settings.updateImageGamma()
 
-        elif event.key() == QtCore.Qt.Key_J:
+        elif event.key() == QtCore.Qt.Key_J and not modifiers == QtCore.Qt.ControlModifier:
 
             # Decrease image gamma by a factor of 0.9x
             self.img.updateGamma(0.9)
@@ -2998,7 +2999,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Jump to furthest unmatched star
             #ToDo: remove the BracketRight function
             elif event.key() == QtCore.Qt.Key_BracketRight or \
-                    event.key() == QtCore.Qt.Key_J and modifiers == QtCore.Qt.ControlModifier:
+                    event.key() == QtCore.Qt.Key_P and modifiers == QtCore.Qt.ControlModifier:
 
                 new_x, new_y = self.furthestStar()
                 new_x, new_y = int(new_x), int(new_y)
@@ -3338,7 +3339,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.updatePairedStars()
 
             # Show the photometry plot
-            elif event.key() == QtCore.Qt.Key_P:
+            elif event.key() == QtCore.Qt.Key_P and not modifiers == QtCore.Qt.ControlModifier:
                 self.photometry(show_plot=True)
 
             # Show astrometry residuals plot
