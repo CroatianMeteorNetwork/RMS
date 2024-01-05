@@ -1614,6 +1614,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
     sigVignettingChanged = QtCore.pyqtSignal()
 
     sigFitPressed = QtCore.pyqtSignal()
+    sigNextStarPressed = QtCore.pyqtSignal()
     sigAstrometryPressed = QtCore.pyqtSignal()
     sigPhotometryPressed = QtCore.pyqtSignal()
     sigResetDistortionPressed = QtCore.pyqtSignal()
@@ -1637,9 +1638,15 @@ class PlateparParameterManager(QtWidgets.QWidget):
         # buttons
         box = QtWidgets.QVBoxLayout()
 
+        self.next_star_button = QtWidgets.QPushButton("Next Star")
+        self.next_star_button.clicked.connect(self.sigNextStarPressed.emit)
+        box.addWidget(self.next_star_button)
+
         self.fit_astrometry_button = QtWidgets.QPushButton("Fit")
         self.fit_astrometry_button.clicked.connect(self.sigFitPressed.emit)
         box.addWidget(self.fit_astrometry_button)
+
+
 
         box.addWidget(QtWidgets.QLabel("Residuals:"))
 

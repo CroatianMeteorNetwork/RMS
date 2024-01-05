@@ -626,6 +626,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.status_bar.addPermanentWidget(self.skyfit_button)
         self.status_bar.addPermanentWidget(self.manualreduction_button)
 
+        self.nextstar_button = QtWidgets.QPushButton('SkyFit')
+        self.nextstar_button.pressed.connect(lambda: self.nextstar())
+
         ###################################################################################################
         # CENTRAL WIDGET (DISPLAY)
 
@@ -953,6 +956,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Connect astronmetry & photometry buttons to functions
         self.tab.param_manager.sigFitPressed.connect(lambda: self.fitPickedStars())
+        self.tab.param_manager.sigNextStarPressed.connect(lambda: self.jumpNextStar())
         self.tab.param_manager.sigPhotometryPressed.connect(lambda: self.photometry(show_plot=True))
         self.tab.param_manager.sigAstrometryPressed.connect(self.showAstrometryFitPlots)
         self.tab.param_manager.sigResetDistortionPressed.connect(self.resetDistortion)
@@ -4815,6 +4819,19 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateFitResiduals()
         self.tab.param_manager.updatePlatepar()
 
+
+    def jumpNextStar(self):
+
+
+        new_x, new_y = self.furthestStar()
+        new_x, new_y = int(new_x), int(new_y)
+        self.img_frame.setRange(xRange=(new_x + 15, new_x - 15), yRange=(new_y + 15, new_y - 15))
+        self.checkParamRange()
+        self.platepar.updateRefRADec(preserve_rotation=True)
+        self.checkParamRange()
+        self.tab.param_manager.updatePlatepar()
+        self.updateLeftLabels()
+        self.updateStars()
 
     def showAstrometryFitPlots(self):
         """ Show window with astrometry fit details. """
