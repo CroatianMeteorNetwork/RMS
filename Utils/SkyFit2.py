@@ -1535,6 +1535,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
         if self.camera_mask is None:
             cat_stars_xy = cat_stars_xy_unmasked
+            for star_xy, star_radec in zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked):
+                    cat_stars_xy.append(star_xy)
+                    self.catalog_stars_filtered.append(star_radec)
+
         else:
             cat_stars_xy, self.catalog_stars_filtered = [], []
             for star_xy, star_radec in zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked):
@@ -5762,8 +5766,12 @@ if __name__ == '__main__':
             print("Given a path to a mask at {}".format(cml_args.mask))
             camera_mask = getMaskFile(os.path.expanduser(cml_args.mask), config)
         elif os.path.exists(os.path.join(config.rms_root_dir, config.mask_file)):
-            print("Loading mask from {}".format(os.path.join(config.rms_root_dir, config.mask_file)))
+            print("No mask specified loading mask from {}".format(os.path.join(config.rms_root_dir, config.mask_file)))
             camera_mask = getMaskFile(config.rms_root_dir, config)
+        elif os.path.exists("mask.bmp"):
+            camera_mask = getMaskFile(mask.bmp, config)
+        elif True:
+            camera_mask = None
 
         # Init SkyFit
         plate_tool = PlateTool(input_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
