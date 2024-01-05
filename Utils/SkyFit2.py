@@ -1261,6 +1261,7 @@ class PlateTool(QtWidgets.QMainWindow):
             status_str += ", RA={:6.2f}  Dec={:+6.2f} (J2000)".format(ra[0], dec[0])
 
 
+
         return status_str
 
 
@@ -2988,7 +2989,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.updateStars()
 
             # Jump to furthest unmatched star
-            elif event.key() == QtCore.Qt.Key_BracketRight:
+            #ToDo: remove the BracketRight function
+            elif event.key() == QtCore.Qt.Key_BracketRight or \
+                    event.key() == QtCore.Qt.Key_J and modifiers == QtCore.Qt.ControlModifier:
 
                 new_x, new_y = self.furthestStar()
                 new_x, new_y = int(new_x), int(new_y)
