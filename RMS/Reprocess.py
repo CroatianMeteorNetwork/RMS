@@ -179,12 +179,6 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         if config.ml_filter > 0:
 
             log.info("Filtering out detections using machine learning...")
-            # first remove the unfiltered file from the last run, if one exists
-            # as otherwise the ML will use it by mistake
-            unfiltered_name = os.path.splitext(os.path.basename(ftpdetectinfo_name))[0] + '_unfiltered.txt'
-            if os.path.isfile(os.path.join(night_data_dir, unfiltered_name)):
-                log.info("removing old unfiltered file...")
-                os.remove(os.path.join(night_data_dir, unfiltered_name))
 
             ff_detected = filterFTPdetectinfoML(config, os.path.join(night_data_dir, ftpdetectinfo_name), \
                 threshold=config.ml_filter, keep_pngs=False, clear_prev_run=True)

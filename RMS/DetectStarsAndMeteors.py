@@ -98,6 +98,7 @@ def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None, dark=
         meteor_list = detectMeteors(img_handle, config, flat_struct=flat_struct, dark=dark, mask=mask)
 
         log.info(ff_name + ' detected meteors: ' + str(len(meteor_list)))
+
     else:
         meteor_list = []
 

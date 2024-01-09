@@ -295,7 +295,7 @@ class Config:
         self.archived_dir = "ArchivedFiles"
 
         # days of logfiles to keep
-        self.log_days_to_keep = 30
+        self.logdays_to_keep = 30
 
         # ArchDirs and bzs to keep 
         # keep this many ArchDirs. Zero means keep them all
@@ -818,8 +818,8 @@ def parseCapture(config, parser):
     if parser.has_option(section, "log_dir"):
         config.log_dir = parser.get(section, "log_dir")
 
-    if parser.has_option(section, "log_days_to_keep"):
-        config.log_days_to_keep = int(parser.get(section, "log_days_to_keep"))
+    if parser.has_option(section, "logdays_to_keep"):
+        config.logdays_to_keep = int(parser.get(section, "logdays_to_keep"))
 
     if parser.has_option(section, "arch_dirs_to_keep"):
         config.arch_dirs_to_keep = int(parser.get(section, "arch_dirs_to_keep"))
