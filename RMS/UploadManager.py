@@ -408,6 +408,10 @@ class UploadManager(multiprocessing.Process):
 
             # Get a file from the queue
             file_name = self.file_queue.get()
+            if not os.path.isfile(file_name):
+                log.info('Local file not found: {}'.format(file_name))
+                log.info('Skipping it...')
+                continue
 
             # Separate the path to the file and the file name
             data_path, f_name = os.path.split(file_name)
