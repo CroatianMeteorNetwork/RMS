@@ -5678,6 +5678,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 #skip this star as a candidate to pan to
                 continue
 
+
             # Find the distance in image coordinates to closest matched star to this star
             min_matched_distance = np.inf
 
@@ -5685,9 +5686,14 @@ class PlateTool(QtWidgets.QMainWindow):
             im_x, im_y = raDecToXYPP(np.array([x]), np.array([y]), datetime2JD(self.img_handle.currentFrameTime(dt_obj=True)),
                                                              self.platepar)
 
-            # iterate to find the closest matched star to this star
+            # exclude stars within 10 pixels of image edge
+            if im_x < 10 or im_y < 10 or self.platepar.X_res - im_x < 10 or self.platepar.Y_res - im_y < 10:
+                continue
+
+
+            # iterate to find the closest matched star to this star - we are looking to exclude stars in this loop
             for match_index, (matched_x, matched_y) in enumerate(zip(matched_im_x_list, matched_im_y_list)):
-                # ignore self
+                # ignore our self
                 if match_index == this_star_index:
                     continue
                 #OK to use vector difference because these are cartesian image coordinates
