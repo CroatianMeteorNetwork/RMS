@@ -627,7 +627,7 @@ def processIncompleteCaptures(config, upload_manager):
                         captured_dir_list.append(captured_dir_name)
 
 
-    # Check if there is a processed archived dir for every captured dir
+    # Check if there are any unprocessed or incompletely processed captured dirs
     for captured_subdir in captured_dir_list:
 
         captured_dir_path = os.path.join(config.data_dir, config.captured_dir, captured_subdir)
