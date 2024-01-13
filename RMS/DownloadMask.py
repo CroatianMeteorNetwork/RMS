@@ -147,9 +147,6 @@ def downloadNewMask(config, port=22):
 
     # Download the remote mask
     log.info("Downloading {} from {} to {}".format(remote_mask, remote_mask_path, os.path.join(config.config_file_path, config.mask_file)))
-    sftp.get(remote_mask, os.path.join(config.config_file_path, config.mask_file))
-    log.info('Latest mask downloaded!')
-
 
 
 
@@ -158,11 +155,35 @@ def downloadNewMask(config, port=22):
 
     # Construct a new name with the time of the download included
     dl_mask_name = remote_mask_path + 'mask_dl_' \
-        + datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S.%f') + '.bmp'
+                   + datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S.%f') + '.bmp'
 
-    sftp.posix_rename(remote_mask, dl_mask_name)
+    # Only permit the mask on the server to be renamed if there was a successful download
+    # initialised here in case future code changes introduce a path where there is no assignment
+    rename_permissive = False
 
-    log.info('Remote mask renamed to: ' + dl_mask_name)
+    try:
+        sftp.get(remote_mask, os.path.join(config.config_file_path, config.mask_file))
+        log.info('Latest mask downloaded!')
+        rename_permissive = True
+
+    except:
+
+        log.warning('Unable to download latest mask, not renaming mask on server')
+        log.warning('Mask remains on server and will be downloaded')
+        rename_permissive = False
+
+    if rename_permissive:
+
+        try:
+
+            sftp.posix_rename(remote_mask, dl_mask_name)
+            log.info('Remote mask renamed to: ' + dl_mask_name)
+
+        except:
+
+            log.warning('Remote mask not renamed')
+            return False
+
 
     ### ###
 
