@@ -811,7 +811,7 @@ class CursorItem(pg.GraphicsObject):
             painter.drawEllipse(QtCore.QPoint(0, 0), r, r)
         painter.end()
 
-        rect = QtCore.QRect(-3*self.r, -3*self.r, 6*self.r, 6*self.r)
+        rect = QtCore.QRect(-3*int(self.r), -3*int(self.r), 6*int(self.r), 6*int(self.r))
         self.picture.setBoundingRect(rect)
 
     def paint(self, painter, option, widget=None):

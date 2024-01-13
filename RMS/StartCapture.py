@@ -388,10 +388,10 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
     # Stop the capture
     log.debug('Stopping capture...')
+    dropped_frames = bc.dropped_frames
     bc.stopCapture()
     log.debug('Capture stopped')
 
-    dropped_frames = bc.dropped_frames
     log.info('Total number of late or dropped frames: ' + str(dropped_frames))
 
 
@@ -627,7 +627,7 @@ def processIncompleteCaptures(config, upload_manager):
                         captured_dir_list.append(captured_dir_name)
 
 
-    # Check if there is a processed archived dir for every captured dir
+    # Check if there are any unprocessed or incompletely processed captured dirs
     for captured_subdir in captured_dir_list:
 
         captured_dir_path = os.path.join(config.data_dir, config.captured_dir, captured_subdir)
