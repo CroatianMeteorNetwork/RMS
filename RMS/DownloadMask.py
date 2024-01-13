@@ -159,6 +159,7 @@ def downloadNewMask(config, port=22):
 
     # Only permit the mask on the server to be renamed if there was a successful download
     # initialised here in case future code changes introduce a path where there is no assignment
+
     rename_permissive = False
 
     try:
