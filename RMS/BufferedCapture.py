@@ -402,7 +402,7 @@ class BufferedCapture(Process):
 
             first_skipped_frames = 10
             for i in range(first_skipped_frames):
-                device.read()
+                self.read(device)
 
             total_frames = first_skipped_frames
 
