@@ -365,7 +365,8 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
 
 def deleteOldArchivedDirs(data_dir, config):
     archived_dir = os.path.join(data_dir, config.archived_dir)
-
+    orig_count = 0
+    final_count = 0
     if config.arch_dirs_to_keep > 0:
         archdir_list = getNightDirs(archived_dir, config.stationID)
         orig_count = len(archdir_list)
