@@ -26,6 +26,7 @@ import RMS.ConfigReader as cr
 from RMS.ExtractStars import extractStarsAndSave
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
+from RMS.Formats.FFfile import convertFRNameToFF
 from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFile
 from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
 from RMS.Formats import StarCatalog
@@ -41,15 +42,6 @@ import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
 
-
-
-def convertFRNameToFF(fr_name):
-    """ Convert the FR name format to an FF format. """
-
-    if fr_name.startswith("FR_") and fr_name.endswith(".bin"):
-        fr_name = fr_name.replace("FR_", "FF_", 1).replace(".bin", ".fits")
-
-    return fr_name
 
 
 class QFOVinputDialog(QtWidgets.QDialog):
@@ -1386,6 +1378,7 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'CTRL + A - Auto levels\n'
             text_str += 'CTRL + D - Load dark\n'
             text_str += 'CTRL + F - Load flat\n'
+            text_str += 'CTRL + G - Cycle grids\n'
             text_str += 'CTRL + X - astrometry.net img upload\n'
             text_str += 'CTRL + SHIFT + X - astrometry.net XY only\n'
             text_str += 'SHIFT + Z - Show zoomed window\n'

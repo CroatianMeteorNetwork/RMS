@@ -82,22 +82,61 @@ def _agentAuth(transport, username, rsa_private_key):
 
     return False
 
+def existsRemoteDirectory(sftp,path):
+    """
+
+    Args:
+        sftp: connection object
+        path: path to the directory to check
+
+    Returns:
+        True if successful else false
+    """
+
+    try:
+        # Get files in directory above target
+        listing = sftp.listdir(os.path.dirname(path))
+        # Is the required directory name in the filelist
+        if os.path.basename(path) in listing:
+            # Is the required directory name actually a directory
+            sftp_return = str(sftp.stat(path))
+            if sftp_return[0] == 'd':
+                return True
+            else:
+                log.error("{} must be a directory, but was not.".format(path))
+                log.error("stat returns {}".format(sftp_return))
+                return False
+        else:
+            return False
+    except:
+        log.error("Failure whilst checking that directory {} exists".format(path))
+        return False
+
+def createRemoteDirectory(sftp,path):
+
+    try:
+        sftp.mkdir(path)
+        return True
+    except:
+        log.error("Unable to create {}".format(path))
+        return False
 
 
 def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22, 
-        rsa_private_key=os.path.expanduser('~/.ssh/id_rsa')):
+        rsa_private_key=os.path.expanduser('~/.ssh/id_rsa'), allow_dir_creation = False):
     """ Upload the given list of files using SFTP. 
 
     Arguments:
         hostname: [str] Server name or IP address.
         username: [str] Username used for connecting to the server.
         dir_local: [str] Path to the local directory where the local files are located.
-        dir_remove: [str] Path on the server where the files will be stored.
+        dir_remote: [str] Path on the server where the files will be stored.
         file_list: [list or strings] A list of files to the uploaded to the server.
 
     Ketword arguments:
         port: [int] SSH port. 22 by default.
-        rsa_private_key: [str] Path to the SSH private key. ~/.ssh/id_rsa by defualt.
+        rsa_private_key: [str] Path to the SSH private key. ~/.ssh/id_rsa by default.
+        allow_dir_creation: [bool] Allow test for and create remote directory. False by default.
 
     Return:
         [bool] True if upload successful, false otherwise.
@@ -126,6 +165,10 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
         # Open new SFTP connection
         sftp = paramiko.SFTPClient.from_transport(t)
 
+        # If permitted, check if directory exists and create
+        if allow_dir_creation:
+            if not existsRemoteDirectory(sftp, dir_remote):
+                createRemoteDirectory(sftp, dir_remote)
         # Check that the remote directory exists
         try:
             sftp.stat(dir_remote)
@@ -143,7 +186,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
             # Get the size of the local file
             local_file_size = os.lstat(local_file).st_size
 
-            # Path to the remove file
+            # Path to the remote file
             remote_file = dir_remote + '/' + os.path.basename(fname)
 
             # Check if the remote file already exists and skip it if it has the same size as the local file
@@ -161,7 +204,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
 
             
             # Upload the file to the server if it isn't already there
-            log.info('Copying ' + local_file + ' to ' + remote_file)
+            log.info('Copying ' + local_file + ' ({:3.2f}MB) to '.format(int(local_file_size)/ (1024*1024)) + remote_file)
             sftp.put(local_file, remote_file)
 
 
@@ -365,6 +408,10 @@ class UploadManager(multiprocessing.Process):
 
             # Get a file from the queue
             file_name = self.file_queue.get()
+            if not os.path.isfile(file_name):
+                log.warning("Local file not found: {:s}".format(file_name))
+                log.warning("Skipping it...")
+                continue
 
             # Separate the path to the file and the file name
             data_path, f_name = os.path.split(file_name)

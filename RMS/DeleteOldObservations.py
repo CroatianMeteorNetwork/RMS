@@ -10,10 +10,13 @@ import datetime
 import time
 import logging
 import glob
+import argparse
 
 import ephem
 
 from RMS.CaptureDuration import captureDuration
+from RMS.ConfigReader import loadConfigFromDirectory
+from RMS.Logger import initLogging
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -79,6 +82,30 @@ def getNightDirs(dir_path, stationID):
     dir_list = sorted(dir_list)
 
     return dir_list
+
+
+
+def getBz2Files(dir_path, stationID):
+    """ Returns a sorted list of bz2 files in the given directory which conform to the RMS compress archdir names. 
+
+    Arguments:
+        dir_path: [str] Path to the data directory.
+        stationID: [str] Name of the station. The file will have to contain this string to be taken 
+        as a compressed archdir.
+
+    Return:
+        dir_list: [list] A list of bz2 files in the data directory.
+
+    """
+
+    # Get a list of files in the given directory
+    bz2_list = [bz2_name for bz2_name in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, bz2_name))]
+
+    # Get a list of files which conform to the required pattern
+    bz2_list = [bz2_name for bz2_name in bz2_list if (len(bz2_name.split('_')) > 3) and (stationID in bz2_name)]
+    bz2_list = sorted(bz2_list)
+
+    return bz2_list
 
 
 
@@ -200,7 +227,12 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     archived_dir = os.path.join(data_dir, archived_dir)
 
     # clear down logs first
+    log.info('clearing down log files')
     deleteOldLogfiles(data_dir, config)
+
+    # next purge out any old ArchivedFiles folders and compressed files
+    log.info('clearing down old data from ArchivedFiles')
+    deleteOldArchivedDirs(data_dir, config)
 
     # Calculate the approximate needed disk space for the next night
 
@@ -213,8 +245,8 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
 
         # Initialize the observer and find the time of next noon
         o = ephem.Observer()  
-        o.lat = config.latitude
-        o.long = config.longitude
+        o.lat = str(config.latitude)
+        o.long = str(config.longitude)
         o.elevation = config.elevation
         sun = ephem.Sun()
 
@@ -331,6 +363,29 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     return True
 
 
+def deleteOldArchivedDirs(data_dir, config):
+    archived_dir = os.path.join(data_dir, config.archived_dir)
+    orig_count = 0
+    final_count = 0
+    if config.arch_dirs_to_keep > 0:
+        archdir_list = getNightDirs(archived_dir, config.stationID)
+        orig_count = len(archdir_list)
+        while len(archdir_list) > config.arch_dirs_to_keep:
+            archdir_list = deleteNightFolders(archived_dir, config)
+        final_count = len(archdir_list)
+    log.info('Purged {} older folders from ArchivedFiles'.format(orig_count - final_count))
+
+    if config.bz2_files_to_keep > 0:
+        bz2_list = getBz2Files(archived_dir, config.stationID)
+        orig_count = len(bz2_list)
+        while len(bz2_list) > config.bz2_files_to_keep:
+            os.remove(os.path.join(archived_dir, bz2_list[0]))
+            bz2_list.pop(0)
+        final_count = len(bz2_list)
+    log.info('Purged {} older bz2 files from ArchivedFiles'.format(orig_count - final_count))
+    return
+
+
 def deleteOldLogfiles(data_dir, config, days_to_keep=None):
     """ Deletes old observation directories to free up space for new ones.
 
@@ -368,3 +423,26 @@ def deleteOldLogfiles(data_dir, config, days_to_keep=None):
                 except Exception as e:
                     log.warning('unable to delete {}: '.format(log_file_path) + repr(e)) 
                 
+
+if __name__ == '__main__':
+    """ Delete old data to free up space for next night's run
+    """
+    arg_parser = argparse.ArgumentParser(description=""" Deleting old observations.""")
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, help="Path to a config file")
+    cml_args = arg_parser.parse_args()
+
+    cfg_path = os.path.abspath('.') # default to using config from current folder
+    cfg_file = '.config'
+    if cml_args.config:
+        if os.path.isfile(cml_args.config[0]):
+            cfg_path, cfg_file = os.path.split(cml_args.config[0])
+    config = loadConfigFromDirectory(cfg_file, cfg_path)
+    # Initialize the logger
+    initLogging(config)
+    log = logging.getLogger("logger")
+
+    if not os.path.isdir(config.data_dir):
+        log.info('Data Dir not found {}'.format(config.data_dir))
+    else:
+        log.info('deleting obs from {}'.format(config.data_dir))
+        deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config)

@@ -6,9 +6,9 @@ import datetime
 
 import numpy as np
 import scipy.optimize
-from RMS.Astrometry.Conversions import date2JD, datetime2JD
+from RMS.Astrometry.Conversions import date2JD, datetime2JD, jd2Date
 
-
+@np.vectorize
 def jd2SolLonSteyaert(jd):
     """ Convert the given Julian date to solar longitude, J2000.0 epoch. Chris Steyaert method.
 
@@ -201,5 +201,20 @@ if __name__ == "__main__":
 
     # ### ###
 
-
+    print("Current UTC time is: {}".format(datetime.datetime.utcnow()))
+    print("Current Julian date is: {:.12f}".format(datetime2JD(datetime.datetime.utcnow())))
     print("Current solar longitude: {:.6f} deg".format(np.degrees(jd2SolLonSteyaert(datetime2JD(datetime.datetime.utcnow())))))
+
+
+    # Test inverse function
+    sol_test = 140.626
+    jd_test = solLon2jdSteyaert(2023, 8, np.radians(sol_test))
+    dt_test = jd2Date(jd_test, dt_obj=True)
+    print("Test solar longitude: {:.6f} deg".format(sol_test))
+    print("Test Julian date: {:.12f}".format(jd_test))
+    print("Test date: {}".format(dt_test))
+
+    # Convert the date back to solar longitude
+    jd_inv_test = datetime2JD(dt_test)
+    sol_inv_test = np.degrees(jd2SolLonSteyaert(jd_inv_test))
+    print("Test solar longitude (inverse): {:.6f} deg".format(sol_inv_test))

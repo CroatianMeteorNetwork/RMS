@@ -236,6 +236,7 @@ class Config:
         self.cams_code = 0
 
 
+
         # Show this camera on the GMN weblog
         self.weblog_enable = True
 
@@ -296,10 +297,15 @@ class Config:
         # days of logfiles to keep
         self.logdays_to_keep = 30
 
+        # ArchDirs and bzs to keep 
+        # keep this many ArchDirs. Zero means keep them all
+        self.arch_dirs_to_keep = 20
+        # keep this many compressed ArchDirs. Zero means keep them all
+        self.bz2_files_to_keep = 20
+
         # Extra space to leave on disk for the archive (in GB) after the captured files have been taken
         #   into account
-        self.extra_space_gb = 3
-
+        self.extra_space_gb = 6
 
         # Enable/disable showing maxpixel on the screen (off by default)
         self.live_maxpixel_enable = False
@@ -312,6 +318,7 @@ class Config:
 
         # Automatically reprocess broken capture directories
         self.auto_reprocess = True
+        self.prioritize_capture_over_reprocess = False
 
         # Flag file which indicates that the previously processed files are loaded during capture resume
         self.capture_resume_flag_file = ".capture_resuming"
@@ -356,6 +363,15 @@ class Config:
 
         # 1 - Normal, 2 - Skip uploading FFs, 3 - Skip FFs and FRs
         self.upload_mode = 1
+
+        self.event_monitor_enabled = True
+        self.event_monitor_db_name = "event_monitor.db"
+        self.event_monitor_webpage = "https://globalmeteornetwork.org/events/event_watchlist.txt"
+        self.event_monitor_remote_dir = "files/event_monitor"
+        self.event_monitor_check_interval = 30
+        self.event_monitor_check_interval_fast = 5
+
+
 
 
         ##### Weave compilation arguments
@@ -486,6 +502,12 @@ class Config:
         self.platepar_remote_name = 'platepar_latest.cal'
         self.remote_platepar_dir = 'platepars'
 
+        # Download remote mask
+        self.mask_download_permissive = True
+        self.mask_remote_name = 'mask_latest.bmp'
+        self.remote_mask_dir = 'masks'
+
+
         self.catalog_mag_limit = 5.5
 
         self.calstars_files_N = 400 # How many calstars FF files to evaluate
@@ -523,6 +545,18 @@ class Config:
         # Path to flux showers
         self.showers_flux_file_name = 'flux_showers.csv'
 
+        # Path to file with shower activity parameters
+        self.shower_activity_file_name = "flux_activity.csv"
+
+        # Sporadic ZHR to be used in the dial on the flux website
+        self.background_sporadic_zhr = 25
+
+        # Path to the template flux dial SVG file
+        self.flux_dial_template_svg = os.path.join(self.rms_root_dir, 'share', 'flux_dial_template.svg')
+
+        # Name of the yearly ZHR overview plot
+        self.yearly_zhr_plot_name = 'yearly_zhr_overview.png'
+
         # colour scheme to use for showers
         self.shower_color_map = 'viridis'
 
@@ -538,6 +572,10 @@ class Config:
 
         # Maximum distance from shower radiant (degrees)
         self.shower_max_radiant_separation = 7.5
+
+        #### Event Monitor
+
+        self.event_monitor_db_name = "event_monitor.db"
 
 
 def normalizeParameter(param, config, binning=1):
@@ -739,6 +777,9 @@ def parseSystem(config, parser):
         config.auto_reprocess_external_script_run = parser.getboolean(section, \
             "auto_reprocess_external_script_run")
 
+    if parser.has_option(section, "prioritize_capture_over_reprocess"):
+        config.prioritize_capture_over_reprocess = parser.getboolean(section, \
+            "prioritize_capture_over_reprocess")
 
     if parser.has_option(section, "external_script_path"):
         config.external_script_path = parser.get(section, "external_script_path")
@@ -752,7 +793,10 @@ def parseSystem(config, parser):
 
     if parser.has_option(section, "reboot_lock_file"):
         config.reboot_lock_file = parser.get(section, "reboot_lock_file")
-        
+
+
+    if parser.has_option(section, "event_monitor_db_name"):
+        config.event_monitor_db_name = parser.get(section, "event_monitor_db_name")
 
 
 def parseCapture(config, parser):
@@ -781,7 +825,13 @@ def parseCapture(config, parser):
         config.log_dir = parser.get(section, "log_dir")
 
     if parser.has_option(section, "logdays_to_keep"):
-        config.logdays_to_keep = parser.get(section, "logdays_to_keep")
+        config.logdays_to_keep = int(parser.get(section, "logdays_to_keep"))
+
+    if parser.has_option(section, "arch_dirs_to_keep"):
+        config.arch_dirs_to_keep = int(parser.get(section, "arch_dirs_to_keep"))
+
+    if parser.has_option(section, "bz2_files_to_keep"):
+        config.bz2_files_to_keep = int(parser.get(section, "bz2_files_to_keep"))
 
     if parser.has_option(section, "captured_dir"):
         config.captured_dir = parser.get(section, "captured_dir")
@@ -929,6 +979,10 @@ def parseCapture(config, parser):
     if parser.has_option(section, "auto_reprocess"):
         config.auto_reprocess = parser.getboolean(section, "auto_reprocess")
 
+    # Prioritize capture over reprocessing - do not start reprocessing a new directory if should be capturing
+    if parser.has_option(section, "prioritize_capture_over_reprocess"):
+        config.prioritize_capture_over_reprocess = parser.getboolean(section, \
+            "prioritize_capture_over_reprocess")
 
     # Load name of the capture resume flag file
     if parser.has_option(section, "capture_resume_flag_file"):
@@ -991,7 +1045,29 @@ def parseUpload(config, parser):
     # SSH port
     if parser.has_option(section, "upload_mode"):
         config.upload_mode = parser.getint(section, "upload_mode")
-        
+
+    # Event monitor enabled
+    if parser.has_option(section, "event_monitor_enabled"):
+        config.event_monitor_enabled = parser.getboolean(section, "event_monitor_enabled")
+
+
+    # Name to use for eventmonitor database
+    if parser.has_option(section, "event_monitor_db_name"):
+        config.event_monitor_webpage = parser.get(section, "event_monitor_db_name")
+
+    # Address to look for watchlist
+    if parser.has_option(section, "event_monitor_webpage"):
+        config.event_monitor_webpage = parser.get(section, "event_monitor_webpage")
+
+    # Directory on the server where the events will be uploaded to
+    if parser.has_option(section, "event_monitor_remote_dir"):
+        config.event_monitor_remote_dir = parser.get(section, "event_monitor_remote_dir")
+
+    if parser.has_option(section, "event_monitor_check_interval"):
+        config.event_monitor_check_interval = parser.getint(section, "event_monitor_check_interval")
+
+    if parser.has_option(section, "event_monitor_check_interval_fast"):
+        config.event_monitor_check_interval_fast = parser.getint(section, "event_monitor_check_interval_fast")
 
 
 def parseBuildArgs(config, parser):
@@ -1382,6 +1458,16 @@ def parseCalibration(config, parser):
 
     if parser.has_option(section, "min_matched_stars"):
         config.min_matched_stars = parser.getint(section, "min_matched_stars")
+
+    if parser.has_option(section, "mask_download_permissive"):
+        config.mask_download_permissive = parser.getboolean(section, "mask_download_permissive")
+
+    if parser.has_option(section, "mask_remote_name"):
+        config.mask_remote_name = parser.get(section, "mask_remote_name")
+
+    if parser.has_option(section, "remote_mask_dir"):
+        config.remote_mask_dir = parser.get(section, "remote_mask_dir")
+
 
 
 

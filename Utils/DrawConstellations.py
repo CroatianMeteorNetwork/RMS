@@ -34,7 +34,7 @@ def drawConstellations(platepar, ff_file, separation_deg=90, color_bgra=None):
     to_x, to_y = raDecToXYPP(np.array(to_ra), to_dec, fftime_jd, platepar)
     for i in range(len(to_x)):
         if ang_sep[i] < separation_deg:
-            cv2.line(img, (round(from_x[i]), round(from_y[i])), (round(to_x[i]), round(to_y[i])), color_bgr, 1)
+            cv2.line(img, (int(round(from_x[i])), int(round(from_y[i]))), (int(round(to_x[i])), int(round(to_y[i]))), color_bgr, 1)
 
     return img
 
