@@ -234,7 +234,7 @@ class BufferedCapture(Process):
         """
         device_url = self.extract_rtsp_url(self.config.deviceID)
         device_str = ("rtspsrc protocols=tcp tcp-timeout=5000000 retry=5 "
-                    f"location=\"{device_url}\" !"
+                    f"location=\"{device_url}\" ! "
                     "rtph264depay ! h264parse ! avdec_h264")
 
         conversion = f"videoconvert ! video/x-raw,format={video_format}"
