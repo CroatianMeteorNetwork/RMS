@@ -26,7 +26,7 @@ import numpy as np
 import logging
 import datetime
 import os.path
-from multiprocessing import Process, Event
+from multiprocessing import Process, Event, Value
 
 import cv2
 
@@ -76,7 +76,7 @@ class BufferedCapture(Process):
         # A frame will be considered dropped if it was late more then half a frame
         self.time_for_drop = 1.5*(1.0/config.fps)
 
-        self.dropped_frames = 0
+        self.dropped_frames = Value('i', 0)
         self.pipeline = None
         self.start_timestamp = 0
         self.frame_shape = None
@@ -140,7 +140,7 @@ class BufferedCapture(Process):
             log.info('Terminating capture...')
             self.terminate()
 
-        return self.dropped_frames
+        return self.dropped_frames.value
 
 
     def device_isOpened(self, device):
@@ -549,7 +549,7 @@ class BufferedCapture(Process):
 
                     # Calculate elapsed time since frame capture to assess sink fill level
                     frame_age_seconds = time.time() - frame_timestamp
-                    log.info(f"Frame is {frame_age_seconds:.3f} seconds old. Total dropped frames: {self.dropped_frames}")
+                    log.info(f"Frame is {frame_age_seconds:.3f} seconds old. Total dropped frames: {self.dropped_frames.value}")
 
 
                 # If the end of the video file was reached, stop the capture
@@ -572,11 +572,10 @@ class BufferedCapture(Process):
                     # Calculate the number of dropped frames
                     n_dropped = int((frame_timestamp - last_frame_timestamp)*self.config.fps)
 
-                    self.dropped_frames += n_dropped
+                    self.dropped_frames.value += n_dropped
 
                     if self.config.report_dropped_frames:
-                        log.info(f"{str(n_dropped)}/{str(self.dropped_frames)} frames dropped! Time for frame: {t_frame:.3f}, convert: {t_convert:.3f}, assignment: {t_assignment:.3f}")
-                    self.dropped_frames += n_dropped
+                        log.info(f"{str(n_dropped)}/{str(self.dropped_frames.value)} frames dropped! Time for frame: {t_frame:.3f}, convert: {t_convert:.3f}, assignment: {t_assignment:.3f}")
 
                     
 
