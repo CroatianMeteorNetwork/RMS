@@ -923,6 +923,9 @@ def parseCapture(config, parser):
     if parser.has_option(section, "force_v4l2"):
         config.force_v4l2 = parser.getboolean(section, "force_v4l2")
 
+    if parser.has_option(section, "force_cv2"):
+        config.force_cv2 = parser.getboolean(section, "force_cv2")
+        
     if parser.has_option(section, "uyvy_pixelformat"):
         config.uyvy_pixelformat = parser.getboolean(section, "uyvy_pixelformat")
 

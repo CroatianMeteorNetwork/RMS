@@ -175,7 +175,7 @@ class BufferedCapture(Process):
                 timestamp = None # assigned later
         
         else:
-            if self.config.force_v4l2:
+            if self.config.force_v4l2 or self.config.force_cv2:
                 ret, frame = device.read()
                 if ret:
                     timestamp = time.time()
@@ -308,11 +308,16 @@ class BufferedCapture(Process):
             log.info("Initializing the video device...")
             log.info("Device: " + str(self.config.deviceID))
             if self.config.force_v4l2:
+                log.info("Initialize v4l2 Device.")
                 device = cv2.VideoCapture(self.config.deviceID, cv2.CAP_V4L2)
                 device.set(cv2.CAP_PROP_CONVERT_RGB, 0)
+
+            elif self.config.force_cv2 and not self.config.force_v4l2:
+                log.info("Initialize OpenCV Device.")
+                device = cv2.VideoCapture(self.config.deviceID)
+
             else:
-                log.info("Initialize GStreamer Device: ")
-                #device = cv2.VideoCapture(self.config.deviceID)
+                log.info("Initialize GStreamer Device.")
                 # Initialize GStreamer
                 Gst.init(None)
 
