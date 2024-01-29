@@ -361,11 +361,11 @@ class BufferedCapture(Process):
                             # If frame is grayscale, stop and restart the pipeline in GRAY8 format
                             if self.is_grayscale(frame):
                                 self.convert_to_gray = True
-                            log.info(f"Video format: {video_format}, color: {not self.convert_to_gray}")
+                            log.info(f"Video format: {video_format}, {height}P, color: {not self.convert_to_gray}")
                         
                         elif video_format == 'GRAY8':
                             self.frame_shape = (height, width)  # Grayscale
-                            log.info(f"Video format: {video_format}")
+                            log.info(f"Video format: {video_format}, {height}P")
                             
                         else:
                             log.error(f"Unsupported video format: {video_format}.")
