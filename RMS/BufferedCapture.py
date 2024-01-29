@@ -80,7 +80,7 @@ class BufferedCapture(Process):
         self.pipeline = None
         self.start_timestamp = 0
         self.frame_shape = None
-        self.is_gray = False
+        self.convert_to_gray = False
         
         # TIMESTAMP LATENCY
         #
@@ -188,8 +188,11 @@ class BufferedCapture(Process):
 
                     ret, map_info = buffer.map(Gst.MapFlags.READ)
                     if ret:
-                        if not self.is_gray:
+                        # If all channels contains colors, or there is only one channel, keep channel(s) 
+                        if not self.convert_to_gray:
                             frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
+
+                        # If channels contains no colors, discard two channels
                         else:
                             bgr_frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
                             
@@ -357,10 +360,12 @@ class BufferedCapture(Process):
 
                             # If frame is grayscale, stop and restart the pipeline in GRAY8 format
                             if self.is_grayscale(frame):
-                                self.is_gray = True
+                                self.convert_to_gray = True
+                            log.info(f"Video format: {video_format}, color: {not self.convert_to_gray}")
                         
                         elif video_format == 'GRAY8':
                             self.frame_shape = (height, width)  # Grayscale
+                            log.info(f"Video format: {video_format}")
                             
                         else:
                             log.error(f"Unsupported video format: {video_format}.")
