@@ -395,14 +395,12 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
     log.info('Plotting timestamp intervals...')
 
-    # Plot timestamp interval
+    # Plot timestamp intervals
     try:
-        analyze_timestamps(night_data_dir)
-
-        timelapse_path = os.path.join(night_data_dir, timelapse_file_name)
-
+        score, intervals_path =  analyze_timestamps(night_data_dir)
+        log.info(f'Timestamp Intervals Score: {score}')
         # Add the timelapse to the extra files
-        extra_files.append(timelapse_path)
+        extra_files.append(intervals_path)
 
     except Exception as e:
         log.debug('Plotting timestamp interval failed with message:\n' + repr(e))
