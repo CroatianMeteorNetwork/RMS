@@ -42,7 +42,10 @@ def analyze_timestamps(folder_path, fps=25):
     differences = [(timestamps[i+1] - timestamps[i]).total_seconds() for i in range(len(timestamps) - 1)]
     df = pd.DataFrame({'Timestamp': timestamps[:-1], 'Difference': differences})
 
-    score = calculate_score(differences)
+    if len(differences) > 10:
+        score = calculate_score(differences)
+    else:
+        score = None
 
     # Calculate mean and standard deviation
     mean_diff = df['Difference'].mean()
