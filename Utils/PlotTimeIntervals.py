@@ -64,7 +64,9 @@ def analyze_timestamps(folder_path, fps=25):
     average_difference = df[~df['Outlier']]['Difference'].mean()
 
     # Calculate average fps
-    average_fps = 256 / average_difference
+    block_size = 256
+    average_fps = block_size / average_difference
+    expected_interval = block_size / fps
 
     # Plotting
     plt.figure(figsize=(12, 6))
@@ -77,7 +79,7 @@ def analyze_timestamps(folder_path, fps=25):
     plt.scatter(outlier_points['Timestamp'], outlier_points['Difference'], label='Outliers', c='red', s=10, alpha=0.5)
 
     # Expected and Average lines
-    plt.axhline(y=1/fps, color='green', linestyle='-', label='Expected Interval from .config fps')
+    plt.axhline(y=expected_interval, color='green', linestyle='-', label=f'Expected Interval from .config fpsv({(expected_interval:.4f}s)')
     plt.axhline(y=average_difference, color='blue', linestyle='--', label=f'Average Interval ({average_difference:.4f}s), Average ({average_fps:.1f} fps)')
 
     # Find the minimum difference and round down to nearest 0.1
