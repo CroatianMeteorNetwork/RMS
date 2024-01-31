@@ -1,3 +1,4 @@
+""" Plot the intervals between timestamps from FF file and scores the variability. """
 import os
 import pandas as pd
 import numpy as np
@@ -22,7 +23,7 @@ def calculate_score(differences, alpha=1.5):
     return int(round(score))
 
 
-def analyze_timestamps(folder_path):
+def analyze_timestamps(folder_path, fps=25):
     timestamps = []
 
     # Extract the subdir_name from folder_path
@@ -73,7 +74,7 @@ def analyze_timestamps(folder_path):
     plt.scatter(outlier_points['Timestamp'], outlier_points['Difference'], label='Outliers', c='red', s=10, alpha=0.5)
 
     # Expected and Average lines
-    # plt.axhline(y=1/fps, color='green', linestyle='-', label='Expected Interval (5.12s)')
+    plt.axhline(y=1/fps, color='green', linestyle='-', label='Expected Interval from .config fps')
     plt.axhline(y=average_difference, color='blue', linestyle='--', label=f'Average Interval ({average_difference:.4f}s), Average ({average_fps:.1f} fps)')
 
     # Find the minimum difference and round down to nearest 0.1

@@ -397,7 +397,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
     # Plot timestamp intervals
     try:
-        score, intervals_path =  analyze_timestamps(night_data_dir)
+        score, intervals_path =  analyze_timestamps(night_data_dir, fps=config.fps)
         log.info(f'Timestamp Intervals Score: {score}')
         # Add the timelapse to the extra files
         extra_files.append(intervals_path)
