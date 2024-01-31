@@ -1,5 +1,6 @@
 """ Plot the intervals between timestamps from FF file and scores the variability. """
 import os
+import tarfile
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -24,19 +25,35 @@ def calculate_score(differences, alpha=1.5):
 
 
 def analyze_timestamps(folder_path, fps=25):
-    timestamps = []
 
     # Extract the subdir_name from folder_path
     subdir_name = os.path.basename(folder_path.rstrip('/\\'))
 
+    # Find the FS*.tar.bz2 file in the specified directory
+    tar_file_path = None
     for file in os.listdir(folder_path):
-        if file.endswith('.fits'):
-            try:
-                timestamp_str = file.split('_')[2] + file.split('_')[3] + file.split('_')[4].split('.')[0]
-                timestamp = datetime.strptime(timestamp_str, '%Y%m%d%H%M%S%f')
-                timestamps.append(timestamp)
-            except ValueError:
-                print(f"Skipping file with incorrect format: {file}")
+        if file.endswith('.tar.bz2') and file.startswith('FS'):
+            tar_file_path = os.path.join(folder_path, file)
+            break
+
+    if not tar_file_path:
+        print("Tar file not found.")
+    else:
+        # Open the tar file
+        with tarfile.open(tar_file_path, 'r:bz2') as tar:
+            timestamps = []
+            # Iterate through its members
+            for member in tar.getmembers():
+                # Check if the current member is a .bin file
+                if member.isfile() and member.name.endswith('.bin'):
+                    try:
+                        # Extract timestamp from the file name
+                        file_name_parts = member.name.split('_')
+                        timestamp_str = file_name_parts[2] + file_name_parts[3] + file_name_parts[4].split('.')[0]
+                        timestamp = datetime.strptime(timestamp_str, '%Y%m%d%H%M%S%f')
+                        timestamps.append(timestamp)
+                    except ValueError:
+                        print(f"Skipping file with incorrect format: {member.name}")
 
     timestamps.sort()
     differences = [(timestamps[i+1] - timestamps[i]).total_seconds() for i in range(len(timestamps) - 1)]
