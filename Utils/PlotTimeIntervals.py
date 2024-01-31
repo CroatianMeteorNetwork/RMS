@@ -1,4 +1,16 @@
-""" Plot the intervals between timestamps from FF file and scores the variability. """
+""" Plot the intervals between timestamps from FF file and scores the variability.
+Usage:
+  python -m Utils.PlotTimeIntervals "$input_path" "$fps"
+
+Arguments:
+  <folder_path>  The path to the folder containing the files to analyze.
+  [fps]          Frames per second. Optional argument. Default is 25.
+
+This script analyzes the timestamps in the files located in the specified folder.
+The optional fps argument allows specifying the frames per second for the analysis.
+If fps is not provided, the default value of 25 is used.
+
+ """
 import os
 import tarfile
 import pandas as pd
@@ -163,12 +175,14 @@ def analyze_timestamps(folder_path, fps=25):
 
 
 def main():
-    if len(sys.argv) != 2:
-        print("Usage: python script.py <folder_path>")
+    if len(sys.argv) not in [2, 3]:
+        print("Usage: python script.py <folder_path> [fps]")
         sys.exit(1)
 
     folder_path = sys.argv[1]
-    analyze_timestamps(folder_path)
+    fps = int(sys.argv[2]) if len(sys.argv) == 3 else 25
+
+    analyze_timestamps(folder_path, fps)
 
 if __name__ == "__main__":
     main()
