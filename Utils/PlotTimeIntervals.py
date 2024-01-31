@@ -56,8 +56,11 @@ def analyze_timestamps(folder_path, fps=25):
                         print(f"Skipping file with incorrect format: {member.name}")
 
     timestamps.sort()
-    differences = [(timestamps[i+1] - timestamps[i]).total_seconds() for i in range(len(timestamps) - 1)]
-    df = pd.DataFrame({'Timestamp': timestamps[:-1], 'Difference': differences})
+    # Calculate differences, starting from the second timestamp as the first is unreliable
+    differences = [(timestamps[i+1] - timestamps[i]).total_seconds() for i in range(1, len(timestamps) - 1)]
+    
+    # Create a DataFrame, starting from the second timestamp for the 'Timestamp' column
+    df = pd.DataFrame({'Timestamp': timestamps[1:-1], 'Difference': differences})
 
     if len(differences) > 10:
         score = calculate_score(differences)
