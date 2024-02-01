@@ -173,6 +173,14 @@ def analyze_timestamps(folder_path, fps=25):
     return score, plot_filename
 
 
+def process_directory(directory, fps):
+    # Process each .tar.bz2 file in the directory
+    for file in os.listdir(directory):
+        if file.endswith('.tar.bz2') and file.startswith('FS'):
+            tar_file_path = os.path.join(directory, file)
+            print(f"Processing {tar_file_path}")
+            analyze_timestamps(directory, fps)
+
 
 def main():
     if len(sys.argv) not in [2, 3]:
@@ -182,7 +190,8 @@ def main():
     folder_path = sys.argv[1]
     fps = int(sys.argv[2]) if len(sys.argv) == 3 else 25
 
-    analyze_timestamps(folder_path, fps)
+    for root, dirs, files in os.walk(folder_path):
+        process_directory(root, fps)
 
 if __name__ == "__main__":
     main()
