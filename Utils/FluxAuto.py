@@ -456,7 +456,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
     metadata_dir=None, output_dir=None, csv_dir=None, index_dir=None, generate_website=False, 
     website_plot_url=None, shower_code=None, shower_suffix_filename=None, custom_binning_dict=None,
     cpu_cores=1, excluded_stations_file="excluded_stations.txt",
-    skip_allyear=False):
+    skip_allyear=False, publication_quality=False):
     """ Given the reference time, automatically identify active showers and produce the flux graphs and
         CSV files.
 
@@ -487,6 +487,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
         excluded_stations_file: [str] File with excluded stations and periods. It should be in the metadata
             directory.
         skip_allyear: [bool] Skip computing the flux with all years.
+        publication_quality: [bool] Produce plots in publication quality. False by default.
     """
 
 
@@ -850,7 +851,8 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
                 compute_single=False,
                 show_plot=False,
                 xlim_shower_limits=True,
-                sol_marker=sol_ref
+                sol_marker=sol_ref,
+                publication_quality=publication_quality
             )
 
             # Save the batch flux plot (full metadata)
@@ -862,7 +864,8 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
                 compute_single=False,
                 show_plot=False,
                 xlim_shower_limits=True,
-                sol_marker=None
+                sol_marker=None,
+                publication_quality=publication_quality
             )
 
             # Save the results to a CSV file
@@ -969,6 +972,9 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('--skipallyear', action="store_true", \
         help="""Skip computing multi-year fluxes. Only compute fluxes for the given year.""")
+    
+    arg_parser.add_argument('--publication', action="store_true", \
+        help="""Produce plots in publication quality.""")
 
 
     # Parse the command line arguments
@@ -1018,7 +1024,9 @@ if __name__ == "__main__":
             website_plot_url=cml_args.weburl, shower_code=cml_args.shower, \
             shower_suffix_filename=cml_args.suffix, custom_binning_dict=custom_binning_dict,
             cpu_cores=cml_args.cpucores,
-            skip_allyear=cml_args.skipallyear)
+            skip_allyear=cml_args.skipallyear,
+            publication_quality=cml_args.publication
+            )
 
 
         ### <// DETERMINE NEXT RUN TIME ###
