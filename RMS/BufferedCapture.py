@@ -249,18 +249,20 @@ class BufferedCapture(Process):
         """
         device_url = self.extract_rtsp_url(self.config.deviceID)
         device_str = ("rtspsrc protocols=tcp tcp-timeout=5000000 retry=5 "
-                    f"location=\"{device_url}\" ! "
-                    "rtph264depay ! h264parse ! avdec_h264")
+                    "location=\"{}\" ! "
+                    "rtph264depay ! h264parse ! avdec_h264").format(device_url)
 
-        conversion = f"videoconvert ! video/x-raw,format={video_format}"
-        pipeline_str = (f"{device_str} ! {conversion} ! "
-                        "appsink max-buffers=25 drop=true sync=1 name=appsink")
+        conversion = "videoconvert ! video/x-raw,format={}".format(video_format)
+        pipeline_str = ("{} ! {} ! "
+                        "appsink max-buffers=25 drop=true sync=1 name=appsink").format(device_str, conversion)
+
         
         self.pipeline = Gst.parse_launch(pipeline_str)
 
         self.pipeline.set_state(Gst.State.PLAYING)
         self.start_timestamp = time.time() - self.total_latency
-        log.info(f"Start time is {datetime.datetime.fromtimestamp(self.start_timestamp).strftime('%Y-%m-%d %H:%M:%S.%f')}")
+        start_time_str = datetime.datetime.fromtimestamp(self.start_timestamp).strftime('%Y-%m-%d %H:%M:%S.%f')
+        log.info("Start time is {}".format(start_time_str))
 
         return self.pipeline.get_by_name("appsink")
 
@@ -361,14 +363,14 @@ class BufferedCapture(Process):
                             # If frame is grayscale, stop and restart the pipeline in GRAY8 format
                             if self.is_grayscale(frame):
                                 self.convert_to_gray = True
-                            log.info(f"Video format: {video_format}, {height}P, color: {not self.convert_to_gray}")
+                            log.info("Video format: {}, {}P, color: {}".format(video_format, height, not self.convert_to_gray))
                         
                         elif video_format == 'GRAY8':
                             self.frame_shape = (height, width)  # Grayscale
-                            log.info(f"Video format: {video_format}, {height}P")
+                            log.info("Video format: {}, {}P".format(video_format, height))
                             
                         else:
-                            log.error(f"Unsupported video format: {video_format}.")
+                            log.error("Unsupported video format: {}.".format(video_format))
                     else:
                         log.error("Could not determine frame shape.")
                 else:
@@ -585,7 +587,9 @@ class BufferedCapture(Process):
                     self.dropped_frames.value += n_dropped
 
                     if self.config.report_dropped_frames:
-                        log.info(f"{str(n_dropped)}/{str(self.dropped_frames.value)} frames dropped or late! Time for frame: {t_frame:.3f}, convert: {t_convert:.3f}, assignment: {t_assignment:.3f}")
+                        log.info("{}/{} frames dropped or late! Time for frame: {:.3f}, convert: {:.3f}, assignment: {:.3f}".format(
+                            str(n_dropped), str(self.dropped_frames.value), t_frame, t_convert, t_assignment))
+
 
                 # If cv2:
                 if self.config.force_v4l2 or self.config.force_cv2:
@@ -605,11 +609,11 @@ class BufferedCapture(Process):
                 if i == block_frames - 1:
                     # For cv2, show elapsed time since frame read to assess loop performance
                     if self.config.force_v4l2 or self.config.force_cv2:
-                        log.info(f"Cycle max frame interval: {max_frame_interval_normalized:.3f} (normalized). Run late frames: {self.dropped_frames.value}")
+                        log.info("Cycle max frame interval: {:.3f} (normalized). Run late frames: {}".format(max_frame_interval_normalized, self.dropped_frames.value))
                     
                     # For GStreamer, show elapsed time since frame capture to assess sink fill level
                     else:
-                        log.info(f"Cycle max frame age: {max_frame_age_seconds:.3f} seconds. Run dropped frames: {self.dropped_frames.value}")
+                        log.info("Cycle max frame age: {:.3f} seconds. Run dropped frames: {}".format(max_frame_age_seconds, self.dropped_frames.value))
 
                 last_frame_timestamp = frame_timestamp
                 
