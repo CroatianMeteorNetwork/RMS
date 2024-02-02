@@ -50,6 +50,7 @@ from RMS.Reprocess import getPlatepar, processNight
 from RMS.RunExternalScript import runExternalScript
 from RMS.UploadManager import UploadManager
 from RMS.EventMonitor import EventMonitor
+from RMS.DownloadMask import downloadNewMask
 
 # Flag indicating that capturing should be stopped
 STOP_CAPTURE = False
@@ -245,6 +246,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         except:
             log.error("Cannot copy the config file to the capture directory!")
 
+    # Check for and get an updated mask
+    if config.mask_download_permissive:
+        downloadNewMask(config)
 
     # Get the platepar file
     platepar, platepar_path, platepar_fmt = getPlatepar(config, night_data_dir)
@@ -384,10 +388,10 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
     # Stop the capture
     log.debug('Stopping capture...')
+    dropped_frames = bc.dropped_frames
     bc.stopCapture()
     log.debug('Capture stopped')
 
-    dropped_frames = bc.dropped_frames
     log.info('Total number of late or dropped frames: ' + str(dropped_frames))
 
 
@@ -793,6 +797,9 @@ if __name__ == "__main__":
     mkdirP(os.path.join(root_dir, config.captured_dir))
     mkdirP(os.path.join(root_dir, config.archived_dir))
 
+    # Check for and get an updated mask
+    if config.mask_download_permissive:
+        downloadNewMask(config)
 
     # If the duration of capture was given, capture right away for a specified time
     if cml_args.duration:

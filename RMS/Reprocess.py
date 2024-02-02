@@ -43,7 +43,7 @@ log = logging.getLogger("logger")
 
 
 def getPlatepar(config, night_data_dir):
-    """ Downloads a new platepar from the server of uses an existing one.   
+    """ Downloads a new platepar from the server or uses an existing one.
     
     Arguments:  
         Config: [Config instance]  

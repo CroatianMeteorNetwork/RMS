@@ -502,6 +502,12 @@ class Config:
         self.platepar_remote_name = 'platepar_latest.cal'
         self.remote_platepar_dir = 'platepars'
 
+        # Download remote mask
+        self.mask_download_permissive = True
+        self.mask_remote_name = 'mask_latest.bmp'
+        self.remote_mask_dir = 'masks'
+
+
         self.catalog_mag_limit = 5.5
 
         self.calstars_files_N = 400 # How many calstars FF files to evaluate
@@ -1452,6 +1458,16 @@ def parseCalibration(config, parser):
 
     if parser.has_option(section, "min_matched_stars"):
         config.min_matched_stars = parser.getint(section, "min_matched_stars")
+
+    if parser.has_option(section, "mask_download_permissive"):
+        config.mask_download_permissive = parser.getboolean(section, "mask_download_permissive")
+
+    if parser.has_option(section, "mask_remote_name"):
+        config.mask_remote_name = parser.get(section, "mask_remote_name")
+
+    if parser.has_option(section, "remote_mask_dir"):
+        config.remote_mask_dir = parser.get(section, "remote_mask_dir")
+
 
 
 
