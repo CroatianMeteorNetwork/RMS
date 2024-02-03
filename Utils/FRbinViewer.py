@@ -32,6 +32,7 @@ from RMS.Formats import FFfile, FRbin
 import datetime
 from glob import glob
 from Utils.ShowerAssociation import showerAssociation
+from RMS.Formats.FTPdetectinfo import validDefaultFTPdetectinfo
 
 
 def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=None, hide=False,
@@ -180,12 +181,8 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
 
                 # Put the name of the FR file, followed by the frame number
                 # Put a black shadow
-                cv2.putText(img, fr_path + " frame = {:3d}".format(t), (10, 20), 
-                            fontFace=cv2.FONT_HERSHEY_SIMPLEX , fontScale=0.5, color=[0, 0, 0], 
-                            lineType=cv2.LINE_AA, thickness=2)
-                cv2.putText(img, fr_path + " frame = {:3d}".format(t), (10, 20), 
-                            fontFace=cv2.FONT_HERSHEY_SIMPLEX , fontScale=0.5, color=[255, 255, 255], 
-                            lineType=cv2.LINE_AA, thickness=1)
+                title = fr_path + " frame = {:3d}".format(t)
+                addTextToImage(img, title, 10, 20)
 
             # Add timestamp
             if add_timestamp:
@@ -296,49 +293,53 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
         cv2.destroyWindow(name)
 
 
-def saveFramesForMeteorImage(meteorImage, imagePath, frPath, addTimestamp, lastFrameNumber, frameCount, videoNumber, format,
+def saveFramesForMeteorImage(meteorImage, imagePath, frPath, addTimestamp, lastFrameNumber, frameCount, videoNumber,
+                             format,
                              frameFiles, folder, addShowerName, associations):
-        # Add timestamp
-        if addTimestamp:
-            addTimestampToImage(meteorImage, imagePath)
-            # Add meteor shower name
-        if addShowerName:
-            addShowerNameToImage(meteorImage, imagePath, associations)
-        # append frames for 1 second
-        for frameNumber in range(frameCount):
-            frameFileName = frPath.replace('.bin', '') \
-                              + "_line_{:02d}_frame_{:03d}.{:s}".format(videoNumber,lastFrameNumber + frameNumber + 1, format)
-            cv2.imwrite(os.path.join(folder, frameFileName), meteorImage)
-            frameFiles.append(frameFileName)
+    # Add timestamp
+    if addTimestamp:
+        addTimestampToImage(meteorImage, imagePath)
+        # Add meteor shower name
+    if addShowerName:
+        addShowerNameToImage(meteorImage, imagePath, associations)
+    # append frames for 1.5 second
+    for frameNumber in range(frameCount):
+        frameFileName = frPath.replace('.bin', '') \
+                        + "_line_{:02d}_frame_{:03d}.{:s}".format(videoNumber, lastFrameNumber + frameNumber + 1,
+                                                                  format)
+        cv2.imwrite(os.path.join(folder, frameFileName), meteorImage)
+        frameFiles.append(frameFileName)
 
 
 def addTimestampToImage(image, filePath):
-    height = image.shape[0]
     title = getTimestampTitle(filePath)
-    cv2.putText(image, title, (15, height - 20),
-                fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=[0, 0, 0],
-                lineType=cv2.LINE_AA, thickness=2)
-    cv2.putText(image, title, (15, height - 20),
-                fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=[255, 255, 255],
-                lineType=cv2.LINE_AA, thickness=1)
+    height = image.shape[0]
+    addTextToImage(image, title, 15, height - 20)
+
 
 def addShowerNameToImage(image, filePath, associations):
-    height = image.shape[0]
     fileName = os.path.basename(filePath)
-    try:
+    if (fileName, 1.0) in associations:
         shower = associations[(fileName, 1.0)][1]
         if shower is not None:
             title = "Meteor shower : [{:s}] - {:s}".format(shower.name, shower.name_full)
         else:
             title = "Meteor shower : Sporadic"
-    except:
-       title = "Meteor shower : Unknown"
-    cv2.putText(image, title, (320, height - 20),
+    else:
+        title = "Meteor shower : Unknown"
+    height = image.shape[0]
+    addTextToImage(image, title, 320, height - 20)
+
+
+def addTextToImage(image, title, x, y):
+    cv2.putText(image, title, (x, y),
                 fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=[0, 0, 0],
                 lineType=cv2.LINE_AA, thickness=2)
-    cv2.putText(image, title, (320, height - 20),
+    cv2.putText(image, title, (x, y),
                 fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=[255, 255, 255],
                 lineType=cv2.LINE_AA, thickness=1)
+
+
 
 # Resize image to fit window to screen (for images larger than 1280x720)
 # By default resize to HD (with=1280 same as for regular camera resolution)
@@ -361,21 +362,21 @@ def getTimestampTitle(fr_path):
     return splits[1] + ' ' + imgdt.strftime('%Y-%m-%d %H:%M:%S UTC')
 
 
-def loadShowerAssociations():
+def loadShowerAssociations(folder, configuration):
     associations = {}
     # Get FTP file so we can filter by shower
-    ftp_list = glob(os.path.join(dir_path, 'FTPdetectinfo_{}*.txt'.format(config.stationID)))
-    ftp_list = [x for x in ftp_list if 'backup' not in x and 'unfiltered' not in x]
-    ftp_list.sort()
+    ftp_list = glob(os.path.join(folder, 'FTPdetectinfo_{}*.txt'.format(configuration.stationID)))
+    ftp_list = [x for x in ftp_list if validDefaultFTPdetectinfo(os.path.basename(x))]
 
     if len(ftp_list) < 1:
-        print('Unable to find FTPdetect file in {}'.format(dir_path))
-        exit(1)
+        print('Unable to find FTPdetect file in {}'.format(folder))
+        # return empty list to finish mp4 generation if FTPdetect file not found
+        return associations
     ftp_file = ftp_list[0]
 
     print('Performing shower association using {}'.format(ftp_file))
 
-    associations_per_dir, _ = showerAssociation(config, [ftp_file],
+    associations_per_dir, _ = showerAssociation(configuration, [ftp_file],
                                                 shower_code=None, show_plot=False, save_plot=False, plot_activity=False)
     associations.update(associations_per_dir)
 
@@ -427,8 +428,7 @@ if __name__ == "__main__":
     cml_args = arg_parser.parse_args()
 
     #########################
-
-    dir_path = cml_args.dir_path[0]
+    dir_path = os.path.abspath(cml_args.dir_path[0])
 
     # Load the configuration file
     config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
@@ -451,7 +451,11 @@ if __name__ == "__main__":
     add_shower_name=cml_args.add_shower_name
     associations = {}
     if add_shower_name:
-        associations = loadShowerAssociations()
+        associations = loadShowerAssociations(dir_path, config)
+        # if no meteor information - skip adding name
+        if not associations:
+            print("Shower Associations not loaded, skipping add shower name")
+            add_shower_name = False
 
     i = 0
 
