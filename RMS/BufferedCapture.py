@@ -29,15 +29,17 @@ import os.path
 from multiprocessing import Process, Event, Value
 
 import cv2
-
-import gi
-gi.require_version('Gst', '1.0')
-from gi.repository import Gst
-
 from RMS.Misc import ping
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
+
+try:
+    import gi
+    gi.require_version('Gst', '1.0')
+    from gi.repository import Gst
+except ImportError as e:
+    log.info('Could not import gi: {}. Using OpenCV.'.format(e))
 
 
 class BufferedCapture(Process):
@@ -157,7 +159,7 @@ class BufferedCapture(Process):
                 else:
                     return False
         except Exception as e:
-            log.error(f'Error checking device status: {e}')
+            log.error('Error checking device status: {}'.format(e))
             return False
 
 
@@ -332,50 +334,53 @@ class BufferedCapture(Process):
                 device = cv2.VideoCapture(self.config.deviceID)
 
             else:
-                log.info("Initialize GStreamer Device.")
-                # Initialize GStreamer
-                Gst.init(None)
+                try:
+                    log.info("Initialize GStreamer Device.")
+                    # Initialize GStreamer
+                    Gst.init(None)
 
-                # Create and start a GStreamer pipeline
-                device = self.create_gstream_device('BGR')
+                    # Create and start a GStreamer pipeline
+                    device = self.create_gstream_device('BGR')
 
-                # Determine the shape of the GStream
-                sample = device.emit("pull-sample")
-                buffer = sample.get_buffer()
-                ret, _ = buffer.map(Gst.MapFlags.READ)
-                if ret:
-                    # Get caps and extract video information
-                    caps = sample.get_caps()
-                    structure = caps.get_structure(0) if caps else None
+                    # Determine the shape of the GStream
+                    sample = device.emit("pull-sample")
+                    buffer = sample.get_buffer()
+                    ret, _ = buffer.map(Gst.MapFlags.READ)
+                    if ret:
+                        # Get caps and extract video information
+                        caps = sample.get_caps()
+                        structure = caps.get_structure(0) if caps else None
 
-                    if structure:
+                        if structure:
 
-                        # Extract width, height, and format
-                        width = structure.get_value('width')
-                        height = structure.get_value('height')
-                        video_format = structure.get_value('format')
+                            # Extract width, height, and format
+                            width = structure.get_value('width')
+                            height = structure.get_value('height')
+                            video_format = structure.get_value('format')
 
-                        # Determine the shape based on format
-                        if video_format in ['RGB', 'BGR']:
-                            self.frame_shape = (height, width, 3)  # RGB or BGR
-                            ret, frame, _ = self.read(device)
+                            # Determine the shape based on format
+                            if video_format in ['RGB', 'BGR']:
+                                self.frame_shape = (height, width, 3)  # RGB or BGR
+                                ret, frame, _ = self.read(device)
 
-                            # If frame is grayscale, stop and restart the pipeline in GRAY8 format
-                            if self.is_grayscale(frame):
-                                self.convert_to_gray = True
-                            log.info("Video format: {}, {}P, color: {}".format(video_format, height, not self.convert_to_gray))
-                        
-                        elif video_format == 'GRAY8':
-                            self.frame_shape = (height, width)  # Grayscale
-                            log.info("Video format: {}, {}P".format(video_format, height))
+                                # If frame is grayscale, stop and restart the pipeline in GRAY8 format
+                                if self.is_grayscale(frame):
+                                    self.convert_to_gray = True
+                                log.info("Video format: {}, {}P, color: {}".format(video_format, height, not self.convert_to_gray))
                             
+                            elif video_format == 'GRAY8':
+                                self.frame_shape = (height, width)  # Grayscale
+                                log.info("Video format: {}, {}P".format(video_format, height))
+                                
+                            else:
+                                log.error("Unsupported video format: {}.".format(video_format))
                         else:
-                            log.error("Unsupported video format: {}.".format(video_format))
+                            log.error("Could not determine frame shape.")
                     else:
-                        log.error("Could not determine frame shape.")
-                else:
-                    log.error("Could not obtain frame.")
-
+                        log.error("Could not obtain frame.")
+                except:
+                    log.info("Could not initialize GStream. Initialize OpenCV Device instead.")
+                    device = cv2.VideoCapture(self.config.deviceID)
         return device
 
 
@@ -710,7 +715,7 @@ class BufferedCapture(Process):
                 self.pipeline.set_state(Gst.State.NULL)
                 log.info('GStreamer Video device released!')
             except Exception as e:
-                log.error(f'Error releasing GStreamer pipeline: {e}')
+                log.error('Error releasing GStreamer pipeline: {}'.format(e))
 
         # Check if using OpenCV and release resources
         if 'device' in locals() and device:
@@ -719,4 +724,4 @@ class BufferedCapture(Process):
                     device.release()
                     log.info('OpenCV Video device released!')
             except Exception as e:
-                log.error(f'Error releasing OpenCV device: {e}')    
+                log.error('Error releasing OpenCV device: {}'.format(e))    
