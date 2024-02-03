@@ -1,9 +1,9 @@
 """ Plot the intervals between timestamps from FF file and scores the variability.
 Usage:
-  python -m Utils.PlotTimeIntervals "$input_path" "$fps"
+  python -m Utils.PlotTimeIntervals /path/to/directory --fps 25
 
 Arguments:
-  <folder_path>  The path to the folder containing the files to analyze.
+  <dir_path>  The path to the folder containing the files to analyze.
   [fps]          Frames per second. Optional argument. Default is 25.
 
 This script analyzes the timestamps in the files located in the specified folder.
@@ -12,15 +12,14 @@ If fps is not provided, the default value of 25 is used.
 
  """
 import os
+import argparse
 import tarfile
-import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import math
 from datetime import datetime
-from RMS.ConfigReader import Config
-import sys
+import RMS.ConfigReader as cr
 
 
 def calculate_score(differences, alpha=1.5):
@@ -36,16 +35,16 @@ def calculate_score(differences, alpha=1.5):
     return int(round(score))
 
 
-def analyze_timestamps(folder_path, fps=25):
+def analyze_timestamps(dir_path, fps=25.0):
 
-    # Extract the subdir_name from folder_path
-    subdir_name = os.path.basename(folder_path.rstrip('/\\'))
+    # Extract the subdir_name from dir_path
+    subdir_name = os.path.basename(dir_path.rstrip('/\\'))
 
     # Find the FS*.tar.bz2 file in the specified directory
     tar_file_path = None
-    for file in os.listdir(folder_path):
+    for file in os.listdir(dir_path):
         if file.endswith('.tar.bz2') and file.startswith('FS'):
-            tar_file_path = os.path.join(folder_path, file)
+            tar_file_path = os.path.join(dir_path, file)
             break
 
     if not tar_file_path:
@@ -65,35 +64,21 @@ def analyze_timestamps(folder_path, fps=25):
                         timestamp = datetime.strptime(timestamp_str, '%Y%m%d%H%M%S%f')
                         timestamps.append(timestamp)
                     except ValueError:
-                        print(f"Skipping file with incorrect format: {member.name}")
+                        print("Skipping file with incorrect format: {}".format(member.name))
+
 
     timestamps.sort()
     # Calculate differences, starting from the second timestamp as the first is unreliable
     differences = [(timestamps[i+1] - timestamps[i]).total_seconds() for i in range(1, len(timestamps) - 1)]
-    
-    # Create a DataFrame, starting from the second timestamp for the 'Timestamp' column
-    df = pd.DataFrame({'Timestamp': timestamps[1:-1], 'Difference': differences})
 
     if len(differences) > 10:
         score = calculate_score(differences)
     else:
         score = None
-
-    # Calculate mean and standard deviation
-    mean_diff = df['Difference'].mean()
-    std_diff = df['Difference'].std()
-
-    # Define outlier threshold based on standard deviation (e.g., 2 or 3 sigma)
-    sigma = 10
-    lower_bound = mean_diff - (sigma * std_diff)
-    upper_bound = mean_diff + (sigma * std_diff)
-
-    # Identify outliers
-    df['Outlier'] = (df['Difference'] < lower_bound) | (df['Difference'] > upper_bound)
-
-
-    # Calculate average excluding outliers
-    average_difference = df[~df['Outlier']]['Difference'].mean()
+    
+    min_difference = min(differences) if differences else None
+    max_difference = max(differences) if differences else None
+    average_difference = sum(differences) / len(differences) if differences else None
 
     # Calculate average fps
     block_size = 256
@@ -103,26 +88,16 @@ def analyze_timestamps(folder_path, fps=25):
     # Plotting
     plt.figure(figsize=(12, 6))
 
-    # Separate scatter plots for normal points and outliers
-    normal_points = df[~df['Outlier']]
-    outlier_points = df[df['Outlier']]
 
-    plt.scatter(normal_points['Timestamp'], normal_points['Difference'], label='Normal', c='gray', s=10, alpha=0.5)
-    plt.scatter(outlier_points['Timestamp'], outlier_points['Difference'], label='Outliers', c='red', s=10, alpha=0.5)
+    plt.scatter(timestamps[1:-1], differences, label= 'Intervals, max ({:.3f}s), min ({:.3f}s)'.format(max_difference, min_difference), c='gray', s=10, alpha=0.5)
 
     # Expected and Average lines
-    plt.axhline(y=expected_interval, color='green', linestyle='-',  label=f'Expected Interval ({expected_interval:.3f}s), ({fps:.1f} fps)')
-    plt.axhline(y=average_difference, color='blue', linestyle='--', label=f'Average Interval   ({average_difference:.3f}s), ({average_fps:.1f} fps)')
-
-    # Find the minimum difference and round down to nearest 0.1
-    min_difference = df['Difference'].min()
-
-    # Find the maximum difference and round up to nearest 0.1
-    max_difference = df['Difference'].max()
+    plt.axhline(y=expected_interval, color='green', linestyle='-', label='Expected Interval ({:.3f}s), ({:.1f} fps)'.format(expected_interval, fps))
+    plt.axhline(y=average_difference, color='blue', linestyle='--', label='Average Interval ({:.3f}s), ({:.1f} fps)'.format(average_difference, average_fps))
 
     # Setting gridlines
     # Determine grid interval dynamically
-    difference_range = df['Difference'].max() - df['Difference'].min()
+    difference_range = max_difference - min_difference
     raw_interval = difference_range / 11
 
 
@@ -135,7 +110,7 @@ def analyze_timestamps(folder_path, fps=25):
 
     elif raw_interval < 1:
         grid_interval = math.ceil(raw_interval)
-        grid_color = '#FFBF00'  # Corrected color format
+        grid_color = '#FFBF00'
         rounded_min_difference = np.floor(min_difference)
         rounded_max_difference = np.ceil(max_difference)
 
@@ -162,36 +137,43 @@ def analyze_timestamps(folder_path, fps=25):
     # Labeling
     plt.xlabel('Timestamp')
     plt.ylabel('Time Difference (seconds)')
-    plt.title(f'Frame Intervals {subdir_name} - Score: {score}')
+    plt.title('Timestamp Intervals {} - Score: {}'.format(subdir_name, score))
     plt.legend()
 
-    # Save the plot in the folder_path
-    plot_filename = os.path.join(folder_path, f'{subdir_name}_intervals_score_{score}.png')
+    # Save the plot in the dir_path
+    plot_filename = os.path.join(dir_path, '{}_intervals_score_{}.png'.format(subdir_name, score))
     plt.savefig(plot_filename, format='png', dpi=300)
-    #plt.show()
+    plt.close()
 
     return score, plot_filename
 
 
-def process_directory(directory, fps):
-    # Process each .tar.bz2 file in the directory
-    for file in os.listdir(directory):
-        if file.endswith('.tar.bz2') and file.startswith('FS'):
-            tar_file_path = os.path.join(directory, file)
-            print(f"Processing {tar_file_path}")
-            analyze_timestamps(directory, fps)
+if __name__ == '__main__':
 
+    ### COMMAND LINE ARGUMENTS
 
-def main():
-    if len(sys.argv) not in [2, 3]:
-        print("Usage: python script.py <folder_path> [fps]")
-        sys.exit(1)
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Generate interval plots on all subfoler where a FS*tar.gz2 is found.")
 
-    folder_path = sys.argv[1]
-    fps = int(sys.argv[2]) if len(sys.argv) == 3 else 25
+    arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str, \
+        help='Path to directory with FS*tar.bz2 files.')
 
-    for root, dirs, files in os.walk(folder_path):
-        process_directory(root, fps)
+    arg_parser.add_argument('--fps', metavar='FPS', type=float, default=25.0, required=False, \
+        help='Expected fps (default: 25.0).')
 
-if __name__ == "__main__":
-    main()
+     # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    #########################
+
+    for root, dirs, files in os.walk(cml_args.dir_path):
+        for file in files:
+            if file.endswith('.tar.bz2') and file.startswith('FS'):
+                try:
+                    config = cr.loadConfigFromDirectory('.config', root)
+                    fps = config.fps
+                except:
+                    fps = cml_args.fps
+                tar_file_path = os.path.join(root, file)
+                print("Processing {}".format(tar_file_path))
+                analyze_timestamps(root, fps)
