@@ -22,17 +22,12 @@ from datetime import datetime
 import RMS.ConfigReader as cr
 
 
-def calculate_score(differences, alpha=1.5):
-    """
-    Calculate a score using an exponential decay function based on the standard deviation.
-    A higher standard deviation results in a lower score.
-    The alpha parameter controls the rate of decay.
-    """
-    current_std_dev = np.std(differences)
-    
-    score = 1000 * np.exp(-alpha * current_std_dev)
-
-    return int(round(score))
+def calculate_score(differences, fps=25, block=256):
+    target_interval = block / fps
+    tolerance = 1 / fps
+    count_within_tolerance = sum(1 for diff in differences if abs(diff - target_interval) <= tolerance)
+    score_percentage = (count_within_tolerance / len(differences)) * 100 if differences else 0
+    return score_percentage
 
 
 def analyze_timestamps(dir_path, fps=25.0):
@@ -137,11 +132,16 @@ def analyze_timestamps(dir_path, fps=25.0):
     # Labeling
     plt.xlabel('Timestamp')
     plt.ylabel('Time Difference (seconds)')
-    plt.title('Timestamp Intervals {} - Score: {}'.format(subdir_name, score))
+
+    # Title and subtitle
+    plt.title('Timestamp Intervals - {}'.format(subdir_name), fontsize=14, pad=20)
+    subtitle_text = 'Percentage of intervals within ±1/fps of the target interval: {:.1f}%'.format(round(score, 1))
+    plt.figtext(0.5, 0.89, subtitle_text, ha='center', fontsize=10)
+
     plt.legend()
 
     # Save the plot in the dir_path
-    plot_filename = os.path.join(dir_path, '{}_intervals_score_{}.png'.format(subdir_name, score))
+    plot_filename = os.path.join(dir_path, '{}_intervals_score_{:.0f}.png'.format(subdir_name, round(score, 0)))
     plt.savefig(plot_filename, format='png', dpi=300)
     plt.close()
 
