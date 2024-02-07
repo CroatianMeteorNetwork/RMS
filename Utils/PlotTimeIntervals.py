@@ -1,4 +1,4 @@
-""" Plot the intervals between timestamps from FF file and scores the variability.
+""" Plot the intervals between timestamps from FF file and scores the timing performance.
 Usage:
   python -m Utils.PlotTimeIntervals /path/to/directory --fps 25
 
@@ -20,14 +20,6 @@ import matplotlib.dates as mdates
 import math
 from datetime import datetime
 import RMS.ConfigReader as cr
-
-
-def calculate_score(differences, fps=25, block=256):
-    target_interval = block / fps
-    tolerance = 1 / fps
-    count_within_tolerance = sum(1 for diff in differences if abs(diff - target_interval) <= tolerance)
-    score_percentage = (count_within_tolerance / len(differences)) * 100 if differences else 0
-    return score_percentage
 
 
 def analyze_timestamps(dir_path, fps=25.0):
@@ -63,89 +55,156 @@ def analyze_timestamps(dir_path, fps=25.0):
 
 
     timestamps.sort()
-    # Calculate differences, starting from the second timestamp as the first is unreliable
-    differences = [(timestamps[i+1] - timestamps[i]).total_seconds() for i in range(1, len(timestamps) - 1)]
 
-    if len(differences) > 10:
-        score = calculate_score(differences)
-    else:
-        score = None
-    
-    min_difference = min(differences) if differences else None
-    max_difference = max(differences) if differences else None
-    average_difference = sum(differences) / len(differences) if differences else None
-
-    # Calculate average fps
+    # set the number of frames in each FF file
     block_size = 256
-    average_fps = block_size / average_difference
+
+    # Calculate intervals, starting from the second timestamp as the first is unreliable
+    intervals = [(timestamps[i+1] - timestamps[i]).total_seconds() for i in range(1, len(timestamps) - 1)]
+    timestamps = timestamps[1:-1]
+
+    # Convert timestamps to a NumPy array for boolean indexing
+    timestamps_np = np.array(timestamps)
+    intervals_np = np.array(intervals)
+    
+    # Calculate minimum, maximum, average, median, and expected intervals
+    min_interval = min(intervals) if intervals else None
+    max_interval = max(intervals) if intervals else None
+    #mean_interval = np.mean(intervals) if intervals else None
+    median_interval = np.median(intervals_np) if intervals_np.size > 0 else None
     expected_interval = block_size / fps
 
-    # Plotting
-    plt.figure(figsize=(12, 6))
+    # Calculate average fps
+    # average_fps = block_size / mean_interval
+    median_fps = block_size / median_interval
+
+    # Set the window size for the moving average
+    window_size = 50
+
+    # Calculate moving average
+    moving_avg = np.convolve(intervals_np, np.ones(window_size), 'valid') / window_size
+
+    # Insert padding at the start to line up with timestamps
+    padding = np.full(window_size-1, expected_interval)
+    padded_moving_avg = np.concatenate([padding, moving_avg])
+
+    # Set the threshold above which to tag for possible dropped frames
+    tolerance = 1
+    threshold = (block_size + tolerance) / fps
+
+    # Create a boolean mask where the moving average exceeds the threshold
+    above_threshold = padded_moving_avg > threshold
+
+    
+
+    ### Scoring ###
+
+    # Don't compute scores if there's not enough data
+    if len(intervals) > 60:
+        # Calculate Jitter Quality
+        count_within_tolerance = sum(1 for interval in intervals if abs(interval - expected_interval) <= tolerance / fps)
+        jitter_quality = (count_within_tolerance / len(intervals)) * 100 if intervals else 0
+        # Calculate Dropped Frame Rate
+        dropped_frame_rate = (np.sum(above_threshold) / len(padded_moving_avg)) * 100
+
+    else:
+        jitter_quality = None
+        dropped_frame_rate = None
 
 
-    plt.scatter(timestamps[1:-1], differences, label= 'Intervals, max ({:.3f}s), min ({:.3f}s)'.format(max_difference, min_difference), c='gray', s=10, alpha=0.5)
 
-    # Expected and Average lines
-    plt.axhline(y=expected_interval, color='green', linestyle='-', label='Expected Interval ({:.3f}s), ({:.1f} fps)'.format(expected_interval, fps))
-    plt.axhline(y=average_difference, color='blue', linestyle='--', label='Average Interval ({:.3f}s), ({:.1f} fps)'.format(average_difference, average_fps))
+    ### Plotting ###
+    
+    # Only tag long intervals for plotting
+    above_expected_interval = intervals_np > expected_interval
+    combined_condition = above_threshold & above_expected_interval
 
-    # Setting gridlines
+    # Separate data points based on the condition for plotting
+    timestamps_below_threshold = timestamps_np[~combined_condition]
+    intervals_below_threshold = intervals_np[~combined_condition]
+    timestamps_above_threshold = timestamps_np[combined_condition]
+    intervals_above_threshold = intervals_np[combined_condition]
+
+    # Calculating the lower and upper interval values for plotting
+    lower_interval = (block_size - 1) / fps
+    upper_interval = (block_size + 1) / fps
+
+    plt.figure()
+
+    # Plot grey points (below threshold)
+    plt.scatter(timestamps_below_threshold, intervals_below_threshold, label='Intervals, max ({:.3f}s), min ({:.3f}s)'.format(max_interval, min_interval), c='gray', s=10, alpha=0.5, zorder=3)
+
+    # Plot red points (above threshold) at the highest z-order
+    plt.scatter(timestamps_above_threshold, intervals_above_threshold, label='Possible Dropped Frames', c='red', s=10, alpha=0.5, zorder=5)
+
+    # Plot Expected and Median lines
+    plt.axhline(y=expected_interval, color='lime', linestyle='-', label='Expected ({:.3f}s), ({:.2f} fps)'.format(expected_interval, fps), zorder=4)
+    # plt.axhline(y=mean_interval, color='blue', linestyle='--', label='Mean ({:.3f}s), ({:.2f} fps)'.format(mean_interval, average_fps), zorder=4)
+    plt.axhline(y=median_interval, color='green', linestyle='--', label='Median ({:.3f}s), ({:.2f} fps)'.format(median_interval, median_fps), zorder=4)
+
     # Determine grid interval dynamically
-    difference_range = max_difference - min_difference
+    difference_range = max_interval - min_interval
     raw_interval = difference_range / 11
-
 
     # Round the interval up to the nearest 0.1, 1, or 10
     if raw_interval < 0.1:
         grid_interval = math.ceil(raw_interval * 10) / 10
         grid_color = 'grey'
-        rounded_min_difference = np.floor(min_difference * 10) / 10
-        rounded_max_difference = np.ceil(max_difference * 10) / 10
+        rounded_min_interval = np.floor(min_interval * 10) / 10
+        rounded_max_difference = np.ceil(max_interval * 10) / 10
+
+        # Only draw lower and upper interval lines if the scale is fine enough
+        plt.axhline(y=lower_interval, color='lime', linestyle='--', label='-1/fps Interval ({:.3f}s)'.format(lower_interval), zorder=4)
+        plt.axhline(y=upper_interval, color='lime', linestyle='--', label='+1/fps Interval ({:.3f}s)'.format(upper_interval), zorder=4)
 
     elif raw_interval < 1:
         grid_interval = math.ceil(raw_interval)
-        grid_color = '#FFBF00'
-        rounded_min_difference = np.floor(min_difference)
-        rounded_max_difference = np.ceil(max_difference)
+        grid_color = '#C0A040'
+        rounded_min_interval = np.floor(min_interval)
+        rounded_max_difference = np.ceil(max_interval)
 
     else:
         grid_interval = math.ceil(raw_interval / 10) * 10
-        grid_color = 'red'
-        rounded_min_difference = np.floor(min_difference / 10) * 10
-        rounded_max_difference = np.ceil(max_difference / 10) * 10
+        grid_color = '#FFBF00'
+        rounded_min_interval = np.floor(min_interval / 10) * 10
+        rounded_max_difference = np.ceil(max_interval / 10) * 10
 
     # Ensure grid_interval is not too small
     minimum_allowed_interval = 0.1
     grid_interval = max(grid_interval, minimum_allowed_interval)
 
-
-    y_ticks = np.arange(rounded_min_difference, rounded_max_difference + grid_interval, grid_interval)
+    # Draw Horizontal grid lines
+    y_ticks = np.arange(rounded_min_interval, rounded_max_difference + grid_interval, grid_interval)
     plt.yticks(y_ticks)
-    plt.grid(axis='y', color=grid_color, linestyle='-', alpha=0.7)
+    plt.grid(axis='y', color=grid_color, linestyle='-', alpha=0.7, zorder=0)
 
-    # Vertical grid every hour
-    plt.gca().xaxis.set_major_locator(mdates.HourLocator())
+    # Set vertical grid to appear every two hours
+    plt.gca().xaxis.set_major_locator(mdates.HourLocator(interval=2))
     plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-    plt.grid(axis='x', linestyle='-', alpha=0.7)
+    plt.grid(axis='x', linestyle='-', alpha=0.7, zorder=0)
 
     # Labeling
-    plt.xlabel('Timestamp')
-    plt.ylabel('Time Difference (seconds)')
+    plt.xlabel('Time (UTC)')
+    plt.ylabel('Intervals (seconds)')
 
     # Title and subtitle
-    plt.title('Timestamp Intervals - {}'.format(subdir_name), fontsize=14, pad=20)
-    subtitle_text = 'Percentage of intervals within ±1/fps of the target interval: {:.1f}%'.format(round(score, 1))
-    plt.figtext(0.5, 0.89, subtitle_text, ha='center', fontsize=10)
+    plt.title('Timestamp Intervals - {}'.format(subdir_name), pad=30)
+    subtitle_text = 'Jitter Quality (intervals within +/-1 frame): {:.1f}%'.format(round(jitter_quality, 1))
+    subtitle_text_2 = 'Dropped Frame Rate (intervals >{} frames late within {} FF files): {:.1f}%'.format(tolerance, window_size, dropped_frame_rate)
 
-    plt.legend()
+    plt.figtext(0.5, 0.925, subtitle_text, ha='center', va='top', fontsize=8)
+    plt.figtext(0.5, 0.895, subtitle_text_2, ha='center', va='top', fontsize=8)
+
+    # Legend
+    plt.legend(fontsize='x-small')
+    plt.tight_layout()
 
     # Save the plot in the dir_path
-    plot_filename = os.path.join(dir_path, '{}_intervals_score_{:.0f}.png'.format(subdir_name, round(score, 0)))
-    plt.savefig(plot_filename, format='png', dpi=300)
+    plot_filename = os.path.join(dir_path, '{}_intervals_scores_{:.0f}-{:.0f}.png'.format(subdir_name, jitter_quality, dropped_frame_rate))
+    plt.savefig(plot_filename, format='png', dpi=150)
     plt.close()
 
-    return score, plot_filename
+    return jitter_quality, dropped_frame_rate, plot_filename
 
 
 if __name__ == '__main__':
