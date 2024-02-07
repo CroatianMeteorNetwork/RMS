@@ -35,7 +35,7 @@ from Utils.MakeFlat import makeFlat
 from Utils.PlotFieldsums import plotFieldsums
 from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
 from Utils.ShowerAssociation import showerAssociation
-from Utils.PlotTimeIntervals import analyze_timestamps
+from Utils.PlotTimeIntervals import plotFFTimeIntervals
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -397,8 +397,9 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
     # Plot timestamp intervals
     try:
-        jitter_quality, dropped_frame_rate, intervals_path = analyze_timestamps(night_data_dir, fps=config.fps)
-        log.info('Timestamp Intervals Analysis: Jitter Quality: {:.1f}%, Dropped Frame Rate: {:.1f}%'.format(jitter_quality, dropped_frame_rate))
+        jitter_quality, dropped_frame_rate, intervals_path = plotFFTimeIntervals(night_data_dir, fps=config.fps)
+        log.info('Timestamp Intervals Analysis: Jitter Quality: {:.1f}%, Dropped Frame Rate: {:.1f}%'.format(
+            jitter_quality, dropped_frame_rate))
         # Add the timelapse to the extra files
         extra_files.append(intervals_path)
 
