@@ -71,7 +71,9 @@ def analyze_timestamps(dir_path, fps=25.0):
     min_interval = min(intervals) if intervals else None
     max_interval = max(intervals) if intervals else None
     #mean_interval = np.mean(intervals) if intervals else None
-    median_interval = np.median(intervals_np) if intervals_np.size > 0 else None
+    median_interval = np.median(intervals_np)
+    std_intervals_seconds = np.std(intervals_np)
+    std_intervals_frames = std_intervals_seconds * fps
     expected_interval = block_size / fps
 
     # Calculate average fps
@@ -140,7 +142,7 @@ def analyze_timestamps(dir_path, fps=25.0):
     # Plot Expected and Median lines
     plt.axhline(y=expected_interval, color='lime', linestyle='-', label='Expected ({:.3f}s), ({:.2f} fps)'.format(expected_interval, fps), zorder=4)
     # plt.axhline(y=mean_interval, color='blue', linestyle='--', label='Mean ({:.3f}s), ({:.2f} fps)'.format(mean_interval, average_fps), zorder=4)
-    plt.axhline(y=median_interval, color='green', linestyle='--', label='Median ({:.3f}s), ({:.2f} fps)'.format(median_interval, median_fps), zorder=4)
+    plt.axhline(y=median_interval, color='green', linestyle='--', label='Median ({:.3f} +/- {:.3f} s), ({:.2f} +/- {:.2f} fps)'.format(median_interval, std_intervals_seconds, median_fps, std_intervals_frames), zorder=4)
 
     # Determine grid interval dynamically
     difference_range = max_interval - min_interval
