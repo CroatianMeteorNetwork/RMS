@@ -147,23 +147,26 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
     lower_interval = (ff_block_size - 1)/fps
     upper_interval = (ff_block_size + 1)/fps
 
-    plt.figure()
+    # Set up two subplots one on top of the other. The top one is 2x the size of the bottom one
+    fig, (ax_inter, ax_res) = plt.subplots(
+        nrows=2, ncols=1, figsize=(8, 6), sharex=True, gridspec_kw={'height_ratios': [2, 1]}
+        )
 
     # Plot grey points (below threshold)
-    plt.scatter(timestamps_below_threshold, intervals_below_threshold, 
+    ax_inter.scatter(timestamps_below_threshold, intervals_below_threshold, 
                 label='Intervals, max ({:.3f}s), min ({:.3f}s)'.format(max_interval, min_interval), 
                 c='gray', s=10, alpha=0.5, zorder=3)
 
     # Plot red points (above threshold) at the highest z-order
-    plt.scatter(timestamps_above_threshold, intervals_above_threshold, 
+    ax_inter.scatter(timestamps_above_threshold, intervals_above_threshold, 
                 label='Possible Dropped Frames', 
                 c='red', s=10, alpha=0.5, zorder=5)
 
     # Plot Expected and Median lines
-    plt.axhline(y=expected_interval, color='lime', linestyle='-', 
+    ax_inter.axhline(y=expected_interval, color='lime', linestyle='-', 
                 label='Expected ({:.3f}s), ({:.2f} fps)'.format(expected_interval, fps), zorder=4)
-    # plt.axhline(y=mean_interval, color='blue', linestyle='--', label='Mean ({:.3f}s), ({:.2f} fps)'.format(mean_interval, average_fps), zorder=4)
-    plt.axhline(y=median_interval, color='green', linestyle='--', 
+    # ax_inter.axhline(y=mean_interval, color='blue', linestyle='--', label='Mean ({:.3f}s), ({:.2f} fps)'.format(mean_interval, average_fps), zorder=4)
+    ax_inter.axhline(y=median_interval, color='green', linestyle='--', 
                 label='Median ({:.3f} +/- {:.3f} s), ({:.2f} +/- {:.2f} fps)'.format(
                     median_interval, std_intervals_seconds, median_fps, std_intervals_frames), zorder=4)
 
@@ -179,9 +182,9 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
         rounded_max_difference = np.ceil(max_interval*10)/10
 
         # Only draw lower and upper interval lines if the scale is fine enough
-        plt.axhline(y=lower_interval, color='lime', linestyle='--', 
+        ax_inter.axhline(y=lower_interval, color='lime', linestyle='--', 
                     label='-1/fps Interval ({:.3f}s)'.format(lower_interval), zorder=4)
-        plt.axhline(y=upper_interval, color='lime', linestyle='--', 
+        ax_inter.axhline(y=upper_interval, color='lime', linestyle='--', 
                     label='+1/fps Interval ({:.3f}s)'.format(upper_interval), zorder=4)
 
     elif raw_interval < 1:
@@ -196,37 +199,64 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
         rounded_min_interval = np.floor(min_interval/10)*10
         rounded_max_difference = np.ceil(max_interval/10)*10
 
-    # Ensure grid_interval is not too small
     minimum_allowed_interval = 0.1
     grid_interval = max(grid_interval, minimum_allowed_interval)
 
     # Draw Horizontal grid lines
     y_ticks = np.arange(rounded_min_interval, rounded_max_difference + grid_interval, grid_interval)
-    plt.yticks(y_ticks)
-    plt.grid(axis='y', color=grid_color, linestyle='-', alpha=0.7, zorder=0)
+    ax_inter.set_yticks(y_ticks)
+    ax_inter.grid(axis='y', color=grid_color, linestyle='-', alpha=0.7, zorder=0)
 
     # Set vertical grid to appear every two hours
-    plt.gca().xaxis.set_major_locator(mdates.HourLocator(interval=2))
-    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-    plt.grid(axis='x', linestyle='-', alpha=0.7, zorder=0)
+    ax_inter.xaxis.set_major_locator(mdates.HourLocator(interval=2))
+    ax_inter.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+    ax_inter.grid(axis='x', linestyle='-', alpha=0.7, zorder=0)
 
     # Labeling
-    plt.xlabel('Time (UTC)')
-    plt.ylabel('Intervals (seconds)')
+    ax_inter.set_ylabel('Intervals (seconds)')
 
     # Title and subtitle
     plot_title = subdir_name.replace("_detected", "")
-    plt.title('Timestamp Intervals - {}'.format(plot_title), pad=30)
+    fig.suptitle('Timestamp Intervals - {}'.format(plot_title))
+
     subtitle_text = 'Jitter Quality (intervals within +/-1 frame): {:.1f}%'.format(jitter_quality)
     subtitle_text_2 = 'Dropped Frame Rate (intervals >{} frames late within {} FF files): {:.1f}%'.format(
         tolerance, ma_window_size, dropped_frame_rate)
 
-    plt.figtext(0.5, 0.925, subtitle_text, ha='center', va='top', fontsize=8)
-    plt.figtext(0.5, 0.895, subtitle_text_2, ha='center', va='top', fontsize=8)
+    plt.figtext(0.5, 0.945, subtitle_text, ha='center', va='top', fontsize=8)
+    plt.figtext(0.5, 0.920, subtitle_text_2, ha='center', va='top', fontsize=8)
 
     # Legend
-    plt.legend(fontsize='x-small')
+    ax_inter.legend(fontsize='x-small')
+
+
+
+    # Plot the residuals from the expected interval
+    residuals = intervals_np - expected_interval
+    ax_res.scatter(timestamps, residuals, c='gray', s=1, zorder=3)
+
+    # Enable the grid
+    ax_res.grid(alpha=0.7, zorder=0)
+
+    # Limit the plot to +/- 2 frames in the Y axis
+    ax_res.set_ylim(-2/fps, 2/fps)
+
+    # Draw a horizontal line at 0
+    ax_res.axhline(y=0, color='lime', linestyle='-', zorder=4)
+
+    # Plot the median
+    median_residual = median_interval - expected_interval
+    ax_res.axhline(y=median_residual, color='green', linestyle='--', zorder=4)
+
+
+    ax_res.set_ylabel('Residuals (seconds)')
+    ax_res.set_xlabel('Time (UTC)')
+
+
     plt.tight_layout()
+
+    # Move the upper edge of ax_inter a bit down to make room for the text
+    plt.subplots_adjust(top=0.90, hspace=0.05)
 
     # Save the plot in the dir_path
     plot_filename = os.path.join(dir_path, '{}_ff_intervals.png'.format(plot_title))
