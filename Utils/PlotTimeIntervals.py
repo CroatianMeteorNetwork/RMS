@@ -244,6 +244,10 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
     # Draw a horizontal line at 0
     ax_res.axhline(y=0, color='lime', linestyle='-', zorder=4)
 
+    # Plot +/- 1 frame lines
+    ax_res.axhline(y=-1/fps, color='lime', linestyle='--', zorder=4)
+    ax_res.axhline(y=1/fps, color='lime', linestyle='--', zorder=4)
+
     # Plot the median
     median_residual = median_interval - expected_interval
     ax_res.axhline(y=median_residual, color='green', linestyle='--', zorder=4)
