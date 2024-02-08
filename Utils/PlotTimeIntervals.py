@@ -50,30 +50,32 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
 
     if not tar_file_path:
         print("Tar file not found.")
+        return None, None, None
 
-    else:
+    timestamps = []
 
-        # Open the tar file
-        with tarfile.open(tar_file_path, 'r:bz2') as tar:
+    # Open the tar file
+    with tarfile.open(tar_file_path, 'r:bz2') as tar:
 
-            timestamps = []
+        # Iterate through its members
+        for member in tar.getmembers():
 
-            # Iterate through its members
-            for member in tar.getmembers():
+            # Check if the current member is a .bin file
+            if member.isfile() and member.name.endswith('.bin'):
 
-                # Check if the current member is a .bin file
-                if member.isfile() and member.name.endswith('.bin'):
+                try:
+                    # Extract timestamp from the file name
+                    file_name_parts = member.name.split('_')
+                    timestamp_str = file_name_parts[2] + file_name_parts[3] + file_name_parts[4].split('.')[0]
+                    timestamp = datetime.datetime.strptime(timestamp_str, '%Y%m%d%H%M%S%f')
+                    timestamps.append(timestamp)
 
-                    try:
-                        # Extract timestamp from the file name
-                        file_name_parts = member.name.split('_')
-                        timestamp_str = file_name_parts[2] + file_name_parts[3] + file_name_parts[4].split('.')[0]
-                        timestamp = datetime.datetime.strptime(timestamp_str, '%Y%m%d%H%M%S%f')
-                        timestamps.append(timestamp)
+                except ValueError:
+                    print("Skipping file with incorrect format: {}".format(member.name))
 
-                    except ValueError:
-                        print("Skipping file with incorrect format: {}".format(member.name))
-
+    if len(timestamps) < 2:
+        print("Insufficient timestamps. At least two timestamps are required.")
+        return None, None, None
 
     timestamps.sort()
 

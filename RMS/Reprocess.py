@@ -401,7 +401,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         log.info('Timestamp Intervals Analysis: Jitter Quality: {:.1f}%, Dropped Frame Rate: {:.1f}%'.format(
             jitter_quality, dropped_frame_rate))
         # Add the timelapse to the extra files
-        extra_files.append(intervals_path)
+        if intervals_path is not None:
+            extra_files.append(intervals_path)
 
     except Exception as e:
         log.debug('Plotting timestamp interval failed with message:\n' + repr(e))
