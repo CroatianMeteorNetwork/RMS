@@ -98,26 +98,26 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
     # average_fps = ff_block_size/mean_interval
     median_fps = ff_block_size/median_interval
 
-    # Calculate moving average
-    moving_avg = np.convolve(intervals_np, np.ones(ma_window_size), 'valid')/ma_window_size
-
-    # Insert padding at the start to line up with timestamps
-    padding = np.full(ma_window_size - 1, expected_interval)
-    padded_moving_avg = np.concatenate([padding, moving_avg])
-
-    # Set the threshold above which to tag for possible dropped frames
-    tolerance = 1
-    threshold = (ff_block_size + tolerance)/fps
-
-    # Create a boolean mask where the moving average exceeds the threshold
-    above_threshold = padded_moving_avg > threshold
-
     
-
     ### Scoring ###
 
+    # Set frame tolerance threshold
+    tolerance = 1
+
     # Don't compute scores if there's not enough data
-    if len(intervals) > 60:
+    if len(intervals) > ma_window_size + 10:
+        # Calculate moving average
+        moving_avg = np.convolve(intervals_np, np.ones(ma_window_size), 'valid')/ma_window_size
+
+        # Insert padding at the start to line up with timestamps
+        padding = np.full(ma_window_size - 1, expected_interval)
+        padded_moving_avg = np.concatenate([padding, moving_avg])
+
+        # Set the threshold above which to tag for possible dropped frames
+        threshold = (ff_block_size + tolerance)/fps
+
+        # Create a boolean mask where the moving average exceeds the threshold
+        above_threshold = padded_moving_avg > threshold
         # Calculate Jitter Quality
         count_within_tolerance = sum(1 for interval in intervals if abs(interval - expected_interval) <= tolerance/fps)
         jitter_quality = (count_within_tolerance/len(intervals))*100 if intervals else 0
@@ -125,8 +125,9 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
         dropped_frame_rate = (np.sum(above_threshold)/len(padded_moving_avg))*100
 
     else:
-        jitter_quality = None
-        dropped_frame_rate = None
+        jitter_quality = 100
+        dropped_frame_rate = 0
+        above_threshold = above_threshold = np.full(intervals_np.shape, False, dtype=bool)
 
 
 
@@ -216,8 +217,7 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
     # Title and subtitle
     plot_title = subdir_name.replace("_detected", "")
     plt.title('Timestamp Intervals - {}'.format(plot_title), pad=30)
-    subtitle_text = 'Jitter Quality (intervals within +/-1 frame): {:.1f}%'.format(
-        round(jitter_quality, 1))
+    subtitle_text = 'Jitter Quality (intervals within +/-1 frame): {:.1f}%'.format(jitter_quality)
     subtitle_text_2 = 'Dropped Frame Rate (intervals >{} frames late within {} FF files): {:.1f}%'.format(
         tolerance, ma_window_size, dropped_frame_rate)
 
