@@ -42,14 +42,19 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
     subdir_name = os.path.basename(dir_path.rstrip('/\\'))
 
     # Find the FS*.tar.bz2 file in the specified directory
-    tar_file_path = None
-    for file in os.listdir(dir_path):
-        if file.endswith('.tar.bz2') and file.startswith('FS'):
-            tar_file_path = os.path.join(dir_path, file)
-            break
+    try:
+        tar_file_path = None
+        for file in os.listdir(dir_path):
+            if file.endswith('.tar.bz2') and file.startswith('FS'):
+                tar_file_path = os.path.join(dir_path, file)
+                break
 
-    if not tar_file_path:
-        print("Tar file not found.")
+        if not tar_file_path:
+            print("Tar file not found.")
+            return None, None, None
+
+    except FileNotFoundError:
+        print("Directory not found: {}".format(dir_path))
         return None, None, None
 
     timestamps = []
@@ -246,10 +251,6 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
     # Draw a horizontal line at 0
     ax_res.axhline(y=0, color='lime', linestyle='-', zorder=4)
 
-    # Plot +/- 1 frame lines
-    ax_res.axhline(y=-1/fps, color='lime', linestyle='--', zorder=4)
-    ax_res.axhline(y=1/fps, color='lime', linestyle='--', zorder=4)
-
     # Plot the median
     median_residual = median_interval - expected_interval
     ax_res.axhline(y=median_residual, color='green', linestyle='--', zorder=4)
@@ -265,7 +266,8 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
     plt.subplots_adjust(top=0.90, hspace=0.05)
 
     # Save the plot in the dir_path
-    plot_filename = os.path.join(dir_path, '{}_ff_intervals.png'.format(plot_title))
+    suffix = "_ff_intervals_flagged.png" if dropped_frame_rate > 0.1 else "_ff_intervals.png"
+    plot_filename = os.path.join(dir_path, '{}{}'.format(plot_title, suffix))
     plt.savefig(plot_filename, dpi=150)
     plt.close()
 
