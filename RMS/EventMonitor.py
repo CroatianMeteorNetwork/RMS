@@ -1795,8 +1795,7 @@ class EventMonitor(multiprocessing.Process):
                                  event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,
                                  rsa_private_key=self.config.rsa_private_key, allow_dir_creation=True)
 
-                #todo: remove before publishing
-                upload_status = True
+
                 if upload_status:
                     log.info("Upload of {} - attempt no {} was successful".format(event_monitor_directory, retry))
                     # set to the fast check rate after an upload,
