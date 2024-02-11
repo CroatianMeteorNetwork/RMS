@@ -1821,9 +1821,8 @@ class EventMonitor(multiprocessing.Process):
     def frFileInList(self, file_list):
 
         found = False
-
         for file_to_check in file_list:
-            if file_to_check[0:2] == "FR" and file_to_check.endswith('.bin'):
+            if os.path.basename(file_to_check)[0:2] == "FR" and file_to_check.endswith('bin'):
                 found = True
 
         return found
