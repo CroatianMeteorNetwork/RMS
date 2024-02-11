@@ -2114,7 +2114,7 @@ class EventMonitor(multiprocessing.Process):
         # Delay to allow capture to check existing folders - keep the logs tidy
 
 
-        time.sleep(10)
+        time.sleep(60)
         last_check_start_time = datetime.datetime.utcnow()
         while not self.exit.is_set():
             check_start_time = datetime.datetime.utcnow()
