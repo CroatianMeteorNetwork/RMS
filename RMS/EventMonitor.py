@@ -176,7 +176,7 @@ class EventContainer(object):
         self.ht_std = float(value) if "EventHtStd" == variable_name else self.ht_std
         self.cart_std = float(value) if "EventCartStd" == variable_name else self.cart_std
         if "RequireFR" == variable_name:
-            if value == 0:
+            if str(value) == "0" :
                 self.require_FR = 0
             else:
                 self.require_FR = 1
@@ -1886,11 +1886,17 @@ class EventMonitor(multiprocessing.Process):
                 continue
 
             # move to the next event if we required an FR file but do not have one
-            if observed_event.require_FR != 0 and not self.frFileInList(file_list):
-                log.info("Event at {} skipped - FR required and none found".format(observed_event.dt))
-                continue
+
+            if observed_event.require_FR == 1:
+                log.info("Event at {} requirees FR file".format(observed_event.dt))
+                if not self.frFileInList(file_list):
+                    log.info("Event at {} skipped - FR required and none found".format(observed_event.dt))
+                    self.markEventAsProcessed(observed_event)
+                    continue
+                else:
+                    log.info("Event at {} required FR file and file was found".format(observed_event.dt))
             else:
-                log.info("FR file required and found for event at {}".format(observed_event.dt))
+                log.info("FR file not required for event at {}".format(observed_event.dt))
 
             # If there is a .config file then parse it as evcon - not the station config
             for file in file_list:
