@@ -1888,7 +1888,7 @@ class EventMonitor(multiprocessing.Process):
             # move to the next event if we required an FR file but do not have one
 
             if observed_event.require_FR == 1:
-                log.info("Event at {} requirees FR file".format(observed_event.dt))
+                log.info("Event at {} requires FR file".format(observed_event.dt))
                 if not self.frFileInList(file_list):
                     log.info("Event at {} skipped - FR required and none found".format(observed_event.dt))
                     self.markEventAsProcessed(observed_event)
