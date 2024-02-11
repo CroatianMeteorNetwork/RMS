@@ -30,10 +30,14 @@ import numpy as np
 import RMS.ConfigReader as cr
 from RMS.Formats import FFfile, FRbin
 import datetime
+from glob import glob
+from Utils.ShowerAssociation import showerAssociation
+from RMS.Formats.FTPdetectinfo import validDefaultFTPdetectinfo
 
 
 def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=None, hide=False,
-        avg_background=False, split=False, add_timestamp=False, add_frame_number=False):
+        avg_background=False, split=False, add_timestamp=False, add_frame_number=False, append_ff_to_video=False,
+         add_shower_name=False, associations={}):
     """ Shows the detected fireball stored in the FR file. 
     
     Arguments:
@@ -51,6 +55,7 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
         split: [bool] Split the video into multiple videos, one for each line. False by default.
         add_timestamp: [bool] Add timestamp to the image. False by default.
         add_frame_number: [bool] Add frame number to the image. False by default.
+        append_ff_to_video: [bool] Append image with meteor to video
 
     """
 
@@ -81,7 +86,9 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
             background = FFfile.read(dir_path, ff_path).avepixel
         else:
             background = FFfile.read(dir_path, ff_path).maxpixel
-    
+        if append_ff_to_video:
+            meteor_image = FFfile.read(dir_path, ff_path).maxpixel
+
     print("Number of lines:", fr.lines)
     
     first_image = True
@@ -124,7 +131,6 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
                 videos[0].append(clips[t])
 
     video_num = 0
-
     for video in videos:
 
         print('Frame,  Y ,  X , size')
@@ -175,23 +181,15 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
 
                 # Put the name of the FR file, followed by the frame number
                 # Put a black shadow
-                cv2.putText(img, fr_path + " frame = {:3d}".format(t), (10, 20), 
-                            fontFace=cv2.FONT_HERSHEY_SIMPLEX , fontScale=0.5, color=[0, 0, 0], 
-                            lineType=cv2.LINE_AA, thickness=2)
-                cv2.putText(img, fr_path + " frame = {:3d}".format(t), (10, 20), 
-                            fontFace=cv2.FONT_HERSHEY_SIMPLEX , fontScale=0.5, color=[255, 255, 255], 
-                            lineType=cv2.LINE_AA, thickness=1)
+                title = fr_path + " frame = {:3d}".format(t)
+                addTextToImage(img, title, 10, 20)
 
             # Add timestamp
             if add_timestamp:
-                height = img.shape[0]
-                title = getTimestampTitle(fr_path)
-                cv2.putText(img, title, (15, height - 20),
-                            fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=[0, 0, 0],
-                            lineType=cv2.LINE_AA, thickness=2)
-                cv2.putText(img, title, (15, height - 20),
-                            fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=[255, 255, 255],
-                            lineType=cv2.LINE_AA, thickness=1)
+                addTimestampToImage(img, fr_path)
+            # Add meteor shower name
+            if add_shower_name and ff_path is not None:
+                addShowerNameToImage(img, ff_path, associations)
 
             # Save frame to disk
             if save_frames or makevideo:
@@ -249,6 +247,11 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
 
 
         if makevideo is True:
+            if append_ff_to_video and ff_path is not None:
+                # add duration of 1.5 sec
+                frameCount = int(config.fps * 1.5)
+                saveFramesForMeteorImage(meteor_image, ff_path, fr_path, add_timestamp, t, frameCount, video_num,
+                                         extract_format, framefiles, dir_path, add_shower_name, associations)
 
             root = os.path.dirname(__file__)
             ffmpeg_path = os.path.join(root, "ffmpeg.exe")
@@ -290,6 +293,54 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
         cv2.destroyWindow(name)
 
 
+def saveFramesForMeteorImage(meteorImage, imagePath, frPath, addTimestamp, lastFrameNumber, frameCount, videoNumber,
+                             format,
+                             frameFiles, folder, addShowerName, associations):
+    # Add timestamp
+    if addTimestamp:
+        addTimestampToImage(meteorImage, imagePath)
+        # Add meteor shower name
+    if addShowerName:
+        addShowerNameToImage(meteorImage, imagePath, associations)
+    # append frames for 1.5 second
+    for frameNumber in range(frameCount):
+        frameFileName = frPath.replace('.bin', '') \
+                        + "_line_{:02d}_frame_{:03d}.{:s}".format(videoNumber, lastFrameNumber + frameNumber + 1,
+                                                                  format)
+        cv2.imwrite(os.path.join(folder, frameFileName), meteorImage)
+        frameFiles.append(frameFileName)
+
+
+def addTimestampToImage(image, filePath):
+    title = getTimestampTitle(filePath)
+    height = image.shape[0]
+    addTextToImage(image, title, 15, height - 20)
+
+
+def addShowerNameToImage(image, filePath, associations):
+    fileName = os.path.basename(filePath)
+    if (fileName, 1.0) in associations:
+        shower = associations[(fileName, 1.0)][1]
+        if shower is not None:
+            title = "Meteor shower : [{:s}] - {:s}".format(shower.name, shower.name_full)
+        else:
+            title = "Meteor shower : Sporadic"
+    else:
+        title = "Meteor shower : Unknown"
+    height = image.shape[0]
+    addTextToImage(image, title, 320, height - 20)
+
+
+def addTextToImage(image, title, x, y):
+    cv2.putText(image, title, (x, y),
+                fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=[0, 0, 0],
+                lineType=cv2.LINE_AA, thickness=2)
+    cv2.putText(image, title, (x, y),
+                fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=[255, 255, 255],
+                lineType=cv2.LINE_AA, thickness=1)
+
+
+
 # Resize image to fit window to screen (for images larger than 1280x720)
 # By default resize to HD (with=1280 same as for regular camera resolution)
 def resizeImageIfNeed(image, width=1280):
@@ -309,6 +360,27 @@ def getTimestampTitle(fr_path):
     dtstr = splits[2] + '_' + splits[3] + '.' + splits[4]
     imgdt = datetime.datetime.strptime(dtstr, '%Y%m%d_%H%M%S.%f')
     return splits[1] + ' ' + imgdt.strftime('%Y-%m-%d %H:%M:%S UTC')
+
+
+def loadShowerAssociations(folder, configuration):
+    associations = {}
+    # Get FTP file so we can filter by shower
+    ftp_list = glob(os.path.join(folder, 'FTPdetectinfo_{}*.txt'.format(configuration.stationID)))
+    ftp_list = [x for x in ftp_list if validDefaultFTPdetectinfo(os.path.basename(x))]
+
+    if len(ftp_list) < 1:
+        print('Unable to find FTPdetect file in {}'.format(folder))
+        # return empty list to finish mp4 generation if FTPdetect file not found
+        return associations
+    ftp_file = ftp_list[0]
+
+    print('Performing shower association using {}'.format(ftp_file))
+
+    associations_per_dir, _ = showerAssociation(configuration, [ftp_file],
+                                                shower_code=None, show_plot=False, save_plot=False, plot_activity=False)
+    associations.update(associations_per_dir)
+
+    return associations
 
 
 if __name__ == "__main__":
@@ -347,13 +419,16 @@ if __name__ == "__main__":
 
     arg_parser.add_argument("-n", "--framenumber", action="store_true", help="Show frame number on the image.")
 
+    arg_parser.add_argument("-m", "--append_ff_to_video", action="store_true", help="Append image with meteor to video")
+
+    arg_parser.add_argument("-w", "--add_shower_name", action="store_true", help="Show shower name on image")
+
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
     #########################
-
-    dir_path = cml_args.dir_path[0]
+    dir_path = os.path.abspath(cml_args.dir_path[0])
 
     # Load the configuration file
     config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
@@ -373,6 +448,14 @@ if __name__ == "__main__":
     ff_list = [ff for ff in os.listdir(dir_path) if FFfile.validFFName(ff)]
     ff_list = sorted(ff_list)
 
+    add_shower_name=cml_args.add_shower_name
+    associations = {}
+    if add_shower_name:
+        associations = loadShowerAssociations(dir_path, config)
+        # if no meteor information - skip adding name
+        if not associations:
+            print("Shower Associations not loaded, skipping add shower name")
+            add_shower_name = False
 
     i = 0
 
@@ -402,8 +485,10 @@ if __name__ == "__main__":
         
         # View the fireball detection
         retval = view(dir_path, ff_match, fr, config, save_frames=cml_args.extract,
-            extract_format=cml_args.extractformat, hide=cml_args.hide, avg_background=cml_args.avg, 
-            split=cml_args.split, add_timestamp=cml_args.timestamp, add_frame_number=cml_args.framenumber)
+            extract_format=cml_args.extractformat, hide=cml_args.hide, avg_background=cml_args.avg,
+            split=cml_args.split, add_timestamp=cml_args.timestamp, add_frame_number=cml_args.framenumber,
+                      append_ff_to_video=cml_args.append_ff_to_video, add_shower_name=add_shower_name,
+                      associations=associations)
 
         # Return to previous file
         if retval == -1:
