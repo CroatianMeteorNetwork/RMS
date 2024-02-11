@@ -255,7 +255,7 @@ class BufferedCapture(Process):
                     "rtph264depay ! h264parse ! avdec_h264").format(device_url)
 
         conversion = "videoconvert ! video/x-raw,format={}".format(video_format)
-        pipeline_str = ("{} ! {} ! "
+        pipeline_str = ("{} ! queue ! {} ! "
                         "appsink max-buffers=25 drop=true sync=1 name=appsink").format(device_str, conversion)
 
         
