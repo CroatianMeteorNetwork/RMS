@@ -102,7 +102,7 @@ EventElev		         : 20			    #Elevation as perceived by observer on ground, he
 #Optional
 EventCartStd		     : 10000		    #Event start cartesian standard deviation (m)
 EventCart2Std		     : 10000		    #Event end cartesian standard deviation (m)
-
+RequireFR                : 0                #If not zero only upload if a file FR*.bin exists 
 
 #Optional - not preferred as sensitive to different latitudes
 EventLatStd (deg)	     : 1.0			    #Event start latitude polar standard deviation
@@ -129,6 +129,7 @@ class EventContainer(object):
         self.lat, self.lat_std, self.lon, self.lon_std, self.ht, self.ht_std, self.cart_std = lat, 0, lon, 0, ht, 0, 0
         self.lat2, self.lat2_std, self.lon2, self.lon2_std, self.ht2, self.ht2_std, self.cart2_std = 0, 0, 0, 0, 0, 0, 0
         self.close_radius, self.far_radius = 0, 0
+        self.require_FR = 0
 
         # Or trajectory information from the first point
         self.azim, self.azim_std, self.elev, self.elev_std, self.elev_is_max = 0, 0, 0, 0, False
@@ -174,6 +175,11 @@ class EventContainer(object):
         self.ht = float(value) if "EventHt" == variable_name else self.ht
         self.ht_std = float(value) if "EventHtStd" == variable_name else self.ht_std
         self.cart_std = float(value) if "EventCartStd" == variable_name else self.cart_std
+        if "RequireFR" == variable_name:
+            if value == 0:
+                self.require_FR = 0
+            else:
+                self.require_FR = 1
 
         # Radii
         self.close_radius = float(value) if "CloseRadius" == variable_name else self.close_radius
@@ -824,6 +830,7 @@ class EventMonitor(multiprocessing.Process):
                             EventElev REAL NOT NULL,
                             EventElevStd REAL NOT NULL,
                             EventElevIsMax BOOL,
+                            RequireFR TEXT,
                             StationsRequired TEXT,
                             filesuploaded TEXT,
                             timeadded TEXT,
@@ -894,18 +901,6 @@ class EventMonitor(multiprocessing.Process):
             log.info("Missing db column Suffix")
             self.addDBcol("Suffix","TEXT")
 
-        if not self.checkDBcol(conn,"ObsLat"):
-            log.info("Missing db column ObsLat")
-            self.addDBcol("ObsLat","REAL")
-
-        if not self.checkDBcol(conn,"ObsLon"):
-            log.info("Missing db column ObsLon")
-            self.addDBcol("ObsLon","REAL")
-
-        if not self.checkDBcol(conn,"ObsRange"):
-            log.info("Missing db column ObsRange")
-            self.addDBcol("ObsRange","TEXT")
-
         if not self.checkDBcol(conn,"Ra"):
             log.info("Missing db column Ra")
             self.addDBcol("Ra","REAL")
@@ -914,33 +909,11 @@ class EventMonitor(multiprocessing.Process):
             log.info("Missing db column Dec")
             self.addDBcol("Dec","REAL")
 
-        if not self.checkDBcol(conn,"SkyRadius"):
-            log.info("Missing db column SkyRadius")
-            self.addDBcol("SkyRadius","REAL")
 
-        if not self.checkDBcol(conn,"MinElev"):
-            log.info("Missing db column MinElev")
-            self.addDBcol("MinElev","REAL")
+        if not self.checkDBcol(conn,"RequireFR"):
+            log.info("Missing db column RequireFR")
+            self.addDBcol("RequireFR","bool")
 
-        if not self.checkDBcol(conn,"MinStars"):
-            log.info("Missing db column MinStars")
-            self.addDBcol("MinStars","REAL")
-
-        if not self.checkDBcol(conn,"tle_0"):
-            log.info("Missing db column tle_0")
-            self.addDBcol("tle_0","TEXT")
-
-        if not self.checkDBcol(conn,"tle_1"):
-            log.info("Missing db column tle_1")
-            self.addDBcol("tle_1","text")
-
-        if not self.checkDBcol(conn,"tle_2"):
-            log.info("Missing db column tle_2")
-            self.addDBcol("tle_2","text")
-
-        if not self.checkDBcol(conn,"tle_last_processed"):
-            log.info("Missing db column tle_last_processed")
-            self.addDBcol("tle_last_processed","text")
 
     def addDBcol(self, column, coltype):
 
@@ -1142,7 +1115,7 @@ class EventMonitor(multiprocessing.Process):
             sql_statement += "CloseRadius, FarRadius,                     \n"
             sql_statement += "EventLat2, EventLat2Std, EventLon2, EventLon2Std,EventHt2, EventHt2Std, EventCart2Std,    \n"
             sql_statement += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax,    \n"
-            sql_statement += "processedstatus, uploadedstatus, uuid, RespondTo, StationsRequired, timeadded \n"
+            sql_statement += "processedstatus, uploadedstatus, uuid, RespondTo, StationsRequired, RequireFR, timeadded \n"
             sql_statement += ")                                           \n"
 
             sql_statement += "VALUES "
@@ -1156,7 +1129,7 @@ class EventMonitor(multiprocessing.Process):
             sql_statement += "{},  {}, {}, {}, {} ,        \n".format(event.azim, event.azim_std, event.elev,
                                                                       event.elev_std,
                                                                       qry_elev_is_max)
-            sql_statement += "{},  {}, '{}', '{}', '{}' ,       \n".format(0, 0,uuid.uuid4(), event.respond_to, event.stations_required)
+            sql_statement += "{},  {}, '{}', '{}', '{}' , '{}', \n".format(0, 0,uuid.uuid4(), event.respond_to, event.stations_required, event.require_FR)
             sql_statement += "CURRENT_TIMESTAMP ) \n"
 
             try:
@@ -1394,7 +1367,7 @@ class EventMonitor(multiprocessing.Process):
         sql_query_cols += "FarRadius,CloseRadius, uuid,"
         sql_query_cols += "EventLat2, EventLat2Std, EventLon2, EventLon2Std,EventHt2, EventHt2Std, "
         sql_query_cols += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax, RespondTo, StationsRequired,"
-        sql_query_cols += "EventCartStd, EventCart2Std"
+        sql_query_cols += "EventCartStd, EventCart2Std, RequireFR"
         sql_statement += sql_query_cols
         sql_statement += " \n"
         sql_statement += "FROM event_monitor "
@@ -1507,6 +1480,8 @@ class EventMonitor(multiprocessing.Process):
                         os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir,
                                      night_directory))
         return directory_list
+
+
 
     def findEventFiles(self, event, directory_list, file_extension_list):
 
@@ -1776,7 +1751,7 @@ class EventMonitor(multiprocessing.Process):
         if True:
             image_note = event.suffix
             batchFFtoImage(os.path.join(this_event_directory), "jpg", add_timestamp=True,
-                           ff_component='maxpixel', image_note = image_note)
+                           ff_component='maxpixel')
 
         with open(os.path.join(this_event_directory, "event_report.txt"), "w") as info:
             info.write(event.eventToString())
@@ -1820,8 +1795,8 @@ class EventMonitor(multiprocessing.Process):
                                  event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,
                                  rsa_private_key=self.config.rsa_private_key, allow_dir_creation=True)
 
-
-
+                #todo: remove before publishing
+                upload_status = True
                 if upload_status:
                     log.info("Upload of {} - attempt no {} was successful".format(event_monitor_directory, retry))
                     # set to the fast check rate after an upload,
@@ -1842,6 +1817,16 @@ class EventMonitor(multiprocessing.Process):
         if not keep_files:
             shutil.rmtree(event_monitor_directory)
         return upload_status
+
+    def frFileInList(self, file_list):
+
+        found = False
+
+        for file_to_check in file_list:
+            if file_to_check[0:2] == "FR" and file_to_check.endswith('.bin'):
+                found = True
+
+        return found
 
     def checkEvents(self, ev_con, test_mode = False):
 
@@ -1900,6 +1885,13 @@ class EventMonitor(multiprocessing.Process):
                 self.markEventAsProcessed(observed_event)
                 # This moves to next observed_event
                 continue
+
+            # move to the next event if we required an FR file but do not have one
+            if observed_event.require_FR != 0 and not self.frFileInList(file_list):
+                log.info("Event at {} skipped - FR required and none found".format(observed_event.dt))
+                continue
+            else:
+                log.info("FR file required and found for event at {}".format(observed_event.dt))
 
             # If there is a .config file then parse it as evcon - not the station config
             for file in file_list:
@@ -2077,13 +2069,15 @@ class EventMonitor(multiprocessing.Process):
 
         return True
 
-    def getEventsAndCheck(self, testmode=False):
+    def getEventsAndCheck(self, start_time, end_time, testmode=False):
         """
         Gets event(s) from the webpage, or a local file.
         Calls self.addevent to add them to the database
         Calls self.checkevents to see if the database holds any unprocessed events
 
         Args:
+            start_time: time to start checking from
+            end_time: time to start checking to
             testmode: [bool] if set true looks for a local file, rather than a web address
 
         Returns:
@@ -2114,9 +2108,9 @@ class EventMonitor(multiprocessing.Process):
         """
 
         # Delay to allow capture to check existing folders - keep the logs tidy
-        time.sleep(30)
 
-        time.sleep(60)
+
+        time.sleep(10)
         last_check_start_time = datetime.datetime.utcnow()
         while not self.exit.is_set():
             check_start_time = datetime.datetime.utcnow()
