@@ -1317,7 +1317,7 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
 
 
 def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_single=False, show_plot=True,
-    xlim_shower_limits=False, sol_marker=None):
+    xlim_shower_limits=False, sol_marker=None, publication_quality=False):
     """ Make a plot showing the batch flux results. 
     
     Arguments:
@@ -1333,6 +1333,8 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
             by default.
         sol_marker: [float] Plot a red vertical line on the flux plot at the given solar longitude (deg).
             None by default, in which case the marker will not be plotted.
+        publication_quality: [bool] If True, make the plot publication quality with no grid, larger font,
+            and only keeping the flux and TAP subplots, not the individual parameters. False by default.
     """
 
 
@@ -1341,14 +1343,34 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
     plot_info = StationPlotParams()
     
     if only_flux:
+
         subplot_rows = 1
         figsize = (15, 5)
+
     else:
-        subplot_rows = 4
-        figsize = (15, 10)
+
+        if publication_quality:
+            subplot_rows = 2
+            figsize = (15, 10)
+
+        else:
+            subplot_rows = 4
+            figsize = (15, 10)
 
     fig, ax = plt.subplots(nrows=subplot_rows, figsize=figsize, sharex=True, \
         gridspec_kw={'height_ratios': [3, 1, 1, 1][:subplot_rows]})
+    
+
+    # If the plot is for publication, set the plot parameters
+    if publication_quality:
+
+        plt.rcParams.update({'font.size': 16})
+        plt.rcParams.update({'axes.labelsize': 16})
+        plt.rcParams.update({'xtick.labelsize': 16})
+        plt.rcParams.update({'ytick.labelsize': 16})
+        plt.rcParams.update({'legend.fontsize': 16})
+        plt.rcParams.update({'figure.autolayout': True})
+        plt.rcParams.update({'axes.grid': False})
 
 
     if not isinstance(ax, np.ndarray):
@@ -1421,24 +1443,31 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
             capsize=3,
         )
 
+        ax[0].legend()
+
         # Set the minimum flux to 0
         ax[0].set_ylim(bottom=0)
 
-        # Add the grid
-        ax[0].grid(color='0.9')
-
-        ax[0].legend()
-        ax[0].set_title("{:s}, v = {:.1f} km/s, s = {:.2f}, r = {:.2f}".format(fbr.shower.name_full, 
-            fbr.v_init/1000, calculateMassIndex(np.mean(fbr.summary_population_index)), 
-            np.mean(fbr.summary_population_index)) 
-                      # + ", $\\mathrm{m_{lim}} = $" + r"${:s}$ g ".format(formatScientific(1000*mass_lim, 0))
-                      # + "at LM = +6.5$^{\\mathrm{M}}$"
-                      )
         ax[0].set_ylabel("Flux (meteoroids / 1000 $\\cdot$ km$^2$ $\\cdot$ h)")
 
-        # Plot the marker
-        if sol_marker is not None:
-            ax[0].axvline(x=sol_marker, color='r', linewidth=1)
+
+        if not publication_quality:
+
+            # Add the grid
+            ax[0].grid(color='0.9')
+            
+            # Set the title
+            ax[0].set_title("{:s}, v = {:.1f} km/s, s = {:.2f}, r = {:.2f}".format(fbr.shower.name_full, 
+                fbr.v_init/1000, calculateMassIndex(np.mean(fbr.summary_population_index)), 
+                np.mean(fbr.summary_population_index)) 
+                        # + ", $\\mathrm{m_{lim}} = $" + r"${:s}$ g ".format(formatScientific(1000*mass_lim, 0))
+                        # + "at LM = +6.5$^{\\mathrm{M}}$"
+                        )
+            
+
+            # Plot the marker
+            if sol_marker is not None:
+                ax[0].axvline(x=sol_marker, color='r', linewidth=1)
 
 
         ### Plot the ZHR on another axis ###
@@ -1543,118 +1572,120 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
             lines2, labels2 = side_ax.get_legend_handles_labels()
             side_ax.legend(lines + lines2, labels + labels2)
 
+            
+            if not publication_quality:
 
-            ##### SUBPLOT 2 #####
+                ##### SUBPLOT 2 #####
 
-            # Plot the radiant elevation
-            ax[2].scatter(fbr.comb_sol_tap_weighted%360, fbr.comb_rad_elev, \
-                label="Rad. elev. (TAP-weighted)", color='0.75', s=15, marker='s')
+                # Plot the radiant elevation
+                ax[2].scatter(fbr.comb_sol_tap_weighted%360, fbr.comb_rad_elev, \
+                    label="Rad. elev. (TAP-weighted)", color='0.75', s=15, marker='s')
 
-            # Plot the radiant distance
-            ax[2].scatter(fbr.comb_sol_tap_weighted%360, fbr.comb_rad_dist, \
-                label="Rad. dist.", color='0.25', s=20, marker='x')
+                # Plot the radiant distance
+                ax[2].scatter(fbr.comb_sol_tap_weighted%360, fbr.comb_rad_dist, \
+                    label="Rad. dist.", color='0.25', s=20, marker='x')
 
-            ax[2].set_ylabel("Angle (deg)")
+                ax[2].set_ylabel("Angle (deg)")
 
-            ### Plot lunar phases per year ###
+                ### Plot lunar phases per year ###
 
-            moon_ax = ax[2].twinx()
+                moon_ax = ax[2].twinx()
 
-            # Set line plot cycler
-            line_cycler   = (
-                cycler(color=["#E69F00", "#56B4E9", "#009E73", "#0072B2", "#D55E00", "#CC79A7", "#F0E442"]) +
-                cycler(linestyle=["-", "--", "-.", ":", "-", "--", "-."])
+                # Set line plot cycler
+                line_cycler   = (
+                    cycler(color=["#E69F00", "#56B4E9", "#009E73", "#0072B2", "#D55E00", "#CC79A7", "#F0E442"]) +
+                    cycler(linestyle=["-", "--", "-.", ":", "-", "--", "-."])
+                    )
+
+                moon_ax.set_prop_cycle(line_cycler)
+
+
+                # Set up observer
+                o = ephem.Observer()
+                o.lat = str(0)
+                o.long = str(0)
+                o.elevation = 0
+                o.horizon = '0:0'
+
+                year_list = []
+                for dt_range, dt_arr in fbr.bin_datetime_yearly:
+
+                    dt_bin_beg, dt_bin_end = dt_range
+                    dt_mid = jd2Date((datetime2JD(dt_bin_beg) + datetime2JD(dt_bin_end))/2, dt_obj=True)
+
+                    # Make sure the years are not repeated
+                    if dt_mid.year in year_list:
+                        continue
+
+                    year_list.append(dt_mid.year)
+
+                    moon_phases = []
+
+                    for dt in dt_arr:
+
+                        o.date = dt
+                        m = ephem.Moon()
+                        m.compute(o)
+
+                        moon_phases.append(m.phase)
+
+                    # Plot Moon phases
+                    moon_ax.plot(np.degrees(fbr.sol_bins), moon_phases, label="{:d} moon phase".format(dt_mid.year))
+
+                moon_ax.set_ylabel("Moon phase")
+                moon_ax.set_ylim([0, 100])
+
+                # Add a combined legend
+                lines, labels = ax[2].get_legend_handles_labels()
+                lines2, labels2 = moon_ax.get_legend_handles_labels()
+                moon_ax.legend(lines + lines2, labels + labels2)
+
+                ### ###
+
+
+                ##### SUBPLOT 3 #####
+
+                ### Plot the TAP-weighted limiting magnitude ###
+
+                lm_ax = ax[3].twinx()
+
+                lm_ax.scatter(fbr.comb_sol_tap_weighted%360, fbr.comb_lm_m, label="Meteor LM", color='0.5', s=20)
+
+                lm_ax.invert_yaxis()
+                lm_ax.set_ylabel("Meteor LM")
+                #lm_ax.legend()
+
+                # Add one magnitude of buffer to every end, round to 0.5
+                lm_min, lm_max = lm_ax.get_ylim()
+                lm_ax.set_ylim(np.ceil(2*(lm_min))/2, np.floor(2*(lm_max))/2)
+
+
+                # Plot the TAP-weighted meteor LM
+
+                lm_ax.hlines(
+                    fbr.lm_m_mean,
+                    np.min(fbr.comb_sol%360),
+                    np.max(fbr.comb_sol%360),
+                    colors='k',
+                    alpha=0.5,
+                    linestyles='dashed',
+                    label="Mean meteor LM = {:+.2f}".format(fbr.lm_m_mean) + "$^{\\mathrm{M}}$",
                 )
 
-            moon_ax.set_prop_cycle(line_cycler)
+
+                ###
+
+                
+                # Plot the angular velocity
+                ax[3].scatter(fbr.comb_sol_tap_weighted%360, fbr.comb_ang_vel, \
+                    label="Angular velocity", color='0.0', s=30, marker='+')
+                ax[3].set_ylabel("Ang. vel. (deg/s)")
 
 
-            # Set up observer
-            o = ephem.Observer()
-            o.lat = str(0)
-            o.long = str(0)
-            o.elevation = 0
-            o.horizon = '0:0'
-
-            year_list = []
-            for dt_range, dt_arr in fbr.bin_datetime_yearly:
-
-                dt_bin_beg, dt_bin_end = dt_range
-                dt_mid = jd2Date((datetime2JD(dt_bin_beg) + datetime2JD(dt_bin_end))/2, dt_obj=True)
-
-                # Make sure the years are not repeated
-                if dt_mid.year in year_list:
-                    continue
-
-                year_list.append(dt_mid.year)
-
-                moon_phases = []
-
-                for dt in dt_arr:
-
-                    o.date = dt
-                    m = ephem.Moon()
-                    m.compute(o)
-
-                    moon_phases.append(m.phase)
-
-                # Plot Moon phases
-                moon_ax.plot(np.degrees(fbr.sol_bins), moon_phases, label="{:d} moon phase".format(dt_mid.year))
-
-            moon_ax.set_ylabel("Moon phase")
-            moon_ax.set_ylim([0, 100])
-
-            # Add a combined legend
-            lines, labels = ax[2].get_legend_handles_labels()
-            lines2, labels2 = moon_ax.get_legend_handles_labels()
-            moon_ax.legend(lines + lines2, labels + labels2)
-
-            ### ###
-
-
-            ##### SUBPLOT 3 #####
-
-            ### Plot the TAP-weighted limiting magnitude ###
-
-            lm_ax = ax[3].twinx()
-
-            lm_ax.scatter(fbr.comb_sol_tap_weighted%360, fbr.comb_lm_m, label="Meteor LM", color='0.5', s=20)
-
-            lm_ax.invert_yaxis()
-            lm_ax.set_ylabel("Meteor LM")
-            #lm_ax.legend()
-
-            # Add one magnitude of buffer to every end, round to 0.5
-            lm_min, lm_max = lm_ax.get_ylim()
-            lm_ax.set_ylim(np.ceil(2*(lm_min))/2, np.floor(2*(lm_max))/2)
-
-
-            # Plot the TAP-weighted meteor LM
-
-            lm_ax.hlines(
-                fbr.lm_m_mean,
-                np.min(fbr.comb_sol%360),
-                np.max(fbr.comb_sol%360),
-                colors='k',
-                alpha=0.5,
-                linestyles='dashed',
-                label="Mean meteor LM = {:+.2f}".format(fbr.lm_m_mean) + "$^{\\mathrm{M}}$",
-            )
-
-
-            ###
-
-            
-            # Plot the angular velocity
-            ax[3].scatter(fbr.comb_sol_tap_weighted%360, fbr.comb_ang_vel, \
-                label="Angular velocity", color='0.0', s=30, marker='+')
-            ax[3].set_ylabel("Ang. vel. (deg/s)")
-
-
-            # Add a combined legend
-            lines, labels = ax[3].get_legend_handles_labels()
-            lines2, labels2 = lm_ax.get_legend_handles_labels()
-            lm_ax.legend(lines + lines2, labels + labels2)
+                # Add a combined legend
+                lines, labels = ax[3].get_legend_handles_labels()
+                lines2, labels2 = lm_ax.get_legend_handles_labels()
+                lm_ax.legend(lines + lines2, labels + labels2)
 
 
         ax[subplot_rows - 1].set_xlabel("Solar longitude (deg)")
@@ -1670,6 +1701,14 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
     fig_path = os.path.join(dir_path, output_filename + ".png")
     print("Figure saved to:", fig_path)
     plt.savefig(fig_path, dpi=300)
+
+    # Also save a PDF file for publication-quality plots
+    if publication_quality:
+
+        fig_path = os.path.join(dir_path, output_filename + ".pdf")
+        print("Figure saved to:", fig_path)
+        plt.savefig(fig_path, format='pdf', dpi=300)
+
 
     if show_plot:
         plt.show()
