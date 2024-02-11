@@ -16,17 +16,20 @@ import datetime
 import cv2
 import time
 import Utils.FFtoFrames as f2f
+from Utils.ShowerAssociation import showerAssociation
+import RMS.ConfigReader as cr
+from RMS.Formats.FTPdetectinfo import validDefaultFTPdetectinfo
 
 from RMS.Formats import FTPdetectinfo
 
 from PIL import ImageFont
 
 from RMS.Formats.FFfile import read as readFF
-from RMS.Formats.FFfile import filenameToDatetime
+#from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Misc import mkdirP
 
 
-def generateMP4s(dir_path, ftpfile_name):
+def generateMP4s(dir_path, ftpfile_name, shower_code=None, min_mag=None, config=None):
     t1 = datetime.datetime.utcnow()
 
     # Load the font for labeling
@@ -35,14 +38,51 @@ def generateMP4s(dir_path, ftpfile_name):
     except:
         font = ImageFont.load_default()
     
+    if isinstance(min_mag,(int, float)):
+        min_mag = float(min_mag)
+    else:
+        min_mag = None
+    print('min_mag is {}'.format(min_mag))
+
+    if shower_code is not None and config is not None:
+        associations, _ = showerAssociation(config, [os.path.join(dir_path, ftpfile_name)])
+    else:
+        print('unable to determine shower associations, ignoring shower code')
+        shower_code = None
+
     print("Preparing files for the timelapse...")
     # load the ftpfile so we know which frames we want
     meteor_list = FTPdetectinfo.readFTPdetectinfo(dir_path, ftpfile_name)  
     for meteor in meteor_list:
-        ff_name, _, _, n_segments, _, _, _, _, _, _, _, \
+        ff_name, _, meteor_no, n_segments, _, _, _, _, _, _, _, \
             meteor_meas = meteor
-        # determine which frames we want
+        
+        # checks on mag and shower        
+        best_mag = 999
+        if min_mag is not None:
+            #print(meteor_meas)
+            for meas in meteor_meas:
+                best_mag = min(best_mag, meas[9])
+            #print('best mag is {}'.format(best_mag))
+            if best_mag > min_mag:
+                print('rejecting {} as too dim'.format(ff_name))
+                continue
+        if shower_code is not None:
+            if (ff_name, meteor_no) not in associations:
+                print('rejecting {} as not in radiants data'.format(ff_name))
+                continue
+            shower = associations[(ff_name, meteor_no)][1]
+            if shower is None: 
+                print('rejecting {} as wrong shower'.format(ff_name))
+                continue
+            elif shower.name != shower_code:
+                print('rejecting {} as wrong shower'.format(ff_name))
+                continue
+            print(shower.name)
+            pass
 
+        # determine which frames we want
+        
         first_frame=int(meteor_meas[0][1])-30
         last_frame=first_frame + 60
         if first_frame < 0:
@@ -97,6 +137,10 @@ def generateMP4s(dir_path, ftpfile_name):
 
             # Draw text to image
             text = camid + " " + timestamp.strftime("%Y-%m-%d %H:%M:%S") + " UTC"
+            if min_mag is not None:
+                text = text + ' Mag: {}'.format(best_mag)
+            if shower_code:
+                text = text + ' Shower: ' + shower_code
             cv2.putText(img, text, (10, ff.nrows - 6), font, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
 
             # Save the labelled image to disk
@@ -104,7 +148,7 @@ def generateMP4s(dir_path, ftpfile_name):
     
         ffbasename = os.path.splitext(ff_name)[0]
         mp4_path = ffbasename + ".mp4"
-        temp_img_path = os.path.join(dir_tmp_path, ffbasename+"_%03d.jpg")
+        temp_img_path = os.path.abspath(os.path.join(dir_tmp_path, ffbasename+"_%03d.jpg"))
 
         # If running on Windows, use ffmpeg.exe
         if platform.system() == 'Windows':
@@ -113,7 +157,7 @@ def generateMP4s(dir_path, ftpfile_name):
             root = os.path.dirname(__file__)
             ffmpeg_path = os.path.join(root, "ffmpeg.exe")
             # Construct the ecommand for ffmpeg           
-            com = ffmpeg_path + " -y -f image2 -pattern_type sequence -start_number " + str(first_frame) + " -i " + temp_img_path +" " + mp4_path
+            com = ffmpeg_path + " -hide_banner -loglevel error -pix_fmt yuv420p  -y -f image2 -pattern_type sequence -start_number " + str(first_frame) + " -i " + temp_img_path +" " + mp4_path
             print("Creating timelapse using ffmpeg...")
         else:
             # If avconv is not found, try using ffmpeg
@@ -122,7 +166,7 @@ def generateMP4s(dir_path, ftpfile_name):
             if os.system(software_name + " --help > /dev/null"):
                 software_name = "ffmpeg"
                 # Construct the ecommand for ffmpeg           
-                com = software_name + " -y -f image2 -pattern_type sequence -start_number " + str(first_frame) + " -i " + temp_img_path +" " + mp4_path
+                com = software_name + " -hide_banner -loglevel error -pix_fmt yuv420p  -y -f image2 -pattern_type sequence -start_number " + str(first_frame) + " -i " + temp_img_path +" " + mp4_path
                 print("Creating timelapse using ffmpeg...")
             else:
                 print("Creating timelapse using avconv...")
@@ -159,6 +203,15 @@ if __name__ == "__main__":
     arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str,
         help='Path to directory with FF files.')
 
+    arg_parser.add_argument('-s', '--shower', metavar='SHOWER', type=str, \
+        help="Process just this single shower given its code (e.g. PER, ORI, ETA).")
+
+    arg_parser.add_argument('-m', '--minmag', metavar='MINMAG', type=float, \
+        help="Process only detections brighter than this")
+
+    arg_parser.add_argument('-c', '--config', metavar='CONFIG', type=str, \
+        help="full path to config file. Only required if filtering by shower and no config file in the target folder")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -171,18 +224,20 @@ if __name__ == "__main__":
         print('unable to access target folder - check path')
         exit(1)
 
+    # Load the config file
+    config = None
+    if cml_args.config:
+        config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
+    else:
+        if os.path.isfile(os.path.join(dir_path, '.config')):
+            config = cr.loadConfigFromDirectory('.config', dir_path)
+
     if len(ftps) == 0:
         print('no ftpdetect files in target folder - unable to continue')
 
     else:
-        ftpfile_name = ''
-        for ftpf in ftps:
-            file_name = os.path.basename(ftpf)
-            if '_detected' not in file_name and '-confirmation' not in file_name and \
-                    '_original' not in file_name and '_backup' not in file_name:
-                ftpfile_name = file_name
-        print(ftpfile_name)
-        if ftpfile_name == '':
+        ftps = [x for x in ftps if validDefaultFTPdetectinfo(os.path.basename(x))]
+        if len(ftps) == 0:
             print('no usable ftpdetect file present')
         else:
-            generateMP4s(dir_path, ftpfile_name)
+            generateMP4s(dir_path, ftps[0], shower_code=cml_args.shower, min_mag=cml_args.minmag, config=config)
