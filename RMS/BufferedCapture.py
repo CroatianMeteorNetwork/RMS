@@ -255,9 +255,9 @@ class BufferedCapture(Process):
                       "rtph264depay ! h264parse ! avdec_h264").format(device_url)
 
         conversion = "videoconvert ! video/x-raw,format={}".format(video_format)
-        pipeline_str = ("{} ! queue leaky=downstream max-size-buffers=250 max-size-bytes=0 max-size-time=0 ! "
-                        "{} ! queue max-size-buffers=250 max-size-bytes=0 max-size-time=0 ! "
-                        "appsink max-buffers=250 drop=true sync=1 name=appsink").format(device_str, conversion)
+        pipeline_str = ("{} ! queue leaky=downstream max-size-buffers=100 max-size-bytes=0 max-size-time=0 ! "
+                        "{} ! queue max-size-buffers=100 max-size-bytes=0 max-size-time=0 ! "
+                        "appsink max-buffers=100 drop=true sync=0 name=appsink").format(device_str, conversion)
 
         
         self.pipeline = Gst.parse_launch(pipeline_str)
