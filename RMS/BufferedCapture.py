@@ -79,6 +79,7 @@ class BufferedCapture(Process):
         self.time_for_drop = 1.5*(1.0/config.fps)
 
         self.dropped_frames = Value('i', 0)
+        self.device = None
         self.pipeline = None
         self.start_timestamp = 0
         self.frame_shape = None
@@ -121,7 +122,6 @@ class BufferedCapture(Process):
         self.start()
     
 
-
     def stopCapture(self):
         """ Stop capture.
         """
@@ -146,14 +146,14 @@ class BufferedCapture(Process):
         return self.dropped_frames.value
 
 
-    def device_isOpened(self, device):
-        if device is None:
+    def device_is_opened(self):
+        if self.device is None:
             return False
         try:
-            if isinstance(device, cv2.VideoCapture):
-                return device.isOpened()
+            if isinstance(self.device, cv2.VideoCapture):
+                return self.device.isOpened()
             else:
-                state = device.get_state(Gst.CLOCK_TIME_NONE).state
+                state = self.device.get_state(Gst.CLOCK_TIME_NONE).state
                 if state == Gst.State.PLAYING:
                     return True
                 else:
@@ -163,7 +163,7 @@ class BufferedCapture(Process):
             return False
 
 
-    def read(self, device):
+    def read(self):
         '''
         Retrieve frames and timestamp.
         :param device: The video capture device or file.
@@ -173,21 +173,28 @@ class BufferedCapture(Process):
         ret, frame, timestamp = False, None, None
 
         if self.video_file is not None:
-            ret, frame = device.read()
+            ret, frame = self.device.read()
             if ret:
                 timestamp = None # assigned later
         
         else:
             if self.config.force_v4l2 or self.config.force_cv2:
-                ret, frame = device.read()
+                ret, frame = self.device.read()
                 if ret:
                     timestamp = time.time()
             else:
-                sample = device.emit("pull-sample")
+                sample = self.device.emit("pull-sample")
                 if sample:
                     buffer = sample.get_buffer()
                     gst_timestamp_ns = buffer.pts  # GStreamer timestamp in nanoseconds
 
+                    # Validate gst_timestamp_ns to be within a reasonable range 
+                    max_expected_ns = 24 * 60 * 60 * 1e9
+                    if gst_timestamp_ns > max_expected_ns or gst_timestamp_ns <= 0:
+                        # Log this event, handle error, or take corrective action
+                        log.info("Unexpected PTS value: {}.".format(gst_timestamp_ns))
+                        return False, None, None
+                    
                     ret, map_info = buffer.map(Gst.MapFlags.READ)
                     if ret:
                         # If all channels contains colors, or there is only one channel, keep channel(s) 
@@ -270,15 +277,12 @@ class BufferedCapture(Process):
         return self.pipeline.get_by_name("appsink")
 
 
-
     def initVideoDevice(self):
         """ Initialize the video device. """
 
-        device = None
-
         # use a file as the video source
         if self.video_file is not None:
-            device = cv2.VideoCapture(self.video_file)
+            self.device = cv2.VideoCapture(self.video_file)
 
         # Use a device as the video source
         else:
@@ -316,23 +320,23 @@ class BufferedCapture(Process):
 
                     if not ping_success:
                         log.error("Can't ping the camera IP!")
-                        return None
+                        return False
 
                 else:
-                    return None
-
+                    log.error("Can't find the camera IP!")
+                    return False
 
             # Init the video device
             log.info("Initializing the video device...")
             log.info("Device: " + str(self.config.deviceID))
             if self.config.force_v4l2:
                 log.info("Initialize v4l2 Device.")
-                device = cv2.VideoCapture(self.config.deviceID, cv2.CAP_V4L2)
-                device.set(cv2.CAP_PROP_CONVERT_RGB, 0)
+                self.device = cv2.VideoCapture(self.config.deviceID, cv2.CAP_V4L2)
+                self.device.set(cv2.CAP_PROP_CONVERT_RGB, 0)
 
             elif self.config.force_cv2 and not self.config.force_v4l2:
                 log.info("Initialize OpenCV Device.")
-                device = cv2.VideoCapture(self.config.deviceID)
+                self.device = cv2.VideoCapture(self.config.deviceID)
 
             else:
                 try:
@@ -341,10 +345,10 @@ class BufferedCapture(Process):
                     Gst.init(None)
 
                     # Create and start a GStreamer pipeline
-                    device = self.create_gstream_device('BGR')
+                    self.device = self.create_gstream_device('BGR')
 
                     # Determine the shape of the GStream
-                    sample = device.emit("pull-sample")
+                    sample = self.device.emit("pull-sample")
                     buffer = sample.get_buffer()
                     ret, _ = buffer.map(Gst.MapFlags.READ)
                     if ret:
@@ -362,27 +366,55 @@ class BufferedCapture(Process):
                             # Determine the shape based on format
                             if video_format in ['RGB', 'BGR']:
                                 self.frame_shape = (height, width, 3)  # RGB or BGR
-                                ret, frame, _ = self.read(device)
+                                ret, frame, _ = self.read()
 
-                                # If frame is grayscale, stop and restart the pipeline in GRAY8 format
-                                if self.is_grayscale(frame):
-                                    self.convert_to_gray = True
-                                log.info("Video format: {}, {}P, color: {}".format(video_format, height, not self.convert_to_gray))
-                            
+                                if ret:
+                                    # If frame is grayscale, stop and restart the pipeline in GRAY8 format
+                                    if self.is_grayscale(frame):
+                                        self.convert_to_gray = True
+                                    log.info("Video format: {}, {}P, color: {}".format(video_format, height, not self.convert_to_gray))
+
+                                else:
+                                    log.error("Could not determine BGR frame shape.")
+                                    return False
+
                             elif video_format == 'GRAY8':
                                 self.frame_shape = (height, width)  # Grayscale
                                 log.info("Video format: {}, {}P".format(video_format, height))
                                 
                             else:
                                 log.error("Unsupported video format: {}.".format(video_format))
+                                return False
                         else:
                             log.error("Could not determine frame shape.")
+                            return False
                     else:
                         log.error("Could not obtain frame.")
+                        return False
                 except:
                     log.info("Could not initialize GStream. Initialize OpenCV Device instead.")
-                    device = cv2.VideoCapture(self.config.deviceID)
-        return device
+                    self.device = cv2.VideoCapture(self.config.deviceID)
+        return False
+
+
+    def release_resources(self):
+        """Releases resources for GStreamer and OpenCV devices."""
+        if self.pipeline:
+            try:
+                self.pipeline.set_state(Gst.State.NULL)
+                log.info('GStreamer Video device released!')
+            except Exception as e:
+                log.error('Error releasing GStreamer pipeline: {}'.format(e))
+                
+        if self.device:
+            try:
+                if isinstance(self.device, cv2.VideoCapture):
+                    self.device.release()
+                    log.info('OpenCV Video device released!')
+            except Exception as e:
+                log.error('Error releasing OpenCV device: {}'.format(e))
+            finally:
+                self.device = None  # Reset device to None after releasing
 
 
     def run(self):
@@ -390,24 +422,23 @@ class BufferedCapture(Process):
         """
         
         # Init the video device
-        device = self.initVideoDevice()
+        while not self.exit.is_set() and not self.initVideoDevice():
+            log.info('Waiting for the video device to be connect...')
+            time.sleep(5)
 
-
-        if device is None:
+        if self.device is None:
 
             log.info('The video source could not be opened!')
             self.exit.set()
             return False
 
-
         # Wait until the device is opened
         device_opened = False
         for i in range(20):
             time.sleep(1)
-            if self.device_isOpened(device):
+            if self.device_is_opened():
                 device_opened = True
                 break
-
 
         # If the device could not be opened, stop capturing
         if not device_opened:
@@ -422,16 +453,14 @@ class BufferedCapture(Process):
         # Keep track of the total number of frames
         total_frames = 0
 
-
         # For video devices only (not files), throw away the first 10 frames
-        if self.video_file is None and isinstance(device, cv2.VideoCapture):
+        if self.video_file is None and isinstance(self.device, cv2.VideoCapture):
 
             first_skipped_frames = 10
             for i in range(first_skipped_frames):
-                self.read(device)
+                self.read()
 
             total_frames = first_skipped_frames
-
 
         # If a video file was used, set the time of the first frame to the time read from the file name
         if self.video_file is not None:
@@ -444,7 +473,6 @@ class BufferedCapture(Process):
             # Convert the first time to a UNIX timestamp
             video_first_timestamp = (video_first_time - datetime.datetime(1970, 1, 1)).total_seconds()
 
-
         # Use the first frame buffer to start - it will be flip-flopped between the first and the second
         #   buffer during capture, to prevent any data loss
         buffer_one = True
@@ -455,7 +483,6 @@ class BufferedCapture(Process):
         
         # Run until stopped from the outside
         while not self.exit.is_set():
-
 
             # Wait until the compression is done (only when a video file is used)
             if self.video_file is not None:
@@ -474,8 +501,6 @@ class BufferedCapture(Process):
                     time.sleep(0.1)
                     continue
 
-
-
             
             if buffer_one:
                 self.startTime1.value = 0
@@ -488,17 +513,13 @@ class BufferedCapture(Process):
 
                 print('Reconnecting...')
 
-                while not self.exit.is_set():
+                while not self.exit.is_set() and not self.initVideoDevice():
 
                     log.info('Waiting for the video device to be reconnected...')
 
                     time.sleep(5)
 
-                    # Reinit the video device
-                    device = self.initVideoDevice()
-
-
-                    if device is None:
+                    if self.device is None:
                         print("The video device couldn't be connected! Retrying...")
                         continue
 
@@ -508,7 +529,7 @@ class BufferedCapture(Process):
 
                     # Read the frame
                     log.info("Reading frame...")
-                    ret, _, _ = self.read(device)
+                    ret, _, _ = self.read()
                     log.info("Frame read!")
 
                     # If the connection was made and the frame was retrieved, continue with the capture
@@ -538,7 +559,7 @@ class BufferedCapture(Process):
 
                 # Read the frame (keep track how long it took to grab it)
                 t1_frame = time.time()
-                ret, frame, frame_timestamp = self.read(device)
+                ret, frame, frame_timestamp = self.read()
                 t_frame = time.time() - t1_frame
 
 
@@ -546,7 +567,7 @@ class BufferedCapture(Process):
                 if (self.video_file is None) and (not ret):
 
                     log.info('Frame grabbing failed, video device is probably disconnected!')
-
+                    self.release_resources()
                     wait_for_reconnect = True
                     break
 
@@ -572,12 +593,12 @@ class BufferedCapture(Process):
 
                 # If the end of the video file was reached, stop the capture
                 if self.video_file is not None: 
-                    if (frame is None) or (not device.isOpened()):
+                    if (frame is None) or (not self.device_is_opened()):
 
                         log.info("End of video file!")
                         log.debug("Video end status:")
                         log.debug("Frame:" + str(frame))
-                        log.debug("Device open:" + str(device.isOpened()))
+                        log.debug("Device open:" + str(self.device_is_opened()))
 
                         self.exit.set()
                         time.sleep(0.1)
@@ -623,8 +644,6 @@ class BufferedCapture(Process):
 
                 last_frame_timestamp = frame_timestamp
                 
-
-
 
                 ### Convert the frame to grayscale ###
 
@@ -681,8 +700,6 @@ class BufferedCapture(Process):
                 total_frames += 1
 
 
-
-
             if self.exit.is_set():
                 wait_for_reconnect = False
                 log.info('Capture exited!')
@@ -709,20 +726,4 @@ class BufferedCapture(Process):
         
 
         log.info('Releasing video device...')
-
-        # Check if using GStreamer and release resources
-        if hasattr(self, 'pipeline') and self.pipeline:
-            try:
-                self.pipeline.set_state(Gst.State.NULL)
-                log.info('GStreamer Video device released!')
-            except Exception as e:
-                log.error('Error releasing GStreamer pipeline: {}'.format(e))
-
-        # Check if using OpenCV and release resources
-        if 'device' in locals() and device:
-            try:
-                if isinstance(device, cv2.VideoCapture):
-                    device.release()
-                    log.info('OpenCV Video device released!')
-            except Exception as e:
-                log.error('Error releasing OpenCV device: {}'.format(e))    
+        self.release_resources()
