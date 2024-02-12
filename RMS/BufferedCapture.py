@@ -394,7 +394,7 @@ class BufferedCapture(Process):
                 except:
                     log.info("Could not initialize GStream. Initialize OpenCV Device instead.")
                     self.device = cv2.VideoCapture(self.config.deviceID)
-        return False
+        return True
 
 
     def release_resources(self):
@@ -636,11 +636,11 @@ class BufferedCapture(Process):
                 if i == block_frames - 1:
                     # For cv2, show elapsed time since frame read to assess loop performance
                     if self.config.force_v4l2 or self.config.force_cv2:
-                        log.info("Cycle max frame interval: {:.3f} (normalized). Run late frames: {}".format(max_frame_interval_normalized, self.dropped_frames.value))
+                        log.info("Block's max frame interval: {:.3f} (normalized). Run's late frames: {}".format(max_frame_interval_normalized, self.dropped_frames.value))
                     
                     # For GStreamer, show elapsed time since frame capture to assess sink fill level
                     else:
-                        log.info("Cycle max frame age: {:.3f} seconds. Run dropped frames: {}".format(max_frame_age_seconds, self.dropped_frames.value))
+                        log.info("Block's max frame age: {:.3f} seconds. Run's dropped frames: {}".format(max_frame_age_seconds, self.dropped_frames.value))
 
                 last_frame_timestamp = frame_timestamp
                 
