@@ -33,7 +33,7 @@ import datetime
 from glob import glob
 from Utils.ShowerAssociation import showerAssociation
 from RMS.Formats.FTPdetectinfo import validDefaultFTPdetectinfo
-
+from RMS.Astrometry.Conversions import datetime2JD
 
 def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=None, hide=False,
         avg_background=False, split=False, add_timestamp=False, add_frame_number=False, append_ff_to_video=False,
@@ -80,14 +80,21 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
         img_size = max(y_size, x_size)
 
         background = np.zeros((img_size, img_size), np.uint8)
+        add_timestamp = False
+        add_shower_name = False
 
     else:
+        ff_file = FFfile.read(dir_path, ff_path)
         if avg_background:
-            background = FFfile.read(dir_path, ff_path).avepixel
+            background = ff_file.avepixel
         else:
-            background = FFfile.read(dir_path, ff_path).maxpixel
+            background = ff_file.maxpixel
         if append_ff_to_video:
-            meteor_image = FFfile.read(dir_path, ff_path).maxpixel
+            meteor_image = ff_file.maxpixel
+        timestampTitle = ""
+        if add_timestamp:
+            timestampTitle = getTimestampTitle(ff_path)
+
 
     print("Number of lines:", fr.lines)
     
@@ -140,9 +147,13 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
 
         # Track the first frame
         first_frame = np.inf
+        # calculate shower name
+        showerNameTitle = ""
+        if add_shower_name:
+            showerNameTitle = getMeteorShowerTitle(video, fr, ff_path, associations, config.fps)
 
-        for frame in video:        
-        
+        for frame in video:
+
             img = np.copy(background)
 
             for current_line, z in frame:
@@ -186,10 +197,10 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
 
             # Add timestamp
             if add_timestamp:
-                addTimestampToImage(img, fr_path)
+                addTimestampToImage(img, timestampTitle)
             # Add meteor shower name
-            if add_shower_name and ff_path is not None:
-                addShowerNameToImage(img, ff_path, associations)
+            if add_shower_name:
+                addShowerNameToImage(img, showerNameTitle)
 
             # Save frame to disk
             if save_frames or makevideo:
@@ -250,8 +261,8 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
             if append_ff_to_video and ff_path is not None:
                 # add duration of 1.5 sec
                 frameCount = int(config.fps * 1.5)
-                saveFramesForMeteorImage(meteor_image, ff_path, fr_path, add_timestamp, t, frameCount, video_num,
-                                         extract_format, framefiles, dir_path, add_shower_name, associations)
+                saveFramesForMeteorImage(meteor_image, fr_path, add_timestamp, t, frameCount, video_num,
+                                         extract_format, framefiles, dir_path, add_shower_name, timestampTitle, showerNameTitle)
 
             root = os.path.dirname(__file__)
             ffmpeg_path = os.path.join(root, "ffmpeg.exe")
@@ -293,15 +304,15 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
         cv2.destroyWindow(name)
 
 
-def saveFramesForMeteorImage(meteorImage, imagePath, frPath, addTimestamp, lastFrameNumber, frameCount, videoNumber,
+def saveFramesForMeteorImage(meteorImage, frPath, addTimestamp, lastFrameNumber, frameCount, videoNumber,
                              format,
-                             frameFiles, folder, addShowerName, associations):
+                             frameFiles, folder, addShowerName, timestampTitle, showerNameTitle):
     # Add timestamp
     if addTimestamp:
-        addTimestampToImage(meteorImage, imagePath)
-        # Add meteor shower name
+        addTimestampToImage(meteorImage, timestampTitle)
+    # Add meteor shower name
     if addShowerName:
-        addShowerNameToImage(meteorImage, imagePath, associations)
+        addShowerNameToImage(meteorImage, showerNameTitle)
     # append frames for 1.5 second
     for frameNumber in range(frameCount):
         frameFileName = frPath.replace('.bin', '') \
@@ -311,24 +322,47 @@ def saveFramesForMeteorImage(meteorImage, imagePath, frPath, addTimestamp, lastF
         frameFiles.append(frameFileName)
 
 
-def addTimestampToImage(image, filePath):
-    title = getTimestampTitle(filePath)
+def addTimestampToImage(image, title):
     height = image.shape[0]
     addTextToImage(image, title, 15, height - 20)
 
 
-def addShowerNameToImage(image, filePath, associations):
-    fileName = os.path.basename(filePath)
-    if (fileName, 1.0) in associations:
-        shower = associations[(fileName, 1.0)][1]
-        if shower is not None:
-            title = "Meteor shower : [{:s}] - {:s}".format(shower.name, shower.name_full)
-        else:
-            title = "Meteor shower : Sporadic"
-    else:
-        title = "Meteor shower : Unknown"
+def addShowerNameToImage(image, title):
     height = image.shape[0]
     addTextToImage(image, title, 320, height - 20)
+
+
+def getMeteorShowerTitle(video, frFile, ffPath, associations, fps):
+    frFrameTimeStart, frFrameTimeEnd = getVideoStartAndEndTime(video, frFile, ffPath, fps)
+    fileName = os.path.basename(ffPath)
+    meteorsForFile = [key for key in associations if key[0].startswith(fileName)]
+    title = "Meteor shower : Unknown"
+    for meteor in meteorsForFile:
+        frameTimes = associations[meteor][0].jd_array
+        meteorTimeStart = frameTimes[0]
+        meteorTimeEnd = frameTimes[-1]
+        # meteor time should be inside video time
+        if meteorTimeStart >= frFrameTimeStart and meteorTimeEnd <= frFrameTimeEnd:
+            shower = associations[meteor][1]
+            if shower is not None:
+                title = "Meteor shower : [{:s}] - {:s}".format(shower.name, shower.name_full)
+            else:
+                title = "Meteor shower : Sporadic"
+            break
+
+    return title
+
+
+def getVideoStartAndEndTime(video, frFile, ffPath, fps):
+    video_line = video[0][0][0]
+    frStartFrame = frFile.t[video_line][0]
+    frEndFrame = frFile.t[video_line][-1]
+    frDate = FFfile.filenameToDatetime(ffPath)
+    # calculate time of min and max frame
+    frFrameTimeStart = datetime2JD(frDate + datetime.timedelta(seconds=float(frStartFrame)/fps))
+    frFrameTimeEnd = datetime2JD(frDate + datetime.timedelta(seconds=float(frEndFrame)/fps))
+
+    return frFrameTimeStart, frFrameTimeEnd
 
 
 def addTextToImage(image, title, x, y):
@@ -354,12 +388,12 @@ def resizeImageIfNeed(image, width=1280):
     else:
         return image
 
-def getTimestampTitle(fr_path):
-    _, fname = os.path.split(fr_path)
-    splits = fname.split('_')
-    dtstr = splits[2] + '_' + splits[3] + '.' + splits[4]
-    imgdt = datetime.datetime.strptime(dtstr, '%Y%m%d_%H%M%S.%f')
-    return splits[1] + ' ' + imgdt.strftime('%Y-%m-%d %H:%M:%S UTC')
+
+def getTimestampTitle(ff_path):
+    fileName = os.path.basename(ff_path)
+    stationName = fileName.split('_')[1]
+    timestampt = FFfile.filenameToDatetime(fileName)
+    return stationName + ' ' + timestampt.strftime('%Y-%m-%d %H:%M:%S UTC')
 
 
 def loadShowerAssociations(folder, configuration):
