@@ -333,16 +333,23 @@ def addShowerNameToImage(image, title):
 
 
 def getMeteorShowerTitle(video, frFile, ffPath, associations, fps):
+    title = "Meteor shower : Unknown"
+    # use time offset 100mls (~2 frames) in case if video capture started later or sopped earlier
+    mls = 100
+    # convert seconds to days
+    timeOffset = mls/1000/(24*60*60)
+    # get start and end time of video
     frFrameTimeStart, frFrameTimeEnd = getVideoStartAndEndTime(video, frFile, ffPath, fps)
+    # get all available meteors for current FF file
     fileName = os.path.basename(ffPath)
     meteorsForFile = [key for key in associations if key[0].startswith(fileName)]
-    title = "Meteor shower : Unknown"
+    # search first suitable by time range
     for meteor in meteorsForFile:
         frameTimes = associations[meteor][0].jd_array
         meteorTimeStart = frameTimes[0]
         meteorTimeEnd = frameTimes[-1]
-        # meteor time should be inside video time
-        if meteorTimeStart >= frFrameTimeStart and meteorTimeEnd <= frFrameTimeEnd:
+        # meteor time should be inside video time +- 100 mls for error
+        if meteorTimeStart >= frFrameTimeStart - timeOffset and meteorTimeEnd <= frFrameTimeEnd + timeOffset:
             shower = associations[meteor][1]
             if shower is not None:
                 title = "Meteor shower : [{:s}] - {:s}".format(shower.name, shower.name_full)
