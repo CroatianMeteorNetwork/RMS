@@ -90,7 +90,7 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
         else:
             background = ff_file.maxpixel
         if append_ff_to_video:
-            meteor_image = ff_file.maxpixel
+            meteor_image = np.copy(ff_file.maxpixel)
         timestampTitle = ""
         if add_timestamp:
             timestampTitle = getTimestampTitle(ff_path)
