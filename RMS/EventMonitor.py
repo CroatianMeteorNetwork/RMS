@@ -860,6 +860,11 @@ class EventMonitor(multiprocessing.Process):
         """
 
         log.error("Attempting to recover from database error")
+        if self.delEventMonitorDB():
+            log.warning("Deleted EventMonitor database at {}".format(self.event_monitor_db_path))
+        else:
+            log.warning("No EventMonitor database found at {}".format(self.event_monitor_db_path))
+        time.sleep(20)
         self.createDB()
         log.info("Database recovered")
 
