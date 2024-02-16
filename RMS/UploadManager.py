@@ -109,7 +109,7 @@ def existsRemoteDirectory(sftp,path):
         else:
             return False
     except:
-        log.error("Failure to check that directory {} exists".format(path))
+        log.error("Failure whilst checking that directory {} exists".format(path))
         return False
 
 def createRemoteDirectory(sftp,path):
@@ -408,6 +408,10 @@ class UploadManager(multiprocessing.Process):
 
             # Get a file from the queue
             file_name = self.file_queue.get()
+            if not os.path.isfile(file_name):
+                log.warning("Local file not found: {:s}".format(file_name))
+                log.warning("Skipping it...")
+                continue
 
             # Separate the path to the file and the file name
             data_path, f_name = os.path.split(file_name)

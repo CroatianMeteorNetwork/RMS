@@ -18,12 +18,12 @@ liblapack-dev at-spi2-core libopencv-dev libffi-dev libssl-dev socat ntp \
 libxml2-dev libxslt-dev imagemagick ffmpeg cmake unzip
 
 sudo pip3 install --upgrade pip
-sudo pip3 install virtualenv
+sudo apt install python3-virtualenv
 cd ~
 virtualenv vRMS
 source ~/vRMS/bin/activate
 pip install -U pip setuptools
-pip install numpy
+pip install numpy==1.23.5
 pip install Pillow
 pip install gitpython cython pyephem astropy 
 pip install scipy==1.8.1
