@@ -150,7 +150,7 @@ def reduceTimeGaps(file_list, captured_path, max_time_between_fits = 900):
             final_fits_count += 1
 
     log.info("Intervals before / after including extra files {} / {} seconds".format(initial_max_interval, final_max_interval))
-    log.info("Original / added / final fits file count {} /  {} / {}".format(original_fits_list_length, len(target_time_list), final_fits_count))
+    log.info("Original / added / final fits file count {} / {} / {}".format(original_fits_list_length, len(target_time_list), final_fits_count))
 
 
     return file_list
