@@ -41,6 +41,7 @@ def reduceTimeGaps(file_list, captured_path, max_time_between_fits = 900):
 
     if max_time_between_fits < minimum_time_between_fits:
         log.warning("Setting max_time_between_fits to {} seconds is less than coded minimum of {} seconds".format(max_time_between_fits, minimum_time_between_fits))
+        max_time_between_fits = minimum_time_between_fits
     log.info("max_time_between_fits is set to {} seconds".format(max_time_between_fits))
 
     # make a list of only fits files, sorted by time
