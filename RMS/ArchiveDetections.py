@@ -68,13 +68,9 @@ def reduceTimeGaps(file_list, captured_path, max_time_between_fits = 900):
     original_fits_list_length = len(fits_list)
 
     first_captured_fits_file = os.path.basename(captured_fits_list[0])
-    log.info("First fits file : {}".format(first_captured_fits_file))
     time_previous_fits_file = RMS.Formats.FFfile.filenameToDatetime(first_captured_fits_file)
-    log.info("Time of first file {}".format(time_previous_fits_file))
     final_captured_fits_file = os.path.basename(captured_fits_list[-1])
-    log.info("Final fits file : {}".format(final_captured_fits_file))
     time_final_fits_file = RMS.Formats.FFfile.filenameToDatetime(final_captured_fits_file)
-    log.info("Time of final file {}".format(time_final_fits_file))
 
     # add the final captured file to the fits list
     fits_list.append(final_captured_fits_file)
@@ -122,7 +118,6 @@ def reduceTimeGaps(file_list, captured_path, max_time_between_fits = 900):
     for target_time in target_time_list:
         for fits_file in captured_fits_list:
             if RMS.Formats.FFfile.filenameToDatetime(os.path.basename(fits_file)) > target_time:
-                log.info("Adding {} to the files to be uploaded".format(fits_file))
                 file_list.append(os.path.basename(fits_file))
                 break
 
