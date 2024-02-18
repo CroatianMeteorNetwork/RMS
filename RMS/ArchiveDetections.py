@@ -136,8 +136,8 @@ def reduceTimeGaps(file_list, captured_path, max_time_between_fits = 900):
 
     log.info("Maximum interval before including extra files was {} seconds".format(initial_max_interval))
     log.info("Maximum interval after including {} extra files is {} seconds".format(len(target_time_list),final_max_interval))
-    log.info("Original fits file count {}".format(original_fits_list_length))
-    log.info("Final fits file count    {}".format(final_fits_count))
+    log.info("Original / final fits file count {}/{}".format(original_fits_list_length, final_fits_count))
+
 
     return file_list
 
@@ -366,10 +366,10 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         log.error("".join(traceback.format_exception(*sys.exc_info())))
 
     if config.upload_mode == 1:
-        try:
+        #try:
             file_list = reduceTimeGaps(file_list, captured_path, config.max_time_between_fits)
-        except:
-            log.warning("Could not reduce time gaps")
+        #except:
+        #   log.warning("Could not reduce time gaps")
 
     if file_list:
 
