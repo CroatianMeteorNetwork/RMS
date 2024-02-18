@@ -73,6 +73,7 @@ def reduceTimeGaps(file_list, captured_path, max_time_between_fits = 900):
     time_final_fits_file = RMS.Formats.FFfile.filenameToDatetime(final_captured_fits_file)
 
     # add the final captured file to the fits list
+    log.info("Adding final captured fits file {}".format(final_captured_fits_file))
     fits_list.append(final_captured_fits_file)
 
     target_time_list = []
