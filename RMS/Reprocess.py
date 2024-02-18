@@ -449,7 +449,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     # If FFs are not uploaded, choose two to upload
     if config.upload_mode > 1:
     
-        # If all FF files are not uploaded, add two FF files which were successfuly recalibrated
+        # If all FF files are not uploaded, add two FF files which were successfully recalibrated
         recalibrated_ffs = []
         for ff_name in recalibrated_platepars:
 
