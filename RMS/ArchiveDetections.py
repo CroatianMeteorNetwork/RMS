@@ -381,10 +381,10 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         log.error("".join(traceback.format_exception(*sys.exc_info())))
 
     if config.upload_mode == 1:
-        #try:
+        try:
             file_list = reduceTimeGaps(file_list, captured_path, config.max_time_between_fits)
-        #except:
-        #   log.warning("Could not reduce time gaps")
+        except:
+            log.warning("Could not reduce time gaps")
 
     if file_list:
 
