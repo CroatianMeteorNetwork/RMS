@@ -119,9 +119,9 @@ def reduceTimeGaps(file_list, captured_path, max_time_between_fits = 900):
             if files_added == 0:
                 log.warning("Loop did not execute with input values of")
                 log.warning("time_of_this_fits_file {}".format(time_of_this_fits_file))
-                log.warning("time_elapsed".format(time_elapsed))
-                log.warning("number_of_additional_fits_files".format(number_of_additional_files))
-                log.warning("interval_seconds".format(interval_seconds))
+                log.warning("time_elapsed {}".format(time_elapsed))
+                log.warning("number_of_additional_fits_files {}".format(number_of_additional_files))
+                log.warning("interval_seconds {}".format(interval_seconds))
 
             # the time of the previous fits file is the time of the file we are going to add
             time_previous_fits_file = target_time
