@@ -364,6 +364,8 @@ class Config:
         # 1 - Normal, 2 - Skip uploading FFs, 3 - Skip FFs and FRs
         self.upload_mode = 1
 
+        self.max_time_between_fits = 3600
+
         self.event_monitor_enabled = True
         self.event_monitor_db_name = "event_monitor.db"
         self.event_monitor_webpage = "https://globalmeteornetwork.org/events/event_watchlist.txt"
@@ -1042,9 +1044,13 @@ def parseUpload(config, parser):
     if parser.has_option(section, "remote_dir"):
         config.remote_dir = parser.get(section, "remote_dir")
 
-    # SSH port
+    # Upload mode
     if parser.has_option(section, "upload_mode"):
         config.upload_mode = parser.getint(section, "upload_mode")
+
+    # Max time between fits
+    if parser.has_option(section, "max_time_between_fits"):
+        config.max_time_between_fits = parser.getint(section, "max_time_between_fits")
 
     # Event monitor enabled
     if parser.has_option(section, "event_monitor_enabled"):

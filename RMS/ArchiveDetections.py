@@ -37,7 +37,11 @@ def reduceTimeGaps(file_list, captured_path, max_time_between_fits = 900):
 
 
     fits_list = []
+    minimum_time_between_fits = 900
 
+    if max_time_between_fits < minimum_time_between_fits:
+        log.warning("Setting max_time_between_fits to {} seconds is less than coded minimum of {} seconds".format(max_time_between_fits, minimum_time_between_fits))
+    log.info("max_time_between_fits is set to {} seconds".format(max_time_between_fits))
 
     # make a list of only fits files, sorted by time
     for path_file_to_check in file_list:
@@ -367,7 +371,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
     if config.upload_mode == 1:
         try:
-            file_list = reduceTimeGaps(file_list, captured_path)
+            file_list = reduceTimeGaps(file_list, captured_path, config.max_time_between_fits)
         except:
             log.warning("Could not reduce time gaps")
 
