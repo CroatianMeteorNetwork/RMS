@@ -99,7 +99,7 @@ def reduceTimeGaps(file_list, captured_path, max_time_between_fits = 900):
             # work out how many intervals there are
             number_of_additional_files = time_elapsed // max_time_between_fits
             # how long is the interval, make 1 second shorter so that we will always add at least one file at middle
-            # of interval, for proteciton against edge case
+            # of interval, for protection against edge case
             interval_seconds = int(time_elapsed // (number_of_additional_files+1) -1)
 
             # iterate across this interval, missing the first - because that fits file is already in place
