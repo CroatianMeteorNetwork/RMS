@@ -31,7 +31,7 @@ def reduceTimeGaps(file_list, captured_path, max_time_between_fits = 900):
         max_time_between_fits: [int] maximum time between two fits files default 900 seconds.
 
     Return:
-         file_list: [list] The original list of files augmented by fits files to reduce the gap.
+         file_list: [list] The original list of files augmented by fits files to reduce the gaps.
 
     """
 
