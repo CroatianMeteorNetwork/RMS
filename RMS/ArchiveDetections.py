@@ -99,10 +99,13 @@ def reduceTimeGaps(file_list, captured_path, max_time_between_fits = 900):
             # work out how many intervals there are
             number_of_additional_files = time_elapsed // max_time_between_fits
             # how long is this interval
-            interval_seconds = int(time_elapsed // (number_of_additional_files + 1))
+            interval_seconds = int(time_elapsed // (number_of_additional_files+1))
 
             # iterate across this interval, missing the first - because that fits file is already in place
             # and add target times for fits files to find
+            print("Interval seconds {}".format(interval_seconds))
+            print("Time elapsed     {}".format(time_elapsed))
+
             for offset in range(interval_seconds,time_elapsed - interval_seconds,interval_seconds):
                 target_time = time_previous_fits_file + datetime.timedelta(seconds = offset)
                 target_time_list.append(target_time)
