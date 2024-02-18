@@ -104,8 +104,6 @@ def reduceTimeGaps(file_list, captured_path, max_time_between_fits = 900):
 
             # iterate across this interval, missing the first - because that fits file is already in place
             # and add target times for fits files to find
-            print("Interval seconds {}".format(interval_seconds))
-            print("Time elapsed     {}".format(time_elapsed))
 
             # intialise target_time for edge case protection
             target_time = time_previous_fits_file + datetime.timedelta(seconds=interval_seconds)
