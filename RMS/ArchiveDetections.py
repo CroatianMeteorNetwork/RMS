@@ -49,7 +49,7 @@ def reduceTimeGaps(file_list, captured_path, max_time_between_fits = 900):
         file_to_check = os.path.basename(path_file_to_check)
         if file_to_check.endswith('.fits'):
             fits_list.append(file_to_check)
-            log.info("{}".format(os.path.basename(file_to_check)))
+            # log.info("Adding {}".format(os.path.basename(file_to_check)))
     fits_list.sort()
 
     # get a list of all the fits files that are available in the captured files directory, and sort
