@@ -240,4 +240,4 @@ if __name__ == "__main__":
         if len(ftps) == 0:
             print('no usable ftpdetect file present')
         else:
-            generateMP4s(dir_path, ftps[0], shower_code=cml_args.shower, min_mag=cml_args.minmag, config=config)
+            generateMP4s(dir_path, os.path.basename(ftps[0]), shower_code=cml_args.shower, min_mag=cml_args.minmag, config=config)
