@@ -54,7 +54,7 @@ def reduceTimeGaps(file_list, captured_path, max_time_between_fits = 900):
 
     log.info("Initial files in fits_list")
     for file in fits_list:
-        print(file)
+        log.info(file)
 
     # get a list of all the fits files that are available in the captured files directory, and sort
     captured_fits_list = glob(os.path.join(captured_path,"*.fits"))
@@ -82,7 +82,7 @@ def reduceTimeGaps(file_list, captured_path, max_time_between_fits = 900):
 
     log.info("Files in fits_list after adding final fits file from captured directory")
     for file in fits_list:
-        print(file)
+        log.info(file)
 
     target_time_list = []
 
@@ -160,8 +160,8 @@ def reduceTimeGaps(file_list, captured_path, max_time_between_fits = 900):
             final_fits_count += 1
 
     log.info("Final files in fits_list")
-    for file in fits_list:
-        print(file)
+    for file in file_list:
+        log.info(file)
 
 
     log.info("Intervals before / after including extra files {} / {} seconds".format(initial_max_interval, final_max_interval))
