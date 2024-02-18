@@ -77,12 +77,12 @@ def reduceTimeGaps(file_list, captured_path, max_time_between_fits = 900):
     time_final_fits_file = RMS.Formats.FFfile.filenameToDatetime(final_captured_fits_file)
 
     # add the final captured file to the fits list
-    log.info("Adding final captured fits file {}".format(final_captured_fits_file))
+    #log.info("Adding final captured fits file {}".format(final_captured_fits_file))
     fits_list.append(final_captured_fits_file)
 
-    log.info("Files in fits_list after adding final fits file from captured directory")
-    for file in fits_list:
-        log.info(file)
+    #log.info("Files in fits_list after adding final fits file from captured directory")
+    #for file in fits_list:
+    #    log.info(file)
 
     target_time_list = []
 
@@ -137,13 +137,13 @@ def reduceTimeGaps(file_list, captured_path, max_time_between_fits = 900):
             # otherwise the time of the previous fits file is the time of this file
             time_previous_fits_file = time_of_this_fits_file
 
-    log.info("Adding fits files")
+    #log.info("Adding fits files")
     # find files immediately after the target times - the intervals will not be perfect
     for target_time in target_time_list:
         for fits_file in captured_fits_list:
             if RMS.Formats.FFfile.filenameToDatetime(os.path.basename(fits_file)) > target_time:
                 file_list.append(os.path.basename(fits_file))
-                log.info(os.path.basename(fits_file))
+                #log.info(os.path.basename(fits_file))
                 break
 
     file_list.sort()
@@ -159,9 +159,9 @@ def reduceTimeGaps(file_list, captured_path, max_time_between_fits = 900):
             last_time = RMS.Formats.FFfile.filenameToDatetime(os.path.basename(file))
             final_fits_count += 1
 
-    log.info("Final files in fits_list")
-    for file in file_list:
-        log.info(file)
+    #log.info("Final files in fits_list")
+    #for file in file_list:
+    #    log.info(file)
 
 
     log.info("Intervals before / after including extra files {} / {} seconds".format(initial_max_interval, final_max_interval))
