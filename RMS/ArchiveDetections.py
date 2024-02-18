@@ -106,9 +106,22 @@ def reduceTimeGaps(file_list, captured_path, max_time_between_fits = 900):
             print("Interval seconds {}".format(interval_seconds))
             print("Time elapsed     {}".format(time_elapsed))
 
+            # intialise target_time for safety
+            target_time = time_previous_fits_file + datetime.timedelta(seconds=interval_seconds)
+
+            # in case some edge case prevents this loop from executing
+            files_added = 0
             for offset in range(interval_seconds,time_elapsed - interval_seconds,interval_seconds):
                 target_time = time_previous_fits_file + datetime.timedelta(seconds = offset)
                 target_time_list.append(target_time)
+                files_added += 1
+
+            if files_added == 0:
+                log.warning("Loop did not execute with input values of")
+                log.warning("time_of_this_fits_file {}".format(time_of_this_fits_file))
+                log.warning("time_elapsed".format(time_elapsed))
+                log.warning("number_of_additional_fits_files".format(number_of_additional_files))
+                log.warning("interval_seconds".format(interval_seconds))
 
             # the time of the previous fits file is the time of the file we are going to add
             time_previous_fits_file = target_time
