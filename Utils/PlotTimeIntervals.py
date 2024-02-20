@@ -6,6 +6,8 @@ If fps is not provided, the default value of 25 is used.
 
 """
 
+from __future__ import print_function, division, absolute_import
+
 import os
 import argparse
 import tarfile
