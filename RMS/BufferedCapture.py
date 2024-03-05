@@ -72,6 +72,7 @@ class BufferedCapture(Process):
         self.startTime2.value = 0
         
         self.config = config
+        self.media_backend_override = False
 
         self.video_file = video_file
 
@@ -85,6 +86,16 @@ class BufferedCapture(Process):
         self.frame_shape = None
         self.convert_to_gray = False
         
+        # Smoothing parameters
+        self.n = 0
+        self.sum_x = 0
+        self.sum_y = 0
+        self.sum_xx = 0
+        self.sum_xy = 0
+        self.lowest_point = None
+        self.adjusted_b = None
+        
+
         # TIMESTAMP LATENCY
         #
         # Experimentally establish device_buffer and device_latency
@@ -102,9 +113,9 @@ class BufferedCapture(Process):
 
         self.device_buffer = 1 # Experimentally measured buffer size (does not set the buffer)
         if self.config.height == 1080:
-            self.system_latency = 0.02 # seconds. Experimentally measured latency
+            self.system_latency = 0.055 # seconds. Experimentally measured latency
         else:
-            self.system_latency = 0.01 # seconds. Experimentally measured latency
+            self.system_latency = 0.045 # seconds. Experimentally measured latency
         self.total_latency = self.device_buffer / self.config.fps + (self.config.fps - 5) / 2000 + self.system_latency
     
 
@@ -147,20 +158,100 @@ class BufferedCapture(Process):
 
 
     def device_is_opened(self):
+        """ Return True if media backend is opened.
+        """
+
         if self.device is None:
             return False
+        
         try:
+            # OpenCV
             if isinstance(self.device, cv2.VideoCapture):
                 return self.device.isOpened()
+            
+             # GStreamer
             else:
                 state = self.device.get_state(Gst.CLOCK_TIME_NONE).state
                 if state == Gst.State.PLAYING:
                     return True
                 else:
                     return False
+                
         except Exception as e:
             log.error('Error checking device status: {}'.format(e))
             return False
+
+
+    def add_pts_point(self, y):
+        """ Add pts and perform an online linear regression on pts.
+            smoothed_pts = m * frame_count + b
+            Adjust b so that the line passes through the earliest frame.
+        """
+        self.n += 1
+        x = self.n
+        self.sum_x += x
+        self.sum_y += y
+        self.sum_xx += x * x
+        self.sum_xy += x * y
+
+        # Update regression parameters
+        m, b = self.calculate_pts_regression_params()
+
+        # Check if this is the first point or if it's the new lowest point
+        if self.n < 10:
+            pass
+        elif self.lowest_point is None or y - (m * x + b) < self.lowest_point[2]:
+            self.lowest_point = (x, y, y - (m * x + b))
+            # Adjust b using the lowest point
+            self.adjusted_b = y - m * x
+    
+
+    def calculate_pts_regression_params(self):
+        """ Perform an online linear regression on pts.
+            smoothed_pts = m * frame_count + b
+            Returns slope m (ns per frame) and a b such that the line passes through the 
+            earliest frame.
+        """
+        if self.n > 1:
+            m = (self.n * self.sum_xy - self.sum_x * self.sum_y) / (self.n * self.sum_xx - self.sum_x ** 2)
+            b = (self.sum_y - m * self.sum_x) / self.n
+        else:
+            m, b = 0, self.sum_y if self.n else 0  # Handle case with <= 1 point
+
+        return m, self.adjusted_b if self.adjusted_b is not None else b
+
+
+
+    def smooth_pts(self, new_pts):        
+
+        # Calulate linear regression params
+        self.add_pts_point(new_pts)
+        m, b = self.calculate_pts_regression_params()
+
+        # On initial run or after a reset
+        if self.n == 1:
+            smoothed_pts = new_pts
+
+        # Calculate smoothed pts from regression parameters
+        else:
+            smoothed_pts = m * self.n + b
+
+            # Reset regression on dropped frame (raw pts is more than 1 frame late)
+            if new_pts - smoothed_pts > m:
+                self.n = 0
+                self.sum_x = 0
+                self.sum_y = 0
+                self.sum_xx = 0
+                self.sum_xy = 0
+                self.lowest_point = None
+                self.adjusted_b = None
+                log.error('smooth_pts detected dropped frame. Resetting regression parameters.')
+                return new_pts
+        
+            sys.stdout.write(f"\r Frame count: {self.n}, average fps: {1e9/m:.6f} ms, delta: {(smoothed_pts - new_pts) / 1e6:.3f} ms")
+            sys.stdout.flush()
+
+        return smoothed_pts
 
 
     def read(self):
@@ -172,51 +263,58 @@ class BufferedCapture(Process):
         '''
         ret, frame, timestamp = False, None, None
 
+        # Read Video file frame
         if self.video_file is not None:
             ret, frame = self.device.read()
             if ret:
                 timestamp = None # assigned later
         
+        # Read capture device frame
         else:
-            if self.config.force_v4l2 or self.config.force_cv2:
+            # GStreamer
+            if self.config.media_backend == 'gst' and not self.media_backend_override:
+                sample = self.device.emit("pull-sample")
+                if not sample:
+                    log.info("Gst device did not emit a sample.")
+                    return False, None, None
+
+                buffer = sample.get_buffer()
+                gst_timestamp_ns = buffer.pts  # GStreamer timestamp in nanoseconds
+
+                # Sanity check for pts value
+                max_expected_ns = 24 * 60 * 60 * 1e9  # 24 hours in nanoseconds
+                if not (0 < gst_timestamp_ns <= max_expected_ns):
+                    log.info("Unexpected PTS value: {}.".format(gst_timestamp_ns))
+                    return False, None, None
+
+                ret, map_info = buffer.map(Gst.MapFlags.READ)
+                if not ret:
+                    log.info("Gst Buffer did not contain a frame.")
+                    return False, None, None
+
+                # Handling for grayscale conversion
+                frame = self.handle_grayscale_conversion(map_info)
+
+                # Smooth raw timestamp and calculate actual timestamp
+                smoothed_pts = self.smooth_pts(gst_timestamp_ns)
+                timestamp = self.start_timestamp + (smoothed_pts / 1e9)
+
+                buffer.unmap(map_info)
+        
+            # OpenCV
+            else:
                 ret, frame = self.device.read()
                 if ret:
                     timestamp = time.time()
-            else:
-                sample = self.device.emit("pull-sample")
-                if sample:
-                    buffer = sample.get_buffer()
-                    gst_timestamp_ns = buffer.pts  # GStreamer timestamp in nanoseconds
-
-                    # Validate gst_timestamp_ns to be within a reasonable range 
-                    max_expected_ns = 24 * 60 * 60 * 1e9
-                    if gst_timestamp_ns > max_expected_ns or gst_timestamp_ns <= 0:
-                        # Log this event, handle error, or take corrective action
-                        log.info("Unexpected PTS value: {}.".format(gst_timestamp_ns))
-                        return False, None, None
-                    
-                    ret, map_info = buffer.map(Gst.MapFlags.READ)
-                    if ret:
-                        # If all channels contains colors, or there is only one channel, keep channel(s) 
-                        if not self.convert_to_gray:
-                            frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
-
-                        # If channels contains no colors, discard two channels
-                        else:
-                            bgr_frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
-                            
-                            # select a specific channel
-                            gray_frame = bgr_frame[:, :, 0]
-                                                        
-                            frame = gray_frame
-
-                        buffer.unmap(map_info)
-                        timestamp = self.start_timestamp + (gst_timestamp_ns / 1e9)
                 
         return ret, frame, timestamp
 
 
     def extract_rtsp_url(self, input_string):
+        '''
+        Return validated camera url
+        '''
+
         # Define the regular expression pattern
         pattern = r'(rtsp://.*?\.sdp)/?'
 
@@ -234,11 +332,26 @@ class BufferedCapture(Process):
             
 
     def is_grayscale(self, frame):
+        '''
+        Return True if all color channels contain identical data
+        '''
+
         # Check if the R, G, and B channels are equal
         b, g, r = cv2.split(frame)
         if np.array_equal(r, g) and np.array_equal(g, b):
             return True
         return False
+
+    
+    def handle_grayscale_conversion(self, map_info):
+        """Handle conversion of frame to grayscale if necessary."""
+        if not self.convert_to_gray:
+            return np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
+
+        # Convert to grayscale by selecting a specific channel
+        bgr_frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
+        gray_frame = bgr_frame[:, :, 0]  # Assuming the blue channel for grayscale
+        return gray_frame
 
 
     def create_gstream_device(self, video_format):
@@ -256,8 +369,13 @@ class BufferedCapture(Process):
         - Gst.Element: The appsink element of the created GStreamer pipeline, 
         which can be used for further processing of the captured video frames.
         """
+
         device_url = self.extract_rtsp_url(self.config.deviceID)
-        device_str = ("rtspsrc protocols=tcp tcp-timeout=5000000 retry=5 "
+        # device_str = ("rtspsrc  buffer-mode=1 latency=1000 default-rtsp-version=17 protocols=tcp tcp-timeout=5000000 retry=5 "
+        #               "location=\"{}\" ! rtpjitterbuffer latency=1000 mode=1 ! "
+        #               "rtph264depay ! h264parse ! avdec_h264").format(device_url)
+
+        device_str = ("rtspsrc  buffer-mode=1 protocols=tcp tcp-timeout=5000000 retry=5 "
                       "location=\"{}\" ! "
                       "rtph264depay ! h264parse ! avdec_h264").format(device_url)
 
@@ -280,7 +398,7 @@ class BufferedCapture(Process):
     def initVideoDevice(self):
         """ Initialize the video device. """
 
-        # use a file as the video source
+        # Use a file as the video source
         if self.video_file is not None:
             self.device = cv2.VideoCapture(self.video_file)
 
@@ -326,74 +444,70 @@ class BufferedCapture(Process):
                     log.error("Can't find the camera IP!")
                     return False
 
+
             # Init the video device
             log.info("Initializing the video device...")
             log.info("Device: " + str(self.config.deviceID))
-            if self.config.force_v4l2:
-                log.info("Initialize v4l2 Device.")
-                self.device = cv2.VideoCapture(self.config.deviceID, cv2.CAP_V4L2)
-                self.device.set(cv2.CAP_PROP_CONVERT_RGB, 0)
 
-            elif self.config.force_cv2 and not self.config.force_v4l2:
-                log.info("Initialize OpenCV Device.")
-                self.device = cv2.VideoCapture(self.config.deviceID)
-
-            else:
+            if self.config.media_backend == 'gst':
                 try:
                     log.info("Initialize GStreamer Device.")
-                    # Initialize GStreamer
-                    Gst.init(None)
+                    Gst.init(None)  # Initialize GStreamer
 
                     # Create and start a GStreamer pipeline
                     self.device = self.create_gstream_device('BGR')
+                    self.pts_buffer = []  # Reset pts buffer
 
-                    # Determine the shape of the GStream
+                    # Attempt to get a sample and determine the frame shape
                     sample = self.device.emit("pull-sample")
+                    if not sample:
+                        raise ValueError("Could not obtain sample.")
+
                     buffer = sample.get_buffer()
-                    ret, _ = buffer.map(Gst.MapFlags.READ)
-                    if ret:
-                        # Get caps and extract video information
-                        caps = sample.get_caps()
-                        structure = caps.get_structure(0) if caps else None
+                    ret, map_info = buffer.map(Gst.MapFlags.READ)
+                    if not ret:
+                        raise ValueError("Could not obtain frame.")
 
-                        if structure:
+                    # Extract video information from caps
+                    caps = sample.get_caps()
+                    if not caps:
+                        raise ValueError("Sample caps are None.")
+                        
+                    structure = caps.get_structure(0)
+                    if not structure:
+                        raise ValueError("Could not determine frame shape.")
+                    
+                    # Extract width, height, and format, and create frame
+                    width = structure.get_value('width')
+                    height = structure.get_value('height')
+                    self.frame_shape = (height, width, 3)
+                    frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
+                    
+                    # Check if frame is grayscale and set flag
+                    self.convert_to_gray = self.is_grayscale(frame)
+                    log.info("Video format: BGR, {}P, color: {}".format(height, not self.convert_to_gray))
 
-                            # Extract width, height, and format
-                            width = structure.get_value('width')
-                            height = structure.get_value('height')
-                            video_format = structure.get_value('format')
+                except Exception as e:
+                    log.info("Error initializing GStreamer, switching to alternative. Error: {}".format(e))
+                    self.media_backend_override = True
+                    self.release_resources()
 
-                            # Determine the shape based on format
-                            if video_format in ['RGB', 'BGR']:
-                                self.frame_shape = (height, width, 3)  # RGB or BGR
-                                ret, frame, _ = self.read()
 
-                                if ret:
-                                    # If frame is grayscale, stop and restart the pipeline in GRAY8 format
-                                    if self.is_grayscale(frame):
-                                        self.convert_to_gray = True
-                                    log.info("Video format: {}, {}P, color: {}".format(video_format, height, not self.convert_to_gray))
+            if self.config.media_backend == 'v4l2':
+                try:
+                    log.info("Initialize v4l2 Device.")
+                    self.device = cv2.VideoCapture(self.config.deviceID, cv2.CAP_V4L2)
+                    self.device.set(cv2.CAP_PROP_CONVERT_RGB, 0)
+                except Exception as e:
+                    log.info("Could not initialize v4l2. Initialize OpenCV Device instead. Error: {}".format(e))
+                    self.media_backend_override = True
+                    self.release_resources()
 
-                                else:
-                                    log.error("Could not determine BGR frame shape.")
-                                    return False
 
-                            elif video_format == 'GRAY8':
-                                self.frame_shape = (height, width)  # Grayscale
-                                log.info("Video format: {}, {}P".format(video_format, height))
-                                
-                            else:
-                                log.error("Unsupported video format: {}.".format(video_format))
-                                return False
-                        else:
-                            log.error("Could not determine frame shape.")
-                            return False
-                    else:
-                        log.error("Could not obtain frame.")
-                        return False
-                except:
-                    log.info("Could not initialize GStream. Initialize OpenCV Device instead.")
-                    self.device = cv2.VideoCapture(self.config.deviceID)
+            elif self.config.media_backend == 'cv2' or self.media_backend_override:
+                log.info("Initialize OpenCV Device.")
+                self.device = cv2.VideoCapture(self.config.deviceID)
+
         return True
 
 
@@ -402,6 +516,7 @@ class BufferedCapture(Process):
         if self.pipeline:
             try:
                 self.pipeline.set_state(Gst.State.NULL)
+                time.sleep(5)
                 log.info('GStreamer Video device released!')
             except Exception as e:
                 log.error('Error releasing GStreamer pipeline: {}'.format(e))
@@ -619,7 +734,7 @@ class BufferedCapture(Process):
 
 
                 # If cv2:
-                if self.config.force_v4l2 or self.config.force_cv2:
+                if self.config.media_backend != 'gst' and not self.media_backend_override:
                     # Calculate the normalized frame interval between the current and last frame read, normalized by frames per second (fps)
                     frame_interval_normalized = (frame_timestamp - last_frame_timestamp) / (1 / self.config.fps)
                     # Update max_frame_interval_normalized for this cycle
@@ -635,7 +750,7 @@ class BufferedCapture(Process):
                 # On the last loop, report late or dropped frames
                 if i == block_frames - 1:
                     # For cv2, show elapsed time since frame read to assess loop performance
-                    if self.config.force_v4l2 or self.config.force_cv2:
+                    if self.config.media_backend != 'gst' and not self.media_backend_override:
                         log.info("Block's max frame interval: {:.3f} (normalized). Run's late frames: {}".format(max_frame_interval_normalized, self.dropped_frames.value))
                     
                     # For GStreamer, show elapsed time since frame capture to assess sink fill level
