@@ -119,7 +119,6 @@ class BufferedCapture(Process):
         self.total_latency = self.device_buffer / self.config.fps + (self.config.fps - 5) / 2000 + self.system_latency
     
 
-
     def startCapture(self, cameraID=0):
         """ Start capture using specified camera.
         
