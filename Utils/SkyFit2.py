@@ -2163,9 +2163,11 @@ class PlateTool(QtWidgets.QMainWindow):
         # Currently, any important variables should be initialized in the constructor (and cannot be classes
         # that inherit). Anything that can be generated for that information should be done in setupUI.
 
+        img_name = self.img_handle.name()
         to_remove = []
 
         dic = copy.copy(self.__dict__)
+        # print('input path', dic['input_path'])
         for k, v in dic.items():
 
             if (v.__class__.__bases__[0] is not object) and (not isinstance(v, bool)) and \
@@ -2177,6 +2179,9 @@ class PlateTool(QtWidgets.QMainWindow):
         for remove in to_remove:
             del dic[remove]
 
+        if os.path.isdir(self.input_path):
+            real_input_path = os.path.join(self.input_path, img_name)
+            dic['input_path'] = real_input_path
         savePickle(dic, self.dir_path, 'skyFitMR_latest.state')
         print("Saved state to file")
 
