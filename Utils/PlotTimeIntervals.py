@@ -268,7 +268,8 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
     plt.subplots_adjust(top=0.90, hspace=0.05)
 
     # Save the plot in the dir_path
-    suffix = "_ff_intervals_flagged.png" if dropped_frame_rate > 0.1 else "_ff_intervals.png"
+    #suffix = "_ff_intervals_flagged.png" if dropped_frame_rate > 0.1 else "_ff_intervals.png"
+    suffix = "_ff_intervals.png"
     plot_filename = os.path.join(dir_path, '{}{}'.format(plot_title, suffix))
     plt.savefig(plot_filename, dpi=150)
     plt.close()
