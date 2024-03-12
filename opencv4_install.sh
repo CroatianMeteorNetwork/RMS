@@ -7,7 +7,7 @@ fi
 
 # Configuration
 HOME_DIR=$HOME
-OPEN_VERSION=4.9.0
+OPENCV_VERSION=4.9.0
 
 PYTHON_EXECUTABLE=$(which python3)
 PYTHON_VERSION=$($PYTHON_EXECUTABLE -c 'import platform; print(platform.python_version())')
