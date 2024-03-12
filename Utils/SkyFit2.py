@@ -4214,6 +4214,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Check if the size of the file matches
         if self.img.data.shape != dark.shape:
+            print()
+            print('Size of the dark frame:', dark.shape)
+            print('Size of the image:', self.img.data.shape)
             qmessagebox(title='Dark field file error',
                         message='The size of the dark frame does not match the size of the image!',
                         message_type="error")
