@@ -51,9 +51,10 @@ def loadRaw(img_path):
     if 'rawpy' in sys.modules:
 
         # Get raw data from .nef file and get image from it
+        # Disable automated levels scaling and image orientation
         raw = rawpy.imread(img_path)
         frame = raw.postprocess(gamma=(1,1), output_bps=16, no_auto_bright=True, no_auto_scale=True, \
-            output_color=rawpy.ColorSpace.sRGB)
+            output_color=rawpy.ColorSpace.sRGB, user_flip=0)
 
         # Convert the image to grayscale
         frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
