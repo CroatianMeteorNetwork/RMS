@@ -4154,12 +4154,18 @@ class PlateTool(QtWidgets.QMainWindow):
         try:
             # Load the flat, byteswap the flat if vid file is used or UWO png
             flat = Image.loadFlat(*os.path.split(flat_file), dtype=self.img.data.dtype,
-                                  byteswap=self.img_handle.byteswap)
+                      byteswap=self.img_handle.byteswap)
             flat.flat_img = np.swapaxes(flat.flat_img, 0, 1)
-        except:
+            
+        except Exception as e:
+            
+            print("Loading the flat failed with error: " + repr(e))
+            print()
+            print(*traceback.format_exception(*sys.exc_info()))
+
             qmessagebox(title='Flat field file error',
-                        message='Flat could not be loaded!',
-                        message_type="error")
+                message='Flat could not be loaded!',
+                message_type="error")
 
             return False, None
 
