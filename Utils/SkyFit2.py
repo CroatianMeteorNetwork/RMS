@@ -5458,8 +5458,17 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute the time relative to the reference JD
             t_rel = frame_no/self.img_handle.fps
 
-            # For UWO .vid files DFN data, don't normalize the time to the FPS, as the time is GPS-synced
+            # Determine whether to save the raw times that came with in the data
+            save_raw_times = False
             if (self.img_handle.input_type == "vid") or (self.img_handle.input_type == "dfn"):
+                save_raw_times = True
+
+            if self.img_handle.input_type == "images":
+                if self.img_handle.fripon_mode or self.img_handle.uwo_png_mode:
+                    save_raw_times = True
+
+            # For UWO .vid files DFN data, don't normalize the time to the FPS, as the time is GPS-synced
+            if save_raw_times:
                 frame_time = frame_dt
             
             else:
