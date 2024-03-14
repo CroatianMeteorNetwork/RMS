@@ -1188,6 +1188,11 @@ class InputTypeUWOVid(InputType):
         """ Return the time of the frame. """
 
         if frame_no is None:
+
+            # Load the frame time if it wasn't loaded yet
+            if not hasattr(self, 'current_frame_time'):
+                self.loadFrame()
+            
             dt = self.current_frame_time
 
 

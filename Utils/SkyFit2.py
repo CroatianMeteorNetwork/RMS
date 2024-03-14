@@ -4156,6 +4156,8 @@ class PlateTool(QtWidgets.QMainWindow):
             flat = Image.loadFlat(*os.path.split(flat_file), dtype=self.img.data.dtype,
                       byteswap=self.img_handle.byteswap)
             flat.flat_img = np.swapaxes(flat.flat_img, 0, 1)
+
+            print("Flat loaded successfully!")
             
         except Exception as e:
             
