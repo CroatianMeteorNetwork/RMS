@@ -267,6 +267,7 @@ class Config:
         self.width_device = self.width
         self.height_device = self.height
         self.fps = 25.0
+        self.camera_latency = 0.0
 
         self.report_dropped_frames = False
 
@@ -934,6 +935,9 @@ def parseCapture(config, parser):
             config.fps = 1000000
             print()
             print("WARNING! The FPS has been limited to 1,000,000!")
+            
+    if parser.has_option(section, "camera_latency"):
+        config.camera_latency = parser.getfloat(section, "camera_latency")
 
     if parser.has_option(section, "ff_format"):
         config.ff_format = parser.get(section, "ff_format")
