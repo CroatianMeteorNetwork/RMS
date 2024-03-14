@@ -316,9 +316,6 @@ class BufferedCapture(Process):
             else:
                 self.m_jump_error = min(self.m_jump_error + max_adjust, 0)
 
-            log.info(f"b: {self.b:.1f} ns, b_delta: {delta_b:.1f} ns, "
-                     f"error debt: {self.b_error_debt:.1f}, m_jump_err: {self.m_jump_error:.1f}")
-
         else:
             # Introduce a very small positive bias
             self.b += 25 # ns
