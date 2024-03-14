@@ -79,22 +79,20 @@ class BufferedCapture(Process):
         # A frame will be considered dropped if it was late more then half a frame
         self.time_for_drop = 1.5*(1.0/config.fps)
 
+        # Initialize Smoothing variables
+        self.startup_flag = True
+        self.last_calculated_fps = 0
+        self.last_calculated_fps_n = 0
+        self.expected_m = 1e9/self.config.fps
+        self.reset_count = -1
+
         self.dropped_frames = Value('i', 0)
         self.device = None
         self.pipeline = None
         self.start_timestamp = 0
         self.frame_shape = None
         self.convert_to_gray = False
-        
-        # Smoothing parameters
-        self.n = 0
-        self.sum_x = 0
-        self.sum_y = 0
-        self.sum_xx = 0
-        self.sum_xy = 0
-        self.lowest_point = None
-        self.adjusted_b = None
-        
+                
 
         # TIMESTAMP LATENCY
         #
@@ -104,19 +102,23 @@ class BufferedCapture(Process):
         #
         # RPi4, GStream, IMX291, 720p @ 25 FPS, VBR
         #     self.device_buffer = 1
-        #     self.system_latency = 0.01
+        #     self.system_latency = 0.055
         #
         # If timestamp is late, increase latency. If it is early, decrease latency.
         # Formula is: timestamp = time.time() - total_latency
 
-        # TODO: Incorporate variables in .config
+        # Fine tune using the config file's camera_latency field.
 
         self.device_buffer = 1 # Experimentally measured buffer size (does not set the buffer)
         if self.config.height == 1080:
             self.system_latency = 0.055 # seconds. Experimentally measured latency
         else:
             self.system_latency = 0.045 # seconds. Experimentally measured latency
-        self.total_latency = self.device_buffer / self.config.fps + (self.config.fps - 5) / 2000 + self.system_latency
+        buffer_latency = self.device_buffer / self.config.fps
+        fps_adjustment = (self.config.fps - 5) / 2000
+        total_configured_latency = self.system_latency + self.config.camera_latency
+
+        self.total_latency = buffer_latency + fps_adjustment + total_configured_latency
     
 
     def startCapture(self, cameraID=0):
@@ -168,7 +170,7 @@ class BufferedCapture(Process):
             if isinstance(self.device, cv2.VideoCapture):
                 return self.device.isOpened()
             
-             # GStreamer
+            # GStreamer
             else:
                 state = self.device.get_state(Gst.CLOCK_TIME_NONE).state
                 if state == Gst.State.PLAYING:
@@ -181,10 +183,11 @@ class BufferedCapture(Process):
             return False
 
 
-    def add_pts_point(self, y):
+    def calculate_pts_regression_params(self, y):
         """ Add pts and perform an online linear regression on pts.
             smoothed_pts = m * frame_count + b
-            Adjust b so that the line passes through the earliest frame.
+            m is the slope in ns per frame (1e9/fps)
+            Adjust b so that the line passes through the earliest frames.
         """
         self.n += 1
         x = self.n
@@ -194,38 +197,151 @@ class BufferedCapture(Process):
         self.sum_xy += x * y
 
         # Update regression parameters
-        m, b = self.calculate_pts_regression_params()
-
-        # Check if this is the first point or if it's the new lowest point
-        if self.n < 10:
-            pass
-        elif self.lowest_point is None or y - (m * x + b) < self.lowest_point[2]:
-            self.lowest_point = (x, y, y - (m * x + b))
-            # Adjust b using the lowest point
-            self.adjusted_b = y - m * x
-    
-
-    def calculate_pts_regression_params(self):
-        """ Perform an online linear regression on pts.
-            smoothed_pts = m * frame_count + b
-            Returns slope m (ns per frame) and a b such that the line passes through the 
-            earliest frame.
-        """
-        if self.n > 1:
+        if x > 1:
             m = (self.n * self.sum_xy - self.sum_x * self.sum_y) / (self.n * self.sum_xx - self.sum_x ** 2)
-            b = (self.sum_y - m * self.sum_x) / self.n
+        
+        # First frame
         else:
-            m, b = 0, self.sum_y if self.n else 0  # Handle case with <= 1 point
+            m = self.expected_m
+            self.b = y - m * x
+        
+        ## STARTUP ##
+        # On startup, use expected fps until calculate fps stabilizes
+        if self.n <= self.startup_frames and self.startup_flag:
 
-        return m, self.adjusted_b if self.adjusted_b is not None else b
+            # Exit startup if calculated m doesn't converge with expected m
+
+            # Check error at increasingly longer intervals
+            if x < self.startup_frames / 32:
+                sample_interval = 128
+            elif x < self.startup_frames / 16:
+                sample_interval = 512
+            elif x < self.startup_frames / 8:
+                sample_interval = 1024
+            elif x < self.startup_frames / 4:
+                sample_interval = 2048
+            else:
+                sample_interval = 4096
+
+            # Determine if the values converge. Skipping the first few noisy frames
+            if (x - 25) % sample_interval == 0 or x == self.startup_frames:
+
+                m_err = abs(m - self.expected_m)
+                delta_m_err = (m_err - self.last_m_err) / (x - self.last_m_err_n)
+                startup_remaining = self.startup_frames - x
+                final_m_err = m_err + startup_remaining * delta_m_err
+                self.last_m_err = m_err
+                self.last_m_err_n = x
+
+                # If end is reached, or error does not converge to zero, exit startup
+                if final_m_err  > 0 or x == self.startup_frames:
+
+                    # If residual error on exit is too large, the expected m is probably wrong.
+                    if m_err > 2000:
+
+                        # Reset debt and b as they were probably wrong, and permanently disable startup
+                        self.startup_flag = False
+                        self.b_error_debt = 0
+                        self.b = y - m * x
+                        self.m_jump_error = 0
+
+                        log.info("Check config FPS! Startup sequence exited early probably due to inaccurate FPS value. "
+                                 "Startup is disabled for the remainder of the run")
+
+                    # On normal exit, calculate residual error for smooth transition to calculate m
+                    else:
+
+                        # calculate the jump error
+                        self.m_jump_error = x * (m - self.expected_m) # ns
+
+                    log.info("Exiting startup logic at {:.1f}% of startup sequence, Expected fps: {:.6f}, "
+                             "calculated fps at this point: {:.6f}, residual m error: {:.1f} ns, sample interval: {}"
+                             .format(100 * x / self.startup_frames, 1e9/self.expected_m, 1e9/m, m_err, sample_interval))
+
+                    # This will temporarily exit startup
+                    self.startup_frames = 0
+
+            # Use expected value during startup
+            if self.startup_frames > 0:
+                m = self.expected_m
+
+        ### LEAST DELAYED FRAME LOGIC ###
+                
+        # The code attempts to smoothly distribute presentation timestamps (pts) on a line that passes
+        # through the least-delayed frame. The idea is that the least-delayed frames are thought to
+        # be the least affected by network and other delays, and should therefore offer the most
+        # consistent points of reference.
+        # When a new least-delayed frame is detected, the time delta is smoothly distributed over
+        # time.
+        # The line has a slope m (ns per frame) that passes through the least delayed frame by
+        # adjusting b in: y = m * x + b
+        # where y is the pts, and x is the frame number.
+        # A slow positive bias is introduce to keep the line in contact with a slowly accelerating
+        # frame rate.
+        # Finally, the small jump error at the completion of the startup sequence, when
+        # transitioning from expected fps to calculated fps (linear regression), is smoothly
+        # distributed over time.
+                
+        # Calculate the delta between the lowest point and current point
+        delta_b = self.b - (y - m * x)
+
+        # Adjust b error debt to the max of current debt or new delta b
+        self.b_error_debt = max(self.b_error_debt, delta_b)
+        
+        # Skew b, if due
+        if self.b_error_debt > 0 or self.m_jump_error != 0:
+
+            # Don't limit changes to b for the first few blocks of frames
+            if x <= 256 * 3:
+                max_adjust = float('inf')
+
+            # Then adjust b aggressively for the first few minutes
+            elif x <= 256 * 6 * 10: # first ~10 min
+                max_adjust = 100 * 1000 / 256 # 0.1 ms per block
+
+            # Then only allow small changes for the remainder of the run
+            else:
+                max_adjust = 25 * 1000 / 256 # 0.025 ms per block
+            
+            # Determine the correction factor
+            b_corr = min(self.b_error_debt, max_adjust) # ns
+
+            # Update the lowest b and adjust the debt
+            self.b -= b_corr
+            self.b_error_debt -= b_corr
+
+            # Update m jump error debt
+            if self.m_jump_error > 0:
+                self.m_jump_error = max(self.m_jump_error - max_adjust, 0)
+            else:
+                self.m_jump_error = min(self.m_jump_error + max_adjust, 0)
+
+            log.info(f"b: {self.b:.1f} ns, b_delta: {delta_b:.1f} ns, "
+                     f"error debt: {self.b_error_debt:.1f}, m_jump_err: {self.m_jump_error:.1f}")
+
+        else:
+            # Introduce a very small positive bias
+            self.b += 25 # ns
+        
+        return m, self.b - self.m_jump_error
 
 
+    def smooth_pts(self, new_pts):
 
-    def smooth_pts(self, new_pts):        
+        # Disable smoothing if too many resets are detected
+        if self.reset_count >= 50:
+            if self.reset_count == 50:
+                log.info("Too many resets. Disabling smoothing function!")
+                self.reset_count += 1
+            return new_pts
 
-        # Calulate linear regression params
-        self.add_pts_point(new_pts)
-        m, b = self.calculate_pts_regression_params()
+        # Calculate linear regression params
+        m, b = self.calculate_pts_regression_params(new_pts)
+
+        # Store last calculated fps for the longest run so far
+        if self.n > self.last_calculated_fps_n:
+            self.last_calculated_fps = 1e9 / m
+            self.last_calculated_fps_n = self.n
 
         # On initial run or after a reset
         if self.n == 1:
@@ -236,15 +352,19 @@ class BufferedCapture(Process):
             smoothed_pts = m * self.n + b
 
             # Reset regression on dropped frame (raw pts is more than 1 frame late)
-            if new_pts - smoothed_pts > m:
+            if new_pts - smoothed_pts > self.expected_m:
+                self.reset_count += 1
                 self.n = 0
                 self.sum_x = 0
                 self.sum_y = 0
                 self.sum_xx = 0
                 self.sum_xy = 0
-                self.lowest_point = None
-                self.adjusted_b = None
-                log.error('smooth_pts detected dropped frame. Resetting regression parameters.')
+                self.startup_frames = 25 * 60 * 10 # 10 minutes
+                self.m_jump_error = 0
+                self.b_error_debt = 0
+                self.last_m_err = float('inf')
+                self.last_m_err_n = 0
+                log.info('smooth_pts detected dropped frame. Resetting regression parameters.')
                 return new_pts
         
         return smoothed_pts
@@ -271,7 +391,7 @@ class BufferedCapture(Process):
             if self.config.media_backend == 'gst' and not self.media_backend_override:
                 sample = self.device.emit("pull-sample")
                 if not sample:
-                    log.info("Gst device did not emit a sample.")
+                    log.info("GStreamer pipeline did not emit a sample.")
                     return False, None, None
 
                 buffer = sample.get_buffer()
@@ -285,13 +405,13 @@ class BufferedCapture(Process):
 
                 ret, map_info = buffer.map(Gst.MapFlags.READ)
                 if not ret:
-                    log.info("Gst Buffer did not contain a frame.")
+                    log.info("GStreamer Buffer did not contain a frame.")
                     return False, None, None
 
                 # Handling for grayscale conversion
                 frame = self.handle_grayscale_conversion(map_info)
 
-                # Smooth raw timestamp and calculate actual timestamp
+                # Smooth raw pts and calculate actual timestamp
                 smoothed_pts = self.smooth_pts(gst_timestamp_ns)
                 timestamp = self.start_timestamp + (smoothed_pts / 1e9)
 
@@ -447,8 +567,24 @@ class BufferedCapture(Process):
 
             if self.config.media_backend == 'gst':
                 try:
-                    log.info("Initialize GStreamer Device.")
-                    Gst.init(None)  # Initialize GStreamer
+                    log.info("Initialize GStreamer Standalone Device.")
+                    
+                    # Initialize Smoothing parameters
+                    self.reset_count += 1
+                    self.n = 0
+                    self.sum_x = 0
+                    self.sum_y = 0
+                    self.sum_xx = 0
+                    self.sum_xy = 0
+                    self.startup_frames = 25 * 60 * 10 # 10 minutes
+                    self.b = 0
+                    self.b_error_debt = 0
+                    self.m_jump_error = 0
+                    self.last_m_err = float('inf')
+                    self.last_m_err_n = 0
+
+                    # Initialize GStreamer
+                    Gst.init(None)
 
                     # Create and start a GStreamer pipeline
                     self.device = self.create_gstream_device('BGR')
@@ -491,11 +627,12 @@ class BufferedCapture(Process):
 
             if self.config.media_backend == 'v4l2':
                 try:
-                    log.info("Initialize v4l2 Device.")
+                    log.info("Initialize OpenCV Device with v4l2.")
                     self.device = cv2.VideoCapture(self.config.deviceID, cv2.CAP_V4L2)
                     self.device.set(cv2.CAP_PROP_CONVERT_RGB, 0)
                 except Exception as e:
-                    log.info("Could not initialize v4l2. Initialize OpenCV Device instead. Error: {}".format(e))
+                    log.info("Could not initialize OpenCV with v4l2. Initialize "
+                             "OpenCV Device without v4l2 instead. Error: {}".format(e))
                     self.media_backend_override = True
                     self.release_resources()
 
@@ -512,6 +649,12 @@ class BufferedCapture(Process):
         if self.pipeline:
             try:
                 self.pipeline.set_state(Gst.State.NULL)
+
+                if abs(self.last_calculated_fps - self.config.fps) > 0.0005 and self.last_calculated_fps_n > 25*60*60:
+                    log.info('Config file fps appears to be inaccurate. Consider updating the config file!')
+                log.info("Last calculated FPS: {:.6f} at frame {}, config FPS: {}, resets: {}, startup status: {}"
+                         .format(self.last_calculated_fps, self.last_calculated_fps_n, self.config.fps, self.reset_count, self.startup_flag))
+
                 time.sleep(5)
                 log.info('GStreamer Video device released!')
             except Exception as e:
@@ -692,7 +835,7 @@ class BufferedCapture(Process):
 
                     
                 # Set the time of the first frame
-                if i == 0: 
+                if i == 0:
 
                     # Initialize last frame timestamp if it's not set
                     if not last_frame_timestamp:
@@ -747,11 +890,13 @@ class BufferedCapture(Process):
                 if i == block_frames - 1:
                     # For cv2, show elapsed time since frame read to assess loop performance
                     if self.config.media_backend != 'gst' and not self.media_backend_override:
-                        log.info("Block's max frame interval: {:.3f} (normalized). Run's late frames: {}".format(max_frame_interval_normalized, self.dropped_frames.value))
+                        log.info("Block's max frame interval: {:.3f} (normalized). Run's late frames: {}"
+                                 .format(max_frame_interval_normalized, self.dropped_frames.value))
                     
                     # For GStreamer, show elapsed time since frame capture to assess sink fill level
                     else:
-                        log.info("Block's max frame age: {:.3f} seconds. Run's dropped frames: {}".format(max_frame_age_seconds, self.dropped_frames.value))
+                        log.info("Block's max frame age: {:.3f} seconds. Run's dropped frames: {}"
+                                 .format(max_frame_age_seconds, self.dropped_frames.value))
 
                 last_frame_timestamp = frame_timestamp
                 
@@ -827,7 +972,8 @@ class BufferedCapture(Process):
                 else:
                     self.startTime2.value = first_frame_timestamp
 
-                log.info('New block of raw frames available for compression with starting time: {:s}'.format(str(first_frame_timestamp)))
+                log.info('New block of raw frames available for compression with starting time: {:s}'
+                         .format(str(first_frame_timestamp)))
 
             
             # Switch the frame block buffer flags
