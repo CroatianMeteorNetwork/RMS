@@ -68,8 +68,9 @@ def loadRaw(img_path):
 
 
 def loadImage(img_path, flatten=-1):
-    """ Load the given image. Handle loading it using different libraries. 
-    
+    """
+    Load the given image. Handle loading it using different libraries.
+
     Arguments:
         img_path: [str] Path to the image.
 
@@ -84,9 +85,18 @@ def loadImage(img_path, flatten=-1):
 
         try:
             img = imread(img_path, as_gray=bool(flatten))
-            
+
         except TypeError:
-            img = imread(img_path, mode="L")
+            
+            img = imread(img_path)
+
+            # If there more than 16 bits, convert to uint16
+            if img.nbytes >= 2**16:
+                img = img.astype("uint16")
+
+            # Convert the time to grayscale, making sure to preserve the bit depth
+            if img.shape == 3 and flatten == -1:
+                img = img.mean(axis=2).astype(img.dtype)
 
     return img
 
