@@ -4210,8 +4210,15 @@ class PlateTool(QtWidgets.QMainWindow):
             # Load the dark
             dark = Image.loadDark(*os.path.split(dark_file), dtype=self.img.data.dtype, \
                                   byteswap=self.img_handle.byteswap)
+            
+            print("Dark loaded successfully!")
 
-        except:
+        except Exception as e:
+
+            print("Loading the dark failed with error: " + repr(e))
+            print()
+            print(*traceback.format_exception(*sys.exc_info()))
+
             qmessagebox(title='Dark frame error',
                         message='Dark frame could not be loaded!',
                         message_type="error")
