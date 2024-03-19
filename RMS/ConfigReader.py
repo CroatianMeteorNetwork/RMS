@@ -259,6 +259,8 @@ class Config:
         
         ##### Capture
         self.deviceID = 0
+
+        # Media backend to use for capture. Options are gst, cv2, or v4l2
         self.media_backend = "gst"
         self.uyvy_pixelformat = False
 
@@ -267,6 +269,9 @@ class Config:
         self.width_device = self.width
         self.height_device = self.height
         self.fps = 25.0
+
+        # Camera latency in seconds. This will be applied as an offset to the timestamp of the captured
+        #   frames
         self.camera_latency = 0.0
 
         self.report_dropped_frames = False
@@ -923,6 +928,12 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "media_backend"):
         config.media_backend = parser.get(section, "media_backend")
+
+    if parser.has_option(section, "force_v4l2"):
+        force_v4l2 = parser.getboolean(section, "force_v4l2")
+
+        if force_v4l2:
+            config.media_backend = "v4l2"
 
     if parser.has_option(section, "uyvy_pixelformat"):
         config.uyvy_pixelformat = parser.getboolean(section, "uyvy_pixelformat")

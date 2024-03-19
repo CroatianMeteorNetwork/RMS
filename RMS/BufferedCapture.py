@@ -22,22 +22,26 @@ os.environ['GST_DEBUG'] = '3'
 
 import re
 import time
-import numpy as np
 import logging
 import datetime
 import os.path
 from multiprocessing import Process, Event, Value
 
 import cv2
+import numpy as np
+
 from RMS.Misc import ping
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
 
+GST_IMPORTED = False
 try:
     import gi
     gi.require_version('Gst', '1.0')
     from gi.repository import Gst
+    GST_IMPORTED = True
+
 except ImportError as e:
     log.info('Could not import gi: {}. Using OpenCV.'.format(e))
 
@@ -108,14 +112,15 @@ class BufferedCapture(Process):
         # Formula is: timestamp = time.time() - total_latency
 
         # Fine tune using the config file's camera_latency field.
-
         self.device_buffer = 1 # Experimentally measured buffer size (does not set the buffer)
         if self.config.height == 1080:
             self.system_latency = 0.055 # seconds. Experimentally measured latency
         else:
             self.system_latency = 0.045 # seconds. Experimentally measured latency
-        buffer_latency = self.device_buffer / self.config.fps
-        fps_adjustment = (self.config.fps - 5) / 2000
+
+
+        buffer_latency = self.device_buffer/self.config.fps
+        fps_adjustment = (self.config.fps - 5)/2000
         total_configured_latency = self.system_latency + self.config.camera_latency
 
         self.total_latency = buffer_latency + fps_adjustment + total_configured_latency
@@ -158,7 +163,7 @@ class BufferedCapture(Process):
         return self.dropped_frames.value
 
 
-    def device_is_opened(self):
+    def deviceIsOpened(self):
         """ Return True if media backend is opened.
         """
 
@@ -172,9 +177,14 @@ class BufferedCapture(Process):
             
             # GStreamer
             else:
-                state = self.device.get_state(Gst.CLOCK_TIME_NONE).state
-                if state == Gst.State.PLAYING:
-                    return True
+                if GST_IMPORTED:
+
+                    state = self.device.get_state(Gst.CLOCK_TIME_NONE).state
+                    if state == Gst.State.PLAYING:
+                        return True
+                    else:
+                        return False
+                    
                 else:
                     return False
                 
@@ -183,58 +193,66 @@ class BufferedCapture(Process):
             return False
 
 
-    def calculate_pts_regression_params(self, y):
+    def calculatePTSRegressionParams(self, y):
         """ Add pts and perform an online linear regression on pts.
-            smoothed_pts = m * frame_count + b
+            smoothed_pts = m*frame_count + b
             m is the slope in ns per frame (1e9/fps)
             Adjust b so that the line passes through the earliest frames.
+
+        Arguments:
+            y: [float] pts of the frame
+
+        Return:
+            m: [float] slope in ns per frame
+            b: [float] y-intercept in ns
+
         """
         self.n += 1
         x = self.n
         self.sum_x += x
         self.sum_y += y
-        self.sum_xx += x * x
-        self.sum_xy += x * y
+        self.sum_xx += x*x
+        self.sum_xy += x*y
 
         # Update regression parameters
         if x > 1:
-            m = (self.n * self.sum_xy - self.sum_x * self.sum_y) / (self.n * self.sum_xx - self.sum_x ** 2)
+            m = (self.n*self.sum_xy - self.sum_x*self.sum_y)/(self.n*self.sum_xx - self.sum_x**2)
         
         # First frame
         else:
             m = self.expected_m
-            self.b = y - m * x
+            self.b = y - m*x
         
         ## STARTUP ##
         # On startup, use expected fps until calculate fps stabilizes
-        if self.n <= self.startup_frames and self.startup_flag:
+        if (self.n <= self.startup_frames) and self.startup_flag:
 
             # Exit startup if calculated m doesn't converge with expected m
 
             # Check error at increasingly longer intervals
-            if x < self.startup_frames / 32:
+            if x < self.startup_frames/32:
                 sample_interval = 128
-            elif x < self.startup_frames / 16:
+            elif x < self.startup_frames/16:
                 sample_interval = 512
-            elif x < self.startup_frames / 8:
+            elif x < self.startup_frames/8:
                 sample_interval = 1024
-            elif x < self.startup_frames / 4:
+            elif x < self.startup_frames/4:
                 sample_interval = 2048
             else:
                 sample_interval = 4096
 
             # Determine if the values converge. Skipping the first few noisy frames
-            if (x - 25) % sample_interval == 0 or x == self.startup_frames:
+            if ((x - 25)%sample_interval == 0) or (x == self.startup_frames):
 
                 m_err = abs(m - self.expected_m)
-                delta_m_err = (m_err - self.last_m_err) / (x - self.last_m_err_n)
+                delta_m_err = (m_err - self.last_m_err)/(x - self.last_m_err_n)
                 startup_remaining = self.startup_frames - x
-                final_m_err = m_err + startup_remaining * delta_m_err
+                final_m_err = m_err + startup_remaining*delta_m_err
                 self.last_m_err = m_err
                 self.last_m_err_n = x
 
                 # If end is reached, or error does not converge to zero, exit startup
-                if final_m_err  > 0 or x == self.startup_frames:
+                if (final_m_err > 0) or (x == self.startup_frames):
 
                     # If residual error on exit is too large, the expected m is probably wrong.
                     if m_err > 2000:
@@ -242,7 +260,7 @@ class BufferedCapture(Process):
                         # Reset debt and b as they were probably wrong, and permanently disable startup
                         self.startup_flag = False
                         self.b_error_debt = 0
-                        self.b = y - m * x
+                        self.b = y - m*x
                         self.m_jump_error = 0
 
                         log.info("Check config FPS! Startup sequence exited early probably due to inaccurate FPS value. "
@@ -252,11 +270,11 @@ class BufferedCapture(Process):
                     else:
 
                         # calculate the jump error
-                        self.m_jump_error = x * (m - self.expected_m) # ns
+                        self.m_jump_error = x*(m - self.expected_m) # ns
 
                     log.info("Exiting startup logic at {:.1f}% of startup sequence, Expected fps: {:.6f}, "
                              "calculated fps at this point: {:.6f}, residual m error: {:.1f} ns, sample interval: {}"
-                             .format(100 * x / self.startup_frames, 1e9/self.expected_m, 1e9/m, m_err, sample_interval))
+                             .format(100*x/self.startup_frames, 1e9/self.expected_m, 1e9/m, m_err, sample_interval))
 
                     # This will temporarily exit startup
                     self.startup_frames = 0
@@ -274,7 +292,7 @@ class BufferedCapture(Process):
         # When a new least-delayed frame is detected, the time delta is smoothly distributed over
         # time.
         # The line has a slope m (ns per frame) that passes through the least delayed frame by
-        # adjusting b in: y = m * x + b
+        # adjusting b in: y = m*x + b
         # where y is the pts, and x is the frame number.
         # A slow positive bias is introduce to keep the line in contact with a slowly accelerating
         # frame rate.
@@ -283,7 +301,7 @@ class BufferedCapture(Process):
         # distributed over time.
                 
         # Calculate the delta between the lowest point and current point
-        delta_b = self.b - (y - m * x)
+        delta_b = self.b - (y - m*x)
 
         # Adjust b error debt to the max of current debt or new delta b
         self.b_error_debt = max(self.b_error_debt, delta_b)
@@ -292,16 +310,16 @@ class BufferedCapture(Process):
         if self.b_error_debt > 0 or self.m_jump_error != 0:
 
             # Don't limit changes to b for the first few blocks of frames
-            if x <= 256 * 3:
+            if x <= 256*3:
                 max_adjust = float('inf')
 
             # Then adjust b aggressively for the first few minutes
-            elif x <= 256 * 6 * 10: # first ~10 min
-                max_adjust = 100 * 1000 / 256 # 0.1 ms per block
+            elif x <= 256*6*10: # first ~10 min
+                max_adjust = 100*1000/256 # 0.1 ms per block
 
             # Then only allow small changes for the remainder of the run
             else:
-                max_adjust = 25 * 1000 / 256 # 0.025 ms per block
+                max_adjust = 25*1000/256 # 0.025 ms per block
             
             # Determine the correction factor
             b_corr = min(self.b_error_debt, max_adjust) # ns
@@ -323,7 +341,16 @@ class BufferedCapture(Process):
         return m, self.b - self.m_jump_error
 
 
-    def smooth_pts(self, new_pts):
+    def smoothPTS(self, new_pts):
+        """ Smooth pts using linear regression.
+
+        Arguments:
+            new_pts: [float] pts of the frame
+
+        Return:
+            smoothed_pts: [float] smoothed pts
+
+        """
 
         # Disable smoothing if too many resets are detected
         if self.reset_count >= 50:
@@ -333,11 +360,11 @@ class BufferedCapture(Process):
             return new_pts
 
         # Calculate linear regression params
-        m, b = self.calculate_pts_regression_params(new_pts)
+        m, b = self.calculatePTSRegressionParams(new_pts)
 
         # Store last calculated fps for the longest run so far
         if self.n > self.last_calculated_fps_n:
-            self.last_calculated_fps = 1e9 / m
+            self.last_calculated_fps = 1e9/m
             self.last_calculated_fps_n = self.n
 
         # On initial run or after a reset
@@ -346,34 +373,36 @@ class BufferedCapture(Process):
 
         # Calculate smoothed pts from regression parameters
         else:
-            smoothed_pts = m * self.n + b
+            smoothed_pts = m*self.n + b
 
             # Reset regression on dropped frame (raw pts is more than 1 frame late)
             if new_pts - smoothed_pts > self.expected_m:
+
                 self.reset_count += 1
                 self.n = 0
                 self.sum_x = 0
                 self.sum_y = 0
                 self.sum_xx = 0
                 self.sum_xy = 0
-                self.startup_frames = 25 * 60 * 10 # 10 minutes
+                self.startup_frames = 25*60*10 # 10 minutes
                 self.m_jump_error = 0
                 self.b_error_debt = 0
                 self.last_m_err = float('inf')
                 self.last_m_err_n = 0
                 log.info('smooth_pts detected dropped frame. Resetting regression parameters.')
+
                 return new_pts
         
         return smoothed_pts
 
 
     def read(self):
-        '''
-        Retrieve frames and timestamp.
-        :param device: The video capture device or file.
-        :return: tuple (ret, frame, timestamp) where ret is a boolean indicating success,
+        """ Retrieve frames and timestamp.
+
+        Return:
+        (tuple): (ret, frame, timestamp) where ret is a boolean indicating success,
                  frame is the captured frame, and timestamp is the frame timestamp.
-        '''
+        """
         ret, frame, timestamp = False, None, None
 
         # Read Video file frame
@@ -384,18 +413,20 @@ class BufferedCapture(Process):
         
         # Read capture device frame
         else:
+
             # GStreamer
-            if self.config.media_backend == 'gst' and not self.media_backend_override:
+            if GST_IMPORTED and (self.config.media_backend == 'gst') and (not self.media_backend_override):
                 sample = self.device.emit("pull-sample")
                 if not sample:
                     log.info("GStreamer pipeline did not emit a sample.")
+
                     return False, None, None
 
                 buffer = sample.get_buffer()
                 gst_timestamp_ns = buffer.pts  # GStreamer timestamp in nanoseconds
 
                 # Sanity check for pts value
-                max_expected_ns = 24 * 60 * 60 * 1e9  # 24 hours in nanoseconds
+                max_expected_ns = 24*60*60*1e9  # 24 hours in nanoseconds
                 if not (0 < gst_timestamp_ns <= max_expected_ns):
                     log.info("Unexpected PTS value: {}.".format(gst_timestamp_ns))
                     return False, None, None
@@ -406,11 +437,11 @@ class BufferedCapture(Process):
                     return False, None, None
 
                 # Handling for grayscale conversion
-                frame = self.handle_grayscale_conversion(map_info)
+                frame = self.handleGrayscaleConversion(map_info)
 
                 # Smooth raw pts and calculate actual timestamp
-                smoothed_pts = self.smooth_pts(gst_timestamp_ns)
-                timestamp = self.start_timestamp + (smoothed_pts / 1e9)
+                smoothed_pts = self.smoothPTS(gst_timestamp_ns)
+                timestamp = self.start_timestamp + (smoothed_pts/1e9)
 
                 buffer.unmap(map_info)
         
@@ -423,7 +454,7 @@ class BufferedCapture(Process):
         return ret, frame, timestamp
 
 
-    def extract_rtsp_url(self, input_string):
+    def extractRtspUrl(self, input_string):
         '''
         Return validated camera url
         '''
@@ -444,7 +475,7 @@ class BufferedCapture(Process):
             return None  # Return None if no RTSP URL is found
             
 
-    def is_grayscale(self, frame):
+    def isGrayscale(self, frame):
         '''
         Return True if all color channels contain identical data
         '''
@@ -456,7 +487,7 @@ class BufferedCapture(Process):
         return False
 
     
-    def handle_grayscale_conversion(self, map_info):
+    def handleGrayscaleConversion(self, map_info):
         """Handle conversion of frame to grayscale if necessary."""
         if not self.convert_to_gray:
             return np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
@@ -467,7 +498,7 @@ class BufferedCapture(Process):
         return gray_frame
 
 
-    def create_gstream_device(self, video_format):
+    def createGstreamDevice(self, video_format):
         """
         Creates a GStreamer pipeline for capturing video from an RTSP source and 
         initializes playback with specific configurations.
@@ -483,7 +514,7 @@ class BufferedCapture(Process):
         which can be used for further processing of the captured video frames.
         """
 
-        device_url = self.extract_rtsp_url(self.config.deviceID)
+        device_url = self.extractRtspUrl(self.config.deviceID)
         # device_str = ("rtspsrc  buffer-mode=1 latency=1000 default-rtsp-version=17 protocols=tcp tcp-timeout=5000000 retry=5 "
         #               "location=\"{}\" ! rtpjitterbuffer latency=1000 mode=1 ! "
         #               "rtph264depay ! h264parse ! avdec_h264").format(device_url)
@@ -562,29 +593,30 @@ class BufferedCapture(Process):
             log.info("Initializing the video device...")
             log.info("Device: " + str(self.config.deviceID))
 
-            if self.config.media_backend == 'gst':
-                try:
-                    log.info("Initialize GStreamer Standalone Device.")
-                    
-                    # Initialize Smoothing parameters
-                    self.reset_count += 1
-                    self.n = 0
-                    self.sum_x = 0
-                    self.sum_y = 0
-                    self.sum_xx = 0
-                    self.sum_xy = 0
-                    self.startup_frames = 25 * 60 * 10 # 10 minutes
-                    self.b = 0
-                    self.b_error_debt = 0
-                    self.m_jump_error = 0
-                    self.last_m_err = float('inf')
-                    self.last_m_err_n = 0
+            if (self.config.media_backend == 'gst') and GST_IMPORTED:
+                
+                log.info("Initialize GStreamer Standalone Device.")
+                
+                # Initialize Smoothing parameters
+                self.reset_count += 1
+                self.n = 0
+                self.sum_x = 0
+                self.sum_y = 0
+                self.sum_xx = 0
+                self.sum_xy = 0
+                self.startup_frames = 25*60*10 # 10 minutes
+                self.b = 0
+                self.b_error_debt = 0
+                self.m_jump_error = 0
+                self.last_m_err = float('inf')
+                self.last_m_err_n = 0
 
+                try:
                     # Initialize GStreamer
                     Gst.init(None)
 
                     # Create and start a GStreamer pipeline
-                    self.device = self.create_gstream_device('BGR')
+                    self.device = self.createGstreamDevice('BGR')
                     self.pts_buffer = []  # Reset pts buffer
 
                     # Attempt to get a sample and determine the frame shape
@@ -613,13 +645,13 @@ class BufferedCapture(Process):
                     frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
                     
                     # Check if frame is grayscale and set flag
-                    self.convert_to_gray = self.is_grayscale(frame)
+                    self.convert_to_gray = self.isGrayscale(frame)
                     log.info("Video format: BGR, {}P, color: {}".format(height, not self.convert_to_gray))
 
                 except Exception as e:
                     log.info("Error initializing GStreamer, switching to alternative. Error: {}".format(e))
                     self.media_backend_override = True
-                    self.release_resources()
+                    self.releaseResources()
 
 
             if self.config.media_backend == 'v4l2':
@@ -631,19 +663,26 @@ class BufferedCapture(Process):
                     log.info("Could not initialize OpenCV with v4l2. Initialize "
                              "OpenCV Device without v4l2 instead. Error: {}".format(e))
                     self.media_backend_override = True
-                    self.release_resources()
+                    self.releaseResources()
 
 
-            elif self.config.media_backend == 'cv2' or self.media_backend_override:
+            elif (self.config.media_backend == 'cv2') or self.media_backend_override:
                 log.info("Initialize OpenCV Device.")
                 self.device = cv2.VideoCapture(self.config.deviceID)
+
+            else:
+                error_msg  = "Invalid media backend: {}\n".format(self.config.media_backend)
+                error_msg += "Or GStreamer is not available but is set as the media_backend."
+                raise ValueError(error_msg)
 
         return True
 
 
-    def release_resources(self):
+    def releaseResources(self):
         """Releases resources for GStreamer and OpenCV devices."""
+
         if self.pipeline:
+
             try:
                 self.pipeline.set_state(Gst.State.NULL)
 
@@ -654,10 +693,12 @@ class BufferedCapture(Process):
 
                 time.sleep(5)
                 log.info('GStreamer Video device released!')
+
             except Exception as e:
                 log.error('Error releasing GStreamer pipeline: {}'.format(e))
                 
         if self.device:
+
             try:
                 if isinstance(self.device, cv2.VideoCapture):
                     self.device.release()
@@ -687,7 +728,7 @@ class BufferedCapture(Process):
         device_opened = False
         for i in range(20):
             time.sleep(1)
-            if self.device_is_opened():
+            if self.deviceIsOpened():
                 device_opened = True
                 break
 
@@ -705,7 +746,7 @@ class BufferedCapture(Process):
         total_frames = 0
 
         # For video devices only (not files), throw away the first 10 frames
-        if self.video_file is None and isinstance(self.device, cv2.VideoCapture):
+        if (self.video_file is None) and isinstance(self.device, cv2.VideoCapture):
 
             first_skipped_frames = 10
             for i in range(first_skipped_frames):
@@ -818,7 +859,7 @@ class BufferedCapture(Process):
                 if (self.video_file is None) and (not ret):
 
                     log.info('Frame grabbing failed, video device is probably disconnected!')
-                    self.release_resources()
+                    self.releaseResources()
                     wait_for_reconnect = True
                     break
 
@@ -844,12 +885,12 @@ class BufferedCapture(Process):
 
                 # If the end of the video file was reached, stop the capture
                 if self.video_file is not None: 
-                    if (frame is None) or (not self.device_is_opened()):
+                    if (frame is None) or (not self.deviceIsOpened()):
 
                         log.info("End of video file!")
                         log.debug("Video end status:")
                         log.debug("Frame:" + str(frame))
-                        log.debug("Device open:" + str(self.device_is_opened()))
+                        log.debug("Device open:" + str(self.deviceIsOpened()))
 
                         self.exit.set()
                         time.sleep(0.1)
@@ -870,9 +911,9 @@ class BufferedCapture(Process):
 
 
                 # If cv2:
-                if self.config.media_backend != 'gst' and not self.media_backend_override:
+                if (self.config.media_backend != 'gst') and not self.media_backend_override:
                     # Calculate the normalized frame interval between the current and last frame read, normalized by frames per second (fps)
-                    frame_interval_normalized = (frame_timestamp - last_frame_timestamp) / (1 / self.config.fps)
+                    frame_interval_normalized = (frame_timestamp - last_frame_timestamp)/(1/self.config.fps)
                     # Update max_frame_interval_normalized for this cycle
                     max_frame_interval_normalized = max(max_frame_interval_normalized, frame_interval_normalized)
 
@@ -885,6 +926,7 @@ class BufferedCapture(Process):
 
                 # On the last loop, report late or dropped frames
                 if i == block_frames - 1:
+
                     # For cv2, show elapsed time since frame read to assess loop performance
                     if self.config.media_backend != 'gst' and not self.media_backend_override:
                         log.info("Block's max frame interval: {:.3f} (normalized). Run's late frames: {}"
@@ -980,4 +1022,4 @@ class BufferedCapture(Process):
         
 
         log.info('Releasing video device...')
-        self.release_resources()
+        self.releaseResources()
