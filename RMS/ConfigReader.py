@@ -940,12 +940,6 @@ def parseCapture(config, parser):
         if force_v4l2:
             config.media_backend = "v4l2"
 
-    if parser.has_option(section, "force_v4l2"):
-        force_v4l2 = parser.getboolean(section, "force_v4l2")
-
-        if force_v4l2:
-            config.media_backend = "v4l2"
-
     if parser.has_option(section, "uyvy_pixelformat"):
         config.uyvy_pixelformat = parser.getboolean(section, "uyvy_pixelformat")
 

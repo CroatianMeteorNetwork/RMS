@@ -427,9 +427,9 @@ class BufferedCapture(Process):
 
 
     def extractRtspUrl(self, input_string):
-        '''
+        """
         Return validated camera url
-        '''
+        """
 
         # Define the regular expression pattern
         pattern = r'(rtsp://.*?\.sdp)/?'
@@ -448,9 +448,9 @@ class BufferedCapture(Process):
             
 
     def isGrayscale(self, frame):
-        '''
-        Return True if all color channels contain identical data
-        '''
+        """
+        Return True if all color channels contain identical data.
+        """
 
         # Check if the R, G, and B channels are equal
         b, g, r = cv2.split(frame)
@@ -477,13 +477,13 @@ class BufferedCapture(Process):
 
         The method also sets an initial timestamp for the pipeline's operation.
 
-        Parameters:
-        - video_format (str): The desired video format for the conversion, 
-        e.g., 'BGR', 'GRAY8', etc.
+        Arguments:
+            video_format: [str] The desired video format for the conversion, 
+                e.g., 'BGR', 'GRAY8', etc.
 
         Returns:
-        - Gst.Element: The appsink element of the created GStreamer pipeline, 
-        which can be used for further processing of the captured video frames.
+            Gst.Element: The appsink element of the created GStreamer pipeline, 
+                which can be used for further processing of the captured video frames.
         """
 
         device_url = self.extractRtspUrl(self.config.deviceID)
