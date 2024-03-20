@@ -434,25 +434,27 @@ class BufferedCapture(Process):
         Return validated camera url
         """
 
-        # Define the regular expression pattern
-        pattern = r'(rtsp://.*?\.sdp)/?'
+        # Define a regular expression pattern for RTSP URLs
+        pattern = r'rtsp://[^\s]+'
 
         # Search for the pattern in the input string
         match = re.search(pattern, input_string)
 
-        # Extract and format the RTSP URL
+        # Extract, format, and return the RTSP URL
         if match:
-            
-            rtsp_url = match.group(1)  # Extract the matched URL
 
+            rtsp_url = match.group(0)
+
+            # Add '/' if it's missing
             if not rtsp_url.endswith('/'):
-                rtsp_url += '/'  # Add '/' if it's missing
+                rtsp_url += '/'
 
             return rtsp_url
-        
+
+        # If no match is found, return None or handle as appropriate        
         else:
             log.error("No RTSP URL found in the input string: {}".format(input_string))
-            return None  # Return None if no RTSP URL is found
+            return None
             
 
     def isGrayscale(self, frame):
@@ -516,7 +518,7 @@ class BufferedCapture(Process):
 
         self.pipeline.set_state(Gst.State.PLAYING)
 
-        
+
         # Calculate camera latency from config parameters
         total_latency = self.config.camera_buffer/self.config.fps + self.config.camera_latency
 
