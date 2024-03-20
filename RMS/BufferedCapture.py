@@ -442,11 +442,16 @@ class BufferedCapture(Process):
 
         # Extract and format the RTSP URL
         if match:
+            
             rtsp_url = match.group(1)  # Extract the matched URL
+
             if not rtsp_url.endswith('/'):
                 rtsp_url += '/'  # Add '/' if it's missing
+
             return rtsp_url
+        
         else:
+            log.error("No RTSP URL found in the input string: {}".format(input_string))
             return None  # Return None if no RTSP URL is found
             
 
@@ -459,6 +464,7 @@ class BufferedCapture(Process):
         b, g, r = cv2.split(frame)
         if np.array_equal(r, g) and np.array_equal(g, b):
             return True
+        
         return False
 
     
@@ -503,10 +509,14 @@ class BufferedCapture(Process):
                         "{} ! queue max-size-buffers=100 max-size-bytes=0 max-size-time=0 ! "
                         "appsink max-buffers=100 drop=true sync=0 name=appsink").format(device_str, conversion)
 
+
+        log.debug("GStreamer pipeline string: {}".format(pipeline_str))
         
         self.pipeline = Gst.parse_launch(pipeline_str)
 
         self.pipeline.set_state(Gst.State.PLAYING)
+
+        
         # Calculate camera latency from config parameters
         total_latency = self.config.camera_buffer/self.config.fps + self.config.camera_latency
 
