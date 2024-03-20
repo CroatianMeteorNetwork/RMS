@@ -624,6 +624,8 @@ class BufferedCapture(Process):
                     self.convert_to_gray = self.isGrayscale(frame)
                     log.info("Video format: BGR, {}P, color: {}".format(height, not self.convert_to_gray))
 
+                    return True
+
                 except Exception as e:
                     log.info("Error initializing GStreamer, switching to alternative. Error: {}".format(e))
                     self.media_backend_override = True
@@ -635,6 +637,9 @@ class BufferedCapture(Process):
                     log.info("Initialize OpenCV Device with v4l2.")
                     self.device = cv2.VideoCapture(self.config.deviceID, cv2.CAP_V4L2)
                     self.device.set(cv2.CAP_PROP_CONVERT_RGB, 0)
+
+                    return True
+                
                 except Exception as e:
                     log.info("Could not initialize OpenCV with v4l2. Initialize "
                              "OpenCV Device without v4l2 instead. Error: {}".format(e))
@@ -646,12 +651,14 @@ class BufferedCapture(Process):
                 log.info("Initialize OpenCV Device.")
                 self.device = cv2.VideoCapture(self.config.deviceID)
 
+                return True
+
             else:
                 error_msg  = "Invalid media backend: {}\n".format(self.config.media_backend)
                 error_msg += "Or GStreamer is not available but is set as the media_backend."
                 raise ValueError(error_msg)
 
-        return True
+        return False
 
 
     def releaseResources(self):
