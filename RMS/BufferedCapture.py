@@ -504,7 +504,11 @@ class BufferedCapture(Process):
         self.pipeline = Gst.parse_launch(pipeline_str)
 
         self.pipeline.set_state(Gst.State.PLAYING)
-        self.start_timestamp = time.time() - self.total_latency
+        # Calculate camera latency from config parameters
+        total_latency = self.config.camera_buffer/self.config.fps + self.config.camera_latency
+
+        self.start_timestamp = time.time() - total_latency
+ 
         start_time_str = datetime.datetime.fromtimestamp(self.start_timestamp).strftime('%Y-%m-%d %H:%M:%S.%f')
         log.info("Start time is {}".format(start_time_str))
 
