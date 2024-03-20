@@ -77,6 +77,7 @@ class BufferedCapture(Process):
         
         self.config = config
         self.media_backend_override = False
+        self.video_device_type = "cv2"
 
         self.video_file = video_file
 
@@ -144,15 +145,13 @@ class BufferedCapture(Process):
         
         try:
             # OpenCV
-            if (self.config.media_backend == 'cv2') \
-                or (self.config.media_backend == 'v4l2') \
-                or self.media_backend_override:
+            if self.video_device_type == "cv2":
 
                 return self.device.isOpened()
             
             # GStreamer
             else:
-                
+
                 if GST_IMPORTED:
 
                     state = self.device.get_state(Gst.CLOCK_TIME_NONE).state
@@ -522,6 +521,9 @@ class BufferedCapture(Process):
     def initVideoDevice(self):
         """ Initialize the video device. """
 
+        # Assume OpenCV as the default video device type, which will be overridden if GStreamer is used
+        self.video_device_type = "cv2"
+
         # Use a file as the video source
         if self.video_file is not None:
             self.device = cv2.VideoCapture(self.video_file)
@@ -633,6 +635,9 @@ class BufferedCapture(Process):
                     self.convert_to_gray = self.isGrayscale(frame)
                     log.info("Video format: BGR, {}P, color: {}".format(height, not self.convert_to_gray))
 
+                    # Set the video device type
+                    self.video_device_type = "gst"
+
                     return True
 
                 except Exception as e:
@@ -692,11 +697,14 @@ class BufferedCapture(Process):
         if self.device:
 
             try:
-                if isinstance(self.device, cv2.VideoCapture):
+
+                if self.video_device_type == "cv2":
                     self.device.release()
                     log.info('OpenCV Video device released!')
+
             except Exception as e:
                 log.error('Error releasing OpenCV device: {}'.format(e))
+
             finally:
                 self.device = None  # Reset device to None after releasing
 
@@ -738,7 +746,7 @@ class BufferedCapture(Process):
         total_frames = 0
 
         # For video devices only (not files), throw away the first 10 frames
-        if (self.video_file is None) and isinstance(self.device, cv2.VideoCapture):
+        if (self.video_file is None) and (self.video_device_type == "cv2"):
 
             first_skipped_frames = 10
             for i in range(first_skipped_frames):
