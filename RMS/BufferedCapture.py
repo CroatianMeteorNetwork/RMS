@@ -454,7 +454,7 @@ class BufferedCapture(Process):
         # If no match is found, return None or handle as appropriate        
         else:
             log.error("No RTSP URL found in the input string: {}".format(input_string))
-            return None
+            raise ValueError("No RTSP URL found in the input string: {}".format(input_string))
             
 
     def isGrayscale(self, frame):
