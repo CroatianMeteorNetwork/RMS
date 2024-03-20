@@ -144,11 +144,15 @@ class BufferedCapture(Process):
         
         try:
             # OpenCV
-            if isinstance(self.device, cv2.VideoCapture):
+            if (self.config.media_backend == 'cv2') \
+                or (self.config.media_backend == 'v4l2') \
+                or self.media_backend_override:
+
                 return self.device.isOpened()
             
             # GStreamer
             else:
+                
                 if GST_IMPORTED:
 
                     state = self.device.get_state(Gst.CLOCK_TIME_NONE).state
