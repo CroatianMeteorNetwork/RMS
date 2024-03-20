@@ -569,6 +569,11 @@ class BufferedCapture(Process):
             log.info("Initializing the video device...")
             log.info("Device: " + str(self.config.deviceID))
 
+            # If media backend is set to gst, but GStreamer is not available, switch to openCV
+            if (self.config.media_backend == 'gst') and (not GST_IMPORTED):
+                log.info("GStreamer is not available. Switching to alternative.")
+                self.media_backend_override = True
+
             if (self.config.media_backend == 'gst') and GST_IMPORTED:
                 
                 log.info("Initialize GStreamer Standalone Device.")
