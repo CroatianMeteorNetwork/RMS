@@ -270,9 +270,14 @@ class Config:
         self.height_device = self.height
         self.fps = 25.0
 
-        # Camera latency in seconds. This will be applied as an offset to the timestamp of the captured
-        #   frames
-        self.camera_latency = 0.0
+        # Camera buffer in number of frames. This will applied a buffer/fps correction to
+        # the timestamps when in GStreamer Standalone mode
+        self.camera_buffer = 1
+
+        # Camera latency in seconds. This will applied an offset to the timestamps
+        # when in GStreamer Standalone mode
+        self.camera_latency = 0.05
+
 
         self.report_dropped_frames = False
 
@@ -935,6 +940,12 @@ def parseCapture(config, parser):
         if force_v4l2:
             config.media_backend = "v4l2"
 
+    if parser.has_option(section, "force_v4l2"):
+        force_v4l2 = parser.getboolean(section, "force_v4l2")
+
+        if force_v4l2:
+            config.media_backend = "v4l2"
+
     if parser.has_option(section, "uyvy_pixelformat"):
         config.uyvy_pixelformat = parser.getboolean(section, "uyvy_pixelformat")
 
@@ -946,7 +957,10 @@ def parseCapture(config, parser):
             config.fps = 1000000
             print()
             print("WARNING! The FPS has been limited to 1,000,000!")
-            
+
+    if parser.has_option(section, "camera_buffer"):
+        config.camera_buffer = parser.getint(section, "camera_buffer")
+
     if parser.has_option(section, "camera_latency"):
         config.camera_latency = parser.getfloat(section, "camera_latency")
 
