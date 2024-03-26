@@ -100,7 +100,7 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
     #mean_interval = np.mean(intervals) if intervals else None
     median_interval = np.median(intervals_np)
     std_intervals_seconds = np.std(intervals_np)
-    std_intervals_frames = std_intervals_seconds*fps
+    std_intervals_frames = std_intervals_seconds*fps/ff_block_size
     expected_interval = ff_block_size/fps
 
     # Calculate average fps
@@ -171,12 +171,17 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
                 label='Possible Dropped Frames', 
                 c='red', s=10, alpha=0.5, zorder=5)
 
+    # Plot the residuals from the expected interval
+    residuals = intervals_np - expected_interval
+    ax_res.scatter(timestamps, residuals, c='gray', s=1, zorder=3)
+
+
     # Plot Expected and Median lines
     ax_inter.axhline(y=expected_interval, color='lime', linestyle='-', 
-                label='Expected ({:.3f}s), ({:.2f} fps)'.format(expected_interval, fps), zorder=4)
-    # ax_inter.axhline(y=mean_interval, color='blue', linestyle='--', label='Mean ({:.3f}s), ({:.2f} fps)'.format(mean_interval, average_fps), zorder=4)
+                label='Expected ({:.3f}s), ({:.5f} fps)'.format(expected_interval, fps), zorder=4)
+    
     ax_inter.axhline(y=median_interval, color='green', linestyle='--', 
-                label='Median ({:.3f} +/- {:.3f} s), ({:.2f} +/- {:.2f} fps)'.format(
+                label='Median ({:.3f} +/- {:.3f} s), ({:.5f} +/- {:.2f} fps)'.format(
                     median_interval, std_intervals_seconds, median_fps, std_intervals_frames), zorder=4)
 
     # Determine grid interval dynamically
@@ -184,7 +189,7 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
     raw_interval = difference_range/11
 
     # Round the interval up to the nearest 0.1, 1, or 10
-    if raw_interval < 0.1:
+    if raw_interval < 1:
         grid_interval = math.ceil(raw_interval*10)/10
         grid_color = 'grey'
         rounded_min_interval = np.floor(min_interval*10)/10
@@ -196,7 +201,7 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
         ax_inter.axhline(y=upper_interval, color='lime', linestyle='--', 
                     label='+1/fps Interval ({:.3f}s)'.format(upper_interval), zorder=4)
 
-    elif raw_interval < 1:
+    elif raw_interval < 10:
         grid_interval = math.ceil(raw_interval)
         grid_color = '#C0A040'
         rounded_min_interval = np.floor(min_interval)
@@ -206,7 +211,7 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
         grid_interval = math.ceil(raw_interval/10)*10
         grid_color = '#FFBF00'
         rounded_min_interval = np.floor(min_interval/10)*10
-        rounded_max_difference = np.ceil(max_interval/10)*10
+        rounded_max_difference = min(np.ceil(max_interval/10)*10, 60)
 
     minimum_allowed_interval = 0.1
     grid_interval = max(grid_interval, minimum_allowed_interval)
@@ -217,7 +222,6 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
     ax_inter.grid(axis='y', color=grid_color, linestyle='-', alpha=0.7, zorder=0)
 
     # Set vertical grid to appear every two hours
-    ax_inter.xaxis.set_major_locator(mdates.HourLocator(interval=2))
     ax_inter.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
     ax_inter.grid(axis='x', linestyle='-', alpha=0.7, zorder=0)
 
@@ -240,9 +244,6 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
 
 
 
-    # Plot the residuals from the expected interval
-    residuals = intervals_np - expected_interval
-    ax_res.scatter(timestamps, residuals, c='gray', s=1, zorder=3)
 
     # Enable the grid
     ax_res.grid(alpha=0.7, zorder=0)
@@ -268,7 +269,6 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
     plt.subplots_adjust(top=0.90, hspace=0.05)
 
     # Save the plot in the dir_path
-    #suffix = "_ff_intervals_flagged.png" if dropped_frame_rate > 0.1 else "_ff_intervals.png"
     suffix = "_ff_intervals.png"
     plot_filename = os.path.join(dir_path, '{}{}'.format(plot_title, suffix))
     plt.savefig(plot_filename, dpi=150)
@@ -290,7 +290,7 @@ if __name__ == '__main__':
     arg_parser.add_argument('--fps', metavar='FPS', type=float, default=25.0, required=False, \
         help='Expected fps (default: taken from config file, 25.0 if config not found).')
 
-     # Parse the command line arguments
+    # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
     #########################
