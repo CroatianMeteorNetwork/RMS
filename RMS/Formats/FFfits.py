@@ -183,7 +183,7 @@ def write(ff, directory, filename, compress=True):
     hdulist = fits.HDUList([prim, maxpixel_hdu, maxframe_hdu, avepixel_hdu, stdpixel_hdu])
 
     # Save the FITS
-    hdulist.writeto(file_path, overwrite=overwrite)
+    hdulist.writeto(file_path, overwrite=True)
 
 
 
