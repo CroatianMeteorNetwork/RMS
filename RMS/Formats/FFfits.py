@@ -122,7 +122,7 @@ def read(directory, filename, array=False, full_filename=False):
 
 
 
-def write(ff, directory, filename):
+def write(ff, directory, filename, compress=True):
     """ Write a FF structure to a FITS file in specified directory.
     
     Arguments:
@@ -164,11 +164,18 @@ def write(ff, directory, filename):
         ff.stdpixel = ff.stdpixel[0]
 
     # Add the data arrays to the list and specify compression algorithm
-    maxpixel_hdu = fits.CompImageHDU(ff.maxpixel, name='MAXPIXEL', compression_type='RICE_1')
-    maxframe_hdu = fits.CompImageHDU(ff.maxframe, name='MAXFRAME', compression_type='RICE_1')
-    avepixel_hdu = fits.CompImageHDU(ff.avepixel, name='AVEPIXEL', compression_type='RICE_1')
-    stdpixel_hdu = fits.CompImageHDU(ff.stdpixel, name='STDPIXEL', compression_type='RICE_1')
+    if compress:
+        maxpixel_hdu = fits.CompImageHDU(ff.maxpixel, name='MAXPIXEL', compression_type='RICE_1')
+        maxframe_hdu = fits.CompImageHDU(ff.maxframe, name='MAXFRAME', compression_type='RICE_1')
+        avepixel_hdu = fits.CompImageHDU(ff.avepixel, name='AVEPIXEL', compression_type='RICE_1')
+        stdpixel_hdu = fits.CompImageHDU(ff.stdpixel, name='STDPIXEL', compression_type='RICE_1')
     
+    else:
+        maxpixel_hdu = fits.ImageHDU(ff.maxpixel, name='MAXPIXEL')
+        maxframe_hdu = fits.ImageHDU(ff.maxframe, name='MAXFRAME')
+        avepixel_hdu = fits.ImageHDU(ff.avepixel, name='AVEPIXEL')
+        stdpixel_hdu = fits.ImageHDU(ff.stdpixel, name='STDPIXEL')
+
     # Create the primary part
     prim = fits.PrimaryHDU(header=head)
     
@@ -176,7 +183,7 @@ def write(ff, directory, filename):
     hdulist = fits.HDUList([prim, maxpixel_hdu, maxframe_hdu, avepixel_hdu, stdpixel_hdu])
 
     # Save the FITS
-    hdulist.writeto(file_path, overwrite=True)
+    hdulist.writeto(file_path, overwrite=overwrite)
 
 
 
