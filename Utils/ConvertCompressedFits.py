@@ -21,7 +21,8 @@ import os
 import sys
 import glob
 
-from RMS.Formats import FFfits
+from RMS.Formats.FFfits import read as readFFfits
+from RMS.Formats.FFfits import write as writeFFfits
 
 
 def findFitsFiles(directory):
@@ -29,7 +30,10 @@ def findFitsFiles(directory):
 
     Arguments:
         directory: [str] The path to the folder containing the files to convert.
-        
+
+    Return:
+        None
+
     """
     fits_files = []
     for root, dirs, files in os.walk(directory):
@@ -45,6 +49,9 @@ def convertDirectoryFits(input_directory, output_directory):
         input_directory: [str] The path to the folder containing the files to convert.
         output_directory: [str] The path to the folder where the converted files will be saved.
 
+    Return:
+        None
+
     """
     fits_files = findFitsFiles(input_directory)
     for fits_file in fits_files:
@@ -55,10 +62,10 @@ def convertDirectoryFits(input_directory, output_directory):
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
             # Read the compressed FITS file
-            ff = FFfits.read('', fits_file, array=True, full_filename=True)
+            ff = readFFfits('', fits_file, array=True, full_filename=True)
 
             # Write it uncompressed
-            FFfits.write(ff, os.path.dirname(output_path), os.path.basename(output_path), compress=False)
+            writeFFfits(ff, os.path.dirname(output_path), os.path.basename(output_path), compress=False)
             print(f"Converted {fits_file} to {output_path}")
         except Exception as e:
             print(f"Failed to convert {fits_file}: {e}", file=sys.stderr)
