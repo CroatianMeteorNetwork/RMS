@@ -383,7 +383,7 @@ class Config:
         self.event_monitor_check_interval_fast = 5
 
         ##### Compression
-        self.hdu_compress = True
+        self.hdu_compress = False
 
         ##### Weave compilation arguments
         self.extra_compile_args = ["-O3"]
