@@ -22,6 +22,8 @@ from RMS.Formats import StarCatalog
 from RMS.Routines import Image
 from RMS.Routines.AddCelestialGrid import addEquatorialGrid
 
+from RMS.Routines import MaskImage
+
 # Import Cython functions
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
@@ -60,9 +62,9 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
 
 
 
-    ### Load recalibrated platepars, if they exist ###
+    ### Load re-calibrated platepars, if they exist ###
 
-    # Find recalibrated platepars file per FF file
+    # Find re-calibrated platepars file per FF file
     platepars_recalibrated_file = None
     for file_name in os.listdir(night_dir_path):
         if file_name == config.platepars_recalibrated_name:
@@ -70,12 +72,12 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
             break
 
 
-    # Load all recalibrated platepars if the file is available
+    # Load all re-calibrated platepars if the file is available
     recalibrated_platepars = None
     if platepars_recalibrated_file:
         with open(os.path.join(night_dir_path, platepars_recalibrated_file)) as f:
             recalibrated_platepars = json.load(f)
-            print('Loaded recalibrated platepars JSON file for the calibration report...')
+            print('Loaded re-calibrated platepars JSON file for the calibration report...')
 
     ### ###
 
@@ -140,7 +142,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         dt = getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True)
         jd = date2JD(*dt)
 
-        # Add the time and the stars to the dict
+        # Add the time and the stars to the dictionary
         star_dict[jd] = star_data
         ff_dict[jd] = ff_name
 
@@ -152,7 +154,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         return None
 
 
-    # If the recalibrated platepars file exists, take the one with the most stars
+    # If the re-calibrated platepars file exists, take the one with the most stars
     max_jd = 0
     using_recalib_platepars = False
     if recalibrated_platepars is not None:
@@ -167,7 +169,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
             if (jd not in star_dict) or (jd not in ff_dict):
                 continue
 
-            # Make sure that the chosen file has been successfuly recalibrated
+            # Make sure that the chosen file has been successfully re-calibrated
             if "auto_recalibrated" in recalibrated_platepars[ff_name_temp]:
                 if not recalibrated_platepars[ff_name_temp]["auto_recalibrated"]:
                     continue
@@ -178,12 +180,12 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
                 max_stars = len(star_dict[jd])
 
 
-        # Set a flag to indicate if using recalibrated platepars has failed
+        # Set a flag to indicate if using re-calibrated platepars has failed
         if max_jd == 0:
             using_recalib_platepars = False
         else:
 
-            print('Using recalibrated platepars, file:', ff_dict[max_jd])
+            print('Using re-calibrated platepars, file:', ff_dict[max_jd])
             using_recalib_platepars = True
 
             # Select the platepar where the FF file has the most stars
@@ -224,7 +226,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
 
 
 
-    # If no recalibrated platepars where found, find the image with the largest number of matched stars
+    # If no re-calibrated platepars where found, find the image with the largest number of matched stars
     if (not using_recalib_platepars) or (max_jd == 0):
 
         max_jd = 0
@@ -299,7 +301,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
 
         ### Plot match residuals ###
 
-        # Compute preducted positions of matched image stars from the catalog
+        # Compute predicted positions of matched image stars from the catalog
         x_predicted, y_predicted = raDecToXYPP(matched_catalog_stars[:, 0], \
             matched_catalog_stars[:, 1], max_jd, platepar)
 
@@ -374,6 +376,13 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
     temp_arr = temp_arr[temp_arr[:, 0] <= ff.avepixel.shape[1]]
     temp_arr = temp_arr[temp_arr[:, 1] >= 0]
     temp_arr = temp_arr[temp_arr[:, 1] <= ff.avepixel.shape[0]]
+    x_catalog, y_catalog, mag_catalog = temp_arr.T
+
+    # Filter out catalog stars in the masked regions of the image
+    mask = MaskImage.getMaskFile(night_dir_path, config)
+    temp_arr = np.c_[x_catalog, y_catalog, mag_catalog]
+    temp_int_arr = temp_arr.astype(int)
+    temp_arr = temp_arr[mask.img[temp_int_arr[:, 1], temp_int_arr[:, 0]] > 0]
     x_catalog, y_catalog, mag_catalog = temp_arr.T
 
     # Plot catalog stars on the image
@@ -469,7 +478,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         if config.use_flat:
             platepar.vignetting_coeff = 0.0
 
-        # Extact intensities and mangitudes
+        # Extract intensities and magnitudes
         star_intensities = image_stars[:, 2]
         catalog_ra, catalog_dec, catalog_mags = matched_catalog_stars.T
 

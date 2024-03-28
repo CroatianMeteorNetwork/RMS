@@ -72,7 +72,7 @@ class MaskStructure(object):
 
 def getMaskFile(dir_path, config, file_list=None):
     """
-    From a directory, fine the mask file, load it and return it
+    From a directory, find the mask file, load it and return it
     """
     if file_list is None:
         file_list = os.listdir(dir_path)
