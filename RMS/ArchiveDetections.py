@@ -1,21 +1,176 @@
 """ Selecting and zipping files with detections. """
-
-
+import datetime
 import os
 import sys
 import logging
 import traceback
 
 
+import RMS.Formats.FFfile
 from RMS.Formats.FFfile import validFFName
 from RMS.Misc import archiveDir
 from RMS.Routines import MaskImage
 from Utils.GenerateThumbnails import generateThumbnails
 from Utils.StackFFs import stackFFs
-
+from glob import glob
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
+
+
+def reduceTimeGaps(file_list, captured_path, max_time_between_fits = 900):
+
+    """
+    Function takes a list of files, calculates the difference in time between
+    each fits file, and adds additional files from the CapturedPath to reduce the gap
+    to the max_time_between fits
+
+    Arguments:
+        file_list: [list] list of files to be uploaded.
+        captured_path: [str] path of the captured files directory corresponding to this list of files.
+        max_time_between_fits: [int] maximum time between two fits files default 900 seconds.
+
+    Return:
+         file_list: [list] The original list of files augmented by fits files to reduce the gaps.
+
+    """
+
+
+    fits_list = []
+    minimum_time_between_fits = 900
+
+    if max_time_between_fits < minimum_time_between_fits:
+        log.warning("Setting max_time_between_fits to {} seconds is less than coded minimum of {} seconds".format(max_time_between_fits, minimum_time_between_fits))
+        max_time_between_fits = minimum_time_between_fits
+    log.info("max_time_between_fits is set to {} seconds".format(max_time_between_fits))
+
+    # make a list of only fits files, sorted by time
+    for path_file_to_check in file_list:
+        file_to_check = os.path.basename(path_file_to_check)
+        if file_to_check.endswith('.fits'):
+            fits_list.append(file_to_check)
+
+    fits_list.sort()
+
+    log.info("Initial files in fits_list")
+    for file in fits_list:
+        log.info(file)
+
+    # get a list of all the fits files that are available in the captured files directory, and sort
+    captured_fits_list = glob(os.path.join(captured_path,"*.fits"))
+
+
+    # if there are no fits files, then return from this function
+    if len(captured_fits_list) == 0:
+        log.warning("No captured fits files so no extra files to add")
+        return file_list
+
+    # sort the list of files
+    captured_fits_list.sort()
+
+    # calculate some statistics
+    original_fits_list_length = len(fits_list)
+
+    first_captured_fits_file = os.path.basename(captured_fits_list[0])
+    time_previous_fits_file = RMS.Formats.FFfile.filenameToDatetime(first_captured_fits_file)
+    final_captured_fits_file = os.path.basename(captured_fits_list[-1])
+    time_final_fits_file = RMS.Formats.FFfile.filenameToDatetime(final_captured_fits_file)
+
+    # add the final captured file to the fits list
+    #log.info("Adding final captured fits file {}".format(final_captured_fits_file))
+    fits_list.append(final_captured_fits_file)
+
+    #log.info("Files in fits_list after adding final fits file from captured directory")
+    #for file in fits_list:
+    #    log.info(file)
+
+    target_time_list = []
+
+    file_list.sort()
+
+    # compute the initial maximum interval between fits files
+    initial_max_interval = 0
+    last_time = RMS.Formats.FFfile.filenameToDatetime(first_captured_fits_file)
+    for file in file_list:
+        if file.endswith(".fits"):
+            interval = round((RMS.Formats.FFfile.filenameToDatetime(os.path.basename(file)) - last_time).total_seconds())
+            initial_max_interval = interval if interval > initial_max_interval else initial_max_interval
+            last_time = RMS.Formats.FFfile.filenameToDatetime(os.path.basename(file))
+
+
+    # go through all the fits files
+    for fits in fits_list:
+
+        time_of_this_fits_file = RMS.Formats.FFfile.filenameToDatetime(fits)
+        time_elapsed = int((time_of_this_fits_file - time_previous_fits_file).total_seconds())
+        # if the time gap is too large
+        if time_elapsed > max_time_between_fits:
+            # work out how many intervals there are
+            number_of_additional_files = time_elapsed // max_time_between_fits
+            # how long is the interval, make 1 second shorter so that we will always add at least one file at middle
+            # of interval, for protection against edge case
+            interval_seconds = int(time_elapsed // (number_of_additional_files+1) -1)
+
+            # iterate across this interval, missing the first - because that fits file is already in place
+            # and add target times for fits files to find
+
+            # intialise target_time for edge case protection
+            target_time = time_previous_fits_file + datetime.timedelta(seconds=interval_seconds)
+
+
+            files_added = 0
+            for offset in range(interval_seconds + 1,time_elapsed - interval_seconds,interval_seconds):
+                target_time = time_previous_fits_file + datetime.timedelta(seconds = offset)
+                target_time_list.append(target_time)
+                files_added += 1
+
+            if files_added == 0:
+                log.warning("Loop did not execute with input values of")
+                log.warning("time_of_this_fits_file {}".format(time_of_this_fits_file))
+                log.warning("time_elapsed {}".format(time_elapsed))
+                log.warning("number_of_additional_fits_files {}".format(number_of_additional_files))
+                log.warning("interval_seconds {}".format(interval_seconds))
+
+            # the time of the previous fits file is the time of the file we are going to add
+            time_previous_fits_file = target_time
+        else:
+            # otherwise the time of the previous fits file is the time of this file
+            time_previous_fits_file = time_of_this_fits_file
+
+    #log.info("Adding fits files")
+    # find files immediately after the target times - the intervals will not be perfect
+    for target_time in target_time_list:
+        for fits_file in captured_fits_list:
+            if RMS.Formats.FFfile.filenameToDatetime(os.path.basename(fits_file)) > target_time:
+                file_list.append(os.path.basename(fits_file))
+                #log.info(os.path.basename(fits_file))
+                break
+
+    file_list.sort()
+
+    final_max_interval,final_fits_count = 0,0
+
+    # recalculate the statistics
+    last_time = RMS.Formats.FFfile.filenameToDatetime(first_captured_fits_file)
+    for file in file_list:
+        if file.endswith(".fits"):
+            interval = round((RMS.Formats.FFfile.filenameToDatetime(os.path.basename(file)) - last_time).total_seconds())
+            final_max_interval = interval if interval > final_max_interval else final_max_interval
+            last_time = RMS.Formats.FFfile.filenameToDatetime(os.path.basename(file))
+            final_fits_count += 1
+
+    #log.info("Final files in fits_list")
+    #for file in file_list:
+    #    log.info(file)
+
+
+    log.info("Intervals before / after including extra files {} / {} seconds".format(initial_max_interval, final_max_interval))
+    log.info("Original / added / final fits file count {} / {} / {}".format(original_fits_list_length, len(target_time_list), final_fits_count))
+
+
+
+
+    return file_list
 
 
 def selectFiles(config, dir_path, ff_detected):
@@ -241,7 +396,11 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         log.error('Generating stack failed with error:' + repr(e))
         log.error("".join(traceback.format_exception(*sys.exc_info())))
 
-
+    if config.upload_mode == 1:
+        try:
+            file_list = reduceTimeGaps(file_list, captured_path, config.max_time_between_fits)
+        except:
+            log.warning("Could not reduce time gaps")
 
     if file_list:
 
@@ -266,6 +425,15 @@ if __name__ == "__main__":
     # Load the configuration file
     config = cr.parse(".config")
 
+    if False:
+        # this code is for testing reduceTimeGaps function
+        # captured path points to a captured directory
+        # file_list is a list of all the files that are to be uploaded, for test purposes
+        # use all the files in the already existing archived directory
+
+        captured_path = "/home/user/RMS_data/CapturedFiles/sample_night_dir"
+        file_list = os.listdir("/home/user/RMS_data/ArchivedFiles/sample_archived_dir")
+        reduceTimeGaps(file_list, captured_path)
 
 
     ### Test the archive function
