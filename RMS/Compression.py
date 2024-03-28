@@ -121,12 +121,11 @@ class Compressor(multiprocessing.Process):
         micros = int((startTime - floor(startTime))*1000000)
         millis = int((startTime - floor(startTime))*1000)
         
-
-        filename_millis = str(self.config.stationID).zfill(3) +  "_" + date_string + "_" + str(millis).zfill(3) \
-            + "_" + str(N).zfill(7)
+        filename_millis = str(self.config.stationID).zfill(3) + "_" + date_string + "_" \
+            + str(millis).zfill(3) + "_" + str(N).zfill(7)
         
-        filename_micros = str(self.config.stationID).zfill(3) +  "_" + date_string + "_" + str(micros).zfill(6) \
-            + "_" + str(N).zfill(7)
+        filename_micros = str(self.config.stationID).zfill(3) + "_" + date_string + "_" \
+            + str(micros).zfill(6) + "_" + str(N).zfill(7)
 
         ff = FFStruct.FFStruct()
         ff.array = arr
@@ -140,7 +139,8 @@ class Compressor(multiprocessing.Process):
         ff.starttime = date_string + "_" + str(micros).zfill(6)
         
         # Write the FF file
-        FFfile.write(ff, self.data_dir, filename_millis, fmt=self.config.ff_format)
+        FFfile.write(ff, self.data_dir, filename_millis, fmt=self.config.ff_format,
+                     compress=self.config.hdu_compress)
         
         return filename_millis, filename_micros
 

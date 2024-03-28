@@ -99,7 +99,7 @@ def read(directory, filename, fmt=None, array=False, full_filename=False, verbos
 
 
 
-def write(ff, directory, filename, fmt=None):
+def write(ff, directory, filename, fmt=None, compress=True):
     """ Write a FF structure to a FITS file in specified directory.
     
     Arguments:
@@ -140,7 +140,7 @@ def write(ff, directory, filename, fmt=None):
 
     # RMS fits format
     elif fmt == 'fits':
-        writeFFfits(ff, directory, filename)
+        writeFFfits(ff, directory, filename, compress=compress)
 
 
 def reconstructFrame(ff, frame_no, avepixel=False):
