@@ -51,7 +51,7 @@ from RMS.RunExternalScript import runExternalScript
 from RMS.UploadManager import UploadManager
 from RMS.EventMonitor import EventMonitor
 from RMS.DownloadMask import downloadNewMask
-from Utils.PerfMonitor import writeTest
+from Utils.PerfMonitor import PerfMonitor
 
 # Flag indicating that capturing should be stopped
 STOP_CAPTURE = False
@@ -161,6 +161,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
     # Check if resuming capture to the last capture directory
     night_data_dir_name = None
+    perf_monitor = None
+    
     if resume_capture:
 
         log.info("Resuming capture in the last capture directory...")
@@ -192,6 +194,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
         else:
             log.info("Previous capture directory found: {:s}".format(night_data_dir))
+            # Initialize PerfMonitor instance
+            perf_monitor = PerfMonitor(night_data_dir_name)
 
         # Resume run is finished now, reset resume flag
         cml_args.resume = False
@@ -200,19 +204,33 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Make a name for the capture data directory
     if night_data_dir_name is None:
 
-        # Create a directory for captured files based on the current time
+        # Create a directory for captured files based on the current time and start PerfMonitor
         if video_file is None:
             night_data_dir_name = str(config.stationID) + '_' \
                 + datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')
             
-            # Perform the storage write performance test
-            write_speed_mbps = writeTest(config.data_dir, night_data_dir_name)
-            log.info(f"Logged write speed of {write_speed_mbps:.2f} MB/s")
-
-
         # If a video file is given, take the folder name from the video file
         else:
             night_data_dir_name = os.path.basename(video_file[:-4])
+
+        # Initialize PerfMonitor instance
+        perf_monitor = PerfMonitor(night_data_dir_name)
+
+        # Perform a storage write performance test and log
+        write_speed_mbps = perf_monitor.writeTest(config.data_dir)
+        log.info("Logged write speed of {:.2f} MB/s".format(write_speed_mbps))
+
+        # Gather basic system information and log
+        info = perf_monitor.getSystemInfo()
+        info_str = ', '.join(f'{key}: {value}' for key, value in info.items())
+        log.info("System Information: {}".format(info_str))
+
+        # Gather config settings and log
+        perf_monitor.updateEntry('live_maxpixel', config.live_maxpixel_enable)
+        perf_monitor.updateEntry('live_jpg', config.live_jpg)
+        perf_monitor.updateEntry('slideshow', config.slideshow_enable)
+        perf_monitor.updateEntry('hdu_compress', config.hdu_compress)
+        perf_monitor.updateEntry('fireball_detection', config.enable_fireball_detection)
 
         # Full path to the data directory
         night_data_dir = os.path.join(os.path.abspath(config.data_dir), config.captured_dir, \
@@ -353,7 +371,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
     # Initialize buffered capture
-    bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config, video_file=video_file)
+    bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config, perf_monitor, video_file=video_file)
 
 
     # Initialize the live image viewer
@@ -518,7 +536,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
     # Save detection to disk and archive detection
-    night_archive_dir, archive_name, _ = processNight(night_data_dir, config, \
+    night_archive_dir, archive_name, _ = processNight(night_data_dir, config, perf_monitor \
         detection_results=detection_results, nodetect=nodetect)
 
 
