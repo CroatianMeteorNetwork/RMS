@@ -93,21 +93,21 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
     # Convert timestamps to a NumPy array for boolean indexing
     timestamps_np = np.array(timestamps)
     intervals_np = np.array(intervals)
-    
-    # Calculate minimum, maximum, average, median, and expected intervals
+
+    # Calculate minimum, maximum, median, std, and expected intervals
     min_interval = min(intervals) if intervals else None
     max_interval = max(intervals) if intervals else None
-    #mean_interval = np.mean(intervals) if intervals else None
+
     median_interval = np.median(intervals_np)
     std_intervals_seconds = np.std(intervals_np)
-    std_intervals_frames = std_intervals_seconds*fps/ff_block_size
     expected_interval = ff_block_size/fps
 
-    # Calculate average fps
-    # average_fps = ff_block_size/mean_interval
+    # Calculate median and std fps
     median_fps = ff_block_size/median_interval
+    fps_array = ff_block_size/intervals_np
+    std_fps = np.std(fps_array)
 
-    
+
     ### Scoring ###
 
     # Set frame tolerance threshold
@@ -127,9 +127,12 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
 
         # Create a boolean mask where the moving average exceeds the threshold
         above_threshold = padded_moving_avg > threshold
+
         # Calculate Jitter Quality
-        count_within_tolerance = sum(1 for interval in intervals if abs(interval - expected_interval) <= tolerance/fps)
+        count_within_tolerance = sum(1 for interval in intervals if abs(interval - expected_interval)
+                                     <= tolerance/fps)
         jitter_quality = (count_within_tolerance/len(intervals))*100 if intervals else 0
+
         # Calculate Dropped Frame Rate
         dropped_frame_rate = (np.sum(above_threshold)/len(padded_moving_avg))*100
 
@@ -141,7 +144,7 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
 
 
     ### Plotting ###
-    
+
     # Only tag long intervals for plotting
     above_expected_interval = intervals_np > expected_interval
     combined_condition = above_threshold & above_expected_interval
@@ -158,18 +161,17 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
 
     # Set up two subplots one on top of the other. The top one is 2x the size of the bottom one
     fig, (ax_inter, ax_res) = plt.subplots(
-        nrows=2, ncols=1, figsize=(8, 6), sharex=True, gridspec_kw={'height_ratios': [2, 1]}
-        )
+        nrows=2, ncols=1, figsize=(8, 6), sharex=True, gridspec_kw={'height_ratios': [2, 1]})
 
     # Plot grey points (below threshold)
-    ax_inter.scatter(timestamps_below_threshold, intervals_below_threshold, 
-                label='Intervals, max ({:.3f}s), min ({:.3f}s)'.format(max_interval, min_interval), 
-                c='gray', s=10, alpha=0.5, zorder=3)
+    ax_inter.scatter(timestamps_below_threshold, intervals_below_threshold,
+                     label='Intervals, max ({:.3f}s), min ({:.3f}s)'.format(max_interval, min_interval),
+                     c='gray', s=10, alpha=0.5, zorder=3)
 
     # Plot red points (above threshold) at the highest z-order
-    ax_inter.scatter(timestamps_above_threshold, intervals_above_threshold, 
-                label='Possible Dropped Frames', 
-                c='red', s=10, alpha=0.5, zorder=5)
+    ax_inter.scatter(timestamps_above_threshold, intervals_above_threshold,
+                     label='Possible Dropped Frames',
+                     c='red', s=10, alpha=0.5, zorder=5)
 
     # Plot the residuals from the expected interval
     residuals = intervals_np - expected_interval
@@ -177,12 +179,12 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
 
 
     # Plot Expected and Median lines
-    ax_inter.axhline(y=expected_interval, color='lime', linestyle='-', 
-                label='Expected ({:.3f}s), ({:.5f} fps)'.format(expected_interval, fps), zorder=4)
-    
-    ax_inter.axhline(y=median_interval, color='green', linestyle='--', 
-                label='Median ({:.3f} +/- {:.3f} s), ({:.5f} +/- {:.2f} fps)'.format(
-                    median_interval, std_intervals_seconds, median_fps, std_intervals_frames), zorder=4)
+    ax_inter.axhline(y=expected_interval, color='lime', linestyle='-',
+                     label='Expected ({:.3f}s), ({:.5f} fps)'.format(expected_interval, fps), zorder=4)
+
+    ax_inter.axhline(y=median_interval, color='green', linestyle='--',
+                     label='Median ({:.3f} +/- {:.3f} s), ({:.5f} +/- {:.2f} fps)'.format(
+                         median_interval, std_intervals_seconds, median_fps, std_fps), zorder=4)
 
     # Determine grid interval dynamically
     difference_range = max_interval - min_interval
@@ -196,10 +198,10 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
         rounded_max_difference = np.ceil(max_interval*10)/10
 
         # Only draw lower and upper interval lines if the scale is fine enough
-        ax_inter.axhline(y=lower_interval, color='lime', linestyle='--', 
-                    label='-1/fps Interval ({:.3f}s)'.format(lower_interval), zorder=4)
-        ax_inter.axhline(y=upper_interval, color='lime', linestyle='--', 
-                    label='+1/fps Interval ({:.3f}s)'.format(upper_interval), zorder=4)
+        ax_inter.axhline(y=lower_interval, color='lime', linestyle='--',
+                         label='-1/fps Interval ({:.3f}s)'.format(lower_interval), zorder=4)
+        ax_inter.axhline(y=upper_interval, color='lime', linestyle='--',
+                         label='+1/fps Interval ({:.3f}s)'.format(upper_interval), zorder=4)
 
     elif raw_interval < 10:
         grid_interval = math.ceil(raw_interval)
@@ -242,9 +244,6 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
     # Legend
     ax_inter.legend(fontsize='x-small')
 
-
-
-
     # Enable the grid
     ax_res.grid(alpha=0.7, zorder=0)
 
@@ -258,10 +257,8 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
     median_residual = median_interval - expected_interval
     ax_res.axhline(y=median_residual, color='green', linestyle='--', zorder=4)
 
-
     ax_res.set_ylabel('Residuals (seconds)')
     ax_res.set_xlabel('Time (UTC)')
-
 
     plt.tight_layout()
 
@@ -282,13 +279,15 @@ if __name__ == '__main__':
     ### COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description="Generate interval plots on all subdirectories where a FS*tar.bz2 is found. FPS will be taken from config files unless it is manually overridden.")
+    arg_parser = argparse.ArgumentParser(description="Generate interval plots on all subdirectories where "
+                                         "a FS*tar.bz2 is found. FPS will be taken from config files unless "
+                                         "it is manually overridden.")
 
-    arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str, \
-        help='Path to directory with FS*tar.bz2 files.')
+    arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str,
+                            help='Path to directory with FS*tar.bz2 files.')
 
-    arg_parser.add_argument('--fps', metavar='FPS', type=float, default=25.0, required=False, \
-        help='Expected fps (default: taken from config file, 25.0 if config not found).')
+    arg_parser.add_argument('--fps', metavar='FPS', type=float, default=25.0, required=False,
+                            help='Expected fps (default: taken from config file, 25.0 if config not found).')
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
