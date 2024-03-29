@@ -1,10 +1,18 @@
+"""
+A monitoring tool for long term logging of system performance metrics and key settings on RMS systems.
+It records write speeds for system and data drives, gathers system info (OS version, architecture, model),
+and checks disk space. Metrics are logged to a CSV file for analysis.
+"""
+
+from __future__ import print_function, division, absolute_import
+
+
 import os
 import csv
 import time
 import platform
 import shutil
 import logging
-
 
 from threading import Lock
 from multiprocessing import Manager
@@ -14,6 +22,13 @@ log = logging.getLogger("logger")
 
 class PerfMonitor:
     def __init__(self, night_data_dir_name, config):
+        """Initializes the performance monitoring tool.
+
+        Arguments:
+            night_data_dir_name: [str] Name of the directory where night data is stored.
+            config: [Config instance]
+        """
+
         self.manager = Manager()
         self.data_entries = self.manager.dict()
         self.log_file_path = './perfMonitorLog.csv'
@@ -50,11 +65,26 @@ class PerfMonitor:
         self.getRunInfo()
 
 
-    def cleanNonAscii(self.text):
+    def cleanNonAscii(self, text):
+        """Removes non-ASCII characters from the given text.
+
+    Arguments:
+        text: [str] The string from which to remove non-ASCII characters.
+    Return:
+        [str] The cleaned string, containing only ASCII characters.
+    """
+
         return ''.join(char for char in text if ord(char) < 128)
 
 
     def updateEntry(self, key, value):
+        """Updates a specific performance metric in the data entries dictionary.
+
+        Arguments:
+            key: [str] The name of the performance metric to update.
+            value: [various] The new value for the specified metric.
+        """
+
         with self.lock:
             if self.night_data_dir_name not in self.data_entries:
                 # Initialize a new entry if this is the first value for this data_dir_name
@@ -71,6 +101,10 @@ class PerfMonitor:
 
 
     def logToCsv(self):
+        """Logs the collected performance metrics to a CSV file.
+
+        Ensures each metric is correctly logged under its corresponding header.
+        """
         # Check if the file exists to determine if we need to write headers
         file_exists = os.path.isfile(self.log_file_path)
 
@@ -137,7 +171,12 @@ class PerfMonitor:
 
 
     def getSystemInfo(self):
-        # Gather basic system information
+        """Gathers and updates basic system information, such as OS version and architecture.
+
+        Return:
+            [dict] Collected system information including OS version and architecture.
+        """
+
         info = {
             "os_version": platform.platform(),
             "architecture": platform.machine(),
@@ -151,6 +190,14 @@ class PerfMonitor:
 
 
     def getModel(self):
+        """Retrieves the model information of the system.
+
+        Attempts to read the system's model from specific files. Falls back to 'Unknown Model' if not found.
+
+        Return:
+            [str] The model information of the system or 'Unknown Model'.
+        """
+
         try:
             with open("/proc/device-tree/model", "r") as model_file:
                 # Read the model information
@@ -175,19 +222,23 @@ class PerfMonitor:
 
 
     def checkFreeSpace(self, path='/'):
-        """
-        Check and print the free disk space for the given path in a human-readable format.
+        """Checks and logs the free disk space of the given path.
 
-        :param path: Path to check disk space for. Defaults to root '/'.
+        Arguments:
+            path: [str] The filesystem path to check disk space for. Defaults to root '/'.
+
+        Return:
+            [tuple] Total, used, and free disk space in GB.
         """
+
         # Get disk usage statistics
         total, used, free = shutil.disk_usage(path)
-        
+
         # Convert bytes to GB for easier reading
         total_gb = total / 1024 / 1024 / 1024
         used_gb = used / 1024 / 1024 / 1024
         free_gb = free / 1024 / 1024 / 1024
-        
+
         self.updateEntry('total_gb', round(total_gb, 2))
         self.updateEntry('used_gb', round(used_gb, 2))
         self.updateEntry('free_gb', round(free_gb, 2))
@@ -196,6 +247,11 @@ class PerfMonitor:
 
 
     def getRunInfo(self):
+        """Performs all set tests (write speed, system info) and updates entries with the results.
+
+        Logs the results of write tests, system information gathering, and disk space checks.
+        """
+
         # Perform a system drive performance test and update PerfMonitor
         write_speed_mbps = self.writeTest()
         log.info("Logged System Drive write speed of {:.2f} MB/s".format(write_speed_mbps))
@@ -233,6 +289,3 @@ class PerfMonitor:
 
         fireball_detection_value = getattr(self.config, 'enable_fireball_detection', None)
         self.updateEntry('fireball_detection', fireball_detection_value)
-
-
-
