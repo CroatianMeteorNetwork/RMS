@@ -1,7 +1,7 @@
 """
 A monitoring tool for long term logging of system performance metrics and key settings on RMS systems.
-It records write speeds for system and data drives, gathers system info (OS version, architecture, model),
-and checks disk space. Metrics are logged to a CSV file for analysis.
+It records key config settings, write speeds for system and data drives, gathers system info (OS version,
+architecture, model), and checks disk space. Metrics are logged to a CSV file for analysis.
 """
 
 from __future__ import print_function, division, absolute_import
@@ -65,16 +65,23 @@ class PerfMonitor:
         self.getRunInfo()
 
 
-    def cleanNonAscii(self, text):
-        """Removes non-ASCII characters from the given text.
+    def cleanText(self, text):
+        """Removes non-ASCII characters and the null character from the given text.
 
-    Arguments:
-        text: [str] The string from which to remove non-ASCII characters.
-    Return:
-        [str] The cleaned string, containing only ASCII characters.
-    """
+        Arguments:
+            text: [str] The string from which to remove unwanted characters.
 
-        return ''.join(char for char in text if ord(char) < 128)
+        Return:
+            [str] The cleaned string, with non-ASCII and null characters removed.
+        """
+
+        # Remove non-ASCII characters
+        cleaned_text = ''.join(char for char in text if ord(char) < 128)
+
+        # Further remove null characters
+        cleaned_text = cleaned_text.replace('\x00', '')
+
+        return cleaned_text
 
 
     def updateEntry(self, key, value):
@@ -202,7 +209,7 @@ class PerfMonitor:
             with open("/proc/device-tree/model", "r") as model_file:
                 # Read the model information
                 model_info = model_file.read().strip()
-                model_info = self.cleanNonAscii(model_info)
+                model_info = self.cleanText(model_info)
 
                 # Log the result
                 self.updateEntry('model', model_info)
@@ -212,7 +219,7 @@ class PerfMonitor:
             try:
                 with open("/sys/firmware/devicetree/base/model", "r") as model_file:
                     model_info = model_file.read().strip()
-                    model_info = self.cleanNonAscii(model_info)
+                    model_info = self.cleanText(model_info)
 
                     return model_info
             except IOError:
