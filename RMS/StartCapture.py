@@ -221,6 +221,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         log.info("Logged write speed of {:.2f} MB/s".format(write_speed_mbps))
 
         # Gather basic system information and log
+        model = perf_monitor.getModel()
+        log.info("Model: {}".format(info_str))
+
         info = perf_monitor.getSystemInfo()
         info_str = ', '.join(f'{key}: {value}' for key, value in info.items())
         log.info("System Information: {}".format(info_str))
