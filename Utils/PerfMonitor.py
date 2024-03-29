@@ -23,8 +23,8 @@ class PerfMonitor:
             'model',
             'os_version',
             'architecture',
-            'system_drive_speed',
             'system_drive_desc',
+            'system_drive_speed',
             'data_drive_desc',
             'data_drive_speed',
             'res',
@@ -103,7 +103,7 @@ class PerfMonitor:
 
         # Full path to the test file
         filename = 'tempWriteTestFile'
-        file_path = os.path.join(os.path.abspath(file_path), filename)
+        full_file_path = os.path.join(os.path.abspath(file_path), filename)
 
         data = os.urandom(block_size)
 
@@ -112,7 +112,7 @@ class PerfMonitor:
 
         start_time = time.time()
 
-        with open(file_path, 'wb') as file:
+        with open(full_file_path, 'wb') as file:
             for _ in range(num_blocks):
                 file.write(data)
 
@@ -127,7 +127,7 @@ class PerfMonitor:
         else:
             self.updateEntry('data_drive_speed', speed_mbps)
         # Clean up the temporary file
-        os.remove(file_path)
+        os.remove(full_file_path)
 
         return speed_mbps
 
