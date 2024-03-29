@@ -4,14 +4,18 @@ import time
 import platform
 
 from threading import Lock
+from multiprocessing import Manager
+
 
 class PerfMonitor:
     def __init__(self, night_data_dir_name):
-        self.data_entries = {}
+        self.manager = Manager()
+        self.data_entries = self.manager.dict()
         self.log_file_path = './perfMonitorLog.csv'
-        self.fieldnames = ['data_dir_name', 'write_speed_mbps', 'res', 'calc_fps', 'media_backend', 'media_backend_ovr',
-                           'live_maxpixel', 'live_jpg', 'slideshow', 'hdu_compress', 'fireball_detection',
-                           'jitter_quality', 'dropped_frame_rate', 'os_version', 'architecture', 'cpu']
+        self.fieldnames = ['data_dir_name', 'write_speed_mbps', 'res', 'calc_fps', 'media_backend', 
+                           'media_backend_ovr', 'live_maxpixel', 'live_jpg', 'slideshow', 'hdu_compress', 
+                           'fireball_detection', 'jitter_quality', 'dropped_frame_rate', 'os_version', 
+                           'architecture', 'cpu']
         self.night_data_dir_name = night_data_dir_name
         self.lock = Lock()
 
