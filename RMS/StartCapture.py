@@ -195,7 +195,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         else:
             log.info("Previous capture directory found: {:s}".format(night_data_dir))
             # Initialize PerfMonitor instance
-            perf_monitor = PerfMonitor(night_data_dir_name)
+            perf_monitor = PerfMonitor(night_data_dir_name, config)
 
         # Resume run is finished now, reset resume flag
         cml_args.resume = False
@@ -214,35 +214,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             night_data_dir_name = os.path.basename(video_file[:-4])
 
         # Initialize PerfMonitor instance
-        perf_monitor = PerfMonitor(night_data_dir_name)
-
-        # Perform a storage write performance test and log
-        write_speed_mbps = perf_monitor.writeTest(config.data_dir)
-        log.info("Logged write speed of {:.2f} MB/s".format(write_speed_mbps))
-
-        # Gather basic system information and log
-        model = perf_monitor.getModel()
-        log.info("Model: {}".format(model))
-
-        info = perf_monitor.getSystemInfo()
-        info_str = ', '.join(f'{key}: {value}' for key, value in info.items())
-        log.info("System Information: {}".format(info_str))
-
-        # Gather config settings and log
-        live_maxpixel_value = getattr(config, 'live_maxpixel_enable', None)
-        perf_monitor.updateEntry('live_maxpixel', live_maxpixel_value)
-
-        live_jpg_value = getattr(config, 'live_jpg', None)
-        perf_monitor.updateEntry('live_jpg', live_jpg_value)
-
-        slideshow_value = getattr(config, 'slideshow_enable', None)
-        perf_monitor.updateEntry('slideshow', slideshow_value)
-
-        hdu_compress_value = getattr(config, 'hdu_compress', None)
-        perf_monitor.updateEntry('hdu_compress', hdu_compress_value)
-
-        fireball_detection_value = getattr(config, 'enable_fireball_detection', None)
-        perf_monitor.updateEntry('fireball_detection', fireball_detection_value)
+        perf_monitor = PerfMonitor(night_data_dir_name, config)
 
         # Full path to the data directory
         night_data_dir = os.path.join(os.path.abspath(config.data_dir), config.captured_dir, \

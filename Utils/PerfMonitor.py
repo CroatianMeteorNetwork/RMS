@@ -3,22 +3,51 @@ import csv
 import time
 import platform
 import shutil
+import logging
+
 
 from threading import Lock
 from multiprocessing import Manager
 
+# Get the logger from the main module
+log = logging.getLogger("logger")
 
 class PerfMonitor:
-    def __init__(self, night_data_dir_name):
+    def __init__(self, night_data_dir_name, config):
         self.manager = Manager()
         self.data_entries = self.manager.dict()
         self.log_file_path = './perfMonitorLog.csv'
-        self.fieldnames = ['data_dir_name', 'write_speed_mbps', 'res', 'calc_fps', 'media_backend', 
-                           'media_backend_ovr', 'live_maxpixel', 'live_jpg', 'slideshow', 'hdu_compress', 
-                           'fireball_detection', 'jitter_quality', 'dropped_frame_rate', 'os_version', 
-                           'architecture', 'model', 'total_gb', 'used_gb', 'free_gb']
+
+        self.fieldnames = [
+            'data_dir_name',
+            'model',
+            'os_version',
+            'architecture',
+            'system_drive_speed',
+            'system_drive_desc',
+            'data_drive_desc',
+            'data_drive_speed',
+            'res',
+            'calc_fps',
+            'media_backend',
+            'media_backend_ovr',
+            'live_maxpixel',
+            'live_jpg',
+            'slideshow',
+            'hdu_compress',
+            'fireball_detection',
+            'jitter_quality',
+            'dropped_frame_rate',
+            'total_gb',
+            'used_gb',
+            'free_gb'
+        ]
+
         self.night_data_dir_name = night_data_dir_name
+        self.config = config
         self.lock = Lock()
+
+        self.getRunInfo()
 
 
     def updateEntry(self, key, value):
@@ -58,7 +87,7 @@ class PerfMonitor:
         self.data_entries.clear()
 
 
-    def writeTest(self, file_path, block_size=1024*1024, num_blocks=100):
+    def writeTest(self, file_path='./', block_size=1024*1024, num_blocks=100):
         """
         Perform a write performance test by writing a specific number of blocks
         of data to a temporary file and measure the time taken.
@@ -93,7 +122,10 @@ class PerfMonitor:
         speed_mbps = (bytes_written/1024/1024)/duration
 
         # Log the result
-        self.updateEntry('write_speed_mbps', speed_mbps)
+        if file_path == './':
+            self.updateEntry('system_drive_speed', speed_mbps)
+        else:
+            self.updateEntry('data_drive_speed', speed_mbps)
         # Clean up the temporary file
         os.remove(file_path)
 
@@ -154,5 +186,46 @@ class PerfMonitor:
         self.updateEntry('free_gb', free_gb)
 
         return total_gb, used_gb, free_gb
+
+
+    def getRunInfo(self):
+        # Perform a system drive performance test and update PerfMonitor
+        write_speed_mbps = self.writeTest()
+        log.info("Logged System Drive write speed of {:.2f} MB/s".format(write_speed_mbps))
+
+        # Perform a data drive performance test and update PerfMonitor
+        write_speed_mbps = self.writeTest(file_path=self.config.data_dir)
+        log.info("Logged Data Drive write speed of {:.2f} MB/s".format(write_speed_mbps))
+
+        # Gather basic system information and update PerfMonitor
+        model = self.getModel()
+        log.info("Model: {}".format(model))
+
+        info = self.getSystemInfo()
+        info_str = ', '.join(f'{key}: {value}' for key, value in info.items())
+        log.info("System Information: {}".format(info_str))
+
+        # Gather config settings and update PerfMonitor
+        system_drive_description = getattr(self.config, 'system_drive_description', None)
+        self.updateEntry('system_drive_desc', system_drive_description)
+
+        data_drive_description = getattr(self.config, 'data_drive_description', None)
+        self.updateEntry('data_drive_desc', data_drive_description)
+
+        live_maxpixel_value = getattr(self.config, 'live_maxpixel_enable', None)
+        self.updateEntry('live_maxpixel', live_maxpixel_value)
+
+        live_jpg_value = getattr(self.config, 'live_jpg', None)
+        self.updateEntry('live_jpg', live_jpg_value)
+
+        slideshow_value = getattr(self.config, 'slideshow_enable', None)
+        self.updateEntry('slideshow', slideshow_value)
+
+        hdu_compress_value = getattr(self.config, 'hdu_compress', None)
+        self.updateEntry('hdu_compress', hdu_compress_value)
+
+        fireball_detection_value = getattr(self.config, 'enable_fireball_detection', None)
+        self.updateEntry('fireball_detection', fireball_detection_value)
+
 
 
