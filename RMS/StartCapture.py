@@ -226,11 +226,20 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         log.info("System Information: {}".format(info_str))
 
         # Gather config settings and log
-        perf_monitor.updateEntry('live_maxpixel', config.live_maxpixel_enable)
-        perf_monitor.updateEntry('live_jpg', config.live_jpg)
-        perf_monitor.updateEntry('slideshow', config.slideshow_enable)
-        perf_monitor.updateEntry('hdu_compress', config.hdu_compress)
-        perf_monitor.updateEntry('fireball_detection', config.enable_fireball_detection)
+        live_maxpixel_value = getattr(config, 'live_maxpixel_enable', None)
+        perf_monitor.updateEntry('live_maxpixel', live_maxpixel_value)
+
+        live_jpg_value = getattr(config, 'live_jpg', None)
+        perf_monitor.updateEntry('live_jpg', live_jpg_value)
+
+        slideshow_value = getattr(config, 'slideshow_enable', None)
+        perf_monitor.updateEntry('slideshow', slideshow_value)
+
+        hdu_compress_value = getattr(config, 'hdu_compress', None)
+        perf_monitor.updateEntry('hdu_compress', hdu_compress_value)
+
+        fireball_detection_value = getattr(config, 'enable_fireball_detection', None)
+        perf_monitor.updateEntry('fireball_detection', fireball_detection_value)
 
         # Full path to the data directory
         night_data_dir = os.path.join(os.path.abspath(config.data_dir), config.captured_dir, \
@@ -536,7 +545,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
     # Save detection to disk and archive detection
-    night_archive_dir, archive_name, _ = processNight(night_data_dir, config, perf_monitor \
+    night_archive_dir, archive_name, _ = processNight(night_data_dir, config, perf_monitor, \
         detection_results=detection_results, nodetect=nodetect)
 
 
