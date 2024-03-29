@@ -539,6 +539,9 @@ class BufferedCapture(Process):
         # Assume OpenCV as the default video device type, which will be overridden if GStreamer is used
         self.video_device_type = "cv2"
 
+        # Update PerfMonitor
+        self.perf_monitor.updateEntry('res', self.config.height)
+
         # Use a file as the video source
         if self.video_file is not None:
             self.device = cv2.VideoCapture(self.video_file)
@@ -644,6 +647,9 @@ class BufferedCapture(Process):
                     height = structure.get_value('height')
                     self.frame_shape = (height, width, 3)
                     frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
+
+                    # Update PerfMonitor
+                    self.perf_monitor.updateEntry('res', height)
                     
                     # Check if frame is grayscale and set flag
                     self.convert_to_gray = self.isGrayscale(frame)
@@ -685,14 +691,6 @@ class BufferedCapture(Process):
                 error_msg  = "Invalid media backend: {}\n".format(self.config.media_backend)
                 error_msg += "Or GStreamer is not available but is set as the media_backend."
                 raise ValueError(error_msg)
-
-            # Update PerfMonitor
-            if height:
-                self.perf_monitor.updateEntry('res', height)
-            else:
-                self.perf_monitor.updateEntry('res', self.config.height)
-            self.perf_monitor.updateEntry('media_backend', self.config.media_backend)
-            self.perf_monitor.updateEntry('media_backend_ovr', self.config.media_backend_override)
 
         return False
 
@@ -764,7 +762,11 @@ class BufferedCapture(Process):
 
         else:
             log.info('Video device opened!')
-
+            
+        # Update PerfMonitor
+        media_backend_value = getattr(self.config, 'media_backend', None)
+        self.perf_monitor.updateEntry('media_backend', media_backend_value)
+        self.perf_monitor.updateEntry('media_backend_ovr', self.media_backend_override)
 
         # Keep track of the total number of frames
         total_frames = 0
