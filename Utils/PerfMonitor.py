@@ -31,7 +31,7 @@ class PerfMonitor:
 
         self.manager = Manager()
         self.data_entries = self.manager.dict()
-        self.log_file_path = './perfMonitorLog.csv'
+        self.log_file_path = './{}_perfMonitorLog.csv'.format(config.stationID)
 
         self.fieldnames = [
             'data_dir_name',
@@ -111,6 +111,9 @@ class PerfMonitor:
         """Logs the collected performance metrics to a CSV file.
 
         Ensures each metric is correctly logged under its corresponding header.
+
+        Return:
+            log_file_path: [path] the path of the csv file
         """
         # Check if the file exists to determine if we need to write headers
         file_exists = os.path.isfile(self.log_file_path)
@@ -130,6 +133,8 @@ class PerfMonitor:
 
         # Clear entries after logging
         self.data_entries.clear()
+
+        return self.log_file_path
 
 
     def writeTest(self, file_path='./', block_size=1024*1024, num_blocks=100):
