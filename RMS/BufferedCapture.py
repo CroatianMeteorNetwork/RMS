@@ -709,7 +709,7 @@ class BufferedCapture(Process):
                          .format(self.last_calculated_fps, self.last_calculated_fps_n, self.config.fps, self.reset_count, self.startup_flag))
 
                 # Update PerfMonitor
-                self.perf_monitor.updateEntry('calc_fps', self.last_calculated_fps)
+                self.perf_monitor.updateEntry('calc_fps', round(self.last_calculated_fps, 6))
                 self.perf_monitor.checkFreeSpace(path=self.config.data_dir)
 
                 # Give the pipeline a moment to spool down

@@ -399,13 +399,14 @@ def processNight(night_data_dir, config, perf_monitor, detection_results=None, n
 
     # Plot timestamp intervals
     try:
-        jitter_quality, dropped_frame_rate, intervals_path = plotFFTimeIntervals(night_data_dir, fps=config.fps)
+        jitter_quality, dropped_frame_rate, intervals_path = plotFFTimeIntervals(night_data_dir,
+                                                                                 fps=config.fps)
         log.info('Timestamp Intervals Analysis: Jitter Quality: {:.1f}%, Dropped Frame Rate: {:.1f}%'.format(
             jitter_quality, dropped_frame_rate))
 
         # Add data to PerfMonitor
-        perf_monitor.updateEntry('jitter_quality', jitter_quality)
-        perf_monitor.updateEntry('dropped_frame_rate', dropped_frame_rate)
+        perf_monitor.updateEntry('jitter_quality', round(jitter_quality, 4))
+        perf_monitor.updateEntry('dropped_frame_rate', round(dropped_frame_rate, 4))
 
         # Add the timelapse to the extra files
         if intervals_path is not None:

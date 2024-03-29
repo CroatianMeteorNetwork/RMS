@@ -50,6 +50,10 @@ class PerfMonitor:
         self.getRunInfo()
 
 
+    def cleanNonAscii(self.text):
+        return ''.join(char for char in text if ord(char) < 128)
+
+
     def updateEntry(self, key, value):
         with self.lock:
             if self.night_data_dir_name not in self.data_entries:
@@ -123,9 +127,9 @@ class PerfMonitor:
 
         # Log the result
         if file_path == './':
-            self.updateEntry('system_drive_speed', speed_mbps)
+            self.updateEntry('system_drive_speed', round(speed_mbps, 2))
         else:
-            self.updateEntry('data_drive_speed', speed_mbps)
+            self.updateEntry('data_drive_speed', round(speed_mbps, 2))
         # Clean up the temporary file
         os.remove(full_file_path)
 
@@ -151,6 +155,7 @@ class PerfMonitor:
             with open("/proc/device-tree/model", "r") as model_file:
                 # Read the model information
                 model_info = model_file.read().strip()
+                model_info = self.cleanNonAscii(model_info)
 
                 # Log the result
                 self.updateEntry('model', model_info)
@@ -160,6 +165,8 @@ class PerfMonitor:
             try:
                 with open("/sys/firmware/devicetree/base/model", "r") as model_file:
                     model_info = model_file.read().strip()
+                    model_info = self.cleanNonAscii(model_info)
+
                     return model_info
             except IOError:
                 pass  # Model file could not be read
@@ -181,9 +188,9 @@ class PerfMonitor:
         used_gb = used / 1024 / 1024 / 1024
         free_gb = free / 1024 / 1024 / 1024
         
-        self.updateEntry('total_gb', total_gb)
-        self.updateEntry('used_gb', used_gb)
-        self.updateEntry('free_gb', free_gb)
+        self.updateEntry('total_gb', round(total_gb, 2))
+        self.updateEntry('used_gb', round(used_gb, 2))
+        self.updateEntry('free_gb', round(free_gb, 2))
 
         return total_gb, used_gb, free_gb
 
