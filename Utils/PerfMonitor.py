@@ -2,6 +2,7 @@ import os
 import csv
 import time
 import platform
+import shutil
 
 from threading import Lock
 from multiprocessing import Manager
@@ -15,7 +16,7 @@ class PerfMonitor:
         self.fieldnames = ['data_dir_name', 'write_speed_mbps', 'res', 'calc_fps', 'media_backend', 
                            'media_backend_ovr', 'live_maxpixel', 'live_jpg', 'slideshow', 'hdu_compress', 
                            'fireball_detection', 'jitter_quality', 'dropped_frame_rate', 'os_version', 
-                           'architecture', 'model']
+                           'architecture', 'model', 'total_gb', 'used_gb', 'free_gb']
         self.night_data_dir_name = night_data_dir_name
         self.lock = Lock()
 
@@ -104,13 +105,11 @@ class PerfMonitor:
         info = {
             "os_version": platform.platform(),
             "architecture": platform.machine(),
-            "cpu": platform.processor(),
         }
 
         # Update entries with the gathered information
         self.updateEntry('os_version', info['os_version'])
         self.updateEntry('architecture', info['architecture'])
-        self.updateEntry('cpu', info['cpu'])
 
         return info
 
@@ -134,4 +133,26 @@ class PerfMonitor:
                 pass  # Model file could not be read
 
         return "Unknown Model"
+
+
+    def checkFreeSpace(self, path='/'):
+        """
+        Check and print the free disk space for the given path in a human-readable format.
+
+        :param path: Path to check disk space for. Defaults to root '/'.
+        """
+        # Get disk usage statistics
+        total, used, free = shutil.disk_usage(path)
+        
+        # Convert bytes to GB for easier reading
+        total_gb = total / 1024 / 1024 / 1024
+        used_gb = used / 1024 / 1024 / 1024
+        free_gb = free / 1024 / 1024 / 1024
+        
+        self.updateEntry('total_gb', total_gb)
+        self.updateEntry('used_gb', used_gb)
+        self.updateEntry('free_gb', free_gb)
+
+        return total_gb, used_gb, free_gb
+
 
