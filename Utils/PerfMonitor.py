@@ -24,8 +24,16 @@ class PerfMonitor:
         with self.lock:
             if self.night_data_dir_name not in self.data_entries:
                 # Initialize a new entry if this is the first value for this data_dir_name
-                self.data_entries[self.night_data_dir_name] = {fieldname: None for fieldname in self.fieldnames}
-            self.data_entries[self.night_data_dir_name][key] = value
+                entry = {fieldname: None for fieldname in self.fieldnames}
+            else:
+                # Retrieve the existing entry to modify it
+                entry = self.data_entries[self.night_data_dir_name]
+            
+            # Update the entry
+            entry[key] = value
+            
+            # Re-assign the modified entry back to the managed dictionary
+            self.data_entries[self.night_data_dir_name] = entry
 
 
     def logToCsv(self):
