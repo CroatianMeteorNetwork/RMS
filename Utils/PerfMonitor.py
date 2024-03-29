@@ -37,15 +37,24 @@ class PerfMonitor:
 
 
     def logToCsv(self):
+        # Check if the file exists to determine if we need to write headers
+        file_exists = os.path.isfile(self.log_file_path)
+        
         with self.lock:
             with open(self.log_file_path, 'a', newline='') as csvfile:
                 writer = csv.DictWriter(csvfile, fieldnames=self.fieldnames)
-                writer.writeheader()
+                
+                # Write the header only if the file did not exist before
+                if not file_exists:
+                    writer.writeheader()
+                    
                 for data_dir, entry in self.data_entries.items():
-                    entry['data_dir_name'] = data_dir  # Ensure the key is part of the entry
+                    # Ensure 'data_dir_name' is part of the entry for logging
+                    entry['data_dir_name'] = data_dir
                     writer.writerow(entry)
-            # Clear entries after logging if they should not be logged again
-            self.data_entries.clear()
+                    
+        # Clear entries after logging
+        self.data_entries.clear()
 
 
     def writeTest(self, file_path, block_size=1024*1024, num_blocks=100):
