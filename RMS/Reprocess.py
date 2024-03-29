@@ -404,8 +404,8 @@ def processNight(night_data_dir, config, perf_monitor, detection_results=None, n
             jitter_quality, dropped_frame_rate))
 
         # Add data to PerfMonitor
-        self.perf_monitor.updateEntry('jitter_quality', jitter_quality)
-        self.perf_monitor.updateEntry('dropped_frame_rate', dropped_frame_rate)
+        perf_monitor.updateEntry('jitter_quality', jitter_quality)
+        perf_monitor.updateEntry('dropped_frame_rate', dropped_frame_rate)
 
         # Add the timelapse to the extra files
         if intervals_path is not None:
