@@ -416,7 +416,7 @@ def processNight(night_data_dir, config, perf_monitor, detection_results=None, n
         log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
     # Write all entries to PerfMonitor CVS
-    perf_monitor.logToCvs()
+    perf_monitor.logToCsv()
 
     ### Add extra files to archive
 
