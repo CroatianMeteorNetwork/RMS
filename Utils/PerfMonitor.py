@@ -1,9 +1,10 @@
 import os
 import csv
 import time
+import datetime
 
 
-def writeTest(file_path, block_size, num_blocks):
+def writeTest(file_path, night_data_dir_name, block_size=1024*1024, num_blocks=100):
     """
     Perform a write performance test by writing a specific number of blocks
     of data to a temporary file and measure the time taken.
@@ -17,7 +18,15 @@ def writeTest(file_path, block_size, num_blocks):
         speed_mbps: [float] Write speed in MB/s.
     """
 
+    # Full path to the test file
+    filename = 'tempWriteTestFile'
+    file_path = os.path.join(os.path.abspath(file_path), filename)
+
     data = os.urandom(block_size)
+
+    # Sleep for 5 seconds before starting the write test
+    time.sleep(5)
+
     start_time = time.time()
 
     with open(file_path, 'wb') as file:
@@ -28,6 +37,14 @@ def writeTest(file_path, block_size, num_blocks):
     duration = end_time - start_time
     bytes_written = block_size*num_blocks
     speed_mbps = (bytes_written/1024/1024)/duration
+
+    # Log the result
+    log_file_path = './perfLogfile.csv'
+    log_data = {
+        'data_dir_name': night_data_dir_name,
+        'write_speed_mbps': round(speed_mbps, 2)
+    }
+    logToCsv(log_file_path, log_data)
 
     # Clean up the temporary file
     os.remove(file_path)

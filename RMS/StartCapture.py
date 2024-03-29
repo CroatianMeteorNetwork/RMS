@@ -17,7 +17,6 @@
 from __future__ import print_function, absolute_import
 
 import os
-import csv
 import sys
 import glob
 import argparse
@@ -52,7 +51,7 @@ from RMS.RunExternalScript import runExternalScript
 from RMS.UploadManager import UploadManager
 from RMS.EventMonitor import EventMonitor
 from RMS.DownloadMask import downloadNewMask
-from Utils.PerfMonitor import writeTest, logToCsv
+from Utils.PerfMonitor import writeTest
 
 # Flag indicating that capturing should be stopped
 STOP_CAPTURE = False
@@ -201,35 +200,15 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Make a name for the capture data directory
     if night_data_dir_name is None:
 
-        # Measure storage device write performance
-
-        # Sleep for 3 seconds before starting the write test
-        time.sleep(3)
-
-        # Full path to the test file
-        filename = 'tempWriteTestFile'
-        file_path = os.path.join(os.path.abspath(config.data_dir), filename)
-
-        # Parameters for the write test
-        block_size = 1024*1024  # 1MB
-        num_blocks = 100  # Write 100 MB total
-
-        # Perform the write test
-        write_speed_mbps = writeTest(file_path, block_size, num_blocks)
-
-        # Log the result
-        log_file_path = './perfLogfile.csv'
-        log_data = {
-            'timestamp': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'write_speed_mbps': round(write_speed_mbps, 2)
-        }
-        logToCsv(log_file_path, log_data)
-        log.info(f"Logged write speed of {write_speed_mbps:.2f} MB/s")
-
         # Create a directory for captured files based on the current time
         if video_file is None:
             night_data_dir_name = str(config.stationID) + '_' \
                 + datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')
+            
+            # Perform the storage write performance test
+            write_speed_mbps = writeTest(config.data_dir, night_data_dir_name)
+            log.info(f"Logged write speed of {write_speed_mbps:.2f} MB/s")
+
 
         # If a video file is given, take the folder name from the video file
         else:
