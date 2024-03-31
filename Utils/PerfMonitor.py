@@ -42,6 +42,7 @@ class PerfMonitor:
             'system_drive_speed',
             'data_drive_desc',
             'data_drive_speed',
+            'device_desc',
             'res',
             'calc_fps',
             'media_backend',
@@ -286,6 +287,9 @@ class PerfMonitor:
 
         data_drive_description = getattr(self.config, 'data_drive_description', None)
         self.updateEntry('data_drive_desc', data_drive_description)
+
+        device_description = getattr(self.config, 'device_description', None)
+        self.updateEntry('device_desc', device_description)
 
         live_maxpixel_value = getattr(self.config, 'live_maxpixel_enable', None)
         self.updateEntry('live_maxpixel', live_maxpixel_value)

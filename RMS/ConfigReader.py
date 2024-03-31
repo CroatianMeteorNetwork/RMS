@@ -262,6 +262,10 @@ class Config:
         self.reboot_lock_file = ".reboot_lock"
         
         ##### Capture
+        
+        # PerfMonitor capture device user descriptions
+        self.device_description: None
+
         self.deviceID = 0
 
         # Media backend to use for capture. Options are gst, cv2, or v4l2
@@ -929,7 +933,10 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "gamma"):
         config.gamma = parser.getfloat(section, "gamma")
-    
+
+    if parser.has_option(section, "device_description"):
+        config.device_description = parser.get(section, "device_description")
+
     if parser.has_option(section, "device"):
         config.deviceID = parser.get(section, "device")
 
