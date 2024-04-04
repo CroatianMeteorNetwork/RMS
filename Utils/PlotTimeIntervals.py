@@ -98,14 +98,34 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
     min_interval = min(intervals) if intervals else None
     max_interval = max(intervals) if intervals else None
 
+    # Calculate the expected interval based on the fps
+    expected_interval = ff_block_size/fps
+
+    # Calculate the median and std intervals using all data
     median_interval = np.median(intervals_np)
     std_intervals_seconds = np.std(intervals_np)
-    expected_interval = ff_block_size/fps
+
+    # Reject 3 sigma outliers a few times and recompute the values
+    if len(intervals) > 2:
+        intervals_np_filtered = intervals_np
+        for _ in range(3):
+            intervals_np_filtered = intervals_np_filtered[np.abs(intervals_np_filtered - median_interval) < 3*std_intervals_seconds]
+            median_interval = np.median(intervals_np_filtered)
+            std_intervals_seconds = np.std(intervals_np_filtered)
+
 
     # Calculate median and std fps
     median_fps = ff_block_size/median_interval
     fps_array = ff_block_size/intervals_np
     std_fps = np.std(fps_array)
+
+    # Reject 3 sigma outliers a few times and recompute the values
+    if len(fps_array) > 2:
+        fps_array_filtered = fps_array
+        for _ in range(3):
+            fps_array_filtered = fps_array_filtered[np.abs(fps_array_filtered - median_fps) < 3*std_fps]
+            median_fps = np.median(fps_array_filtered)
+            std_fps = np.std(fps_array_filtered)
 
 
     ### Scoring ###
