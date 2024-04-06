@@ -76,6 +76,8 @@ def write(ff, directory, filename):
     
     Arguments:
         ff: [ff bin struct] FF bin file loaded in the FF structure
+            In this FF structure, the standard deviation is an uint8 with ten
+            times the actual value
         directory: [str] path to the directory where the file will be written
         filename: [str] name of the file which will be written
     
@@ -115,7 +117,10 @@ def write(ff, directory, filename):
     maxpixel_hdu = fits.ImageHDU(ff.maxpixel, name='MAXPIXEL')
     maxframe_hdu = fits.ImageHDU(ff.maxframe, name='MAXFRAME')
     avepixel_hdu = fits.ImageHDU(ff.avepixel, name='AVEPIXEL')
-    stdpixel_hdu = fits.ImageHDU(ff.stdpixel, name='STDPIXEL')
+    stdpixel_hdu = fits.ImageHDU(0.1 * ff.stdpixel, name='STDPIXEL')
+    # Set BSCALE in fits metadata, so FITS readers will understand the scaling and
+    # return e.g. 4.3 when the number 43 is stored as uint8
+    stdpixel_hdu.scale('uint8', bscale=0.1)
     
     # Create the primary part
     prim = fits.PrimaryHDU(header=head)
@@ -152,7 +157,7 @@ if __name__ == "__main__":
 
     maxpixel = np.zeros((ht, wid), dtype=np.uint8)
     avepixel = np.zeros((ht, wid), dtype=np.uint8) + 10
-    stdpixel = np.zeros((ht, wid), dtype=np.uint8) + 20
+    stdpixel = np.zeros((ht, wid), dtype=np.uint8) + 201 # Scaled by 10, so this represents 20.1
     maxframe = np.zeros((ht, wid), dtype=np.uint8) + 30
 
     ff.array = np.stack([maxpixel, maxframe, avepixel, stdpixel], axis=0)
