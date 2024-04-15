@@ -259,7 +259,9 @@ class Config:
         
         ##### Capture
         self.deviceID = 0
-        self.force_v4l2 = False
+
+        # Media backend to use for capture. Options are gst, cv2, or v4l2
+        self.media_backend = "gst"
         self.uyvy_pixelformat = False
 
         self.width = 1280
@@ -267,6 +269,15 @@ class Config:
         self.width_device = self.width
         self.height_device = self.height
         self.fps = 25.0
+
+        # Camera buffer in number of frames. This will applied a buffer/fps correction to
+        # the timestamps when in GStreamer Standalone mode
+        self.camera_buffer = 1
+
+        # Camera latency in seconds. This will applied an offset to the timestamps
+        # when in GStreamer Standalone mode
+        self.camera_latency = 0.05
+
 
         self.report_dropped_frames = False
 
@@ -920,8 +931,14 @@ def parseCapture(config, parser):
         # If it fails, it's probably a RTSP stream
         pass
 
+    if parser.has_option(section, "media_backend"):
+        config.media_backend = parser.get(section, "media_backend")
+
     if parser.has_option(section, "force_v4l2"):
-        config.force_v4l2 = parser.getboolean(section, "force_v4l2")
+        force_v4l2 = parser.getboolean(section, "force_v4l2")
+
+        if force_v4l2:
+            config.media_backend = "v4l2"
 
     if parser.has_option(section, "uyvy_pixelformat"):
         config.uyvy_pixelformat = parser.getboolean(section, "uyvy_pixelformat")
@@ -934,6 +951,12 @@ def parseCapture(config, parser):
             config.fps = 1000000
             print()
             print("WARNING! The FPS has been limited to 1,000,000!")
+
+    if parser.has_option(section, "camera_buffer"):
+        config.camera_buffer = parser.getint(section, "camera_buffer")
+
+    if parser.has_option(section, "camera_latency"):
+        config.camera_latency = parser.getfloat(section, "camera_latency")
 
     if parser.has_option(section, "ff_format"):
         config.ff_format = parser.get(section, "ff_format")

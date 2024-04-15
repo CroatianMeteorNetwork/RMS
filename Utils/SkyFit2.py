@@ -339,7 +339,7 @@ class PairedStars(object):
 
 class PlateTool(QtWidgets.QMainWindow):
     def __init__(self, input_path, config, beginning_time=None, fps=None, gamma=None, use_fr_files=False, \
-        geo_points_input=None, startUI=True):
+        geo_points_input=None, startUI=True, nobg=False):
         """ SkyFit interactive window.
 
         Arguments:
@@ -357,6 +357,7 @@ class PlateTool(QtWidgets.QMainWindow):
             geo_points_input: [str] Path to a file with a list of geo coordinates which will be projected on
                 the image as seen from the perspective of the observer.
             startUI: [bool] Start the GUI. True by default.
+            nobg: [bool] Do not subtract the background for photometry. False by default.
         """
 
         super(PlateTool, self).__init__()
@@ -378,6 +379,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Store forced time of first frame
         self.beginning_time = beginning_time
+
+        # Store the background subtraction flag
+        self.no_background_subtraction = nobg
 
         # Extract the directory path if a file was given
         if os.path.isfile(self.dir_path):
@@ -2357,6 +2361,9 @@ class PlateTool(QtWidgets.QMainWindow):
         if not hasattr(self, "single_click_photometry"):
             self.single_click_photometry = False
 
+        # Update possibly missing flag for not subtracting the background
+        if not hasattr(self, "no_background_subtraction"):
+            self.no_background_subtraction = False
 
         # If the paired stars are a list (old version), reset it to a new version where it's an object
         if isinstance(self.paired_stars, list):
@@ -4154,12 +4161,20 @@ class PlateTool(QtWidgets.QMainWindow):
         try:
             # Load the flat, byteswap the flat if vid file is used or UWO png
             flat = Image.loadFlat(*os.path.split(flat_file), dtype=self.img.data.dtype,
-                                  byteswap=self.img_handle.byteswap)
+                      byteswap=self.img_handle.byteswap)
             flat.flat_img = np.swapaxes(flat.flat_img, 0, 1)
-        except:
+
+            print("Flat loaded successfully!")
+            
+        except Exception as e:
+            
+            print("Loading the flat failed with error: " + repr(e))
+            print()
+            print(*traceback.format_exception(*sys.exc_info()))
+
             qmessagebox(title='Flat field file error',
-                        message='Flat could not be loaded!',
-                        message_type="error")
+                message='Flat could not be loaded!',
+                message_type="error")
 
             return False, None
 
@@ -4202,8 +4217,15 @@ class PlateTool(QtWidgets.QMainWindow):
             # Load the dark
             dark = Image.loadDark(*os.path.split(dark_file), dtype=self.img.data.dtype, \
                                   byteswap=self.img_handle.byteswap)
+            
+            print("Dark loaded successfully!")
 
-        except:
+        except Exception as e:
+
+            print("Loading the dark failed with error: " + repr(e))
+            print()
+            print(*traceback.format_exception(*sys.exc_info()))
+
             qmessagebox(title='Dark frame error',
                         message='Dark frame could not be loaded!',
                         message_type="error")
@@ -4214,6 +4236,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Check if the size of the file matches
         if self.img.data.shape != dark.shape:
+            print()
+            print('Size of the dark frame:', dark.shape)
+            print('Size of the image:', self.img.data.shape)
             qmessagebox(title='Dark field file error',
                         message='The size of the dark frame does not match the size of the image!',
                         message_type="error")
@@ -4989,6 +5014,11 @@ class PlateTool(QtWidgets.QMainWindow):
             if (self.img_handle.input_type == "dfn") and (self.dark is not None):
                 background_lvl = 0
 
+            # If the nobg flag is set, assume that the background is zero.
+            # This is useful when the background is already subtracted or saturated objects are being
+            #  measured
+            if self.no_background_subtraction:
+                background_lvl = 0
 
             # Compute the background subtracted intensity sum (do as a float to avoid artificially pumping
             #   up the magnitude)
@@ -5455,9 +5485,23 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute the time relative to the reference JD
             t_rel = frame_no/self.img_handle.fps
 
-            # Compute the datetime of the point
-            frame_time = dt_ref + datetime.timedelta(seconds=t_rel)
+            # Determine whether to save the raw times that came with in the data
+            save_raw_times = False
+            if (self.img_handle.input_type == "vid") or (self.img_handle.input_type == "dfn"):
+                save_raw_times = True
 
+            if self.img_handle.input_type == "images":
+                if self.img_handle.fripon_mode or self.img_handle.uwo_png_mode:
+                    save_raw_times = True
+
+            # For UWO .vid files DFN data, don't normalize the time to the FPS, as the time is GPS-synced
+            if save_raw_times:
+                frame_time = frame_dt
+            
+            else:
+                
+                # Compute the datetime of the point
+                frame_time = dt_ref + datetime.timedelta(seconds=t_rel)
 
             # Add an entry to the ECSV file
             entry = [frame_time.strftime(isodate_format_entry), "{:10.6f}".format(ra), \
@@ -5546,6 +5590,12 @@ if __name__ == '__main__':
     arg_parser.add_argument('-p', '--geopoints', metavar='GEO_POINTS_PATH', type=str,
                             help="Path to a file with a list of geo coordinates which will be projected on "
                                  "the image as seen from the perspective of the observer.")
+    
+    arg_parser.add_argument('-n', '--nobg', action="store_true", \
+                            help="Do not subtract the background when doing photometry. This is useful when"
+                            "calibrating saturated objects, as the background can vary between images and the" 
+                            "idea is that the initensity is used as a measure of the radius of the saturated "
+                            "object.")
 
 
 
@@ -5590,7 +5640,8 @@ if __name__ == '__main__':
 
         # Init SkyFit
         plate_tool = PlateTool(input_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
-            gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints)
+            gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints, 
+            nobg=cml_args.nobg)
 
 
     # Run the GUI app

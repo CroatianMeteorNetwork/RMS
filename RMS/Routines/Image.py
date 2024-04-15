@@ -51,9 +51,10 @@ def loadRaw(img_path):
     if 'rawpy' in sys.modules:
 
         # Get raw data from .nef file and get image from it
+        # Disable automated levels scaling and image orientation
         raw = rawpy.imread(img_path)
         frame = raw.postprocess(gamma=(1,1), output_bps=16, no_auto_bright=True, no_auto_scale=True, \
-            output_color=rawpy.ColorSpace.sRGB)
+            output_color=rawpy.ColorSpace.sRGB, user_flip=0)
 
         # Convert the image to grayscale
         frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
@@ -67,8 +68,9 @@ def loadRaw(img_path):
 
 
 def loadImage(img_path, flatten=-1):
-    """ Load the given image. Handle loading it using different libraries. 
-    
+    """
+    Load the given image. Handle loading it using different libraries.
+
     Arguments:
         img_path: [str] Path to the image.
 
@@ -83,9 +85,18 @@ def loadImage(img_path, flatten=-1):
 
         try:
             img = imread(img_path, as_gray=bool(flatten))
-            
+
         except TypeError:
-            img = imread(img_path, mode="L")
+            
+            img = imread(img_path)
+
+            # If there more than 16 bits, convert to uint16
+            if img.nbytes >= 2**16:
+                img = img.astype("uint16")
+
+            # Convert the time to grayscale, making sure to preserve the bit depth
+            if img.shape == 3 and flatten == -1:
+                img = img.mean(axis=2).astype(img.dtype)
 
     return img
 
