@@ -30,7 +30,7 @@ try:
     from dvrip import DVRIPCam
 
 except ImportError:
-    print("Exitting: dvrip module not found. This script cannot run on Python 2.")
+    print("Exiting: dvrip module not found. This script cannot run on Python 2.")
     sys.exit(1)
 
 try:
