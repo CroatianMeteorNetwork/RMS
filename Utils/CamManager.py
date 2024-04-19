@@ -25,7 +25,13 @@ from socket import *
 import platform
 from datetime import *
 import hashlib, base64
-from dvrip import DVRIPCam
+
+try:
+    from dvrip import DVRIPCam
+
+except ImportError:
+    print("Exitting: dvrip module not found. This script cannot run on Python 2.")
+    sys.exit(1)
 
 try:
     try:
