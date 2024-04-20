@@ -36,6 +36,8 @@ from Utils.PlotFieldsums import plotFieldsums
 from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
 from Utils.ShowerAssociation import showerAssociation
 from Utils.PlotTimeIntervals import plotFFTimeIntervals
+from Utils.PerfMonitor import PerfMonitor
+
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -124,7 +126,7 @@ def getPlatepar(config, night_data_dir):
 
 
 
-def processNight(night_data_dir, config, detection_results=None, nodetect=False):
+def processNight(night_data_dir, config, perf_monitor, detection_results=None, nodetect=False):
     """ Given the directory with FF files, run detection and archiving.  
     
     Arguments:  
@@ -397,9 +399,15 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
     # Plot timestamp intervals
     try:
-        jitter_quality, dropped_frame_rate, intervals_path = plotFFTimeIntervals(night_data_dir, fps=config.fps)
+        jitter_quality, dropped_frame_rate, intervals_path = plotFFTimeIntervals(night_data_dir,
+                                                                                 fps=config.fps)
         log.info('Timestamp Intervals Analysis: Jitter Quality: {:.1f}%, Dropped Frame Rate: {:.1f}%'.format(
             jitter_quality, dropped_frame_rate))
+
+        # Add data to PerfMonitor
+        perf_monitor.updateEntry('jitter_quality', round(jitter_quality, 4))
+        perf_monitor.updateEntry('dropped_frame_rate', round(dropped_frame_rate, 4))
+
         # Add the timelapse to the extra files
         if intervals_path is not None:
             extra_files.append(intervals_path)
@@ -407,6 +415,13 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     except Exception as e:
         log.debug('Plotting timestamp interval failed with message:\n' + repr(e))
         log.debug(repr(traceback.format_exception(*sys.exc_info())))
+
+    # Write all entries to PerfMonitor CVS
+    perf_monitor_path = perf_monitor.logToCsv()
+
+    # Add the perfMonitorLog.csv to the extra files
+    if intervals_path is not None:
+        extra_files.append(perf_monitor_path)
 
 
     ### Add extra files to archive

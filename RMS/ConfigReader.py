@@ -245,9 +245,13 @@ class Config:
 
         # Camera network (e.g. national networks, used for grouping on the weblog)
         self.network_name = None
+
         # Camera group (e.g. a camera cluster or a location with multiple cameras)
         self.camera_group_name = None
 
+        # PerfMonitor user storage descriptions
+        self.system_drive_description: None
+        self.data_drive_description: None
 
         self.external_script_run = False
         self.auto_reprocess_external_script_run = False
@@ -258,6 +262,10 @@ class Config:
         self.reboot_lock_file = ".reboot_lock"
         
         ##### Capture
+        
+        # PerfMonitor capture device user descriptions
+        self.device_description: None
+
         self.deviceID = 0
 
         # Media backend to use for capture. Options are gst, cv2, or v4l2
@@ -775,11 +783,17 @@ def parseSystem(config, parser):
         if config.network_name.lower() == "none":
             config.network_name = None
 
+    if parser.has_option(section, "system_drive_description"):
+        config.system_drive_description = parser.get(section, "system_drive_description")
+
+    if parser.has_option(section, "data_drive_description"):
+        config.data_drive_description = parser.get(section, "data_drive_description")
+
     if parser.has_option(section, "camera_group_name"):
         config.camera_group_name = parser.get(section, "camera_group_name")
         if config.camera_group_name.lower() == "none":
             config.camera_group_name = None
-    
+
     if parser.has_option(section, "external_script_run"):
         config.external_script_run = parser.getboolean(section, "external_script_run")
 
@@ -919,7 +933,10 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "gamma"):
         config.gamma = parser.getfloat(section, "gamma")
-    
+
+    if parser.has_option(section, "device_description"):
+        config.device_description = parser.get(section, "device_description")
+
     if parser.has_option(section, "device"):
         config.deviceID = parser.get(section, "device")
 

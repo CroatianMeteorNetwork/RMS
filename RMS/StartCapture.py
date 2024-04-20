@@ -51,6 +51,7 @@ from RMS.RunExternalScript import runExternalScript
 from RMS.UploadManager import UploadManager
 from RMS.EventMonitor import EventMonitor
 from RMS.DownloadMask import downloadNewMask
+from Utils.PerfMonitor import PerfMonitor
 
 # Flag indicating that capturing should be stopped
 STOP_CAPTURE = False
@@ -132,7 +133,6 @@ def wait(duration, compressor, buffered_capture, video_file):
                 break
 
 
-
 def runCapture(config, duration=None, video_file=None, nodetect=False, detect_end=False, \
     upload_manager=None, resume_capture=False, fixed_duration=False):
     """ Run capture and compression for the given time.given
@@ -161,6 +161,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
     # Check if resuming capture to the last capture directory
     night_data_dir_name = None
+    perf_monitor = None
+    
     if resume_capture:
 
         log.info("Resuming capture in the last capture directory...")
@@ -192,6 +194,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
         else:
             log.info("Previous capture directory found: {:s}".format(night_data_dir))
+            # Initialize PerfMonitor instance
+            perf_monitor = PerfMonitor(night_data_dir_name, config)
 
         # Resume run is finished now, reset resume flag
         cml_args.resume = False
@@ -200,14 +204,17 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Make a name for the capture data directory
     if night_data_dir_name is None:
 
-        # Create a directory for captured files based on the current time
+        # Create a directory for captured files based on the current time and start PerfMonitor
         if video_file is None:
             night_data_dir_name = str(config.stationID) + '_' \
                 + datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')
-
+            
         # If a video file is given, take the folder name from the video file
         else:
             night_data_dir_name = os.path.basename(video_file[:-4])
+
+        # Initialize PerfMonitor instance
+        perf_monitor = PerfMonitor(night_data_dir_name, config)
 
         # Full path to the data directory
         night_data_dir = os.path.join(os.path.abspath(config.data_dir), config.captured_dir, \
@@ -348,7 +355,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
     # Initialize buffered capture
-    bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config, video_file=video_file)
+    bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config, perf_monitor, video_file=video_file)
 
 
     # Initialize the live image viewer
@@ -513,7 +520,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
     # Save detection to disk and archive detection
-    night_archive_dir, archive_name, _ = processNight(night_data_dir, config, \
+    night_archive_dir, archive_name, _ = processNight(night_data_dir, config, perf_monitor, \
         detection_results=detection_results, nodetect=nodetect)
 
 

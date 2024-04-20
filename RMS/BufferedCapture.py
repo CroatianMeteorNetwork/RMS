@@ -31,6 +31,7 @@ import cv2
 import numpy as np
 
 from RMS.Misc import ping
+from Utils.PerfMonitor import PerfMonitor
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -52,7 +53,7 @@ class BufferedCapture(Process):
     
     running = False
     
-    def __init__(self, array1, startTime1, array2, startTime2, config, video_file=None):
+    def __init__(self, array1, startTime1, array2, startTime2, config, perf_monitor, video_file=None):
         """ Populate arrays with (startTime, frames) after startCapture is called.
         
         Arguments:
@@ -60,6 +61,7 @@ class BufferedCapture(Process):
             startTime1: float in shared memory that holds time of first frame in array1
             array2: second numpy array in shared memory
             startTime2: float in shared memory that holds time of first frame in array2
+            perf_monitor: a PerfMonitor instance
 
         Keyword arguments:
             video_file: [str] Path to the video file, if it was given as the video source. None by default.
@@ -75,6 +77,7 @@ class BufferedCapture(Process):
         self.startTime1.value = 0
         self.startTime2.value = 0
         
+        self.perf_monitor = perf_monitor
         self.config = config
         self.media_backend_override = False
         self.video_device_type = "cv2"
@@ -536,13 +539,15 @@ class BufferedCapture(Process):
         # Assume OpenCV as the default video device type, which will be overridden if GStreamer is used
         self.video_device_type = "cv2"
 
+        # Update PerfMonitor
+        self.perf_monitor.updateEntry('res', self.config.height)
+
         # Use a file as the video source
         if self.video_file is not None:
             self.device = cv2.VideoCapture(self.video_file)
 
         # Use a device as the video source
         else:
-
             # If an analog camera is used, skip the ping
             ip_cam = False
             if "rtsp" in str(self.config.deviceID):
@@ -642,6 +647,9 @@ class BufferedCapture(Process):
                     height = structure.get_value('height')
                     self.frame_shape = (height, width, 3)
                     frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
+
+                    # Update PerfMonitor
+                    self.perf_monitor.updateEntry('res', height)
                     
                     # Check if frame is grayscale and set flag
                     self.convert_to_gray = self.isGrayscale(frame)
@@ -665,7 +673,7 @@ class BufferedCapture(Process):
                     self.device.set(cv2.CAP_PROP_CONVERT_RGB, 0)
 
                     return True
-                
+
                 except Exception as e:
                     log.info("Could not initialize OpenCV with v4l2. Initialize "
                              "OpenCV Device without v4l2 instead. Error: {}".format(e))
@@ -700,6 +708,11 @@ class BufferedCapture(Process):
                 log.info("Last calculated FPS: {:.6f} at frame {}, config FPS: {}, resets: {}, startup status: {}"
                          .format(self.last_calculated_fps, self.last_calculated_fps_n, self.config.fps, self.reset_count, self.startup_flag))
 
+                # Update PerfMonitor
+                self.perf_monitor.updateEntry('calc_fps', round(self.last_calculated_fps, 6))
+                self.perf_monitor.checkFreeSpace(path=self.config.data_dir)
+
+                # Give the pipeline a moment to spool down
                 time.sleep(5)
                 log.info('GStreamer Video device released!')
 
@@ -752,7 +765,11 @@ class BufferedCapture(Process):
 
         else:
             log.info('Video device opened!')
-
+            
+        # Update PerfMonitor
+        media_backend_value = getattr(self.config, 'media_backend', None)
+        self.perf_monitor.updateEntry('media_backend', media_backend_value)
+        self.perf_monitor.updateEntry('media_backend_ovr', self.media_backend_override)
 
         # Keep track of the total number of frames
         total_frames = 0
