@@ -178,11 +178,7 @@ def generateMP4s(dir_path, ftpfile_name, shower_code=None, min_mag=None, config=
 
         #print(com)
         subprocess.call(com, shell=True, cwd=dir_path)
-        
-   
 
-        		
-        	
         #Delete temporary images directory and files inside
         if os.path.exists(dir_tmp_path):
             try:
