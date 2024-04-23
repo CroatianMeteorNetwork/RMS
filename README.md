@@ -84,12 +84,13 @@ Here we provide installation instructions for the RPi, but the procedure should 
 Alternatively, if you are using Anaconda Python on your Linux PC, you can install all libraries except OpenCV by running:
 
 ```
-conda create --name rms
+conda create --name rms python=3.9
 conda activate rms 
 conda install -y numpy scipy gitpython cython matplotlib
 conda install -y -c conda-forge Pillow pyqtgraph'<=0.12.1'
 conda install -y -c conda-forge ephem
 conda install -y -c conda-forge imageio pandas
+conda install -y -c conda-forge pygobject
 conda install -y -c astropy astropy
 conda install -y pyqt
 pip install rawpy
