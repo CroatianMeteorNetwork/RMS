@@ -88,7 +88,7 @@ conda create --name rms
 conda activate rms 
 conda install -y numpy scipy gitpython cython matplotlib
 conda install -y -c conda-forge Pillow pyqtgraph'<=0.12.1'
-conda install -y -c conda-forge pyephem
+conda install -y -c conda-forge ephem
 conda install -y -c conda-forge imageio pandas
 conda install -y -c astropy astropy
 conda install -y pyqt
