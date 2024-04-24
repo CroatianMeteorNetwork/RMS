@@ -502,7 +502,16 @@ class InputTypeFRFF(InputType):
         self.cache[file_name] = self.ff
 
         return ff
+    
 
+    def setCurrentFF(self, ff_name):
+        """ Set the current FF file. """
+
+        if ff_name in self.ff_list:
+            self.current_ff_index = self.ff_list.index(ff_name)
+
+            # Load the chunk
+            self.loadChunk()
 
     @property
     def current_ff_file(self):
