@@ -15,6 +15,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import pyqtgraph as pg
 
+import RMS
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
@@ -2270,6 +2271,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Set the dir path in case it changed
         self.dir_path = dir_path
 
+        # Update the RMS root directory
+        self.config.rms_root_dir = os.path.abspath(os.path.join(os.path.dirname(RMS.__file__), os.pardir))
+
 
         # Update img_handle parameters
         if hasattr(self, "img_handle"):
@@ -3942,6 +3946,11 @@ class PlateTool(QtWidgets.QMainWindow):
             lim_mag: [float] Limiting magnitude of catalog stars.
 
         """
+
+        # If the star catalog path doesn't exist, use the catalog available in the repository
+        if not os.path.isdir(self.config.star_catalog_path):
+            self.config.star_catalog_path = os.path.join(self.config.rms_root_dir, 'Catalogs')
+            print("Updated catalog path to: ", self.config.star_catalog_path)
 
         # Load catalog stars
         catalog_stars, self.mag_band_string, self.config.star_catalog_band_ratios = StarCatalog.readStarCatalog(
