@@ -371,7 +371,7 @@ def checkWhiteRatio(img_thres, ff, max_white_ratio):
     # Compute the radio between the number of threshold passers and all pixels
     white_ratio = np.count_nonzero(img_thres)/float(ff.nrows*ff.ncols)
 
-    logDebug('white ratio: ' + str(white_ratio))
+    logDebug('white ratio: {:.6f}'.format(white_ratio))
 
     if white_ratio > max_white_ratio:
 
@@ -466,7 +466,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
                 continue
 
             # Print the time
-            logDebug('Time:', img_handle.name())
+            logDebug("Frame: {:d}, Time: {:s}".format(frame_min, str(img_handle.currentTime(dt_obj=True))))
 
             # Apply the mask, dark, flat
             img_handle = preprocessFF(img_handle, mask, flat_struct, dark)
@@ -1165,7 +1165,9 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 # plt.show()
                 # ### ###
 
-                logDebug('Checking temporal propagation at time:', img_handle.name())
+                logDebug('Checking temporal propagation at frames {:d} - {:d} and time: {:s}'.format(
+                    frame_min, frame_max, img_handle.name())
+                    )
                 
 
             # Extract (x, y, frame) of thresholded frames, i.e. pixel and frame locations of threshold passers
@@ -1294,7 +1296,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 img_thres, max_avg_corrected, flattened_weights, \
                     min_patch_intensity = thresholdAndCorrectGammaFF(img_handle, config, mask)
 
-                logDebug('Centroiding at time:', img_handle.name())
+                logDebug('Centroiding frames {:d} - {:d} and time:'.format(frame_min, frame_max, img_handle.name()))
                 
 
 
@@ -1779,8 +1781,15 @@ if __name__ == "__main__":
             if cml_args.debug:
                 results_file.write(str(np.array(res_centroids)) + '\n')
 
+            # Construct FF file name if it's not available
+            if img_handle.input_type == 'ff':
+                ff_file_name = img_handle.name()
+
+            else:
+                ff_file_name = FFfile.constructFFName(config.stationID, first_pick_time)
+
             # Append to the results list
-            results_list.append([img_handle.name(beginning=True), meteor_No, rho, theta, centroids])
+            results_list.append([ff_file_name, meteor_No, rho, theta, centroids])
             meteor_No += 1
 
             total_meteors += 1

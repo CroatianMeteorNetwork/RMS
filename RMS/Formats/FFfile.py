@@ -308,6 +308,22 @@ def getMiddleTimeFF(ff_name, fps, ret_milliseconds=True, ff_frames=256):
         return (year, month, day, hour, minute, second, microsecond)
 
 
+def constructFFName(station_code, beg_dt, ext='fits'):
+    """ Construct a name for an FF file using the station code and the given datetime. """
+
+    # Remove all underscores from the station code
+    station_code = station_code.replace("_", "")
+
+    # Remove all spaces and colones from the station code
+    station_code = station_code.replace(" ", "").replace(":", "")
+
+
+    # Construct a fake FF file name
+    ff_name_ftp = "FF_{:s}_".format(station_code) + beg_dt.strftime("%Y%m%d_%H%M%S_") \
+                + "{:03d}".format(int(beg_dt.microsecond//1000)) + "_0000000." + ext
+    
+    return ff_name_ftp
+
 
 def validFFName(ff_file, fmt=None):
     """ Checks if the given file is an FF file. 

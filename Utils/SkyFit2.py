@@ -26,7 +26,7 @@ import RMS.ConfigReader as cr
 from RMS.ExtractStars import extractStarsAndSave
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
-from RMS.Formats.FFfile import convertFRNameToFF
+from RMS.Formats.FFfile import convertFRNameToFF, constructFFName
 from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFile
 from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
 from RMS.Formats import StarCatalog
@@ -5273,10 +5273,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         else:
             # Construct a fake FF file name
-            ff_name_ftp = "FF_{:s}_".format(self.platepar.station_code) \
-                          + self.img_handle.beginning_datetime.strftime("%Y%m%d_%H%M%S_") \
-                          + "{:03d}".format(int(self.img_handle.beginning_datetime.microsecond//1000)) \
-                          + "_0000000.fits"
+            ff_name_ftp = constructFFName(self.platepar.station_code, 
+                                          self.img_handle.beginning_datetime)
 
         print(self.img_handle.beginning_datetime.strftime("%Y%m%d_%H%M%S_"))
 
