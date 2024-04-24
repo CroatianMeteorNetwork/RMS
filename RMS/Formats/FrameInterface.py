@@ -718,15 +718,20 @@ class InputTypeVideo(InputType):
 
         if beginning_time is None:
 
+            # Try reading the beginning time of the video from the name if time is not given
             try:
-                # Try reading the beginning time of the video from the name if time is not given
                 self.beginning_datetime = datetime.datetime.strptime(file_name_noext, "%Y%m%d_%H%M%S.%f")
+            
+            except ValueError:
 
-            except:
-                messagebox(title="Input error", \
-                message="The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using command line options.")
+                try:
+                    self.beginning_datetime = datetime.datetime.strptime(file_name_noext, "%Y%m%d_%H%M%S")
 
-                sys.exit()
+                except:
+                    messagebox(title="Input error", \
+                    message="The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using command line options.")
+
+                    sys.exit()
 
         else:
             self.beginning_datetime = beginning_time
