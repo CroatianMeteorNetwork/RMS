@@ -63,6 +63,7 @@ source ~/vRMS/bin/activate
 if sudo -n true 2>/dev/null; then
     sudo apt-get update
     sudo apt-get install -y gobject-introspection libgirepository1.0-dev
+    sudo apt-get install -y gstreamer1.0-libav gstreamer1.0-plugins-bad
 else
     echo "sudo requires a password. Please run this script as a user with passwordless sudo access."
 fi
