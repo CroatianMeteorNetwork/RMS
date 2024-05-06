@@ -608,6 +608,8 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
 
     ### Load all data folders ###
 
+    print("Loading data folders...")
+
     # Determine which data folders should be used for each shower (don't search deeper than a depth of 2)
     shower_dirs = {}
     shower_dirs_ref_year = {}
