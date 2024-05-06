@@ -811,7 +811,6 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
             #   shower table)
             mass_index = shower.mass_index
             if forced_mass_index is not None:
-                print("Forcing mass index:", forced_mass_index)
                 mass_index = forced_mass_index
 
             # Compute the batch flux
@@ -1028,6 +1027,9 @@ if __name__ == "__main__":
         # Set the population index if given
         if cml_args.popindex is not None:
             forced_mass_index = calculateMassIndex(cml_args.popindex)
+
+        if forced_mass_index is not None:
+            print("Forcing mass index: {:.2f}".format(forced_mass_index))
 
 
     previous_start_time = None
