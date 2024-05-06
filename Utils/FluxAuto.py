@@ -1029,7 +1029,7 @@ if __name__ == "__main__":
             forced_mass_index = calculateMassIndex(cml_args.popindex)
 
         if forced_mass_index is not None:
-            print("Forcing mass index: {:.2f}".format(forced_mass_index))
+            print("Forcing mass index: {:.2f} for shower {:s}".format(forced_mass_index, cml_args.shower))
 
 
     previous_start_time = None
