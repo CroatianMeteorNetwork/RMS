@@ -56,6 +56,11 @@ def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
     if mask_path:
         mask = MaskImage.loadMask(mask_path)
 
+        # If the mask is all white, set it to None
+        if np.all(mask.img == 255):
+            print('Mask is all white, setting it to None.')
+            mask = None
+
     if mask is not None:
         print('Loaded mask:', mask_path)
         log.info('Loaded mask: {:s}'.format(mask_path))
@@ -414,7 +419,8 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
                 fr_img = Image.applyFlat(fr_img, flat_struct)
 
             # Mask the image
-            fr_img = MaskImage.applyMask(fr_img, mask)
+            if mask is not None:
+                fr_img = MaskImage.applyMask(fr_img, mask)
                 
 
             # Threshold the frame

@@ -457,7 +457,10 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         else:
 
             # Load the frame chunk
+            t1 = time()
             img_handle.loadChunk(first_frame=frame_min, read_nframes=(frame_max - frame_min + 1))
+
+            logDebug('Time to load chunk of {:d} frames: {:.2f} s'.format(frame_max - frame_min + 1, time() - t1))
 
             # If making the synthetic FF has failed, skip it
             if not img_handle.ff.successful:
@@ -1145,7 +1148,10 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             if img_handle.input_type != 'ff':
 
                 # Compute the FF for this chunk
+                t1 = time()
                 img_handle.loadChunk(first_frame=frame_min, read_nframes=(frame_max - frame_min + 1))
+
+                logDebug('Time to load chunk of {:d} frames: {:.2f} s'.format(frame_max - frame_min + 1, time() - t1))
 
                 # Apply mask and flat to FF
                 img_handle = preprocessFF(img_handle, mask, flat_struct, dark)
@@ -1171,8 +1177,11 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 
 
             # Extract (x, y, frame) of thresholded frames, i.e. pixel and frame locations of threshold passers
+            t1 = time()
             xs, ys, zs = getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, \
                 mask, flat_struct, dark, debug=False)
+            
+            logDebug('Time for thresholding and stripe extraction: {:.3f}'.format(time() - t1))
 
             # Limit the number of points to search if too large
             if len(zs) > config.max_points_det:
@@ -1410,8 +1419,11 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                         ### Extract intensity from frame ###
 
                         # Load the frame
+                        t1 = time()
                         img_handle.setFrame(int(frame_no))
                         fr_img = img_handle.loadFrame()
+
+                        logDebug('Time to load frame {:d}: {:.3f}'.format(int(frame_no), time() - t1))
 
                         # Get the frame sequence number (frame number since the beginning of the recording)
                         seq_num = img_handle.getSequenceNumber()
@@ -1427,11 +1439,13 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
 
                         # Mask the image
-                        fr_img = MaskImage.applyMask(fr_img, mask)
+                        if mask is not None:
+                            fr_img = MaskImage.applyMask(fr_img, mask)
 
 
                         # Apply gamma correction
-                        fr_img = Image.gammaCorrection(fr_img, config.gamma)
+                        if config.gamma != 1.0:
+                            fr_img = Image.gammaCorrection(fr_img, config.gamma)
 
                         # Subtract average
                         max_avg_corrected = Image.applyDark(fr_img, img_handle.ff.avepixel)
@@ -1575,6 +1589,8 @@ if __name__ == "__main__":
     arg_parser.add_argument('-p', '--photoff', metavar='ASGARD_PHOTOMETRIC_OFFSET', type=float, \
         help="""Photometric offset used when the ASGARD AST plate is given. Mandatory argument if --asgard is used.""")
 
+    arg_parser.add_argument('--preloadvid', action="store_true", \
+        help="""Preload the video file into memory. This can speed up the detection process, but it requires a lot of memory. Only use for short videos. """)
 
     arg_parser.add_argument('-d', '--debug', action="store_true", \
         help="""Show debug info on the screen. """)
@@ -1660,7 +1676,7 @@ if __name__ == "__main__":
             file_path = file_path.replace('"', '')
 
             img_handle = detectInputType(file_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
-                detection=True)
+                detection=True, preload_video=cml_args.preloadvid)
 
             img_handle_list.append(img_handle)
 
@@ -1686,7 +1702,7 @@ if __name__ == "__main__":
 
         # Detect the input file format
         img_handle_main = detectInputType(dir_path_input, config, beginning_time=beginning_time, \
-            fps=cml_args.fps, detection=True)
+            fps=cml_args.fps, detection=True, preload_video=cml_args.preloadvid)
 
         img_handle_list = []
 
