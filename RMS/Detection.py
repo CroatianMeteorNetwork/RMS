@@ -1179,7 +1179,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             # Extract (x, y, frame) of thresholded frames, i.e. pixel and frame locations of threshold passers
             t1 = time()
             xs, ys, zs = getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, \
-                mask, flat_struct, dark, debug=False)
+                mask, flat_struct, dark, debug=VERBOSE_DEBUG)
             
             logDebug('Time for thresholding and stripe extraction: {:.3f}'.format(time() - t1))
 
@@ -1419,11 +1419,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                         ### Extract intensity from frame ###
 
                         # Load the frame
-                        t1 = time()
                         img_handle.setFrame(int(frame_no))
                         fr_img = img_handle.loadFrame()
-
-                        logDebug('Time to load frame {:d}: {:.3f}'.format(int(frame_no), time() - t1))
 
                         # Get the frame sequence number (frame number since the beginning of the recording)
                         seq_num = img_handle.getSequenceNumber()

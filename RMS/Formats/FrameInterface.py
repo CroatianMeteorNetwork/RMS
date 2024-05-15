@@ -790,6 +790,7 @@ class InputTypeVideo(InputType):
         # Preload the video into memory if needed
         if self.preload_video:
             
+            print()
             print("Loading the full video into memory...")
 
             memory_size_mb = self.nrows*self.ncols*self.total_frames/1024/1024
