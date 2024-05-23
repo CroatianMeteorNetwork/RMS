@@ -227,7 +227,7 @@ class InputTypeFRFF(InputType):
         self.line_number = [1]*len(self.ff_list)  # number of lines for each file
 
         # Number for frames to read by default
-        self.total_frames = 256
+        self.total_frames = config.frames_per_block
 
         # Cahcne for whole FF files
         self.cache = {}
@@ -336,17 +336,17 @@ class InputTypeFRFF(InputType):
             if first_frame == -1:
                 first_frame = 0
 
-            total_ff_frames = len([x for x in self.ff_list if validFFName(x)])*256
-            frames_to_read = computeFramesToRead(read_nframes, total_ff_frames, 256, first_frame)
-            ffs_to_read = self.ff_list[first_frame//256:(first_frame + frames_to_read)//256 + 1]
+            total_ff_frames = len([x for x in self.ff_list if validFFName(x)])*self.config.frames_per_block
+            frames_to_read = computeFramesToRead(read_nframes, total_ff_frames, self.config.frames_per_block, first_frame)
+            ffs_to_read = self.ff_list[first_frame//self.config.frames_per_block:(first_frame + frames_to_read)//self.config.frames_per_block + 1]
 
             # If there is only one FF to read, reconstruct given frames
             if len(ffs_to_read) == 1:
                 file_name = ffs_to_read[0]
 
                 # Compute the range of frames to read
-                min_frame = first_frame%256
-                max_frame = (first_frame + frames_to_read)%256
+                min_frame = first_frame%self.config.frames_per_block
+                max_frame = (first_frame + frames_to_read)%self.config.frames_per_block
 
                 # Read the FF file
                 ff = readFF(self.dir_path, file_name)
@@ -372,10 +372,10 @@ class InputTypeFRFF(InputType):
                     max_frame = 255
 
                     if i == 0:
-                        min_frame = first_frame%256
+                        min_frame = first_frame%self.config.frames_per_block
 
                     elif i == len(ffs_to_read) - 1:
-                        max_frame = (first_frame + frames_to_read)%256
+                        max_frame = (first_frame + frames_to_read)%self.config.frames_per_block
 
                     # Read the FF file
                     ff_temp = readFF(self.dir_path, file_name)
@@ -428,7 +428,7 @@ class InputTypeFRFF(InputType):
             fr_files = [ff]
             fr_file_frames = [fr.frameNum for fr in fr_files]  # number of frames in each fr file
             total_frames = sum(sum(x) for x in fr_file_frames)
-            frames_to_read = computeFramesToRead(read_nframes, total_frames, 256, first_frame)
+            frames_to_read = computeFramesToRead(read_nframes, total_frames, self.config.frames_per_block, first_frame)
 
             frame_list = []
             img_count = np.full((self.ncols, self.nrows), -1, dtype=np.float64)
@@ -534,10 +534,10 @@ class InputTypeFRFF(InputType):
         """ Return the middle time of the current image. """
 
         if dt_obj:
-            return datetime.datetime(*getMiddleTimeFF(self.name(), self.fps, ret_milliseconds=False))
+            return datetime.datetime(*getMiddleTimeFF(self.name(), self.fps, ret_milliseconds=False,ff_frames=self.config.frames_per_block))
 
         else:
-            return getMiddleTimeFF(self.name(), self.fps, ret_milliseconds=True)
+            return getMiddleTimeFF(self.name(), self.fps, ret_milliseconds=True,ff_frames=self.config.frames_per_block)
 
     def nextLine(self):
         self.current_line = (self.current_line + 1)%self.line_number[self.current_ff_index]
@@ -766,7 +766,7 @@ class InputTypeVideo(InputType):
         print('Total frames:', self.total_frames)
 
         # Set the number of frames to be used for averaging and maxpixels
-        self.fr_chunk_no = 256
+        self.fr_chunk_no = self.config.frames_per_block
 
         # Compute the number of frame chunks
         self.total_fr_chunks = self.total_frames//self.fr_chunk_no

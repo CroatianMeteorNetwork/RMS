@@ -268,19 +268,19 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     array_pad = 0
 
     # Check if the image dimensions are divisible by RPi3 L2 cache size and add padding
-    if (256*config.width*config.height)%(512*1024) == 0:
+    if (config.frames_per_block*config.width*config.height)%(512*1024) == 0:
         array_pad = 1
 
 
     # Init arrays for parallel compression on 2 cores
-    sharedArrayBase = multiprocessing.Array(ctypes.c_uint8, 256*(config.width + array_pad)*(config.height + array_pad))
+    sharedArrayBase = multiprocessing.Array(ctypes.c_uint8, config.frames_per_block*(config.width + array_pad)*(config.height + array_pad))
     sharedArray = np.ctypeslib.as_array(sharedArrayBase.get_obj())
-    sharedArray = sharedArray.reshape(256, (config.height + array_pad), (config.width + array_pad))
+    sharedArray = sharedArray.reshape(config.frames_per_block, (config.height + array_pad), (config.width + array_pad))
     startTime = multiprocessing.Value('d', 0.0)
 
-    sharedArrayBase2 = multiprocessing.Array(ctypes.c_uint8, 256*(config.width + array_pad)*(config.height + array_pad))
+    sharedArrayBase2 = multiprocessing.Array(ctypes.c_uint8, config.frames_per_block*(config.width + array_pad)*(config.height + array_pad))
     sharedArray2 = np.ctypeslib.as_array(sharedArrayBase2.get_obj())
-    sharedArray2 = sharedArray2.reshape(256, (config.height + array_pad), (config.width + array_pad))
+    sharedArray2 = sharedArray2.reshape(config.frames_per_block, (config.height + array_pad), (config.width + array_pad))
     startTime2 = multiprocessing.Value('d', 0.0)
 
     log.info('Initializing frame buffers done!')

@@ -285,16 +285,16 @@ class BufferedCapture(Process):
         if self.b_error_debt > 0 or self.m_jump_error != 0:
 
             # Don't limit changes to b for the first few blocks of frames
-            if x <= 256*3:
+            if x <= self.config.frames_per_block*3:
                 max_adjust = float('inf')
 
             # Then adjust b aggressively for the first few minutes
-            elif x <= 256*6*10: # first ~10 min
-                max_adjust = 100*1000/256 # 0.1 ms per block
+            elif x <= self.config.frames_per_block*6*10: # first ~10 min
+                max_adjust = 100*1000/self.config.frames_per_block # 0.1 ms per block
 
             # Then only allow small changes for the remainder of the run
             else:
-                max_adjust = 25*1000/256 # 0.025 ms per block
+                max_adjust = 25*1000/self.config.frames_per_block # 0.025 ms per block
             
             # Determine the correction factor
             b_corr = min(self.b_error_debt, max_adjust) # ns
@@ -855,7 +855,7 @@ class BufferedCapture(Process):
 
 
             # Capture a block of 256 frames
-            block_frames = 256
+            block_frames = self.config.frames_per_block
 
             log.info('Grabbing a new block of {:d} frames...'.format(block_frames))
             for i in range(block_frames):

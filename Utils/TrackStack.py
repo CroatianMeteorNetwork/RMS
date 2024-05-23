@@ -118,7 +118,7 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
         if os.path.basename(ff_name_temp) in ff_list:
 
             # Compute the Julian date of the FF middle
-            dt = getMiddleTimeFF(os.path.basename(ff_name_temp), config.fps, ret_milliseconds=True)
+            dt = getMiddleTimeFF(os.path.basename(ff_name_temp), config.fps, ret_milliseconds=True, ff_frames=config.frames_per_block)
             jd = date2JD(*dt)
 
             jd_list.append(jd)
@@ -195,7 +195,7 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
 
         for x_c, y_c in zip(x_corns, y_corns):
             _, ra_temp, dec_temp, _ = xyToRaDecPP(
-                [getMiddleTimeFF(os.path.basename(ff_temp), config.fps, ret_milliseconds=True)], [x_c], [y_c], [1], pp_ref,
+                [getMiddleTimeFF(os.path.basename(ff_temp), config.fps, ret_milliseconds=True,ff_frames=config.frames_per_block)], [x_c], [y_c], [1], pp_ref,
                 extinction_correction=False)
             ra_c, dec_c = ra_temp[0], dec_temp[0]
 
@@ -290,7 +290,7 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
     # Draw constellations
     if draw_constellations:
         constellations_img = drawConstellations(pp_stack, ff_mid,
-                                                separation_deg=175)
+                                                separation_deg=175,config=config)
 
 
     # Crop image
@@ -366,7 +366,7 @@ def stackFrame(ff_name, recalibrated_platepars, mask, border, pp_ref, img_size, 
     y_coords = y_coords.ravel()
     # Map image pixels to sky
     jd_arr, ra_coords, dec_coords, _ = xyToRaDecPP(
-        len(x_coords) * [getMiddleTimeFF(ff_basename, conf.fps, ret_milliseconds=True)], x_coords, y_coords,
+        len(x_coords) * [getMiddleTimeFF(ff_basename, conf.fps, ret_milliseconds=True,ff_frames=config.frames_per_block)], x_coords, y_coords,
         len(x_coords) * [1], pp_temp, extinction_correction=False)
     # Map sky coordinates to stack image coordinates
     stack_x, stack_y = raDecToXYPP(ra_coords, dec_coords, jd_middle, pp_stack)

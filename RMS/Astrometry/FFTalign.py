@@ -395,7 +395,7 @@ if __name__ == "__main__":
     calstars_coords[:, [0, 1]] = calstars_coords[:, [1, 0]]
 
     # Get the time of the FF file
-    calstars_time = getMiddleTimeFF(max_len_ff, config.fps, ret_milliseconds=True)
+    calstars_time = getMiddleTimeFF(max_len_ff, config.fps, ret_milliseconds=True,ff_frames=config.frames_per_block)
 
 
 
