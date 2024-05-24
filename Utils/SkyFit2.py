@@ -15,6 +15,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import pyqtgraph as pg
 
+import RMS
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
@@ -2167,7 +2168,6 @@ class PlateTool(QtWidgets.QMainWindow):
         # Currently, any important variables should be initialized in the constructor (and cannot be classes
         # that inherit). Anything that can be generated for that information should be done in setupUI.
 
-        img_name = self.img_handle.name()
         to_remove = []
 
         dic = copy.copy(self.__dict__)
@@ -2183,9 +2183,14 @@ class PlateTool(QtWidgets.QMainWindow):
         for remove in to_remove:
             del dic[remove]
 
-        if os.path.isdir(self.input_path):
-            real_input_path = os.path.join(self.input_path, img_name)
-            dic['input_path'] = real_input_path
+        # if os.path.isdir(self.input_path):
+        #     real_input_path = os.path.join(self.input_path, img_name)
+        #     dic['input_path'] = real_input_path
+
+        # Save the FF file name if the input type is FF
+        if self.img_handle.input_type == 'ff':
+            dic['ff_file'] = self.img_handle.name()
+            
         savePickle(dic, self.dir_path, 'skyFitMR_latest.state')
         print("Saved state to file")
 
@@ -2270,12 +2275,25 @@ class PlateTool(QtWidgets.QMainWindow):
         # Set the dir path in case it changed
         self.dir_path = dir_path
 
+        # Update the RMS root directory
+        self.config.rms_root_dir = os.path.abspath(os.path.join(os.path.dirname(RMS.__file__), os.pardir))
+
 
         # Update img_handle parameters
         if hasattr(self, "img_handle"):
 
             # Update the dir path
             self.img_handle.dir_path = dir_path
+
+            # If the input type is FF and the path to the actual FF file got saved, update it
+            if self.img_handle.input_type == 'ff':
+                if "ff_file" in variables:
+                    
+                    # If the file is available in the input path, update the FF file path
+                    ff_file = variables["ff_file"]
+
+                    if os.path.isfile(os.path.join(dir_path, ff_file)):
+                        self.img_handle.setCurrentFF(ff_file)
 
             # Make sure an option is not missing
             if self.img_handle.input_type == 'images':
@@ -3942,6 +3960,11 @@ class PlateTool(QtWidgets.QMainWindow):
             lim_mag: [float] Limiting magnitude of catalog stars.
 
         """
+
+        # If the star catalog path doesn't exist, use the catalog available in the repository
+        if not os.path.isdir(self.config.star_catalog_path):
+            self.config.star_catalog_path = os.path.join(self.config.rms_root_dir, 'Catalogs')
+            print("Updated catalog path to: ", self.config.star_catalog_path)
 
         # Load catalog stars
         catalog_stars, self.mag_band_string, self.config.star_catalog_band_ratios = StarCatalog.readStarCatalog(

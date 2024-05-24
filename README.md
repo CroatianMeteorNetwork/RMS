@@ -84,12 +84,13 @@ Here we provide installation instructions for the RPi, but the procedure should 
 Alternatively, if you are using Anaconda Python on your Linux PC, you can install all libraries except OpenCV by running:
 
 ```
-conda create --name rms
+conda create --name rms python=3.9
 conda activate rms 
 conda install -y numpy scipy gitpython cython matplotlib
 conda install -y -c conda-forge Pillow pyqtgraph'<=0.12.1'
 conda install -y -c conda-forge ephem
 conda install -y -c conda-forge imageio pandas
+conda install -y -c conda-forge pygobject
 conda install -y -c astropy astropy
 conda install -y pyqt
 pip install rawpy
@@ -108,7 +109,7 @@ conda install -c conda-forge opencv
 ### Installing on Windows
 The RMS code runs on Windows with the exception of meteor detection (I guess the most crucial part). I wasn't able to get the detection to work, but we encourage everybody to try!
 
-Nevertheless, other RMS tools work well under Windows and you can follow [these instructions](https://docs.google.com/document/d/1htbyUFKD159IuB3_1HLp-tABTtlCFLMnvoH6zyojTxk/edit?usp=sharing) to install it.
+Nevertheless, other RMS tools work well under Windows and you can follow [these instructions](https://globalmeteornetwork.org/wiki/index.php?title=Windows_Installation) to install it.
 
 ### Setting the timezone to UTC
 It is always a good idea to set the timezone to UTC when recording any data. This provides a common time reference among observatons, and more than once there have been issues when people were using different time zones. So, use your favorite search engine to find how to change the timezone on your RPi to UTC.
