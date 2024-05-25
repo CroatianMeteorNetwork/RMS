@@ -1440,6 +1440,10 @@ class InputTypeImages(object):
         # If during the frame loading it was deterined that the images are in the FRIPON format
         if self.fripon_mode:
 
+            print()
+            print("FRIPON mode")
+            print()
+
             ### Sort the frames according to the fits header time ###
             
             frame_time_list = []
@@ -1855,8 +1859,9 @@ class InputTypeImages(object):
                 # Indicate that a FRIPON fit file is read
                 self.fripon_mode = True
 
+
         # Loads a non-FRIPON FITS image
-        if current_img_file.lower().endswith('.fits'):
+        elif current_img_file.lower().endswith('.fits'):
             
             # Load the data from a fits file
             with open(os.path.join(self.dir_path, current_img_file), 'rb') as f:
@@ -1873,6 +1878,7 @@ class InputTypeImages(object):
 
             # Get the current image if it's not an NEF file (e.g. png, jpg...)
             frame = cv2.imread(os.path.join(self.dir_path, current_img_file), -1)
+
 
         
         # Convert the image to black and white if it's 8 bit and has colors
