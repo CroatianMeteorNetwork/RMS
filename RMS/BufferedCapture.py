@@ -960,7 +960,7 @@ class BufferedCapture(Process):
                 #gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
                 # Convert the frame to grayscale
-                if len(frame.shape) == 3:
+                if len(frame.shape) == 3 and not self.config.keep_color:
 
                     # If a color image is given, take the green channel
                     if frame.shape[2] == 3:

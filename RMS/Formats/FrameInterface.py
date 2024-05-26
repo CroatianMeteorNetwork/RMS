@@ -860,7 +860,8 @@ class InputTypeVideo(InputType):
                 break
 
             # Convert frame to grayscale
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            if not self.config.keep_color:
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
             # Bin the frame
             if self.detection and (self.config.detection_binning_factor > 1):
@@ -925,7 +926,8 @@ class InputTypeVideo(InputType):
         ret, frame = self.cap.read()
 
         # Convert frame to grayscale
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        if not self.config.keep_color:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
         # Bin the frame
         if self.detection and (self.config.detection_binning_factor > 1):
@@ -1755,7 +1757,7 @@ class InputTypeImages(object):
             # .nef files will not be brought here if rawpy is not installed
 
             # Load the raw image
-            frame = Image.loadRaw(os.path.join(self.dir_path, current_img_file))
+            frame = Image.loadRaw(os.path.join(self.dir_path, current_img_file), self.config.keep_color)
 
 
         # Load a FRIPON fit file
@@ -1820,7 +1822,7 @@ class InputTypeImages(object):
 
         
         # Convert the image to black and white if it's 8 bit and has colors
-        if (8*frame.itemsize == 8) and (frame.ndim == 3):
+        if (8*frame.itemsize == 8) and (frame.ndim == 3) and not self.config.keep_color:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
 
@@ -2108,7 +2110,8 @@ class InputTypeDFN(InputType):
                 output_color=rawpy.ColorSpace.sRGB)
 
             # Convert the image to grayscale
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+            if not self.config.keep_color:
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
 
             
         else:
@@ -2116,7 +2119,7 @@ class InputTypeDFN(InputType):
             frame = cv2.imread(os.path.join(self.dir_path, self.image_file), -1)
 
         # Convert the image to black and white if it's 8 bit
-        if 8*frame.itemsize == 8:
+        if 8*frame.itemsize == 8 and not self.config.keep_color:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
         return frame
