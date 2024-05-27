@@ -275,12 +275,18 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Init arrays for parallel compression on 2 cores
     sharedArrayBase = multiprocessing.Array(ctypes.c_uint8, config.frames_per_block*(config.width + array_pad)*(config.height + array_pad)*(3 if (config.keep_color and not config.uyvy_pixelformat) else 1))
     sharedArray = np.ctypeslib.as_array(sharedArrayBase.get_obj())
-    sharedArray = sharedArray.reshape(config.frames_per_block, (config.height + array_pad), (config.width + array_pad), 3 if (config.keep_color and not config.uyvy_pixelformat) else 1)
+    if (config.keep_color and not config.uyvy_pixelformat):
+        sharedArray = sharedArray.reshape(config.frames_per_block, (config.height + array_pad), (config.width + array_pad),3)
+    else: 
+        sharedArray = sharedArray.reshape(config.frames_per_block, (config.height + array_pad), (config.width + array_pad))
     startTime = multiprocessing.Value('d', 0.0)
 
     sharedArrayBase2 = multiprocessing.Array(ctypes.c_uint8, config.frames_per_block*(config.width + array_pad)*(config.height + array_pad)*(3 if (config.keep_color and not config.uyvy_pixelformat) else 1))
     sharedArray2 = np.ctypeslib.as_array(sharedArrayBase2.get_obj())
-    sharedArray2 = sharedArray2.reshape(config.frames_per_block, (config.height + array_pad), (config.width + array_pad), 3 if (config.keep_color and not config.uyvy_pixelformat) else 1)
+    if (config.keep_color and not config.uyvy_pixelformat):
+        sharedArray2 = sharedArray2.reshape(config.frames_per_block, (config.height + array_pad), (config.width + array_pad), 3)
+    else:
+        sharedArray2 = sharedArray2.reshape(config.frames_per_block, (config.height + array_pad), (config.width + array_pad))
     startTime2 = multiprocessing.Value('d', 0.0)
 
     log.info('Initializing frame buffers done!')
