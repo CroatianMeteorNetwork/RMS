@@ -273,14 +273,14 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
     # Init arrays for parallel compression on 2 cores
-    sharedArrayBase = multiprocessing.Array(ctypes.c_uint8, config.frames_per_block*(config.width + array_pad)*(config.height + array_pad))
+    sharedArrayBase = multiprocessing.Array(ctypes.c_uint8, config.frames_per_block*(config.width + array_pad)*(config.height + array_pad)*(3 if (config.keep_color and not config.uyvy_pixelformat) else 1))
     sharedArray = np.ctypeslib.as_array(sharedArrayBase.get_obj())
-    sharedArray = sharedArray.reshape(config.frames_per_block, (config.height + array_pad), (config.width + array_pad))
+    sharedArray = sharedArray.reshape(config.frames_per_block, (config.height + array_pad), (config.width + array_pad), 3 if (config.keep_color and not config.uyvy_pixelformat) else 1)
     startTime = multiprocessing.Value('d', 0.0)
 
-    sharedArrayBase2 = multiprocessing.Array(ctypes.c_uint8, config.frames_per_block*(config.width + array_pad)*(config.height + array_pad))
+    sharedArrayBase2 = multiprocessing.Array(ctypes.c_uint8, config.frames_per_block*(config.width + array_pad)*(config.height + array_pad)*(3 if (config.keep_color and not config.uyvy_pixelformat) else 1))
     sharedArray2 = np.ctypeslib.as_array(sharedArrayBase2.get_obj())
-    sharedArray2 = sharedArray2.reshape(config.frames_per_block, (config.height + array_pad), (config.width + array_pad))
+    sharedArray2 = sharedArray2.reshape(config.frames_per_block, (config.height + array_pad), (config.width + array_pad), 3 if (config.keep_color and not config.uyvy_pixelformat) else 1)
     startTime2 = multiprocessing.Value('d', 0.0)
 
     log.info('Initializing frame buffers done!')
@@ -359,7 +359,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
         live_jpg_path = os.path.join(config.data_dir, 'live.jpg')
 
-        live_view = LiveViewer(live_jpg_path, image=True, slideshow=False, banner_text="Live")
+        live_view = LiveViewer(live_jpg_path, image=True, slideshow=False, banner_text="Live", config=config)
         live_view.start()
 
     else:
@@ -1032,7 +1032,7 @@ if __name__ == "__main__":
 
                         # Start the slide show
                         slideshow_view = LiveViewer(latest_night_archive_dir, slideshow=True, \
-                            banner_text="Last night's detections")
+                            banner_text="Last night's detections",config=config)
                         slideshow_view.start()
 
                     else:
