@@ -683,7 +683,8 @@ class InputTypeFRFF(InputType):
 
 
 class InputTypeVideo(InputType):
-    def __init__(self, dir_path, config, beginning_time=None, detection=False, preload_video=False):
+    def __init__(self, dir_path, config, beginning_time=None, detection=False, preload_video=False, 
+                 flipud=False):
         """ Input file type handle for video files.
         
         Arguments:
@@ -708,6 +709,8 @@ class InputTypeVideo(InputType):
         self.config = config
 
         self.preload_video = preload_video
+
+        self.flipud = flipud
 
 
         self.ff = None
@@ -940,8 +943,15 @@ class InputTypeVideo(InputType):
         # Read the frame
         ret, frame = self.cap.read()
 
+        if frame is None:
+            return None
+
         # Convert frame to grayscale
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+        # Flip the frame if needed
+        if self.flipud:
+            frame = np.flipud(frame)
 
         # Bin the frame
         if self.detection and (self.config.detection_binning_factor > 1):
@@ -1301,7 +1311,7 @@ class InputTypeUWOVid(InputType):
 
     
 class InputTypeImages(object):
-    def __init__(self, dir_path, config, beginning_time=None, fps=None, detection=False):
+    def __init__(self, dir_path, config, beginning_time=None, fps=None, detection=False, flipud=False):
         """ Input file type handle for a folder with images.
 
         Arguments:
@@ -1321,6 +1331,8 @@ class InputTypeImages(object):
         self.config = config
 
         self.detection = detection
+
+        self.flipud = flipud
 
         self.ff = None
         self.cache = {}
@@ -1931,6 +1943,12 @@ class InputTypeImages(object):
             if fr_no not in self.frame_dt_dict:
                 self.frame_dt_dict[fr_no] = self.dt_frame_time
 
+        
+        # Flip the image vertically if needed
+        if self.flipud:
+            frame = np.flipud(frame)
+
+
         # Bin the frame
         if self.detection and (self.config.detection_binning_factor > 1):
             frame = Image.binImage(frame, self.config.detection_binning_factor,
@@ -2259,7 +2277,7 @@ def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_d
 
 
 def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip_ff_dir=False, \
-    detection=False, use_fr_files=False):
+    detection=False, use_fr_files=False, flipud=False):
     """ Given the folder of a file, detect the input format.
 
     Arguments:
@@ -2276,6 +2294,7 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
         detection: [bool] Indicates that the input is used for detection. False by default. This will
                 control whether the binning is applied or not. No effect on FF image handle.
         use_fr_files: [bool] Include FR files together with FF files. False by default, only used in SkyFit.
+        flipud: [bool] Flip the image vertically. False by default.
 
     """
 
@@ -2318,14 +2337,14 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
     elif any([any(file.lower().endswith(x) for x in img_types) for file in os.listdir(input_dir)]) and \
             config.width != 4912 and config.width != 7360:
         img_handle = InputTypeImages(input_dir, config, beginning_time=beginning_time, fps=fps,
-                                     detection=detection)
+                                     detection=detection, flipud=flipud)
 
     return img_handle
 
 
 
 def detectInputTypeFile(input_file, config, beginning_time=None, fps=None, detection=False, 
-                        preload_video=False):
+                        preload_video=False, flipud=False):
     """ Given a file, detect the input format.
 
     Arguments:
@@ -2340,6 +2359,7 @@ def detectInputTypeFile(input_file, config, beginning_time=None, fps=None, detec
         detection: [bool] Indicates that the input is used for detection. False by default. This will
                 control whether the binning is applied or not. No effect on FF image handle.
         preload_video: [bool] Preload the video file. False by default. This is only used for video files.
+        flipud: [bool] Flip the image vertically. False by default.
 
     """
 
@@ -2361,7 +2381,7 @@ def detectInputTypeFile(input_file, config, beginning_time=None, fps=None, detec
 
         # Init the image hadle for video files
         img_handle = InputTypeVideo(input_file, config, beginning_time=beginning_time,
-                                    detection=detection, preload_video=preload_video)
+                                    detection=detection, preload_video=preload_video, flipud=flipud)
 
     # Check if the given files is the UWO .vid format
     elif file_name.endswith('.vid'):
