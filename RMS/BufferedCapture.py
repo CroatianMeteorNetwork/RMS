@@ -974,7 +974,9 @@ class BufferedCapture(Process):
                     # Otherwise, take the first available channel
                     else:
                         gray = frame[:, :, 0]
-
+                        
+                    # Add another dimension with value 1
+                    gray = np.expand_dims(gray, axis=-1)
                 else:
                     gray = frame
 
