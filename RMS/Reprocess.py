@@ -451,13 +451,14 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     
         # If all FF files are not uploaded, add two FF files which were successfuly recalibrated
         recalibrated_ffs = []
-        for ff_name in recalibrated_platepars:
+        if recalibrated_platepars is not None:
+            for ff_name in recalibrated_platepars:
 
-            pp = recalibrated_platepars[ff_name]
+                pp = recalibrated_platepars[ff_name]
 
-            # Check if the FF was recalibrated
-            if pp.auto_recalibrated:
-                recalibrated_ffs.append(os.path.join(night_data_dir, ff_name))
+                # Check if the FF was recalibrated
+                if pp.auto_recalibrated:
+                    recalibrated_ffs.append(os.path.join(night_data_dir, ff_name))
 
         # Choose two files randomly
         if len(recalibrated_ffs) > 2:

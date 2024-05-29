@@ -263,6 +263,12 @@ class Config:
         # Media backend to use for capture. Options are gst, cv2, or v4l2
         self.media_backend = "gst"
 
+        # Colorspace to use for the gstreamer media backend (e.g. BGR, GRAY8)
+        self.gst_colorspace = "BGR"
+
+        # Decoder for the gstreamer media backend (e.g. decodebin, avdec_h264, nvh264dec)
+        self.gst_decoder = "avdec_h264"
+
         # Location of the raw videos to be saved to disk (None means no saving)
         self.raw_video_dir = None
 
@@ -943,6 +949,12 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "media_backend"):
         config.media_backend = parser.get(section, "media_backend")
+
+    if parser.has_option(section, "gst_colorspace"):
+        config.gst_colorspace = parser.get(section, "gst_colorspace")
+
+    if parser.has_option(section, "gst_decoder"):
+        config.gst_decoder = parser.get(section, "gst_decoder")
 
     if parser.has_option(section, "raw_video_dir"):
         config.raw_video_dir = parser.get(section, "raw_video_dir")
