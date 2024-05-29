@@ -52,7 +52,7 @@ class BufferedCapture(Process):
     
     running = False
     
-    def __init__(self, array1, startTime1, array2, startTime2, config, video_file=None):
+    def __init__(self, array1, startTime1, array2, startTime2, config, video_file=None, night_data_dir=None):
         """ Populate arrays with (startTime, frames) after startCapture is called.
         
         Arguments:
@@ -63,6 +63,7 @@ class BufferedCapture(Process):
 
         Keyword arguments:
             video_file: [str] Path to the video file, if it was given as the video source. None by default.
+            night_data_dir: [str] Path to the directory where night data is stored. None by default.
 
         """
         
@@ -80,6 +81,8 @@ class BufferedCapture(Process):
         self.video_device_type = "cv2"
 
         self.video_file = video_file
+
+        self.night_data_dir = night_data_dir
 
         # A frame will be considered dropped if it was late more then half a frame
         self.time_for_drop = 1.5*(1.0/config.fps)
@@ -481,7 +484,7 @@ class BufferedCapture(Process):
         return gray_frame
 
 
-    def createGstreamDevice(self, video_format):
+    def createGstreamDevice(self, video_format, video_file_dir=None, segment_duration_sec=30):
         """
         Creates a GStreamer pipeline for capturing video from an RTSP source and 
         initializes playback with specific configurations.
@@ -492,24 +495,47 @@ class BufferedCapture(Process):
             video_format: [str] The desired video format for the conversion, 
                 e.g., 'BGR', 'GRAY8', etc.
 
+        Keyword arguments:
+            video_file_dir: [str] The directory where the raw video stream should be saved. 
+                If None, the raw stream will not be saved to disk. Default is None.
+            segment_duration_sec: [int] The duration of each video segment in seconds. 
+                Default is 30.
+
         Returns:
             Gst.Element: The appsink element of the created GStreamer pipeline, 
                 which can be used for further processing of the captured video frames.
         """
 
         device_url = self.extractRtspUrl(self.config.deviceID)
-        # device_str = ("rtspsrc  buffer-mode=1 latency=1000 default-rtsp-version=17 protocols=tcp tcp-timeout=5000000 retry=5 "
-        #               "location=\"{}\" ! rtpjitterbuffer latency=1000 mode=1 ! "
-        #               "rtph264depay ! h264parse ! avdec_h264").format(device_url)
 
-        device_str = ("rtspsrc  buffer-mode=1 protocols=tcp tcp-timeout=5000000 retry=5 "
-                      "location=\"{}\" ! "
-                      "rtph264depay ! h264parse ! avdec_h264").format(device_url)
+         # Define the source up to the point where we want to branch off
+        source_to_tee = (
+            "rtspsrc buffer-mode=1 protocols=tcp tcp-timeout=5000000 retry=5 "
+            "location=\"{}\" ! "
+            "rtph264depay ! tee name=t"
+            ).format(device_url)
 
-        conversion = "videoconvert ! video/x-raw,format={}".format(video_format)
-        pipeline_str = ("{} ! queue leaky=downstream max-size-buffers=100 max-size-bytes=0 max-size-time=0 ! "
-                        "{} ! queue max-size-buffers=100 max-size-bytes=0 max-size-time=0 ! "
-                        "appsink max-buffers=100 drop=true sync=0 name=appsink").format(device_str, conversion)
+         # Branch for processing
+        processing_branch = (
+            "t. ! queue ! h264parse ! avdec_h264 ! videoconvert ! video/x-raw,format={} ! "
+            "queue leaky=downstream max-size-buffers=100 max-size-bytes=0 max-size-time=0 ! "
+            "appsink max-buffers=100 drop=true sync=0 name=appsink"
+            ).format(video_format)
+        
+         # Branch for storage - if video_file_dir is not None, save the raw stream to a file
+        if video_file_dir is not None:
+
+            video_location = os.path.join(video_file_dir, "video_%05d.mkv")
+            storage_branch = (
+                "t. ! queue ! filesink location={} max-size-time={} sync=false"
+                ).format(video_location, segment_duration_sec*1e9)
+
+        # Otherwise, skip saving the raw stream to disk
+        else:
+            storage_branch = ""
+
+         # Combine all parts of the pipeline
+        pipeline_str = "{} {} {}".format(source_to_tee, processing_branch, storage_branch)
 
 
         log.debug("GStreamer pipeline string: {}".format(pipeline_str))
@@ -614,9 +640,22 @@ class BufferedCapture(Process):
                     # Initialize GStreamer
                     Gst.init(None)
 
+
+                    # Determine if which directory to save the raw video, if any
+                    raw_video_dir = None
+                    if self.config.raw_video_dir_night:
+                        raw_video_dir = self.night_data_dir
+
+                    else:
+                        raw_video_dir = self.config.raw_video_dir
+
                     # Create and start a GStreamer pipeline
-                    self.device = self.createGstreamDevice('BGR')
-                    self.pts_buffer = []  # Reset pts buffer
+                    self.device = self.createGstreamDevice('BGR', video_file_dir=raw_video_dir, 
+                        segment_duration_sec=self.config.raw_video_duration)
+                    
+                    
+                    # Reset presentation time stamp buffer
+                    self.pts_buffer = []
 
                     # Attempt to get a sample and determine the frame shape
                     sample = self.device.emit("pull-sample")

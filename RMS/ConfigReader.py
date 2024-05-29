@@ -262,6 +262,16 @@ class Config:
 
         # Media backend to use for capture. Options are gst, cv2, or v4l2
         self.media_backend = "gst"
+
+        # Location of the raw videos to be saved to disk (None means no saving)
+        self.raw_video_dir = None
+
+        # Save the raw video to the night directory
+        self.raw_video_dir_night = False
+
+        # Duration of the raw video segment (seconds)
+        self.raw_video_duration = 30
+
         self.uyvy_pixelformat = False
 
         self.width = 1280
@@ -933,6 +943,26 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "media_backend"):
         config.media_backend = parser.get(section, "media_backend")
+
+    if parser.has_option(section, "raw_video_dir"):
+        config.raw_video_dir = parser.get(section, "raw_video_dir")
+
+        # If the raw video directory is set to 'None', disable saving raw videos
+        if config.raw_video_dir.strip().lower() == "none":
+            config.raw_video_dir = None
+
+
+    if parser.has_option(section, "raw_video_dir_night"):
+        config.raw_video_dir_night = parser.getboolean(section, "raw_video_dir_night")
+        
+
+    if parser.has_option(section, "raw_video_duration"):
+        config.raw_video_duration = parser.getfloat(section, "raw_video_duration")
+
+        # If the duration is negative, set it to 256 frames at the current FPS
+        if config.raw_video_duration < 0:
+            config.raw_video_duration = 256.0/float(config.fps)
+
 
     if parser.has_option(section, "force_v4l2"):
         force_v4l2 = parser.getboolean(section, "force_v4l2")

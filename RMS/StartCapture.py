@@ -348,7 +348,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
     # Initialize buffered capture
-    bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config, video_file=video_file)
+    bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config, video_file=video_file,
+                         night_data_dir=night_data_dir)
 
 
     # Initialize the live image viewer
