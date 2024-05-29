@@ -340,7 +340,7 @@ class PairedStars(object):
 
 class PlateTool(QtWidgets.QMainWindow):
     def __init__(self, input_path, config, beginning_time=None, fps=None, gamma=None, use_fr_files=False, \
-        geo_points_input=None, startUI=True, nobg=False):
+        geo_points_input=None, startUI=True, nobg=False, flipud=False):
         """ SkyFit interactive window.
 
         Arguments:
@@ -359,6 +359,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 the image as seen from the perspective of the observer.
             startUI: [bool] Start the GUI. True by default.
             nobg: [bool] Do not subtract the background for photometry. False by default.
+            flipud: [bool] Flip the image upside down. False by default.
         """
 
         super(PlateTool, self).__init__()
@@ -383,6 +384,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Store the background subtraction flag
         self.no_background_subtraction = nobg
+
+        # Store the flip upside down flag
+        self.flipud = flipud
 
         # Extract the directory path if a file was given
         if os.path.isfile(self.dir_path):
@@ -2383,6 +2387,10 @@ class PlateTool(QtWidgets.QMainWindow):
         if not hasattr(self, "no_background_subtraction"):
             self.no_background_subtraction = False
 
+        # Update the possibly missing flag for flipping the image upside down
+        if not hasattr(self, "flipud"):
+            self.flipud = False
+
         # If the paired stars are a list (old version), reset it to a new version where it's an object
         if isinstance(self.paired_stars, list):
 
@@ -3868,14 +3876,15 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Load a state file
         if os.path.isfile(self.input_path):
-            img_handle = detectInputTypeFile(self.input_path, self.config, beginning_time=beginning_time)
+            img_handle = detectInputTypeFile(self.input_path, self.config, beginning_time=beginning_time, 
+                                             flipud=self.flipud)
         
         # Load given data from a folder
         elif os.path.isdir(self.input_path):
 
             # Detect input file type and load appropriate input plugin
             img_handle = detectInputTypeFolder(self.dir_path, self.config, beginning_time=beginning_time, \
-                use_fr_files=self.use_fr_files)
+                use_fr_files=self.use_fr_files, flipud=self.flipud)
 
             # If the data was not being able to load from the folder, choose a file to load
             if img_handle is None:
@@ -3892,7 +3901,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # If no previous ways of opening data was sucessful, open a file
         if img_handle is None:
-            img_handle = detectInputTypeFile(self.input_path, self.config, beginning_time=beginning_time)
+            img_handle = detectInputTypeFile(self.input_path, self.config, beginning_time=beginning_time, 
+                                             flipud=self.flipud)
 
 
         self.img_handle = img_handle
@@ -5617,6 +5627,9 @@ if __name__ == '__main__':
                             "calibrating saturated objects, as the background can vary between images and the" 
                             "idea is that the initensity is used as a measure of the radius of the saturated "
                             "object.")
+    
+    arg_parser.add_argument('--flipud', action="store_true", \
+                            help="Flip the image upside down. Only applied to images and videos.")
 
 
 
@@ -5662,7 +5675,7 @@ if __name__ == '__main__':
         # Init SkyFit
         plate_tool = PlateTool(input_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
             gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints, 
-            nobg=cml_args.nobg)
+            nobg=cml_args.nobg, flipud=cml_args.flipud)
 
 
     # Run the GUI app
