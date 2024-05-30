@@ -30,6 +30,7 @@ from RMS.Formats.Vid import readFrame as readVidFrame
 from RMS.Formats.Vid import VidStruct
 from RMS.GeoidHeightEGM96 import wgs84toMSLHeight
 from RMS.Routines import Image
+from RMS.Routines.GstreamerCapture import GstVideoFile
 
 
 # Try importaing a Qt message box if available
@@ -44,6 +45,15 @@ except:
     except:
         import tkMessageBox as messagebox
 
+
+GST_IMPORTED = False
+try:
+    import gi
+    gi.require_version('Gst', '1.0')
+    from gi.repository import Gst
+    GST_IMPORTED = True
+except ImportError:
+    pass
 
 # Import cython functions
 import pyximport
@@ -748,8 +758,17 @@ class InputTypeVideo(InputType):
 
         print('Using video file:', self.file_path)
 
-        # Open the video file
-        self.cap = cv2.VideoCapture(self.file_path)
+
+        # If gstreamer is available and the media backend is set to gst, use it
+        if GST_IMPORTED and (self.config.media_backend == 'gst'):
+
+            self.cap = GstVideoFile(self.file_path, decoder=self.config.gst_decoder,
+                                        video_format="BGR")
+
+        else:
+
+            # Open the video file
+            self.cap = cv2.VideoCapture(self.file_path)
 
         self.current_frame_chunk = 0
 

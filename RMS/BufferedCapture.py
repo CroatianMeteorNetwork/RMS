@@ -31,6 +31,7 @@ import cv2
 import numpy as np
 
 from RMS.Misc import ping
+from RMS.Routines.GstreamerCapture import GstVideoFile
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -577,7 +578,16 @@ class BufferedCapture(Process):
 
         # Use a file as the video source
         if self.video_file is not None:
-            self.device = cv2.VideoCapture(self.video_file)
+
+            # If the video file is a GStreamer file, use the GstVideoFile class
+            if GST_IMPORTED and (self.config.media_backend == 'gst'):
+
+                self.device = GstVideoFile(self.video_file, decoder=self.config.gst_decoder,
+                                           video_format=self.config.gst_colorspace)
+
+            # Fall back to OpenCV if GStreamer is not available
+            else:
+                self.device = cv2.VideoCapture(self.video_file)
 
         # Use a device as the video source
         else:
@@ -785,6 +795,22 @@ class BufferedCapture(Process):
             finally:
                 self.device = None  # Reset device to None after releasing
 
+
+        # Release the video device if running Gstreamer
+        if self.video_file is not None:
+
+            if GST_IMPORTED and (self.config.media_backend == 'gst'):
+
+                try:
+                    self.device.release()
+                    log.info('GStreamer Video device released!')
+
+                except Exception as e:
+                    log.error('Error releasing GStreamer device: {}'.format(e))
+
+                finally:
+                    self.device = None
+            
 
     def run(self):
         """ Capture frames.
@@ -1119,6 +1145,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
         help="Path to a config file which will be used instead of the default one.")
     
+    arg_parser.add_argument('--video_file', metavar='VIDEO_FILE', type=str, \
+        help="Path to a video file to be used as a video source instead of a camera.")
+    
 
      # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -1145,48 +1174,74 @@ if __name__ == "__main__":
     sharedArray = sharedArray.reshape(256, (config.height), (config.width))
     startTime = multiprocessing.Value('d', 0.0)
 
-    # Init the BufferedCapture object
-    bc = BufferedCapture(sharedArray, startTime, sharedArray, startTime, config)
 
-    device = bc.createGstreamDevice('BGR', video_file_dir=None, segment_duration_sec=config.raw_video_duration)
+    # If a video is given, use it as the video source
+    if cml_args.video_file:
 
-    print('GStreamer device created!')
+        print("Using video file: {}".format(cml_args.video_file))
 
-    ### TEST
-    print("Pulling a sample...", end=' ')
-    sample = device.emit("pull-sample")
-    print('Sample pulled!')
+        bc = BufferedCapture(sharedArray, startTime, sharedArray, startTime, config, 
+                             video_file=cml_args.video_file)
+        
+        bc.initVideoDevice()
+        
 
-    print('Mapping buffer...', end=' ')
-    buffer = sample.get_buffer()
-    ret, map_info = buffer.map(Gst.MapFlags.READ)
-    print('Buffer mapped!')
+        # Read at least 256 frames from the video file
+        for i in range(256):
+            ret, frame = bc.device.read()
 
-    print('Getting caps...', end=' ')
-    caps = sample.get_caps()
-    print('Caps obtained!')
+            print('Frame read: {}'.format(i))
+            if not ret:
+                print("End of video file!")
+                break
+                
+        # Close the device
+        bc.releaseResources()
 
-    print('Getting structure...', end=' ')
-    structure = caps.get_structure(0)
-    print('Structure obtained!')
+        
+    
+    # Capture from a camera
+    else:
 
-    print('Extracting width and height...', end=' ')
-    width = structure.get_value('width')
-    height = structure.get_value('height')
-    print('Width and height extracted!')
+        # Init the BufferedCapture object
+        bc = BufferedCapture(sharedArray, startTime, sharedArray, startTime, config)
 
-    print('Creating frame...', end=' ')
-    frame_shape = (height, width, 3)
-    frame = np.ndarray(shape=frame_shape, buffer=map_info.data, dtype=np.uint8)
-    print('Frame created!')
+        device = bc.createGstreamDevice('BGR', video_file_dir=None, segment_duration_sec=config.raw_video_duration)
 
-    print('Unmapping buffer...', end=' ')
-    buffer.unmap(map_info)
-    print('Buffer unmapped!')
-    ###
+        print('GStreamer device created!')
 
-    # Close the device
-    bc.releaseResources()
+        ### TEST
+        print("Pulling a sample...", end=' ')
+        sample = device.emit("pull-sample")
+        print('Sample pulled!')
 
-    # Init the video device
-    # bc.initVideoDevice()
+        print('Mapping buffer...', end=' ')
+        buffer = sample.get_buffer()
+        ret, map_info = buffer.map(Gst.MapFlags.READ)
+        print('Buffer mapped!')
+
+        print('Getting caps...', end=' ')
+        caps = sample.get_caps()
+        print('Caps obtained!')
+
+        print('Getting structure...', end=' ')
+        structure = caps.get_structure(0)
+        print('Structure obtained!')
+
+        print('Extracting width and height...', end=' ')
+        width = structure.get_value('width')
+        height = structure.get_value('height')
+        print('Width and height extracted!')
+
+        print('Creating frame...', end=' ')
+        frame_shape = (height, width, 3)
+        frame = np.ndarray(shape=frame_shape, buffer=map_info.data, dtype=np.uint8)
+        print('Frame created!')
+
+        print('Unmapping buffer...', end=' ')
+        buffer.unmap(map_info)
+        print('Buffer unmapped!')
+        ###
+
+        # Close the device
+        bc.releaseResources()
