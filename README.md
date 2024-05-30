@@ -103,6 +103,13 @@ If you want to use the machine for capture, you need to install OpenCV using the
 conda install -c conda-forge opencv
 ```
 
+If you want full gstreamer support, you need to install the additional gstreamer libraries:
+
+```
+conda install -c conda-forge gstreamer==1.22.3
+conda install -c conda-forge gst-plugins-bad gst-plugins-base gst-plugins-good gst-plugins-ugly
+```
+
 
 ## Setting up
 
