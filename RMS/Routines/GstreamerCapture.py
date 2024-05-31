@@ -18,6 +18,9 @@ try:
 except ImportError as e:
     print('Could not import gi: {}. Using OpenCV.'.format(e))
 
+except ValueError as e:
+    print('Could not import Gst: {}. Using OpenCV.'.format(e))
+
 
 
 class GstCaptureTest(multiprocessing.Process):
