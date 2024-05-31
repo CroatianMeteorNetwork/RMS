@@ -88,14 +88,14 @@ conda create --name rms python=3.9
 conda activate rms 
 conda install -y -c conda-forge numpy scipy gitpython cython matplotlib
 conda install -y -c conda-forge numba
-conda install -y -c conda-forge Pillow pyqtgraph'<=0.12.1'
+conda install -y -c conda-forge Pillow pyqtgraph==0.12.3
 conda install -y -c conda-forge ephem
 conda install -y -c conda-forge imageio pandas
 conda install -y -c conda-forge pygobject
 conda install -y -c astropy astropy
 conda install -y pyqt
 pip install rawpy
-pip install git+https://github.com/matejak/imreg_dft@master#egg=imreg_dft
+pip install git+https://github.com/matejak/imreg_dft@master#egg=imreg_dft>'2.0.0'
 ```
 
 If you want to use the machine for capture, you need to install OpenCV using the ```opencv4_install.sh``` script. This will build OpenCV with gstreamer and ffmpeg support. If you are not planning to run the capture but you are planning to use other RMS tool, you can install opencv using conda:
