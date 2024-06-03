@@ -491,6 +491,8 @@ class Config:
         # Path to the ML model
         self.ml_model_path = os.path.join(self.rms_root_dir, "share", "meteorml32.tflite")
 
+        # Number of CPU cores to use for detection. -1 means all available cores (default)
+        self.num_cores = -1
 
         ##### StarExtraction
 
@@ -1410,6 +1412,11 @@ def parseMeteorDetection(config, parser):
         if TFLITE_AVAILABLE and (config.ml_filter > 0):
             config.min_patch_intensity_multiplier = 0
 
+    if parser.has_option(section, "num_cores"):
+        config.num_cores = parser.getint(section, "num_cores")
+
+        if config.num_cores <= 0:
+            config.num_cores = -1
 
 
 def parseStarExtraction(config, parser):

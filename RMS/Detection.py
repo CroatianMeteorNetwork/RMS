@@ -1310,9 +1310,11 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
 
             # Extract (x, y, frame) of thresholded frames, i.e. pixel and frame locations of threshold passers
+            t1 = time()
             xs, ys, zs = getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, \
                 mask, flat_struct, dark, stripe_width_factor=1.5, centroiding=True, \
                 point1=detected_line[0], point2=detected_line[1], debug=False)
+            logDebug('Time for thresholding and stripe extraction: {:.3f}'.format(time() - t1))
 
 
             # Make an array to feed into the centroiding algorithm
@@ -1345,6 +1347,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             # Calculate centroids
             centroids = []
             for i in range(frame_min, frame_max + 1):
+
+                t_centroid = time()
                 
                 # Select pixel indicies belonging to a given frame
                 frame_pixels_inds = np.where(line_points[:,2] == i)
@@ -1469,8 +1473,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                         if config.detection_binning_method == 'avg':
                             intensity *= config.detection_binning_factor**2
 
-                    logDebug("centroid: fr {:>12.3f}, x {:>7.2f}, y {:>7.2f}, intens {:d}".format(frame_no, \
-                        x_centroid, y_centroid, intensity))
+                    logDebug("centroid: fr {:>12.3f}, x {:>7.2f}, y {:>7.2f}, intens {:d}, runtime: {:.6f} s".format(frame_no, \
+                        x_centroid, y_centroid, intensity, time() - t_centroid))
 
                     # Add computed centroid to the centroid list
                     centroids.append([frame_no, seq_num, x_centroid, y_centroid, intensity])
@@ -1513,7 +1517,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             meteor_detections.append([rho_cams, theta_cams, centroids])
 
 
-            logDebug('Time for processing:', time() - t_all)
+            logDebug('Running time:', time() - t_all)
 
 
             

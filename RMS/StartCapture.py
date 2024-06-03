@@ -447,8 +447,12 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             # If there are some more files to process, process them on more cores
             if detector.input_queue.qsize() > 0:
 
-                # Let the detector use all cores, but leave 2 free
-                available_cores = multiprocessing.cpu_count() - 2
+                # If a fixed number of cores is not set, use all but 2 cores
+                if config.num_cores <= 0:
+                    available_cores = multiprocessing.cpu_count() - 2
+
+                else:
+                    available_cores = config.num_cores
 
 
                 if available_cores > 1:
@@ -750,6 +754,11 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-r', '--resume', action="store_true", \
         help="""Resume capture into the last night directory in CapturedFiles. """)
+    
+    arg_parser.add_argument('--num_cores', metavar='NUM_CORES', type=int, default=None, \
+        help="Number of cores to use for detection. Default is what is specific in the config file. " 
+        "If not given in the config file, all available cores will be used."
+        )
 
 
     # Parse the command line arguments
@@ -760,6 +769,7 @@ if __name__ == "__main__":
 
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath('.'))
+
 
     # Initialize the logger
     initLogging(config)
@@ -785,6 +795,15 @@ if __name__ == "__main__":
 
     log.info("Program version: {:s}, {:s}".format(commit_time, sha))
 
+
+    # Set the number of cores to use if given
+    if cml_args.num_cores is not None:
+        config.num_cores = cml_args.num_cores
+
+        if config.num_cores <= 0:
+            config.num_cores = -1
+
+            log.info("Using all available cores for detection.")
 
 
     # Change the Ctrl+C action to the special handle

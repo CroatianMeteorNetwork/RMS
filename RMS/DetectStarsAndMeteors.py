@@ -239,7 +239,7 @@ def detectStarsAndMeteorsDirectory(dir_path, config):
     log.info('Starting detection...')
 
     # Initialize the detector
-    detector = QueuedPool(detectStarsAndMeteors, cores=-1, log=log, backup_dir=ff_dir, \
+    detector = QueuedPool(detectStarsAndMeteors, cores=config.num_cores, log=log, backup_dir=ff_dir, \
         input_queue_maxsize=None)
 
     # Start the detection
