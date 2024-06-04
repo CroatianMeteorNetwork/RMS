@@ -551,6 +551,8 @@ class Config:
 
         self.min_matched_stars = 20
 
+        # Maximum number of stars to use for recalibration on a single FF
+        self.recalibration_max_stars = 200
 
         ##### Thumbnails
         self.thumb_bin =  4
@@ -1530,6 +1532,9 @@ def parseCalibration(config, parser):
 
     if parser.has_option(section, "min_matched_stars"):
         config.min_matched_stars = parser.getint(section, "min_matched_stars")
+
+    if parser.has_option(section, "recalibration_max_stars"):
+        config.recalibration_max_stars = parser.getint(section, "recalibration_max_stars")
 
     if parser.has_option(section, "mask_download_permissive"):
         config.mask_download_permissive = parser.getboolean(section, "mask_download_permissive")
