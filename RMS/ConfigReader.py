@@ -261,7 +261,7 @@ class Config:
         self.deviceID = 0
 
         # Media backend to use for capture. Options are gst, cv2, or v4l2
-        self.media_backend = "gst"
+        self.media_backend = "cv2"
 
         # Colorspace to use for the gstreamer media backend (e.g. BGR, GRAY8)
         self.gst_colorspace = "BGR"
