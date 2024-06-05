@@ -602,7 +602,7 @@ class BufferedCapture(Process):
                         ping_success = ping(ip)
 
                         if ping_success:
-                            log.info("Camera IP ping successful!")
+                            log.info("Camera IP ping successful! Waiting  10 seconds. ")
 
                             # Wait for camera to finish booting up
                             time.sleep(10)
