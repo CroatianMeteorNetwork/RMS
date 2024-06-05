@@ -80,8 +80,8 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
                 except ValueError:
                     print("Skipping file with incorrect format: {}".format(member.name))
 
-    if len(timestamps) < 2:
-        print("Insufficient timestamps. At least two timestamps are required.")
+    if len(timestamps) < 3:
+        print("Insufficient timestamps. At least three timestamps are required.")
         return None, None, None
 
     timestamps.sort()
