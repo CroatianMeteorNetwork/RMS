@@ -266,8 +266,9 @@ class InputTypeFRFF(InputType):
     def nrows(self, nrows):
         self.__nrows = nrows
         for file in self.cache.keys():
-            if self.cache[file].nrows is None:
-                self.cache[file].nrows = nrows
+            if self.cache[file] is not None:
+                if self.cache[file].nrows is None:
+                    self.cache[file].nrows = nrows
 
     @property
     def ncols(self):
