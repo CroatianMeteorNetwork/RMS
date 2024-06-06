@@ -821,10 +821,12 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     ra_centre = radians((ra_ref + cyjd2LST(jd, 0) - h0 + 360)%360)
     dec_centre = radians(dec_ref)
 
+    
     # Correct the reference FOV centre for refraction
     if refraction:
         ra_centre, dec_centre = eqRefractionTrueToApparent(ra_centre, dec_centre, jd, radians(lat), \
             radians(lon))
+            
 
     # Precess the FOV centre to J2000 (otherwise the FOV centre drifts with time)
     ra_centre_j2000, dec_centre = equatorialCoordPrecession(jd_ref, J2000_DAYS, ra_centre, dec_centre)
@@ -832,7 +834,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     # The position angle needs to be corrected for precession, otherwise the FOV rotates with time
     # Applying the difference in RA between the current and the reference epoch fixes the position angle
     ra_diff = (ra_centre - ra_centre_j2000 + pi)%(2*pi) - pi
-    pos_angle_ref = (pos_angle_ref - degrees(ra_diff) + 360)%360
+    pos_angle_ref_corr = (pos_angle_ref + degrees(ra_diff) + 360)%360
 
     ra_centre = ra_centre_j2000
 
@@ -925,7 +927,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
         # Compute theta - the direction angle between the FOV centre, sky coordinate, and the image vertical
         sin_ang = cos(dec)*sin(ra - ra_centre)/sin(radius)
         cos_ang = (sin(dec) - sin(dec_centre)*cos(radius))/(cos(dec_centre)*sin(radius))
-        theta   = -atan2(sin_ang, cos_ang) + radians(pos_angle_ref) - pi/2.0
+        theta   = -atan2(sin_ang, cos_ang) + radians(pos_angle_ref_corr) - pi/2.0
 
         # Calculate the standard coordinates
         x = degrees(radius)*cos(theta)*pix_scale
@@ -1371,16 +1373,16 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
             dec_ref_corr = dec_ref
 
 
-        # Precess the reference RA and dec to current epoch (needs to be used to avoid FOV centre drift over 
+        # Precess the reference RA and dec to J2000 (needs to be used to avoid FOV centre drift over 
         # time)
-        ra_ref_now_corr_j2000, dec_ref_corr = equatorialCoordPrecession(jd_ref, J2000_DAYS, ra_ref_now_corr, \
+        ra_ref_now_corr_j2000, dec_ref_corr = equatorialCoordPrecession(jd, J2000_DAYS, ra_ref_now_corr, \
             dec_ref_corr)
 
         # The position angle needs to be corrected for precession, otherwise the FOV rotates with time
         # Applying the difference in RA between the current and the reference epoch fixes the position angle
         ra_diff = (ra_ref_now_corr - ra_ref_now_corr_j2000 + pi)%(2*pi) - pi
-        pos_angle_ref_now_corr = (pos_angle_ref - degrees(ra_diff) + 360)%360
-
+        
+        pos_angle_ref_now_corr = (pos_angle_ref + degrees(ra_diff) + 360)%360
         ra_ref_now_corr = ra_ref_now_corr_j2000
 
         
