@@ -101,15 +101,15 @@ pip install git+https://github.com/matejak/imreg_dft@master#egg=imreg_dft>'2.0.0
 If you want to use the machine for capture using OpenCV, you need to install it using the ```opencv4_install.sh``` script. This will build OpenCV with gstreamer and ffmpeg support. If you are not planning to run the capture but you are planning to use other RMS tool, you can install opencv using conda:
 
 ```
-conda install -c conda-forge opencv
+conda install -y -c conda-forge opencv
 ```
 
 If you want full gstreamer support, you need to install the additional gstreamer libraries:
 
 ```
-conda install -c conda-forge gstreamer==1.22.3
-conda install -c conda-forge gobject-introspection
-conda install -c conda-forge gst-plugins-bad gst-plugins-base gst-plugins-good gst-plugins-ugly
+conda install -y -c conda-forge gstreamer==1.22.3
+conda install -y -c conda-forge gobject-introspection
+conda install -y -c conda-forge gst-plugins-bad gst-plugins-base gst-plugins-good gst-plugins-ugly
 ```
 
 
