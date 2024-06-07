@@ -86,7 +86,7 @@ Alternatively, if you are using Anaconda Python on your Linux PC, you can instal
 ```
 conda create --name rms python=3.11
 conda activate rms 
-conda install -y -c conda-forge numpy scipy gitpython cython matplotlib
+conda install -y -c conda-forge numpy scipy gitpython cython matplotlib paramiko
 conda install -y -c conda-forge numba
 conda install -y -c conda-forge Pillow pyqtgraph==0.12.3
 conda install -y -c conda-forge ephem
