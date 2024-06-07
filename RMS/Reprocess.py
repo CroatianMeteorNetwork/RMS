@@ -454,13 +454,14 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     
         # If all FF files are not uploaded, add two FF files which were successfuly recalibrated
         recalibrated_ffs = []
-        for ff_name in recalibrated_platepars:
+        if recalibrated_platepars is not None:
+            for ff_name in recalibrated_platepars:
 
-            pp = recalibrated_platepars[ff_name]
+                pp = recalibrated_platepars[ff_name]
 
-            # Check if the FF was recalibrated
-            if pp.auto_recalibrated:
-                recalibrated_ffs.append(os.path.join(night_data_dir, ff_name))
+                # Check if the FF was recalibrated
+                if pp.auto_recalibrated:
+                    recalibrated_ffs.append(os.path.join(night_data_dir, ff_name))
 
         # Choose two files randomly
         if len(recalibrated_ffs) > 2:
@@ -549,6 +550,11 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
         help="Path to a config file which will be used instead of the default one.")
+    
+    arg_parser.add_argument('--num_cores', metavar='NUM_CORES', type=int, default=None, \
+        help="Number of cores to use for detection. Default is what is specific in the config file. " 
+        "If not given in the config file, all available cores will be used."
+        )
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -567,6 +573,16 @@ if __name__ == "__main__":
     log = logging.getLogger("logger")
 
     ######
+
+    
+    # Set the number of cores to use if given
+    if cml_args.num_cores is not None:
+        config.num_cores = cml_args.num_cores
+
+        if config.num_cores <= 0:
+            config.num_cores = -1
+
+            log.info("Using all available cores for detection.")
 
 
     # Process the night

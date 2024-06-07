@@ -30,6 +30,7 @@ from RMS.Formats.Vid import readFrame as readVidFrame
 from RMS.Formats.Vid import VidStruct
 from RMS.GeoidHeightEGM96 import wgs84toMSLHeight
 from RMS.Routines import Image
+from RMS.Routines.GstreamerCapture import GstVideoFile
 
 
 # Try importaing a Qt message box if available
@@ -44,6 +45,15 @@ except:
     except:
         import tkMessageBox as messagebox
 
+
+GST_IMPORTED = False
+try:
+    import gi
+    gi.require_version('Gst', '1.0')
+    from gi.repository import Gst
+    GST_IMPORTED = True
+except:
+    pass
 
 # Import cython functions
 import pyximport
@@ -256,8 +266,9 @@ class InputTypeFRFF(InputType):
     def nrows(self, nrows):
         self.__nrows = nrows
         for file in self.cache.keys():
-            if self.cache[file].nrows is None:
-                self.cache[file].nrows = nrows
+            if self.cache[file] is not None:
+                if self.cache[file].nrows is None:
+                    self.cache[file].nrows = nrows
 
     @property
     def ncols(self):
@@ -683,7 +694,8 @@ class InputTypeFRFF(InputType):
 
 
 class InputTypeVideo(InputType):
-    def __init__(self, dir_path, config, beginning_time=None, detection=False):
+    def __init__(self, dir_path, config, beginning_time=None, detection=False, preload_video=False, 
+                 flipud=False):
         """ Input file type handle for video files.
         
         Arguments:
@@ -694,6 +706,8 @@ class InputTypeVideo(InputType):
             beginning_time: [datetime] datetime of the beginning of the video. Optional, None by default.
             detection: [bool] Indicates that the input is used for detection. False by default. This will
                 control whether the binning is applied or not.
+            preload_video: [bool] If True, the whole video will be loaded into memory. False by default.
+                Only use for small videos due to memory constraints.
 
         """
 
@@ -704,6 +718,11 @@ class InputTypeVideo(InputType):
         self.dir_path, self.file_name = os.path.split(dir_path)
 
         self.config = config
+
+        self.preload_video = preload_video
+
+        self.flipud = flipud
+
 
         self.ff = None
 
@@ -740,8 +759,17 @@ class InputTypeVideo(InputType):
 
         print('Using video file:', self.file_path)
 
-        # Open the video file
-        self.cap = cv2.VideoCapture(self.file_path)
+
+        # If gstreamer is available and the media backend is set to gst, use it
+        if GST_IMPORTED and (self.config.media_backend == 'gst'):
+
+            self.cap = GstVideoFile(self.file_path, decoder=self.config.gst_decoder,
+                                        video_format="BGR")
+
+        else:
+
+            # Open the video file
+            self.cap = cv2.VideoCapture(self.file_path)
 
         self.current_frame_chunk = 0
 
@@ -778,6 +806,20 @@ class InputTypeVideo(InputType):
         self.current_frame = 0
 
         self.cache = {}
+
+        # List for storing the video frames if needed
+        self.video_frames = []
+
+        # Preload the video into memory if needed
+        if self.preload_video:
+            
+            print()
+            print("Loading the full video into memory...")
+
+            memory_size_mb = self.nrows*self.ncols*self.total_frames/1024/1024
+            print("Memory needed: {:.2f} MB".format(memory_size_mb))
+
+            self.video_frames = self.loadFullVideo()
 
         # Load the initial chunk
         self.loadChunk()
@@ -826,8 +868,10 @@ class InputTypeVideo(InputType):
             # Make sure the first frame is within the limits
             first_frame = first_frame%self.total_frames
 
-        # Set the first frame location
-        self.cap.set(1, first_frame)
+        if not self.preload_video:
+            
+            # Set the first frame location
+            self.cap.set(1, first_frame)
 
         # Compute the number of frames to read
         frames_to_read = computeFramesToRead(read_nframes, self.total_frames, self.fr_chunk_no, first_frame)
@@ -853,19 +897,17 @@ class InputTypeVideo(InputType):
         # Load the chunk of frames
         for i in range(frames_to_read):
 
-            ret, frame = self.cap.read()
+            # Read a preloaded frame
+            if self.preload_video:
+                frame = self.video_frames[first_frame + i]
 
-            # If the end of the video files was reached, stop the loop
-            if frame is None:
-                break
+            else:
+                # Read the frame
+                frame = self.loadVideoFrame()
 
-            # Convert frame to grayscale
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-            # Bin the frame
-            if self.detection and (self.config.detection_binning_factor > 1):
-                frame = Image.binImage(frame, self.config.detection_binning_factor,
-                                       self.config.detection_binning_method)
+                # If the end of the video files was reached, stop the loop
+                if frame is None:
+                    break
 
             # Add frame for FF processing
             ff_struct_fake.addFrame(frame.astype(np.uint16))
@@ -914,25 +956,44 @@ class InputTypeVideo(InputType):
 
         else:
             return dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000
-
-    def loadFrame(self, avepixel=False):
-        """ Load the current frame. """
-
-        # Set the frame location
-        self.cap.set(1, self.current_frame)
+        
+    def loadVideoFrame(self):
+        """ Load the next video frame in line. """
 
         # Read the frame
         ret, frame = self.cap.read()
 
+        if frame is None:
+            return None
+
         # Convert frame to grayscale
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+        # Flip the frame if needed
+        if self.flipud:
+            frame = np.flipud(frame)
 
         # Bin the frame
         if self.detection and (self.config.detection_binning_factor > 1):
             frame = Image.binImage(frame, self.config.detection_binning_factor,
                                    self.config.detection_binning_method)
-
+            
         return frame
+
+
+    def loadFrame(self, avepixel=False):
+        """ Load the current frame. """
+
+        # If the video was preloaded, return the frame from the list
+        if self.preload_video:
+            return self.video_frames[self.current_frame]
+        
+        else:
+
+            # Set the frame location
+            self.cap.set(1, self.current_frame)
+
+            return self.loadVideoFrame()
 
     def currentFrameTime(self, frame_no=None, dt_obj=False):
         """ Return the time of the frame. """
@@ -948,6 +1009,31 @@ class InputTypeVideo(InputType):
 
         else:
             return dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000
+        
+    def loadFullVideo(self):
+        """ Load the full video in memory. """
+
+        # Set the frame location
+        self.cap.set(1, 0)
+
+        video_frames = []
+
+        for i in range(self.total_frames):
+
+            print('Loading frame: {:4d}/{:4d}'.format(i, self.total_frames), end='\r', flush=True)
+
+            frame = self.loadVideoFrame()
+
+            # If the end of the video files was reached, stop the loop
+            if frame is None:
+                break
+
+            video_frames.append(frame)
+
+        # Set the frame cursor back to the frame it was before
+        self.cap.set(1, self.current_frame)
+
+        return video_frames
 
 
 class InputTypeUWOVid(InputType):
@@ -1245,7 +1331,7 @@ class InputTypeUWOVid(InputType):
 
     
 class InputTypeImages(object):
-    def __init__(self, dir_path, config, beginning_time=None, fps=None, detection=False):
+    def __init__(self, dir_path, config, beginning_time=None, fps=None, detection=False, flipud=False):
         """ Input file type handle for a folder with images.
 
         Arguments:
@@ -1265,6 +1351,8 @@ class InputTypeImages(object):
         self.config = config
 
         self.detection = detection
+
+        self.flipud = flipud
 
         self.ff = None
         self.cache = {}
@@ -1383,6 +1471,10 @@ class InputTypeImages(object):
 
         # If during the frame loading it was deterined that the images are in the FRIPON format
         if self.fripon_mode:
+
+            print()
+            print("FRIPON mode")
+            print()
 
             ### Sort the frames according to the fits header time ###
             
@@ -1799,8 +1891,9 @@ class InputTypeImages(object):
                 # Indicate that a FRIPON fit file is read
                 self.fripon_mode = True
 
+
         # Loads a non-FRIPON FITS image
-        if current_img_file.lower().endswith('.fits'):
+        elif current_img_file.lower().endswith('.fits'):
             
             # Load the data from a fits file
             with open(os.path.join(self.dir_path, current_img_file), 'rb') as f:
@@ -1817,6 +1910,7 @@ class InputTypeImages(object):
 
             # Get the current image if it's not an NEF file (e.g. png, jpg...)
             frame = cv2.imread(os.path.join(self.dir_path, current_img_file), -1)
+
 
         
         # Convert the image to black and white if it's 8 bit and has colors
@@ -1868,6 +1962,12 @@ class InputTypeImages(object):
             # Save the frame time of the current frame
             if fr_no not in self.frame_dt_dict:
                 self.frame_dt_dict[fr_no] = self.dt_frame_time
+
+        
+        # Flip the image vertically if needed
+        if self.flipud:
+            frame = np.flipud(frame)
+
 
         # Bin the frame
         if self.detection and (self.config.detection_binning_factor > 1):
@@ -2159,7 +2259,7 @@ class InputTypeDFN(InputType):
 
 
 def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_dir=False, detection=False,
-    use_fr_files=False):
+    use_fr_files=False, preload_video=False):
     """ Given the folder of a file, detect the input format.
 
     Arguments:
@@ -2176,6 +2276,8 @@ def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_d
         detection: [bool] Indicates that the input is used for detection. False by default. This will
                 control whether the binning is applied or not. No effect on FF image handle.
         use_fr_files: [bool] Include FR files together with FF files. False by default, only used in SkyFit.
+        preload_video: [bool] Preload the video file. False by default. This is only used for video files.
+            Uses a lot of memory, so only use for small videos.
 
     """
     
@@ -2189,13 +2291,13 @@ def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_d
     else:
         # Detect input type if a path to a file is given
         img_handle = detectInputTypeFile(input_path, config, beginning_time=beginning_time, fps=fps, \
-            detection=fps)
+            detection=detection, preload_video=preload_video)
 
     return img_handle
 
 
 def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip_ff_dir=False, \
-    detection=False, use_fr_files=False):
+    detection=False, use_fr_files=False, flipud=False):
     """ Given the folder of a file, detect the input format.
 
     Arguments:
@@ -2212,6 +2314,7 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
         detection: [bool] Indicates that the input is used for detection. False by default. This will
                 control whether the binning is applied or not. No effect on FF image handle.
         use_fr_files: [bool] Include FR files together with FF files. False by default, only used in SkyFit.
+        flipud: [bool] Flip the image vertically. False by default.
 
     """
 
@@ -2254,13 +2357,14 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
     elif any([any(file.lower().endswith(x) for x in img_types) for file in os.listdir(input_dir)]) and \
             config.width != 4912 and config.width != 7360:
         img_handle = InputTypeImages(input_dir, config, beginning_time=beginning_time, fps=fps,
-                                     detection=detection)
+                                     detection=detection, flipud=flipud)
 
     return img_handle
 
 
 
-def detectInputTypeFile(input_file, config, beginning_time=None, fps=None, detection=False):
+def detectInputTypeFile(input_file, config, beginning_time=None, fps=None, detection=False, 
+                        preload_video=False, flipud=False):
     """ Given a file, detect the input format.
 
     Arguments:
@@ -2274,6 +2378,8 @@ def detectInputTypeFile(input_file, config, beginning_time=None, fps=None, detec
             the config file.
         detection: [bool] Indicates that the input is used for detection. False by default. This will
                 control whether the binning is applied or not. No effect on FF image handle.
+        preload_video: [bool] Preload the video file. False by default. This is only used for video files.
+        flipud: [bool] Flip the image vertically. False by default.
 
     """
 
@@ -2295,7 +2401,7 @@ def detectInputTypeFile(input_file, config, beginning_time=None, fps=None, detec
 
         # Init the image hadle for video files
         img_handle = InputTypeVideo(input_file, config, beginning_time=beginning_time,
-                                    detection=detection)
+                                    detection=detection, preload_video=preload_video, flipud=flipud)
 
     # Check if the given files is the UWO .vid format
     elif file_name.endswith('.vid'):

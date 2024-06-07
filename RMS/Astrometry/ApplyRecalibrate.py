@@ -122,7 +122,18 @@ def recalibrateFF(
         result: [?] A Platepar instance if refinement is successful, None if it failed.
         min_match_radius: [float] Minimum radius that successfuly matched the stars (pixels).
     """
+
     working_platepar = copy.deepcopy(working_platepar)
+
+    # If there more stars than a set limit, sample them randomly using the same seed for reproducibility
+    if len(star_dict_ff[jd]) > config.recalibration_max_stars:
+
+        # Create a generator with a fixed random seed
+        rng = np.random.default_rng(seed=0)
+
+        # Sample the stars and store them in a copy of the star dictionary
+        star_dict_ff = copy.deepcopy(star_dict_ff)
+        star_dict_ff = {jd: rng.choice(star_dict_ff[jd], config.recalibration_max_stars, replace=False)}
 
     # A list of matching radiuses to try
     min_radius = 0.5

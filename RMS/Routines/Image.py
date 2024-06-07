@@ -5,6 +5,7 @@ from __future__ import print_function, division, absolute_import
 import os
 import sys
 import math
+import time
 
 import numpy as np
 import scipy.misc
@@ -163,6 +164,61 @@ def binImage(img, bin_factor, method='avg'):
 
 
 
+
+# Define the fallback function using NumPy
+def applyThresholdNumpy(img_avg_sub, stdpixel, k1, j1):
+    """Apply thresholding to the image using NumPy.
+    
+    Arguments:
+        img_avg_sub: [ndarray] Image with average subtracted.
+        stdpixel: [float] Standard deviation of pixels.
+        k1: [float] Multiplication factor for standard deviation.
+        j1: [float] Constant to add to the threshold.
+    """
+
+    threshold = k1*stdpixel + j1
+    img_thresh = np.greater(img_avg_sub, threshold)
+
+    return img_thresh
+
+# Try importing Numba and define the Numba-optimized function if possible
+try:
+    from numba import njit
+
+    @njit
+    def applyThresholdNumba(img_avg_sub, stdpixel, k1, j1):
+        """Apply thresholding to the image using Numba for JIT compilation.
+        
+        Arguments:
+            img_avg_sub: [ndarray] Image with average subtracted.
+            stdpixel: [float] Standard deviation of pixels.
+            k1: [float] Multiplication factor for standard deviation.
+            j1: [float] Constant to add to the threshold.
+        """
+
+        height, width = img_avg_sub.shape
+        img_thresh = np.zeros((height, width), dtype=np.bool_)
+
+        for i in range(height):
+            for j in range(width):
+
+                threshold = int(k1*stdpixel[i, j] + j1)
+
+                img_thresh[i, j] = img_avg_sub[i, j] > threshold
+
+        return img_thresh
+
+    # If Numba is available, use the Numba-optimized function
+    applyImgThreshold = applyThresholdNumba
+
+except ImportError:
+
+    # If Numba is not available, use the fallback NumPy function
+    applyImgThreshold = applyThresholdNumpy
+
+
+
+
 def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False, mask=None, mask_ave_bright=True):
     """ Threshold the image with given parameters.
     
@@ -194,8 +250,7 @@ def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False, mask=None, mask_ave_
         img_avg_sub = applyDark(img, avepixel)
 
     # Compute the thresholded image
-    img_thresh = img_avg_sub > (k1 * stdpixel + j1)
-
+    img_thresh = applyImgThreshold(img_avg_sub, stdpixel, k1, j1)
 
     # Mask out regions that are very bright in avepixel
     if mask_ave_bright:
@@ -627,22 +682,8 @@ def applyDark(img, dark_img):
     if img.shape != dark_img.shape:
         return img
 
-
-    # Save input type
-    input_type = img.dtype
-
-
-    # Convert the image to integer (with negative values)
-    img = img.astype(np.int64)
-
-    # Subtract dark
-    img -= dark_img.astype(np.int64)
-
-    # Make sure there aren't any values smaller than 0
-    img[img < 0] = 0
-
-    # Convert the image back to the input type
-    img = img.astype(input_type)
+    # Use cv2.subtract to subtract the images and ensure no negative values
+    img = cv2.subtract(img, dark_img)
 
 
     return img
