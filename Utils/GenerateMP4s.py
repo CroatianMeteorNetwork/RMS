@@ -222,7 +222,7 @@ def generateMP4s(dir_path, ftpfile_name, shower_code=None, min_mag=None, config=
         		o = "-" + o
         		frbv_switches.append(o)
         	options = ' '.join(frbv_switches)
-        	command = 'python -m Utils.FRbinViewer ' + options + " " + dir_frbv_path
+        	command = 'python -m Utils.FRbinViewer ' + options + " " + "-c " + frbvconfig + " " + dir_frbv_path
         	os.system(command)
         	files = os.listdir(dir_frbv_path)
         	files = [s for s in files if not (s.endswith('.fits') or s.endswith('.bin'))]
@@ -283,13 +283,20 @@ if __name__ == "__main__":
         print('unable to access target folder - check path')
         exit(1)
 
+
     # Load the config file
     config = None
+    frbvconfig = None
     if cml_args.config:
-        config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
+    	frbvconfig = str(cml_args.config)
+    	config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
+
     else:
         if os.path.isfile(os.path.join(dir_path, '.config')):
-            config = cr.loadConfigFromDirectory('.config', dir_path)
+        	frbvconfig = (cml_args.dir_path + '/.config')
+        	config = cr.loadConfigFromDirectory('.config', dir_path)
+
+            
 
     if len(ftps) == 0:
         print('no ftpdetect files in target folder - unable to continue')
