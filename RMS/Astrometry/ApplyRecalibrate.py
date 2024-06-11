@@ -835,7 +835,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
         min_lim = min(plt.xlim()[0], plt.ylim()[0])
         max_lim = max(plt.xlim()[1], plt.ylim()[1])
         abs_lim = max_lim - min_lim
-        plt.xlim(-0.5, -0.5 + abs_lim)
+        plt.xlim(-0.1*abs_lim, 0.9*abs_lim)
         plt.ylim(min_lim, max_lim)
 
 
