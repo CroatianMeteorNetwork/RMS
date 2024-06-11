@@ -802,7 +802,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     """
 
     cdef int i
-    cdef double ra_centre, dec_centre, ra, dec, ra_centre_j2000, ra_diff
+    cdef double ra_centre, dec_centre, ra, dec, ra_centre_j2000, ra_diff, ra_diff_sign, pos_angle_ref_corr
     cdef double radius, sin_ang, cos_ang, theta, x, y, r, dx, dy, x_img, y_img, r_corr, r_scale
     cdef double x0, y0, xy, a1, a2, k1, k2, k3, k4, k5
     cdef int index_offset
@@ -831,9 +831,15 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     # Precess the FOV centre to J2000 (otherwise the FOV centre drifts with time)
     ra_centre_j2000, dec_centre = equatorialCoordPrecession(jd_ref, J2000_DAYS, ra_centre, dec_centre)
 
+    # Determine the ra_diff sign (negative for northern hemisphere)
+    if lat > 0:
+        ra_diff_sign = -1
+    else:
+        ra_diff_sign = 1
+
     # The position angle needs to be corrected for precession, otherwise the FOV rotates with time
     # Applying the difference in RA between the current and the reference epoch fixes the position angle
-    ra_diff = (ra_centre - ra_centre_j2000 + pi)%(2*pi) - pi
+    ra_diff = ra_diff_sign*((ra_centre - ra_centre_j2000 + pi)%(2*pi) - pi)
     pos_angle_ref_corr = (pos_angle_ref + degrees(ra_diff) + 360)%360
 
     ra_centre = ra_centre_j2000
@@ -1129,7 +1135,8 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     cdef double x0, y0, xy, off_direction, a1, a2, k1, k2, k3, k4, k5
     cdef int index_offset
     cdef double radius, theta, sin_t, cos_t
-    cdef double ha, ra_ref_now, ra_ref_now_corr, ra, dec, dec_ref_corr, pos_angle_ref_now_corr
+    cdef double ha, ra_ref_now, ra_ref_now_corr, ra, dec, dec_ref_corr, pos_angle_ref_now_corr, ra_diff, \
+        ra_diff_sign
 
     # Convert the reference pointing direction to radians
     ra_ref  = radians(ra_ref)
@@ -1378,9 +1385,15 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         ra_ref_now_corr_j2000, dec_ref_corr = equatorialCoordPrecession(jd, J2000_DAYS, ra_ref_now_corr, \
             dec_ref_corr)
 
+        # Determine the ra_diff sign (negative for northern hemisphere, positive for southern)
+        if lat > 0:
+            ra_diff_sign = -1
+        else:
+            ra_diff_sign = 1
+
         # The position angle needs to be corrected for precession, otherwise the FOV rotates with time
         # Applying the difference in RA between the current and the reference epoch fixes the position angle
-        ra_diff = (ra_ref_now_corr - ra_ref_now_corr_j2000 + pi)%(2*pi) - pi
+        ra_diff = ra_diff_sign*((ra_ref_now_corr - ra_ref_now_corr_j2000 + pi)%(2*pi) - pi)
         
         pos_angle_ref_now_corr = (pos_angle_ref + degrees(ra_diff) + 360)%360
         ra_ref_now_corr = ra_ref_now_corr_j2000
