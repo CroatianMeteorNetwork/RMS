@@ -737,16 +737,26 @@ class InputTypeVideo(InputType):
 
         if beginning_time is None:
 
-            # Try reading the beginning time of the video from the name if time is not given
-            try:
-                self.beginning_datetime = datetime.datetime.strptime(file_name_noext, "%Y%m%d_%H%M%S.%f")
-            
-            except ValueError:
+            time_formats_to_try = ["%Y%m%d_%H%M%S.%f", "%Y%m%d_%H%M%S", "%Y%m%d-%H%M%S.%f", "%Y%m%d-%H%M%S"]
+            self.beginning_datetime = None
 
+            for fmt in time_formats_to_try:
                 try:
-                    self.beginning_datetime = datetime.datetime.strptime(file_name_noext, "%Y%m%d_%H%M%S")
+                    self.beginning_datetime = datetime.datetime.strptime(file_name_noext, fmt)
+                    break
+                except ValueError:
+                    pass
 
-                except:
+            # If no formats matched, try the RMS video file format, e.g. CAWE01_20240611_020430_954145_video.mkv
+            if self.beginning_datetime is None:
+                
+                try:
+                    fn_data = file_name_noext.split('_')
+                    fn_timestamp = fn_data[1] + '_' + fn_data[2] + '_' + fn_data[3]
+                    self.beginning_datetime = datetime.datetime.strptime(fn_timestamp, "%Y%m%d_%H%M%S_%f")
+
+                except ValueError:
+
                     messagebox(title="Input error", \
                     message="The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using command line options.")
 

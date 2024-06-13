@@ -5642,7 +5642,19 @@ if __name__ == '__main__':
     # Parse the beginning time into a datetime object
     if cml_args.timebeg is not None:
 
-        beginning_time = datetime.datetime.strptime(cml_args.timebeg[0], "%Y%m%d_%H%M%S.%f")
+        time_formats_to_try = ["%Y%m%d_%H%M%S.%f", "%Y%m%d_%H%M%S", "%Y%m%d-%H%M%S.%f", "%Y%m%d-%H%M%S"]
+
+        beginning_time = None
+        for time_format in time_formats_to_try:
+            try:
+                beginning_time = datetime.datetime.strptime(cml_args.timebeg[0], time_format)
+                break
+            except ValueError:
+                pass
+
+        if beginning_time is None:
+            raise ValueError("The beginning time format is not recognized! Please use one of the following formats: "
+                                + ", ".join(time_formats_to_try))
 
     else:
         beginning_time = None
