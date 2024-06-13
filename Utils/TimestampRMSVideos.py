@@ -115,6 +115,16 @@ def getVideoFrameCount(video_file):
 
     cap = cv2.VideoCapture(video_file)
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    # If the frame count is <= 0, try to get the frame count manually
+    if frame_count <= 0:
+        frame_count = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frame_count += 1
+
     cap.release()
 
     return frame_count
