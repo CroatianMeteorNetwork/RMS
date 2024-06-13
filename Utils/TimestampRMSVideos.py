@@ -73,7 +73,7 @@ def loadFrameTimeData(fs_archive):
     """
 
     # Extract the camera ID from the archive name
-    camera_id = fs_archive.split("_")[1]
+    camera_id = os.path.basename(fs_archive).split("_")[1]
 
     # Load the list of FS files from the tar.bz2 archive
     frame_time_data = OrderedDict()
@@ -138,7 +138,7 @@ if __name__ == "__main__":
     fs_archive = None
     for f in os.listdir(dir_path):
         if f.startswith("FS") and f.endswith(".tar.bz2"):
-            fs_archive = f
+            fs_archive = os.path.join(dir_path, f)
             break
 
     if fs_archive is None:
@@ -152,7 +152,7 @@ if __name__ == "__main__":
 
 
     # Load the list of all video*.mkv files in the directory
-    video_files = [f for f in sorted(os.listdir(dir_path)) if f.startswith("video") and f.endswith(".mkv")]
+    video_files = [f for f in sorted(os.listdir(dir_path)) if f.startswith("video_") and f.endswith(".mkv")]
 
     if len(video_files) == 0:
         print("No video files found in the directory!")
@@ -191,4 +191,4 @@ if __name__ == "__main__":
         else:
 
             # Copy the video file to the new name
-            shutil.copy2(video_file, video_ts_name)
+            shutil.copy2(os.path.join(dir_path, video_file), os.path.join(dir_path, video_ts_name))
