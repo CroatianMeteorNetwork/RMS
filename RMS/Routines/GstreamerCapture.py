@@ -1,5 +1,6 @@
 
 import os
+import sys
 # Set GStreamer debug level. Use '2' for warnings in production environments.
 os.environ['GST_DEBUG'] = '3'
 
@@ -24,11 +25,19 @@ except ValueError as e:
 
 
 class GstCaptureTest(multiprocessing.Process):
-    def __init__(self, nframes=100):
+    def __init__(self, device_url, gst_decoder, video_format='BGR', video_file_dir=None, 
+                 segment_duration_sec=30, nframes=100):
 
         super(GstCaptureTest, self).__init__()
 
         self.exit = multiprocessing.Event()
+
+        self.device_url = device_url
+        self.gst_decoder = gst_decoder
+        self.video_format = video_format
+
+        self.video_file_dir = video_file_dir
+        self.segment_duration_sec = segment_duration_sec
 
         self.nframes = nframes
 
@@ -39,13 +48,37 @@ class GstCaptureTest(multiprocessing.Process):
 
         Gst.init(None)
 
-        self.pipeline = Gst.parse_launch(
-            "rtspsrc buffer-mode=1 protocols=tcp tcp-timeout=5000000 retry=5 location=rtsp://192.168.42.10:554/user=admin&password=&channel=1&stream=0.sdp/ ! "
-            "rtph264depay ! queue ! h264parse ! nvh264dec ! videoconvert ! "
-            "video/x-raw,format=BGR ! "
+        # Define the source up to the point where we want to branch off
+        source_to_tee = (
+            "rtspsrc buffer-mode=1 protocols=tcp tcp-timeout=5000000 retry=5 "
+            "location=\"{}\" ! "
+            "rtph264depay ! tee name=t"
+            ).format(self.device_url)
+
+        # Branch for processing
+        processing_branch = (
+            "t. ! queue ! h264parse ! {} ! videoconvert ! video/x-raw,format={} ! "
             "queue leaky=downstream max-size-buffers=100 max-size-bytes=0 max-size-time=0 ! "
             "appsink max-buffers=100 drop=true sync=0 name=appsink"
-        )
+            ).format(self.gst_decoder, self.video_format)
+        
+         # Branch for storage - if video_file_dir is not None, save the raw stream to a file
+        if self.video_file_dir is not None:
+
+            video_location = os.path.join(self.video_file_dir, "video_%05d.mkv")
+            storage_branch = (
+                "t. ! queue ! h264parse ! "
+                "splitmuxsink location={} max-size-time={} muxer-factory=matroskamux"
+                ).format(video_location, int(self.segment_duration_sec*1e9))
+
+        # Otherwise, skip saving the raw stream to disk
+        else:
+            storage_branch = ""
+
+         # Combine all parts of the pipeline
+        pipeline_str = "{} {} {}".format(source_to_tee, processing_branch, storage_branch)
+
+        self.pipeline = Gst.parse_launch(pipeline_str)
 
         self.pipeline.set_state(Gst.State.PLAYING)
 
@@ -347,13 +380,26 @@ class GstVideoFile():
 
 if __name__ == "__main__":
 
-    # # Test capture from a camera
-    # gst_test = GstCaptureTest()
-    # gst_test.startCapture()
-    # gst_test.stop()
+    # Test capture from a camera
+
+    device_url = "rtsp://192.168.42.10:554/user=admin&password=&channel=1&stream=0.sdp"
+    gst_decoder = "nvh264dec"
+    video_file_dir = "/mnt/temp/test"
+
+    gst_test = GstCaptureTest(device_url, gst_decoder, video_format='BGR', video_file_dir=video_file_dir, 
+                              nframes=300, segment_duration_sec=10)
+    gst_test.startCapture()
+    gst_test.stop()
 
 
-    # Test capture from a video file
+    ### EXIT ###
+    
+    sys.exit()
+
+    ###
+
+    #### Test capture from a video file
+
     video_file_path = "/mnt/RMS_data/CapturedFiles/CAWE01_20240530_015840_497533/video_00001.mkv"
 
     gst_video_file = GstVideoFile(video_file_path, decoder='nvh264dec')

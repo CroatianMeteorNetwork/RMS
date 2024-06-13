@@ -33,17 +33,23 @@ from RMS.Routines import Image
 from RMS.Routines.GstreamerCapture import GstVideoFile
 
 
-# Try importaing a Qt message box if available
-try:
-    from RMS.Routines.CustomPyqtgraphClasses import qmessagebox as messagebox
-except:
+# If there is not display, messagebox will simply print to the console
+if os.environ.get('DISPLAY') is None:
+    messagebox = lambda title, message: print(title + ': ' + message)
 
-    # Otherwise import a tk message box
-    # tkinter import that works on both Python 2 and 3
+else:
+
+    # Try importaing a Qt message box if available
     try:
-        from tkinter import messagebox
+        from RMS.Routines.CustomPyqtgraphClasses import qmessagebox as messagebox
     except:
-        import tkMessageBox as messagebox
+
+        # Otherwise import a tk message box
+        # tkinter import that works on both Python 2 and 3
+        try:
+            from tkinter import messagebox
+        except:
+            import tkMessageBox as messagebox
 
 
 GST_IMPORTED = False
