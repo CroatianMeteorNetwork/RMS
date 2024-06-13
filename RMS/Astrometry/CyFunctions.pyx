@@ -829,7 +829,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
             
 
     # Precess the FOV centre to J2000 (otherwise the FOV centre drifts with time)
-    ra_centre_j2000, dec_centre = equatorialCoordPrecession(jd_ref, J2000_DAYS, ra_centre, dec_centre)
+    ra_centre_j2000, dec_centre = equatorialCoordPrecession(jd, J2000_DAYS, ra_centre, dec_centre)
 
     # Determine the ra_diff sign (negative for northern hemisphere)
     if lat > 0:
