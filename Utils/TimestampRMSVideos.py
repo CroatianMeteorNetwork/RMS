@@ -109,6 +109,10 @@ def getVideoFrameCount(video_file):
 
     """
 
+    # Check that the video file exists
+    if not os.path.exists(video_file):
+        raise FileNotFoundError("Video file {:s} not found!".format(video_file))
+
     cap = cv2.VideoCapture(video_file)
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     cap.release()
@@ -166,7 +170,7 @@ if __name__ == "__main__":
     for video_file in video_files:
         
         # Get the number of frames in the video file
-        frame_count = getVideoFrameCount(video_file)
+        frame_count = getVideoFrameCount(os.path.join(dir_path, video_file))
 
         # Sum all previous frame counts to get the frame number of the first frame in the video file
         total_frames = sum(video_frame_counts)
@@ -181,7 +185,7 @@ if __name__ == "__main__":
         video_ts_name = "{:s}_{:s}_video.mkv".format(ft.camera_id, start_time.strftime("%Y%m%d_%H%M%S_%f"))
         
         #print("{:s} - total frames: {:d}, start time: {:s}".format(video_file, total_frames, str(start_time)))
-        print("{:s} - {:s}".format(video_file, video_ts_name))
+        print("fr tot = {:8d}, fr vid = {:d}, {:s} - {:s}".format(total_frames, frame_count, video_file, video_ts_name))
 
         if args.rename:
             
