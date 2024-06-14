@@ -400,7 +400,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
     # Free shared memory after the compressor is done
     try:
-        log.debug('Freeing frame buffers...')
+        log.debug('Freeing frame buffers in StartCapture...')
         del sharedArrayBase
         del sharedArray
         del sharedArrayBase2
