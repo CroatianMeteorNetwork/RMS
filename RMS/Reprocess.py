@@ -36,6 +36,7 @@ from Utils.PlotFieldsums import plotFieldsums
 from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
 from Utils.ShowerAssociation import showerAssociation
 from Utils.PlotTimeIntervals import plotFFTimeIntervals
+from Utils.TimestampRMSVideos import timestampRMSVideos
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -320,6 +321,17 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     else:
         ff_detected = []
         detector = None
+
+
+    # If videos were saved, rename them with the timestamp of the first frame
+    if (config.raw_video_dir is not None) or config.raw_video_dir_night:
+
+        try:
+            timestampRMSVideos(night_data_dir, rename=True)
+
+        except Exception as e:
+            log.debug('Renaming videos failed with the message:\n' + repr(e))
+            log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
 
 

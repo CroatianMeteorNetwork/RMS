@@ -131,22 +131,16 @@ def getVideoFrameCount(video_file):
 
 
 
-if __name__ == "__main__":
+def timestampRMSVideos(dir_path, rename=False):
+    """ Change the names of RMS videos to include the timestamp of the first frame.
 
-    import argparse
+    Arguments:
+        dir_path: [str] the path to the directory with video_*.mkv files and the FS archive
 
-    parser = argparse.ArgumentParser(description="Change the names of RMS videos to include the timestamp of the first frame.")
+    Keyword arguments:
+        rename: [bool] rename the video files instead of making copies
 
-    parser.add_argument("dir_path", type=str, help="Directory with video_*.mkv files and the FS archive.")
-
-    parser.add_argument("-r", "--rename", action="store_true", help="Rename the video files instead of making copies.")
-
-    args = parser.parse_args()
-
-    ### 
-
-    dir_path = args.dir_path
-
+    """
 
     # Find the the FS archive in the directory
     fs_archive = None
@@ -197,7 +191,7 @@ if __name__ == "__main__":
         #print("{:s} - total frames: {:d}, start time: {:s}".format(video_file, total_frames, str(start_time)))
         print("fr tot = {:8d}, fr vid = {:d}, {:s} - {:s}".format(total_frames, frame_count, video_file, video_ts_name))
 
-        if args.rename:
+        if rename:
             
             # Rename the video file to the new name
             os.rename(os.path.join(dir_path, video_file), os.path.join(dir_path, video_ts_name))
@@ -206,3 +200,28 @@ if __name__ == "__main__":
 
             # Copy the video file to the new name
             shutil.copy2(os.path.join(dir_path, video_file), os.path.join(dir_path, video_ts_name))
+
+
+
+
+
+if __name__ == "__main__":
+
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Change the names of RMS videos to include the timestamp of the first frame.")
+
+    parser.add_argument("dir_path", type=str, help="Directory with video_*.mkv files and the FS archive.")
+
+    parser.add_argument("-r", "--rename", action="store_true", help="Rename the video files instead of making copies.")
+
+    cml_args = parser.parse_args()
+
+    ### 
+
+    dir_path = cml_args.dir_path
+    
+    timestampRMSVideos(dir_path, rename=cml_args.rename)
+
+
+    
