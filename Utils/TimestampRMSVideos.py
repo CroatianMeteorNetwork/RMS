@@ -151,7 +151,7 @@ def timestampRMSVideos(dir_path, rename=False):
 
     if fs_archive is None:
         print("No FS archive found in the directory!")
-        sys.exit(1)
+        return None
 
 
 
@@ -164,7 +164,7 @@ def timestampRMSVideos(dir_path, rename=False):
 
     if len(video_files) == 0:
         print("No video files found in the directory!")
-        sys.exit(1)
+        return None
 
 
     ### Assume that the first video begins exactly at the time of the first FS file ###
