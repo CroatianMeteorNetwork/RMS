@@ -323,16 +323,6 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         detector = None
 
 
-    # If videos were saved, rename them with the timestamp of the first frame
-    if (config.raw_video_dir is not None) or config.raw_video_dir_night:
-
-        try:
-            timestampRMSVideos(night_data_dir, rename=True)
-
-        except Exception as e:
-            log.debug('Renaming videos failed with the message:\n' + repr(e))
-            log.debug(repr(traceback.format_exception(*sys.exc_info())))
-
 
 
     log.info('Plotting field sums...')
@@ -349,6 +339,18 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
     # Archive all fieldsums to one archive
     archiveFieldsums(night_data_dir)
+
+
+    # If videos were saved, rename them with the timestamp of the first frame
+    # This command requires the FS archive to be present
+    if (config.raw_video_dir is not None) or config.raw_video_dir_night:
+
+        try:
+            timestampRMSVideos(night_data_dir, rename=True)
+
+        except Exception as e:
+            log.debug('Renaming videos failed with the message:\n' + repr(e))
+            log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
 
     # List for any extra files which will be copied to the night archive directory. Full paths have to be 
