@@ -17,6 +17,8 @@
 from __future__ import print_function, division, absolute_import
 
 import os
+import sys
+import traceback
 # Set GStreamer debug level. Use '2' for warnings in production environments.
 os.environ['GST_DEBUG'] = '3'
 
@@ -136,6 +138,15 @@ class BufferedCapture(Process):
         if self.is_alive():
             log.info('Terminating capture...')
             self.terminate()
+        
+        # Free shared memory after the compressor is done
+        try:
+            log.debug('Freeing frame buffers in BufferedCapture...')
+            del self.array1
+            del self.array2
+        except Exception as e:
+            log.debug('Freeing frame buffers failed with error:' + repr(e))
+            log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
         return self.dropped_frames.value
 

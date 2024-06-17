@@ -16,6 +16,8 @@
 
 
 import os
+import sys
+import traceback
 import time
 import datetime
 import logging
@@ -200,11 +202,19 @@ class Compressor(multiprocessing.Process):
                 log.debug('Waited more than 60 seconds for compression to end, killing it...')
                 break
 
-
         log.debug('Compression joined!')
 
         self.terminate()
         self.join()
+
+        # Free shared memory after the compressor is done
+        try:
+            log.debug('Freeing frame buffers in Compressor...')
+            del self.array1
+            del self.array2
+        except Exception as e:
+            log.debug('Freeing frame buffers failed with error:' + repr(e))
+            log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
         # Return the detector and live viewer objects because they were updated in this namespace
         return self.detector
