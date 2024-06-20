@@ -391,13 +391,19 @@ class BufferedCapture(Process):
 
             # GStreamer
             if GST_IMPORTED and (self.config.media_backend == 'gst') and (not self.media_backend_override):
+
+                # Pull a sample from the appsink
                 sample = self.device.emit("pull-sample")
                 if not sample:
                     log.info("GStreamer pipeline did not emit a sample.")
-
                     return False, None, None
 
+                # Try to get the buffer from the sample
                 buffer = sample.get_buffer()
+                if not buffer:
+                    log.error("Failed to get buffer from sample.")
+                    return False, None, None
+
                 gst_timestamp_ns = buffer.pts  # GStreamer timestamp in nanoseconds
 
                 # Sanity check for pts value
@@ -419,13 +425,13 @@ class BufferedCapture(Process):
                 timestamp = self.start_timestamp + (smoothed_pts/1e9)
 
                 buffer.unmap(map_info)
-        
+
             # OpenCV
             else:
                 ret, frame = self.device.read()
                 if ret:
                     timestamp = time.time()
-                
+
         return ret, frame, timestamp
 
 
@@ -481,7 +487,7 @@ class BufferedCapture(Process):
         return gray_frame
 
 
-    def createGstreamDevice(self, video_format):
+    def createGstreamDevice(self, video_format, max_retries=5, retry_interval=1):
         """
         Creates a GStreamer pipeline for capturing video from an RTSP source and 
         initializes playback with specific configurations.
@@ -491,6 +497,9 @@ class BufferedCapture(Process):
         Arguments:
             video_format: [str] The desired video format for the conversion, 
                 e.g., 'BGR', 'GRAY8', etc.
+            max_retries: [int] The maximum number of retry attempts
+            retry_interval: [float] The number of seconds to wait between retries
+
 
         Returns:
             Gst.Element: The appsink element of the created GStreamer pipeline, 
@@ -498,9 +507,6 @@ class BufferedCapture(Process):
         """
 
         device_url = self.extractRtspUrl(self.config.deviceID)
-        # device_str = ("rtspsrc  buffer-mode=1 latency=1000 default-rtsp-version=17 protocols=tcp tcp-timeout=5000000 retry=5 "
-        #               "location=\"{}\" ! rtpjitterbuffer latency=1000 mode=1 ! "
-        #               "rtph264depay ! h264parse ! avdec_h264").format(device_url)
 
         device_str = ("rtspsrc  buffer-mode=1 protocols=tcp tcp-timeout=5000000 retry=5 "
                       "location=\"{}\" ! "
@@ -511,23 +517,50 @@ class BufferedCapture(Process):
                         "{} ! queue max-size-buffers=100 max-size-bytes=0 max-size-time=0 ! "
                         "appsink max-buffers=100 drop=true sync=0 name=appsink").format(device_str, conversion)
 
-
         log.debug("GStreamer pipeline string: {}".format(pipeline_str))
-        
-        self.pipeline = Gst.parse_launch(pipeline_str)
 
-        self.pipeline.set_state(Gst.State.PLAYING)
+        # Set the pipeline to PLAYING state with retries
+        for attempt in range(max_retries):
+            
+            # Parse and create the pipeline
+            self.pipeline = Gst.parse_launch(pipeline_str)
 
+            # Set the pipeline to PLAYING state
+            self.pipeline.set_state(Gst.State.PLAYING)
 
-        # Calculate camera latency from config parameters
-        total_latency = self.config.camera_buffer/self.config.fps + self.config.camera_latency
+            # Capture time
+            start_time = time.time()
 
-        self.start_timestamp = time.time() - total_latency
- 
-        start_time_str = datetime.datetime.fromtimestamp(self.start_timestamp).strftime('%Y-%m-%d %H:%M:%S.%f')
-        log.info("Start time is {}".format(start_time_str))
+            # Wait for the state change to complete
+            state_change_return, current_state, pending_state = self.pipeline.get_state(Gst.CLOCK_TIME_NONE)
 
-        return self.pipeline.get_by_name("appsink")
+            # Check if the state change was successful
+            if state_change_return != Gst.StateChangeReturn.FAILURE and current_state == Gst.State.PLAYING:
+                log.info("Pipeline is in PLAYING state.")
+
+                # Calculate camera latency from config parameters
+                total_latency = self.config.camera_buffer/self.config.fps + self.config.camera_latency
+
+                # Calculate stream start time
+                self.start_timestamp = start_time - total_latency
+
+                # Log start time
+                start_time_str = (datetime.datetime.fromtimestamp(self.start_timestamp)
+                                  .strftime('%Y-%m-%d %H:%M:%S.%f'))
+
+                log.info("Start time is {}".format(start_time_str))
+
+                return self.pipeline.get_by_name("appsink")
+
+            # Log the failure and retry if attempts are left
+            log.error("Attempt {}: Pipeline did not transition to PLAYING state, current state is {}. \
+                      Retrying in {} seconds."
+                      .format(attempt + 1, current_state, retry_interval))
+
+            time.sleep(retry_interval)
+
+        log.error("Failed to set pipeline to PLAYING state after {} attempts.".format(max_retries))
+        return False
 
 
     def initVideoDevice(self):
@@ -560,7 +593,7 @@ class BufferedCapture(Process):
                 if ip:
                     ip = ip[0]
 
-                    # Try pinging 5 times
+                    # Try pinging 500 times
                     ping_success = False
 
                     for i in range(500):
@@ -569,7 +602,10 @@ class BufferedCapture(Process):
                         ping_success = ping(ip)
 
                         if ping_success:
-                            log.info("Camera IP ping successful!")
+                            log.info("Camera IP ping successful! Waiting  10 seconds. ")
+
+                            # Wait for camera to finish booting up
+                            time.sleep(10)
                             break
 
                         time.sleep(5)
@@ -615,7 +651,7 @@ class BufferedCapture(Process):
                     Gst.init(None)
 
                     # Create and start a GStreamer pipeline
-                    self.device = self.createGstreamDevice('BGR')
+                    self.device = self.createGstreamDevice('BGR', max_retries=5, retry_interval=1)
                     self.pts_buffer = []  # Reset pts buffer
 
                     # Attempt to get a sample and determine the frame shape
