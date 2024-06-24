@@ -395,8 +395,8 @@ cdef np.ndarray[np.float64_t, ndim=2] precessionMatrix(double zeta, double theta
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
-cpdef (double, double, double) equatorialCoordPrecession2(double start_epoch, double final_epoch,
-                                                         double ra, double dec, double rot_angle):
+cpdef (double, double, double) equatorialCoordAndRotPrecession(double start_epoch, double final_epoch,
+                                                               double ra, double dec, double rot_angle):
     """ Corrects Right Ascension, Declination, and Rotation wrt Standard angle from one epoch to another,
     taking only precession into account.
     
@@ -1040,17 +1040,12 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] x_array = np.zeros_like(ra_data)
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] y_array = np.zeros_like(ra_data)
 
-    # Precalculate some parameters
-    cdef double sl = sin(radians(lat))
-    cdef double cl = cos(radians(lat))
-
 
     # Compute the current RA of the FOV centre by adding the difference in between the current and the 
     #   reference hour angle
     ra_centre = radians((ra_ref + cyjd2LST(jd, 0) - h0 + 360)%360)
     dec_centre = radians(dec_ref)
 
-    
     # Correct the reference FOV centre for refraction
     if refraction:
         ra_centre, dec_centre = eqRefractionTrueToApparent(ra_centre, dec_centre, jd, radians(lat), \
@@ -1058,7 +1053,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
             
 
     # Precess the FOV centre and rotation angle to J2000 (otherwise the FOV centre drifts with time)
-    ra_centre_j2000, dec_centre_j2000, pos_angle_ref_corr = equatorialCoordPrecession2(jd, J2000_DAYS,
+    ra_centre_j2000, dec_centre_j2000, pos_angle_ref_corr = equatorialCoordAndRotPrecession(jd, J2000_DAYS,
                                                             ra_centre, dec_centre, radians(pos_angle_ref))
 
     # The position angle needs to be corrected for precession, otherwise the FOV rotates with time
@@ -1223,13 +1218,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
             r = sqrt(x**2 + y**2)
 
             # Apply the asymmetry correction
-            #off_direction = atan2(y, x)
-            #r = r*(1.0 + a1*sin(off_direction + a2))
-            #r = (1.0 + a1)*(r + a2*y*cos(a3) - a2*x*sin(a3))
-            #r = (r + a1*y*cos(a2) - a1*x*sin(a2))
             r = r + a1*y*cos(a2) - a1*x*sin(a2)
-            #r_corr = r_corr + (-a1*y*cos(a2) + a1*x*sin(a2))/((x_res/2.0)**2)
-
 
             # Normalize radius to horizontal size
             r = r/(x_res/2.0)
@@ -1359,7 +1348,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     cdef double x0, y0, xy, a1, a2, k1, k2, k3, k4, k5, ra_ref_now_corr_j2000,dec_ref_corr_j2000
     cdef int index_offset
     cdef double radius, theta, sin_t, cos_t
-    cdef double ha, ra_ref_now, ra_ref_now_corr, ra, dec, dec_ref_corr, pos_angle_ref_now_corr
+    cdef double ra_ref_now, ra_ref_now_corr, ra, dec, dec_ref_corr, pos_angle_ref_now_corr
 
     # Convert the reference pointing direction to radians
     ra_ref  = radians(ra_ref)
@@ -1506,14 +1495,9 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         elif dist_type.startswith("radial"):
 
             # Compute the radius
-            #r = sqrt(x_img**2 + (1.0 + xy)*y_img**2)
             r = sqrt((x_img - x0)**2 + ((1.0 + xy)*(y_img - y0))**2)
 
             # Apply the asymmetry correction
-            # off_direction = atan2((1.0 + xy)*(y_img - y0), x_img - x0)
-            # r = r*(1.0 + a1*sin(off_direction + a2))
-            # r = (1.0 + a1)*(r + a2*(1.0 + xy)*y_img*cos(a3) - a2*x_img*sin(a3))
-            #r = r + a1*(1.0 + xy)*y_img*cos(a2) - a1*x_img*sin(a2)
             r = r + a1*(1.0 + xy)*(y_img - y0)*cos(a2) - a1*(x_img - x0)*sin(a2)
 
             # Normalize radius to horizontal size
@@ -1605,7 +1589,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 
         # Precess the reference RA, dec, position angle to J2000 (needs to be used to avoid FOV centre drift
         # over time)
-        ra_ref_now_corr_j2000, dec_ref_corr_j2000, pos_angle_ref_now_corr = equatorialCoordPrecession2(jd,
+        ra_ref_now_corr_j2000, dec_ref_corr_j2000, pos_angle_ref_now_corr = equatorialCoordAndRotPrecession(jd,
                                             J2000_DAYS, ra_ref_now_corr, dec_ref_corr, radians(pos_angle_ref))
 
         # The position angle needs to be corrected for precession, otherwise the FOV rotates with time
