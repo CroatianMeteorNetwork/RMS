@@ -259,7 +259,9 @@ class Config:
         
         ##### Capture
         self.deviceID = 0
-        self.force_v4l2 = False
+
+        # Media backend to use for capture. Options are gst, cv2, or v4l2
+        self.media_backend = "gst"
         self.uyvy_pixelformat = False
 
         self.width = 1280
@@ -267,6 +269,15 @@ class Config:
         self.width_device = self.width
         self.height_device = self.height
         self.fps = 25.0
+
+        # Camera buffer in number of frames. This will applied a buffer/fps correction to
+        # the timestamps when in GStreamer Standalone mode
+        self.camera_buffer = 1
+
+        # Camera latency in seconds. This will applied an offset to the timestamps
+        # when in GStreamer Standalone mode
+        self.camera_latency = 0.05
+
 
         self.report_dropped_frames = False
 
@@ -297,10 +308,15 @@ class Config:
         # days of logfiles to keep
         self.logdays_to_keep = 30
 
+        # ArchDirs and bzs to keep 
+        # keep this many ArchDirs. Zero means keep them all
+        self.arch_dirs_to_keep = 20
+        # keep this many compressed ArchDirs. Zero means keep them all
+        self.bz2_files_to_keep = 20
+
         # Extra space to leave on disk for the archive (in GB) after the captured files have been taken
         #   into account
-        self.extra_space_gb = 3
-
+        self.extra_space_gb = 6
 
         # Enable/disable showing maxpixel on the screen (off by default)
         self.live_maxpixel_enable = False
@@ -496,6 +512,12 @@ class Config:
         # Name of the platepar file on the server
         self.platepar_remote_name = 'platepar_latest.cal'
         self.remote_platepar_dir = 'platepars'
+
+        # Download remote mask
+        self.mask_download_permissive = True
+        self.mask_remote_name = 'mask_latest.bmp'
+        self.remote_mask_dir = 'masks'
+
 
         self.catalog_mag_limit = 5.5
 
@@ -814,7 +836,13 @@ def parseCapture(config, parser):
         config.log_dir = parser.get(section, "log_dir")
 
     if parser.has_option(section, "logdays_to_keep"):
-        config.logdays_to_keep = parser.get(section, "logdays_to_keep")
+        config.logdays_to_keep = int(parser.get(section, "logdays_to_keep"))
+
+    if parser.has_option(section, "arch_dirs_to_keep"):
+        config.arch_dirs_to_keep = int(parser.get(section, "arch_dirs_to_keep"))
+
+    if parser.has_option(section, "bz2_files_to_keep"):
+        config.bz2_files_to_keep = int(parser.get(section, "bz2_files_to_keep"))
 
     if parser.has_option(section, "captured_dir"):
         config.captured_dir = parser.get(section, "captured_dir")
@@ -903,8 +931,14 @@ def parseCapture(config, parser):
         # If it fails, it's probably a RTSP stream
         pass
 
+    if parser.has_option(section, "media_backend"):
+        config.media_backend = parser.get(section, "media_backend")
+
     if parser.has_option(section, "force_v4l2"):
-        config.force_v4l2 = parser.getboolean(section, "force_v4l2")
+        force_v4l2 = parser.getboolean(section, "force_v4l2")
+
+        if force_v4l2:
+            config.media_backend = "v4l2"
 
     if parser.has_option(section, "uyvy_pixelformat"):
         config.uyvy_pixelformat = parser.getboolean(section, "uyvy_pixelformat")
@@ -917,6 +951,12 @@ def parseCapture(config, parser):
             config.fps = 1000000
             print()
             print("WARNING! The FPS has been limited to 1,000,000!")
+
+    if parser.has_option(section, "camera_buffer"):
+        config.camera_buffer = parser.getint(section, "camera_buffer")
+
+    if parser.has_option(section, "camera_latency"):
+        config.camera_latency = parser.getfloat(section, "camera_latency")
 
     if parser.has_option(section, "ff_format"):
         config.ff_format = parser.get(section, "ff_format")
@@ -1441,6 +1481,16 @@ def parseCalibration(config, parser):
 
     if parser.has_option(section, "min_matched_stars"):
         config.min_matched_stars = parser.getint(section, "min_matched_stars")
+
+    if parser.has_option(section, "mask_download_permissive"):
+        config.mask_download_permissive = parser.getboolean(section, "mask_download_permissive")
+
+    if parser.has_option(section, "mask_remote_name"):
+        config.mask_remote_name = parser.get(section, "mask_remote_name")
+
+    if parser.has_option(section, "remote_mask_dir"):
+        config.remote_mask_dir = parser.get(section, "remote_mask_dir")
+
 
 
 

@@ -228,18 +228,19 @@ def selectFFFrames(img_input, ff, frame_min, frame_max):
 
 
 def filenameToDatetime(file_name):
-    """ Converts FF bin file name to a datetime object.
+    """ Converts FS and FF bin file name to a datetime object.
 
     Arguments:
-        file_name: [str] Name of a FF file.
+        file_name: [str] Name of a FF or FS file.
 
     Return:
-        [datetime object] Date and time of the first frame in the FF file.
+        [datetime object] Date and time of the first frame in the FS or FF file.
 
     """
 
     # e.g.  FF499_20170626_020520_353_0005120.bin
     # or FF_CA0001_20170626_020520_353_0005120.fits
+    # or FS_US9999_20240318_011731_867370_1054720_fieldsum.bin
 
     file_name = file_name.split('_')
 
@@ -258,10 +259,15 @@ def filenameToDatetime(file_name):
     minute = int(time[2:4])
     seconds = int(time[4:6])
 
-    ms = int(file_name[i + 3])
+    # Determine if the time fraction is in milliseconds or microseconds
+    time_fraction_str = file_name[i + 3]
+    if len(time_fraction_str) == 3:  # Milliseconds, need to convert to microseconds
+        microseconds = int(time_fraction_str) * 1000
+    else:  # Assuming microseconds directly
+        microseconds = int(time_fraction_str)
 
 
-    return datetime.datetime(year, month, day, hour, minute, seconds, ms*1000)
+    return datetime.datetime(year, month, day, hour, minute, seconds, microseconds)
 
 
 

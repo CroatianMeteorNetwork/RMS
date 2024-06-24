@@ -502,7 +502,16 @@ class InputTypeFRFF(InputType):
         self.cache[file_name] = self.ff
 
         return ff
+    
 
+    def setCurrentFF(self, ff_name):
+        """ Set the current FF file. """
+
+        if ff_name in self.ff_list:
+            self.current_ff_index = self.ff_list.index(ff_name)
+
+            # Load the chunk
+            self.loadChunk()
 
     @property
     def current_ff_file(self):
@@ -709,15 +718,20 @@ class InputTypeVideo(InputType):
 
         if beginning_time is None:
 
+            # Try reading the beginning time of the video from the name if time is not given
             try:
-                # Try reading the beginning time of the video from the name if time is not given
                 self.beginning_datetime = datetime.datetime.strptime(file_name_noext, "%Y%m%d_%H%M%S.%f")
+            
+            except ValueError:
 
-            except:
-                messagebox(title="Input error", \
-                message="The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using command line options.")
+                try:
+                    self.beginning_datetime = datetime.datetime.strptime(file_name_noext, "%Y%m%d_%H%M%S")
 
-                sys.exit()
+                except:
+                    messagebox(title="Input error", \
+                    message="The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using command line options.")
+
+                    sys.exit()
 
         else:
             self.beginning_datetime = beginning_time
@@ -1188,6 +1202,11 @@ class InputTypeUWOVid(InputType):
         """ Return the time of the frame. """
 
         if frame_no is None:
+
+            # Load the frame time if it wasn't loaded yet
+            if not hasattr(self, 'current_frame_time'):
+                self.loadFrame()
+            
             dt = self.current_frame_time
 
 

@@ -74,23 +74,34 @@ You will probably need some cables and connectors to connect your camera to the 
 
 ---------
 
-The code was designed to run on a RPi, but it will also run an some Linux distributions. We have tested it on Linux Mint 18 and Ubuntu 16. 
+The code was designed to run on a RPi, but it will also run an some Linux distributions. We have tested it on Linux Mint 20 and Ubuntu 20 and 22. 
 
 The recording **will not** run on Windows, but most of other submodules will (astrometric calibration, viewing the data, manual reduction, etc.). The problem under Windows is that for some reason the logging module object cannot be pickled when parallelized by the multiprocessing library. **We weren't able to solve this issue, but we invite people to try to take a stab at it.**
 
 
-Here we provide installation instructions for the RPi, but the procedure should be the same for any Debian-based Linux distribution: [LINK](https://docs.google.com/document/d/19ImeNqBTD1ml2iisp5y7CjDrRV33wBeF9rtx3mIVjh4/edit)
+Here we provide installation instructions for the RPi, but the procedure should be the same for any Debian-based Linux distribution: [LINK](https://docs.google.com/document/d/e/2PACX-1vTh_CtwxKu3_vxB6YpEoctLpsn5-v677qJgWsYi6gEr_QKacrfrfIz4lFM1l-CZO86t1HwFfk3P5Nb6/pub#h.399xr1c3jau2)
 
 Alternatively, if you are using Anaconda Python on your Linux PC, you can install all libraries except OpenCV by running:
 
 ```
-conda install -y numpy scipy gitpython cython matplotlib
-conda install -y -c conda-forge pyephem Pillow imreg_dft imageio pyqtgraph'<=0.12.1'
+conda create --name rms python=3.9
+conda activate rms 
+conda install -y -c conda-forge numpy scipy gitpython cython matplotlib paramiko
+conda install -y -c conda-forge Pillow pyqtgraph'<=0.12.1'
+conda install -y -c conda-forge ephem
+conda install -y -c conda-forge imageio pandas
+conda install -y -c conda-forge pygobject
 conda install -y -c astropy astropy
+conda install -y pyqt
 pip install rawpy
+pip install git+https://github.com/matejak/imreg_dft@master#egg=imreg_dft
 ```
 
-To install OpenCV, use the ```opencv4_install.sh``` script. This will build OpenCV with gstreamer and ffmpeg support.
+If you want to use the machine for capture, you need to install OpenCV using the ```opencv4_install.sh``` script. This will build OpenCV with gstreamer and ffmpeg support. If you are not planning to run the capture but you are planning to use other RMS tool, you can install opencv using conda:
+
+```
+conda install -c conda-forge opencv
+```
 
 
 ## Setting up
@@ -98,7 +109,7 @@ To install OpenCV, use the ```opencv4_install.sh``` script. This will build Open
 ### Installing on Windows
 The RMS code runs on Windows with the exception of meteor detection (I guess the most crucial part). I wasn't able to get the detection to work, but we encourage everybody to try!
 
-Nevertheless, other RMS tools work well under Windows and you can follow [these instructions](https://docs.google.com/document/d/1htbyUFKD159IuB3_1HLp-tABTtlCFLMnvoH6zyojTxk/edit?usp=sharing) to install it.
+Nevertheless, other RMS tools work well under Windows and you can follow [these instructions](https://globalmeteornetwork.org/wiki/index.php?title=Windows_Installation) to install it.
 
 ### Setting the timezone to UTC
 It is always a good idea to set the timezone to UTC when recording any data. This provides a common time reference among observatons, and more than once there have been issues when people were using different time zones. So, use your favorite search engine to find how to change the timezone on your RPi to UTC.

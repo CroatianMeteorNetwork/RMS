@@ -14,8 +14,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-
-
 from __future__ import print_function, division, absolute_import
 
 
@@ -57,6 +55,7 @@ else:
 import numpy as np
 
 import RMS.ConfigReader as cr
+
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector
 from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt
 from RMS.Math import angularSeparationVect
@@ -67,6 +66,7 @@ from Utils.StackFFs import stackFFs
 from Utils.FRbinViewer import view
 from Utils.BatchFFtoImage import batchFFtoImage
 from RMS.CaptureDuration import captureDuration
+from RMS.Misc import sanitise
 
 
 # Import Cython functions
@@ -74,8 +74,8 @@ import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz
 
-
 log = logging.getLogger("logger")
+EM_RAISE = False
 
 """
 
@@ -102,21 +102,20 @@ EventElev		         : 20			    #Elevation as perceived by observer on ground, he
 #Optional
 EventCartStd		     : 10000		    #Event start cartesian standard deviation (m)
 EventCart2Std		     : 10000		    #Event end cartesian standard deviation (m)
-
+RequireFR                : 0                #If not zero only upload if a file FR*.bin exists 
 
 #Optional - not preferred as sensitive to different latitudes
 EventLatStd (deg)	     : 1.0			    #Event start latitude polar standard deviation
 EventLonStd (deg)	     : 1.0		        #Event start longitude polar standard deviation
 EventLat2 (deg +N)       : -31			    #Event end latitude
 EventLon2Std (deg)	     : 1.0			    #Event end longitude standard deviation
-
+Suffix                   : event            #Free text suffix to the uploaded archive
 
 END						                    #Event delimiter - everything after this is associated with a new event
 
 """
 
 """ Automatically uploads data files based on search specification information given on a website. """
-
 
 class EventContainer(object):
 
@@ -130,6 +129,7 @@ class EventContainer(object):
         self.lat, self.lat_std, self.lon, self.lon_std, self.ht, self.ht_std, self.cart_std = lat, 0, lon, 0, ht, 0, 0
         self.lat2, self.lat2_std, self.lon2, self.lon2_std, self.ht2, self.ht2_std, self.cart2_std = 0, 0, 0, 0, 0, 0, 0
         self.close_radius, self.far_radius = 0, 0
+        self.require_FR = 0
 
         # Or trajectory information from the first point
         self.azim, self.azim_std, self.elev, self.elev_std, self.elev_is_max = 0, 0, 0, 0, False
@@ -146,6 +146,7 @@ class EventContainer(object):
 
         self.start_distance, self.start_angle, self.end_distance, self.end_angle = 0, 0, 0, 0
         self.fovra, self.fovdec = 0, 0
+        self.suffix = "event"
 
     def setValue(self, variable_name, value):
 
@@ -174,6 +175,11 @@ class EventContainer(object):
         self.ht = float(value) if "EventHt" == variable_name else self.ht
         self.ht_std = float(value) if "EventHtStd" == variable_name else self.ht_std
         self.cart_std = float(value) if "EventCartStd" == variable_name else self.cart_std
+        if "RequireFR" == variable_name:
+            if str(value) == "0" :
+                self.require_FR = 0
+            else:
+                self.require_FR = 1
 
         # Radii
         self.close_radius = float(value) if "CloseRadius" == variable_name else self.close_radius
@@ -223,7 +229,7 @@ class EventContainer(object):
 
         output = "# Required \n"
         output += ("EventTime                : {}\n".format(self.dt))
-        output += ("TimeTolerance (s)        : {:.0f}\n".format(self.time_tolerance))
+        output += ("TimeTolerance (s)        : {}\n".format(self.time_tolerance))
         output += ("EventLat (deg +N)        : {:3.2f}\n".format(self.lat))
         output += ("EventLatStd (deg)        : {:3.2f}\n".format(self.lat_std))
         output += ("EventLon (deg +E)        : {:3.2f}\n".format(self.lon))
@@ -262,6 +268,7 @@ class EventContainer(object):
         output += "# Station information        \n"
         output += ("Field of view RA         : {:3.2f}\n".format(self.fovra))
         output += ("Field of view Dec        : {:3.2f}\n".format(self.fovdec))
+        output += ("Suffix                   : {}\n".format(self.suffix))
         output += "\n"
         output += "END"
         output += "\n"
@@ -396,7 +403,6 @@ class EventContainer(object):
 
         return population
 
-
     def applyPolarSD(self, population, seed = None):
 
 
@@ -472,7 +478,6 @@ class EventContainer(object):
 
             # If elevation is min_elev_hard - min_elev degrees set to min_elev
             self.elev = min_elev if min_elev_hard < self.elev < min_elev else self.elev
-
 
     def limitHeights(self, obsvd_ht, min_lum_flt_ht, max_lum_flt_ht, gap):
 
@@ -720,14 +725,15 @@ class EventMonitor(multiprocessing.Process):
         self.config = config        # the config that will be used for all data processing - lats, lons etc.
         self.syscon = config        # the config that describes where the folders are
 
-        # The path to the event monitor database
+        # The path to the EventMonitor database
         self.event_monitor_db_path = os.path.join(os.path.abspath(self.syscon.data_dir),
                                                   self.syscon.event_monitor_db_name)
 
         self.createDB()
 
-        # Load the event monitor database. Any problems, delete and recreate.
+        # Load the EventMonitor database. Any problems, delete and recreate.
         self.db_conn = self.getConnectionToEventMonitorDB()
+        self.upgradeDB(self.db_conn)
         self.check_interval = self.syscon.event_monitor_check_interval
         self.exit = multiprocessing.Event()
 
@@ -759,7 +765,7 @@ class EventMonitor(multiprocessing.Process):
 
     def createEventMonitorDB(self, test_mode=False):
 
-        """ Creates the event monitor database. Tries only once.
+        """ Creates the EventMonitor database. Tries only once.
 
         arguments:
 
@@ -768,7 +774,7 @@ class EventMonitor(multiprocessing.Process):
 
         """
 
-        # Create the event monitor database
+        # Create the EventMonitor database
         if test_mode:
             self.event_monitor_db_path = os.path.expanduser(os.path.join(self.syscon.data_dir, self.syscon.event_monitor_db_name))
             if os.path.exists(self.event_monitor_db_path):
@@ -792,8 +798,11 @@ class EventMonitor(multiprocessing.Process):
                 """SELECT name FROM sqlite_master WHERE type = 'table' and name = 'event_monitor';""").fetchall()
 
             if tables:
+                self.upgradeDB(conn)
                 return conn
         except:
+            if EM_RAISE:
+                raise
             return None
 
         conn.execute("""CREATE TABLE event_monitor (
@@ -821,6 +830,7 @@ class EventMonitor(multiprocessing.Process):
                             EventElev REAL NOT NULL,
                             EventElevStd REAL NOT NULL,
                             EventElevIsMax BOOL,
+                            RequireFR TEXT,
                             StationsRequired TEXT,
                             filesuploaded TEXT,
                             timeadded TEXT,
@@ -830,8 +840,10 @@ class EventMonitor(multiprocessing.Process):
                             uploadedstatus BOOL,
                             receivedbyserver BOOL,
                             uuid TEXT,              
-                            RespondTo TEXT
+                            RespondTo TEXT,
+                            Suffix TEXT
                             )""")
+
 
         # Commit the changes
         conn.commit()
@@ -848,13 +860,17 @@ class EventMonitor(multiprocessing.Process):
         """
 
         log.error("Attempting to recover from database error")
-        self.delEventMonitorDB()
+        if self.delEventMonitorDB():
+            log.warning("Deleted EventMonitor database at {}".format(self.event_monitor_db_path))
+        else:
+            log.warning("No EventMonitor database found at {}".format(self.event_monitor_db_path))
+        time.sleep(20)
         self.createDB()
         log.info("Database recovered")
 
     def delEventMonitorDB(self):
 
-        """ Delete the event monitor database.
+        """ Delete the EventMonitor database.
 
         Arguments:
 
@@ -871,12 +887,47 @@ class EventMonitor(multiprocessing.Process):
         else:
             return False
 
+    def upgradeDB(self,conn):
+
+
+        """
+
+        Checks that any columns required by subsequent releases of EventMonitor are present. If they are not,
+        then they are added.
+
+        Args:
+            conn: Connection to the EventMonitor database
+
+        Returns: Nothing
+
+        """
+
+        if not self.checkDBcol(conn,"Suffix"):
+            log.info("Missing db column Suffix")
+            self.addDBcol("Suffix","TEXT")
+
+        if not self.checkDBcol(conn,"Ra"):
+            log.info("Missing db column Ra")
+            self.addDBcol("Ra","REAL")
+
+        if not self.checkDBcol(conn,"Dec"):
+            log.info("Missing db column Dec")
+            self.addDBcol("Dec","REAL")
+
+
+        if not self.checkDBcol(conn,"RequireFR"):
+            log.info("Missing db column RequireFR")
+            self.addDBcol("RequireFR","bool")
+
+
     def addDBcol(self, column, coltype):
-        """ Add a new column to the database
+
+
+        """ Add a new column to the database. This is used when upgrading the database to later features.
 
         Arguments:
             column: [string] Name of column to add
-            coltype: [string] type of columnd to add
+            coltype: [string] type of column to add
 
         Return:
             Status: [bool] True if successful otherwise false
@@ -888,10 +939,37 @@ class EventMonitor(multiprocessing.Process):
         sql_command += "ADD {} {}; ".format(column, coltype)
 
         try:
+
             conn = sqlite3.connect(self.event_monitor_db_path)
             conn.execute(sql_command)
             conn.close()
             return True
+        except:
+            if EM_RAISE:
+                raise
+            return False
+
+    def checkDBcol(self, conn,column):
+
+        """ Check column exists
+
+        Arguments:
+            conn: [connection] database connection
+            column: [string] Name of column to check for
+
+
+        Return:
+            Status: [bool] True if column exists
+
+        """
+
+        sql_command = ""
+        sql_command += "SELECT COUNT(*) AS COL"
+        sql_command += " FROM pragma_table_info('event_monitor')"
+        sql_command += " WHERE name='{}'  \n".format(column)
+
+        try:
+            return (conn.cursor().execute(sql_command).fetchone())[0] != 0
         except:
             return False
 
@@ -921,7 +999,7 @@ class EventMonitor(multiprocessing.Process):
         return None
 
     def getConnectionToEventMonitorDB(self):
-        """ Loads the event monitor database
+        """ Loads the EventMonitor database
 
         Arguments:
 
@@ -929,13 +1007,15 @@ class EventMonitor(multiprocessing.Process):
              connection: [connection] A connection to the database
         """
 
-        # Create the event monitor database if it does not exist
+        # Create the EventMonitor database if it does not exist
         if not os.path.isfile(self.event_monitor_db_path):
             self.createEventMonitorDB()
 
-        # Load the event monitor database - only gets done here
+
+        # Load the EventMonitor database - only gets done here
         try:
             self.conn = sqlite3.connect(self.event_monitor_db_path)
+            self.upgradeDB(self.conn)
         except:
             os.unlink(self.event_monitor_db_path)
             self.createEventMonitorDB()
@@ -955,7 +1035,7 @@ class EventMonitor(multiprocessing.Process):
         sql_statement = ""
         sql_statement += "SELECT COUNT(*) FROM event_monitor \n"
         sql_statement += "WHERE \n"
-        sql_statement += "EventTime = '{}'          AND \n".format(event.dt)
+        sql_statement += "EventTime = '{}'              AND \n".format(event.dt)
         sql_statement += "EventLat = '{}'               AND \n".format(event.lat)
         sql_statement += "EventLon = '{}'               AND \n".format(event.lon)
         sql_statement += "EventHt = '{}'                AND \n".format(event.ht)
@@ -981,6 +1061,8 @@ class EventMonitor(multiprocessing.Process):
             return (self.db_conn.cursor().execute(sql_statement).fetchone())[0] != 0
         except:
             log.info("Check for event exists failed")
+            if EM_RAISE:
+                raise
             return False
 
     def delOldRecords(self):
@@ -1023,11 +1105,11 @@ class EventMonitor(multiprocessing.Process):
 
             """
 
+
         self.delOldRecords()
 
         # required for Jessie
         qry_elev_is_max = 1 if event.elev_is_max else 0
-
 
         if not self.eventExists(event):
             sql_statement = ""
@@ -1038,7 +1120,7 @@ class EventMonitor(multiprocessing.Process):
             sql_statement += "CloseRadius, FarRadius,                     \n"
             sql_statement += "EventLat2, EventLat2Std, EventLon2, EventLon2Std,EventHt2, EventHt2Std, EventCart2Std,    \n"
             sql_statement += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax,    \n"
-            sql_statement += "processedstatus, uploadedstatus, uuid, RespondTo, StationsRequired, timeadded \n"
+            sql_statement += "processedstatus, uploadedstatus, uuid, RespondTo, StationsRequired, RequireFR, timeadded \n"
             sql_statement += ")                                           \n"
 
             sql_statement += "VALUES "
@@ -1052,7 +1134,7 @@ class EventMonitor(multiprocessing.Process):
             sql_statement += "{},  {}, {}, {}, {} ,        \n".format(event.azim, event.azim_std, event.elev,
                                                                       event.elev_std,
                                                                       qry_elev_is_max)
-            sql_statement += "{},  {}, '{}', '{}', '{}' ,       \n".format(0, 0,uuid.uuid4(), event.respond_to, event.stations_required)
+            sql_statement += "{},  {}, '{}', '{}', '{}' , '{}', \n".format(0, 0,uuid.uuid4(), event.respond_to, event.stations_required, event.require_FR)
             sql_statement += "CURRENT_TIMESTAMP ) \n"
 
             try:
@@ -1061,6 +1143,9 @@ class EventMonitor(multiprocessing.Process):
                 self.db_conn.commit()
 
             except:
+                print(sql_statement)
+                if EM_RAISE:
+                    raise
                 log.info("Add event failed")
                 self.recoverFromDatabaseError()
                 return False
@@ -1226,7 +1311,7 @@ class EventMonitor(multiprocessing.Process):
 
             except:
                 # Return an empty list
-                log.info("Event monitor found no page at {}".format(self.syscon.event_monitor_webpage))
+                log.info("EventMonitor found no page at {}".format(self.syscon.event_monitor_webpage))
                 return events
         else:
             f = open(os.path.expanduser("~/RMS_data/event_watchlist.txt"), "r")
@@ -1278,6 +1363,7 @@ class EventMonitor(multiprocessing.Process):
                 events : [list of events]
         """
 
+
         sql_statement = ""
         sql_statement += "SELECT "
         sql_statement += ""
@@ -1286,7 +1372,7 @@ class EventMonitor(multiprocessing.Process):
         sql_query_cols += "FarRadius,CloseRadius, uuid,"
         sql_query_cols += "EventLat2, EventLat2Std, EventLon2, EventLon2Std,EventHt2, EventHt2Std, "
         sql_query_cols += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax, RespondTo, StationsRequired,"
-        sql_query_cols += "EventCartStd, EventCart2Std"
+        sql_query_cols += "EventCartStd, EventCart2Std, RequireFR"
         sql_statement += sql_query_cols
         sql_statement += " \n"
         sql_statement += "FROM event_monitor "
@@ -1295,6 +1381,8 @@ class EventMonitor(multiprocessing.Process):
         try:
             cursor = self.db_conn.cursor().execute(sql_statement)
         except:
+            if EM_RAISE:
+                raise
             log.info("Database access error. Delete and recreate.")
             self.delEventMonitorDB()
             self.createEventMonitorDB()
@@ -1320,7 +1408,7 @@ class EventMonitor(multiprocessing.Process):
     def getFile(self, file_name, directory):
 
         """ Get the path to the file in the directory if it exists.
-            If not, then return the path to ~/source/RMS
+            If not, then return the path to RMS root directory
 
 
             Arguments:
@@ -1339,7 +1427,7 @@ class EventMonitor(multiprocessing.Process):
 
             if os.path.isfile(os.path.join(os.path.expanduser(self.config.config_file_name), file_name)):
                 file_list.append(str(os.path.join(os.path.expanduser(self.config.config_file_name), file_name)))
-                log.info("Using {} as fallback .config file".format(self.config.config_file_name))
+                log.info("Was looking for {}, returning {} as fallback .config file".format(file_name, self.config.config_file_name))
                 return file_list
         return []
 
@@ -1367,7 +1455,6 @@ class EventMonitor(multiprocessing.Process):
 
         return platepar_file
 
-
     def getDirectoryList(self, event):
 
         """ Get the paths of directories which may contain files associated with an event
@@ -1388,7 +1475,6 @@ class EventMonitor(multiprocessing.Process):
                     os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir)):
                 #Skip over any directory which does not start with the stationID and warn
                 if night_directory[0:len(self.config.stationID)] != self.config.stationID:
-                    log.warning("Skipping directory {} - not the expected format for a captured files directory".format(night_directory))
                     continue
                 directory_POSIX_time = convertGMNTimeToPOSIX(night_directory[7:22])
 
@@ -1400,12 +1486,14 @@ class EventMonitor(multiprocessing.Process):
                                      night_directory))
         return directory_list
 
+
+
     def findEventFiles(self, event, directory_list, file_extension_list):
 
         """Take an event, directory list and an extension list and return paths to files
 
            For .fits files always return at least the closest previous event
-           This is a pretty ugly process, where the previous file compared to the event time is held in a variable.
+           The previous file compared to the event time is held in a variable.
            If the file being compared is the first file after the event time, put the previous file into the list,
            if it is not already there.
 
@@ -1438,7 +1526,7 @@ class EventMonitor(multiprocessing.Process):
                 if file_extension == ".fits":
                     fits_list = glob.glob(os.path.join(directory,"*.fits"))
                     fits_list.sort()
-                    log.info("Searching for first fits file in {}".format(directory))
+
                     if len(fits_list) == 0:
                         # If fits_list is empty then return an empty list
                         log.info("No fits files in {}".format(directory))
@@ -1446,7 +1534,7 @@ class EventMonitor(multiprocessing.Process):
                     else:
                         # Initialise last_fits_file with the first from the list
                         last_fits_file = fits_list[0]
-                        log.info("Intialised last_fits_file with {}".format(last_fits_file))
+
                         seeking_first_fits_after_event = True
                 for file in dirlist:
                     if file.endswith(file_extension):
@@ -1480,11 +1568,11 @@ class EventMonitor(multiprocessing.Process):
 
         file_list += self.findEventFiles(event, self.getDirectoryList(event), [".fits", ".bin"])
         #have to use system .config file_name here because we have not yet identified the files for the event
-        log.info("Using {} as .config file name".format(self.syscon.config_file_name))
+        #log.info("Using {} as .config file name".format(self.syscon.config_file_name))
         if len(self.getDirectoryList(event)) > 0:
             file_list += self.getFile(os.path.basename(self.syscon.config_file_name), self.getDirectoryList(event)[0])
             file_list += [self.getPlateparFilePath(event)]
-            log.info("File list {}".format(file_list))
+            #log.info("File list {}".format(file_list))
         return file_list
 
     def trajectoryVisible(self, rp, event):
@@ -1604,21 +1692,21 @@ class EventMonitor(multiprocessing.Process):
             log.warning("Call to doUpload for already processed event {}".format(event.dt))
 
         event_monitor_directory = os.path.expanduser(os.path.join(self.syscon.data_dir, "EventMonitor"))
-        upload_filename = "{}_{}_{}".format(evcon.stationID, event.dt, "event")
+        upload_filename = "{}_{}_{}".format(evcon.stationID, event.dt, sanitise(event.suffix))
         # Try and bake the camera network name and group name into the path structure of the archive
         if evcon.network_name is not None and evcon.camera_group_name is not None:
             #create path for this_event_directory
             #get rid of spaces from network name and group name
             this_event_directory = os.path.join(event_monitor_directory,
                                                     upload_filename,
-                                                        evcon.network_name.replace(" ",""),
-                                                            evcon.camera_group_name.replace(" ",""),
-                                                                evcon.stationID)
+                                                        sanitise(evcon.network_name),
+                                                            sanitise(evcon.camera_group_name),
+                                                                sanitise(evcon.stationID))
 
             log.info("Network {} and group {} so creating {}"
-                                .format(evcon.network_name,evcon.camera_group_name, this_event_directory))
+                                .format(sanitise(evcon.network_name),sanitise(evcon.camera_group_name), this_event_directory))
         else:
-            this_event_directory = os.path.join(event_monitor_directory, upload_filename, evcon.stationID)
+            this_event_directory = os.path.join(event_monitor_directory, upload_filename, sanitise(evcon.stationID))
             log.info("Network and group not defined so creating {}".format(this_event_directory))
 
         # get rid of the eventdirectory, should never be needed
@@ -1666,6 +1754,7 @@ class EventMonitor(multiprocessing.Process):
                     log.error("fr_file {}".format(fr_file))
 
         if True:
+            image_note = event.suffix
             batchFFtoImage(os.path.join(this_event_directory), "jpg", add_timestamp=True,
                            ff_component='maxpixel')
 
@@ -1704,9 +1793,13 @@ class EventMonitor(multiprocessing.Process):
                 archives = glob.glob(os.path.join(event_monitor_directory,"*.bz2"))
 
                 # Make the upload
+
+
+
                 upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),
-                                        event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,
-                                           rsa_private_key=self.config.rsa_private_key, allow_dir_creation=True)
+                                 event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,
+                                 rsa_private_key=self.config.rsa_private_key, allow_dir_creation=True)
+
 
                 if upload_status:
                     log.info("Upload of {} - attempt no {} was successful".format(event_monitor_directory, retry))
@@ -1728,6 +1821,15 @@ class EventMonitor(multiprocessing.Process):
         if not keep_files:
             shutil.rmtree(event_monitor_directory)
         return upload_status
+
+    def frFileInList(self, file_list):
+
+        found = False
+        for file_to_check in file_list:
+            if os.path.basename(file_to_check)[0:2] == "FR" and file_to_check.endswith('bin'):
+                found = True
+
+        return found
 
     def checkEvents(self, ev_con, test_mode = False):
 
@@ -1786,6 +1888,19 @@ class EventMonitor(multiprocessing.Process):
                 self.markEventAsProcessed(observed_event)
                 # This moves to next observed_event
                 continue
+
+            # move to the next event if we required an FR file but do not have one
+
+            if observed_event.require_FR == 1:
+                log.info("Event at {} requires FR file".format(observed_event.dt))
+                if not self.frFileInList(file_list):
+                    log.info("Event at {} skipped - FR required and none found".format(observed_event.dt))
+                    self.markEventAsProcessed(observed_event)
+                    continue
+                else:
+                    log.info("Event at {} required FR file and file was found".format(observed_event.dt))
+            else:
+                log.info("FR file not required for event at {}".format(observed_event.dt))
 
             # If there is a .config file then parse it as evcon - not the station config
             for file in file_list:
@@ -1931,19 +2046,20 @@ class EventMonitor(multiprocessing.Process):
         return None
 
     def start(self):
-        """ Starts the event monitor. """
+        """ Starts the EventMonitor """
 
         if testIndividuals(logging = False):
             log.info("EventMonitor function test success")
             super(EventMonitor, self).start()
             log.info("EventMonitor was started")
+            log.info("Using {} as fallback directory".format(os.path.join(os.path.abspath("."))))
+            log.info("Using {} as config filename".format(self.syscon.config_file_name))
+            log.info("Using {} as platepar filename".format(self.syscon.platepar_name))
         else:
             log.error("EventMonitor function test fail - not starting EventMonitor")
 
-
-
     def stop(self):
-        """ Stops the event monitor. """
+        """ Stops the EventMonitor. """
 
         self.db_conn.close()
         time.sleep(2)
@@ -1962,13 +2078,15 @@ class EventMonitor(multiprocessing.Process):
 
         return True
 
-    def getEventsAndCheck(self, testmode=False):
+    def getEventsAndCheck(self, start_time, end_time, testmode=False):
         """
         Gets event(s) from the webpage, or a local file.
         Calls self.addevent to add them to the database
         Calls self.checkevents to see if the database holds any unprocessed events
 
         Args:
+            start_time: time to start checking from
+            end_time: time to start checking to
             testmode: [bool] if set true looks for a local file, rather than a web address
 
         Returns:
@@ -1990,7 +2108,7 @@ class EventMonitor(multiprocessing.Process):
     def run(self):
 
         """
-        Call to start the event monitor loop. If the loop has been accelerated following a match
+        Call to start the EventMonitor loop. If the loop has been accelerated following a match
         then this loop slows it down by multiplying the check interval by 1.1.
 
         The time between checks is the sum of the delay interval, and the time to perform the check and upload.
@@ -1999,22 +2117,41 @@ class EventMonitor(multiprocessing.Process):
         """
 
         # Delay to allow capture to check existing folders - keep the logs tidy
-        time.sleep(30)
 
+
+        time.sleep(60)
+        last_check_start_time = datetime.datetime.utcnow()
         while not self.exit.is_set():
+            check_start_time = datetime.datetime.utcnow()
+            next_check_start_time = (datetime.datetime.utcnow() + datetime.timedelta(minutes=self.check_interval))
+            next_check_start_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
             self.checkDBExists()
-            self.getEventsAndCheck()
-            log.info("Event monitor check completed")
+            self.getEventsAndCheck(last_check_start_time,next_check_start_time)
+            last_check_start_time = check_start_time
+
             start_time, duration = captureDuration(self.syscon.latitude, self.syscon.longitude, self.syscon.elevation)
+
             if not isinstance(start_time, bool):
-                log.info('Next capture start time: ' + str(start_time) + ' UTC')
+
+                time_left_before_start = (start_time - datetime.datetime.utcnow())
+                time_left_before_start = time_left_before_start - datetime.timedelta(microseconds=time_left_before_start.microseconds)
+                time_left_before_start_minutes = int(time_left_before_start.total_seconds() / 60)
+                next_check_start_time = (datetime.datetime.utcnow() + datetime.timedelta(minutes=self.check_interval))
+                next_check_start_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
+                log.info('Next EventMonitor run : {} UTC; {:3.1f} minutes from now'.format(next_check_start_time_str, int(self.check_interval)))
+                if time_left_before_start_minutes < 120:
+                    log.info('Next Capture start    : {} UTC; {:3.1f} minutes from now'.format(str(start_time.strftime('%H:%M:%S')),time_left_before_start_minutes))
+                else:
+                    log.info('Next Capture start    : {} UTC'.format(str(start_time.strftime('%H:%M:%S'))))
+            else:
+                next_check_start_time = (datetime.datetime.utcnow() + datetime.timedelta(minutes=self.check_interval))
+                next_check_start_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
+                log.info('Next EventMonitor run : {} UTC {:3.1f} minutes from now'.format(next_check_start_time_str, self.check_interval))
             # Wait for the next check
             self.exit.wait(60 * self.check_interval)
             # Increase the check interval
             if self.check_interval < self.syscon.event_monitor_check_interval:
                 self.check_interval = self.check_interval * 1.1
-
-
 
 def latLonAlt2ECEFDeg(lat, lon, h):
     """ Convert geographical coordinates to Earth centered - Earth fixed coordinates.
@@ -2189,7 +2326,7 @@ def convertGMNTimeToPOSIX(timestring):
     try:
         dt_object = datetime.datetime.strptime(timestring.strip(), "%Y%m%d_%H%M%S")
     except:
-        log.error("Badly formatted time {}".format(timestring.strip()))
+        log.error("Badly formatted time {}".format(timestring))
         # return a time which will be safe but cannot produce any output
         dt_object = datetime.datetime.strptime("20000101_000000".strip(), "%Y%m%d_%H%M%S")
     return dt_object
@@ -2667,6 +2804,32 @@ def testApplyPolarSD():
     success = success if abs(e.ht - ht1mn) < 5 and (e.ht2 - ht2mn) < 10 else False
     return success
 
+def testsanitise():
+
+    success = True
+
+    if "This_string_is_safe" == sanitise("This string is safe", space_substitution="_", log_changes= False):
+        success = success
+    else:
+        success = False
+
+    if "Thisstringis_alsosafebuthasspacesstripped" == sanitise("This string is _ also safe but has spaces stripped", log_changes= False):
+        success = success
+    else:
+        success = False
+
+    if "This_string_is_-_also_safe_but_has_spaces_converted_to_us" == sanitise("This string is - also safe but has spaces converted to us", space_substitution="_", log_changes= False):
+        success = success
+    else:
+        success = False
+
+
+    if "This string is - not  safe but has spaces left in place" == sanitise("This string is - not ?.,`?/%%^&* safe but has spaces left in place", space_substitution=" ", log_changes= False):
+        success = success
+    else:
+        success = False
+
+    return success
 
 def testIndividuals(logging = True):
 
@@ -2683,6 +2846,16 @@ def testIndividuals(logging = True):
     """
 
     individuals_success = True
+
+
+
+    if testsanitise():
+        if logging:
+            log.info("santise passed tests")
+    else:
+        log.error("sanitise failed tests")
+        individuals_success = False
+
 
     if testRevAz():
         if logging:
@@ -2800,7 +2973,7 @@ if __name__ == "__main__":
 
     try:
         # Add a random string after the URL to defeat caching
-        print(syscon.event_monitor_webpage)
+
 
         if sys.version_info[0] < 3:
             web_page = urllib2.urlopen(syscon.event_monitor_webpage).read().splitlines()
@@ -2820,10 +2993,9 @@ if __name__ == "__main__":
 
 
     if cml_args.one_shot:
-        print("EventMonitor running once")
+
         em.getEventsAndCheck()
 
     else:
-        print("EventMonitor running indefinitely")
-        em.start()
 
+        em.start()

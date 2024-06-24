@@ -12,7 +12,7 @@ from RMS.Routines.Image import applyBrightnessAndContrast
 
 def get_device(config):
     """ Get the video device """
-    if config.force_v4l2:
+    if config.media_backend == 'v4l2':
         vcap = cv2.VideoCapture(config.deviceID, cv2.CAP_V4L2)
         vcap.set(cv2.CAP_PROP_CONVERT_RGB, 0)
     else:
