@@ -2,21 +2,6 @@
 #cython: language_level=3
 
 import numpy as np
-cimport numpy as cnp
-
-cdef extern from "math.h":
-    double fabs(double)
-    double sin(double)
-    double asin(double)
-    double cos(double)
-    double acos(double)
-    double tan(double)
-    double atan2(double, double)
-    double sqrt(double)
-    double M_PI "M_PI"
-    double fmod(double x, double y) nogil
-
-# import cv2
 
 # Cython import
 cimport numpy as np
@@ -32,12 +17,27 @@ ctypedef np.uint32_t INT_TYPE_t
 FLOAT_TYPE = np.float64 
 ctypedef np.float64_t FLOAT_TYPE_t
 
+# Declare math functions
+cdef extern from "math.h":
+    double fabs(double)
+    double sin(double)
+    double asin(double)
+    double cos(double)
+    double acos(double)
+    double tan(double)
+    double atan2(double, double)
+    double sqrt(double)
+    double hypot(double, double)
+    double fmod(double, double)
+    double M_PI "M_PI"
+
 
 # Define Pi
 cdef double pi = M_PI
 
 # Define the Julian date at the J2000 epoch
 cdef double J2000_DAYS = 2451545.0
+
 
 
 @cython.cdivision(True)
@@ -346,13 +346,28 @@ cpdef (double, double) equatorialCoordPrecession(double start_epoch, double fina
     return ra_corr, dec_corr
 
 
-
-
-
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef np.ndarray[np.float64_t, ndim=2] precession_matrix(double zeta, double theta, double z):
-    cdef np.ndarray[np.float64_t, ndim=2] P = np.zeros((3, 3), dtype=np.float64)
+@cython.cdivision(True)
+cdef np.ndarray[np.float64_t, ndim=2] precessionMatrix(double zeta, double theta, double z):
+    """ Calculate the precession matrix based on precession angles.
+
+    Arguments:
+        zeta: [double] Precession angle zeta in radians.
+        theta: [double] Precession angle theta in radians.
+        z: [double] Precession angle z in radians.
+
+    Return:
+        [np.ndarray] A 3x3 rotation matrix representing the precession transformation.
+
+    Notes:
+        - This matrix is used to transform coordinates from one epoch to another, 
+          accounting for the precession of the Earth's rotational axis.
+        - The matrix is calculated using the formulation from the IAU 1976 precession model.
+        - Input angles should be calculated for the time span between the initial and final epochs.
+    """
+
+    cdef np.ndarray[np.float64_t, ndim=2, mode="c"] P = np.empty((3, 3), dtype=np.float64)
     cdef double czeta = cos(zeta)
     cdef double szeta = sin(zeta)
     cdef double ctheta = cos(theta)
@@ -376,10 +391,26 @@ cdef np.ndarray[np.float64_t, ndim=2] precession_matrix(double zeta, double thet
     return P
 
 
+
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
-cpdef (double, double, double) equatorialCoordPrecession2(double start_epoch, double final_epoch, double ra, double dec, double rot_angle):
+cpdef (double, double, double) equatorialCoordPrecession2(double start_epoch, double final_epoch,
+                                                         double ra, double dec, double rot_angle):
+    """ Corrects Right Ascension, Declination, and Rotation wrt Standard angle from one epoch to another,
+    taking only precession into account.
+    
+    Arguments:
+        start_epoch: [float] Julian date of the starting epoch.
+        final_epoch: [float] Julian date of the final epoch.
+        ra: [float] Input right ascension (radians).
+        dec: [float] Input declination (radians).
+        rot_angle [float] the rotation wrt Standard angle, aka pos_angle_ref (radians).
+    
+    Return:
+        (ra, dec, rot_angle): [tuple of floats] Precessed equatorial coordinates and rotation angle (radians).
+    """
+
     cdef:
         np.ndarray[double, ndim=1] initial_vector, transformed_vector, parallel_vec, parallel_vec_precessed
         np.ndarray[double, ndim=1] normal_vector, transformed_normal
@@ -404,10 +435,10 @@ cpdef (double, double, double) equatorialCoordPrecession2(double start_epoch, do
     theta = radians(theta)
 
     # Calculate precession matrix
-    P = precession_matrix(zeta, theta, z)
+    P = precessionMatrix(zeta, theta, z)
 
     # Convert RA, Dec to cartesian coordinates
-    initial_vector = ra_dec_to_cartesian(ra, dec)
+    initial_vector = raDecToCartesian(ra, dec)
 
     # Apply precession
     transformed_vector = np.dot(P, initial_vector)
@@ -423,9 +454,9 @@ cpdef (double, double, double) equatorialCoordPrecession2(double start_epoch, do
     transformed_normal /= np.linalg.norm(transformed_normal)
 
     # Convert precessed vector back to RA, Dec
-    ra_precessed, dec_precessed = cartesian_to_ra_dec(transformed_vector)
+    ra_precessed, dec_precessed = cartesianToRaDec(transformed_vector)
 
-    # Calculate parallel vectors
+    # Calculate vector tangent to the parallel of declination
     parallel_vec = np.array([-sin(ra), cos(ra), 0])
     parallel_vec_precessed = np.array([-sin(ra_precessed), cos(ra_precessed), 0])
 
@@ -437,9 +468,24 @@ cpdef (double, double, double) equatorialCoordPrecession2(double start_epoch, do
     proj_parallel /= np.linalg.norm(proj_parallel)
     proj_parallel_precessed /= np.linalg.norm(proj_parallel_precessed)
 
-    # Calculate angles
+    # Calculate the angles between the normal vector and projected parallels
+    # in the plane perpendicular to the line of sight (sensor plane).
+    #
+    # The normal vectors are fixed relative to the camera sensor.
+    # The projected parallels represent how the celestial parallels appear on the sensor plane.
+    #
+    # Since the rotationWrtStandard function computes pos_angle_ref as the angle between
+    # a row of pixels and the parallel passing through the center of the FOV,
+    # we want to determine how precession affects this angle.
+    #
+    # By comparing these angles before and after precession, we can quantify
+    # the change in field orientation due to precession.
+
+    # Angle for the initial position
     angle1 = atan2(np.dot(np.cross(normal_vector, proj_parallel), initial_vector), 
                    np.dot(normal_vector, proj_parallel))
+
+    # Angle for the precessed position
     angle2 = atan2(np.dot(np.cross(transformed_normal, proj_parallel_precessed), transformed_vector), 
                    np.dot(transformed_normal, proj_parallel_precessed))
 
@@ -452,7 +498,7 @@ cpdef (double, double, double) equatorialCoordPrecession2(double start_epoch, do
     # Normalize the new rotation angle to be between -pi and pi
     new_rot_angle = fmod(new_rot_angle + M_PI, 2*M_PI) - M_PI
 
-    # print(f"Rotation change due to precession: {degrees(rotation_change)} degrees")
+    # print(f"Rotation change due to precession: {degrees(rotation_change)*60} arcmin")
 
     return ra_precessed, dec_precessed, new_rot_angle
 
@@ -874,7 +920,26 @@ def cyApparentAltAz2TrueRADec_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] azim_arr, np
     return (ra_arr, dec_arr)
 
 
-cpdef np.ndarray[cnp.float64_t, ndim=1] ra_dec_to_cartesian(double ra, double dec):
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cpdef np.ndarray[np.float64_t, ndim=1] raDecToCartesian(double ra, double dec):
+    """ Convert RA, Dec to Cartesian coordinates.
+    
+    Arguments:
+        ra: [double] Right ascension in radians.
+        dec: [double] Declination in radians.
+
+    Return:
+        [np.ndarray] A 3D vector [x, y, z] representing the position in Cartesian coordinates.
+            The vector is normalized (unit vector).
+
+    Notes:
+        The coordinate system follows the convention:
+        x-axis points to RA = 0, Dec = 0
+        y-axis points to RA = 90°, Dec = 0
+        z-axis points to the North Celestial Pole (Dec = 90°)
+    """
     cdef:
         double x = cos(dec)*cos(ra)
         double y = cos(dec)*sin(ra)
@@ -882,13 +947,33 @@ cpdef np.ndarray[cnp.float64_t, ndim=1] ra_dec_to_cartesian(double ra, double de
     return np.array([x, y, z], dtype=np.float64)
 
 
-@cython.cdivision(True)
-cpdef (double, double) cartesian_to_ra_dec(np.ndarray[np.float64_t, ndim=1] vec):
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cpdef (double, double) cartesianToRaDec(np.ndarray[np.float64_t, ndim=1] vec):
+    """ Convert Cartesian coordinates to RA, Dec.
+
+    Arguments:
+        vec: [np.ndarray] A 3D vector [x, y, z] representing the position in Cartesian coordinates.
+
+    Return:
+        (ra, dec): [tuple]
+            ra: [double] Right ascension in radians, range [0, 2π).
+            dec: [double] Declination in radians, range [-π/2, π/2].
+
+    Notes:
+        - The function returns (0, 0) if the input vector is [0, 0, 0] to avoid division by zero.
+        - The returned RA is normalized to be within [0, 2π).
+        - The coordinate system assumes:
+          x-axis points to RA = 0, Dec = 0
+          y-axis points to RA = 90°, Dec = 0
+          z-axis points to the North Celestial Pole (Dec = 90°)
+    """
     cdef:
         double x = vec[0]
         double y = vec[1]
         double z = vec[2]
-        double distance = sqrt(x*x + y*y + z*z)
+        double distance = hypot(hypot(x, y), z)
         double ra, dec
         
     if distance == 0:
@@ -901,6 +986,7 @@ cpdef (double, double) cartesian_to_ra_dec(np.ndarray[np.float64_t, ndim=1] vec)
     ra = fmod(ra + 2*M_PI, 2*M_PI)
     
     return ra, dec
+
 
 
 @cython.boundscheck(False)
@@ -971,15 +1057,12 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
             radians(lon))
             
 
-    # Precess the FOV centre to J2000 (otherwise the FOV centre drifts with time)
-    ra_centre_j2000, dec_centre_j2000, pos_angle_ref_corr = equatorialCoordPrecession2(jd, J2000_DAYS, ra_centre, dec_centre, radians(pos_angle_ref))
+    # Precess the FOV centre and rotation angle to J2000 (otherwise the FOV centre drifts with time)
+    ra_centre_j2000, dec_centre_j2000, pos_angle_ref_corr = equatorialCoordPrecession2(jd, J2000_DAYS,
+                                                            ra_centre, dec_centre, radians(pos_angle_ref))
 
     # The position angle needs to be corrected for precession, otherwise the FOV rotates with time
     # Applying the difference in RA between the current and the reference epoch fixes the position angle
-
-    # Convert to Cartesian coordinates
-    
-    # Determine the ra_diff sign (negative for northern hemisphere)
     pos_angle_ref_corr = degrees(pos_angle_ref_corr)
 
     ra_centre = ra_centre_j2000
@@ -1520,16 +1603,15 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
             dec_ref_corr = dec_ref
 
 
-        # Precess the reference RA and dec to J2000 (needs to be used to avoid FOV centre drift over 
-        # time)
-        ra_ref_now_corr_j2000, dec_ref_corr_j2000, pos_angle_ref_now_corr = equatorialCoordPrecession2(jd, J2000_DAYS, ra_ref_now_corr, \
-            dec_ref_corr, radians(pos_angle_ref))
+        # Precess the reference RA, dec, position angle to J2000 (needs to be used to avoid FOV centre drift
+        # over time)
+        ra_ref_now_corr_j2000, dec_ref_corr_j2000, pos_angle_ref_now_corr = equatorialCoordPrecession2(jd,
+                                            J2000_DAYS, ra_ref_now_corr, dec_ref_corr, radians(pos_angle_ref))
 
         # The position angle needs to be corrected for precession, otherwise the FOV rotates with time
         # Applying the difference in RA between the current and the reference epoch fixes the position angle
-    
-        # Convert to Cartesian coordinates
         pos_angle_ref_now_corr = degrees(pos_angle_ref_now_corr)
+
         ra_ref_now_corr = ra_ref_now_corr_j2000
         dec_ref_corr = dec_ref_corr_j2000
 
