@@ -2,6 +2,20 @@
 #cython: language_level=3
 
 import numpy as np
+cimport numpy as cnp
+
+cdef extern from "math.h":
+    double fabs(double)
+    double sin(double)
+    double asin(double)
+    double cos(double)
+    double acos(double)
+    double tan(double)
+    double atan2(double, double)
+    double sqrt(double)
+    double M_PI "M_PI"
+    double fmod(double x, double y) nogil
+
 # import cv2
 
 # Cython import
@@ -20,21 +34,10 @@ ctypedef np.float64_t FLOAT_TYPE_t
 
 
 # Define Pi
-cdef double pi = np.pi
+cdef double pi = M_PI
 
 # Define the Julian date at the J2000 epoch
 cdef double J2000_DAYS = 2451545.0
-
-# Declare math functions
-cdef extern from "math.h":
-    double fabs(double)
-    double sin(double)
-    double asin(double)
-    double cos(double)
-    double acos(double)
-    double tan(double)
-    double atan2(double, double)
-    double sqrt(double)
 
 
 @cython.cdivision(True)
@@ -341,6 +344,117 @@ cpdef (double, double) equatorialCoordPrecession(double start_epoch, double fina
 
 
     return ra_corr, dec_corr
+
+
+
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cdef np.ndarray[np.float64_t, ndim=2] precession_matrix(double zeta, double theta, double z):
+    cdef np.ndarray[np.float64_t, ndim=2] P = np.zeros((3, 3), dtype=np.float64)
+    cdef double czeta = cos(zeta)
+    cdef double szeta = sin(zeta)
+    cdef double ctheta = cos(theta)
+    cdef double stheta = sin(theta)
+    cdef double cz = cos(z)
+    cdef double sz = sin(z)
+
+    # Calculate matrix elements
+    P[0, 0] = czeta*ctheta*cz - szeta*sz
+    P[0, 1] = -szeta*ctheta*cz - czeta*sz
+    P[0, 2] = -stheta*cz
+    
+    P[1, 0] = czeta*ctheta*sz + szeta*cz
+    P[1, 1] = -szeta*ctheta*sz + czeta*cz
+    P[1, 2] = -stheta*sz
+    
+    P[2, 0] = czeta*stheta
+    P[2, 1] = -szeta*stheta
+    P[2, 2] = ctheta
+    
+    return P
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+cpdef (double, double, double) equatorialCoordPrecession2(double start_epoch, double final_epoch, double ra, double dec, double rot_angle):
+    cdef:
+        np.ndarray[double, ndim=1] initial_vector, transformed_vector, parallel_vec, parallel_vec_precessed
+        np.ndarray[double, ndim=1] normal_vector, transformed_normal
+        np.ndarray[double, ndim=1] proj_parallel, proj_parallel_precessed
+        np.ndarray[double, ndim=2] P
+        double ra_precessed, dec_precessed, T, t, zeta, z, theta
+        double new_rot_angle, angle1, angle2, rotation_change
+        int i
+
+    # Calculate precession parameters
+    T = (start_epoch - 2451545.0)/36525.0  # J2000.0 epoch
+    t = (final_epoch - start_epoch)/36525.0
+
+    # Calculate correction parameters in degrees
+    zeta = ((2306.2181 + 1.39656*T - 0.000139*T ** 2)*t + (0.30188 - 0.000344*T)*t ** 2 + 0.017998*t ** 3)/3600
+    z = ((2306.2181 + 1.39656*T - 0.000139*T ** 2)*t + (1.09468 + 0.000066*T)*t ** 2 + 0.018203*t ** 3)/3600
+    theta = ((2004.3109 - 0.85330*T - 0.000217*T ** 2)*t - (0.42665 + 0.000217*T)*t ** 2 - 0.041833*t ** 3)/3600
+
+    # Convert parameters to radians
+    zeta = radians(zeta)
+    z = radians(z)
+    theta = radians(theta)
+
+    # Calculate precession matrix
+    P = precession_matrix(zeta, theta, z)
+
+    # Convert RA, Dec to cartesian coordinates
+    initial_vector = ra_dec_to_cartesian(ra, dec)
+
+    # Apply precession
+    transformed_vector = np.dot(P, initial_vector)
+
+    # Calculate normal vector to the plane of precession
+    normal_vector = np.cross(initial_vector, transformed_vector)
+    transformed_normal = np.dot(P, normal_vector)
+
+    # Normalize vectors
+    initial_vector /= np.linalg.norm(initial_vector)
+    transformed_vector /= np.linalg.norm(transformed_vector)
+    normal_vector /= np.linalg.norm(normal_vector)
+    transformed_normal /= np.linalg.norm(transformed_normal)
+
+    # Convert precessed vector back to RA, Dec
+    ra_precessed, dec_precessed = cartesian_to_ra_dec(transformed_vector)
+
+    # Calculate parallel vectors
+    parallel_vec = np.array([-sin(ra), cos(ra), 0])
+    parallel_vec_precessed = np.array([-sin(ra_precessed), cos(ra_precessed), 0])
+
+    # Project parallel vectors onto the plane perpendicular to the line of sight
+    proj_parallel = parallel_vec - np.dot(parallel_vec, initial_vector)*initial_vector
+    proj_parallel_precessed = parallel_vec_precessed - np.dot(parallel_vec_precessed, transformed_vector)*transformed_vector
+
+    # Normalize projected vectors
+    proj_parallel /= np.linalg.norm(proj_parallel)
+    proj_parallel_precessed /= np.linalg.norm(proj_parallel_precessed)
+
+    # Calculate angles
+    angle1 = atan2(np.dot(np.cross(normal_vector, proj_parallel), initial_vector), 
+                   np.dot(normal_vector, proj_parallel))
+    angle2 = atan2(np.dot(np.cross(transformed_normal, proj_parallel_precessed), transformed_vector), 
+                   np.dot(transformed_normal, proj_parallel_precessed))
+
+    # Calculate the change in angle
+    rotation_change = angle2 - angle1
+
+    # Apply the rotation change to the initial rotation angle
+    new_rot_angle = rot_angle + rotation_change
+
+    # Normalize the new rotation angle to be between -pi and pi
+    new_rot_angle = fmod(new_rot_angle + M_PI, 2*M_PI) - M_PI
+
+    # print(f"Rotation change due to precession: {degrees(rotation_change)} degrees")
+
+    return ra_precessed, dec_precessed, new_rot_angle
 
 
 
@@ -760,6 +874,35 @@ def cyApparentAltAz2TrueRADec_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] azim_arr, np
     return (ra_arr, dec_arr)
 
 
+cpdef np.ndarray[cnp.float64_t, ndim=1] ra_dec_to_cartesian(double ra, double dec):
+    cdef:
+        double x = cos(dec)*cos(ra)
+        double y = cos(dec)*sin(ra)
+        double z = sin(dec)
+    return np.array([x, y, z], dtype=np.float64)
+
+
+@cython.cdivision(True)
+cpdef (double, double) cartesian_to_ra_dec(np.ndarray[np.float64_t, ndim=1] vec):
+    cdef:
+        double x = vec[0]
+        double y = vec[1]
+        double z = vec[2]
+        double distance = sqrt(x*x + y*y + z*z)
+        double ra, dec
+        
+    if distance == 0:
+        return 0.0, 0.0
+    
+    ra = atan2(y, x)
+    dec = asin(z/distance)
+    
+    # Normalize RA to be within [0, 2π)
+    ra = fmod(ra + 2*M_PI, 2*M_PI)
+    
+    return ra, dec
+
+
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
@@ -802,7 +945,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     """
 
     cdef int i
-    cdef double ra_centre, dec_centre, ra, dec, ra_centre_j2000, ra_diff, ra_diff_sign, pos_angle_ref_corr
+    cdef double ra_centre, dec_centre, ra, dec, ra_centre_j2000, dec_centre_j2000, pos_angle_ref_corr
     cdef double radius, sin_ang, cos_ang, theta, x, y, r, dx, dy, x_img, y_img, r_corr, r_scale
     cdef double x0, y0, xy, a1, a2, k1, k2, k3, k4, k5
     cdef int index_offset
@@ -829,20 +972,18 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
             
 
     # Precess the FOV centre to J2000 (otherwise the FOV centre drifts with time)
-    ra_centre_j2000, dec_centre = equatorialCoordPrecession(jd, J2000_DAYS, ra_centre, dec_centre)
-
-    # Determine the ra_diff sign (negative for northern hemisphere)
-    if lat > 0:
-        ra_diff_sign = -1
-    else:
-        ra_diff_sign = 1
+    ra_centre_j2000, dec_centre_j2000, pos_angle_ref_corr = equatorialCoordPrecession2(jd, J2000_DAYS, ra_centre, dec_centre, radians(pos_angle_ref))
 
     # The position angle needs to be corrected for precession, otherwise the FOV rotates with time
     # Applying the difference in RA between the current and the reference epoch fixes the position angle
-    ra_diff = ra_diff_sign*((ra_centre - ra_centre_j2000 + pi)%(2*pi) - pi)
-    pos_angle_ref_corr = (pos_angle_ref + degrees(ra_diff) + 360)%360
+
+    # Convert to Cartesian coordinates
+    
+    # Determine the ra_diff sign (negative for northern hemisphere)
+    pos_angle_ref_corr = degrees(pos_angle_ref_corr)
 
     ra_centre = ra_centre_j2000
+    dec_centre = dec_centre_j2000
 
 
     # If the radial distortion is used, unpack radial parameters
@@ -1131,12 +1272,11 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     """
 
     cdef int i
-    cdef double jd, x_img, y_img, r, dx, x_corr, dy, y_corr, r_corr, r_scale, ra_ref_now_corr_j2000
-    cdef double x0, y0, xy, off_direction, a1, a2, k1, k2, k3, k4, k5
+    cdef double jd, x_img, y_img, r, dx, x_corr, dy, y_corr, r_corr, r_scale
+    cdef double x0, y0, xy, a1, a2, k1, k2, k3, k4, k5, ra_ref_now_corr_j2000,dec_ref_corr_j2000
     cdef int index_offset
     cdef double radius, theta, sin_t, cos_t
-    cdef double ha, ra_ref_now, ra_ref_now_corr, ra, dec, dec_ref_corr, pos_angle_ref_now_corr, ra_diff, \
-        ra_diff_sign
+    cdef double ha, ra_ref_now, ra_ref_now_corr, ra, dec, dec_ref_corr, pos_angle_ref_now_corr
 
     # Convert the reference pointing direction to radians
     ra_ref  = radians(ra_ref)
@@ -1382,23 +1522,17 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 
         # Precess the reference RA and dec to J2000 (needs to be used to avoid FOV centre drift over 
         # time)
-        ra_ref_now_corr_j2000, dec_ref_corr = equatorialCoordPrecession(jd, J2000_DAYS, ra_ref_now_corr, \
-            dec_ref_corr)
-
-        # Determine the ra_diff sign (negative for northern hemisphere, positive for southern)
-        if lat > 0:
-            ra_diff_sign = -1
-        else:
-            ra_diff_sign = 1
+        ra_ref_now_corr_j2000, dec_ref_corr_j2000, pos_angle_ref_now_corr = equatorialCoordPrecession2(jd, J2000_DAYS, ra_ref_now_corr, \
+            dec_ref_corr, radians(pos_angle_ref))
 
         # The position angle needs to be corrected for precession, otherwise the FOV rotates with time
         # Applying the difference in RA between the current and the reference epoch fixes the position angle
-        ra_diff = ra_diff_sign*((ra_ref_now_corr - ra_ref_now_corr_j2000 + pi)%(2*pi) - pi)
-        
-        pos_angle_ref_now_corr = (pos_angle_ref + degrees(ra_diff) + 360)%360
+    
+        # Convert to Cartesian coordinates
+        pos_angle_ref_now_corr = degrees(pos_angle_ref_now_corr)
         ra_ref_now_corr = ra_ref_now_corr_j2000
+        dec_ref_corr = dec_ref_corr_j2000
 
-        
         # Radius from FOV centre to sky coordinate
         radius = radians(sqrt(x_corr**2 + y_corr**2))
 
