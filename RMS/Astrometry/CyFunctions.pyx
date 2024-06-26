@@ -410,6 +410,10 @@ cpdef (double, double, double) equatorialCoordAndRotPrecession(double start_epoc
     Return:
         (ra, dec, rot_angle): [tuple of floats] Precessed equatorial coordinates and rotation angle (radians).
     """
+    
+    # Don't precess if the start and final epoch are the same
+    if start_epoch == final_epoch:
+        return ra, dec, rot_angle
 
     cdef:
         np.ndarray[double, ndim=1] initial_vector, transformed_vector, parallel_vec, parallel_vec_precessed
