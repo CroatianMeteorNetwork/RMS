@@ -47,6 +47,8 @@ from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
 
 class QFOVinputDialog(QtWidgets.QDialog):
 
+    lenses = "none"
+
     def __init__(self, *args, **kwargs):
         super(QFOVinputDialog, self).__init__(*args, **kwargs)
 
@@ -86,10 +88,38 @@ class QFOVinputDialog(QtWidgets.QDialog):
         formlayout.addRow("Azimuth", self.azim_edit)
         formlayout.addRow("Altitude", self.alt_edit)
         formlayout.addRow("Rotation", self.rot_edit)
-
         layout.addLayout(formlayout)
+
+        groupbox = QtWidgets.QGroupBox("Reference lenses:")
+        groupbox.setCheckable(False)
+        layout.addWidget(groupbox)
+
+        vbox = QtWidgets.QVBoxLayout()
+        groupbox.setLayout(vbox)
+
+        fov = QtWidgets.QRadioButton("None/Other")
+        fov.lenses = "none"
+        fov.setChecked(True)
+        fov.toggled.connect(self.lensesSelected)
+        vbox.addWidget(fov)
+
+        fov = QtWidgets.QRadioButton("M16 4mm")
+        fov.lenses = "4mm"
+        fov.toggled.connect(self.lensesSelected)
+        vbox.addWidget(fov)
+
+        fov = QtWidgets.QRadioButton("M16 6mm")
+        fov.toggled.connect(self.lensesSelected)
+        fov.lenses = "6mm"
+        vbox.addWidget(fov)
+
         layout.addWidget(buttonBox)
         self.setLayout(layout)
+
+    def lensesSelected(self):
+        radioButton = self.sender()
+        if radioButton.isChecked():
+            self.lenses = radioButton.lenses
 
     def getInputs(self):
 
@@ -107,11 +137,13 @@ class QFOVinputDialog(QtWidgets.QDialog):
                 # If the rotation is not given, set it to 0
                 rot = 0
 
+            lenses = self.lenses
+
         except ValueError:
             print("Given values could not be read as numbers!")
-            return 0, 0, 0
+            return 0, 0, 0, "none"
 
-        return azim, alt, rot
+        return azim, alt, rot, lenses
 
 
 class GeoPoints(object):
@@ -3202,7 +3234,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 if data is not None:
 
-                    self.platepar.RA_d, self.platepar.dec_d, self.platepar.rotation_from_horiz = data
+                    self.platepar.RA_d, self.platepar.dec_d, self.platepar.rotation_from_horiz, self.lenses = data
 
                     # Compute reference Alt/Az to apparent coordinates, epoch of date
                     self.platepar.az_centre, self.platepar.alt_centre = trueRaDec2ApparentAltAz( \
@@ -3827,9 +3859,9 @@ class PlateTool(QtWidgets.QMainWindow):
         if d.exec_():
              data = d.getInputs()
         else:
-            return 0, 0, 0
+            return 0, 0, 0, "none"
 
-        self.azim_centre, self.alt_centre, rot_horizontal = data
+        self.azim_centre, self.alt_centre, rot_horizontal, lens = data
 
         # Wrap azimuth to 0-360 range
         self.azim_centre %= 360
@@ -3854,7 +3886,7 @@ class PlateTool(QtWidgets.QMainWindow):
         ra, dec = apparentAltAz2TrueRADec(self.azim_centre, self.alt_centre, date2JD(*img_time),
                                           self.platepar.lat, self.platepar.lon)
 
-        return ra, dec, rot_horizontal
+        return ra, dec, rot_horizontal, lens
 
 
     def detectInputType(self,  beginning_time=None, use_fr_files=False, load=False):
@@ -4009,6 +4041,7 @@ class PlateTool(QtWidgets.QMainWindow):
         if platepar_file == '':
             self.platepar = platepar
             self.makeNewPlatepar()
+            self.setReferenceLens()
             self.platepar_file = os.path.join(self.dir_path, self.config.platepar_name)
             self.first_platepar_fit = True
 
@@ -4062,6 +4095,162 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateStars()
             self.tab.param_manager.updatePlatepar()
             self.updateLeftLabels()
+
+    def setReferenceLens(self):
+        if self.lenses == "4mm":
+            print("Configuring platepar for 4mm lenses")
+            self.platepar.distortion_type = "radial7-odd"
+            self.platepar.fov_h = 88.48
+            self.platepar.fov_v = 47.05
+            self.platepar.poly_length = 7
+            self.platepar.F_scale = 15.69
+            self.platepar.X_res = 1280
+            self.platepar.Y_res = 720
+            self.platepar.asymmetry_corr = True
+            self.platepar.auto_check_fit_refined = False
+            self.platepar.auto_recalibrated = False
+            self.platepar.distortion_type_poly_length = np.array([
+                                                                    12,
+                                                                    13,
+                                                                    14,
+                                                                    7,
+                                                                    8,
+                                                                    9,
+                                                                    6,
+                                                                    7,
+                                                                    8,
+                                                                    9
+                                                                ])
+
+            self.platepar.x_poly = np.array([
+                                                -0.049515148894965534,
+                                                -0.03656406235409819,
+                                                0.004034853062995183,
+                                                -0.587767095788385,
+                                                0.06966866569148078,
+                                                0.006346753557137133,
+                                                0.007348153918548211
+                                            ])
+            self.platepar.x_poly_fwd = np.array([
+                                                    -0.049515148894965534,
+                                                    -0.03656406235409819,
+                                                    0.004034853062995183,
+                                                    -0.587767095788385,
+                                                    0.06966866569148078,
+                                                    0.006346753557137133,
+                                                    0.007348153918548211
+                                                ])
+            self.platepar.x_poly_rev = np.array([
+                                                    -0.0495164156247489,
+                                                    -0.03653145242202567,
+                                                    0.0035973308285273805,
+                                                    -0.6051536239116534,
+                                                    0.06866318654186049,
+                                                    -0.0036395617070545455,
+                                                    0.0008211827554213252
+                                                ])
+            self.platepar.y_poly = np.array([
+                                                0.5,
+                                                0.0,
+                                                0.0,
+                                                0.0,
+                                                0.0,
+                                                0.0,
+                                                0.0
+                                            ])
+            self.platepar.y_poly_fwd = np.array([
+                                                    0.5,
+                                                    0.0,
+                                                    0.0,
+                                                    0.0,
+                                                    0.0,
+                                                    0.0,
+                                                    0.0
+                                                ])
+            self.platepar.y_poly_rev = np.array([
+                                                    0.5,
+                                                    0.0,
+                                                    0.0,
+                                                    0.0,
+                                                    0.0,
+                                                    0.0,
+                                                    0.0
+                                                ])
+        elif self.lenses == "6mm":
+            print("Configuring platepar for 6mm lenses")
+            self.platepar.distortion_type = "radial5-odd"
+            self.platepar.fov_h = 53.71
+            self.platepar.fov_v = 30.01
+            self.platepar.poly_length = 6
+            self.platepar.F_scale = 24.100577021670624
+            self.platepar.X_res = 1280
+            self.platepar.Y_res = 720
+            self.platepar.asymmetry_corr = True
+            self.platepar.auto_check_fit_refined = False
+            self.platepar.auto_recalibrated = False
+            self.platepar.distortion_type_poly_length = np.array([
+                                                            12,
+                                                            13,
+                                                            14,
+                                                            7,
+                                                            8,
+                                                            9,
+                                                            6,
+                                                            7,
+                                                            8,
+                                                            9
+                                                        ])
+
+            self.platepar.x_poly = np.array([
+                                        -0.04211605396463094,
+                                        -0.010234837780715945,
+                                        -0.009769930297111313,
+                                        -0.3440089195007747,
+                                        0.01187359807393833,
+                                        -0.0005897621813254839
+                                    ])
+            self.platepar.x_poly_fwd = np.array([
+                                        -0.04211605396463094,
+                                        -0.010234837780715945,
+                                        -0.009769930297111313,
+                                        -0.3440089195007747,
+                                        0.01187359807393833,
+                                        -0.0005897621813254839
+                                        ])
+            self.platepar.x_poly_rev = np.array([
+                                        -0.04211623461533198,
+                                        -0.01020366080989894,
+                                        -0.009609908640269737,
+                                        -0.33843453271195767,
+                                        0.011801177325623372,
+                                        -0.0008752050764633917
+                                        ])
+            self.platepar.y_poly = np.array([
+                                        0.5,
+                                        0.0,
+                                        0.0,
+                                        0.0,
+                                        0.0,
+                                        0.0
+                                    ])
+            self.platepar.y_poly_fwd = np.array([
+                                        0.5,
+                                        0.0,
+                                        0.0,
+                                        0.0,
+                                        0.0,
+                                        0.0
+                                    ])
+            self.platepar.y_poly_rev = np.array([
+                                    0.5,
+                                    0.0,
+                                    0.0,
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ])
+        else:
+            print("Unknown reference lenses: " + self.lenses)
 
     def savePlatepar(self):
         """  Save platepar to a file """
@@ -4141,7 +4330,7 @@ class PlateTool(QtWidgets.QMainWindow):
         if hasattr(self, 'img_handle'):
 
             # Get reference RA, Dec of the image centre
-            self.platepar.RA_d, self.platepar.dec_d, self.platepar.rotation_from_horiz = self.getFOVcentre()
+            self.platepar.RA_d, self.platepar.dec_d, self.platepar.rotation_from_horiz, self.lenses = self.getFOVcentre()
 
             # Recalculate reference alt/az
             self.platepar.az_centre, self.platepar.alt_centre = trueRaDec2ApparentAltAz(self.platepar.RA_d, \
