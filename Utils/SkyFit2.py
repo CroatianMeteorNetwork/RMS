@@ -1758,7 +1758,8 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute RA/Dec using the normal platepar for all pairs
             level_data = np.ones_like(x_arr)
             time_data = [self.img_handle.currentTime()]*len(x_arr)
-            _, ra_data, dec_data, _ = xyToRaDecPP(time_data, x_arr, y_arr, level_data, self.platepar)
+            _, ra_data, dec_data, _ = xyToRaDecPP(time_data, x_arr, y_arr, level_data, self.platepar, 
+                                                  precompute_pointing_corr=True)
 
             # Compute X, Y back without the distortion
             jd = date2JD(*self.img_handle.currentTime())
@@ -4467,7 +4468,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Compute measured RA/Dec from image coordinates
                 _, ra_data, dec_data, _ = xyToRaDecPP(time_data, x_data, \
                     y_data, np.ones_like(x_data), self.platepar, measurement=True, \
-                    extinction_correction=False)
+                    extinction_correction=False, precompute_pointing_corr=True)
 
                 cartesian_points = []
 

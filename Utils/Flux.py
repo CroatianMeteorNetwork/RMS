@@ -1503,6 +1503,7 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
                 [1]*len(x_vert),
                 platepar,
                 extinction_correction=False,
+                precompute_pointing_corr=True
             )
 
             # Collect and filter catalog stars
@@ -1532,7 +1533,8 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
             star_levels = 10**((mag - platepar.mag_lev)/(-2.5))
 
             # Compute star magnitudes using vignetting and extinction
-            _, _, _, mag_corrected = xyToRaDecPP(len(x)*[date], x, y, star_levels, platepar, extinction_correction=True)
+            _, _, _, mag_corrected = xyToRaDecPP(len(x)*[date], x, y, star_levels, platepar, 
+                                                 extinction_correction=True, precompute_pointing_corr=True)
             mag_corrected = np.array(mag_corrected)
 
             # Filter coordinates to be in FOV and make sure that the stars that are too dim are filtered

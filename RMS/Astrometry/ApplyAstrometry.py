@@ -174,7 +174,7 @@ def extinctionCorrectionApparentToTrue(mags, x_data, y_data, jd, platepar):
 
     # Compute RA/Dec in J2000
     _, ra_data, dec_data, _ = xyToRaDecPP(len(x_data)*[jd2Date(jd)], x_data, y_data, len(x_data)*[1], \
-        platepar, extinction_correction=False)
+        platepar, extinction_correction=False, precompute_pointing_corr=True)
 
     # Compute elevation above the horizon
     elevation_data = []
@@ -425,7 +425,7 @@ def rotationWrtHorizon(platepar):
 
     # Compute apparent alt/az in the epoch of date from X,Y
     jd_arr, ra_arr, dec_arr, _ = xyToRaDecPP(2*[jd2Date(platepar.JD)], [img_mid_w, img_up_w], \
-        [img_mid_h, img_up_h], [1, 1], platepar, extinction_correction=False)
+        [img_mid_h, img_up_h], [1, 1], platepar, extinction_correction=False, precompute_pointing_corr=True)
     azim_mid, alt_mid = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr[0]), np.radians(dec_arr[0]), jd_arr[0], \
         np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction)
     azim_up, alt_up = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr[1]), np.radians(dec_arr[1]), jd_arr[1], \
@@ -499,7 +499,7 @@ def rotationWrtStandard(platepar):
 
     # Compute ra/dec
     _, ra, dec, _ = xyToRaDecPP(2*[jd2Date(platepar.JD)], [img_mid_w, img_up_w], [img_mid_h, img_up_h], \
-        2*[1], platepar)
+        2*[1], platepar, precompute_pointing_corr=True)
     ra_mid = ra[0]
     dec_mid = dec[0]
     ra_up = ra[1]
@@ -586,7 +586,7 @@ def calculateMagnitudes(px_sum_arr, radius_arr, photom_offset, vignetting_coeff)
 
 
 def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_correction=True, \
-    measurement=False, jd_time=False):
+    measurement=False, jd_time=False, precompute_pointing_corr=False):
     """ Converts image XY to RA,Dec, but it takes a platepar instead of individual parameters. 
 
     Arguments:
@@ -606,6 +606,10 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
             celestial coordinates for refraction if the refraction was not taken into account during
             plate fitting.
         jd_time: [bool] If True, time_data is expected as a list of Julian dates. False by default.
+        precompute_pointing_corr: [bool] Precompute the pointing correction. False by default. This is used
+            to speed up the calculation when the input JD is the same for all data points, e.g. during
+            plate solving.
+
 
     Return:
         (JD_data, RA_data, dec_data, magnitude_data): [tuple of ndarrays]
@@ -629,7 +633,7 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
         float(platepar.dec_d), float(platepar.pos_angle_ref), float(platepar.F_scale), platepar.x_poly_fwd, 
         platepar.y_poly_fwd, unicode(platepar.distortion_type), refraction=platepar.refraction, \
         equal_aspect=platepar.equal_aspect, force_distortion_centre=platepar.force_distortion_centre, \
-        asymmetry_corr=platepar.asymmetry_corr)
+        asymmetry_corr=platepar.asymmetry_corr, precompute_pointing_corr=precompute_pointing_corr)
 
     # Correct the coordinates for refraction if it wasn't taken into account during the astrometry calibration
     #   procedure
