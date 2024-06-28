@@ -463,8 +463,8 @@ class BufferedCapture(Process):
 
             rtsp_url = match.group(0)
 
-            # Add '/' if it's missing
-            if not rtsp_url.endswith('/'):
+            # Add '/' if it's missing from '.sdp' URL
+            if rtsp_url.endswith('.sdp'):
                 rtsp_url += '/'
 
             return rtsp_url
