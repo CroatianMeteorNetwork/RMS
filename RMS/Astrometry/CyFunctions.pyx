@@ -391,6 +391,36 @@ cdef np.ndarray[np.float64_t, ndim=2] precessionMatrix(double zeta, double theta
     return P
 
 
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+cdef (double, double) nutationComponents(double T):
+    """ Calculate nutation corrections """
+
+    cdef double omega, L, Ll, delta_psi, delta_eps
+
+    # Longitude of the ascending node of the Moon's mean orbit on the ecliptic, measured from the mean equinox
+    # of the date
+    omega = radians(125.04452 - 1934.136261*T)
+
+    # Mean longitude of the Sun
+    L = radians(280.4665 + 36000.7698*T)
+
+    # Mean longitude of the Moon
+    Ll = radians(218.3165 + 481267.8813*T)
+
+    # Nutation in longitude
+    delta_psi = -17.2*sin(omega) - 1.32*sin(2*L) - 0.23*sin(2*Ll) + 0.21*sin(2*omega)
+
+    # Nutation in obliquity
+    delta_eps = 9.2*cos(omega) + 0.57*cos(2*L) + 0.1*cos(2*Ll) - 0.09*cos(2*omega)
+
+    # Convert to radians
+    delta_psi = radians(delta_psi/3600)
+    delta_eps = radians(delta_eps/3600)
+
+    return delta_psi, delta_eps
+
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
@@ -420,7 +450,9 @@ cpdef (double, double, double) equatorialCoordAndRotPrecession(double start_epoc
         np.ndarray[double, ndim=1] normal_vector, transformed_normal
         np.ndarray[double, ndim=1] proj_parallel, proj_parallel_precessed
         np.ndarray[double, ndim=2] P
-        double ra_precessed, dec_precessed, T, t, zeta, z, theta
+        np.ndarray[double, ndim=2] epsilon_matrix, psi_matrix
+
+        double ra_precessed, dec_precessed, T, t, zeta, z, theta, Delta_psi, Delta_epsilon
         double new_rot_angle, angle1, angle2, rotation_change
         int i
 
@@ -446,6 +478,25 @@ cpdef (double, double, double) equatorialCoordAndRotPrecession(double start_epoc
 
     # Apply precession
     transformed_vector = np.dot(P, initial_vector)
+
+
+
+    # Calculate nutation corrections
+    Delta_psi, Delta_epsilon = nutationComponents(T)
+
+    # Construct the nutation matrices
+    epsilon_matrix = np.array([[1,                  0,                   0],
+                               [0, cos(Delta_epsilon),  sin(Delta_epsilon)],
+                               [0, -sin(Delta_epsilon),  cos(Delta_epsilon)]])
+
+    psi_matrix = np.array([[cos(Delta_psi), -sin(Delta_psi), 0],
+                           [sin(Delta_psi),  cos(Delta_psi), 0],
+                           [0,                            0, 1]])
+
+    # Apply nutation
+    transformed_vector = np.dot(epsilon_matrix, transformed_vector)
+    transformed_vector = np.dot(psi_matrix, transformed_vector)
+
 
     # Calculate normal vector to the plane of precession
     normal_vector = np.cross(initial_vector, transformed_vector)
@@ -1310,8 +1361,11 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
 
 
 
-cdef pointingCorrection(double jd, double lat, double lon, double h0, double jd_ref, double ra_ref, \
-    double dec_ref, double pos_angle_ref, bool refraction=True):
+cdef (double, double, double) pointingCorrection(
+    double jd, double lat, double lon, 
+    double h0, double jd_ref, double ra_ref, double dec_ref, double pos_angle_ref, 
+    bool refraction=True
+    ):
     """ Compute the pointing correction for the given Julian date. The correction is done by computing the
         difference in RA between the current and the reference epoch. The correction is done in the J2000
         epoch to avoid the drift of the FOV centre over time.
