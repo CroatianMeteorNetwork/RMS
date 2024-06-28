@@ -1239,6 +1239,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
             stellarLMModel(platepar.mag_lev),
             config.platepars_flux_recalibrated_name,
             ignore_distance_threshold=True,
+            ignore_max_stars=True,
         )
 
     # Skip the rest if this flag is on. This is used on Python 2 systems, as the rest of the code doesn't play
