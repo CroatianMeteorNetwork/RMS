@@ -41,7 +41,7 @@ import RMS.Routines.MorphCy as morph
 from RMS.Routines.BinImageCy import binImage as binImageCy
 
 
-def loadRaw(img_path):
+def loadRaw(img_path, config=None):
     """ Load a raw images such as the DFN NEF or Canon CR2 image. 
     
         Arguments:
@@ -57,7 +57,8 @@ def loadRaw(img_path):
             output_color=rawpy.ColorSpace.sRGB, user_flip=0)
 
         # Convert the image to grayscale
-        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+        if config is None or not config.keep_color:
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
 
         return frame
 
@@ -564,7 +565,7 @@ def applyFlat(img, flat_struct):
 
 
 
-def loadDark(dir_path, file_name, dtype=None, byteswap=False):
+def loadDark(dir_path, file_name, dtype=None, byteswap=False, config=None):
     """ Load the dark frame. 
 
     Arguments:
@@ -586,7 +587,7 @@ def loadDark(dir_path, file_name, dtype=None, byteswap=False):
         if file_name.lower().endswith(".nef") or file_name.lower().endswith(".cr2"):
 
             # Load the dark from a raw file
-            dark = loadRaw(os.path.join(dir_path, file_name))
+            dark = loadRaw(os.path.join(dir_path, file_name), config)
 
         else:
 

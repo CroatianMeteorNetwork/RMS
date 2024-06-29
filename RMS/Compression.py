@@ -133,8 +133,8 @@ class Compressor(multiprocessing.Process):
         ff.nrows = arr.shape[1]
         ff.ncols = arr.shape[2]
         ff.nbits = self.config.bit_depth
-        ff.nframes = 256
-        ff.first = N + 256
+        ff.nframes = self.config.frames_per_block
+        ff.first = N + self.config.frames_per_block
         ff.camno = self.config.stationID
         ff.fps = self.config.fps
         ff.starttime = date_string + "_" + str(micros).zfill(6)
@@ -301,7 +301,7 @@ class Compressor(multiprocessing.Process):
             t = time.time()
             
             # Save the compressed image
-            filename_millis, filename_micros = self.saveFF(compressed, startTime, n*256)
+            filename_millis, filename_micros = self.saveFF(compressed, startTime, n*self.config.frames_per_block)
             n += 1
             
             log.debug("Saving time: {:.3f} s".format(time.time() - t))

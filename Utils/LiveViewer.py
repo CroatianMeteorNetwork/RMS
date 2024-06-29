@@ -31,7 +31,7 @@ PIL_FONT = ImageFont.load_default()
 
 
 
-def drawText(img_arr, img_text):
+def drawText(img_arr, img_text, config = None):
     """ Draws text on the image represented as a numpy array.
     """
 
@@ -45,11 +45,12 @@ def drawText(img_arr, img_text):
     draw = ImageDraw.Draw(im)
 
     # Convert the type of the image to grayscale, with one color
-    try:
-        if len(img_arr[0][0]) != 3:
+    if not config or not config.keep_color:
+        try:
+            if len(img_arr[0][0]) != 3:
+                im = im.convert('L')
+        except:
             im = im.convert('L')
-    except:
-        im = im.convert('L')
 
     im = np.array(im)
     del draw
@@ -59,7 +60,7 @@ def drawText(img_arr, img_text):
 
 class LiveViewer(multiprocessing.Process):
     def __init__(self, dir_path, image=False, slideshow=False, slideshow_pause=2.0, banner_text="", \
-        update_interval=5.0):
+        update_interval=5.0, config=None):
         """ Monitors a given directory for FF files, and shows them on the screen as new ones get created. It can
             also do slideshows. 
 
@@ -88,6 +89,7 @@ class LiveViewer(multiprocessing.Process):
 
         self.first_image = True
 
+        self.config = config
 
 
     def updateImage(self, img, text, pause_time, banner_text=""):
@@ -98,7 +100,7 @@ class LiveViewer(multiprocessing.Process):
             text: [str] Text that will be printed on the image.
         """
 
-        img = drawText(img, text)
+        img = drawText(img, text, self.config)
 
         if not banner_text:
             banner_text = "LiveViewer"
@@ -300,6 +302,7 @@ class LiveViewer(multiprocessing.Process):
 if __name__ == "__main__":
 
     import argparse
+    import RMS.ConfigReader as cr
 
     ### COMMAND LINE ARGUMENTS
 
@@ -320,12 +323,18 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-u', '--update', metavar='UPDATE_INTERVAL', default=5, type=float, \
         help="Time between image refreshes. 5 seconds by default.")
+    
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+        help="Path to a config file which will be used instead of the default one.")
+    arg_parser.add_argument('dir_path', nargs='+', metavar='DIR_PATH', type=str, \
+        help='Path to the folder with FF or image files, or path to a video file. If images or videos are given, their names must be in the format: YYYYMMDD_hhmmss.uuuuuu, or the beginning time has to be given.')
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
     #########################
+    config = cr.loadConfigFromDirectory(cml_args.config, cml_args.dir_path)
 
     lv = LiveViewer(cml_args.dir_path, image=cml_args.image, slideshow=cml_args.slideshow, \
-        slideshow_pause=cml_args.pause, update_interval=cml_args.update)
+        slideshow_pause=cml_args.pause, update_interval=cml_args.update, config=config)
     lv.start()

@@ -140,7 +140,7 @@ def makeFlat(dir_path, config, nostars=False, use_images=False, make_dark=False)
 
                 else:
                     # Calculate the time of the FF files
-                    ff_time = date2JD(*getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True))
+                    ff_time = date2JD(*getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True, ff_frames=config.frames_per_block))
 
 
                 ff_times.append(ff_time)

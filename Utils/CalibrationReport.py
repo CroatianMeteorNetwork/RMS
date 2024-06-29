@@ -137,7 +137,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
             continue
 
 
-        dt = getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True)
+        dt = getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True,ff_frames=config.frames_per_block)
         jd = date2JD(*dt)
 
         # Add the time and the stars to the dict
@@ -160,7 +160,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         for ff_name_temp in recalibrated_platepars:
 
             # Compute the Julian date of the FF middle
-            dt = getMiddleTimeFF(ff_name_temp, config.fps, ret_milliseconds=True)
+            dt = getMiddleTimeFF(ff_name_temp, config.fps, ret_milliseconds=True,ff_frames=config.frames_per_block)
             jd = date2JD(*dt)
 
             # Check that this file exists in CALSTARS and the list of FF files

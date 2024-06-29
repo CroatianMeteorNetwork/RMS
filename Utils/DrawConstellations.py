@@ -18,13 +18,13 @@ from Utils.ShowerAssociation import showerAssociation
 from RMS.Routines.MaskImage import loadMask, MaskStructure
 
 
-def drawConstellations(platepar, ff_file, separation_deg=90, color_bgra=None):
+def drawConstellations(platepar, ff_file, separation_deg=90, color_bgra=None,config=None):
     if not color_bgra:
         color_bgr = [255, 0, 0, 192]
     img = np.zeros((platepar.Y_res, platepar.X_res, 4), dtype=np.uint8)
     img[:, :, 3] = 0  # Fully transparent
     fps = 25  # TODO get from config
-    fftime_jd = date2JD(*getMiddleTimeFF(os.path.basename(ff_file), fps))
+    fftime_jd = date2JD(*getMiddleTimeFF(os.path.basename(ff_file), fps,ff_frames=config.frames_per_block))
     constellations_path = os.path.join(os.path.dirname(__file__), "../share/constellation_lines.csv")
     lines = np.loadtxt(constellations_path, delimiter=",")
     from_ra, from_dec = lines[:, 0], lines[:, 1]
@@ -50,7 +50,10 @@ if __name__ == "__main__":
     arg_parser.add_argument('ff_file', help='Full path to an FF file')
     arg_parser.add_argument('-o', '--output', help='Output filename (default: deduce from FF filename)')
     arg_parser.add_argument('-r', '--resolution', help='Resolution (override platepar; this also resets all other platepar parameters)')
-
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+        help="Path to a config file which will be used instead of the default one.")
+    arg_parser.add_argument('dir_path', nargs='+', metavar='DIR_PATH', type=str, \
+        help='Path to the folder with FF or image files, or path to a video file. If images or videos are given, their names must be in the format: YYYYMMDD_hhmmss.uuuuuu, or the beginning time has to be given.')
     cml_args = arg_parser.parse_args()
 
     outfilename = cml_args.output
@@ -71,7 +74,8 @@ if __name__ == "__main__":
         platepar.refraction = False
         platepar.resetDistortionParameters()
 
-    img = drawConstellations(platepar, cml_args.ff_file)
+    config = cr.loadConfigFromDirectory(cml_args.config, cml_args.dir_path)
+    img = drawConstellations(platepar, cml_args.ff_file,config=config)
 
     cv2.imwrite(outfilename, img)
     print("Wrote", outfilename)

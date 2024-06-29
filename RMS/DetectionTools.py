@@ -82,7 +82,7 @@ def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
         if dark_path is not None:
 
             # Load the dark
-            dark = Image.loadDark(*os.path.split(dark_path), dtype=dtype, byteswap=byteswap)
+            dark = Image.loadDark(*os.path.split(dark_path), dtype=dtype, byteswap=byteswap, config=config.keep_color)
 
         if dark is not None:
             print('Loaded dark:', dark_path)

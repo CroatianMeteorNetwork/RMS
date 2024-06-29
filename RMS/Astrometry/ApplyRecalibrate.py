@@ -405,7 +405,7 @@ def recalibratePlateparsForFF(
 
         # Get stars detected on this FF file (create a dictionaly with only one entry, the residuals function
         #   needs this format)
-        calstars_time = FFfile.getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True)
+        calstars_time = FFfile.getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True,ff_frames=config.frames_per_block)
         jd = date2JD(*calstars_time)
         star_dict_ff = {jd: calstars[ff_name]}
 

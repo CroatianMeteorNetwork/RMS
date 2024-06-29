@@ -263,7 +263,7 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
 
 
     # Calculate the approx. size for the night night
-    next_night_bytes = (duration*config.fps)/256*config.width*config.height*4
+    next_night_bytes = (duration*config.fps)/config.frames_per_block*config.width*config.height*4
 
     # Always leave at least 2 GB free for archive
     next_night_bytes += config.extra_space_gb*(1024**3)
