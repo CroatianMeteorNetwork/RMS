@@ -592,7 +592,7 @@ if __name__ == "__main__":
     
 
     # Test directly uploading files and remote directory creation
-    dir_local = "C:\\temp"
+    dir_local = "C:\\temp\\dir2\\dir3"
     remote_dir = "files/upload_test/dir2/dir3"
     uploadSFTP(
         config.hostname, config.stationID, 
@@ -602,6 +602,7 @@ if __name__ == "__main__":
         allow_dir_creation=True
         )
     
+    sys.exit()
 
 
     ### Test the upload manager ###
