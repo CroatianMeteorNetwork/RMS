@@ -59,7 +59,7 @@ def initLogging(config, log_file_prefix="", safedir=None):
 
     # Make a new log file each day
     handler = logging.handlers.TimedRotatingFileHandler(os.path.join(log_path, log_file_name), when='D', \
-        interval=1) 
+        interval=1, utc=True)
     handler.setLevel(logging.INFO)
     handler.setLevel(logging.DEBUG)
 
