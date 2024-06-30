@@ -416,6 +416,9 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         if jitter_quality is not None and dropped_frame_rate is not None:
             log.info('Timestamp Intervals Analysis: Jitter Quality: {:.1f}%, Dropped Frame Rate: {:.1f}%'
                      .format(jitter_quality, dropped_frame_rate))
+            
+        else:
+            log.info('Timestamp Intervals Analysis: Failed')
 
         # Add the timelapse to the extra files
         if intervals_path is not None:
@@ -493,7 +496,10 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                 if validFFName(ff_name)]
 
             # Add any two FF files
-            extra_files += random.sample(ff_list, 2)
+            if len(ff_list) > 2:
+                extra_files += random.sample(ff_list, 2)
+            else:
+                extra_files += ff_list
         
 
     ### ###
