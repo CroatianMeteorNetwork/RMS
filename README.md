@@ -86,7 +86,7 @@ Alternatively, if you are using Anaconda Python on your Linux PC, you can instal
 ```
 conda create -y -n rms -c conda-forge python==3.11.6
 conda activate rms
-conda install -y -c conda-forge numpy scipy gitpython cython matplotlib paramiko
+conda install -y -c conda-forge numpy'<2.0' scipy gitpython cython matplotlib paramiko
 conda install -y -c conda-forge numba
 conda install -y pyqt==5.15.10
 conda install -y -c conda-forge Pillow pyqtgraph==0.12.3
@@ -95,7 +95,7 @@ conda install -y -c conda-forge imageio pandas
 conda install -y -c conda-forge pygobject
 conda install -y -c astropy astropy
 pip install rawpy
-pip install git+https://github.com/matejak/imreg_dft@master#egg=imreg_dft>'2.0.0'
+pip install git+https://github.com/matejak/imreg_dft@master#egg=imreg_dft'>2.0.0'
 ```
 
 If you want to use the machine for capture using OpenCV, you need to install it using the ```opencv4_install.sh``` script. This will build OpenCV with gstreamer and ffmpeg support. If you are not planning to run the capture but you are planning to use other RMS tool, you can install opencv using conda:
