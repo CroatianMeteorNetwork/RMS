@@ -94,7 +94,7 @@ conda install -y -c conda-forge ephem
 conda install -y -c conda-forge imageio pandas
 conda install -y -c conda-forge pygobject
 conda install -y -c astropy astropy
-pip install rawpy
+pip install rawpy'<0.22'
 pip install git+https://github.com/matejak/imreg_dft@master#egg=imreg_dft'>2.0.0'
 ```
 
