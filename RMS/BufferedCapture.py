@@ -411,11 +411,14 @@ class BufferedCapture(Process):
                 sample = self.device.emit("pull-sample")
                 if not sample:
                     log.info("GStreamer pipeline did not emit a sample.")
-
                     return False, None, None
                 
                 # Extract the frame buffer and timestamp
                 buffer = sample.get_buffer()
+                if not buffer:
+                    log.error("Failed to get buffer from sample.")
+                    return False, None, None
+
                 gst_timestamp_ns = buffer.pts  # GStreamer timestamp in nanoseconds
 
                 # Sanity check for pts value
@@ -437,13 +440,13 @@ class BufferedCapture(Process):
                 timestamp = self.start_timestamp + (smoothed_pts/1e9)
 
                 buffer.unmap(map_info)
-        
+
             # OpenCV
             else:
                 ret, frame = self.device.read()
                 if ret:
                     timestamp = time.time()
-                
+
         return ret, frame, timestamp
 
 
@@ -509,7 +512,7 @@ class BufferedCapture(Process):
 
 
     def createGstreamDevice(self, video_format, gst_decoder='decodebin', 
-                            video_file_dir=None, segment_duration_sec=30):
+                            video_file_dir=None, segment_duration_sec=30, max_retries=5, retry_interval=1):
         """
         Creates a GStreamer pipeline for capturing video from an RTSP source and 
         initializes playback with specific configurations.
@@ -519,13 +522,15 @@ class BufferedCapture(Process):
         Arguments:
             video_format: [str] The desired video format for the conversion, 
                 e.g., 'BGR', 'GRAY8', etc.
-
+            
         Keyword arguments:
             gst_decoder: [str] The gst_decoder to use for the Gstreamer video stream. Default is 'decodebin'.
             video_file_dir: [str] The directory where the raw video stream should be saved. 
                 If None, the raw stream will not be saved to disk. Default is None.
             segment_duration_sec: [int] The duration of each video segment in seconds. 
                 Default is 30.
+            max_retries: [int] The maximum number of retry attempts
+            retry_interval: [float] The number of seconds to wait between retries
 
         Returns:
             Gst.Element: The appsink element of the created GStreamer pipeline, 
@@ -565,20 +570,49 @@ class BufferedCapture(Process):
         pipeline_str = "{} {} {}".format(source_to_tee, processing_branch, storage_branch)
 
         log.debug("GStreamer pipeline string: {}".format(pipeline_str))
-        
-        self.pipeline = Gst.parse_launch(pipeline_str)
 
-        self.pipeline.set_state(Gst.State.PLAYING)
+        # Set the pipeline to PLAYING state with retries
+        for attempt in range(max_retries):
+            
+            # Parse and create the pipeline
+            self.pipeline = Gst.parse_launch(pipeline_str)
 
-        # Calculate camera latency from config parameters
-        total_latency = self.config.camera_buffer/self.config.fps + self.config.camera_latency
+            # Set the pipeline to PLAYING state
+            self.pipeline.set_state(Gst.State.PLAYING)
 
-        self.start_timestamp = time.time() - total_latency
- 
-        start_time_str = datetime.datetime.fromtimestamp(self.start_timestamp).strftime('%Y-%m-%d %H:%M:%S.%f')
-        log.info("Start time is {}".format(start_time_str))
+            # Capture time
+            start_time = time.time()
 
-        return self.pipeline.get_by_name("appsink")
+            # Wait for the state change to complete
+            state_change_return, current_state, pending_state = self.pipeline.get_state(Gst.CLOCK_TIME_NONE)
+
+            # Check if the state change was successful
+            if state_change_return != Gst.StateChangeReturn.FAILURE and current_state == Gst.State.PLAYING:
+                log.info("Pipeline is in PLAYING state.")
+
+                # Calculate camera latency from config parameters
+                total_latency = self.config.camera_buffer/self.config.fps + self.config.camera_latency
+
+                # Calculate stream start time
+                self.start_timestamp = start_time - total_latency
+
+                # Log start time
+                start_time_str = (datetime.datetime.fromtimestamp(self.start_timestamp)
+                                  .strftime('%Y-%m-%d %H:%M:%S.%f'))
+
+                log.info("Start time is {}".format(start_time_str))
+
+                return self.pipeline.get_by_name("appsink")
+
+            # Log the failure and retry if attempts are left
+            log.error("Attempt {}: Pipeline did not transition to PLAYING state, current state is {}. \
+                      Retrying in {} seconds."
+                      .format(attempt + 1, current_state, retry_interval))
+
+            time.sleep(retry_interval)
+
+        log.error("Failed to set pipeline to PLAYING state after {} attempts.".format(max_retries))
+        return False
 
 
     def initVideoDevice(self):
@@ -620,7 +654,7 @@ class BufferedCapture(Process):
                 if ip:
                     ip = ip[0]
 
-                    # Try pinging 5 times
+                    # Try pinging 500 times
                     ping_success = False
 
                     for i in range(500):
@@ -629,7 +663,10 @@ class BufferedCapture(Process):
                         ping_success = ping(ip)
 
                         if ping_success:
-                            log.info("Camera IP ping successful!")
+                            log.info("Camera IP ping successful! Waiting  10 seconds. ")
+
+                            # Wait for camera to finish booting up
+                            time.sleep(10)
                             break
 
                         time.sleep(5)
@@ -688,7 +725,8 @@ class BufferedCapture(Process):
                     log.info("Creating GStreamer pipeline...")
                     self.device = self.createGstreamDevice(
                         self.config.gst_colorspace, gst_decoder=self.config.gst_decoder,
-                        video_file_dir=raw_video_dir, segment_duration_sec=self.config.raw_video_duration)
+                        video_file_dir=raw_video_dir, segment_duration_sec=self.config.raw_video_duration.
+                        max_retries=5, retry_interval=1)
                     
                     log.info("GStreamer pipeline created!")   
                     
