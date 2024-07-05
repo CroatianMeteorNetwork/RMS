@@ -725,8 +725,9 @@ class BufferedCapture(Process):
                     log.info("Creating GStreamer pipeline...")
                     self.device = self.createGstreamDevice(
                         self.config.gst_colorspace, gst_decoder=self.config.gst_decoder,
-                        video_file_dir=raw_video_dir, segment_duration_sec=self.config.raw_video_duration.
-                        max_retries=5, retry_interval=1)
+                        video_file_dir=raw_video_dir, segment_duration_sec=self.config.raw_video_duration,
+                        max_retries=5, retry_interval=1
+                        )
                     
                     log.info("GStreamer pipeline created!")   
                     
