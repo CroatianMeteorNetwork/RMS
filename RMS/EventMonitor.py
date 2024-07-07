@@ -1478,10 +1478,9 @@ class EventMonitor(multiprocessing.Process):
                     continue
                 # Do not add any files, only add directories
                 if not os.path.isdir(os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir,night_directory)):
-                    print("Skipping {}".format(night_directory))
+                    log.warning("Skipping {:s} - there should not be files in {:s}".format(night_directory,self.config.captured_dir))
                     continue
                 directory_POSIX_time = convertGMNTimeToPOSIX(night_directory[7:22])
-                print("Adding {}".format(night_directory))
                 # if the POSIX time representation is before the event, and within 16 hours add to the list of directories
                 # most unlikely that a single event could be split across two directories, unless there was large time uncertainty
                 if directory_POSIX_time < event_time and (event_time - directory_POSIX_time).total_seconds() < 16 * 3600:
