@@ -244,7 +244,12 @@ class QueuedPool(object):
         for file_name in self._listBackupFiles():
 
             # Load the backup file
-            bkup_obj = loadPickle(self.bkup_dir, file_name)
+            try:
+                bkup_obj = loadPickle(self.bkup_dir, file_name)
+            except Exception as e:
+                self.printAndLog('Failed loading backup file:', file_name)
+                self.printAndLog(repr(e))
+                continue
 
             if bkup_obj is None:
                 continue
