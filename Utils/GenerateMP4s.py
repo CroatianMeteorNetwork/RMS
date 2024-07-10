@@ -222,7 +222,7 @@ def generateMP4s(dir_path, ftpfile_name, shower_code=None, min_mag=None, config=
         		o = "-" + o
         		frbv_switches.append(o)
         	options = ' '.join(frbv_switches)
-        	command = 'python -m Utils.FRbinViewer ' + options + " " + "-c " + frbvconfig + " " + dir_frbv_path
+        	command = '/home/rms/vRMS/bin/python -m Utils.FRbinViewer ' + options + " " + "-c " + frbvconfig + " " + dir_frbv_path
         	os.system(command)
         	files = os.listdir(dir_frbv_path)
         	files = [s for s in files if not (s.endswith('.fits') or s.endswith('.bin'))]
