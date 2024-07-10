@@ -813,7 +813,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
 
         ### Plot difference from reference platepar in angular distance from (0, 0) vs rotation ###
 
-        plt.figure()
+        plt.figure(figsize=(6, 5))
 
         plt.scatter(0, 0, marker='o', edgecolor='k', label='Reference platepar', s=100, c='none', zorder=3)
 
@@ -827,6 +827,17 @@ def recalibrateIndividualFFsAndApplyAstrometry(
 
         plt.grid()
         plt.legend()
+
+        # Scale the aspect ratio so X and Y units are the same but the plot is not too narrow
+        plt.axis('scaled')
+
+        # Make the plot square by adjusting the limits to the maximum
+        min_lim = min(plt.xlim()[0], plt.ylim()[0])
+        max_lim = max(plt.xlim()[1], plt.ylim()[1])
+        abs_lim = max_lim - min_lim
+        plt.xlim(-0.1*abs_lim, 0.9*abs_lim)
+        plt.ylim(min_lim, max_lim)
+
 
         plt.tight_layout()
 

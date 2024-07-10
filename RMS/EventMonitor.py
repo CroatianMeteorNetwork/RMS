@@ -1473,11 +1473,13 @@ class EventMonitor(multiprocessing.Process):
         if os.path.exists(os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir)):
             for night_directory in os.listdir(
                     os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir)):
-                #Skip over any directory which does not start with the stationID and warn
+                # Skip over any directory which does not start with the stationID and warn
                 if night_directory[0:len(self.config.stationID)] != self.config.stationID:
                     continue
+                # Do not add any files, only add directories
+                if not os.path.isdir(os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir,night_directory)):
+                    continue
                 directory_POSIX_time = convertGMNTimeToPOSIX(night_directory[7:22])
-
                 # if the POSIX time representation is before the event, and within 16 hours add to the list of directories
                 # most unlikely that a single event could be split across two directories, unless there was large time uncertainty
                 if directory_POSIX_time < event_time and (event_time - directory_POSIX_time).total_seconds() < 16 * 3600:
