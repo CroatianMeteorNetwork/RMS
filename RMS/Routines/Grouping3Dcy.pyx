@@ -429,8 +429,8 @@ def find3DLines(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, start_time, config
 @cython.boundscheck(False)
 @cython.wraparound(False) 
 @cython.cdivision(True)
-def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
-    np.ndarray[UINT8_TYPE_t, ndim=3] compressed, int min_level, int min_points, float k1, float j1, int f):
+def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=4] frames, \
+    np.ndarray[UINT8_TYPE_t, ndim=4] compressed, int min_level, int min_points, float k1, float j1, int f):
     """ Given the list of frames, threshold them, subsample the time and check if there are enough threshold
         passers on the given frame. 
 
@@ -455,6 +455,14 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
     cdef unsigned int x, y, x2, y2, n, max_val, nframes, x_size, y_size
     cdef unsigned int num = 0
     cdef unsigned int avg_std
+
+    # Convert frames and compressed to grayscale
+    cdef int i
+    for i in range(frames.shape[0]):
+        frames[i] = np.round(np.dot(frames[i,...,:4], [0.2989, 0.5870, 0.1140])).astype(np.uint8)
+
+    for i in range(compressed.shape[0]):
+        compressed[i] = np.round(np.dot(compressed[i,...,:4], [0.2989, 0.5870, 0.1140])).astype(np.uint8)
 
     # Calculate the shapes of the subsamples image
     cdef shape_z = frames.shape[0]
