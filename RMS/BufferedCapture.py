@@ -541,7 +541,7 @@ class BufferedCapture(Process):
 
         # Define the source up to the point where we want to branch off
         source_to_tee = (
-            "rtspsrc buffer-mode=1 protocols=tcp tcp-timeout=5000000 retry=5 "
+            "rtspsrc buffer-mode=1 protocols=udp retry=5 "
             "location=\"{}\" ! "
             "rtph264depay ! tee name=t"
             ).format(device_url)
