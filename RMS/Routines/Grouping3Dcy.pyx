@@ -475,8 +475,8 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=4] frames, \
     cdef unsigned int avg_std
 
     # Convert frames and compressed to grayscale
-    cdef np.ndarray[cnp.uint8_t, ndim=3] frames_new = np.empty((frames.shape[0], frames.shape[1], frames.shape[2]), dtype=np.uint8)
-    cdef np.ndarray[cnp.uint8_t, ndim=3] compressed_new = np.empty((compressed.shape[0], compressed.shape[1], compressed.shape[2]), dtype=np.uint8)
+    cdef np.ndarray[np.uint8_t, ndim=3] frames_new = np.empty((frames.shape[0], frames.shape[1], frames.shape[2]), dtype=np.uint8)
+    cdef np.ndarray[np.uint8_t, ndim=3] compressed_new = np.empty((compressed.shape[0], compressed.shape[1], compressed.shape[2]), dtype=np.uint8)
 
     frames_new = convert_to_grayscale(frames)
     compressed_new = convert_to_grayscale(compressed)
