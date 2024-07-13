@@ -241,7 +241,10 @@ class LiveViewer(multiprocessing.Process):
                 
                 # Load the image
                 try:
-                    img = loadImage(self.dir_path)
+                    if self.config.keep_color:
+                        img = loadImage(self.dir_path, 0)
+                    else:
+                        img = loadImage(self.dir_path)
                     text = ""
                     
                 except:

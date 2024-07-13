@@ -423,7 +423,25 @@ def find3DLines(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, start_time, config
     return line_list
 
 
+def convert_to_grayscale(np.ndarray[np.uint8_t, ndim=4] frames):
+    # Assuming frames shape is (num_frames, height, width, 3) for RGB channels
+    cdef int num_frames = frames.shape[0]
+    cdef int height = frames.shape[1]
+    cdef int width = frames.shape[2]
+    cdef np.ndarray[np.uint8_t, ndim=3] grayscale_frames = np.empty((num_frames, height, width), dtype=np.uint8)
 
+    cdef int i, j, k
+    cdef float grayscale_value
+
+    for i in range(num_frames):
+        for j in range(height):
+            for k in range(width):
+                grayscale_value = (0.2989 * frames[i, j, k, 0] +
+                                   0.5870 * frames[i, j, k, 1] +
+                                   0.1140 * frames[i, j, k, 2])
+                grayscale_frames[i, j, k] = <np.uint8_t>grayscale_value
+
+    return grayscale_frames
 
 
 @cython.boundscheck(False)
@@ -457,17 +475,16 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=4] frames, \
     cdef unsigned int avg_std
 
     # Convert frames and compressed to grayscale
-    cdef int i
-    for i in range(frames.shape[0]):
-        frames[i] = np.round(np.dot(frames[i,...,:4], [0.2989, 0.5870, 0.1140])).astype(np.uint8)
+    cdef np.ndarray[cnp.uint8_t, ndim=3] frames_new = np.empty((frames.shape[0], frames.shape[1], frames.shape[2]), dtype=np.uint8)
+    cdef np.ndarray[cnp.uint8_t, ndim=3] compressed_new = np.empty((compressed.shape[0], compressed.shape[1], compressed.shape[2]), dtype=np.uint8)
 
-    for i in range(compressed.shape[0]):
-        compressed[i] = np.round(np.dot(compressed[i,...,:4], [0.2989, 0.5870, 0.1140])).astype(np.uint8)
+    frames_new = convert_to_grayscale(frames)
+    compressed_new = convert_to_grayscale(compressed)
 
     # Calculate the shapes of the subsamples image
-    cdef shape_z = frames.shape[0]
-    cdef shape_y = int(floor(frames.shape[1]//f))
-    cdef shape_x = int(floor(frames.shape[2]//f))
+    cdef shape_z = frames_new.shape[0]
+    cdef shape_y = int(floor(frames_new.shape[1]//f))
+    cdef shape_x = int(floor(frames_new.shape[2]//f))
     
     # Init subsampled image arrays
     cdef np.ndarray[np.int32_t, ndim=3] count = np.zeros((shape_z, shape_y, shape_x), np.int32)
@@ -476,17 +493,17 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=4] frames, \
     cdef np.ndarray[UINT16_TYPE_t, ndim=1] pointsz = np.zeros((shape_z*shape_y*shape_x), UINT16_TYPE)
 
     # Extract frames dimensions 
-    nframes = frames.shape[0]
-    y_size = frames.shape[1]
-    x_size = frames.shape[2]
+    nframes = frames_new.shape[0]
+    y_size = frames_new.shape[1]
+    x_size = frames_new.shape[2]
     
     for y in range(y_size):
         for x in range(x_size):
 
-            max_val = compressed[0, y, x]
+            max_val = compressed_new[0, y, x]
 
             # Compute the threshold limit
-            avg_std = int(float(compressed[2, y, x]) + k1*float(compressed[3, y, x])) + j1
+            avg_std = int(float(compressed_new[2, y, x]) + k1*float(compressed_new[3, y, x])) + j1
 
             # Make sure the threshold limit is not above the maximum possible value
             if avg_std > 255:
@@ -495,7 +512,7 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=4] frames, \
             if ((max_val > min_level) and (max_val >= avg_std)):
 
                 # Extract frame of maximum intensity
-                n = compressed[1, y, x]
+                n = compressed_new[1, y, x]
                 
                 # Subsample frame in f*f squares
                 y2 = int(floor(y//f))

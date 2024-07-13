@@ -122,7 +122,10 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
 
 
     # Apply a mean filter to the image to reduce noise
-    data = ndimage.filters.convolve(data, weights=np.full((2, 2), 1.0/4))
+    if not config.keep_color:
+        data = ndimage.filters.convolve(data, weights=np.full((2, 2), 1.0/4))
+    else:
+        data = ndimage.filters.convolve(data, weights=np.full((2, 2, 3), 1.0/4))
 
     # Locate local maxima on the image
     data_max = filters.maximum_filter(data, neighborhood_size)
