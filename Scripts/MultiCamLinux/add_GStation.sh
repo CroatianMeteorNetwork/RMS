@@ -15,6 +15,9 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #!/bin/bash
 #
+# Version 1.6   - added logic to prevent running this script on a Raspberry Pi
+#                 added by Peter E., June 2024
+#
 # Version 1.5   - added support for non English locales where user user directories may not include a directory named Desktop
 #                 i.e. this enables support of RMS on a non English distro install
 #
@@ -28,6 +31,22 @@
 # Changes	- added station arguments to  Launch scripts
 #		- changed desktop links  for StartCapture to symbolic links of the scripts within .config/autostart
 # 
+# 
+# Prevent running this script on a Raspberry Pi, because 
+#  add_Pi_Station.sh should be used to add cameras on a Pi.
+file=/sys/firmware/devicetree/base/model
+if [[ -f "$file" ]]; then
+    echo ""
+    contents=$(tr -d '\0' < $file)
+    echo "The file $file reads: $contents"
+    if [[ $contents == 'Raspberry'* ]]; then
+	echo "The add_GStation.sh script should not be used on Raspberry Pi."
+	echo "Please use add_Pi_Station.sh to add cameras on a Pi5."
+	echo ""
+	exit 1
+    fi
+fi
+
 # Check if the user's desktop directory environment variable is set
 if [ -n "$xdg-user-dir DESKTOP" ]; then
     Desktop=`xdg-user-dir DESKTOP`
