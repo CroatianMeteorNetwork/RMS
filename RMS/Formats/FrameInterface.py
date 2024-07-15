@@ -994,6 +994,9 @@ class InputTypeVideo(InputType):
             frame = Image.binImage(frame, self.config.detection_binning_factor,
                                    self.config.detection_binning_method)
             
+        # Convert the video frame to uint8
+        frame = frame.astype(np.uint8)
+            
         return frame
 
 
