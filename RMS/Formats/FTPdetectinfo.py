@@ -146,10 +146,10 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
                     if mag is None:
                         mag = 10.0
 
-                    detection_line_str = "{:06.4f} {:07.2f} {:07.2f} {:08.4f} {:+08.4f} {:08.4f} {:+08.4f} {:06d} {:.2f}"
+                    detection_line_str = "{:09.4f} {:07.2f} {:07.2f} {:08.6f} {:+08.6f} {:08.6f} {:+08.6f} {:06d} {:.2f}"
 
                     ftpdetect_file.write(detection_line_str.format(round(frame, 4), round(x, 2), \
-                        round(y, 2), round(ra, 4), round(dec, 4), round(azim, 4), round(elev, 4), \
+                        round(y, 2), round(ra, 6), round(dec, 6), round(azim, 6), round(elev, 6), \
                         int(level), round(mag, 2)) + "\n")
 
                 else:
@@ -171,7 +171,7 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
                     if level is None:
                         level = 1
 
-                    ftpdetect_file.write("{:06.4f} {:07.2f} {:07.2f}".format(round(frame, 4), round(x, 2), \
+                    ftpdetect_file.write("{:09.4f} {:07.2f} {:07.2f}".format(round(frame, 4), round(x, 2), \
                         round(y, 2)) + " 000.00 000.00 000.00 000.00 " + "{:06d}".format(int(level)) \
                         + " 0.00\n")
 
