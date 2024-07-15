@@ -300,9 +300,8 @@ def thresholdFF(ff, k1, j1, mask=None, mask_ave_bright=False):
 
 
 
-@np.vectorize
 def gammaCorrection(intensity, gamma, bp=0, wp=255):
-    """ Correct the given intensity for gamma. 
+    """ Correct the given intensity for gamma on individual values.
         
     Arguments:
         intensity: [int] Pixel intensity
@@ -332,8 +331,8 @@ def gammaCorrection(intensity, gamma, bp=0, wp=255):
     return out
 
 
-def gammaCorrectionImage(intensity, gamma, **kwargs):
-    """ Correct the given image for gamma. 
+def gammaCorrectionImage(intensity, gamma, bp=0, wp=255):
+    """ Correct the given image for gamma on numpy arrays (faster than the single pixel function).
     """
 
     # If the intensity is a numpy array, save the original type
@@ -345,8 +344,15 @@ def gammaCorrectionImage(intensity, gamma, **kwargs):
         intensity = intensity.astype(np.float32)
 
     
+    # Clip intentities < 0 to 0
+    intensity[intensity < 0] = 0
+
     # Apply the gamma correction
-    out = gammaCorrection(intensity, gamma, **kwargs)
+    x = (intensity - bp)/(wp - bp)
+
+    # Scale the gamma to the given range
+    out = np.zeros_like(intensity) + bp
+    out[x > 0] = bp + (wp - bp)*(x[x > 0]**(1.0/gamma))
 
 
     # If the intensity was a numpy array, convert it back to the original type
