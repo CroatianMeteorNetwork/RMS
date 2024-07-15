@@ -48,6 +48,7 @@ from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
 class QFOVinputDialog(QtWidgets.QDialog):
 
     lenses = "none"
+    widgets_720p = [] # list of widgets options compatible with 720p resolution
 
     def __init__(self, *args, **kwargs):
         super(QFOVinputDialog, self).__init__(*args, **kwargs)
@@ -77,7 +78,6 @@ class QFOVinputDialog(QtWidgets.QDialog):
         rot_validator.setNotation(QtGui.QDoubleValidator.StandardNotation)
         self.rot_edit.setValidator(rot_validator)
 
-
         layout = QtWidgets.QVBoxLayout(self)
 
         layout.addWidget(QtWidgets.QLabel("Please enter FOV centre (degrees),\nAzimuth +E of due N\nRotation from vertical"))
@@ -90,31 +90,44 @@ class QFOVinputDialog(QtWidgets.QDialog):
         formlayout.addRow("Rotation", self.rot_edit)
         layout.addLayout(formlayout)
 
-        groupbox = QtWidgets.QGroupBox("Reference lenses:")
+        # Reference lenses options
+
+        groupbox = QtWidgets.QGroupBox("Reference lenses and resolution:")
         groupbox.setCheckable(False)
         layout.addWidget(groupbox)
 
         vbox = QtWidgets.QVBoxLayout()
         groupbox.setLayout(vbox)
 
-        fov = QtWidgets.QRadioButton("None/Other")
+        fov = QtWidgets.QRadioButton("None (unknown or unlisted)")
         fov.lenses = "none"
         fov.setChecked(True)
         fov.toggled.connect(self.lensesSelected)
         vbox.addWidget(fov)
 
-        fov = QtWidgets.QRadioButton("M16 4mm")
-        fov.lenses = "4mm"
-        fov.toggled.connect(self.lensesSelected)
+        fov = self.create_reference_lenses_option("4mm-720p", "M16 4mm (720p)")
         vbox.addWidget(fov)
+        self.widgets_720p.append(fov)
 
-        fov = QtWidgets.QRadioButton("M16 6mm")
-        fov.toggled.connect(self.lensesSelected)
-        fov.lenses = "6mm"
+        fov = self.create_reference_lenses_option("6mm-720p", "M16 6mm (720p)")
         vbox.addWidget(fov)
+        self.widgets_720p.append(fov)
 
         layout.addWidget(buttonBox)
         self.setLayout(layout)
+
+    def create_reference_lenses_option(self, lenses_id, lenses_description):
+        fov = QtWidgets.QRadioButton(lenses_description)
+        fov.lenses = lenses_id
+        fov.setEnabled(False)
+        fov.toggled.connect(self.lensesSelected)
+        return fov
+
+    def set_resolution(self, width, height):
+        # Enable reference lenses options compatible with 720p
+        if width == 1280 and height == 720:
+            for w in self.widgets_720p:
+                w.setEnabled(True)
 
     def lensesSelected(self):
         radioButton = self.sender()
@@ -3856,6 +3869,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Get FOV centre
         d = QFOVinputDialog(self)
+        d.set_resolution(self.config.width, self.config.height)
         if d.exec_():
              data = d.getInputs()
         else:
@@ -4097,8 +4111,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateLeftLabels()
 
     def setReferenceLens(self):
-        if self.lenses == "4mm":
-            print("Configuring platepar for 4mm lenses")
+        if self.lenses == "4mm-720p":
+            print("Configuring platepar for 4mm lenses with sensor resolution 720p")
             self.platepar.distortion_type = "radial7-odd"
             self.platepar.fov_h = 88.48
             self.platepar.fov_v = 47.05
@@ -4176,8 +4190,8 @@ class PlateTool(QtWidgets.QMainWindow):
                                                     0.0,
                                                     0.0
                                                 ])
-        elif self.lenses == "6mm":
-            print("Configuring platepar for 6mm lenses")
+        elif self.lenses == "6mm-720p":
+            print("Configuring platepar for 6mm lenses with sensor resolution 720p")
             self.platepar.distortion_type = "radial5-odd"
             self.platepar.fov_h = 53.71
             self.platepar.fov_v = 30.01
