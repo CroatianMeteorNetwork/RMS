@@ -260,7 +260,6 @@ class Config:
         
         ##### Capture
         self.deviceID = 0
-        self.force_v4l2 = False
         self.uyvy_pixelformat = False
 
         self.width = 1280
@@ -300,8 +299,7 @@ class Config:
 
         # Extra space to leave on disk for the archive (in GB) after the captured files have been taken
         #   into account
-        self.extra_space_gb = 3
-
+        self.extra_space_gb = 6
 
         # Enable/disable showing maxpixel on the screen (off by default)
         self.live_maxpixel_enable = False
@@ -366,9 +364,6 @@ class Config:
         self.event_monitor_remote_dir = "files/event_monitor"
         self.event_monitor_check_interval = 30
         self.event_monitor_check_interval_fast = 5
-
-
-
 
         ##### Weave compilation arguments
         self.extra_compile_args = ["-O3"]
@@ -799,8 +794,6 @@ def parseSystem(config, parser):
 
     if parser.has_option(section, "public_elevation"):
         config.p_elevation = parser.getfloat(section, "public_elevation")
-
-
 
 
 def parseCapture(config, parser):
