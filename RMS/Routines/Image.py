@@ -316,6 +316,14 @@ def gammaCorrection(intensity, gamma, bp=0, wp=255):
         [float] Gamma corrected image intensity.
     """
 
+    # If the intensity is a numpy array, save the original type
+    if isinstance(intensity, np.ndarray):
+        orig_type = intensity.dtype
+
+        # Convert the intensity to float if it's not already
+        intensity = intensity.astype(np.float32)
+
+
     if intensity < 0:
         intensity = 0
 
@@ -324,10 +332,16 @@ def gammaCorrection(intensity, gamma, bp=0, wp=255):
     if x > 0:
 
         # Compute the corrected intensity
-        return bp + (wp - bp)*(x**(1.0/gamma))
+        out = bp + (wp - bp)*(x**(1.0/gamma))
 
     else:
-        return bp
+        out = bp
+
+    # If the intensity was a numpy array, convert it back to the original type
+    if isinstance(intensity, np.ndarray):
+        out = out.astype(orig_type)
+
+    return out
 
 
 
