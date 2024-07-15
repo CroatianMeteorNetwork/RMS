@@ -300,7 +300,6 @@ def thresholdFF(ff, k1, j1, mask=None, mask_ave_bright=False):
 
 
 
-@np.vectorize
 def gammaCorrection(intensity, gamma, bp=0, wp=255):
     """ Correct the given intensity for gamma. 
         
