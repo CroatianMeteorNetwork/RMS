@@ -358,6 +358,8 @@ def gammaCorrectionImage(intensity, gamma, **kwargs):
         # Convert the intensity back to the original type
         out = out.astype(orig_type)
 
+    return out
+
 
 def applyBrightnessAndContrast(img, brightness, contrast):
     """ Applies brightness and contrast corrections to the image. 
