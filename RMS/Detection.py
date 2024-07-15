@@ -1019,9 +1019,9 @@ def thresholdAndCorrectGammaFF(img_handle, config, mask):
 
 
     # Gamma correct image files
-    maxpixel_gamma_corr = Image.gammaCorrection(img_handle.ff.maxpixel, config.gamma)
-    avepixel_gamma_corr = Image.gammaCorrection(img_handle.ff.avepixel, config.gamma)
-    stdpixel_gamma_corr = Image.gammaCorrection(img_handle.ff.stdpixel, config.gamma)
+    maxpixel_gamma_corr = Image.gammaCorrectionImage(img_handle.ff.maxpixel, config.gamma)
+    avepixel_gamma_corr = Image.gammaCorrectionImage(img_handle.ff.avepixel, config.gamma)
+    stdpixel_gamma_corr = Image.gammaCorrectionImage(img_handle.ff.stdpixel, config.gamma)
 
     # Make sure there are no zeros in standard deviation
     stdpixel_gamma_corr[stdpixel_gamma_corr == 0] = 1
@@ -1446,7 +1446,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
                         # Apply gamma correction
                         if config.gamma != 1.0:
-                            fr_img = Image.gammaCorrection(fr_img, config.gamma)
+                            fr_img = Image.gammaCorrectionImage(fr_img, config.gamma)
 
                         # Subtract average
                         max_avg_corrected = Image.applyDark(fr_img, img_handle.ff.avepixel)

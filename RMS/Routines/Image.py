@@ -300,6 +300,7 @@ def thresholdFF(ff, k1, j1, mask=None, mask_ave_bright=False):
 
 
 
+@np.vectorize
 def gammaCorrection(intensity, gamma, bp=0, wp=255):
     """ Correct the given intensity for gamma. 
         
@@ -315,14 +316,6 @@ def gammaCorrection(intensity, gamma, bp=0, wp=255):
         [float] Gamma corrected image intensity.
     """
 
-    # If the intensity is a numpy array, save the original type
-    if isinstance(intensity, np.ndarray):
-        orig_type = intensity.dtype
-
-        # Convert the intensity to float if it's not already
-        intensity = intensity.astype(np.float32)
-
-
     if intensity < 0:
         intensity = 0
 
@@ -336,17 +329,34 @@ def gammaCorrection(intensity, gamma, bp=0, wp=255):
     else:
         out = bp
 
-    # If the intensity was a numpy array, convert it back to the original type
+    return out
+
+
+def gammaCorrectionImage(intensity, gamma, **kwargs):
+    """ Correct the given image for gamma. 
+    """
+
+    # If the intensity is a numpy array, save the original type
+    orig_type = None
     if isinstance(intensity, np.ndarray):
+        orig_type = intensity.dtype
+
+        # Convert the intensity to float if it's not already
+        intensity = intensity.astype(np.float32)
+
+    
+    # Apply the gamma correction
+    out = gammaCorrection(intensity, gamma, **kwargs)
+
+
+    # If the intensity was a numpy array, convert it back to the original type
+    if orig_type is not None:
 
         # Clip the range to the range of the original type
         out = np.clip(out, 0, np.iinfo(orig_type).max)
         
         # Convert the intensity back to the original type
         out = out.astype(orig_type)
-
-    return out
-
 
 
 def applyBrightnessAndContrast(img, brightness, contrast):

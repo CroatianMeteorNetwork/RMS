@@ -4392,7 +4392,7 @@ class PlateTool(QtWidgets.QMainWindow):
         img_crop = self.img.data[x_min:x_max, y_min:y_max]
 
         # Perform gamma correction
-        img_crop = Image.gammaCorrection(img_crop, self.config.gamma)
+        img_crop = Image.gammaCorrectionImage(img_crop, self.config.gamma)
 
         ######################################################################################################
 

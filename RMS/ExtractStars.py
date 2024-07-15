@@ -356,10 +356,10 @@ def fitPSF(ff, avepixel_mean, x2, y2, config):
             continue
 
         # Gamma correct the star segment
-        star_seg_crop = Image.gammaCorrection(star_seg_crop.astype(np.float32), config.gamma)
+        star_seg_crop = Image.gammaCorrectionImage(star_seg_crop.astype(np.float32), config.gamma)
 
         # Correct the background for gamma
-        bg_corrected = Image.gammaCorrection(offset, config.gamma)
+        bg_corrected = Image.gammaCorrectionImage(offset, config.gamma)
 
         # Subtract the background from the star segment and compute the total intensity
         intensity = np.sum(star_seg_crop - bg_corrected)
