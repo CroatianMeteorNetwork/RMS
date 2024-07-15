@@ -270,6 +270,12 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
     # Limit the plot to +/- 2 frames in the Y axis
     ax_res.set_ylim(-2/fps, 2/fps)
 
+    # Limit the plot to timings (all +/- 5% of the total duration on each size)
+    total_duration_hrs = (np.max(timestamps_np) - np.min(timestamps_np)).total_seconds()/3600
+    min_timestamp = np.min(timestamps_np) - datetime.timedelta(hours=0.05*total_duration_hrs)
+    max_timestamp = np.max(timestamps_np) + datetime.timedelta(minutes=0.05*total_duration_hrs)
+    ax_res.set_xlim(min_timestamp, max_timestamp)
+
     # Draw a horizontal line at 0
     ax_res.axhline(y=0, color='lime', linestyle='-', zorder=4)
 
