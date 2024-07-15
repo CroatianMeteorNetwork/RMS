@@ -339,6 +339,11 @@ def gammaCorrection(intensity, gamma, bp=0, wp=255):
 
     # If the intensity was a numpy array, convert it back to the original type
     if isinstance(intensity, np.ndarray):
+
+        # Clip the range to the range of the original type
+        out = np.clip(out, 0, np.iinfo(orig_type).max)
+        
+        # Convert the intensity back to the original type
         out = out.astype(orig_type)
 
     return out
