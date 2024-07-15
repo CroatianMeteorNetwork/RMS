@@ -810,6 +810,7 @@ def parseSystem(config, parser):
     if parser.has_option(section, "event_monitor_db_name"):
         config.event_monitor_db_name = parser.get(section, "event_monitor_db_name")
 
+
     if parser.has_option(section, "public_latitude"):
         config.p_latitude = parser.getfloat(section, "public_latitude")
 
