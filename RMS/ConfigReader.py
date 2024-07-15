@@ -230,12 +230,17 @@ class Config:
 
         ##### System
         self.stationID = "XX0001"
+
+        # Accurate coordinates of the camera (private)
         self.latitude = 0
         self.longitude = 0
         self.elevation = 0
         self.cams_code = 0
 
-
+        # Public low-accuracy coordinates (shown on the GMN website)
+        self.pub_latitude = None
+        self.pub_longitude = None
+        self.pub_elevation = None
 
         # Show this camera on the GMN weblog
         self.weblog_enable = True
@@ -308,7 +313,7 @@ class Config:
         # days of logfiles to keep
         self.logdays_to_keep = 30
 
-        # ArchDirs and bzs to keep 
+        # ArchDirs and bzs to keep
         # keep this many ArchDirs. Zero means keep them all
         self.arch_dirs_to_keep = 20
         # keep this many compressed ArchDirs. Zero means keep them all
@@ -808,6 +813,16 @@ def parseSystem(config, parser):
 
     if parser.has_option(section, "event_monitor_db_name"):
         config.event_monitor_db_name = parser.get(section, "event_monitor_db_name")
+
+
+    if parser.has_option(section, "public_latitude"):
+        config.pub_latitude = parser.getfloat(section, "public_latitude")
+
+    if parser.has_option(section, "public_longitude"):
+        config.pub_longitude = parser.getfloat(section, "public_longitude")
+
+    if parser.has_option(section, "public_elevation"):
+        config.pub_elevation = parser.getfloat(section, "public_elevation")
 
 
 def parseCapture(config, parser):
