@@ -234,8 +234,9 @@ class Config:
         self.longitude = 0
         self.elevation = 0
         self.cams_code = 0
-
-
+        self.p_latitude = None
+        self.p_longitude = None
+        self.p_elevation = None
 
         # Show this camera on the GMN weblog
         self.weblog_enable = True
@@ -259,9 +260,7 @@ class Config:
         
         ##### Capture
         self.deviceID = 0
-
-        # Media backend to use for capture. Options are gst, cv2, or v4l2
-        self.media_backend = "gst"
+        self.force_v4l2 = False
         self.uyvy_pixelformat = False
 
         self.width = 1280
@@ -269,15 +268,6 @@ class Config:
         self.width_device = self.width
         self.height_device = self.height
         self.fps = 25.0
-
-        # Camera buffer in number of frames. This will applied a buffer/fps correction to
-        # the timestamps when in GStreamer Standalone mode
-        self.camera_buffer = 1
-
-        # Camera latency in seconds. This will applied an offset to the timestamps
-        # when in GStreamer Standalone mode
-        self.camera_latency = 0.05
-
 
         self.report_dropped_frames = False
 
@@ -308,15 +298,10 @@ class Config:
         # days of logfiles to keep
         self.logdays_to_keep = 30
 
-        # ArchDirs and bzs to keep 
-        # keep this many ArchDirs. Zero means keep them all
-        self.arch_dirs_to_keep = 20
-        # keep this many compressed ArchDirs. Zero means keep them all
-        self.bz2_files_to_keep = 20
-
         # Extra space to leave on disk for the archive (in GB) after the captured files have been taken
         #   into account
-        self.extra_space_gb = 6
+        self.extra_space_gb = 3
+
 
         # Enable/disable showing maxpixel on the screen (off by default)
         self.live_maxpixel_enable = False
@@ -783,7 +768,6 @@ def parseSystem(config, parser):
     if parser.has_option(section, "external_script_run"):
         config.external_script_run = parser.getboolean(section, "external_script_run")
 
-
     if parser.has_option(section, "auto_reprocess_external_script_run"):
         config.auto_reprocess_external_script_run = parser.getboolean(section, \
             "auto_reprocess_external_script_run")
@@ -798,16 +782,25 @@ def parseSystem(config, parser):
     if parser.has_option(section, "external_function_name"):
         config.external_function_name = parser.get(section, "external_function_name")
 
-
     if parser.has_option(section, "reboot_after_processing"):
         config.reboot_after_processing = parser.getboolean(section, "reboot_after_processing")
 
     if parser.has_option(section, "reboot_lock_file"):
         config.reboot_lock_file = parser.get(section, "reboot_lock_file")
 
-
     if parser.has_option(section, "event_monitor_db_name"):
         config.event_monitor_db_name = parser.get(section, "event_monitor_db_name")
+
+    if parser.has_option(section, "public_latitude"):
+        config.p_latitude = parser.getfloat(section, "public_latitude")
+
+    if parser.has_option(section, "public_longitude"):
+        config.p_longitude = parser.getfloat(section, "public_longitude")
+
+    if parser.has_option(section, "public_elevation"):
+        config.p_elevation = parser.getfloat(section, "public_elevation")
+
+
 
 
 def parseCapture(config, parser):
@@ -836,13 +829,7 @@ def parseCapture(config, parser):
         config.log_dir = parser.get(section, "log_dir")
 
     if parser.has_option(section, "logdays_to_keep"):
-        config.logdays_to_keep = int(parser.get(section, "logdays_to_keep"))
-
-    if parser.has_option(section, "arch_dirs_to_keep"):
-        config.arch_dirs_to_keep = int(parser.get(section, "arch_dirs_to_keep"))
-
-    if parser.has_option(section, "bz2_files_to_keep"):
-        config.bz2_files_to_keep = int(parser.get(section, "bz2_files_to_keep"))
+        config.logdays_to_keep = parser.get(section, "logdays_to_keep")
 
     if parser.has_option(section, "captured_dir"):
         config.captured_dir = parser.get(section, "captured_dir")
@@ -931,14 +918,8 @@ def parseCapture(config, parser):
         # If it fails, it's probably a RTSP stream
         pass
 
-    if parser.has_option(section, "media_backend"):
-        config.media_backend = parser.get(section, "media_backend")
-
     if parser.has_option(section, "force_v4l2"):
-        force_v4l2 = parser.getboolean(section, "force_v4l2")
-
-        if force_v4l2:
-            config.media_backend = "v4l2"
+        config.force_v4l2 = parser.getboolean(section, "force_v4l2")
 
     if parser.has_option(section, "uyvy_pixelformat"):
         config.uyvy_pixelformat = parser.getboolean(section, "uyvy_pixelformat")
@@ -951,12 +932,6 @@ def parseCapture(config, parser):
             config.fps = 1000000
             print()
             print("WARNING! The FPS has been limited to 1,000,000!")
-
-    if parser.has_option(section, "camera_buffer"):
-        config.camera_buffer = parser.getint(section, "camera_buffer")
-
-    if parser.has_option(section, "camera_latency"):
-        config.camera_latency = parser.getfloat(section, "camera_latency")
 
     if parser.has_option(section, "ff_format"):
         config.ff_format = parser.get(section, "ff_format")
