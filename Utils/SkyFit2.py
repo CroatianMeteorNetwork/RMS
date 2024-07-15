@@ -1429,22 +1429,31 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
 
-    def updateStars(self):
-        """ Updates only the stars, including catalog stars, calstars and paired stars """
+    def updateStars(self, only_update_catalog=False):
+        """ Updates only the stars, including catalog stars, calstars and paired stars.
+         
+        Keyword arguments:
+            only_update_catalog: [bool] If True, only the catalog stars will be updated. (default: False)
 
-        # Draw stars that were paired in picking mode
-        self.updatePairedStars()
-        self.onGridChanged()  # for ease of use
+        """
 
-        # Draw stars detected on this image
-        if self.draw_calstars:
-            self.updateCalstars()
+        if not only_update_catalog:
+
+            # Draw stars that were paired in picking mode
+            self.updatePairedStars()
+            self.onGridChanged()  # for ease of use
+
+            # Draw stars detected on this image
+            if self.draw_calstars:
+                self.updateCalstars()
 
 
-
-
-        # Get the Julian date of the current image
-        ff_jd = date2JD(*self.img_handle.currentTime())
+        # If in skyfit mode, take the time of the chunk
+        # If in manual reduction mode, take the time of the current frame
+        if self.mode == 'skyfit':
+            ff_jd = date2JD(*self.img_handle.currentTime())
+        else:
+            ff_jd = date2JD(*self.img_handle.currentFrameTime())
 
         # Update the geo points
         if self.geo_points_obj is not None:
@@ -2117,6 +2126,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img.loadImage(self.mode, self.img_type_flag)
 
             self.updatePicks()
+            self.updateStars(only_update_catalog=True)
             self.drawPhotometryColoring()
             self.showFRBox()
 
