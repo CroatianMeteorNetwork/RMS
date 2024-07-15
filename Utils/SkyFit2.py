@@ -2377,6 +2377,10 @@ class PlateTool(QtWidgets.QMainWindow):
         if not hasattr(self, "beginning_time"):
             self.beginning_time = beginning_time
 
+        # If the previous beginning time is None and the new one is not, update the beginning time
+        if (self.beginning_time is None) and (beginning_time is not None):
+            self.beginning_time = beginning_time
+
         if not hasattr(self, "pick_list"):
             self.pick_list = {}
 
