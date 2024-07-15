@@ -784,6 +784,7 @@ def parseSystem(config, parser):
     if parser.has_option(section, "external_script_run"):
         config.external_script_run = parser.getboolean(section, "external_script_run")
 
+
     if parser.has_option(section, "auto_reprocess_external_script_run"):
         config.auto_reprocess_external_script_run = parser.getboolean(section, \
             "auto_reprocess_external_script_run")
@@ -798,11 +799,13 @@ def parseSystem(config, parser):
     if parser.has_option(section, "external_function_name"):
         config.external_function_name = parser.get(section, "external_function_name")
 
+
     if parser.has_option(section, "reboot_after_processing"):
         config.reboot_after_processing = parser.getboolean(section, "reboot_after_processing")
 
     if parser.has_option(section, "reboot_lock_file"):
         config.reboot_lock_file = parser.get(section, "reboot_lock_file")
+
 
     if parser.has_option(section, "event_monitor_db_name"):
         config.event_monitor_db_name = parser.get(section, "event_monitor_db_name")
