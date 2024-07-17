@@ -503,7 +503,7 @@ class PlateTool(QtWidgets.QMainWindow):
             sys.exit()
 
         else:
-            print('Star catalog loaded!')
+            print('Star catalog loaded: ', self.config.star_catalog_file)
 
 
         self.calstars = {}
