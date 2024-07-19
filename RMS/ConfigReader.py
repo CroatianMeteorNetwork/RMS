@@ -265,6 +265,9 @@ class Config:
         ##### Capture
         self.deviceID = 0
 
+        # Transport Layer Protocol: tcp or udp
+        self.protocol = "tcp"
+
         # Media backend to use for capture. Options are gst, cv2, or v4l2
         self.media_backend = "gst"
         self.uyvy_pixelformat = False
@@ -946,6 +949,9 @@ def parseCapture(config, parser):
         # If it fails, it's probably a RTSP stream
         pass
 
+    if parser.has_option(section, "protocol"):
+        config.protocol = parser.get(section, "protocol")
+    
     if parser.has_option(section, "media_backend"):
         config.media_backend = parser.get(section, "media_backend")
 
