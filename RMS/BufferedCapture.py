@@ -516,7 +516,7 @@ class BufferedCapture(Process):
                         ).format(device_str, conversion)
 
         log.debug("GStreamer pipeline string: {}".format(pipeline_str))
-        
+
         self.pipeline = Gst.parse_launch(pipeline_str)
 
         self.pipeline.set_state(Gst.State.PLAYING)
