@@ -122,8 +122,8 @@ def archiveFieldsums(dir_path):
     # Find all fieldsum FS files
     for file_name in os.listdir(dir_path):
 
-        # Take all field sum files
-        if ('FS' in file_name) and ('fieldsum' in file_name):
+        # Take all field sum .bin files
+        if file_name.startswith("FS") and file_name.endswith(".bin") and ('fieldsum' in file_name):
             fieldsum_files.append(file_name)
 
 
