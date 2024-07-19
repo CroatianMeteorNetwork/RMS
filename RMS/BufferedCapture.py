@@ -512,8 +512,7 @@ class BufferedCapture(Process):
 
         pipeline_str = ("{} ! queue leaky=downstream max-size-buffers=100 max-size-bytes=0 max-size-time=0 ! "
                         "{} ! queue max-size-buffers=100 max-size-bytes=0 max-size-time=0 ! "
-                        "appsink max-buffers=100 drop=true sync=0 name=appsink"
-                        ).format(device_str, conversion)
+                        "appsink max-buffers=100 drop=true sync=0 name=appsink").format(device_str, conversion)
 
         log.debug("GStreamer pipeline string: {}".format(pipeline_str))
 
