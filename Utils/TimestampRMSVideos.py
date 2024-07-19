@@ -81,6 +81,10 @@ def loadFrameTimeData(fs_archive):
         for member in archive.getmembers():
             if member.isfile():
                 file_name = member.name.replace("./", "")
+
+                # Make sure the file ends .bin
+                if not file_name.endswith(".bin"):
+                    continue
             
                 # Extract the frame number from the file name
                 fn_data = file_name.split("_")
