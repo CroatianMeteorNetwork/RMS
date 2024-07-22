@@ -5584,7 +5584,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 img_h = self.config.height
 
             else:
-                img_h = self.img.data.shape[0]
+                img_h = self.img.data.shape[1]
 
             # Compute the corrected frame time
             frame_no = RollingShutterCorrection.correctRollingShutterTemporal(frame, pick['y_centroid'], img_h)
