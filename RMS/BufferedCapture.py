@@ -520,6 +520,7 @@ class BufferedCapture(Process):
         log.debug("GStreamer pipeline string: {}".format(pipeline_str))
 
         # Set the pipeline to PLAYING state with retries
+        attempt = 0
         for attempt in range(max_retries):
             
             # Parse and create the pipeline
