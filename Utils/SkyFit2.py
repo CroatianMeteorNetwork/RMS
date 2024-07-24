@@ -9,6 +9,7 @@ import cProfile
 import json
 import datetime
 import collections
+import glob
 
 import numpy as np
 import matplotlib
@@ -48,7 +49,7 @@ from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
 class QFOVinputDialog(QtWidgets.QDialog):
 
     lenses = "none"
-    widgets_720p = [] # list of widgets options compatible with 720p resolution
+    lenses_vbox = None
 
     def __init__(self, *args, **kwargs):
         super(QFOVinputDialog, self).__init__(*args, **kwargs)
@@ -96,38 +97,57 @@ class QFOVinputDialog(QtWidgets.QDialog):
         groupbox.setCheckable(False)
         layout.addWidget(groupbox)
 
-        vbox = QtWidgets.QVBoxLayout()
-        groupbox.setLayout(vbox)
+        self.lenses_vbox = QtWidgets.QVBoxLayout()
+        groupbox.setLayout(self.lenses_vbox)
 
         fov = QtWidgets.QRadioButton("None (unknown or unlisted)")
         fov.lenses = "none"
         fov.setChecked(True)
         fov.toggled.connect(self.lensesSelected)
-        vbox.addWidget(fov)
-
-        fov = self.create_reference_lenses_option("4mm-720p", "M16 4mm (720p)")
-        vbox.addWidget(fov)
-        self.widgets_720p.append(fov)
-
-        fov = self.create_reference_lenses_option("6mm-720p", "M16 6mm (720p)")
-        vbox.addWidget(fov)
-        self.widgets_720p.append(fov)
+        self.lenses_vbox.addWidget(fov)
 
         layout.addWidget(buttonBox)
         self.setLayout(layout)
+
+    def load_lenses_templates(self, width, height):
+        templates = []
+        templates_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../share/platepar_templates/'))
+        print('Loading platepar templates from: ' + templates_dir)
+
+        # locate platepar templates, parse them and sort by description
+        for template_file in glob.glob('template_*.cal', root_dir = templates_dir):
+            template_path = os.path.join(templates_dir, template_file)
+            f = open(template_path)
+            data = json.load(f)
+
+            if 'template_metadata' not in data or \
+                     'description' not in data['template_metadata']:
+                print('WARNING: Missing or invalid "template_metadata" section in file ' + template_file)
+                continue
+
+            templates.append({
+                       'description' : data['template_metadata']['description'],
+                       'X_res' : data['X_res'],
+                       'Y_res' : data['Y_res'],
+                       'file_name' : template_path
+                      })
+        templates.sort(key=lambda x: x['description'])
+
+        # add lenses options to the dialog box
+        for template in templates:
+            fov = self.create_reference_lenses_option(template['file_name'], template['description'])
+
+            # enable option if resolution is compatible
+            if template['X_res'] == width and template['Y_res'] == height:
+                fov.setEnabled(True)
 
     def create_reference_lenses_option(self, lenses_id, lenses_description):
         fov = QtWidgets.QRadioButton(lenses_description)
         fov.lenses = lenses_id
         fov.setEnabled(False)
         fov.toggled.connect(self.lensesSelected)
+        self.lenses_vbox.addWidget(fov)
         return fov
-
-    def set_resolution(self, width, height):
-        # Enable reference lenses options compatible with 720p
-        if width == 1280 and height == 720:
-            for w in self.widgets_720p:
-                w.setEnabled(True)
 
     def lensesSelected(self):
         radioButton = self.sender()
@@ -3869,13 +3889,17 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Get FOV centre
         d = QFOVinputDialog(self)
-        d.set_resolution(self.config.width, self.config.height)
+        d.load_lenses_templates(self.config.width, self.config.height)
         if d.exec_():
              data = d.getInputs()
         else:
             return 0, 0, 0, "none"
 
-        self.azim_centre, self.alt_centre, rot_horizontal, lens = data
+        self.azim_centre, self.alt_centre, rot_horizontal, lenses_template_file = data
+
+        # read platepar data from a reference file
+        if lenses_template_file != "none":
+            self.loadPlatepar(update=False, platepar_file=lenses_template_file)
 
         # Wrap azimuth to 0-360 range
         self.azim_centre %= 360
@@ -3900,7 +3924,7 @@ class PlateTool(QtWidgets.QMainWindow):
         ra, dec = apparentAltAz2TrueRADec(self.azim_centre, self.alt_centre, date2JD(*img_time),
                                           self.platepar.lat, self.platepar.lon)
 
-        return ra, dec, rot_horizontal, lens
+        return ra, dec, rot_horizontal, lenses_template_file
 
 
     def detectInputType(self,  beginning_time=None, use_fr_files=False, load=False):
@@ -4031,13 +4055,15 @@ class PlateTool(QtWidgets.QMainWindow):
         return catalog_stars
 
 
-    def loadPlatepar(self, update=False):
+    def loadPlatepar(self, update=False, platepar_file = None):
         """
         Open a file dialog and ask user to open the platepar file, changing self.platepar and self.platepar_file
 
         Arguments:
             update: [bool] Whether to update the gui after loading new platepar (leave as False if gui objects
                             may not exist)
+            platepar_file: [string] path to a platepar file to be loaded. If not specified a dialog box in GUI
+                            will be opened so user can specify one
 
         """
 
@@ -4048,14 +4074,14 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             initial_file = self.dir_path
 
-        # Load the platepar file
-        platepar_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the platepar file", initial_file,
-                                                          "Platepar files (*.cal);;All files (*)")[0]
+        # Open the file dialog no 'platepar_file' parameter was specified
+        if platepar_file == None:
+            platepar_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the platepar file", initial_file,
+                                                            "Platepar files (*.cal);;All files (*)")[0]
 
         if platepar_file == '':
             self.platepar = platepar
             self.makeNewPlatepar()
-            self.setReferenceLens()
             self.platepar_file = os.path.join(self.dir_path, self.config.platepar_name)
             self.first_platepar_fit = True
 
@@ -4109,162 +4135,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateStars()
             self.tab.param_manager.updatePlatepar()
             self.updateLeftLabels()
-
-    def setReferenceLens(self):
-        if self.lenses == "4mm-720p":
-            print("Configuring platepar for 4mm lenses with sensor resolution 720p")
-            self.platepar.distortion_type = "radial7-odd"
-            self.platepar.fov_h = 88.48
-            self.platepar.fov_v = 47.05
-            self.platepar.poly_length = 7
-            self.platepar.F_scale = 15.69
-            self.platepar.X_res = 1280
-            self.platepar.Y_res = 720
-            self.platepar.asymmetry_corr = True
-            self.platepar.auto_check_fit_refined = False
-            self.platepar.auto_recalibrated = False
-            self.platepar.distortion_type_poly_length = np.array([
-                                                                    12,
-                                                                    13,
-                                                                    14,
-                                                                    7,
-                                                                    8,
-                                                                    9,
-                                                                    6,
-                                                                    7,
-                                                                    8,
-                                                                    9
-                                                                ])
-
-            self.platepar.x_poly = np.array([
-                                                -0.049515148894965534,
-                                                -0.03656406235409819,
-                                                0.004034853062995183,
-                                                -0.587767095788385,
-                                                0.06966866569148078,
-                                                0.006346753557137133,
-                                                0.007348153918548211
-                                            ])
-            self.platepar.x_poly_fwd = np.array([
-                                                    -0.049515148894965534,
-                                                    -0.03656406235409819,
-                                                    0.004034853062995183,
-                                                    -0.587767095788385,
-                                                    0.06966866569148078,
-                                                    0.006346753557137133,
-                                                    0.007348153918548211
-                                                ])
-            self.platepar.x_poly_rev = np.array([
-                                                    -0.0495164156247489,
-                                                    -0.03653145242202567,
-                                                    0.0035973308285273805,
-                                                    -0.6051536239116534,
-                                                    0.06866318654186049,
-                                                    -0.0036395617070545455,
-                                                    0.0008211827554213252
-                                                ])
-            self.platepar.y_poly = np.array([
-                                                0.5,
-                                                0.0,
-                                                0.0,
-                                                0.0,
-                                                0.0,
-                                                0.0,
-                                                0.0
-                                            ])
-            self.platepar.y_poly_fwd = np.array([
-                                                    0.5,
-                                                    0.0,
-                                                    0.0,
-                                                    0.0,
-                                                    0.0,
-                                                    0.0,
-                                                    0.0
-                                                ])
-            self.platepar.y_poly_rev = np.array([
-                                                    0.5,
-                                                    0.0,
-                                                    0.0,
-                                                    0.0,
-                                                    0.0,
-                                                    0.0,
-                                                    0.0
-                                                ])
-        elif self.lenses == "6mm-720p":
-            print("Configuring platepar for 6mm lenses with sensor resolution 720p")
-            self.platepar.distortion_type = "radial5-odd"
-            self.platepar.fov_h = 53.71
-            self.platepar.fov_v = 30.01
-            self.platepar.poly_length = 6
-            self.platepar.F_scale = 24.100577021670624
-            self.platepar.X_res = 1280
-            self.platepar.Y_res = 720
-            self.platepar.asymmetry_corr = True
-            self.platepar.auto_check_fit_refined = False
-            self.platepar.auto_recalibrated = False
-            self.platepar.distortion_type_poly_length = np.array([
-                                                            12,
-                                                            13,
-                                                            14,
-                                                            7,
-                                                            8,
-                                                            9,
-                                                            6,
-                                                            7,
-                                                            8,
-                                                            9
-                                                        ])
-
-            self.platepar.x_poly = np.array([
-                                        -0.04211605396463094,
-                                        -0.010234837780715945,
-                                        -0.009769930297111313,
-                                        -0.3440089195007747,
-                                        0.01187359807393833,
-                                        -0.0005897621813254839
-                                    ])
-            self.platepar.x_poly_fwd = np.array([
-                                        -0.04211605396463094,
-                                        -0.010234837780715945,
-                                        -0.009769930297111313,
-                                        -0.3440089195007747,
-                                        0.01187359807393833,
-                                        -0.0005897621813254839
-                                        ])
-            self.platepar.x_poly_rev = np.array([
-                                        -0.04211623461533198,
-                                        -0.01020366080989894,
-                                        -0.009609908640269737,
-                                        -0.33843453271195767,
-                                        0.011801177325623372,
-                                        -0.0008752050764633917
-                                        ])
-            self.platepar.y_poly = np.array([
-                                        0.5,
-                                        0.0,
-                                        0.0,
-                                        0.0,
-                                        0.0,
-                                        0.0
-                                    ])
-            self.platepar.y_poly_fwd = np.array([
-                                        0.5,
-                                        0.0,
-                                        0.0,
-                                        0.0,
-                                        0.0,
-                                        0.0
-                                    ])
-            self.platepar.y_poly_rev = np.array([
-                                    0.5,
-                                    0.0,
-                                    0.0,
-                                    0.0,
-                                    0.0,
-                                    0.0
-                                ])
-        else:
-            print("Unknown reference lenses: " + self.lenses)
 
     def savePlatepar(self):
         """  Save platepar to a file """
