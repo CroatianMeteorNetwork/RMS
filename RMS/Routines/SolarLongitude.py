@@ -7,6 +7,7 @@ import datetime
 import numpy as np
 import scipy.optimize
 from RMS.Astrometry.Conversions import date2JD, datetime2JD, jd2Date
+from RMS.Misc import rms_datetime
 
 @np.vectorize
 def jd2SolLonSteyaert(jd):
@@ -201,9 +202,9 @@ if __name__ == "__main__":
 
     # ### ###
 
-    print("Current UTC time is: {}".format(datetime.datetime.utcnow()))
-    print("Current Julian date is: {:.12f}".format(datetime2JD(datetime.datetime.utcnow())))
-    print("Current solar longitude: {:.6f} deg".format(np.degrees(jd2SolLonSteyaert(datetime2JD(datetime.datetime.utcnow())))))
+    print("Current UTC time is: {}".format(rms_datetime.utcnow()))
+    print("Current Julian date is: {:.12f}".format(datetime2JD(rms_datetime.utcnow())))
+    print("Current solar longitude: {:.6f} deg".format(np.degrees(jd2SolLonSteyaert(datetime2JD(rms_datetime.utcnow())))))
 
 
     # Test inverse function

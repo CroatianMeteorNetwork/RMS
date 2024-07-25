@@ -154,7 +154,7 @@ if __name__ == "__main__":
 
 
     # Calibration string to be written to the FTPdetectinfo file
-    calib_str = "RMS - Saturation corrected on {:s} UTC".format(str(datetime.datetime.utcnow()))
+    calib_str = "RMS - Saturation corrected on {:s} UTC".format(str(rms_datetime.utcnow()))
 
     # Write a corrected FTPdetectinfo file
     corrected_ftpdetectinfo_name = ftpdetectinfo_name.strip('.txt') + '_saturation_corrected.txt'

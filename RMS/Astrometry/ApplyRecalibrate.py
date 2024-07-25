@@ -34,6 +34,7 @@ from RMS.Formats import CALSTARS, FFfile, FTPdetectinfo, Platepar, StarCatalog
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile
 from RMS.Math import angularSeparation
 from RMS.Logger import initLogging
+from RMS.Misc import rms_datetime
 
 # Neighbourhood size around individual FFs with detections which will be takes for recalibration
 #   A size of e.g. 3 means that an FF before, the FF with the detection, an an FF after will be taken
@@ -930,7 +931,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
         meteor_output_list.append([ff_name, meteor_No, rho, phi, meteor_picks])
 
     # Calibration string to be written to the FTPdetectinfo file
-    calib_str = 'Recalibrated with RMS on: ' + str(datetime.datetime.utcnow()) + ' UTC'
+    calib_str = 'Recalibrated with RMS on: ' + str(rms_datetime.utcnow()) + ' UTC'
 
     # If no meteors were detected, set dummpy parameters
     if len(meteor_list) == 0:
@@ -942,7 +943,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
         shutil.copy(
             ftpdetectinfo_path,
             ftpdetectinfo_path.strip('.txt')
-            + '_backup_{:s}.txt'.format(datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S.%f')),
+            + '_backup_{:s}.txt'.format(rms_datetime.utcnow().strftime('%Y%m%d_%H%M%S.%f')),
         )
     except:
         log.info('ERROR! The FTPdetectinfo file could not be backed up: {:s}'.format(ftpdetectinfo_path))

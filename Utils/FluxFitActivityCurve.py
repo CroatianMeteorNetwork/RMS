@@ -1093,7 +1093,7 @@ def computeCurrentPeakZHR(shower_models, dt=None, time_window=24, sporadic_zhr=2
 
     # If no datetime is given, use the current time
     if dt is None:
-        dt = datetime.datetime.utcnow()
+        dt = rms_datetime.utcnow()
 
     # Convert the time window from hours to degrees of the solar longitude
     time_window_deg = (time_window/24)*360/365.25
@@ -1193,7 +1193,7 @@ def plotYearlyZHR(config, plot_path, sporadic_zhr=25, dt_ref=None, plot_current_
 
     # If the reference datetime is not provided, use the current time
     if dt_ref is None:
-        dt_ref = datetime.datetime.utcnow()
+        dt_ref = rms_datetime.utcnow()
 
 
     # If the date is before the vernal equinox, use the previous year for the plot
