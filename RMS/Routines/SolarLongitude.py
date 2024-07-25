@@ -201,10 +201,10 @@ if __name__ == "__main__":
     #         print('JD inverse Steyaert: {:.12f} +/- {:.6f} s'.format(jd_steyaert, 24*60*60*abs(jd - jd_steyaert)))
 
     # ### ###
-
-    print("Current UTC time is: {}".format(rms_datetime.utcnow()))
-    print("Current Julian date is: {:.12f}".format(datetime2JD(rms_datetime.utcnow())))
-    print("Current solar longitude: {:.6f} deg".format(np.degrees(jd2SolLonSteyaert(datetime2JD(rms_datetime.utcnow())))))
+    current_time = rms_datetime.utcnow()
+    print("Current UTC time is: {}".format(current_time))
+    print("Current Julian date is: {:.12f}".format(datetime2JD(current_time)))
+    print("Current solar longitude: {:.6f} deg".format(np.degrees(jd2SolLonSteyaert(datetime2JD(current_time)))))
 
 
     # Test inverse function
