@@ -64,7 +64,7 @@ def plotFieldsums(dir_path, config):
                 print('File {:s} is corrupted!'.format(file_name))
 
             # Extract the date and time from the FF file
-            dt = filenameToDatetime(file_name)
+            dt = filenameToDatetime(file_name, microseconds=True)
 
             # Take the peak intensity value
             intensity_data_peak.append(np.max(intensity_array))
