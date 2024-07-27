@@ -127,7 +127,7 @@ class QueuedPool(object):
 
 
         # If cores are negative, use the total available cores minus the given number
-        if cores < 0:
+        if cores <= 0:
 
             cores = multiprocessing.cpu_count() + cores
 
