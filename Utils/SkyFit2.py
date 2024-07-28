@@ -92,15 +92,14 @@ class QFOVinputDialog(QtWidgets.QDialog):
         layout.addLayout(formlayout)
 
         # Reference lenses options
-
-        groupbox = QtWidgets.QGroupBox("Reference lenses and resolution:")
+        groupbox = QtWidgets.QGroupBox("Template lenses:")
         groupbox.setCheckable(False)
         layout.addWidget(groupbox)
 
         self.lenses_vbox = QtWidgets.QVBoxLayout()
         groupbox.setLayout(self.lenses_vbox)
 
-        fov = QtWidgets.QRadioButton("None (unknown or unlisted)")
+        fov = QtWidgets.QRadioButton("No distortion (default)")
         fov.lenses = "none"
         fov.setChecked(True)
         fov.toggled.connect(self.lensesSelected)
@@ -109,20 +108,39 @@ class QFOVinputDialog(QtWidgets.QDialog):
         layout.addWidget(buttonBox)
         self.setLayout(layout)
 
-    def load_lenses_templates(self, width, height):
+    def loadLensTemplates(self, config, data_dir, width, height):
+        """ Load the lens templates and add them to the dialog box. The provided resolution will be used to
+            enable only the templates with the same resolution.
+
+        Arguments:
+            width: [int] Image width.
+            height: [int] Image height.
+        """
+
+        print()
+        print('Loading platepar templates from:')
+        print(" ", config.platepar_template_dir)
+        print(" ", data_dir)
+
+        # Find all template_*.cal files in both the data and config directories
+        platepar_template_files = []
+        for root_dir in [config.platepar_template_dir, data_dir]:
+            for template_file in glob.glob(os.path.join(root_dir, 'template_*.cal')):
+                platepar_template_files.append(template_file)
+
+
+        # Load the lens templates
         templates = []
-        templates_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../share/platepar_templates/'))
-        print('Loading platepar templates from: ' + templates_dir)
+        for template_path in platepar_template_files:
 
-        # locate platepar templates, parse them and sort by description
-        for template_file in glob.glob('template_*.cal', root_dir = templates_dir):
-            template_path = os.path.join(templates_dir, template_file)
-            f = open(template_path)
-            data = json.load(f)
+            with open(template_path) as f:
+                data = json.load(f)
 
-            if 'template_metadata' not in data or \
-                     'description' not in data['template_metadata']:
+            if ('template_metadata' not in data) or \
+                     ('description' not in data['template_metadata']):
+                
                 print('WARNING: Missing or invalid "template_metadata" section in file ' + template_file)
+
                 continue
 
             templates.append({
@@ -135,13 +153,14 @@ class QFOVinputDialog(QtWidgets.QDialog):
 
         # add lenses options to the dialog box
         for template in templates:
-            fov = self.create_reference_lenses_option(template['file_name'], template['description'])
+            fov = self.createTemplateLensOption(template['file_name'], template['description'])
 
             # enable option if resolution is compatible
             if template['X_res'] == width and template['Y_res'] == height:
                 fov.setEnabled(True)
 
-    def create_reference_lenses_option(self, lenses_id, lenses_description):
+    def createTemplateLensOption(self, lenses_id, lenses_description):
+
         fov = QtWidgets.QRadioButton(lenses_description)
         fov.lenses = lenses_id
         fov.setEnabled(False)
@@ -3267,7 +3286,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 if data is not None:
 
-                    self.platepar.RA_d, self.platepar.dec_d, self.platepar.rotation_from_horiz, self.lenses = data
+                    (
+                        self.platepar.RA_d, 
+                        self.platepar.dec_d, 
+                        self.platepar.rotation_from_horiz, 
+                        self.lenses
+                    ) = data
 
                     # Compute reference Alt/Az to apparent coordinates, epoch of date
                     self.platepar.az_centre, self.platepar.alt_centre = trueRaDec2ApparentAltAz( \
@@ -3889,7 +3913,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Get FOV centre
         d = QFOVinputDialog(self)
-        d.load_lenses_templates(self.config.width, self.config.height)
+        d.loadLensTemplates(self.config, self.dir_path, self.config.width, self.config.height)
         if d.exec_():
              data = d.getInputs()
         else:
@@ -4076,8 +4100,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Open the file dialog no 'platepar_file' parameter was specified
         if platepar_file == None:
-            platepar_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the platepar file", initial_file,
-                                                            "Platepar files (*.cal);;All files (*)")[0]
+            platepar_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the platepar file", 
+                                                                  initial_file,
+                                                                  "Platepar files (*.cal);;All files (*)")[0]
 
         if platepar_file == '':
             self.platepar = platepar
@@ -4214,7 +4239,12 @@ class PlateTool(QtWidgets.QMainWindow):
         if hasattr(self, 'img_handle'):
 
             # Get reference RA, Dec of the image centre
-            self.platepar.RA_d, self.platepar.dec_d, self.platepar.rotation_from_horiz, self.lenses = self.getFOVcentre()
+            (
+                self.platepar.RA_d, 
+                self.platepar.dec_d, 
+                self.platepar.rotation_from_horiz, 
+                self.lenses
+            ) = self.getFOVcentre()
 
             # Recalculate reference alt/az
             self.platepar.az_centre, self.platepar.alt_centre = trueRaDec2ApparentAltAz(self.platepar.RA_d, \

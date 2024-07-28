@@ -527,6 +527,9 @@ class Config:
         self.platepars_flux_recalibrated_name = 'platepars_flux_recalibrated.json'
         self.platepars_recalibrated_name = 'platepars_all_recalibrated.json'
 
+        # Platepar template directory
+        self.platepar_template_dir = os.path.join(self.rms_root_dir, 'share', 'platepar_templates')
+
         # Name of the platepar file on the server
         self.platepar_remote_name = 'platepar_latest.cal'
         self.remote_platepar_dir = 'platepars'
@@ -1508,6 +1511,9 @@ def parseCalibration(config, parser):
 
     if parser.has_option(section, "platepars_recalibrated_name"):
         config.platepars_recalibrated_name = parser.get(section, "platepars_recalibrated_name")
+
+    if parser.has_option(section, "platepar_template_dir"):
+        config.platepar_template_dir = parser.get(section, "platepar_template_dir")
 
     if parser.has_option(section, "platepar_remote_name"):
         config.platepar_remote_name = parser.get(section, "platepar_remote_name")
