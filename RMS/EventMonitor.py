@@ -1798,7 +1798,7 @@ class EventMonitor(multiprocessing.Process):
 
                 upload_status = uploadSFTP(self.syscon.hostname, self.syscon.stationID.lower(),
                                  event_monitor_directory,self.syscon.event_monitor_remote_dir,archives,
-                                 rsa_private_key=self.config.rsa_private_key, allow_dir_creation=True)
+                                 rsa_private_key=self.config.rsa_private_key, allow_dir_creation=True, port=self.config.host_port)
 
 
                 if upload_status:

@@ -248,7 +248,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
     # Check for and get an updated mask
     if config.mask_download_permissive:
-        downloadNewMask(config)
+        downloadNewMask(config, port=config.host_port)
 
     # Get the platepar file
     platepar, platepar_path, platepar_fmt = getPlatepar(config, night_data_dir)
@@ -818,7 +818,7 @@ if __name__ == "__main__":
 
     # Check for and get an updated mask
     if config.mask_download_permissive:
-        downloadNewMask(config)
+        downloadNewMask(config, port=config.host_port)
 
     # If the duration of capture was given, capture right away for a specified time
     if cml_args.duration:

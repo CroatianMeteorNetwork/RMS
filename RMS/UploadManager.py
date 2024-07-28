@@ -484,7 +484,7 @@ class UploadManager(multiprocessing.Process):
 
             # Upload the file via SFTP (use the lowercase version of the station ID as the username)
             upload_status = uploadSFTP(self.config.hostname, self.config.stationID.lower(), data_path, \
-                self.config.remote_dir, [f_name], rsa_private_key=self.config.rsa_private_key)
+                self.config.remote_dir, [f_name], rsa_private_key=self.config.rsa_private_key, port=self.config.host_port)
 
             # If the upload was successful, rewrite the holding file, which will remove the uploaded file
             if upload_status:
