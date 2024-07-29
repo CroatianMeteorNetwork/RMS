@@ -56,7 +56,7 @@ def getPlatepar(config, night_data_dir):
 
 
     # Download a new platepar from the server, if present  
-    downloadNewPlatepar(config, port=config.host_port)
+    downloadNewPlatepar(config)
 
 
     # Construct path to the platepar in the night directory
