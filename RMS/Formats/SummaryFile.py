@@ -1,5 +1,6 @@
 """ Summary text file for station and observation session
 """
+from datetime import datetime
 
 # The MIT License
 
@@ -24,32 +25,94 @@
 # THE SOFTWARE.
 
 """
-
 Creates a text file summarising key station information and observation session
-
-date                    :   Mon Jul 22 10:47:01 2024 -0400    
-commit                  :   3a20e04d8fe8104b02af82b3fc34d3e00ace2bd4 (HEAD -> master, origin/master, origin/HEAD, dalava/master)                       
-merge                   :   344c26 2aee258           
-hardware_version        :   Raspberry Pi 4 Model B Rev 1.1    
-os_version              :   Debian GNU/Linux 11 (bullseye)      ; operating system version
-storage_space           :   117G       
-fits_files              :   3079           
-fits_missing            :   0         
-minutes_missing         :   0   
-storage_status          :   4
-detection_before_ml     :   52
-detections_after_ml     :   43        
-number_fits_detected    :   37
-photometry_status       :   good 
-dropped_frames          :   2  
-jitter_quality          :   100.0%  
-dropped_frame_rate      :   0.0%
-lens_type               :   4mm
-media_backend           :   gst
-
 """
 
 
+import datetime
+import git
+import shutil
+import platform
+
+import numpy as np
 
 
+class SummaryFile:
 
+    def __init__(self):
+
+        try:
+            # Get latest version's commit hash and time of commit
+            repo = git.Repo(search_parent_directories=True)
+            commit_unix_time = repo.head.object.committed_date
+            sha = repo.head.object.hexsha
+            commit_time = datetime.datetime.fromtimestamp(commit_unix_time).strftime('%Y%m%d_%H%M%S')
+
+        except:
+            commit_time = ""
+            sha = ""
+
+        self.repo = git.Repo(search_parent_directories=True)
+        self.date = self.repo.head.object.committed_date
+        self.commit = self.repo.head.object.hexsha
+        self.merge = git.Commit(self.repo, self.repo.head.object.binsha).parents[0]
+        self.hardware_version = platform.machine()
+        self.os_version = platform.platform()
+        # todo: handle older versions of python
+        self.storage_total, self.storage_used, self.storage_free = shutil.disk_usage("/")
+        self.fits_files = None
+        self.fits_missing = None
+        self.minutes_missing = None
+        self.capture_directories = None
+        self.detections_before_ml = None
+        self.detections_after_ml = None
+        self.number_fits_detected = None
+        self.photometry_good = None
+        self.dropped_frames = None
+        self.jitter_quality = None
+        self.dropped_frame_rate = None
+        self.last_calculated_fps = None
+        self.sensor_type = None
+        self.lens = None
+        self.protocol = None
+        self.media_backend = None
+
+
+    def serialize(self):
+        output = ""
+        output += "date                                 : {}\n".format(datetime.datetime.fromtimestamp(self.date).strftime('%Y%m%d_%H%M%S'))
+        output += "commit                               : {}\n".format(self.commit)
+        for parent in self.merge.parents:
+            output += "merge_parents                        : {}\n".format(parent.hexsha)
+        output += "hardware_version                     : {}\n".format(self.hardware_version)
+        output += "os_version                           : {}\n".format(self.os_version)
+        output += "storage_total                        : {:.2f}GB\n".format(self.storage_total / 1024 ** 3)
+        output += "storage_used                         : {:.2f}GB\n".format(self.storage_used / 1024 ** 3)
+        output += "storage_free                         : {:.2f}GB\n".format(self.storage_free / 1024 ** 3)
+        output += "fits_files                           : {}\n".format(self.fits_files)
+        output += "fits_missing                         : {}\n".format(self.fits_missing)
+        output += "minutes_missing                      : {}\n".format(self.minutes_missing)
+        output += "capture_directories                  : {}\n".format(self.capture_directories)
+        output += "detections_before_ml                 : {}\n".format(self.detections_before_ml)
+        output += "detections_after_ml                  : {}\n".format(self.detections_after_ml)
+        output += "number_fits_detected                 : {}\n".format(self.number_fits_detected)
+        output += "number_detections_before_ml          : {}\n".format(self.detections_before_ml)
+        output += "number_detections_after_ml           : {}\n".format(self.detections_before_ml)
+        output += "number_fits_detected                 : {}\n".format(self.number_fits_detected)
+        output += "photometry_good                      : {}\n".format(self.photometry_good)
+        output += "dropped_frames                       : {}\n".format(self.dropped_frames)
+        output += "jitter_quality                       : {}\n".format(self.jitter_quality)
+        output += "dropped_frame_rate                   : {}%\n".format(self.jitter_quality)
+        output += "last_calculated_fps                  : {}\n".format(self.last_calculated_fps)
+        output += "sensor_type                          : {}\n".format(self.sensor_type)
+        output += "lens                                 : {}\n".format(self.lens)
+        output += "protocol                             : {}\n".format(self.protocol)
+        output += "media_backend                        : {}\n".format(self.media_backend)
+
+        return output
+
+
+if __name__ == "__main__":
+
+    summary_file = SummaryFile()
+    print(summary_file.serialize())
