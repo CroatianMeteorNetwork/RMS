@@ -568,7 +568,7 @@ class BufferedCapture(Process):
             video_location = os.path.join(video_file_dir, "video_%05d.mkv")
             storage_branch = (
                 "t. ! queue ! h264parse ! "
-                "splitmuxsink location={:s} max-size-time={:s} muxer-factory=matroskamux"
+                "splitmuxsink location={:s} max-size-time={:d} muxer-factory=matroskamux"
                 ).format(video_location, int(segment_duration_sec*1e9))
 
         # Otherwise, skip saving the raw stream to disk
@@ -614,13 +614,13 @@ class BufferedCapture(Process):
                 return self.pipeline.get_by_name("appsink")
 
             # Log the failure and retry if attempts are left
-            log.error("Attempt {:s}: Pipeline did not transition to PLAYING state, current state is {:s}. \
-                      Retrying in {:s} seconds."
+            log.error("Attempt {}: Pipeline did not transition to PLAYING state, current state is {}. \
+                      Retrying in {} seconds."
                       .format(attempt + 1, current_state, retry_interval))
 
             time.sleep(retry_interval)
 
-        log.error("Failed to set pipeline to PLAYING state after {:d} attempts.".format(max_retries))
+        log.error("Failed to set pipeline to PLAYING state after {} attempts.".format(max_retries))
         return False
 
 
