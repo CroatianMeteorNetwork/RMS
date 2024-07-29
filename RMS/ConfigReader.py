@@ -496,7 +496,7 @@ class Config:
         # Path to the ML model
         self.ml_model_path = os.path.join(self.rms_root_dir, "share", "meteorml32.tflite")
 
-        # Number of CPU cores to use for detection. -1 means all available cores (default)
+        # Number of CPU cores to use for detection. 0 means all available cores, -1 all but one core (default)
         self.num_cores = -1
 
         ##### StarExtraction
