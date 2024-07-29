@@ -36,6 +36,7 @@ from Utils.PlotFieldsums import plotFieldsums
 from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
 from Utils.ShowerAssociation import showerAssociation
 from Utils.PlotTimeIntervals import plotFFTimeIntervals
+from Utils.TimestampRMSVideos import timestampRMSVideos
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -323,6 +324,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
 
 
+
     log.info('Plotting field sums...')
 
     # Plot field sums
@@ -337,6 +339,18 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
     # Archive all fieldsums to one archive
     archiveFieldsums(night_data_dir)
+
+
+    # If videos were saved, rename them with the timestamp of the first frame
+    # This command requires the FS archive to be present
+    if (config.raw_video_dir is not None) or config.raw_video_dir_night:
+
+        try:
+            timestampRMSVideos(night_data_dir, rename=True)
+
+        except Exception as e:
+            log.debug('Renaming videos failed with the message:\n' + repr(e))
+            log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
 
     # List for any extra files which will be copied to the night archive directory. Full paths have to be 
@@ -398,8 +412,14 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     # Plot timestamp intervals
     try:
         jitter_quality, dropped_frame_rate, intervals_path = plotFFTimeIntervals(night_data_dir, fps=config.fps)
-        log.info('Timestamp Intervals Analysis: Jitter Quality: {:.1f}%, Dropped Frame Rate: {:.1f}%'.format(
-            jitter_quality, dropped_frame_rate))
+
+        if jitter_quality is not None and dropped_frame_rate is not None:
+            log.info('Timestamp Intervals Analysis: Jitter Quality: {:.1f}%, Dropped Frame Rate: {:.1f}%'
+                     .format(jitter_quality, dropped_frame_rate))
+            
+        else:
+            log.info('Timestamp Intervals Analysis: Failed')
+
         # Add the timelapse to the extra files
         if intervals_path is not None:
             extra_files.append(intervals_path)
@@ -451,13 +471,14 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     
         # If all FF files are not uploaded, add two FF files which were successfuly recalibrated
         recalibrated_ffs = []
-        for ff_name in recalibrated_platepars:
+        if recalibrated_platepars is not None:
+            for ff_name in recalibrated_platepars:
 
-            pp = recalibrated_platepars[ff_name]
+                pp = recalibrated_platepars[ff_name]
 
-            # Check if the FF was recalibrated
-            if pp.auto_recalibrated:
-                recalibrated_ffs.append(os.path.join(night_data_dir, ff_name))
+                # Check if the FF was recalibrated
+                if pp.auto_recalibrated:
+                    recalibrated_ffs.append(os.path.join(night_data_dir, ff_name))
 
         # Choose two files randomly
         if len(recalibrated_ffs) > 2:
@@ -475,7 +496,10 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                 if validFFName(ff_name)]
 
             # Add any two FF files
-            extra_files += random.sample(ff_list, 2)
+            if len(ff_list) > 2:
+                extra_files += random.sample(ff_list, 2)
+            else:
+                extra_files += ff_list
         
 
     ### ###
@@ -546,6 +570,11 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
         help="Path to a config file which will be used instead of the default one.")
+    
+    arg_parser.add_argument('--num_cores', metavar='NUM_CORES', type=int, default=None, \
+        help="Number of cores to use for detection. Default is what is specific in the config file. " 
+        "If not given in the config file, all available cores will be used."
+        )
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -564,6 +593,16 @@ if __name__ == "__main__":
     log = logging.getLogger("logger")
 
     ######
+
+    
+    # Set the number of cores to use if given
+    if cml_args.num_cores is not None:
+        config.num_cores = cml_args.num_cores
+
+        if config.num_cores <= 0:
+            config.num_cores = -1
+
+            log.info("Using all available cores for detection.")
 
 
     # Process the night

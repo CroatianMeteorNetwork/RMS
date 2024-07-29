@@ -9,6 +9,7 @@ import cProfile
 import json
 import datetime
 import collections
+import glob
 
 import numpy as np
 import matplotlib
@@ -27,7 +28,7 @@ import RMS.ConfigReader as cr
 from RMS.ExtractStars import extractStarsAndSave
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
-from RMS.Formats.FFfile import convertFRNameToFF
+from RMS.Formats.FFfile import convertFRNameToFF, constructFFName
 from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFile
 from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
 from RMS.Formats import StarCatalog
@@ -46,6 +47,9 @@ from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
 
 
 class QFOVinputDialog(QtWidgets.QDialog):
+
+    lenses = "none"
+    lenses_vbox = None
 
     def __init__(self, *args, **kwargs):
         super(QFOVinputDialog, self).__init__(*args, **kwargs)
@@ -75,7 +79,6 @@ class QFOVinputDialog(QtWidgets.QDialog):
         rot_validator.setNotation(QtGui.QDoubleValidator.StandardNotation)
         self.rot_edit.setValidator(rot_validator)
 
-
         layout = QtWidgets.QVBoxLayout(self)
 
         layout.addWidget(QtWidgets.QLabel("Please enter FOV centre (degrees),\nAzimuth +E of due N\nRotation from vertical"))
@@ -86,10 +89,89 @@ class QFOVinputDialog(QtWidgets.QDialog):
         formlayout.addRow("Azimuth", self.azim_edit)
         formlayout.addRow("Altitude", self.alt_edit)
         formlayout.addRow("Rotation", self.rot_edit)
-
         layout.addLayout(formlayout)
+
+        # Reference lenses options
+        groupbox = QtWidgets.QGroupBox("Template lenses:")
+        groupbox.setCheckable(False)
+        layout.addWidget(groupbox)
+
+        self.lenses_vbox = QtWidgets.QVBoxLayout()
+        groupbox.setLayout(self.lenses_vbox)
+
+        fov = QtWidgets.QRadioButton("No distortion (default)")
+        fov.lenses = "none"
+        fov.setChecked(True)
+        fov.toggled.connect(self.lensesSelected)
+        self.lenses_vbox.addWidget(fov)
+
         layout.addWidget(buttonBox)
         self.setLayout(layout)
+
+    def loadLensTemplates(self, config, data_dir, width, height):
+        """ Load the lens templates and add them to the dialog box. The provided resolution will be used to
+            enable only the templates with the same resolution.
+
+        Arguments:
+            width: [int] Image width.
+            height: [int] Image height.
+        """
+
+        print()
+        print('Loading platepar templates from:')
+        print(" ", config.platepar_template_dir)
+        print(" ", data_dir)
+
+        # Find all template_*.cal files in both the data and config directories
+        platepar_template_files = []
+        for root_dir in [config.platepar_template_dir, data_dir]:
+            for template_file in glob.glob(os.path.join(root_dir, 'template_*.cal')):
+                platepar_template_files.append(template_file)
+
+
+        # Load the lens templates
+        templates = []
+        for template_path in platepar_template_files:
+
+            with open(template_path) as f:
+                data = json.load(f)
+
+            if ('template_metadata' not in data) or \
+                     ('description' not in data['template_metadata']):
+                
+                print('WARNING: Missing or invalid "template_metadata" section in file ' + template_file)
+
+                continue
+
+            templates.append({
+                       'description' : data['template_metadata']['description'],
+                       'X_res' : data['X_res'],
+                       'Y_res' : data['Y_res'],
+                       'file_name' : template_path
+                      })
+        templates.sort(key=lambda x: x['description'])
+
+        # add lenses options to the dialog box
+        for template in templates:
+            fov = self.createTemplateLensOption(template['file_name'], template['description'])
+
+            # enable option if resolution is compatible
+            if template['X_res'] == width and template['Y_res'] == height:
+                fov.setEnabled(True)
+
+    def createTemplateLensOption(self, lenses_id, lenses_description):
+
+        fov = QtWidgets.QRadioButton(lenses_description)
+        fov.lenses = lenses_id
+        fov.setEnabled(False)
+        fov.toggled.connect(self.lensesSelected)
+        self.lenses_vbox.addWidget(fov)
+        return fov
+
+    def lensesSelected(self):
+        radioButton = self.sender()
+        if radioButton.isChecked():
+            self.lenses = radioButton.lenses
 
     def getInputs(self):
 
@@ -107,11 +189,13 @@ class QFOVinputDialog(QtWidgets.QDialog):
                 # If the rotation is not given, set it to 0
                 rot = 0
 
+            lenses = self.lenses
+
         except ValueError:
             print("Given values could not be read as numbers!")
-            return 0, 0, 0
+            return 0, 0, 0, "none"
 
-        return azim, alt, rot
+        return azim, alt, rot, lenses
 
 
 class GeoPoints(object):
@@ -340,7 +424,7 @@ class PairedStars(object):
 
 class PlateTool(QtWidgets.QMainWindow):
     def __init__(self, input_path, config, beginning_time=None, fps=None, gamma=None, use_fr_files=False, \
-        geo_points_input=None, startUI=True, nobg=False):
+        geo_points_input=None, startUI=True, nobg=False, flipud=False):
         """ SkyFit interactive window.
 
         Arguments:
@@ -359,6 +443,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 the image as seen from the perspective of the observer.
             startUI: [bool] Start the GUI. True by default.
             nobg: [bool] Do not subtract the background for photometry. False by default.
+            flipud: [bool] Flip the image upside down. False by default.
         """
 
         super(PlateTool, self).__init__()
@@ -383,6 +468,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Store the background subtraction flag
         self.no_background_subtraction = nobg
+
+        # Store the flip upside down flag
+        self.flipud = flipud
 
         # Extract the directory path if a file was given
         if os.path.isfile(self.dir_path):
@@ -499,7 +587,7 @@ class PlateTool(QtWidgets.QMainWindow):
             sys.exit()
 
         else:
-            print('Star catalog loaded!')
+            print('Star catalog loaded: ', self.config.star_catalog_file)
 
 
         self.calstars = {}
@@ -1763,7 +1851,8 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute RA/Dec using the normal platepar for all pairs
             level_data = np.ones_like(x_arr)
             time_data = [self.img_handle.currentTime()]*len(x_arr)
-            _, ra_data, dec_data, _ = xyToRaDecPP(time_data, x_arr, y_arr, level_data, self.platepar)
+            _, ra_data, dec_data, _ = xyToRaDecPP(time_data, x_arr, y_arr, level_data, self.platepar, 
+                                                  precompute_pointing_corr=True)
 
             # Compute X, Y back without the distortion
             jd = date2JD(*self.img_handle.currentTime())
@@ -2396,6 +2485,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update possibly missing flag for not subtracting the background
         if not hasattr(self, "no_background_subtraction"):
             self.no_background_subtraction = False
+
+        # Update the possibly missing flag for flipping the image upside down
+        if not hasattr(self, "flipud"):
+            self.flipud = False
 
         # If the paired stars are a list (old version), reset it to a new version where it's an object
         if isinstance(self.paired_stars, list):
@@ -3207,7 +3300,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 if data is not None:
 
-                    self.platepar.RA_d, self.platepar.dec_d, self.platepar.rotation_from_horiz = data
+                    (
+                        self.platepar.RA_d, 
+                        self.platepar.dec_d, 
+                        self.platepar.rotation_from_horiz, 
+                        self.lenses
+                    ) = data
 
                     # Compute reference Alt/Az to apparent coordinates, epoch of date
                     self.platepar.az_centre, self.platepar.alt_centre = trueRaDec2ApparentAltAz( \
@@ -3829,12 +3927,17 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Get FOV centre
         d = QFOVinputDialog(self)
+        d.loadLensTemplates(self.config, self.dir_path, self.config.width, self.config.height)
         if d.exec_():
              data = d.getInputs()
         else:
-            return 0, 0, 0
+            return 0, 0, 0, "none"
 
-        self.azim_centre, self.alt_centre, rot_horizontal = data
+        self.azim_centre, self.alt_centre, rot_horizontal, lenses_template_file = data
+
+        # read platepar data from a reference file
+        if lenses_template_file != "none":
+            self.loadPlatepar(update=False, platepar_file=lenses_template_file)
 
         # Wrap azimuth to 0-360 range
         self.azim_centre %= 360
@@ -3859,7 +3962,7 @@ class PlateTool(QtWidgets.QMainWindow):
         ra, dec = apparentAltAz2TrueRADec(self.azim_centre, self.alt_centre, date2JD(*img_time),
                                           self.platepar.lat, self.platepar.lon)
 
-        return ra, dec, rot_horizontal
+        return ra, dec, rot_horizontal, lenses_template_file
 
 
     def detectInputType(self,  beginning_time=None, use_fr_files=False, load=False):
@@ -3882,14 +3985,15 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Load a state file
         if os.path.isfile(self.input_path):
-            img_handle = detectInputTypeFile(self.input_path, self.config, beginning_time=beginning_time)
+            img_handle = detectInputTypeFile(self.input_path, self.config, beginning_time=beginning_time, 
+                                             flipud=self.flipud)
         
         # Load given data from a folder
         elif os.path.isdir(self.input_path):
 
             # Detect input file type and load appropriate input plugin
             img_handle = detectInputTypeFolder(self.dir_path, self.config, beginning_time=beginning_time, \
-                use_fr_files=self.use_fr_files)
+                use_fr_files=self.use_fr_files, flipud=self.flipud)
 
             # If the data was not being able to load from the folder, choose a file to load
             if img_handle is None:
@@ -3906,7 +4010,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # If no previous ways of opening data was sucessful, open a file
         if img_handle is None:
-            img_handle = detectInputTypeFile(self.input_path, self.config, beginning_time=beginning_time)
+            img_handle = detectInputTypeFile(self.input_path, self.config, beginning_time=beginning_time, 
+                                             flipud=self.flipud)
 
 
         self.img_handle = img_handle
@@ -3988,13 +4093,15 @@ class PlateTool(QtWidgets.QMainWindow):
         return catalog_stars
 
 
-    def loadPlatepar(self, update=False):
+    def loadPlatepar(self, update=False, platepar_file = None):
         """
         Open a file dialog and ask user to open the platepar file, changing self.platepar and self.platepar_file
 
         Arguments:
             update: [bool] Whether to update the gui after loading new platepar (leave as False if gui objects
                             may not exist)
+            platepar_file: [string] path to a platepar file to be loaded. If not specified a dialog box in GUI
+                            will be opened so user can specify one
 
         """
 
@@ -4005,9 +4112,11 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             initial_file = self.dir_path
 
-        # Load the platepar file
-        platepar_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the platepar file", initial_file,
-                                                          "Platepar files (*.cal);;All files (*)")[0]
+        # Open the file dialog no 'platepar_file' parameter was specified
+        if platepar_file == None:
+            platepar_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the platepar file", 
+                                                                  initial_file,
+                                                                  "Platepar files (*.cal);;All files (*)")[0]
 
         if platepar_file == '':
             self.platepar = platepar
@@ -4144,7 +4253,12 @@ class PlateTool(QtWidgets.QMainWindow):
         if hasattr(self, 'img_handle'):
 
             # Get reference RA, Dec of the image centre
-            self.platepar.RA_d, self.platepar.dec_d, self.platepar.rotation_from_horiz = self.getFOVcentre()
+            (
+                self.platepar.RA_d, 
+                self.platepar.dec_d, 
+                self.platepar.rotation_from_horiz, 
+                self.lenses
+            ) = self.getFOVcentre()
 
             # Recalculate reference alt/az
             self.platepar.az_centre, self.platepar.alt_centre = trueRaDec2ApparentAltAz(self.platepar.RA_d, \
@@ -4381,7 +4495,7 @@ class PlateTool(QtWidgets.QMainWindow):
         img_crop = self.img.data[x_min:x_max, y_min:y_max]
 
         # Perform gamma correction
-        img_crop = Image.gammaCorrection(img_crop, self.config.gamma)
+        img_crop = Image.gammaCorrectionImage(img_crop, self.config.gamma)
 
         ######################################################################################################
 
@@ -4471,7 +4585,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Compute measured RA/Dec from image coordinates
                 _, ra_data, dec_data, _ = xyToRaDecPP(time_data, x_data, \
                     y_data, np.ones_like(x_data), self.platepar, measurement=True, \
-                    extinction_correction=False)
+                    extinction_correction=False, precompute_pointing_corr=True)
 
                 cartesian_points = []
 
@@ -5310,10 +5424,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         else:
             # Construct a fake FF file name
-            ff_name_ftp = "FF_{:s}_".format(self.platepar.station_code) \
-                          + self.img_handle.beginning_datetime.strftime("%Y%m%d_%H%M%S_") \
-                          + "{:03d}".format(int(self.img_handle.beginning_datetime.microsecond//1000)) \
-                          + "_0000000.fits"
+            ff_name_ftp = constructFFName(self.platepar.station_code, 
+                                          self.img_handle.beginning_datetime)
 
         print(self.img_handle.beginning_datetime.strftime("%Y%m%d_%H%M%S_"))
 
@@ -5575,7 +5687,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 img_h = self.config.height
 
             else:
-                img_h = self.img.data.shape[0]
+                img_h = self.img.data.shape[1]
 
             # Compute the corrected frame time
             frame_no = RollingShutterCorrection.correctRollingShutterTemporal(frame, pick['y_centroid'], img_h)
@@ -5633,6 +5745,9 @@ if __name__ == '__main__':
                             "calibrating saturated objects, as the background can vary between images and the" 
                             "idea is that the initensity is used as a measure of the radius of the saturated "
                             "object.")
+    
+    arg_parser.add_argument('--flipud', action="store_true", \
+                            help="Flip the image upside down. Only applied to images and videos.")
 
 
 
@@ -5645,7 +5760,19 @@ if __name__ == '__main__':
     # Parse the beginning time into a datetime object
     if cml_args.timebeg is not None:
 
-        beginning_time = datetime.datetime.strptime(cml_args.timebeg[0], "%Y%m%d_%H%M%S.%f")
+        time_formats_to_try = ["%Y%m%d_%H%M%S.%f", "%Y%m%d_%H%M%S", "%Y%m%d-%H%M%S.%f", "%Y%m%d-%H%M%S"]
+
+        beginning_time = None
+        for time_format in time_formats_to_try:
+            try:
+                beginning_time = datetime.datetime.strptime(cml_args.timebeg[0], time_format)
+                break
+            except ValueError:
+                pass
+
+        if beginning_time is None:
+            raise ValueError("The beginning time format is not recognized! Please use one of the following formats: "
+                                + ", ".join(time_formats_to_try))
 
     else:
         beginning_time = None
@@ -5678,7 +5805,7 @@ if __name__ == '__main__':
         # Init SkyFit
         plate_tool = PlateTool(input_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
             gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints, 
-            nobg=cml_args.nobg)
+            nobg=cml_args.nobg, flipud=cml_args.flipud)
 
 
     # Run the GUI app

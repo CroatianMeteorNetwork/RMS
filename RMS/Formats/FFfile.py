@@ -227,20 +227,22 @@ def selectFFFrames(img_input, ff, frame_min, frame_max):
 
 
 
-def filenameToDatetime(file_name):
-    """ Converts FS and FF bin file name to a datetime object.
+def filenameToDatetime(file_name, microseconds=False):
+    """ Converts FF bin file name to a datetime object.
 
     Arguments:
-        file_name: [str] Name of a FF or FS file.
+        file_name: [str] Name of a FF file.
+
+    Keyword arguments:
+        microseconds: [bool] If True, the file name contains microseconds instead of milliseconds.
 
     Return:
-        [datetime object] Date and time of the first frame in the FS or FF file.
+        [datetime object] Date and time of the first frame in the FF file.
 
     """
 
     # e.g.  FF499_20170626_020520_353_0005120.bin
     # or FF_CA0001_20170626_020520_353_0005120.fits
-    # or FS_US9999_20240318_011731_867370_1054720_fieldsum.bin
 
     file_name = file_name.split('_')
 
@@ -259,15 +261,13 @@ def filenameToDatetime(file_name):
     minute = int(time[2:4])
     seconds = int(time[4:6])
 
-    # Determine if the time fraction is in milliseconds or microseconds
-    time_fraction_str = file_name[i + 3]
-    if len(time_fraction_str) == 3:  # Milliseconds, need to convert to microseconds
-        microseconds = int(time_fraction_str) * 1000
-    else:  # Assuming microseconds directly
-        microseconds = int(time_fraction_str)
+    if microseconds:
+        us = int(file_name[i + 3])
+    
+    else:
+        us = 1000*int(file_name[i + 3])
 
-
-    return datetime.datetime(year, month, day, hour, minute, seconds, microseconds)
+    return datetime.datetime(year, month, day, hour, minute, seconds, us)
 
 
 
@@ -307,6 +307,22 @@ def getMiddleTimeFF(ff_name, fps, ret_milliseconds=True, ff_frames=256):
     else:
         return (year, month, day, hour, minute, second, microsecond)
 
+
+def constructFFName(station_code, beg_dt, ext='fits'):
+    """ Construct a name for an FF file using the station code and the given datetime. """
+
+    # Remove all underscores from the station code
+    station_code = station_code.replace("_", "")
+
+    # Remove all spaces and colones from the station code
+    station_code = station_code.replace(" ", "").replace(":", "")
+
+
+    # Construct a fake FF file name
+    ff_name_ftp = "FF_{:s}_".format(station_code) + beg_dt.strftime("%Y%m%d_%H%M%S_") \
+                + "{:03d}".format(int(beg_dt.microsecond//1000)) + "_0000000." + ext
+    
+    return ff_name_ftp
 
 
 def validFFName(ff_file, fmt=None):

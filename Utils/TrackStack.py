@@ -367,7 +367,7 @@ def stackFrame(ff_name, recalibrated_platepars, mask, border, pp_ref, img_size, 
     # Map image pixels to sky
     jd_arr, ra_coords, dec_coords, _ = xyToRaDecPP(
         len(x_coords) * [getMiddleTimeFF(ff_basename, conf.fps, ret_milliseconds=True)], x_coords, y_coords,
-        len(x_coords) * [1], pp_temp, extinction_correction=False)
+        len(x_coords) * [1], pp_temp, extinction_correction=False, precompute_pointing_corr=True)
     # Map sky coordinates to stack image coordinates
     stack_x, stack_y = raDecToXYPP(ra_coords, dec_coords, jd_middle, pp_stack)
 

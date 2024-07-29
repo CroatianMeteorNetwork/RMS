@@ -270,6 +270,22 @@ class Config:
 
         # Media backend to use for capture. Options are gst, cv2, or v4l2
         self.media_backend = "gst"
+
+        # Colorspace to use for the gstreamer media backend (e.g. BGR, GRAY8)
+        self.gst_colorspace = "BGR"
+
+        # Decoder for the gstreamer media backend (e.g. decodebin, avdec_h264, nvh264dec)
+        self.gst_decoder = "avdec_h264"
+
+        # Location of the raw videos to be saved to disk (None means no saving)
+        self.raw_video_dir = None
+
+        # Save the raw video to the night directory
+        self.raw_video_dir_night = False
+
+        # Duration of the raw video segment (seconds)
+        self.raw_video_duration = 30
+
         self.uyvy_pixelformat = False
 
         self.width = 1280
@@ -483,6 +499,8 @@ class Config:
         # Path to the ML model
         self.ml_model_path = os.path.join(self.rms_root_dir, "share", "meteorml32.tflite")
 
+        # Number of CPU cores to use for detection. -1 means all available cores (default)
+        self.num_cores = -1
 
         ##### StarExtraction
 
@@ -517,6 +535,9 @@ class Config:
         self.platepars_flux_recalibrated_name = 'platepars_flux_recalibrated.json'
         self.platepars_recalibrated_name = 'platepars_all_recalibrated.json'
 
+        # Platepar template directory
+        self.platepar_template_dir = os.path.join(self.rms_root_dir, 'share', 'platepar_templates')
+
         # Name of the platepar file on the server
         self.platepar_remote_name = 'platepar_latest.cal'
         self.remote_platepar_dir = 'platepars'
@@ -541,6 +562,8 @@ class Config:
 
         self.min_matched_stars = 20
 
+        # Maximum number of stars to use for recalibration on a single FF
+        self.recalibration_max_stars = 200
 
         ##### Thumbnails
         self.thumb_bin =  4
@@ -954,6 +977,32 @@ def parseCapture(config, parser):
     
     if parser.has_option(section, "media_backend"):
         config.media_backend = parser.get(section, "media_backend")
+
+    if parser.has_option(section, "gst_colorspace"):
+        config.gst_colorspace = parser.get(section, "gst_colorspace")
+
+    if parser.has_option(section, "gst_decoder"):
+        config.gst_decoder = parser.get(section, "gst_decoder")
+
+    if parser.has_option(section, "raw_video_dir"):
+        config.raw_video_dir = parser.get(section, "raw_video_dir")
+
+        # If the raw video directory is set to 'None', disable saving raw videos
+        if config.raw_video_dir.strip().lower() == "none":
+            config.raw_video_dir = None
+
+
+    if parser.has_option(section, "raw_video_dir_night"):
+        config.raw_video_dir_night = parser.getboolean(section, "raw_video_dir_night")
+        
+
+    if parser.has_option(section, "raw_video_duration"):
+        config.raw_video_duration = parser.getfloat(section, "raw_video_duration")
+
+        # If the duration is negative, set it to 256 frames at the current FPS
+        if config.raw_video_duration < 0:
+            config.raw_video_duration = 256.0/float(config.fps)
+
 
     if parser.has_option(section, "force_v4l2"):
         force_v4l2 = parser.getboolean(section, "force_v4l2")
@@ -1389,6 +1438,11 @@ def parseMeteorDetection(config, parser):
         if TFLITE_AVAILABLE and (config.ml_filter > 0):
             config.min_patch_intensity_multiplier = 0
 
+    if parser.has_option(section, "num_cores"):
+        config.num_cores = parser.getint(section, "num_cores")
+
+        if config.num_cores <= 0:
+            config.num_cores = -1
 
 
 def parseStarExtraction(config, parser):
@@ -1479,6 +1533,9 @@ def parseCalibration(config, parser):
     if parser.has_option(section, "platepars_recalibrated_name"):
         config.platepars_recalibrated_name = parser.get(section, "platepars_recalibrated_name")
 
+    if parser.has_option(section, "platepar_template_dir"):
+        config.platepar_template_dir = parser.get(section, "platepar_template_dir")
+
     if parser.has_option(section, "platepar_remote_name"):
         config.platepar_remote_name = parser.get(section, "platepar_remote_name")
 
@@ -1502,6 +1559,9 @@ def parseCalibration(config, parser):
 
     if parser.has_option(section, "min_matched_stars"):
         config.min_matched_stars = parser.getint(section, "min_matched_stars")
+
+    if parser.has_option(section, "recalibration_max_stars"):
+        config.recalibration_max_stars = parser.getint(section, "recalibration_max_stars")
 
     if parser.has_option(section, "mask_download_permissive"):
         config.mask_download_permissive = parser.getboolean(section, "mask_download_permissive")

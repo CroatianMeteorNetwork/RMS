@@ -124,7 +124,8 @@ def getPairedStarsSkyPositions(img_x, img_y, jd, platepar):
     # Compute RA, Dec of image stars
     img_time = jd2Date(jd)
     _, ra_array, dec_array, _ = RMS.Astrometry.ApplyAstrometry.xyToRaDecPP(
-        len(img_x) * [img_time], img_x, img_y, len(img_x) * [1], platepar, extinction_correction=False
+        len(img_x) * [img_time], img_x, img_y, len(img_x) * [1], platepar, extinction_correction=False,
+        precompute_pointing_corr=True
     )
 
     return ra_array, dec_array
@@ -1510,7 +1511,7 @@ if __name__ == "__main__":
 
         # Map to RA/Dec
         jd_data, ra_data, dec_data, _ = RMS.Astrometry.ApplyAstrometry.xyToRaDecPP(
-            [time_data], [x_img], [y_img], [1], pp, extinction_correction=False
+            [time_data], [x_img], [y_img], [1], pp, extinction_correction=False, precompute_pointing_corr=True
         )
 
         # Map back to X, Y
@@ -1518,7 +1519,7 @@ if __name__ == "__main__":
 
         # Map forward to sky again
         _, ra_data_rev, dec_data_rev, _ = RMS.Astrometry.ApplyAstrometry.xyToRaDecPP(
-            [time_data], x_data, y_data, [1], pp, extinction_correction=False
+            [time_data], x_data, y_data, [1], pp, extinction_correction=False, precompute_pointing_corr=True
         )
 
         print()

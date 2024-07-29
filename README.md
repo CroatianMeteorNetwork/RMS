@@ -84,23 +84,32 @@ Here we provide installation instructions for the RPi, but the procedure should 
 Alternatively, if you are using Anaconda Python on your Linux PC, you can install all libraries except OpenCV by running:
 
 ```
-conda create --name rms python=3.9
-conda activate rms 
-conda install -y -c conda-forge numpy scipy gitpython cython matplotlib paramiko
-conda install -y -c conda-forge Pillow pyqtgraph'<=0.12.1'
+conda create -y -n rms -c conda-forge python==3.11.6
+conda activate rms
+conda install -y -c conda-forge numpy'<2.0' scipy gitpython cython matplotlib paramiko
+conda install -y -c conda-forge numba
+conda install -y pyqt==5.15.10
+conda install -y -c conda-forge Pillow pyqtgraph==0.12.3
 conda install -y -c conda-forge ephem
 conda install -y -c conda-forge imageio pandas
 conda install -y -c conda-forge pygobject
 conda install -y -c astropy astropy
-conda install -y pyqt
-pip install rawpy
-pip install git+https://github.com/matejak/imreg_dft@master#egg=imreg_dft
+pip install rawpy'<0.22'
+pip install git+https://github.com/matejak/imreg_dft@master#egg=imreg_dft'>2.0.0'
 ```
 
-If you want to use the machine for capture, you need to install OpenCV using the ```opencv4_install.sh``` script. This will build OpenCV with gstreamer and ffmpeg support. If you are not planning to run the capture but you are planning to use other RMS tool, you can install opencv using conda:
+If you want to use the machine for capture using OpenCV, you need to install it using the ```opencv4_install.sh``` script. This will build OpenCV with gstreamer and ffmpeg support. If you are not planning to run the capture but you are planning to use other RMS tool, you can install opencv using conda:
 
 ```
-conda install -c conda-forge opencv
+conda install -y -c conda-forge opencv
+```
+
+If you want full gstreamer support, you need to install the additional gstreamer libraries:
+
+```
+conda install -y -c conda-forge gstreamer==1.22.3
+conda install -y -c conda-forge gobject-introspection
+conda install -y -c conda-forge gst-plugins-bad gst-plugins-base gst-plugins-good gst-plugins-ugly
 ```
 
 
@@ -134,7 +143,7 @@ This will download the code in this repository in the RMS directory.
 Navigate with terminal to base git directory (e.g. /home/pi/RMS/), and run:
 
 ```
-python setup.py install
+pip install .
 ```
 
 This will compile the code in C++ which we are using as one of the processing steps in meteor detection. The method in question is called Kernel-based Hough Transform, and you can read more about it here: [KHT](http://www2.ic.uff.br/~laffernandes/projects/kht/)

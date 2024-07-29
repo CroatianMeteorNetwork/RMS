@@ -19,7 +19,7 @@ log = logging.getLogger("logger")
 
 
 
-def downloadNewPlatepar(config, port=22):
+def downloadNewPlatepar(config):
     """ Connect to the central server and download a new platepar calibration file, if available. """
 
     log.info('Checking for new platepar on the server...')
@@ -27,11 +27,11 @@ def downloadNewPlatepar(config, port=22):
         log.debug("Can't contact the server: RSA private key file not found.")
         return False
 
-    log.debug('Establishing SSH connection to: ' + config.hostname + ':' + str(port) + '...')
+    log.debug('Establishing SSH connection to: ' + config.hostname + ':' + str(config.host_port) + '...')
 
     try:
         # Connect to host
-        t = paramiko.Transport((config.hostname, port))
+        t = paramiko.Transport((config.hostname, config.host_port))
         t.start_client()
 
         # Authenticate the connection
@@ -128,4 +128,4 @@ if __name__ == "__main__":
 
 
     # Test platepar downloading
-    downloadNewPlatepar(config, port=22)
+    downloadNewPlatepar(config)

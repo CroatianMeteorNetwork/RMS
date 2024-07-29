@@ -102,6 +102,7 @@ def recalibrateFF(
     force_platepar_save=False,
     lim_mag=None,
     ignore_distance_threshold=False,
+    ignore_max_stars=False,
 ):
     """Given the platepar and a list of stars on one image, try to recalibrate the platepar to achieve
         the best match by brute force star matching.
@@ -118,11 +119,25 @@ def recalibrateFF(
         force_platepar_save: [bool] Skip the goodness of fit check and save the platepar.
         ignore_distance_threshold: [bool] Don't consider the recalib as failed if the median distance
             is larger than the threshold.
+        ignore_max_stars: [bool] Ignore the maximum number of image stars for recalibration.
+
     Return:
         result: [?] A Platepar instance if refinement is successful, None if it failed.
         min_match_radius: [float] Minimum radius that successfuly matched the stars (pixels).
     """
+
     working_platepar = copy.deepcopy(working_platepar)
+
+    # If there more stars than a set limit, sample them randomly using the same seed for reproducibility
+    if not ignore_max_stars and len(star_dict_ff[jd]) > config.recalibration_max_stars:
+
+        # Create a generator with a fixed random seed
+        rng = np.random.default_rng(seed=0)
+
+        # Sample the stars and store them in a copy of the star dictionary
+        star_dict_ff = copy.deepcopy(star_dict_ff)
+        star_dict_ff = {jd: rng.choice(star_dict_ff[jd], config.recalibration_max_stars, replace=False)}
+
 
     # A list of matching radiuses to try
     min_radius = 0.5
@@ -364,6 +379,7 @@ def recalibratePlateparsForFF(
     config,
     lim_mag=None,
     ignore_distance_threshold=False,
+    ignore_max_stars=False,
 ):
     """
     Recalibrate platepars corresponding to ff files based on the stars.
@@ -380,6 +396,7 @@ def recalibratePlateparsForFF(
         lim_mag: [float]
         ignore_distance_threshold: [bool] Don't consider the recalib as failed if the median distance
             is larger than the threshold.
+        ignore_max_stars: [bool] Ignore the maximum number of image stars for recalibration.
 
     Returns:
         recalibrated_platepars: [dict] A dictionary where one key is ff file name and the value is
@@ -425,6 +442,7 @@ def recalibratePlateparsForFF(
                 catalog_stars,
                 lim_mag=lim_mag,
                 ignore_distance_threshold=ignore_distance_threshold,
+                ignore_max_stars=ignore_max_stars,
             )
 
             # If the recalibration failed, try using FFT alignment
@@ -510,7 +528,7 @@ def recalibratePlateparsForFF(
 
 
 def recalibrateSelectedFF(dir_path, ff_file_names, calstars_list, config, lim_mag, \
-    pp_recalib_name, ignore_distance_threshold=False):
+    pp_recalib_name, ignore_distance_threshold=False, ignore_max_stars=False):
     """Recalibrate FF files, ignoring whether there are detections.
 
     Arguments:
@@ -524,6 +542,7 @@ def recalibrateSelectedFF(dir_path, ff_file_names, calstars_list, config, lim_ma
     Keyword arguments:
         ignore_distance_threshold: [bool] Don't consider the recalib as failed if the median distance
             is larger than the threshold.
+        ignore_max_stars: [bool] Ignore the maximum number of image stars for recalibration.
 
     Return:
         recalibrated_platepars: [dict] A dictionary where the keys are FF file names and values are
@@ -563,6 +582,7 @@ def recalibrateSelectedFF(dir_path, ff_file_names, calstars_list, config, lim_ma
         config,
         lim_mag=lim_mag,
         ignore_distance_threshold=ignore_distance_threshold,
+        ignore_max_stars=ignore_max_stars,
     )
 
     # Store recalibrated platepars in json
