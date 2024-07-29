@@ -41,17 +41,6 @@ class SummaryFile:
 
     def __init__(self):
 
-        try:
-            # Get latest version's commit hash and time of commit
-            repo = git.Repo(search_parent_directories=True)
-            commit_unix_time = repo.head.object.committed_date
-            sha = repo.head.object.hexsha
-            commit_time = datetime.datetime.fromtimestamp(commit_unix_time).strftime('%Y%m%d_%H%M%S')
-
-        except:
-            commit_time = ""
-            sha = ""
-
         self.repo = git.Repo(search_parent_directories=True)
         self.date = self.repo.head.object.committed_date
         self.commit = self.repo.head.object.hexsha
