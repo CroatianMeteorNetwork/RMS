@@ -164,7 +164,10 @@ class ObservationSummary:
         output += "number_fits_detected: {}\n".format(self.number_fits_detected)
         output += "photometry_good: {}\n".format(self.photometry_good)
         output += "dropped_frames: {}\n".format(self.dropped_frames)
-        output += "jitter_quality: {:.3f}\n".format(self.jitter_quality)
+        try:
+            output += "jitter_quality: {:.3f}\n".format(self.jitter_quality)
+        except:
+            output += "jitter_quality: {:s}\n".format(self.jitter_quality)
         output += "dropped_frame_rate: {:.3f}%\n".format(self.dropped_frame_rate)
         output += "last_calculated_fps: {}\n".format(self.last_calculated_fps)
         output += "sensor_type: {}\n".format(self.sensor_type)
