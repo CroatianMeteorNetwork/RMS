@@ -353,6 +353,8 @@ class Config:
 
         # Automatically reprocess broken capture directories
         self.auto_reprocess = True
+
+        # Prioritize capture over reprocessing - do not start reprocessing a new directory if should be capturing
         self.prioritize_capture_over_reprocess = False
 
         # Flag file which indicates that the previously processed files are loaded during capture resume
@@ -818,10 +820,6 @@ def parseSystem(config, parser):
     if parser.has_option(section, "auto_reprocess_external_script_run"):
         config.auto_reprocess_external_script_run = parser.getboolean(section, \
             "auto_reprocess_external_script_run")
-
-    if parser.has_option(section, "prioritize_capture_over_reprocess"):
-        config.prioritize_capture_over_reprocess = parser.getboolean(section, \
-            "prioritize_capture_over_reprocess")
 
     if parser.has_option(section, "external_script_path"):
         config.external_script_path = parser.get(section, "external_script_path")
