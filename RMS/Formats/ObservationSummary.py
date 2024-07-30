@@ -34,8 +34,7 @@ import git
 import shutil
 import platform
 import os
-
-import numpy as np
+from RMS.Misc import niceFormat, isRaspberryPi
 
 
 class ObservationSummary:
@@ -48,7 +47,11 @@ class ObservationSummary:
         self.date = self.repo.head.object.committed_date
         self.commit = self.repo.head.object.hexsha
         self.merge = git.Commit(self.repo, self.repo.head.object.binsha).parents[0]
-        self.hardware_version = platform.machine()
+        if isRaspberryPi():
+            with open('/sys/firmware/devicetree/base/model', 'r') as m:
+                self.hardware_version = m.read.lower()
+        else:
+            self.hardware_version = platform.machine()
         self.os_version = platform.platform()
         # todo: handle older versions of python
         self.storage_total, self.storage_used, self.storage_free = shutil.disk_usage("/")
@@ -124,20 +127,7 @@ class ObservationSummary:
             summary_file_handle.write(self.serialize())
 
 
-def niceFormat(string, delim=":", extra_space=5):
-    max_to_delim = 0
-    for line in string.splitlines():
-        max_to_delim = line.find(delim) if line.find(delim) > max_to_delim else max_to_delim
 
-    formatted_string = ""
-    for line in string.splitlines():
-        field_name = line.split(delim)[0].strip()
-        value = line.split(delim)[1].strip()
-        padding = " " * (extra_space + max_to_delim - len(field_name))
-        formatted_string += "{:s}{:s}{:s}{:s}\n".format(field_name, padding, delim, value)
-        print(formatted_string)
-
-    return formatted_string
 
 
 if __name__ == "__main__":
