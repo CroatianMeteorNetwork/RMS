@@ -134,8 +134,8 @@ if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser(description="Compare either .configTemplate or ConfigReader.py "
                                          "options with .config file options.")
 
-    arg_parser.add_argument("config_path", default="./.config", help="Path to the .config file")
-
+    arg_parser.add_argument("config_path", nargs='?', default="./.config", help="Path to the .config file")
+    
     arg_parser.add_argument('-r', '--cr', action="store_true", \
         help="""Use ConfigReader options as reference. """)
 
@@ -154,11 +154,11 @@ if __name__ == "__main__":
     configreader_path = cml_args.configreader
     configTemplate_path = cml_args.template
 
-    if not os.path.exists(configreader_path) and cml_args.cr:
+    if not os.path.exists(configreader_path):
         print(f"Error: ConfigReader.py not found at {configreader_path}")
         exit(1)
 
-    if not os.path.exists(configTemplate_path) and not cml_args.cr:
+    if not os.path.exists(configTemplate_path):
         print(f"Error: .configTemplate not found at {configTemplate_path}")
         exit(1)
 
