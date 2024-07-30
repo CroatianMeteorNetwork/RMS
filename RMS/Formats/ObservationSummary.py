@@ -28,14 +28,22 @@ from datetime import datetime
 Creates a text file summarising key station information and observation session
 """
 
-
+import sys
 import datetime
 import git
 import shutil
 import platform
 import os
 import subprocess
+import Utils.CameraControl
 from RMS.Misc import niceFormat, isRaspberryPi
+import re
+
+if sys.version_info.major > 2:
+    import dvrip as dvr
+else:
+    # Python2 compatible version
+    import Utils.CameraControl27 as dvr
 
 
 class ObservationSummary:
@@ -92,6 +100,16 @@ class ObservationSummary:
             if items[0:len(stationID)] == stationID:
                 self.capture_directories += 1
 
+    def gatherCameraInformation(self,config):
+
+        try:
+            cam = dvr.DVRIPCam(re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0])
+            if cam.login():
+                self.sensor_type = cam.get_upgrade_info()['Hardware']
+            else:
+                self.sensor_type = "Unable to login"
+        except:
+            self.sensor_type = "Error"
 
 
     def estimateLens(self,fov_h):

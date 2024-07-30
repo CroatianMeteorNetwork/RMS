@@ -150,7 +150,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
 
     observation_summary.gatherFileSystemInformation(os.path.split(night_data_dir)[0], config.stationID)
-
+    observation_summary.sensor_type = observation_summary.gatherCameraInformation(config)
 
     # Remove final slash in the night dir
     if night_data_dir.endswith(os.sep):
@@ -194,7 +194,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             ff_detected = filterFTPdetectinfoML(config, os.path.join(night_data_dir, ftpdetectinfo_name), \
                 threshold=config.ml_filter, keep_pngs=False, clear_prev_run=True)
             observation_summary.detections_after_ml = len(ff_detected)
-            log.info("detections_after_ml {}".format(observation_summary.detections_after_ml))
+
 
         observation_summary.detections_after_ml = len(readFTPdetectinfo(night_data_dir,ftpdetectinfo_name))
 
