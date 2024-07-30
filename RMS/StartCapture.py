@@ -51,6 +51,7 @@ from RMS.RunExternalScript import runExternalScript
 from RMS.UploadManager import UploadManager
 from RMS.EventMonitor import EventMonitor
 from RMS.DownloadMask import downloadNewMask
+from Utils.AuditConfig import compareConfigs
 
 # Flag indicating that capturing should be stopped
 STOP_CAPTURE = False
@@ -245,6 +246,12 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             shutil.copy2(config.config_file_name, os.path.join(night_data_dir, ".config"))
         except:
             log.error("Cannot copy the config file to the capture directory!")
+
+    # Audit config file
+    try:
+        log.info(compareConfigs(night_data_dir, './configTemplate', './RMS/ConfigReader.py'))
+    except Exception as e:
+        log.debug('Could not generate config audit report:' + repr(e))
 
     # Check for and get an updated mask
     if config.mask_download_permissive:
