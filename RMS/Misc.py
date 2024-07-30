@@ -631,7 +631,7 @@ def niceFormat(string, delim=":", extra_space=5):
         field_name = line.split(delim)[0].strip()
         value = line.split(delim)[1].strip()
         padding = " " * (extra_space + max_to_delim - len(field_name))
-        formatted_string += "{:s}{:s}{:s}{:s}\n".format(field_name, padding, delim, value)
+        formatted_string += "{:s}{:s}{:s} {:s}\n".format(field_name, padding, delim, value)
         print(formatted_string)
 
     return formatted_string
