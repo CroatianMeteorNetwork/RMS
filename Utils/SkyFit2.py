@@ -23,7 +23,7 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     extinctionCorrectionTrueToApparent, applyAstrometryFTPdetectinfo, getFOVSelectionRadius
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, raDec2AltAz, \
     apparentAltAz2TrueRADec, J2000_JD, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
-from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
+from RMS.Astrometry.AstrometryNet import astrometryNetSolve
 import RMS.ConfigReader as cr
 from RMS.ExtractStars import extractStarsAndSave
 import RMS.Formats.CALSTARS as CALSTARS
@@ -38,6 +38,7 @@ from RMS.Misc import decimalDegreesToSexHours
 from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
 from RMS.Routines.CustomPyqtgraphClasses import *
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle, greatCirclePhase
+from RMS.Routines.MaskImage import getMaskFile
 from RMS.Routines import RollingShutterCorrection
 
 import pyximport
@@ -3829,6 +3830,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Handle using FR files too
         ff_name_c = convertFRNameToFF(self.img_handle.name())
 
+        # Find and load a mask file is there is one
+        mask = getMaskFile(self.dir_path, self.config)
+
         # Check if the given FF files is in the calstars list
         if (ff_name_c in self.calstars) and (not upload_image):
 
@@ -3847,7 +3851,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 x_data = star_data[:, 1]
 
                 # Get astrometry.net solution, pass the FOV width estimate
-                solution = novaAstrometryNetSolve(x_data=x_data, y_data=y_data, fov_w_range=fov_w_range)
+                solution = astrometryNetSolve(x_data=x_data, y_data=y_data, fov_w_range=fov_w_range, 
+                                              mask=mask)
 
         else:
             fail = True
@@ -3855,7 +3860,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Try finding the soluting by uploading the whole image
         if fail or upload_image:
 
-            print("Uploading the whole image to astrometry.net...")
+            print("Using the whole image in astrometry.net...")
 
             # If the image is 16bit or larger, rescale and convert it to 8 bit
             if self.img.data.itemsize*8 > 8:
@@ -3870,7 +3875,7 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
                 img_data = self.img.data
 
-            solution = novaAstrometryNetSolve(img=img_data, fov_w_range=fov_w_range)
+            solution = astrometryNetSolve(img=img_data, fov_w_range=fov_w_range, mask=mask)
 
         if solution is None:
             qmessagebox(title='Astrometry.net error',
@@ -3880,31 +3885,20 @@ class PlateTool(QtWidgets.QMainWindow):
             return None
 
         # Extract the parameters
-        ra, dec, orientation, scale, fov_w, fov_h = solution
+        ra, dec, rot_standard, scale, fov_w, fov_h = solution
 
         jd = date2JD(*self.img_handle.currentTime())
-
-        # Compute the position angle from the orientation
-        #pos_angle_ref = rotationWrtStandardToPosAngle(self.platepar, orientation)
-
-        # Assume zero rotation wrt horizon
-        orientation = 0.0
-        pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar, orientation)
 
         # Compute reference azimuth and altitude
         azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, self.platepar.lat, self.platepar.lon)
 
         # Set parameters to platepar
-        self.platepar.pos_angle_ref = pos_angle_ref
-        self.platepar.rotation_from_horiz = orientation
         self.platepar.F_scale = scale
+        self.platepar.pos_angle_ref = rotationWrtStandardToPosAngle(self.platepar, rot_standard)
         self.platepar.az_centre = azim
         self.platepar.alt_centre = alt
 
         self.platepar.updateRefRADec(skip_rot_update=True)
-
-        # Save the current rotation w.r.t horizon value
-        self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
 
         # Reset the distortion parameters
         self.platepar.resetDistortionParameters()
@@ -3918,9 +3912,9 @@ class PlateTool(QtWidgets.QMainWindow):
         print(' Azim  = {:.2f} deg'.format(self.platepar.az_centre))
         print(' Alt   = {:.2f} deg'.format(self.platepar.alt_centre))
         print(' Rot horiz   = {:.2f} deg'.format(self.platepar.rotation_from_horiz))
-        print(' Orient eq   = {:.2f} deg'.format(orientation))
-        print(' Pos angle   = {:.2f} deg'.format(pos_angle_ref))
+        print(' Pos angle   = {:.2f} deg'.format(self.platepar.pos_angle_ref))
         print(' Scale = {:.2f} arcmin/px'.format(60/self.platepar.F_scale))
+        print(' FOV = {:.2f} x {:.2f} deg'.format(fov_w, fov_h))
 
     def getFOVcentre(self):
         """ Asks the user to input the centre of the FOV in altitude and azimuth. """

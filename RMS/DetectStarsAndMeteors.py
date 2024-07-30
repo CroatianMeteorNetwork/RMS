@@ -31,7 +31,7 @@ from RMS.Formats import FTPdetectinfo
 from RMS.Formats import CALSTARS
 from RMS.Formats.FFfile import validFFName
 from RMS.Formats.FrameInterface import detectInputType
-from RMS.ExtractStars import extractStars
+from RMS.ExtractStars import extractStarsFF
 from RMS.Detection import detectMeteors
 from RMS.DetectionTools import loadImageCalibration
 from RMS.QueuedPool import QueuedPool
@@ -82,8 +82,9 @@ def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None, dark=
         byteswap=img_handle.byteswap)
 
 
-    # Run star extraction
-    star_list = extractStars(ff_directory, ff_name, config, flat_struct=flat_struct, dark=dark, mask=mask)
+    # Run star extraction on FF files
+    star_list = extractStarsFF(ff_directory, ff_name, config=config, 
+                               flat_struct=flat_struct, dark=dark, mask=mask)
 
 
     log.info('Detected stars: ' + str(len(star_list[1])))

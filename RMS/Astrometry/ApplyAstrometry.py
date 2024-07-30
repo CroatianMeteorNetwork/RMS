@@ -447,7 +447,7 @@ def rotationWrtHorizonToPosAngle(platepar, rot_angle):
 
     Arguments:
         pletepar: [Platepar object] Input platepar.
-        rot_angle: [float] The rotation angle w.r.t. horizon (deg)>
+        rot_angle: [float] The rotation angle w.r.t. horizon (deg).
     Return:
         pos_angle: [float] Position angle (deg).
     """
@@ -518,11 +518,11 @@ def rotationWrtStandard(platepar):
 
 
 def rotationWrtStandardToPosAngle(platepar, rot_angle):
-    """ Given the rotation angle w.r.t horizon, numerically compute the position angle.
+    """ Given the rotation angle w.r.t standard, numerically compute the position angle.
 
     Arguments:
         pletepar: [Platepar object] Input platepar.
-        rot_angle: [float] The rotation angle w.r.t. horizon (deg)>
+        rot_angle: [float] The rotation angle w.r.t. standard (deg).
     Return:
         pos_angle: [float] Position angle (deg).
     """
