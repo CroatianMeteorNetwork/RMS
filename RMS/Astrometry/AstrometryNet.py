@@ -64,7 +64,7 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
             img_median = np.median(img)
 
             # Try different intensity thresholds until the greatest number of stars is found
-            intens_thresh_list = [20, 30, 40, 10, 5]
+            intens_thresh_list = [70, 50, 40, 30, 20, 10, 5]
 
             # Repeat the process until the number of returned stars falls within the range
             min_stars_astrometry = 50
@@ -81,15 +81,28 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
                     continue
 
                 x_data, y_data, _, _, _ = status
+                x_data = np.array(x_data)
+                y_data = np.array(y_data)
 
-                if (len(x_data) >= min_stars_astrometry) and (len(x_data) <= max_stars_astrometry):
+                if len(x_data) < min_stars_astrometry:
                     print("Skipping, the number of stars {:d} outside {:d} - {:d} range".format(
                         len(x_data), min_stars_astrometry, max_stars_astrometry))
+                    
+                    continue
+                
+                elif len(x_data) > max_stars_astrometry:
+                    
+                    # If too many stars are found even with the first very high threshold, take that solution
                     break
+
+                else:
+                    break
+            
 
 
     # If there are too many stars (more than 200), randomly select 200
     if len(x_data) > 200:
+        
         print("Too many stars found: ", len(x_data))
         print("Randomly selecting 200 stars...")
 
@@ -105,7 +118,7 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
     for x, y in zip(x_data, y_data):
         print("{:8.2f} {:8.2f}".format(x, y))
 
-        
+
 
     print()
     print("Solving the image using the local installation of astrometry.net...")
