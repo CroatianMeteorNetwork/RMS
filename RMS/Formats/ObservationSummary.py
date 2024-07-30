@@ -65,8 +65,11 @@ class ObservationSummary:
             self.hardware_version = platform.machine()
 
         self.os_version = platform.platform()
-        # todo: handle older versions of python
-        self.storage_total, self.storage_used, self.storage_free = shutil.disk_usage("/")
+        # todo: handle older versions of python rather than try / except
+        try:
+            self.storage_total, self.storage_used, self.storage_free = shutil.disk_usage("/")
+        except:
+            self.storage_total, self.storage_used, self.storage_free = "Not available","Not available","Not available"
         self.fits_files = None
         self.fits_missing = None
         self.minutes_missing = None

@@ -37,7 +37,7 @@ from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
 from Utils.ShowerAssociation import showerAssociation
 from Utils.PlotTimeIntervals import plotFFTimeIntervals
 from Utils.TimestampRMSVideos import timestampRMSVideos
-from Formats.ObservationSummary import ObservationSummary
+from RMS.Formats.ObservationSummary import ObservationSummary
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
