@@ -263,7 +263,7 @@ def extractStarsFF(
     x_arr, y_arr, amplitude, intensity, fwhm = status
 
 
-    log.info('extracted ' + str(len(xy)) + ' stars from ' + ff_name)
+    log.info('extracted ' + str(len(x_arr)) + ' stars from ' + ff_name)
     return ff_name, x_arr, y_arr, amplitude, intensity, fwhm
 
 
