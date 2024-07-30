@@ -87,11 +87,25 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
                         len(x_data), min_stars_astrometry, max_stars_astrometry))
                     break
 
-            # Print the found star coordinates
-            print("Found stars: ", len(x_data))
-            print("        X,       Y")   
-            for x, y in zip(x_data, y_data):
-                print("{:8.2f} {:8.2f}".format(x, y))
+
+    # If there are too many stars (more than 200), randomly select 200
+    if len(x_data) > 200:
+        print("Too many stars found: ", len(x_data))
+        print("Randomly selecting 200 stars...")
+
+        # Randomly select 200 stars
+        rand_indices = np.random.choice(len(x_data), 200, replace=False)
+        x_data = x_data[rand_indices]
+        y_data = y_data[rand_indices]
+
+
+    # Print the found star coordinates
+    print("Stars for astrometry.net: ", len(x_data))
+    print("        X,       Y")   
+    for x, y in zip(x_data, y_data):
+        print("{:8.2f} {:8.2f}".format(x, y))
+
+        
 
     print()
     print("Solving the image using the local installation of astrometry.net...")
