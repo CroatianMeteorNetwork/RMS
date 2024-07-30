@@ -357,7 +357,7 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
     if ff_file_path is not None:
         
         # Read the FF file
-        ff = readFF(*os.path.split(cml_args.file_path[0]))
+        ff = readFF(*os.path.split(ff_file_path))
 
         img = ff.avepixel
 
@@ -512,6 +512,9 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
             print('Got job status:', stat)
             results_tries += 1
 
+
+    print("Astrometry.net solution:")
+    print(result)
 
     # RA/Dec of centre
     ra = result['ra']
