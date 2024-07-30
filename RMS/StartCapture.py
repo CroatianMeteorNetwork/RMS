@@ -249,7 +249,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
     # Audit config file
     try:
-        log.info(compareConfigs(night_data_dir, './configTemplate', './RMS/ConfigReader.py'))
+        log.info(compareConfigs(config.config_file_name,
+                                os.path.join(config.rms_root_dir, ".configTemplate"),
+                                os.path.join(config.rms_root_dir, "RMS/ConfigReader.py")))
     except Exception as e:
         log.debug('Could not generate config audit report:' + repr(e))
 
