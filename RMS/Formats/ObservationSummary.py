@@ -60,7 +60,7 @@ class ObservationSummary:
         self.merge = git.Commit(self.repo, self.repo.head.object.binsha).parents[0]
         if isRaspberryPi():
             with open('/sys/firmware/devicetree/base/model', 'r') as m:
-                self.hardware_version = m.read.lower()
+                self.hardware_version = m.read().lower()
         else:
             self.hardware_version = platform.machine()
 
