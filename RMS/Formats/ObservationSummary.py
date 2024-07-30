@@ -159,9 +159,6 @@ class ObservationSummary:
         output += "detections_before_ml: {}\n".format(self.detections_before_ml)
         output += "detections_after_ml: {}\n".format(self.detections_after_ml)
         output += "number_fits_detected: {}\n".format(self.number_fits_detected)
-        output += "number_detections_before_ml: {}\n".format(self.detections_before_ml)
-        output += "number_detections_after_ml: {}\n".format(self.detections_before_ml)
-        output += "number_fits_detected: {}\n".format(self.number_fits_detected)
         output += "photometry_good: {}\n".format(self.photometry_good)
         output += "dropped_frames: {}\n".format(self.dropped_frames)
         try:
