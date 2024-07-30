@@ -546,13 +546,13 @@ class BufferedCapture(Process):
         if self.config.protocol == 'udp':
             protocol_str = "protocols=udp retry=5"
             # rtspsrc_params = ("rtspsrc buffer-mode=1 protocols=udp retry=5")
-            RMS.Reprocess.observation_summary = 'udp'
+            RMS.Reprocess.observation_summary.protocol = 'udp'
 
         else:  
             # Default to TCP
             protocol_str = "protocols=tcp tcp-timeout=5000000 retry=5"
             #rtspsrc_params = ("rtspsrc buffer-mode=1 protocols=tcp tcp-timeout=5000000 retry=5")
-            RMS.Reprocess.observation_summary = 'tcp'
+            RMS.Reprocess.observation_summary.protocol = 'tcp'
             
         # Define the source up to the point where we want to branch off
         source_to_tee = (
@@ -842,10 +842,10 @@ class BufferedCapture(Process):
 
                 time.sleep(5)
                 log.info('GStreamer Video device released!')
-                RMS.Reprocess.observation_summary = "gst"
+                RMS.Reprocess.observation_summary.media_backend = "gst"
             except Exception as e:
                 log.error('Error releasing GStreamer pipeline: {}'.format(e))
-                RMS.Reprocess.observation_summary = "gst not successfully released"
+                RMS.Reprocess.observation_summary.media_backend = "gst not successfully released"
         if self.device:
 
             try:
@@ -853,10 +853,10 @@ class BufferedCapture(Process):
                 if self.video_device_type == "cv2":
                     self.device.release()
                     log.info('OpenCV Video device released!')
-                    RMS.Reprocess.observation_summary = "OpenCV"
+                    RMS.Reprocess.observation_summary.media_backend = "OpenCV"
             except Exception as e:
                 log.error('Error releasing OpenCV device: {}'.format(e))
-                RMS.Reprocess.observation_summary = "OpenCV not successfully released"
+                RMS.Reprocess.observation_summary.media_backend = "OpenCV not successfully released"
             finally:
                 self.device = None  # Reset device to None after releasing
 
