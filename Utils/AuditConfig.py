@@ -69,6 +69,18 @@ def checkCommentedOptions(config_path, options):
     return commented_out_options
 
 
+def validatePath(path, file_name):
+    """Validate if the given path includes a filename and exists."""
+    if not os.path.basename(path):
+        raise ValueError(f"'{path}' does not include a filename.")
+    
+    abs_path = os.path.abspath(path)
+    if not os.path.exists(abs_path):
+        raise FileNotFoundError(f"{file_name} not found. Tried to find it at absolute path: '{abs_path}'")
+    
+    return abs_path   
+
+
 def compareConfigs(config_path, template_path, configreader_path, dev_report=False):
     """Audit .config, and optionally .configTemplate, by comparing options between '.config',
     '.configTemplate', and 'ConfigReader.py'
@@ -82,6 +94,17 @@ def compareConfigs(config_path, template_path, configreader_path, dev_report=Fal
     Returns:
         str: A formatted string containing the comparison results
     """
+    
+    # Validate input paths
+    validatePath(config_path, ".config file")
+    validatePath(template_path, ".configTemplate")
+    validatePath(configreader_path, "ConfigReader.py")
+    
+    # print(f"Using the following files:")
+    # print(f"  Config file: {config_path}")
+    # print(f"  Template file: {template_path}")
+    # print(f"  ConfigReader file: {configreader_path}")
+    # print()
 
     # Gather options from all three files
     config_file_options = parseConfigFile(config_path)
@@ -108,6 +131,7 @@ def compareConfigs(config_path, template_path, configreader_path, dev_report=Fal
 
     # Generate report
     output = []
+    output.append("")
     output.append("=" * 80)
     output.append("CONFIG COMPARISON RESULTS".center(80))
     output.append("=" * 80 + "\n")
@@ -199,12 +223,10 @@ if __name__ == "__main__":
 
     #########################
 
-    config_path = cml_args.config_path
-    configTemplate_path = cml_args.template
-    configreader_path = cml_args.configreader
-
-    checkFileExists(config_path, ".config file")
-    checkFileExists(configTemplate_path, ".configTemplate")
-    checkFileExists(configreader_path, "ConfigReader.py")
-
-    print(compareConfigs(config_path, configTemplate_path, configreader_path, dev_report=cml_args.dev))
+    try:
+        print(compareConfigs(cml_args.config_path, cml_args.template, cml_args.configreader,
+                             dev_report=cml_args.dev))
+        
+    except (ValueError, FileNotFoundError) as e:
+        print(f"Error: {str(e)}")
+        exit(1)
