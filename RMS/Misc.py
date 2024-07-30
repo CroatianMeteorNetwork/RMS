@@ -607,7 +607,7 @@ def niceFormat(string, delim=":", extra_space=5):
     key2 : value1
     alongerkey : value2
 
-    and reformats the string so that the delimiters are all in the same column
+    and formats the string so that the delimiters are all in the same column
 
     key        : value
     key2       : value1
@@ -616,7 +616,7 @@ def niceFormat(string, delim=":", extra_space=5):
     Args:
         string: takes a string, possibly including \n, each line of format key delimiter value
         delim: delimited between key and value default :
-        extra_space: number of extra spaces between the key anre the delimiter
+        extra_space: number of extra spaces between the key and the delimiter
 
     Returns:
         a string
@@ -632,6 +632,5 @@ def niceFormat(string, delim=":", extra_space=5):
         value = line.split(delim)[1].strip()
         padding = " " * (extra_space + max_to_delim - len(field_name))
         formatted_string += "{:s}{:s}{:s} {:s}\n".format(field_name, padding, delim, value)
-        print(formatted_string)
 
     return formatted_string
