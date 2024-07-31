@@ -114,8 +114,10 @@ def findBinaryPath(config, dir_path, binary_name, binary_extension):
     else:
         # If there are more candidates, find the right one for the running version of python, platform, and
         #   bits
-        py_version = "{:d}.{:d}".format(sys.version_info.major, sys.version_info.minor)
-
+        if len(sys.version_info.minor) <= 1:
+            py_version = "{:d}.{:d}".format(sys.version_info.major, sys.version_info.minor)
+        else:
+            py_version = "{:d}{:d}".format(sys.version_info.major, sys.version_info.minor)
         # Find the compiled module for the correct python version
         for file_path in file_candidates:
             
@@ -123,11 +125,13 @@ def findBinaryPath(config, dir_path, binary_name, binary_extension):
             binary_dir = os.path.split(os.path.split(file_path)[0])[1]
 
             # If the directory ends with the correct python version, take that binary
+
             if binary_dir.endswith('-' + py_version):
                 return file_path
 
 
         # If no appropriate binary was found, give up
+        log.warn("No kht binary found")
         return None
 
 
