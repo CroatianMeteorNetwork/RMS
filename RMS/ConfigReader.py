@@ -125,7 +125,7 @@ def findBinaryPath(config, dir_path, binary_name, binary_extension):
             binary_dir_version = binary_dir.split('-')[-1]
 
 
-            # the binary directory may or may not contain a dot in the directory name
+            # the binary directory may or may not contain a dot in the version
             # e.g lib.linux-x86_64-3.7 vs lib.linux-x86_64-cpython-311
             if '.' in binary_dir_version:
                 py_version = "{:d}.{:d}".format(sys.version_info.major, sys.version_info.minor)
