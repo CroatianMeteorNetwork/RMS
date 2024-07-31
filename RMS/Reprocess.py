@@ -201,9 +201,10 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         # Get the platepar file
         platepar, platepar_path, platepar_fmt = getPlatepar(config, night_data_dir)
 
-        observation_summary.camera_pointing = format("az {:.2f}°, alt {:.2f}°".format(platepar.az_centre,platepar.alt_centre))
-        observation_summary.camera_fov = format("horizontal {:.2f}°, vertical {:.2f}°".format(platepar.fov_h,platepar.fov_v))
-        observation_summary.lens = observation_summary.estimateLens(platepar.fov_h)
+        if not platepar is None:
+            observation_summary.camera_pointing = format("az {:.2f}°, alt {:.2f}°".format(platepar.az_centre,platepar.alt_centre))
+            observation_summary.camera_fov = format("horizontal {:.2f}°, vertical {:.2f}°".format(platepar.fov_h,platepar.fov_v))
+            observation_summary.lens = observation_summary.estimateLens(platepar.fov_h)
         # Run calibration check and auto astrometry refinement
         if (platepar is not None) and (calstars_name is not None):
 
