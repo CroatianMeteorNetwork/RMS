@@ -123,7 +123,7 @@ def findBinaryPath(config, dir_path, binary_name, binary_extension):
             binary_dir = os.path.split(os.path.split(file_path)[0])[1]
 
             # If the directory ends with the correct python version, take that binary
-            if binary_dir.endswith('-' + py_version):
+            if binary_dir.endswith('-' + py_version) or binary_dir.endswith('-' + py_version.replace(".","")):
                 return file_path
 
 

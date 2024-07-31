@@ -149,6 +149,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
 
 
+    # populate the observation summary object
     observation_summary.gatherFileSystemInformation(os.path.split(night_data_dir)[0], config.stationID)
     observation_summary.sensor_type = observation_summary.gatherCameraInformation(config)
 
