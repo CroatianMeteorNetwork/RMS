@@ -78,10 +78,12 @@ pip install -r requirements.txt
 # Run the python setup
 python setup.py install
 
-# Copy the config and mask files back
+# Create a template file from the source config and copy the user config and mask files back
 if [ $# -eq 0 ]; then
-    
-    # Copy the config and the mask back
+    # Rename the existing source .config file to .configTemplate
+    mv $RMSSOURCEDIR/.config $RMSSOURCEDIR/.configTemplate
+
+    # Copy the user config and mask files back
     cp $RMSBACKUPDIR/.config $RMSSOURCEDIR/.
     cp $RMSBACKUPDIR/mask.bmp $RMSSOURCEDIR/.
 fi
