@@ -4,6 +4,17 @@ import argparse
 import os
 
 
+OMIT_FROM_CONFIG = {'lat',
+                    'lon',
+                    'location',
+                    'altitude',
+                    'event_monitor_db_name',
+                    'force_v4l2',
+                    'mask',
+                    'platepar_name'
+                    }
+
+
 def extractConfigOptions(file_path):
     """Extract configuration options from ConfigReader.py
 
@@ -13,15 +24,13 @@ def extractConfigOptions(file_path):
     """
 
     options = set()
-
-    # Ignore DFNS specific options
-    excluded_words = {'lat', 'lon', 'location', 'altitude'}
+    options.add('stationid')
 
     with open(file_path, 'r') as file:
         content = file.read()
         # Look for patterns like parser.has_option(section, "option_name")
         matches = re.findall(r'parser\.has_option\([^,]+,\s*["\'](\w+)["\']', content)
-        options.update(match.lower() for match in matches if match.lower() not in excluded_words)
+        options.update(match.lower() for match in matches)
     return options
 
 
@@ -37,12 +46,9 @@ def parseConfigFile(config_path):
     config.read(config_path)
     options = set()
 
-    # Ignore stationID which is a special case
-    excluded_words = {'stationid'}
-
     for section in config.sections():
         for option in config.options(section):
-            if option.lower() not in excluded_words:
+            if option.lower():
                 options.add(option.lower())
 
     return options
@@ -95,48 +101,74 @@ def compareConfigs(config_path, template_path, configreader_path, dev_report=Fal
         str: A formatted string containing the comparison results
     """
     
-    # Validate input paths
-    validatePath(config_path, ".config file")
-    validatePath(template_path, ".configTemplate")
-    validatePath(configreader_path, "ConfigReader.py")
-    
-    # print(f"Using the following files:")
-    # print(f"  Config file: {config_path}")
-    # print(f"  Template file: {template_path}")
-    # print(f"  ConfigReader file: {configreader_path}")
-    # print()
+    # Initialize flags and empty sets
+    found_config = found_template = found_configreader = False
+    config_file_options = template_file_options = configreader_file_options = set()
 
-    # Gather options from all three files
-    config_file_options = parseConfigFile(config_path)
-    template_file_options = parseConfigFile(template_path)
-    configreader_file_options = extractConfigOptions(configreader_path)
+    # Try to load and parse each file
+    try:
+        validatePath(config_path, ".config file")
+        config_file_options = parseConfigFile(config_path)
+        found_config = True
+    except (ValueError, FileNotFoundError) as e:
+        dev_report = True
+        print(f"Error loading .config file: {e}")
 
-    # Find missing options relative to each other
-    missing_in_config_wrt_template = template_file_options - config_file_options
-    missing_in_config_wrt_cr = configreader_file_options - config_file_options
-    missing_in_template_wrt_cr = configreader_file_options - template_file_options
+    try:
+        validatePath(template_path, ".configTemplate")
+        template_file_options = parseConfigFile(template_path)
+        found_template = True
+    except (ValueError, FileNotFoundError) as e:
+        dev_report = True
+        print(f"Error loading .configTemplate file: {e}")
 
-    # Find extraneous options
-    extra_in_config = config_file_options - configreader_file_options
-    extra_in_template = template_file_options - configreader_file_options
+    try:
+        validatePath(configreader_path, "ConfigReader.py")
+        configreader_file_options = extractConfigOptions(configreader_path)
+        found_configreader = True
+    except (ValueError, FileNotFoundError) as e:
+        dev_report = True
+        print(f"Error loading ConfigReader.py file: {e}")
 
-    # Find commented out options
-    commented_options_in_config = checkCommentedOptions(config_path, missing_in_config_wrt_cr)
-    commented_options_in_template = checkCommentedOptions(template_path, missing_in_template_wrt_cr)
+    # Find missing and extra options
+    missing_in_config_wrt_template = template_file_options - config_file_options if found_template and found_config else set()
+    missing_in_config_wrt_cr = configreader_file_options - config_file_options if found_configreader and found_config else set()
+    missing_in_template_wrt_cr = configreader_file_options - template_file_options if found_configreader and found_template else set()
+    extra_in_config = config_file_options - configreader_file_options if found_config and found_configreader else set()
+    extra_in_template = template_file_options - configreader_file_options if found_template and found_configreader else set()
+
+    # Find commented out options (only if respective files are found)
+    commented_options_in_config = checkCommentedOptions(config_path, missing_in_config_wrt_cr) if found_config else set()
+    commented_options_in_template = checkCommentedOptions(template_path, missing_in_template_wrt_cr) if found_template else set()
 
     # Remove commented out options from missing
     missing_in_config_wrt_template -= commented_options_in_config
-    missing_in_config_wrt_cr -= commented_options_in_config
-    missing_in_template_wrt_cr -= commented_options_in_template
+    missing_in_config_wrt_cr -= (commented_options_in_config | OMIT_FROM_CONFIG)
+    missing_in_template_wrt_cr -= (commented_options_in_template | OMIT_FROM_CONFIG)
 
     # Generate report
     output = []
     output.append("")
     output.append("=" * 80)
-    output.append("CONFIG COMPARISON RESULTS".center(80))
+    title = "CONFIG COMPARISON RESULTS"
+    if dev_report:
+        title = "DEV " + title
+    output.append(title.center(80))
     output.append("=" * 80 + "\n")
 
-    if missing_in_config_wrt_template:
+    if not found_config:
+        output.append("WARNING: .config file not found. Some comparisons will be skipped.".center(80))
+        output.append("")
+
+    if not found_template:
+        output.append("NOTE: .configTemplate file not found. Some comparisons will be skipped.".center(80))
+        output.append("")
+
+    if not found_configreader:
+        output.append("WARNING: ConfigReader.py file not found. Some comparisons will be skipped.".center(80))
+        output.append("")
+
+    if missing_in_config_wrt_template and found_template and found_config:
         output.append("OPTIONS MISSING IN .CONFIG FILE (PRESENT IN TEMPLATE)".center(80))
         output.append("****** CONSIDER MANUALLY UPDATING .CONFIG FILE ******".center(80))
         output.append("Default values will be used:".center(80))
@@ -145,14 +177,21 @@ def compareConfigs(config_path, template_path, configreader_path, dev_report=Fal
             output.append(f" • {option}")
         output.append("")
 
-    if missing_in_template_wrt_cr and dev_report:
-        output.append("OPTIONS MISSING IN TEMPLATE FILE BUT IMPLEMENTED IN RMS:".center(80))
+    if missing_in_template_wrt_cr and dev_report and found_template and found_configreader:
+        output.append("OPTIONS NOT IN TEMPLATE FILE BUT IMPLEMENTED IN RMS:".center(80))
         output.append("-" * 80)
         for option in sorted(missing_in_template_wrt_cr):
             output.append(f" • {option}")
         output.append("")
 
-    if commented_options_in_config:
+    if missing_in_config_wrt_cr and dev_report and found_config and found_configreader:
+        output.append("OPTIONS NOT IN CONFIG FILE BUT IMPLEMENTED IN RMS:".center(80))
+        output.append("-" * 80)
+        for option in sorted(missing_in_config_wrt_cr):
+            output.append(f" • {option}")
+        output.append("")
+
+    if commented_options_in_config and found_config:
         output.append("OPTIONS COMMENTED OUT IN .CONFIG FILE".center(80))
         output.append("Default values will be used:".center(80))
         output.append("-" * 80)
@@ -160,46 +199,44 @@ def compareConfigs(config_path, template_path, configreader_path, dev_report=Fal
             output.append(f" • {option}")
         output.append("")
 
-    if commented_options_in_template and dev_report:
+    if commented_options_in_template and dev_report and found_template:
         output.append("OPTIONS COMMENTED OUT IN TEMPLATE FILE:".center(80))
         output.append("-" * 80)
         for option in sorted(commented_options_in_template):
             output.append(f" • {option}")
         output.append("")
 
-    if extra_in_config:
+    if extra_in_config and found_config and found_configreader:
         output.append("OPTIONS IN .CONFIG FILE NOT IMPLEMENTED IN RMS (will be ignored):".center(80))
         output.append("-" * 80)
         for option in sorted(extra_in_config):
             output.append(f" • {option}")
         output.append("")
 
-    if extra_in_template and dev_report:
+    if extra_in_template and dev_report and found_template and found_configreader:
         output.append("OPTIONS IN TEMPLATE FILE NOT IMPLEMENTED IN RMS (will be ignored):".center(80))
         output.append("-" * 80)
         for option in sorted(extra_in_template):
             output.append(f" • {option}")
         output.append("")
 
-    if not missing_in_config_wrt_template and not extra_in_config:
-        output.append("There are no missing or extraneous options in .config file.".center(80))
-        output.append("")
+    if found_config and found_template and found_configreader:
+        if not missing_in_config_wrt_template and not extra_in_config:
+            output.append("There are no missing or extraneous options in .config file.".center(80))
+            output.append("")
 
-    output.append("=" * 80)
-    output.append(f"Total options in template: {len(template_file_options)}".center(80))
-    output.append(f"Total options in .config file: {len(config_file_options)}".center(80))
-    output.append(f"Common options: {len(template_file_options.intersection(config_file_options))}".center(80))
-    output.append("=" * 80 + "\n")
+        output.append("=" * 80)
+        output.append(f"Total options in template: {len(template_file_options)}".center(80))
+        output.append(f"Total options in .config file: {len(config_file_options)}".center(80))
+        output.append(f"Common options: {len(template_file_options.intersection(config_file_options))}".center(80))
+        output.append("=" * 80 + "\n")
+    else:
+        output.append("=" * 80)
+        output.append("INCOMPLETE COMPARISON".center(80))
+        output.append("Some files were not found, resulting in an incomplete comparison.".center(80))
+        output.append("=" * 80 + "\n")
 
     return "\n".join(output)
-
-
-def checkFileExists(file_path, file_name):
-    """Exit if file path does not exist"""
-
-    if not os.path.exists(file_path):
-        print(f"Error: {file_name} not found at {file_path}")
-        exit(1)
 
 
 if __name__ == "__main__":
