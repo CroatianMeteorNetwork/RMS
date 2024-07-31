@@ -114,7 +114,7 @@ def findBinaryPath(config, dir_path, binary_name, binary_extension):
     else:
         # If there are more candidates, find the right one for the running version of python, platform, and
         #   bits
-        if len(sys.version_info.minor) <= 1:
+        if sys.version_info.minor <= 9:
             py_version = "{:d}.{:d}".format(sys.version_info.major, sys.version_info.minor)
         else:
             py_version = "{:d}{:d}".format(sys.version_info.major, sys.version_info.minor)
