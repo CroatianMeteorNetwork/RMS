@@ -539,16 +539,25 @@ class BufferedCapture(Process):
 
         device_url = self.extractRtspUrl(self.config.deviceID)
 
+        if self.config.protocol == 'udp':
+            protocol_str = "protocols=udp retry=5"
+            # rtspsrc_params = ("rtspsrc buffer-mode=1 protocols=udp retry=5")
+
+        else:  
+            # Default to TCP
+            protocol_str = "protocols=tcp tcp-timeout=5000000 retry=5"
+            #rtspsrc_params = ("rtspsrc buffer-mode=1 protocols=tcp tcp-timeout=5000000 retry=5")
+            
         # Define the source up to the point where we want to branch off
         source_to_tee = (
-            "rtspsrc buffer-mode=1 protocols=tcp tcp-timeout=5000000 retry=5 "
-            "location=\"{}\" ! "
+            "rtspsrc buffer-mode=1 {:s} "
+            "location=\"{:s}\" ! "
             "rtph264depay ! tee name=t"
-            ).format(device_url)
+            ).format(protocol_str, device_url)
 
         # Branch for processing
         processing_branch = (
-            "t. ! queue ! h264parse ! {} ! videoconvert ! video/x-raw,format={} ! "
+            "t. ! queue ! h264parse ! {:s} ! videoconvert ! video/x-raw,format={:s} ! "
             "queue leaky=downstream max-size-buffers=100 max-size-bytes=0 max-size-time=0 ! "
             "appsink max-buffers=100 drop=true sync=0 name=appsink"
             ).format(gst_decoder, video_format)
@@ -559,7 +568,7 @@ class BufferedCapture(Process):
             video_location = os.path.join(video_file_dir, "video_%05d.mkv")
             storage_branch = (
                 "t. ! queue ! h264parse ! "
-                "splitmuxsink location={} max-size-time={} muxer-factory=matroskamux"
+                "splitmuxsink location={:s} max-size-time={:d} muxer-factory=matroskamux"
                 ).format(video_location, int(segment_duration_sec*1e9))
 
         # Otherwise, skip saving the raw stream to disk
@@ -567,9 +576,9 @@ class BufferedCapture(Process):
             storage_branch = ""
 
          # Combine all parts of the pipeline
-        pipeline_str = "{} {} {}".format(source_to_tee, processing_branch, storage_branch)
+        pipeline_str = "{:s} {:s} {:s}".format(source_to_tee, processing_branch, storage_branch)
 
-        log.debug("GStreamer pipeline string: {}".format(pipeline_str))
+        log.debug("GStreamer pipeline string: {:s}".format(pipeline_str))
 
         # Set the pipeline to PLAYING state with retries
         for attempt in range(max_retries):
@@ -600,7 +609,7 @@ class BufferedCapture(Process):
                 start_time_str = (datetime.datetime.fromtimestamp(self.start_timestamp)
                                   .strftime('%Y-%m-%d %H:%M:%S.%f'))
 
-                log.info("Start time is {}".format(start_time_str))
+                log.info("Start time is {:s}".format(start_time_str))
 
                 return self.pipeline.get_by_name("appsink")
 
