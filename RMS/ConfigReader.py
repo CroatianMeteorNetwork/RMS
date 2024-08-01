@@ -338,6 +338,10 @@ class Config:
         # keep this many compressed ArchDirs. Zero means keep them all
         self.bz2_files_to_keep = 20
 
+        # CapDirs to keep
+        # keep this many CapDirs. Zero means keep them all
+        self.arch_dirs_to_keep = 20
+
         # Extra space to leave on disk for the archive (in GB) after the captured files have been taken
         #   into account
         self.extra_space_gb = 6
@@ -884,6 +888,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "bz2_files_to_keep"):
         config.bz2_files_to_keep = int(parser.get(section, "bz2_files_to_keep"))
+
+    if parser.has_option(section, "capt_dirs_to_keep"):
+        config.capt_dirs_to_keep = int(parser.get(section, "capt_dirs_to_keep"))
 
     if parser.has_option(section, "captured_dir"):
         config.captured_dir = parser.get(section, "captured_dir")

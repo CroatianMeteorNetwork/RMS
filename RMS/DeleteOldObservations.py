@@ -375,6 +375,16 @@ def deleteOldArchivedDirs(data_dir, config):
         final_count = len(archdir_list)
     log.info('Purged {} older folders from ArchivedFiles'.format(orig_count - final_count))
 
+    captured_dir = os.path.join(data_dir, config.captured_dir)
+    if config.capt_dirs_to_keep > 0:
+        captdir_list = getNightDirs(captured_dir, config.stationID)
+        orig_count = len(captdir_list)
+        while len(captdir_list) > config.arch_dirs_to_keep:
+            captdir_list = deleteNightFolders(captured_dir, config)
+        final_count = len(captdir_list)
+    log.info('Purged {} older folders from ArchivedFiles'.format(orig_count - final_count))
+
+
     if config.bz2_files_to_keep > 0:
         bz2_list = getBz2Files(archived_dir, config.stationID)
         orig_count = len(bz2_list)
