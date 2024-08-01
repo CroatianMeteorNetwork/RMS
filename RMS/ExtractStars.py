@@ -162,6 +162,75 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
     return x_arr, y_arr, amplitude, intensity, fwhm
 
 
+def extractStarsAuto(img, mask=None, 
+        max_star_candidates=1500, segment_radius=8, 
+        min_stars_detect=50, max_stars_detect=150
+        ):
+    """ Automatically tried to extract stars from the given image by trying different intensity thresholds.
+    
+    Arguments:
+        img: [ndarray] Image data.
+
+    Keyword arguments:
+        mask: [ndarray] Mask image. None by default.
+        max_star_candidates: [int] Maximum number of star candidates when trying an intensity threshold.
+            If there are too many, PSF fitting would take too long.
+        segment_radius: [int] Radius (in pixels) of image segment around the detected star on which to 
+            perform the fit.
+        min_stars_detect: [int] Minimum number of stars retrievied with a given intensity threshold before
+            a new one is tried.
+        max_stars_detect: [int] Maximum number of stars to be detected before the process is stopped.
+    
+    """
+
+    # Precompute the median of the image
+    img_median = np.median(img)
+
+    x_data = []
+    y_data = []
+    amplitude = []
+    intensity = []
+    fwhm = []
+
+    # Try different intensity thresholds until the greatest number of stars is found
+    intens_thresh_list = [70, 50, 40, 30, 20, 10, 5]
+
+    # Repeat the process until the number of returned stars falls within the range
+    min_stars_detect = 50
+    max_stars_detect = 150
+    for intens_thresh in intens_thresh_list:
+
+        print("Detecting stars with intensity threshold: ", intens_thresh)
+
+        status = extractStars(img, img_median=img_median, mask=mask, 
+                                max_star_candidates=max_star_candidates, segment_radius=segment_radius, 
+                                intensity_threshold=intens_thresh)
+
+        if status == False:
+            continue
+
+        x_data, y_data, amplitude, intensity, fwhm = status
+        x_data = np.array(x_data)
+        y_data = np.array(y_data)
+
+        if len(x_data) < min_stars_detect:
+            print("Skipping, the number of stars {:d} outside {:d} - {:d} range".format(
+                len(x_data), min_stars_detect, max_stars_detect))
+            
+            continue
+        
+        elif len(x_data) > max_stars_detect:
+            
+            # If too many stars are found even with the first very high threshold, take that solution
+            break
+
+        else:
+            break
+
+
+    return x_data, y_data, amplitude, intensity, fwhm
+
+
 def extractStarsFF(
         ff_dir, ff_name, 
         flat_struct=None, dark=None, mask=None,

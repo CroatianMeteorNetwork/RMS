@@ -7,7 +7,7 @@ import numpy as np
 from PIL import Image
 from astropy.wcs import WCS
 
-from RMS.ExtractStars import extractStars
+from RMS.ExtractStars import extractStarsAuto
 from RMS.Formats.FFfile import read as readFF
 from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
 
@@ -21,7 +21,8 @@ except ImportError:
 
 
 
-def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_data=None, fov_w_range=None):
+def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_data=None, fov_w_range=None,
+                       max_stars=100):
     """ Find an astrometric solution of X, Y image coordinates of stars detected on an image using the 
         local installation of astrometry.net.
 
@@ -33,6 +34,7 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
         y_data: [list] A list of star y image coordiantes
         fov_w_range: [2 element tuple] A tuple of scale_lower and scale_upper, i.e. the estimate of the 
             width of the FOV in degrees.
+        max_stars: [int] Maximum number of stars to use for the astrometry.net solution. Default is 100.
     """
 
     # If the local installation of astrometry.net is not available, use the nova.astrometry.net API
@@ -61,55 +63,22 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
 
         # If an image has been given and no star x and y coordinates have been given, extract the stars
         if x_data is None or y_data is None:
-
-            # Precompute the median of the image
-            img_median = np.median(img)
-
-            # Try different intensity thresholds until the greatest number of stars is found
-            intens_thresh_list = [70, 50, 40, 30, 20, 10, 5]
-
-            # Repeat the process until the number of returned stars falls within the range
-            min_stars_astrometry = 50
-            max_stars_astrometry = 150
-            for intens_thresh in intens_thresh_list:
-
-                print("Detecting stars with intensity threshold: ", intens_thresh)
-
-                status = extractStars(img, img_median=img_median, mask=mask, 
-                                      max_star_candidates=1500, segment_radius=8, 
-                                      intensity_threshold=intens_thresh)
-
-                if status == False:
-                    continue
-
-                x_data, y_data, _, _, _ = status
-                x_data = np.array(x_data)
-                y_data = np.array(y_data)
-
-                if len(x_data) < min_stars_astrometry:
-                    print("Skipping, the number of stars {:d} outside {:d} - {:d} range".format(
-                        len(x_data), min_stars_astrometry, max_stars_astrometry))
-                    
-                    continue
-                
-                elif len(x_data) > max_stars_astrometry:
-                    
-                    # If too many stars are found even with the first very high threshold, take that solution
-                    break
-
-                else:
-                    break
+            
+            # Automatically extract stars from the image
+            x_data, y_data, _, _, _  = extractStarsAuto(img, mask=mask, max_star_candidates=1500, 
+                segment_radius=8, min_stars_detect=50, max_stars_detect=150
+            )
             
 
 
     # If there are too many stars (more than 100), randomly select them to reduce the number
-    if len(x_data) > 100:
+    if len(x_data) > max_stars:
         
         print("Too many stars found: ", len(x_data))
-        print("Randomly selecting 200 stars...")
+        print("Randomly selecting {:d} stars...".format(max_stars))
 
-        # Randomly select 200 stars
-        rand_indices = np.random.choice(len(x_data), 200, replace=False)
+        # Randomly select max_stars stars
+        rand_indices = np.random.choice(len(x_data), max_stars, replace=False)
         x_data = x_data[rand_indices]
         y_data = y_data[rand_indices]
 
