@@ -340,7 +340,7 @@ class Config:
 
         # CaptDirs to keep
         # keep this many CapDirs. Zero means keep them all
-        self.capt_dirs_to_keep = 20
+        self.capt_dirs_to_keep = 8
 
         # Extra space to leave on disk for the archive (in GB) after the captured files have been taken
         #   into account
