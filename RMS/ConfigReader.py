@@ -338,9 +338,9 @@ class Config:
         # keep this many compressed ArchDirs. Zero means keep them all
         self.bz2_files_to_keep = 20
 
-        # CapDirs to keep
+        # CaptDirs to keep
         # keep this many CapDirs. Zero means keep them all
-        self.arch_dirs_to_keep = 20
+        self.capt_dirs_to_keep = 20
 
         # Extra space to leave on disk for the archive (in GB) after the captured files have been taken
         #   into account
