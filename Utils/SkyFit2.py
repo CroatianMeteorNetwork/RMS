@@ -14,6 +14,7 @@ import glob
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 import pyqtgraph as pg
 
 import RMS
@@ -21,6 +22,7 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
     extinctionCorrectionTrueToApparent, applyAstrometryFTPdetectinfo, getFOVSelectionRadius
+from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, raDec2AltAz, \
     apparentAltAz2TrueRADec, J2000_JD, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
 from RMS.Astrometry.AstrometryNet import astrometryNetSolve
@@ -1888,6 +1890,7 @@ class PlateTool(QtWidgets.QMainWindow):
         catalog_ra = []
         catalog_dec = []
         catalog_mags = []
+        elevation_list = []
 
         for paired_star in self.paired_stars.allCoords():
 
@@ -1907,6 +1910,14 @@ class PlateTool(QtWidgets.QMainWindow):
             catalog_ra.append(star_ra)
             catalog_dec.append(star_dec)
             catalog_mags.append(star_mag)
+
+            # Compute the azimuth and elevation of the star
+            _, alt = trueRaDec2ApparentAltAz(star_ra, star_dec, date2JD(*self.img_handle.currentTime()),
+                                                self.platepar.lat, self.platepar.lon, 
+                                                self.platepar.refraction)
+            
+            elevation_list.append(alt)
+
 
         # Make sure there are at least 2 stars picked
         self.residual_text.clear()
@@ -1980,9 +1991,22 @@ class PlateTool(QtWidgets.QMainWindow):
                 ### PLOT PHOTOMETRY FIT ###
                 # Note: An almost identical code exists in Utils.CalibrationReport
 
+                # # Init plot for photometry
+                # fig_p, (ax_p, ax_r, ax_e) = plt.subplots(nrows=3, facecolor=None, figsize=(6.4, 8),
+                #                                    gridspec_kw={'height_ratios': [3, 1, 1]})
+
                 # Init plot for photometry
-                fig_p, (ax_p, ax_r) = plt.subplots(nrows=2, facecolor=None, figsize=(6.4, 7.2),
-                                                   gridspec_kw={'height_ratios': [2, 1]})
+                fig_p = plt.figure(figsize=(12, 6))  # Adjust the figure size as needed
+
+                # Create a grid with 2 columns and 2 rows
+                gs = gridspec.GridSpec(2, 2, width_ratios=[1, 1], height_ratios=[1, 1])
+
+                # Large plot on the left
+                ax_p = fig_p.add_subplot(gs[:, 0])
+
+                # Two smaller plots on the right, one on top of the other
+                ax_r = fig_p.add_subplot(gs[0, 1])
+                ax_e = fig_p.add_subplot(gs[1, 1])
 
                 # Set photometry window title
                 try:
@@ -2045,6 +2069,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 ax_p.invert_yaxis()
                 ax_p.invert_xaxis()
 
+                # Force equal aspect ratio
+                ax_p.set_aspect('equal', adjustable='box')
+
                 ax_p.grid()
 
                 ###
@@ -2054,7 +2081,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 img_diagonal = np.hypot(self.platepar.X_res/2, self.platepar.Y_res/2)
 
                 # Plot radius from centre vs. fit residual (including vignetting)
-                ax_r.scatter(radius_list, fit_resids, s=5, c='b', alpha=0.5, zorder=3)
+                ax_r.scatter(radius_list, fit_resids, s=8, c='b', alpha=0.5, zorder=3)
 
                 # Plot a zero line
                 ax_r.plot(np.linspace(0, img_diagonal, 10), np.zeros(10), linestyle='dashed', alpha=0.5,
@@ -2077,14 +2104,54 @@ class PlateTool(QtWidgets.QMainWindow):
                                       - 2.5*np.log10(correctVignetting(px_sum_tmp, radius_arr_tmp,
                                                                        self.platepar.vignetting_coeff))
 
-                    ax_r.plot(radius_arr_tmp, vignetting_loss, linestyle='dotted', alpha=0.5, color='k')
+                    ax_r.plot(radius_arr_tmp, vignetting_loss, linestyle='dotted', alpha=0.5, color='k',
+                              label='Vignetting model')
+                    
+                    ax_r.legend()
 
                 ax_r.grid()
 
-                ax_r.set_ylabel("Fit residuals (mag)")
+                ax_r.set_ylabel("Fit res. (mag)")
                 ax_r.set_xlabel("Radius from centre (px)")
 
                 ax_r.set_xlim(0, img_diagonal)
+
+                ### PLOT MAG DIFFERENCE BY ELEVATION
+
+                # Plot elevation vs. fit residual
+                ax_e.scatter(elevation_list, fit_resids, s=8, c='b', alpha=0.5, zorder=3)
+
+                # Compute the fit residuals without extinction
+                fit_resids_noext = \
+                    fit_resids + self.platepar.extinction_scale*atmosphericExtinctionCorrection(
+                        np.array(elevation_list), self.platepar.elev)
+                
+                # Plot elevation vs. fit residual (excluding extinction)
+                ax_e.scatter(elevation_list, fit_resids_noext, s=5, c='k', alpha=0.5, zorder=3,
+                             label="No extinction, vig. included")
+
+
+                # Compute the extinction model
+                elev_arr = np.linspace(np.min(elevation_list), np.max(elevation_list), 100)
+                extinction_model = self.platepar.extinction_scale*atmosphericExtinctionCorrection(
+                    elev_arr, self.platepar.elev)
+                
+                # Plot the extinction model
+                ax_e.plot(elev_arr, extinction_model, linestyle='dotted', alpha=0.5, color='k', 
+                          label='Extinction model')
+                
+
+                # Plot a zero line
+                ax_e.plot(elev_arr, np.zeros_like(elev_arr), linestyle='dashed', alpha=0.5, color='k')
+                
+                
+                ax_e.grid()
+                ax_e.legend()
+
+                ax_e.set_ylabel("Fit res. (mag)")
+                ax_e.set_xlabel("Elevation (deg)")
+
+                ###
 
                 fig_p.tight_layout()
                 fig_p.show()
