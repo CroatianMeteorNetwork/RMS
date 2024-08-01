@@ -339,7 +339,8 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
             key will be used.
 
     Return:
-        (ra, dec, orientation, scale, fov_w, fov_h): [tuple of floats] All in degrees, scale in px/deg.
+        (ra, dec, orientation, scale, fov_w, fov_h, star_data): [tuple of floats] All in degrees, 
+            scale in px/deg.
     """
 
 
@@ -530,7 +531,7 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
     fov_w = result['width_arcsec']/3600
     fov_h = result['height_arcsec']/3600
 
-    return ra, dec, orientation, scale, fov_w, fov_h
+    return ra, dec, orientation, scale, fov_w, fov_h, None
 
 
 if __name__ == '__main__':

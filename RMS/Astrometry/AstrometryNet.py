@@ -164,10 +164,15 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
         # print()
         # print("Found solution for image center:")
 
-
-        # # Print the WCS fields
-        # for key, value in solution.best_match().wcs_fields.items():
-        #     print(key, value)
+        if verbose:
+            # Print the WCS fields
+            print()
+            print("WCS fields:")
+            print('-----------------------------')
+            for key, value in solution.best_match().wcs_fields.items():
+                print("{:8s}: {}".format(key, ", ".join(map(str, value))))
+            
+            print()
 
         # Load the solution into an astropy WCS object
         wcs_obj = WCS(solution.best_match().wcs_fields)
@@ -214,7 +219,10 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
             fov_w = x_max*solution.best_match().scale_arcsec_per_pixel/3600
             fov_h = y_max*solution.best_match().scale_arcsec_per_pixel/3600
 
-        return ra_mid, dec_mid, rot_eq_standard, scale, fov_w, fov_h
+
+        star_data = [x_data, y_data]
+
+        return ra_mid, dec_mid, rot_eq_standard, scale, fov_w, fov_h, star_data
     
 
     else:

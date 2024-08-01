@@ -26,6 +26,7 @@ from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, raDec2AltAz, \
     apparentAltAz2TrueRADec, J2000_JD, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
 from RMS.Astrometry.AstrometryNet import astrometryNetSolve
+from RMS.Astrometry.FFTalign import alignPlatepar
 import RMS.ConfigReader as cr
 from RMS.ExtractStars import extractStarsAndSave
 import RMS.Formats.CALSTARS as CALSTARS
@@ -176,27 +177,33 @@ class QFOVinputDialog(QtWidgets.QDialog):
         if radioButton.isChecked():
             self.lenses = radioButton.lenses
 
+
     def getInputs(self):
 
         try:
-
             azim = float(self.azim_edit.text())%360
-            alt = float(self.alt_edit.text())
-            
-
-            # Read the rotation
-            rot_text = self.rot_edit.text()
-            if rot_text:
-                rot = float(rot_text)%360
-            else:
-                # If the rotation is not given, set it to 0
-                rot = 0
-
-            lenses = self.lenses
 
         except ValueError:
-            print("Given values could not be read as numbers!")
-            return 0, 0, 0, "none"
+            print("Azimuth could not be read as a number! Assuming 90 deg.")
+            azim = 90
+
+
+        try:
+            alt = float(self.alt_edit.text())
+        
+        except ValueError:
+            print("Altitude could not be read as a number! Assuming 45 deg.")
+            alt = 45
+
+        # Read the rotation
+        rot_text = self.rot_edit.text()
+        if rot_text:
+            rot = float(rot_text)%360
+        else:
+            # If the rotation is not given, set it to 0
+            rot = 0
+
+        lenses = self.lenses
 
         return azim, alt, rot, lenses
 
@@ -3952,7 +3959,7 @@ class PlateTool(QtWidgets.QMainWindow):
             return None
 
         # Extract the parameters
-        ra, dec, rot_standard, scale, fov_w, fov_h = solution
+        ra, dec, rot_standard, scale, fov_w, fov_h, star_data = solution
 
         jd = date2JD(*self.img_handle.currentTime())
 
@@ -3967,22 +3974,58 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.platepar.updateRefRADec(skip_rot_update=True)
 
-        # Reset the distortion parameters
+
+        # # Reset the distortion parameters
         # self.platepar.resetDistortionParameters()
 
         # Print estimated parameters
         print()
         print('Astrometry.net solution:')
         print('------------------------')
-        print(' RA    = {:.2f} deg'.format(ra))
-        print(' Dec   = {:.2f} deg'.format(dec))
+        # print(' RA    = {:.2f} deg'.format(ra))
+        # print(' Dec   = {:.2f} deg'.format(dec))
+        print(' RA    = {:.2f} deg'.format(self.platepar.RA_d))
+        print(' Dec   = {:.2f} deg'.format(self.platepar.dec_d))
         print(' Azim  = {:.2f} deg'.format(self.platepar.az_centre))
         print(' Alt   = {:.2f} deg'.format(self.platepar.alt_centre))
         print(' Rot horiz   = {:.2f} deg'.format(self.platepar.rotation_from_horiz))
         print(' Rot eq      = {:.2f} deg'.format(rot_standard))
         print(' Pos angle   = {:.2f} deg'.format(self.platepar.pos_angle_ref))
-        print(' Scale = {:.2f} arcmin/px'.format(60/self.platepar.F_scale))
+        print(' Scale = {:.3f} arcmin/px'.format(60/self.platepar.F_scale))
         print(' FOV = {:.2f} x {:.2f} deg'.format(fov_w, fov_h))
+
+
+        # If a list of detected stars is provided by the astrometry.net, use it to run FFT alignment
+        if star_data is not None:
+
+            print()
+            print("Running FFT alignment...")
+
+            # Construct an array with star coordinates (x, y per row)
+            calstars_coords = np.array(star_data).T
+
+            # Get the time of the image
+            calstars_time = self.img_handle.currentTime()
+
+            self.platepar = alignPlatepar(
+                self.config, self.platepar, 
+                calstars_time, calstars_coords, 
+                scale_update=True, show_plot=False
+                )
+            
+            self.platepar.updateRefRADec(skip_rot_update=True)
+            
+            print()
+            print('FFT aligned:')
+            print('------------------------')
+            print(' RA    = {:.2f} deg'.format(self.platepar.RA_d))
+            print(' Dec   = {:.2f} deg'.format(self.platepar.dec_d))
+            print(' Azim  = {:.2f} deg'.format(self.platepar.az_centre))
+            print(' Alt   = {:.2f} deg'.format(self.platepar.alt_centre))
+            print(' Rot horiz   = {:.2f} deg'.format(self.platepar.rotation_from_horiz))
+            print(' Pos angle   = {:.2f} deg'.format(self.platepar.pos_angle_ref))
+            print(' Scale = {:.3f} arcmin/px'.format(60/self.platepar.F_scale))
+
 
     def getFOVcentre(self):
         """ Asks the user to input the centre of the FOV in altitude and azimuth. """

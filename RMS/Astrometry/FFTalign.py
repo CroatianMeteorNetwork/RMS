@@ -200,17 +200,24 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
 
 
 
-def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update=False, show_plot=False):
+def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update=False, show_plot=False,
+                  translation_limit=200, rotation_limit=30):
     """ Align the platepar using FFT registration between catalog stars and the given list of image stars.
     Arguments:
         config:
         platepar: [Platepar instance] Initial platepar.
-        calstars_time: [list] A list of (year, month, day, hour, minute, second, millisecond) of the middle of
+        calstars_time: [list] A single entry of (year, month, day, hour, minute, second, millisecond) of the middle of
             the FF file used for alignment.
         calstars_coords: [ndarray] A 2D numpy array of (x, y) coordinates of image stars.
+    
+    
     Keyword arguments:
         scale_update: [bool] Update the platepar scale. False by default.
         show_plot: [bool] Show the comparison between the reference and image synthetic images.
+        translation_limit: [int] Maximum allowed translation in pixels. Default is 200.
+        rotation_limit: [int] Maximum allowed rotation in degrees. Default is 30.
+
+
     Return:
         platepar_aligned: [Platepar instance] The aligned platepar.
     """
@@ -284,6 +291,21 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
     res = findStarsTransform(config, calstars_coords, catalog_xy, show_plot=show_plot)
     angle, scale, translation_x, translation_y = res
 
+    # Check if the translation and rotation are within the limits
+    if (np.hypot(translation_x, translation_y) > translation_limit) or (abs(angle) > rotation_limit):
+        
+        log.warning("The translation or rotation is too large! The platepar will not be updated!")
+        log.warning("Translation: x = {:.2f}, y = {:.2f} px, limit of {:.2f} px".format(
+            translation_x, translation_y, translation_limit))
+        log.warning("Rotation: {:.2f} deg, limit of {:.2f} deg".format(angle, rotation_limit))
+
+        return platepar
+
+    # print()
+    # print('Angle:', angle)
+    # print('Scale:', scale)
+    # print('Translation:', translation_x, translation_y)
+    
 
     ### Update the platepar ###
 
@@ -297,23 +319,25 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
         platepar_aligned.F_scale *= scale
 
     # Compute the new reference RA and Dec
-    _, ra_centre_new, dec_centre_new, _ = ApplyAstrometry.xyToRaDecPP([jd2Date(platepar.JD)], \
-        [platepar.X_res/2 - platepar.x_poly_fwd[0] - translation_x], \
-        [platepar.Y_res/2 - platepar.y_poly_fwd[0] - translation_y], [1], platepar, \
+    _, ra_centre_new, dec_centre_new, _ = ApplyAstrometry.xyToRaDecPP([jd2Date(platepar_aligned.JD)], \
+        [platepar_aligned.X_res/2 - 2*translation_x], \
+        [platepar_aligned.Y_res/2 - 2*translation_y], [1], platepar_aligned, \
         extinction_correction=False)
+    
+
+    # print("RA:")
+    # print(" - old: {:.5f}".format(ra_centre_old[0]))
+    # print(" - new: {:.5f}".format(ra_centre_new[0]))
+    # print("Dec:")
+    # print(" - old: {:.5f}".format(dec_centre_old[0]))
+    # print(" - new: {:.5f}".format(dec_centre_new[0]))
 
     # Correct RA/Dec
     platepar_aligned.RA_d = ra_centre_new[0]
     platepar_aligned.dec_d = dec_centre_new[0]
 
-    # # Update the reference time and hour angle
-    # platepar_aligned.JD = jd
-    # platepar_aligned.Ho = JD2HourAngle(jd)
-
     # Recompute the FOV centre in Alt/Az and update the rotation
-    platepar_aligned.az_centre, platepar_aligned.alt_centre = raDec2AltAz(platepar.RA_d, \
-        platepar.dec_d, platepar.JD, platepar.lat, platepar.lon)
-    platepar_aligned.rotation_from_horiz = ApplyAstrometry.rotationWrtHorizon(platepar_aligned)
+    platepar_aligned.updateRefAltAz()
 
     ###
 
