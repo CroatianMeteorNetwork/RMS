@@ -2,8 +2,10 @@
 import os
 import logging
 
+
 import numpy as np
 from PIL import Image
+from astropy.wcs import WCS
 
 from RMS.ExtractStars import extractStars
 from RMS.Formats.FFfile import read as readFF
@@ -68,7 +70,7 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
 
             # Repeat the process until the number of returned stars falls within the range
             min_stars_astrometry = 50
-            max_stars_astrometry = 200
+            max_stars_astrometry = 150
             for intens_thresh in intens_thresh_list:
 
                 print("Detecting stars with intensity threshold: ", intens_thresh)
@@ -100,8 +102,8 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
             
 
 
-    # If there are too many stars (more than 200), randomly select 200
-    if len(x_data) > 200:
+    # If there are too many stars (more than 100), randomly select them to reduce the number
+    if len(x_data) > 100:
         
         print("Too many stars found: ", len(x_data))
         print("Randomly selecting 200 stars...")
@@ -136,7 +138,8 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
     solver = astrometry.Solver(
         astrometry.series_4100.index_files(
             cache_directory=astrometry_cache_path,
-            scales={15, 18}, # skymark diameter scales
+            scales={15, 18}, # Skymark diameter scales, chosen for meteor cameras. See: 
+                             # https://pypi.org/project/astrometry/#choosing-series
         )
     )
 
@@ -185,25 +188,46 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
     if solution.has_match():
         
         print()
-        print("Found solution:")
-        
-        # Get the pointing parameters
-        ra = solution.best_match().center_ra_deg
-        dec = solution.best_match().center_dec_deg
+        print("Found solution for image center:")
 
-        print("RA  = {:.2f} deg".format(ra))
-        print("Dec = {:+.2f} deg".format(dec))
+
+        # # Print the WCS fields
+        # for key, value in solution.best_match().wcs_fields.items():
+        #     print(key, value)
+
+        # Load the solution into an astropy WCS object
+        wcs_obj = WCS(solution.best_match().wcs_fields)
+
+        # Get the image center in pixel coordinates
+        if img is not None:
+            x_center = img.shape[1]/2
+            y_center = img.shape[0]/2
+        else:
+            x_center = np.median(x_data)
+            y_center = np.median(y_data)
+
+        # print("Image center, x = {:.2f}, y = {:.2f}".format(x_center, y_center))
+
+        # Use wcs.all_pix2world to get the RA and Dec at the new center
+        ra_mid, dec_mid = wcs_obj.all_pix2world(x_center, y_center, 1)
+
+        # Image coordinate slighty right of the centre
+        x_right = x_center + 10
+        y_right = y_center
+        ra_right, dec_right = wcs_obj.all_pix2world(x_right, y_right, 1)
+
+        # Compute the equatorial orientation
+        rot_eq_standard = np.degrees(np.arctan2(np.radians(dec_mid) - np.radians(dec_right), \
+            np.radians(ra_mid) - np.radians(ra_right)))%360
+
+
+        print("RA  = {:.2f} deg".format(ra_mid))
+        print("Dec = {:+.2f} deg".format(dec_mid))
 
         # Compute the scale in px/deg
         scale = 3600/solution.best_match().scale_arcsec_per_pixel
 
         print("Scale = {:.2f} arcmin/pixel".format(solution.best_match().scale_arcsec_per_pixel/60))
-
-        # Compute the rotation in equatorial coordinates using the WCS parameters
-        cd1_2 = solution.best_match().wcs_fields["CD1_2"][0]
-        cd2_2 = solution.best_match().wcs_fields["CD2_2"][0]
-
-        rot_eq_standard = np.degrees(np.arctan2(-cd1_2, cd2_2))%360
 
         print("Rot. eq. standard = {:.2f} deg".format(rot_eq_standard))
 
@@ -227,14 +251,8 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
 
             print("FOV = ~{:.2f} x ~{:.2f} deg".format(fov_w, fov_h))
 
-        
 
-        # # Print the WCS fields
-        # for key, value in solution.best_match().wcs_fields.items():
-        #     print(key, value)
-
-
-        return ra, dec, rot_eq_standard, scale, fov_w, fov_h
+        return ra_mid, dec_mid, rot_eq_standard, scale, fov_w, fov_h
     
 
     else:
@@ -257,5 +275,12 @@ if __name__ == "__main__":
     # Parse the arguments
     cml_args = arg_parser.parse_args()
 
+
+    # Set the FOV range
+    if cml_args.fov is not None:
+        fov_w_range = (0.5*cml_args.fov, 2*cml_args.fov)
+    else:
+        fov_w_range = None
+
     # Run the astrometry.net solver
-    astrometryNetSolve(ff_file_path=cml_args.input_path, fov_w_range=(0.5*cml_args.fov, 2*cml_args.fov))
+    astrometryNetSolve(ff_file_path=cml_args.input_path, fov_w_range=fov_w_range)

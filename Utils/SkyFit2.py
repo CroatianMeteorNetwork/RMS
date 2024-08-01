@@ -3875,7 +3875,7 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
                 img_data = self.img.data
 
-            solution = astrometryNetSolve(img=img_data, fov_w_range=fov_w_range, mask=mask)
+            solution = astrometryNetSolve(img=img_data.T, fov_w_range=fov_w_range, mask=mask)
 
         if solution is None:
             qmessagebox(title='Astrometry.net error',

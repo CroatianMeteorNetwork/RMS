@@ -484,7 +484,7 @@ def rotationWrtStandard(platepar):
         the FOV.
 
     Arguments:
-        pletepar: [Platepar object] Input platepar.
+        platepar: [Platepar object] Input platepar.
     Return:
         rot_angle: [float] Rotation from the meridian (degrees).
     """
