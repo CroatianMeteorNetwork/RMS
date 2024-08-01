@@ -22,7 +22,7 @@ except ImportError:
 
 
 def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_data=None, fov_w_range=None,
-                       max_stars=100):
+                       max_stars=100, verbose=False):
     """ Find an astrometric solution of X, Y image coordinates of stars detected on an image using the 
         local installation of astrometry.net.
 
@@ -35,6 +35,7 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
         fov_w_range: [2 element tuple] A tuple of scale_lower and scale_upper, i.e. the estimate of the 
             width of the FOV in degrees.
         max_stars: [int] Maximum number of stars to use for the astrometry.net solution. Default is 100.
+        verbose: [bool] Print verbose output. Default is False.
     """
 
     # If the local installation of astrometry.net is not available, use the nova.astrometry.net API
@@ -66,7 +67,7 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
             
             # Automatically extract stars from the image
             x_data, y_data, _, _, _  = extractStarsAuto(img, mask=mask, max_star_candidates=1500, 
-                segment_radius=8, min_stars_detect=50, max_stars_detect=150
+                segment_radius=8, min_stars_detect=50, max_stars_detect=150, verbose=verbose
             )
             
 
@@ -74,8 +75,9 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
     # If there are too many stars (more than 100), randomly select them to reduce the number
     if len(x_data) > max_stars:
         
-        print("Too many stars found: ", len(x_data))
-        print("Randomly selecting {:d} stars...".format(max_stars))
+        if verbose:
+            print("Too many stars found: ", len(x_data))
+            print("Randomly selecting {:d} stars...".format(max_stars))
 
         # Randomly select max_stars stars
         rand_indices = np.random.choice(len(x_data), max_stars, replace=False)
@@ -84,15 +86,16 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
 
 
     # Print the found star coordinates
-    print("Stars for astrometry.net: ", len(x_data))
-    print("        X,       Y")   
-    for x, y in zip(x_data, y_data):
-        print("{:8.2f} {:8.2f}".format(x, y))
+    if verbose:
+        print("Stars for astrometry.net: ", len(x_data))
+        print("        X,       Y")   
+        for x, y in zip(x_data, y_data):
+            print("{:8.2f} {:8.2f}".format(x, y))
 
 
 
-    print()
-    print("Solving the image using the local installation of astrometry.net...")
+        print()
+        print("Solving the image using the local installation of astrometry.net...")
 
     # Get a path to this file
     this_file_path = os.path.abspath(__file__)
@@ -126,9 +129,10 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
         lower_arcsec_per_pixel = fov_w_range[0]*3600/img_width
         upper_arcsec_per_pixel = fov_w_range[1]*3600/img_width
 
-        print("FOV range:")
-        print("  {:.2f} - {:.2f} deg".format(fov_w_range[0], fov_w_range[1]))
-        print("  {:.2f} - {:.2f} arcsec/pixel".format(lower_arcsec_per_pixel, upper_arcsec_per_pixel))
+        if verbose:
+            print("FOV range:")
+            print("  {:.2f} - {:.2f} deg".format(fov_w_range[0], fov_w_range[1]))
+            print("  {:.2f} - {:.2f} arcsec/pixel".format(lower_arcsec_per_pixel, upper_arcsec_per_pixel))
 
 
         size_hint=astrometry.SizeHint(
@@ -137,7 +141,8 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
         )
 
     # Print progress info
-    logging.getLogger().setLevel(logging.INFO)
+    if verbose:
+        logging.getLogger().setLevel(logging.INFO)
 
     solution = solver.solve(
         stars_xs=x_data,
@@ -156,8 +161,8 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
 
     if solution.has_match():
         
-        print()
-        print("Found solution for image center:")
+        # print()
+        # print("Found solution for image center:")
 
 
         # # Print the WCS fields
@@ -190,15 +195,8 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
             np.radians(ra_mid) - np.radians(ra_right)))%360
 
 
-        print("RA  = {:.2f} deg".format(ra_mid))
-        print("Dec = {:+.2f} deg".format(dec_mid))
-
         # Compute the scale in px/deg
         scale = 3600/solution.best_match().scale_arcsec_per_pixel
-
-        print("Scale = {:.2f} arcmin/pixel".format(solution.best_match().scale_arcsec_per_pixel/60))
-
-        print("Rot. eq. standard = {:.2f} deg".format(rot_eq_standard))
 
         # Compute the FOV size in degrees
         if img is not None:
@@ -208,8 +206,6 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
             fov_w = img_wid*solution.best_match().scale_arcsec_per_pixel/3600
             fov_h = img_ht *solution.best_match().scale_arcsec_per_pixel/3600
 
-            print("FOV = {:.2f} x {:.2f} deg".format(fov_w, fov_h))
-
         else:
             # Take the range of image coordiantes as a FOV indicator
             x_max = np.max(x_data)
@@ -217,9 +213,6 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
 
             fov_w = x_max*solution.best_match().scale_arcsec_per_pixel/3600
             fov_h = y_max*solution.best_match().scale_arcsec_per_pixel/3600
-
-            print("FOV = ~{:.2f} x ~{:.2f} deg".format(fov_w, fov_h))
-
 
         return ra_mid, dec_mid, rot_eq_standard, scale, fov_w, fov_h
     
@@ -252,4 +245,19 @@ if __name__ == "__main__":
         fov_w_range = None
 
     # Run the astrometry.net solver
-    astrometryNetSolve(ff_file_path=cml_args.input_path, fov_w_range=fov_w_range)
+    status = astrometryNetSolve(ff_file_path=cml_args.input_path, fov_w_range=fov_w_range, verbose=True)
+
+    if status is not None:
+
+        ra_mid, dec_mid, rot_eq_standard, scale, fov_w, fov_h = status
+
+        print("Astrometry.net solution:")
+        print()
+        print("RA  = {:.2f} deg".format(ra_mid))
+        print("Dec = {:+.2f} deg".format(dec_mid))
+        print("Scale = {:.2f} arcmin/pixel".format(scale))
+        print("Rot. eq. standard = {:.2f} deg".format(rot_eq_standard))
+        print("FOV = {:.2f} x {:.2f} deg".format(fov_w, fov_h))
+
+    else:
+        print("No solution found.")

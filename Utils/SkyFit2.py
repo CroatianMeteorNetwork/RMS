@@ -3968,7 +3968,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.updateRefRADec(skip_rot_update=True)
 
         # Reset the distortion parameters
-        self.platepar.resetDistortionParameters()
+        # self.platepar.resetDistortionParameters()
 
         # Print estimated parameters
         print()
@@ -3979,6 +3979,7 @@ class PlateTool(QtWidgets.QMainWindow):
         print(' Azim  = {:.2f} deg'.format(self.platepar.az_centre))
         print(' Alt   = {:.2f} deg'.format(self.platepar.alt_centre))
         print(' Rot horiz   = {:.2f} deg'.format(self.platepar.rotation_from_horiz))
+        print(' Rot eq      = {:.2f} deg'.format(rot_standard))
         print(' Pos angle   = {:.2f} deg'.format(self.platepar.pos_angle_ref))
         print(' Scale = {:.2f} arcmin/px'.format(60/self.platepar.F_scale))
         print(' FOV = {:.2f} x {:.2f} deg'.format(fov_w, fov_h))

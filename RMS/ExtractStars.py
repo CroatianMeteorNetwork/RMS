@@ -164,7 +164,8 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
 
 def extractStarsAuto(img, mask=None, 
         max_star_candidates=1500, segment_radius=8, 
-        min_stars_detect=50, max_stars_detect=150
+        min_stars_detect=50, max_stars_detect=150,
+        verbose=False
         ):
     """ Automatically tried to extract stars from the given image by trying different intensity thresholds.
     
@@ -180,6 +181,7 @@ def extractStarsAuto(img, mask=None,
         min_stars_detect: [int] Minimum number of stars retrievied with a given intensity threshold before
             a new one is tried.
         max_stars_detect: [int] Maximum number of stars to be detected before the process is stopped.
+        verbose: [bool] Print verbose output.
     
     """
 
@@ -200,7 +202,8 @@ def extractStarsAuto(img, mask=None,
     max_stars_detect = 150
     for intens_thresh in intens_thresh_list:
 
-        print("Detecting stars with intensity threshold: ", intens_thresh)
+        if verbose:
+            print("Detecting stars with intensity threshold: ", intens_thresh)
 
         status = extractStars(img, img_median=img_median, mask=mask, 
                                 max_star_candidates=max_star_candidates, segment_radius=segment_radius, 
@@ -214,8 +217,10 @@ def extractStarsAuto(img, mask=None,
         y_data = np.array(y_data)
 
         if len(x_data) < min_stars_detect:
-            print("Skipping, the number of stars {:d} outside {:d} - {:d} range".format(
-                len(x_data), min_stars_detect, max_stars_detect))
+
+            if verbose:
+                print("Skipping, the number of stars {:d} outside {:d} - {:d} range".format(
+                    len(x_data), min_stars_detect, max_stars_detect))
             
             continue
         
