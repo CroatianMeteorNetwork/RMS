@@ -39,9 +39,6 @@ ffmpeg
 	-c:v libx264 output.mkv
 """
 
-
-
-
 from __future__ import print_function, division, absolute_import
 
 import os
@@ -49,8 +46,6 @@ import sys
 import logging
 import subprocess
 from RMS.Misc import mkdirP
-
-
 
 if sys.version_info[0] < 3:
 
@@ -82,7 +77,6 @@ log = logging.getLogger("logger")
 def downloadFilesToTmp(urls, station_id, working_dir=None):
 
     """
-
     Args:
         urls: a list of URLs to download
         station_id: a list of stationIDs to download, required for naming
@@ -114,21 +108,17 @@ def downloadFilesToTmp(urls, station_id, working_dir=None):
 
 
 def convertListOfStationIDsToListOfUrls(station_ids):
-    """
-    
-    Args:
-        station_id: a list of stationIDs
 
+    """
+        Args:
+        station_id: a list of stationIDs
 
     Returns:
         list of urls pointing to the latest static video for that station
     
-    
-    e.g converts ["AU000A", "AU000C"] to 
+    e.g converts ["AU000A", "AU000C"] to
     ["https://globalmeteornetwork.org/weblog/AU/AU000A/static/AU000A_timelapse_static.mp4",
     "https://globalmeteornetwork.org/weblog/AU/AU000C/static/AU000C_timelapse_static.mp4"]
-    
-    
     """
 
     video_url_template = "https://globalmeteornetwork.org/weblog/{:s}/{:s}/static/{:s}_timelapse_static.mp4"
@@ -142,8 +132,7 @@ def convertListOfStationIDsToListOfUrls(station_ids):
 def generateOutput(output_file, lib="libx264",print_nicely=False):
 
     """
-
-    Geneate the output clause of the ffmpeg statement
+    Generate the output clause of the ffmpeg statement
 
     Args:
         output_file: name of the output file to be used
@@ -170,7 +159,6 @@ def generateInputVideo(input_videos, tile_count, print_nicely=False):
         the input clause for the ffmpeg statement
     """
 
-
     input,vid_count = "", 0
     for video in input_videos:
         input += "-i  {} ".format(video)
@@ -179,13 +167,11 @@ def generateInputVideo(input_videos, tile_count, print_nicely=False):
         if vid_count > tile_count:
             break
 
-
     return input
 
 def generateFilter(video_paths, resolution_list, layout_list,print_nicely = False):
 
     """
-
     Args:
         video_paths: list of input video paths
         resolution_list: list of resolution  e.g.[x,y]
@@ -253,7 +239,6 @@ def generateCommand(video_paths, resolution, shape, output_filename = "~/matrix_
     ffmpeg_command_string += generateFilter(video_paths,resolution,shape,print_nicely=print_nicely)
     ffmpeg_command_string += generateOutput(output_filename, print_nicely=print_nicely)
 
-
     return ffmpeg_command_string
 
 
@@ -302,8 +287,6 @@ def videoMatrix(stationIDs, x_shape=2, y_shape=2, x_res=1280, y_res=720,
         for input_video in input_video_paths:
             os.unlink(input_video)
         os.rmdir(video_directory)
-
-
 
     return ffmpeg_command_string, video_directory
 
@@ -376,7 +359,6 @@ if __name__ == "__main__":
     else:
         output = "~/matrix_video.mp4"
 
-
     if not cml_args.keep_files is None:
         keep_files = cml_args.keep_files
     else:
@@ -386,6 +368,7 @@ if __name__ == "__main__":
         working_directory = cml_args.working_directory
         print("Working in {}".format(working_directory))
 
-    print(videoMatrix(cameras,x_shape=x_shape, y_shape=y_shape,generate=generate,x_res=x_res,y_res=y_res,
-                                output_file_path=output, keep_files=keep_files, working_directory=working_directory)[0])
+    # do the work
+    print(videoMatrix(cameras, x_shape=x_shape, y_shape=y_shape,generate=generate,x_res=x_res,y_res=y_res,
+                        output_file_path=output, keep_files=keep_files, working_directory=working_directory)[0])
 
