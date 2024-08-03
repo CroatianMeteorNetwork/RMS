@@ -304,11 +304,12 @@ if __name__ == "__main__":
     description += "Generate an n x n mosaic of videos. Minimum required to generate a video is\n"
     description += " python -m Utils.VideoMosaic \n\n"
     description += "A more comprehensive example is \n"
-    description += " python -m Utils.VideoMosaic -c AU000U,AU000V,AU000W,AU000X,AU000Y,AU000Z -r "
+    description += " python -m Utils.VideoMosaic -c AU000U,AU000V,AU000W,AU000X,AU000Y,AU000Z -r -a -t 8"
     description += "3840 1440 -s 3 2 -o ~/station_video.mpg \n \n"
     description += "which creates a video of 6 cameras, resolution 3840 x 1440, 3 across, 2 down saved in users root as station_video.mpg\n"
     description += " -n inhibits generating the video and only prints the ffmpeg command string"
     description += " -k inhibits deletion of downloaded files"
+    description += " -a displays on screen automatically and -t 8 sets a refresh time of 8 hours"
 
     arg_parser = argparse.ArgumentParser(description=description, formatter_class=argparse.RawTextHelpFormatter)
 
