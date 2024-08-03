@@ -381,7 +381,7 @@ if __name__ == "__main__":
     # do the work
 
     exit_requested = False
-    last_run_duration = 24 * 3600
+    last_run_duration = 0.25 * 3600
     while run_count > 0 and exit_requested == False:
 
         this_start_time = time.time()
@@ -401,8 +401,8 @@ if __name__ == "__main__":
             print("Preparing to play {}".format(output))
             # play the video
             window_name = "Global Meteor Network"
-            print("Target  {}".format(target_run_duration))
-            print("Elapsed {}".format(time.time() - this_start_time))
+            print("Target  {} hours".format(target_run_duration / 3600))
+            print("Elapsed {} hours".format((time.time() - this_start_time)/3600))
             cap = cv2.VideoCapture(output)
             if not cap.isOpened():
                 print("Error: Could not open video.")
@@ -410,9 +410,9 @@ if __name__ == "__main__":
             exit_requested = False
             while (target_run_duration > (time.time() - this_start_time)
                     and run_count > 0 and not exit_requested):
-                print("Target run duration {}".format(target_run_duration / 3600))
-                print("Run duration so far {}".format(time.time() - this_start_time / 3600))
-
+                print("Target run duration {:.2f} hours".format(target_run_duration / 3600))
+                print("Run duration so far {:.2f} hours".format((time.time() - this_start_time) / 3600))
+                cap = cv2.VideoCapture(output)
 
 
                 cv2.namedWindow(window_name, cv2.WND_PROP_FULLSCREEN)
