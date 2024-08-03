@@ -459,7 +459,7 @@ def printProgress(current, total, stack_start_time=None):
         except:
             eta = ""
     else:
-        eta = " Determining"
+        eta = " Estimating"
     print("\rStacking : {:02.0f}%|{}{}| {}/{}  ETA: {:s}".format(percent, "#" * progress, " " * (progress_bar_len - progress), current, total, eta), end="")
     if current == total:
         print("")
