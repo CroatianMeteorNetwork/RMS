@@ -8,6 +8,60 @@ import numpy as np
 from astropy.io import fits
 
 from RMS.Formats.FFStruct import FFStruct
+import datetime
+
+
+
+def filenameToDatetimeStr(file_name, iso8601=False):
+    """ Converts FS and FF bin file name to a datetime object.
+
+    Arguments:
+        file_name: [str] Name of a FF or FS file.
+
+    Keyword arguments:
+        iso8601: [bool] True if the output should be in ISO 8601 format. False by default.
+
+    Return:
+        [datetime object] Date and time of the first frame in the FS or FF file.
+
+    """
+
+    # e.g.  FF499_20170626_020520_353_0005120.bin
+    # or FF_CA0001_20170626_020520_353_0005120.fits
+    # or FS_US9999_20240318_011731_867370_1054720_fieldsum.bin
+
+    file_name = file_name.split('_')
+
+    # Check the number of list elements, and the new fits format has one more underscore
+    i = 0
+    if len(file_name[0]) == 2:
+        i = 1
+
+    date = file_name[i + 1]
+    year = int(date[:4])
+    month = int(date[4:6])
+    day = int(date[6:8])
+
+    time = file_name[i + 2]
+    hour = int(time[:2])
+    minute = int(time[2:4])
+    seconds = int(time[4:6])
+
+    # Determine if the time fraction is in milliseconds or microseconds
+    time_fraction_str = file_name[i + 3]
+    if len(time_fraction_str) == 3:  # Milliseconds, need to convert to microseconds
+        microseconds = int(time_fraction_str) * 1000
+    else:  # Assuming microseconds directly
+        microseconds = int(time_fraction_str)
+
+
+    if iso8601:
+        dt_str = datetime.datetime(year, month, day, hour, minute, seconds, microseconds).isoformat(timespec='microseconds')
+
+    else:
+        dt_str = datetime.datetime(year, month, day, hour, minute, seconds, microseconds).strftime("%Y-%m-%d %H:%M:%S.%f")
+
+    return dt_str
 
 
 
@@ -51,6 +105,12 @@ def read(directory, filename, array=False, full_filename=False):
     ff.first = head['FIRST']
     ff.camno = head['CAMNO']
     ff.fps = head['FPS']
+
+    # Check for the DATE-OBS field and read datetime from filename it if it doesn't exist
+    if 'DATE-OBS' in head:
+        ff.starttime = head['DATE-OBS']
+    else:
+        ff.starttime = filenameToDatetimeStr(filename, iso8601=True)
 
     # Read in the image data
     ff.maxpixel = hdulist[1].data
@@ -102,6 +162,7 @@ def write(ff, directory, filename):
     head['FIRST'] = ff.first
     head['CAMNO'] = ff.camno
     head['FPS'] = ff.fps
+    head['DATE-OBS'] = ff.starttime
 
     # Deconstruct the 3D array into individual images
     if ff.array is not None:

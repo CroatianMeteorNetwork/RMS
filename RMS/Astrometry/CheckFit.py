@@ -92,7 +92,7 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
 
         # Estimate RA,dec of the centre of the FOV
         _, RA_c, dec_c, _ = xyToRaDecPP([jd2Date(jd)], [platepar.X_res/2], [platepar.Y_res/2], [1], \
-            platepar, extinction_correction=False)
+            platepar, extinction_correction=False, precompute_pointing_corr=True)
 
         RA_c = RA_c[0]
         dec_c = dec_c[0]
@@ -216,7 +216,7 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
 
                 # Convert image coordinates to RA/Dec
                 _, star_ra, star_dec, _ = xyToRaDecPP([jd2Date(jd)], [star_x], [star_y], [1], \
-                    platepar, extinction_correction=False)
+                    platepar, extinction_correction=False, precompute_pointing_corr=True)
 
                 # Compute angular distance between the predicted and the catalog position
                 ang_dist = np.degrees(angularSeparation(np.radians(cat_ra), np.radians(cat_dec), \
@@ -687,7 +687,7 @@ if __name__ == "__main__":
     config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
     # Initialize the logger
-    initLogging(config, 'checkfit_')
+    initLogging(config, 'checkfit_', safedir=dir_path)
 
     # Get the logger handle
     log = logging.getLogger("logger")

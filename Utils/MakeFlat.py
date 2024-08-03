@@ -19,7 +19,7 @@ from RMS.Formats.FFfile import getMiddleTimeFF
 from RMS.Routines.Image import loadImage, saveImage
 
 
-def makeFlat(dir_path, config, nostars=False, use_images=False):
+def makeFlat(dir_path, config, nostars=False, use_images=False, make_dark=False):
     """ Makes a flat field from the files in the given folder. CALSTARS file is needed to estimate the
         quality of every image by counting the number of detected stars.
 
@@ -30,6 +30,7 @@ def makeFlat(dir_path, config, nostars=False, use_images=False):
     Keyword arguments:
         nostars: [bool] If True, all files will be taken regardless of if they have stars on them or not.
         use_images: [bool] Use image files instead of FF files. False by default.
+        make_dark: [bool] If True, a dark frame will be made instead of a flat field. False by default.
 
     Return:
         [2d ndarray] Flat field image as a numpy array. If the flat generation failed, None will be returned.
@@ -163,7 +164,18 @@ def makeFlat(dir_path, config, nostars=False, use_images=False):
         ff_list_good = sorted(random.sample(ff_list_good, max_ff_flat))
 
 
-    print('Using {:d} files for flat...'.format(len(ff_list_good)))
+
+    if make_dark:
+        print('Making a dark frame...')
+
+        combine_function = np.min
+
+    else:
+
+        print('Using {:d} files for flat...'.format(len(ff_list_good)))
+
+        combine_function = np.median
+
 
 
     c = 0
@@ -202,7 +214,7 @@ def makeFlat(dir_path, config, nostars=False, use_images=False):
             img_list = np.array(img_list)
 
             # Median combine the loaded 10 (or less) images
-            ff_median = np.median(img_list, axis=0)
+            ff_median = combine_function(img_list, axis=0)
             median_list.append(ff_median)
 
             img_list = []
@@ -214,17 +226,19 @@ def makeFlat(dir_path, config, nostars=False, use_images=False):
 
         # Median combine all median images
         median_list = np.array(median_list)
-        ff_median = np.median(median_list, axis=0)
+        ff_median = combine_function(median_list, axis=0)
 
     else:
         if len(median_list) > 0:
             ff_median = median_list[0]
         else:
-            ff_median = np.median(np.array(img_list), axis=0)
+            ff_median = combine_function(np.array(img_list), axis=0)
 
 
-    # Stretch flat to 0-255
-    ff_median = ff_median/np.max(ff_median)*255
+    if not make_dark:
+        
+        # Stretch flat to 0-255 
+        ff_median = ff_median/np.max(ff_median)*255
 
     # Convert the flat to 8 bits
     ff_median = ff_median.astype(np.uint8)
@@ -253,6 +267,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
         help="Path to a config file which will be used instead of the default one.")
 
+    arg_parser.add_argument('-d', '--dark', action="store_true",
+        help="Make a dark frame instead by taking the minimum value of the images insted of the median.")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -266,17 +283,24 @@ if __name__ == "__main__":
     config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
 
     # Make the flat
-    ff_median = makeFlat(dir_path, config, nostars=cml_args.nostars, use_images=cml_args.images)
+    img = makeFlat(dir_path, config, nostars=cml_args.nostars, use_images=cml_args.images, 
+                         make_dark=cml_args.dark)
 
-    if ff_median is not None:
+    if img is not None:
+
 
         # Save the flat in the input directory
-        input_dir_flat = os.path.join(dir_path, config.flat_file)
-        saveImage(input_dir_flat, ff_median)
-        print('Flat saved to:', input_dir_flat)
+        if cml_args.dark:
+            img_save_path = os.path.join(dir_path, "dark.png")
+
+        else:
+            img_save_path = os.path.join(dir_path, config.flat_file)
+
+        saveImage(img_save_path, img)
+        print('Image saved to:', img_save_path)
 
         import matplotlib.pyplot as plt
-        plt.imshow(ff_median, cmap='gray', vmin=0, vmax=255)
+        plt.imshow(img, cmap='gray', vmin=0, vmax=255)
         plt.show()
 
     else:

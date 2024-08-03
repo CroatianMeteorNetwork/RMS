@@ -5,6 +5,7 @@ from __future__ import print_function, division, absolute_import
 import os
 import sys
 import math
+import time
 
 import numpy as np
 import scipy.misc
@@ -51,9 +52,10 @@ def loadRaw(img_path):
     if 'rawpy' in sys.modules:
 
         # Get raw data from .nef file and get image from it
+        # Disable automated levels scaling and image orientation
         raw = rawpy.imread(img_path)
         frame = raw.postprocess(gamma=(1,1), output_bps=16, no_auto_bright=True, no_auto_scale=True, \
-            output_color=rawpy.ColorSpace.sRGB)
+            output_color=rawpy.ColorSpace.sRGB, user_flip=0)
 
         # Convert the image to grayscale
         frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
@@ -67,8 +69,9 @@ def loadRaw(img_path):
 
 
 def loadImage(img_path, flatten=-1):
-    """ Load the given image. Handle loading it using different libraries. 
-    
+    """
+    Load the given image. Handle loading it using different libraries.
+
     Arguments:
         img_path: [str] Path to the image.
 
@@ -83,9 +86,18 @@ def loadImage(img_path, flatten=-1):
 
         try:
             img = imread(img_path, as_gray=bool(flatten))
-            
+
         except TypeError:
-            img = imread(img_path, mode="L")
+            
+            img = imread(img_path)
+
+            # If there more than 16 bits, convert to uint16
+            if img.nbytes >= 2**16:
+                img = img.astype("uint16")
+
+            # Convert the time to grayscale, making sure to preserve the bit depth
+            if img.shape == 3 and flatten == -1:
+                img = img.mean(axis=2).astype(img.dtype)
 
     return img
 
@@ -152,6 +164,61 @@ def binImage(img, bin_factor, method='avg'):
 
 
 
+
+# Define the fallback function using NumPy
+def applyThresholdNumpy(img_avg_sub, stdpixel, k1, j1):
+    """Apply thresholding to the image using NumPy.
+    
+    Arguments:
+        img_avg_sub: [ndarray] Image with average subtracted.
+        stdpixel: [float] Standard deviation of pixels.
+        k1: [float] Multiplication factor for standard deviation.
+        j1: [float] Constant to add to the threshold.
+    """
+
+    threshold = k1*stdpixel + j1
+    img_thresh = np.greater(img_avg_sub, threshold)
+
+    return img_thresh
+
+# Try importing Numba and define the Numba-optimized function if possible
+try:
+    from numba import njit
+
+    @njit
+    def applyThresholdNumba(img_avg_sub, stdpixel, k1, j1):
+        """Apply thresholding to the image using Numba for JIT compilation.
+        
+        Arguments:
+            img_avg_sub: [ndarray] Image with average subtracted.
+            stdpixel: [float] Standard deviation of pixels.
+            k1: [float] Multiplication factor for standard deviation.
+            j1: [float] Constant to add to the threshold.
+        """
+
+        height, width = img_avg_sub.shape
+        img_thresh = np.zeros((height, width), dtype=np.bool_)
+
+        for i in range(height):
+            for j in range(width):
+
+                threshold = int(k1*stdpixel[i, j] + j1)
+
+                img_thresh[i, j] = img_avg_sub[i, j] > threshold
+
+        return img_thresh
+
+    # If Numba is available, use the Numba-optimized function
+    applyImgThreshold = applyThresholdNumba
+
+except ImportError:
+
+    # If Numba is not available, use the fallback NumPy function
+    applyImgThreshold = applyThresholdNumpy
+
+
+
+
 def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False, mask=None, mask_ave_bright=True):
     """ Threshold the image with given parameters.
     
@@ -183,8 +250,7 @@ def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False, mask=None, mask_ave_
         img_avg_sub = applyDark(img, avepixel)
 
     # Compute the thresholded image
-    img_thresh = img_avg_sub > (k1 * stdpixel + j1)
-
+    img_thresh = applyImgThreshold(img_avg_sub, stdpixel, k1, j1)
 
     # Mask out regions that are very bright in avepixel
     if mask_ave_bright:
@@ -234,9 +300,8 @@ def thresholdFF(ff, k1, j1, mask=None, mask_ave_bright=False):
 
 
 
-@np.vectorize
-def gammaCorrection(intensity, gamma, bp=0, wp=255):
-    """ Correct the given intensity for gamma. 
+def gammaCorrectionScalar(intensity, gamma, bp=0, wp=255):
+    """ Correct the given intensity for gamma on individual scalar values.
         
     Arguments:
         intensity: [int] Pixel intensity
@@ -258,11 +323,49 @@ def gammaCorrection(intensity, gamma, bp=0, wp=255):
     if x > 0:
 
         # Compute the corrected intensity
-        return bp + (wp - bp)*(x**(1.0/gamma))
+        out = bp + (wp - bp)*(x**(1.0/gamma))
 
     else:
-        return bp
+        out = bp
 
+    return out
+
+
+def gammaCorrectionImage(intensity, gamma, bp=0, wp=255):
+    """ Correct the given image for gamma on numpy arrays (faster than the single pixel function).
+    """
+
+    # If the intensity is a numpy array, save the original type
+    orig_type = None
+    if isinstance(intensity, np.ndarray):
+        orig_type = intensity.dtype
+
+        # Convert the intensity to float if it's not already
+        intensity = intensity.astype(np.float32)
+
+    
+    # Clip intentities < 0 to 0
+    intensity[intensity < 0] = 0
+
+    # Apply the gamma correction
+    x = (intensity - bp)/(wp - bp)
+
+    # Scale the gamma to the given range
+    out = np.zeros_like(intensity) + bp
+    out[x > 0] = bp + (wp - bp)*(x[x > 0]**(1.0/gamma))
+
+
+    # If the intensity was a numpy array, convert it back to the original type
+    if orig_type is not None:
+
+        # Clip the range to the range of the original type if the type is integer (leave float as is)
+        if np.issubdtype(orig_type, np.integer):
+            out = np.clip(out, 0, np.iinfo(orig_type).max)
+        
+        # Convert the intensity back to the original type
+        out = out.astype(orig_type)
+
+    return out
 
 
 def applyBrightnessAndContrast(img, brightness, contrast):
@@ -616,22 +719,8 @@ def applyDark(img, dark_img):
     if img.shape != dark_img.shape:
         return img
 
-
-    # Save input type
-    input_type = img.dtype
-
-
-    # Convert the image to integer (with negative values)
-    img = img.astype(np.int64)
-
-    # Subtract dark
-    img -= dark_img.astype(np.int64)
-
-    # Make sure there aren't any values smaller than 0
-    img[img < 0] = 0
-
-    # Convert the image back to the input type
-    img = img.astype(input_type)
+    # Use cv2.subtract to subtract the images and ensure no negative values
+    img = cv2.subtract(img, dark_img)
 
 
     return img

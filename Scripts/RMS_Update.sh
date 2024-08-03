@@ -56,6 +56,22 @@ git pull
 # Activate the virtual environment
 source ~/vRMS/bin/activate
 
+
+### Install potentially missing libraries ###
+
+# Check if sudo requires a password
+if sudo -n true 2>/dev/null; then
+    sudo apt-get update
+    sudo apt-get install -y gobject-introspection libgirepository1.0-dev
+    sudo apt-get install -y gstreamer1.0-libav gstreamer1.0-plugins-bad
+else
+    echo "sudo requires a password. Please run this script as a user with passwordless sudo access."
+fi
+
+### ###
+
+
+
 # make sure the correct requirements are installed
 pip install -r requirements.txt
 

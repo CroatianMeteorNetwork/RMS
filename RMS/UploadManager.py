@@ -2,6 +2,7 @@
 
 from __future__ import print_function, division, absolute_import
 
+import sys
 import os
 import ctypes
 import multiprocessing
@@ -82,24 +83,28 @@ def _agentAuth(transport, username, rsa_private_key):
 
     return False
 
-def existsRemoteDirectory(sftp,path):
-    """
 
-    Args:
-        sftp: connection object
-        path: path to the directory to check
+def existsRemoteDirectory(sftp,path):
+    """ Check if a directory exists on the remote server.
+
+    Arguments:
+        sftp: [paramiko.SFTPClient object] Connection handle.
+        path: [str] Path to the directory to be checked.
 
     Returns:
-        True if successful else false
+        [bool] True if the directory exists, False otherwise.
     """
 
     try:
         # Get files in directory above target
         listing = sftp.listdir(os.path.dirname(path))
+
         # Is the required directory name in the filelist
         if os.path.basename(path) in listing:
+
             # Is the required directory name actually a directory
             sftp_return = str(sftp.stat(path))
+
             if sftp_return[0] == 'd':
                 return True
             else:
@@ -108,35 +113,95 @@ def existsRemoteDirectory(sftp,path):
                 return False
         else:
             return False
+        
     except:
         log.error("Failure whilst checking that directory {} exists".format(path))
         return False
 
-def createRemoteDirectory(sftp,path):
+def createRemoteDirectory(sftp, path):
+    """ Recursively create a directory tree on the remote server.
+    
+    Arguments:
+        sftp: [paramiko.SFTPClient object] Connection handle.
+        path: [str] Path to the directory to be created.
+
+    Return:
+        [bool] True if successful, False otherwise.
+    """
+
+    # Check if the path is absolute
+    is_abspath = False
+    if path.startswith('/') or path.startswith('\\'):
+        is_abspath = True
 
     try:
-        sftp.mkdir(path)
+        # Split the path into segments
+        folders = []
+        while path not in ('', '/', '\\'):
+            path, folder = os.path.split(path)
+            if folder:
+                folders.append(folder)
+        
+        # Reverse the list to create from top to bottom
+        folders.reverse()
+
+        # Recursively create directory tree
+        path = ''
+        for i, folder in enumerate(folders):
+
+            # Joing the path (if it's the first folder, don't add a slash in front to avoid make it absolute)
+            if (i == 0) and (not is_abspath):
+                path = folder
+            else:
+                path = path + '/' + folder
+
+            # Check if the directory exists
+            try:
+                sftp.stat(path)
+                print(f"Directory '{path}' already exists.")
+
+            except FileNotFoundError:
+
+                sftp.mkdir(path)
+                print(f"Directory '{path}' created.")
+            
+            except Exception as e:
+                log.error(f"Unable to stat directory '{path}': {e}")
+                return False
+        
         return True
-    except:
-        log.error("Unable to create {}".format(path))
+    
+
+    except Exception as e:
+
+        # Log the exception (assuming a logging setup is in place)
+        log.error(f"Unable to create directory '{path}': {e}")
         return False
 
 
 def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22, 
-        rsa_private_key=os.path.expanduser('~/.ssh/id_rsa'), allow_dir_creation = False):
-    """ Upload the given list of files using SFTP. 
+        rsa_private_key=os.path.expanduser('~/.ssh/id_rsa'), allow_dir_creation=False):
+    """ Upload the given list of files using SFTP. The upload only supports uploading files from one local
+        directory to one remote directory. The files are uploaded only if they do not already exist on the 
+        server, or if they are of different size than the local files.
+
+        The RSA private key is used for authentication. If the key is not found, the function will try to
+        use the keys from the SSH agent (if available). Passphrase-protected keys are not supported.
 
     Arguments:
         hostname: [str] Server name or IP address.
         username: [str] Username used for connecting to the server.
         dir_local: [str] Path to the local directory where the local files are located.
-        dir_remote: [str] Path on the server where the files will be stored.
-        file_list: [list or strings] A list of files to the uploaded to the server.
+        dir_remote: [str] Path on the server where the files will be stored. It can be relative to the user's
+            home directory, or an absolute path.
+        file_list: [list or strings] A list of files to be uploaded to the server. These should only be
+            file names, not full paths. The full path is constructed from the dir_local (on the local 
+            machine) and the dir_remote (on the server).
 
     Ketword arguments:
         port: [int] SSH port. 22 by default.
         rsa_private_key: [str] Path to the SSH private key. ~/.ssh/id_rsa by default.
-        allow_dir_creation: [bool] Allow test for and create remote directory. False by default.
+        allow_dir_creation: [bool] Create a remote directory if it doesn't exist. False by default.
 
     Return:
         [bool] True if upload successful, false otherwise.
@@ -169,6 +234,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
         if allow_dir_creation:
             if not existsRemoteDirectory(sftp, dir_remote):
                 createRemoteDirectory(sftp, dir_remote)
+
         # Check that the remote directory exists
         try:
             sftp.stat(dir_remote)
@@ -408,13 +474,18 @@ class UploadManager(multiprocessing.Process):
 
             # Get a file from the queue
             file_name = self.file_queue.get()
+            if not os.path.isfile(file_name):
+                log.warning("Local file not found: {:s}".format(file_name))
+                log.warning("Skipping it...")
+                continue
 
             # Separate the path to the file and the file name
             data_path, f_name = os.path.split(file_name)
 
             # Upload the file via SFTP (use the lowercase version of the station ID as the username)
             upload_status = uploadSFTP(self.config.hostname, self.config.stationID.lower(), data_path, \
-                self.config.remote_dir, [f_name], rsa_private_key=self.config.rsa_private_key)
+                self.config.remote_dir, [f_name], rsa_private_key=self.config.rsa_private_key, 
+                port=self.config.host_port)
 
             # If the upload was successful, rewrite the holding file, which will remove the uploaded file
             if upload_status:
@@ -513,8 +584,29 @@ if __name__ == "__main__":
 
     dir_local = '/home/dvida/Desktop'
 
+    # # Test uploading a single file
+    # uploadSFTP(
+    #     config.hostname, config.stationID, 
+    #     dir_local, dir_remote, file_list, 
+    #     rsa_private_key=config.rsa_private_key
+    #     )
+    
 
-    #uploadSFTP(config.hostname, config.stationID, dir_local, dir_remote, file_list, rsa_private_key=config.rsa_private_key)
+    # Test directly uploading files and remote directory creation
+    dir_local = "C:\\temp\\dir2\\dir3"
+    remote_dir = "files/upload_test/dir2/dir3"
+    uploadSFTP(
+        config.hostname, config.stationID, 
+        dir_local, remote_dir, 
+        ['test.txt'], 
+        rsa_private_key=config.rsa_private_key,
+        allow_dir_creation=True
+        )
+    
+    sys.exit()
+
+
+    ### Test the upload manager ###
 
     # Init the logger
     initLogging(config)
@@ -534,3 +626,5 @@ if __name__ == "__main__":
     up.uploadData()
 
     up.stop()
+
+    ### ###

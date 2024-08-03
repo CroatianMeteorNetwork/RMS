@@ -1239,6 +1239,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
             stellarLMModel(platepar.mag_lev),
             config.platepars_flux_recalibrated_name,
             ignore_distance_threshold=True,
+            ignore_max_stars=True,
         )
 
     # Skip the rest if this flag is on. This is used on Python 2 systems, as the rest of the code doesn't play
@@ -1503,6 +1504,7 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
                 [1]*len(x_vert),
                 platepar,
                 extinction_correction=False,
+                precompute_pointing_corr=True
             )
 
             # Collect and filter catalog stars
@@ -1532,7 +1534,8 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
             star_levels = 10**((mag - platepar.mag_lev)/(-2.5))
 
             # Compute star magnitudes using vignetting and extinction
-            _, _, _, mag_corrected = xyToRaDecPP(len(x)*[date], x, y, star_levels, platepar, extinction_correction=True)
+            _, _, _, mag_corrected = xyToRaDecPP(len(x)*[date], x, y, star_levels, platepar, 
+                                                 extinction_correction=True, precompute_pointing_corr=True)
             mag_corrected = np.array(mag_corrected)
 
             # Filter coordinates to be in FOV and make sure that the stars that are too dim are filtered

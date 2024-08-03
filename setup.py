@@ -7,6 +7,14 @@ from setuptools import setup, Extension, find_packages
 
 from Cython.Build import cythonize
 
+# Determine find_packages function to use depending on Python version
+find_packages_func = find_packages
+
+# If in Python 3.3 or later, load find_namespace_packages()
+if sys.version_info >= (3, 3):
+    from setuptools import find_namespace_packages
+    find_packages_func = find_namespace_packages
+
 
 kht_module = Extension("kht_module",
                     sources = ["Native/Hough/kht.cpp",
@@ -79,7 +87,7 @@ setup (name = "RMS",
         install_requires=requirements,
         data_files=[('Catalogs', catalog_files), ('share', share_files)],
         ext_modules = [kht_module] + cythonize(cython_modules),
-        packages=find_packages(),
+        packages=find_packages_func(),
         include_package_data=True,
         include_dirs=[numpy.get_include()]
         )

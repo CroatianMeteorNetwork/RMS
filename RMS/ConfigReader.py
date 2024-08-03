@@ -230,12 +230,17 @@ class Config:
 
         ##### System
         self.stationID = "XX0001"
+
+        # Accurate coordinates of the camera (private)
         self.latitude = 0
         self.longitude = 0
         self.elevation = 0
         self.cams_code = 0
 
-
+        # Public low-accuracy coordinates (shown on the GMN website)
+        self.pub_latitude = None
+        self.pub_longitude = None
+        self.pub_elevation = None
 
         # Show this camera on the GMN weblog
         self.weblog_enable = True
@@ -259,7 +264,28 @@ class Config:
         
         ##### Capture
         self.deviceID = 0
-        self.force_v4l2 = False
+
+        # Transport Layer Protocol: tcp or udp
+        self.protocol = "tcp"
+
+        # Media backend to use for capture. Options are gst, cv2, or v4l2
+        self.media_backend = "gst"
+
+        # Colorspace to use for the gstreamer media backend (e.g. BGR, GRAY8)
+        self.gst_colorspace = "BGR"
+
+        # Decoder for the gstreamer media backend (e.g. decodebin, avdec_h264, nvh264dec)
+        self.gst_decoder = "avdec_h264"
+
+        # Location of the raw videos to be saved to disk (None means no saving)
+        self.raw_video_dir = None
+
+        # Save the raw video to the night directory
+        self.raw_video_dir_night = False
+
+        # Duration of the raw video segment (seconds)
+        self.raw_video_duration = 30
+
         self.uyvy_pixelformat = False
 
         self.width = 1280
@@ -267,6 +293,15 @@ class Config:
         self.width_device = self.width
         self.height_device = self.height
         self.fps = 25.0
+
+        # Camera buffer in number of frames. This will applied a buffer/fps correction to
+        # the timestamps when in GStreamer Standalone mode
+        self.camera_buffer = 1
+
+        # Camera latency in seconds. This will applied an offset to the timestamps
+        # when in GStreamer Standalone mode
+        self.camera_latency = 0.05
+
 
         self.report_dropped_frames = False
 
@@ -297,10 +332,15 @@ class Config:
         # days of logfiles to keep
         self.logdays_to_keep = 30
 
+        # ArchDirs and bzs to keep
+        # keep this many ArchDirs. Zero means keep them all
+        self.arch_dirs_to_keep = 20
+        # keep this many compressed ArchDirs. Zero means keep them all
+        self.bz2_files_to_keep = 20
+
         # Extra space to leave on disk for the archive (in GB) after the captured files have been taken
         #   into account
-        self.extra_space_gb = 3
-
+        self.extra_space_gb = 6
 
         # Enable/disable showing maxpixel on the screen (off by default)
         self.live_maxpixel_enable = False
@@ -459,6 +499,8 @@ class Config:
         # Path to the ML model
         self.ml_model_path = os.path.join(self.rms_root_dir, "share", "meteorml32.tflite")
 
+        # Number of CPU cores to use for detection. 0 means all available cores, -1 all but one core (default)
+        self.num_cores = -1
 
         ##### StarExtraction
 
@@ -493,6 +535,9 @@ class Config:
         self.platepars_flux_recalibrated_name = 'platepars_flux_recalibrated.json'
         self.platepars_recalibrated_name = 'platepars_all_recalibrated.json'
 
+        # Platepar template directory
+        self.platepar_template_dir = os.path.join(self.rms_root_dir, 'share', 'platepar_templates')
+
         # Name of the platepar file on the server
         self.platepar_remote_name = 'platepar_latest.cal'
         self.remote_platepar_dir = 'platepars'
@@ -517,6 +562,8 @@ class Config:
 
         self.min_matched_stars = 20
 
+        # Maximum number of stars to use for recalibration on a single FF
+        self.recalibration_max_stars = 200
 
         ##### Thumbnails
         self.thumb_bin =  4
@@ -794,6 +841,16 @@ def parseSystem(config, parser):
         config.event_monitor_db_name = parser.get(section, "event_monitor_db_name")
 
 
+    if parser.has_option(section, "public_latitude"):
+        config.pub_latitude = parser.getfloat(section, "public_latitude")
+
+    if parser.has_option(section, "public_longitude"):
+        config.pub_longitude = parser.getfloat(section, "public_longitude")
+
+    if parser.has_option(section, "public_elevation"):
+        config.pub_elevation = parser.getfloat(section, "public_elevation")
+
+
 def parseCapture(config, parser):
     section = "Capture"
     
@@ -820,7 +877,13 @@ def parseCapture(config, parser):
         config.log_dir = parser.get(section, "log_dir")
 
     if parser.has_option(section, "logdays_to_keep"):
-        config.logdays_to_keep = parser.get(section, "logdays_to_keep")
+        config.logdays_to_keep = int(parser.get(section, "logdays_to_keep"))
+
+    if parser.has_option(section, "arch_dirs_to_keep"):
+        config.arch_dirs_to_keep = int(parser.get(section, "arch_dirs_to_keep"))
+
+    if parser.has_option(section, "bz2_files_to_keep"):
+        config.bz2_files_to_keep = int(parser.get(section, "bz2_files_to_keep"))
 
     if parser.has_option(section, "captured_dir"):
         config.captured_dir = parser.get(section, "captured_dir")
@@ -909,8 +972,43 @@ def parseCapture(config, parser):
         # If it fails, it's probably a RTSP stream
         pass
 
+    if parser.has_option(section, "protocol"):
+        config.protocol = parser.get(section, "protocol")
+    
+    if parser.has_option(section, "media_backend"):
+        config.media_backend = parser.get(section, "media_backend")
+
+    if parser.has_option(section, "gst_colorspace"):
+        config.gst_colorspace = parser.get(section, "gst_colorspace")
+
+    if parser.has_option(section, "gst_decoder"):
+        config.gst_decoder = parser.get(section, "gst_decoder")
+
+    if parser.has_option(section, "raw_video_dir"):
+        config.raw_video_dir = parser.get(section, "raw_video_dir")
+
+        # If the raw video directory is set to 'None', disable saving raw videos
+        if config.raw_video_dir.strip().lower() == "none":
+            config.raw_video_dir = None
+
+
+    if parser.has_option(section, "raw_video_dir_night"):
+        config.raw_video_dir_night = parser.getboolean(section, "raw_video_dir_night")
+        
+
+    if parser.has_option(section, "raw_video_duration"):
+        config.raw_video_duration = parser.getfloat(section, "raw_video_duration")
+
+        # If the duration is negative, set it to 256 frames at the current FPS
+        if config.raw_video_duration < 0:
+            config.raw_video_duration = 256.0/float(config.fps)
+
+
     if parser.has_option(section, "force_v4l2"):
-        config.force_v4l2 = parser.getboolean(section, "force_v4l2")
+        force_v4l2 = parser.getboolean(section, "force_v4l2")
+
+        if force_v4l2:
+            config.media_backend = "v4l2"
 
     if parser.has_option(section, "uyvy_pixelformat"):
         config.uyvy_pixelformat = parser.getboolean(section, "uyvy_pixelformat")
@@ -923,6 +1021,12 @@ def parseCapture(config, parser):
             config.fps = 1000000
             print()
             print("WARNING! The FPS has been limited to 1,000,000!")
+
+    if parser.has_option(section, "camera_buffer"):
+        config.camera_buffer = parser.getint(section, "camera_buffer")
+
+    if parser.has_option(section, "camera_latency"):
+        config.camera_latency = parser.getfloat(section, "camera_latency")
 
     if parser.has_option(section, "ff_format"):
         config.ff_format = parser.get(section, "ff_format")
@@ -1334,6 +1438,11 @@ def parseMeteorDetection(config, parser):
         if TFLITE_AVAILABLE and (config.ml_filter > 0):
             config.min_patch_intensity_multiplier = 0
 
+    if parser.has_option(section, "num_cores"):
+        config.num_cores = parser.getint(section, "num_cores")
+
+        if config.num_cores <= 0:
+            config.num_cores = -1
 
 
 def parseStarExtraction(config, parser):
@@ -1424,6 +1533,9 @@ def parseCalibration(config, parser):
     if parser.has_option(section, "platepars_recalibrated_name"):
         config.platepars_recalibrated_name = parser.get(section, "platepars_recalibrated_name")
 
+    if parser.has_option(section, "platepar_template_dir"):
+        config.platepar_template_dir = parser.get(section, "platepar_template_dir")
+
     if parser.has_option(section, "platepar_remote_name"):
         config.platepar_remote_name = parser.get(section, "platepar_remote_name")
 
@@ -1447,6 +1559,9 @@ def parseCalibration(config, parser):
 
     if parser.has_option(section, "min_matched_stars"):
         config.min_matched_stars = parser.getint(section, "min_matched_stars")
+
+    if parser.has_option(section, "recalibration_max_stars"):
+        config.recalibration_max_stars = parser.getint(section, "recalibration_max_stars")
 
     if parser.has_option(section, "mask_download_permissive"):
         config.mask_download_permissive = parser.getboolean(section, "mask_download_permissive")

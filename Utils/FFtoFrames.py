@@ -59,7 +59,8 @@ def saveFrame(frame, frame_no, out_dir, file_name, file_format, ff_dt, fps, half
     return file_name_saving, frame_dt
 
 
-def FFtoFrames(file_path, out_dir, file_format, deinterlace_mode, first_frame=0, last_frame=255, cml_fps=25): 
+def FFtoFrames(file_path, out_dir, file_format, deinterlace_mode, first_frame=0, last_frame=255, cml_fps=25, 
+               avepixel_bg=True): 
     #########################
 
     # Read the deinterlace
@@ -130,7 +131,7 @@ def FFtoFrames(file_path, out_dir, file_format, deinterlace_mode, first_frame=0,
     for i in range(first_frame, last_frame+1):
         # Reconstruct individual frames
 
-        frame = reconstructFrame(ff, i, avepixel=True)
+        frame = reconstructFrame(ff, i, avepixel=avepixel_bg)
         # Deinterlace the frame if necessary, odd first
         if deinterlace_mode == 0:
 
@@ -191,6 +192,8 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-f', '--fps', metavar='FPS', type=float, help="Frames per second of the video. If not given, it will be read from a) the FF file if available, b) from the config file.")
 
+    arg_parser.add_argument('--noavg', action='store_true', help="Do not use avepixel as the background.")
+
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
         help="Path to a config file which will be used instead of the default one.")
 
@@ -211,7 +214,7 @@ if __name__ == "__main__":
     else:
         cml_fps = cml_args.fps
 
-    FFtoFrames(file_path, out_dir, file_format, deinterlace_mode, cml_fps=cml_fps)
+    FFtoFrames(file_path, out_dir, file_format, deinterlace_mode, cml_fps=cml_fps, avepixel_bg=not cml_args.noavg)
 
 
 
