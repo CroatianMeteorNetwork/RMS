@@ -124,8 +124,8 @@ def convertListOfStationIDsToListOfUrls(station_ids):
     video_url_template = "https://globalmeteornetwork.org/weblog/{:s}/{:s}/static/{:s}_timelapse_static.mp4"
     video_urls = []
     for station in station_ids:
-        country_code = station[0:2]
-        video_urls.append(video_url_template.format(country_code,station,station))
+        country_code = station[0:2].upper()
+        video_urls.append(video_url_template.format(country_code,station.upper(),station.upper()))
 
     return video_urls
 
@@ -242,13 +242,13 @@ def generateCommand(video_paths, resolution, shape, output_filename = "~/mosaic_
     return ffmpeg_command_string
 
 
-def videoMosaic(stationIDs, x_shape=2, y_shape=2, x_res=1280, y_res=720,
+def videoMosaic(station_ids, x_shape=2, y_shape=2, x_res=1280, y_res=720,
                 generate=True, output_file_path="~/mosaic_video.mp4", keep_files=False, working_directory=None):
 
     """
 
     Args:
-        stationIDs: a list of stationIDs which have been requested to be downloaded, and optionally combined into a montage
+        station_ids: a list of stationIDs which have been requested to be downloaded, and optionally combined into a montage
         x_shape: number of tiles across e.g. 3
         y_shape: number of tiles down e.g. 2
         x_res: x resolution e.g. 1280
@@ -262,11 +262,11 @@ def videoMosaic(stationIDs, x_shape=2, y_shape=2, x_res=1280, y_res=720,
         [ffmpeg_command_string,working_directory]
     """
 
-    if stationIDs == None:
+    if station_ids == None:
         return
-    if len(stationIDs) == 0:
+    if len(station_ids) == 0:
         return
-    if len(stationIDs) < x_shape * y_shape:
+    if len(station_ids) < x_shape * y_shape:
         print("Too few stationIDs to create video of requested shape {:.f0} x {:.f0}".format(x_shape, y_shape))
         return
 
@@ -274,8 +274,8 @@ def videoMosaic(stationIDs, x_shape=2, y_shape=2, x_res=1280, y_res=720,
         print("user has specified a directory, keeping files")
         keep_files=True
 
-    url_list = convertListOfStationIDsToListOfUrls(stationIDs)
-    video_directory, input_video_paths = downloadFilesToTmp(url_list, stationIDs, working_directory)
+    url_list = convertListOfStationIDsToListOfUrls(station_ids)
+    video_directory, input_video_paths = downloadFilesToTmp(url_list, station_ids, working_directory)
     output_file_path = os.path.expanduser(output_file_path)
     ffmpeg_command_string = generateCommand(input_video_paths, [x_res, y_res],
                                             [x_shape, y_shape], output_file_path)
@@ -367,6 +367,8 @@ if __name__ == "__main__":
     if not cml_args.working_directory is None:
         working_directory = cml_args.working_directory
         print("Working in {}".format(working_directory))
+    else:
+        working_directory = cml_args.working_directory
 
     # do the work
     print(videoMosaic(cameras, x_shape=x_shape, y_shape=y_shape, generate=generate, x_res=x_res, y_res=y_res,
