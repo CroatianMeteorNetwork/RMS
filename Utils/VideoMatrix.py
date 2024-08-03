@@ -15,7 +15,7 @@
 
 """
 This script downloads videos from the static part of the www.globalmeteornetwork.org website
-and programmatically generates and optionally executes a command to generate a matrix of videos
+and programmatically generates and optionally executes a command to generate a mosaic of videos
 
 It is based on the technique at
 
@@ -216,16 +216,16 @@ def generateFilter(video_paths, resolution_list, layout_list,print_nicely = Fals
     return filter
 
 
-def generateCommand(video_paths, resolution, shape, output_filename = "~/matrix_video.mp4", print_nicely=False):
+def generateCommand(video_paths, resolution, shape, output_filename = "~/mosaic_video.mp4", print_nicely=False):
 
     """
     Calls the input, filter and output commands and assembled the full ffmpeg command string
-    for generating a video matrix
+    for generating a video mosaic
 
     Args:
         video_paths: paths to the videos
         resolution: resolution for generated file e.g. [x,y]
-        shape: the shape of the video matrix e.g. [3,2]
+        shape: the shape of the mosaic e.g. [3,2]
         output_filename: the output path and filename
         print_nicely: optionally include \n characters, generally for debugging purposes
 
@@ -242,8 +242,8 @@ def generateCommand(video_paths, resolution, shape, output_filename = "~/matrix_
     return ffmpeg_command_string
 
 
-def videoMatrix(stationIDs, x_shape=2, y_shape=2, x_res=1280, y_res=720,
-                        generate=True, output_file_path="~/matrix_video.mp4", keep_files=False, working_directory=None):
+def videoMosaic(stationIDs, x_shape=2, y_shape=2, x_res=1280, y_res=720,
+                generate=True, output_file_path="~/mosaic_video.mp4", keep_files=False, working_directory=None):
 
     """
 
@@ -299,10 +299,10 @@ if __name__ == "__main__":
         return arg.split(',')
 
     description = ""
-    description += "Generate an n x n matrix of videos. Minimum required to generate a video is\n"
-    description += " python -m Utils.VideoMatrix \n\n"
+    description += "Generate an n x n mosaic of videos. Minimum required to generate a video is\n"
+    description += " python -m Utils.VideoMosaic \n\n"
     description += "A more comprehensive example is \n"
-    description += " python -m Utils.VideoMatrix -c AU000U,AU000V,AU000W,AU000X,AU000Y,AU000Z -r "
+    description += " python -m Utils.VideoMosaic -c AU000U,AU000V,AU000W,AU000X,AU000Y,AU000Z -r "
     description += "3840 1440 -s 3 2 -o ~/station_video.mpg \n \n"
     description += "which creates a video of 6 cameras, resolution 3840 x 1440, 3 across, 2 down saved in users root as station_video.mpg\n"
     description += " -n inhibits generating the video and only prints the ffmpeg command string"
@@ -357,7 +357,7 @@ if __name__ == "__main__":
     if not cml_args.output is None:
         output = cml_args.output[0]
     else:
-        output = "~/matrix_video.mp4"
+        output = "~/mosaic_video.mp4"
 
     if not cml_args.keep_files is None:
         keep_files = cml_args.keep_files
@@ -369,6 +369,6 @@ if __name__ == "__main__":
         print("Working in {}".format(working_directory))
 
     # do the work
-    print(videoMatrix(cameras, x_shape=x_shape, y_shape=y_shape,generate=generate,x_res=x_res,y_res=y_res,
-                        output_file_path=output, keep_files=keep_files, working_directory=working_directory)[0])
+    print(videoMosaic(cameras, x_shape=x_shape, y_shape=y_shape, generate=generate, x_res=x_res, y_res=y_res,
+                      output_file_path=output, keep_files=keep_files, working_directory=working_directory)[0])
 
