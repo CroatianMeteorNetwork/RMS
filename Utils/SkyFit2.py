@@ -14,6 +14,7 @@ import glob
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 import pyqtgraph as pg
 
 import RMS
@@ -21,9 +22,11 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
     extinctionCorrectionTrueToApparent, applyAstrometryFTPdetectinfo, getFOVSelectionRadius
+from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, raDec2AltAz, \
     apparentAltAz2TrueRADec, J2000_JD, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
-from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
+from RMS.Astrometry.AstrometryNet import astrometryNetSolve
+from RMS.Astrometry.FFTalign import alignPlatepar
 import RMS.ConfigReader as cr
 from RMS.ExtractStars import extractStarsAndSave
 import RMS.Formats.CALSTARS as CALSTARS
@@ -38,7 +41,9 @@ from RMS.Misc import decimalDegreesToSexHours
 from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
 from RMS.Routines.CustomPyqtgraphClasses import *
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle, greatCirclePhase
+from RMS.Routines.MaskImage import getMaskFile
 from RMS.Routines import RollingShutterCorrection
+from RMS.Routines.MaskImage import loadMask, MaskStructure, getMaskFile
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
@@ -173,27 +178,33 @@ class QFOVinputDialog(QtWidgets.QDialog):
         if radioButton.isChecked():
             self.lenses = radioButton.lenses
 
+
     def getInputs(self):
 
         try:
-
             azim = float(self.azim_edit.text())%360
-            alt = float(self.alt_edit.text())
-            
-
-            # Read the rotation
-            rot_text = self.rot_edit.text()
-            if rot_text:
-                rot = float(rot_text)%360
-            else:
-                # If the rotation is not given, set it to 0
-                rot = 0
-
-            lenses = self.lenses
 
         except ValueError:
-            print("Given values could not be read as numbers!")
-            return 0, 0, 0, "none"
+            print("Azimuth could not be read as a number! Assuming 90 deg.")
+            azim = 90
+
+
+        try:
+            alt = float(self.alt_edit.text())
+        
+        except ValueError:
+            print("Altitude could not be read as a number! Assuming 45 deg.")
+            alt = 45
+
+        # Read the rotation
+        rot_text = self.rot_edit.text()
+        if rot_text:
+            rot = float(rot_text)%360
+        else:
+            # If the rotation is not given, set it to 0
+            rot = 0
+
+        lenses = self.lenses
 
         return azim, alt, rot, lenses
 
@@ -424,7 +435,7 @@ class PairedStars(object):
 
 class PlateTool(QtWidgets.QMainWindow):
     def __init__(self, input_path, config, beginning_time=None, fps=None, gamma=None, use_fr_files=False, \
-        geo_points_input=None, startUI=True, nobg=False, flipud=False):
+        geo_points_input=None, startUI=True, camera_mask=None, nobg=False, flipud=False):
         """ SkyFit interactive window.
 
         Arguments:
@@ -452,8 +463,8 @@ class PlateTool(QtWidgets.QMainWindow):
         #   of position on frames and photometry
         self.mode = 'skyfit'
         self.mode_list = ['skyfit', 'manualreduction']
-
-
+        self.max_radius_between_matched_stars = np.inf
+        self.autopan_mode = False
         self.input_path = input_path
         if os.path.isfile(self.input_path):
             self.dir_path = os.path.dirname(self.input_path)
@@ -532,6 +543,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # Platepar format (json or txt)
         self.platepar_fmt = None
 
+        # Store the mask
+        self.camera_mask = camera_mask
 
         # Flat field
         self.flat_struct = None
@@ -715,6 +728,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.manualreduction_button.pressed.connect(lambda: self.changeMode('manualreduction'))
         self.status_bar.addPermanentWidget(self.skyfit_button)
         self.status_bar.addPermanentWidget(self.manualreduction_button)
+
+        self.nextstar_button = QtWidgets.QPushButton('SkyFit')
+        self.nextstar_button.pressed.connect(lambda: self.nextstar())
 
         ###################################################################################################
         # CENTRAL WIDGET (DISPLAY)
@@ -1043,6 +1059,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Connect astronmetry & photometry buttons to functions
         self.tab.param_manager.sigFitPressed.connect(lambda: self.fitPickedStars())
+        self.tab.param_manager.sigNextStarPressed.connect(lambda: self.jumpNextStar())
         self.tab.param_manager.sigPhotometryPressed.connect(lambda: self.photometry(show_plot=True))
         self.tab.param_manager.sigAstrometryPressed.connect(self.showAstrometryFitPlots)
         self.tab.param_manager.sigResetDistortionPressed.connect(self.resetDistortion)
@@ -1062,6 +1079,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigMeasGroundPointsToggled.connect(self.toggleMeasGroundPoints)
         self.tab.settings.sigGridToggled.connect(self.onGridChanged)
         self.tab.settings.sigInvertToggled.connect(self.toggleInvertColours)
+        self.tab.settings.sigAutoPanToggled.connect(self.toggleAutoPan)
         self.tab.settings.sigSingleClickPhotometryToggled.connect(self.toggleSingleClickPhotometry)
 
         layout.addWidget(self.tab, 0, 2)
@@ -1088,6 +1106,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateDistortion()
         self.tab.param_manager.updatePlatepar()
         self.changeMode(self.mode)
+
+
 
 
     def changeMode(self, new_mode):
@@ -1342,13 +1362,23 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # If ground points are measured, change the text for alt/az
             if self.meas_ground_points:
-                status_str += ",  Azim={:6.2f}  Alt={:6.2f} (GROUND)".format(azim, alt)
+                status_str += ",  Azim={:6.2f} Alt={:6.2f} (GROUND)".format(azim, alt)
             else:
-                status_str += ",  Azim={:6.2f}  Alt={:6.2f} (date)".format(azim, alt)
+                status_str += ",  Azim={:6.2f} Alt={:6.2f} (date)".format(azim, alt)
 
 
             # Add RA/Dec info
-            status_str += ", RA={:6.2f}  Dec={:+6.2f} (J2000)".format(ra[0], dec[0])
+            status_str += ", RA={:6.2f} Dec={:+6.2f} (J2000)".format(ra[0], dec[0])
+
+            # Show mode for debugging purposes
+            if False:
+                if self.star_pick_mode and not self.autopan_mode:
+                    pass
+                elif self.star_pick_mode and self.autopan_mode:
+                    status_str += ", Auto pan"
+
+                if self.max_radius_between_matched_stars != np.inf:
+                    status_str += ", Angle {:3.2f} {}/{}".format(self.max_radius_between_matched_stars, len(self.paired_stars), len(self.catalog_x_filtered))
 
 
         return status_str
@@ -1472,6 +1502,8 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'CTRL + D - Load dark\n'
             text_str += 'CTRL + F - Load flat\n'
             text_str += 'CTRL + G - Cycle grids\n'
+            text_str += 'CTRL + U - Pan to next\n'
+            text_str += 'CTRL + O - Toggle auto pan\n'
             text_str += 'CTRL + X - astrometry.net img upload\n'
             text_str += 'CTRL + SHIFT + X - astrometry.net XY only\n'
             text_str += 'SHIFT + Z - Show zoomed window\n'
@@ -1612,11 +1644,29 @@ class PlateTool(QtWidgets.QMainWindow):
                                                 & (cat_stars_xy[:, 1] > 0) \
                                                 & (cat_stars_xy[:, 1] < self.platepar.Y_res)
 
+
         # Filter out catalog image stars
-        cat_stars_xy = cat_stars_xy[filtered_indices_all]
+        cat_stars_xy_unmasked = cat_stars_xy[filtered_indices_all]
 
         # Create a filtered catalog
-        self.catalog_stars_filtered = self.catalog_stars[filtered_indices_all]
+        self.catalog_stars_filtered_unmasked = self.catalog_stars[filtered_indices_all]
+
+        if self.camera_mask is None:
+            cat_stars_xy, self.catalog_stars_filtered = [], []
+            for star_xy, star_radec in zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked):
+                    cat_stars_xy.append(star_xy)
+                    self.catalog_stars_filtered.append(star_radec)
+
+        else:
+
+            cat_stars_xy, self.catalog_stars_filtered = [], []
+            for star_xy, star_radec in zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked):
+                if self.camera_mask.img[int(star_xy[1]),int(star_xy[0])] != 0:
+                    cat_stars_xy.append(star_xy)
+                    self.catalog_stars_filtered.append(star_radec)
+
+        # Convert to an array in any case
+        cat_stars_xy = np.array(cat_stars_xy)
 
         # Create a list of filtered catalog image coordinates
         self.catalog_x_filtered, self.catalog_y_filtered, catalog_mag_filtered = cat_stars_xy.T
@@ -1887,6 +1937,7 @@ class PlateTool(QtWidgets.QMainWindow):
         catalog_ra = []
         catalog_dec = []
         catalog_mags = []
+        elevation_list = []
 
         for paired_star in self.paired_stars.allCoords():
 
@@ -1906,6 +1957,14 @@ class PlateTool(QtWidgets.QMainWindow):
             catalog_ra.append(star_ra)
             catalog_dec.append(star_dec)
             catalog_mags.append(star_mag)
+
+            # Compute the azimuth and elevation of the star
+            _, alt = trueRaDec2ApparentAltAz(star_ra, star_dec, date2JD(*self.img_handle.currentTime()),
+                                                self.platepar.lat, self.platepar.lon, 
+                                                self.platepar.refraction)
+            
+            elevation_list.append(alt)
+
 
         # Make sure there are at least 2 stars picked
         self.residual_text.clear()
@@ -1979,9 +2038,22 @@ class PlateTool(QtWidgets.QMainWindow):
                 ### PLOT PHOTOMETRY FIT ###
                 # Note: An almost identical code exists in Utils.CalibrationReport
 
+                # # Init plot for photometry
+                # fig_p, (ax_p, ax_r, ax_e) = plt.subplots(nrows=3, facecolor=None, figsize=(6.4, 8),
+                #                                    gridspec_kw={'height_ratios': [3, 1, 1]})
+
                 # Init plot for photometry
-                fig_p, (ax_p, ax_r) = plt.subplots(nrows=2, facecolor=None, figsize=(6.4, 7.2),
-                                                   gridspec_kw={'height_ratios': [2, 1]})
+                fig_p = plt.figure(figsize=(12, 6))  # Adjust the figure size as needed
+
+                # Create a grid with 2 columns and 2 rows
+                gs = gridspec.GridSpec(2, 2, width_ratios=[1, 1], height_ratios=[1, 1])
+
+                # Large plot on the left
+                ax_p = fig_p.add_subplot(gs[:, 0])
+
+                # Two smaller plots on the right, one on top of the other
+                ax_r = fig_p.add_subplot(gs[0, 1])
+                ax_e = fig_p.add_subplot(gs[1, 1])
 
                 # Set photometry window title
                 try:
@@ -2044,6 +2116,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 ax_p.invert_yaxis()
                 ax_p.invert_xaxis()
 
+                # Force equal aspect ratio
+                ax_p.set_aspect('equal', adjustable='box')
+
                 ax_p.grid()
 
                 ###
@@ -2053,7 +2128,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 img_diagonal = np.hypot(self.platepar.X_res/2, self.platepar.Y_res/2)
 
                 # Plot radius from centre vs. fit residual (including vignetting)
-                ax_r.scatter(radius_list, fit_resids, s=5, c='b', alpha=0.5, zorder=3)
+                ax_r.scatter(radius_list, fit_resids, s=8, c='b', alpha=0.5, zorder=3)
 
                 # Plot a zero line
                 ax_r.plot(np.linspace(0, img_diagonal, 10), np.zeros(10), linestyle='dashed', alpha=0.5,
@@ -2076,14 +2151,54 @@ class PlateTool(QtWidgets.QMainWindow):
                                       - 2.5*np.log10(correctVignetting(px_sum_tmp, radius_arr_tmp,
                                                                        self.platepar.vignetting_coeff))
 
-                    ax_r.plot(radius_arr_tmp, vignetting_loss, linestyle='dotted', alpha=0.5, color='k')
+                    ax_r.plot(radius_arr_tmp, vignetting_loss, linestyle='dotted', alpha=0.5, color='k',
+                              label='Vignetting model')
+                    
+                    ax_r.legend()
 
                 ax_r.grid()
 
-                ax_r.set_ylabel("Fit residuals (mag)")
+                ax_r.set_ylabel("Fit res. (mag)")
                 ax_r.set_xlabel("Radius from centre (px)")
 
                 ax_r.set_xlim(0, img_diagonal)
+
+                ### PLOT MAG DIFFERENCE BY ELEVATION
+
+                # Plot elevation vs. fit residual
+                ax_e.scatter(elevation_list, fit_resids, s=8, c='b', alpha=0.5, zorder=3)
+
+                # Compute the fit residuals without extinction
+                fit_resids_noext = \
+                    fit_resids + self.platepar.extinction_scale*atmosphericExtinctionCorrection(
+                        np.array(elevation_list), self.platepar.elev)
+                
+                # Plot elevation vs. fit residual (excluding extinction)
+                ax_e.scatter(elevation_list, fit_resids_noext, s=5, c='k', alpha=0.5, zorder=3,
+                             label="No extinction, vig. included")
+
+
+                # Compute the extinction model
+                elev_arr = np.linspace(np.min(elevation_list), np.max(elevation_list), 100)
+                extinction_model = self.platepar.extinction_scale*atmosphericExtinctionCorrection(
+                    elev_arr, self.platepar.elev)
+                
+                # Plot the extinction model
+                ax_e.plot(elev_arr, extinction_model, linestyle='dotted', alpha=0.5, color='k', 
+                          label='Extinction model')
+                
+
+                # Plot a zero line
+                ax_e.plot(elev_arr, np.zeros_like(elev_arr), linestyle='dashed', alpha=0.5, color='k')
+                
+                
+                ax_e.grid()
+                ax_e.legend()
+
+                ax_e.set_ylabel("Fit res. (mag)")
+                ax_e.set_xlabel("Elevation (deg)")
+
+                ###
 
                 fig_p.tight_layout()
                 fig_p.show()
@@ -2277,7 +2392,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 (not isinstance(v, float)):
 
                 # Remove class that inherits from something
-                to_remove.append(k)  
+                to_remove.append(k)
+                print(k,v)
 
         for remove in to_remove:
             del dic[remove]
@@ -2304,7 +2420,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.loadState(os.path.dirname(file_), os.path.basename(file_))
 
 
-    def loadState(self, dir_path, state_name, beginning_time=None):
+    def loadState(self, dir_path, state_name, beginning_time=None, camera_mask=None):
         """ Loads state with path to file dir_path and file name state_name. Works mid-program and at the start of
         the program (if done properly).
 
@@ -2343,6 +2459,8 @@ class PlateTool(QtWidgets.QMainWindow):
             if not hasattr(self.platepar, "vignetting_fixed"):
                 self.platepar.vignetting_fixed = False
 
+            if not hasattr(self.autopan_mode, "autopan_mode"):
+                self.autopan_mode = False
 
             if not hasattr(self.platepar, "measurement_apparent_to_true_refraction"):
                 self.platepar.measurement_apparent_to_true_refraction = False
@@ -2466,9 +2584,16 @@ class PlateTool(QtWidgets.QMainWindow):
         if not hasattr(self, "beginning_time"):
             self.beginning_time = beginning_time
 
+
+        # Add the mask
+        if not hasattr(self, "camera_mask"):
+            self.camera_mask = camera_mask
+
+
         # If the previous beginning time is None and the new one is not, update the beginning time
         if (self.beginning_time is None) and (beginning_time is not None):
             self.beginning_time = beginning_time
+
 
         if not hasattr(self, "pick_list"):
             self.pick_list = {}
@@ -2807,7 +2932,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Toggle auto levels
         if event.key() == QtCore.Qt.Key_A and (modifiers == QtCore.Qt.ControlModifier):
-            
+
             self.tab.hist.toggleAutoLevels()
             # This updates image automatically
 
@@ -2919,7 +3044,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         # Increase image gamma
-        elif event.key() == QtCore.Qt.Key_U:
+        elif event.key() == QtCore.Qt.Key_U and not modifiers == QtCore.Qt.ControlModifier:
 
             # Increase image gamma by a factor of 1.1x
             self.img.updateGamma(1/0.9)
@@ -2928,7 +3053,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateLeftLabels()
             self.tab.settings.updateImageGamma()
 
-        elif event.key() == QtCore.Qt.Key_J:
+        elif event.key() == QtCore.Qt.Key_J and not modifiers == QtCore.Qt.ControlModifier:
 
             # Decrease image gamma by a factor of 0.9x
             self.img.updateGamma(0.9)
@@ -3108,6 +3233,27 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.tab.param_manager.updatePlatepar()
                 self.updateLeftLabels()
                 self.updateStars()
+
+            # Pan to unmatched star most distant from all other matched stars
+
+            elif event.key() == QtCore.Qt.Key_U and modifiers == QtCore.Qt.ControlModifier:
+
+                new_x, new_y = self.furthestStar()
+                new_x, new_y = int(new_x), int(new_y)
+                self.img_frame.setRange(xRange=(new_x+15, new_x-15), yRange=(new_y+15, new_y-15))
+                self.checkParamRange()
+                self.platepar.updateRefRADec(preserve_rotation=True)
+                self.checkParamRange()
+                self.tab.param_manager.updatePlatepar()
+                self.updateLeftLabels()
+                self.updateStars()
+
+            elif event.key() == QtCore.Qt.Key_O and modifiers == QtCore.Qt.ControlModifier:
+
+                self.toggleAutoPan()
+                self.tab.settings.updateAutoPan()
+
+
 
 
             # Move rotation parameter
@@ -3434,6 +3580,19 @@ class PlateTool(QtWidgets.QMainWindow):
                         self.cursor.setMode(0)
                         self.updatePairedStars()
 
+                        if self.autopan_mode:
+                            new_x, new_y = self.furthestStar()
+                            new_x, new_y = int(new_x), int(new_y)
+                            self.img_frame.setRange(xRange=(new_x + 15, new_x - 15), yRange=(new_y + 15, new_y - 15))
+                            self.checkParamRange()
+                            self.platepar.updateRefRADec(preserve_rotation=True)
+                            self.checkParamRange()
+                            self.tab.param_manager.updatePlatepar()
+                            self.updateLeftLabels()
+                            self.updateStars()
+
+
+
 
             elif event.key() == QtCore.Qt.Key_Escape:
                 if self.star_pick_mode:
@@ -3443,7 +3602,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.updatePairedStars()
 
             # Show the photometry plot
-            elif event.key() == QtCore.Qt.Key_P:
+            elif event.key() == QtCore.Qt.Key_P and not modifiers == QtCore.Qt.ControlModifier:
                 self.photometry(show_plot=True)
 
             # Show astrometry residuals plot
@@ -3740,6 +3899,12 @@ class PlateTool(QtWidgets.QMainWindow):
         self.img.invert()
         self.img_zoom.invert()
 
+    def toggleAutoPan(self):
+
+        self.img.autopan()
+        self.autopan_mode = not self.autopan_mode
+
+
     def toggleSingleClickPhotometry(self):
         self.single_click_photometry = not self.single_click_photometry
 
@@ -3829,6 +3994,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Handle using FR files too
         ff_name_c = convertFRNameToFF(self.img_handle.name())
 
+        # Find and load a mask file is there is one
+        mask = getMaskFile(self.dir_path, self.config)
+
         # Check if the given FF files is in the calstars list
         if (ff_name_c in self.calstars) and (not upload_image):
 
@@ -3847,7 +4015,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 x_data = star_data[:, 1]
 
                 # Get astrometry.net solution, pass the FOV width estimate
-                solution = novaAstrometryNetSolve(x_data=x_data, y_data=y_data, fov_w_range=fov_w_range)
+                solution = astrometryNetSolve(x_data=x_data, y_data=y_data, fov_w_range=fov_w_range, 
+                                              mask=mask)
 
         else:
             fail = True
@@ -3855,7 +4024,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Try finding the soluting by uploading the whole image
         if fail or upload_image:
 
-            print("Uploading the whole image to astrometry.net...")
+            print("Using the whole image in astrometry.net...")
 
             # If the image is 16bit or larger, rescale and convert it to 8 bit
             if self.img.data.itemsize*8 > 8:
@@ -3870,7 +4039,7 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
                 img_data = self.img.data
 
-            solution = novaAstrometryNetSolve(img=img_data, fov_w_range=fov_w_range)
+            solution = astrometryNetSolve(img=img_data.T, fov_w_range=fov_w_range, mask=mask)
 
         if solution is None:
             qmessagebox(title='Astrometry.net error',
@@ -3880,47 +4049,73 @@ class PlateTool(QtWidgets.QMainWindow):
             return None
 
         # Extract the parameters
-        ra, dec, orientation, scale, fov_w, fov_h = solution
+        ra, dec, rot_standard, scale, fov_w, fov_h, star_data = solution
 
         jd = date2JD(*self.img_handle.currentTime())
-
-        # Compute the position angle from the orientation
-        #pos_angle_ref = rotationWrtStandardToPosAngle(self.platepar, orientation)
-
-        # Assume zero rotation wrt horizon
-        orientation = 0.0
-        pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar, orientation)
 
         # Compute reference azimuth and altitude
         azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, self.platepar.lat, self.platepar.lon)
 
         # Set parameters to platepar
-        self.platepar.pos_angle_ref = pos_angle_ref
-        self.platepar.rotation_from_horiz = orientation
         self.platepar.F_scale = scale
+        self.platepar.pos_angle_ref = rotationWrtStandardToPosAngle(self.platepar, rot_standard)
         self.platepar.az_centre = azim
         self.platepar.alt_centre = alt
 
         self.platepar.updateRefRADec(skip_rot_update=True)
 
-        # Save the current rotation w.r.t horizon value
-        self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
 
-        # Reset the distortion parameters
-        self.platepar.resetDistortionParameters()
+        # # Reset the distortion parameters
+        # self.platepar.resetDistortionParameters()
 
         # Print estimated parameters
         print()
         print('Astrometry.net solution:')
         print('------------------------')
-        print(' RA    = {:.2f} deg'.format(ra))
-        print(' Dec   = {:.2f} deg'.format(dec))
+        # print(' RA    = {:.2f} deg'.format(ra))
+        # print(' Dec   = {:.2f} deg'.format(dec))
+        print(' RA    = {:.2f} deg'.format(self.platepar.RA_d))
+        print(' Dec   = {:.2f} deg'.format(self.platepar.dec_d))
         print(' Azim  = {:.2f} deg'.format(self.platepar.az_centre))
         print(' Alt   = {:.2f} deg'.format(self.platepar.alt_centre))
         print(' Rot horiz   = {:.2f} deg'.format(self.platepar.rotation_from_horiz))
-        print(' Orient eq   = {:.2f} deg'.format(orientation))
-        print(' Pos angle   = {:.2f} deg'.format(pos_angle_ref))
-        print(' Scale = {:.2f} arcmin/px'.format(60/self.platepar.F_scale))
+        print(' Rot eq      = {:.2f} deg'.format(rot_standard))
+        print(' Pos angle   = {:.2f} deg'.format(self.platepar.pos_angle_ref))
+        print(' Scale = {:.3f} arcmin/px'.format(60/self.platepar.F_scale))
+        print(' FOV = {:.2f} x {:.2f} deg'.format(fov_w, fov_h))
+
+
+        # If a list of detected stars is provided by the astrometry.net, use it to run FFT alignment
+        if star_data is not None:
+
+            print()
+            print("Running FFT alignment...")
+
+            # Construct an array with star coordinates (x, y per row)
+            calstars_coords = np.array(star_data).T
+
+            # Get the time of the image
+            calstars_time = self.img_handle.currentTime()
+
+            self.platepar = alignPlatepar(
+                self.config, self.platepar, 
+                calstars_time, calstars_coords, 
+                scale_update=True, show_plot=False
+                )
+            
+            self.platepar.updateRefRADec(skip_rot_update=True)
+            
+            print()
+            print('FFT aligned:')
+            print('------------------------')
+            print(' RA    = {:.2f} deg'.format(self.platepar.RA_d))
+            print(' Dec   = {:.2f} deg'.format(self.platepar.dec_d))
+            print(' Azim  = {:.2f} deg'.format(self.platepar.az_centre))
+            print(' Alt   = {:.2f} deg'.format(self.platepar.alt_centre))
+            print(' Rot horiz   = {:.2f} deg'.format(self.platepar.rotation_from_horiz))
+            print(' Pos angle   = {:.2f} deg'.format(self.platepar.pos_angle_ref))
+            print(' Scale = {:.3f} arcmin/px'.format(60/self.platepar.F_scale))
+
 
     def getFOVcentre(self):
         """ Asks the user to input the centre of the FOV in altitude and azimuth. """
@@ -4913,6 +5108,19 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.updatePlatepar()
 
 
+    def jumpNextStar(self):
+
+
+        new_x, new_y = self.furthestStar()
+        new_x, new_y = int(new_x), int(new_y)
+        self.img_frame.setRange(xRange=(new_x + 15, new_x - 15), yRange=(new_y + 15, new_y - 15))
+        self.checkParamRange()
+        self.platepar.updateRefRADec(preserve_rotation=True)
+        self.checkParamRange()
+        self.tab.param_manager.updatePlatepar()
+        self.updateLeftLabels()
+        self.updateStars()
+
     def showAstrometryFitPlots(self):
         """ Show window with astrometry fit details. """
 
@@ -5708,6 +5916,123 @@ class PlateTool(QtWidgets.QMainWindow):
         self.time = time.time()
 
 
+    def furthestStar(self, minimum_separation = 0.12):
+
+        """
+
+        Args:
+            minimum_separation: minimum separation to avoid double stars default is 0.12 degrees
+            separation of Alpha_1 and Alpha_2 Cap as a reference
+
+        Returns: (x,y) integers of the image location of the furthest star
+        away from all other matched stars
+
+        """
+
+        #intialise
+
+        next_index, max_dist, min_matched_radius = 0,0, np.inf
+        if self.max_radius_between_matched_stars < 360:
+            matched_radius = self.max_radius_between_matched_stars
+        else:
+            matched_radius = np.inf
+        image_ra = [star[0] for star in self.catalog_stars_filtered]
+        image_dec = [star[1] for star in self.catalog_stars_filtered]
+
+        # get all the matched stars in sky coordinates
+        matched_sky_coords = self.paired_stars.skyCoords()
+        ra_list, dec_list = [],[]
+        for coords in matched_sky_coords:
+            ra_list.append(coords[0])
+            dec_list.append(coords[1])
+
+        # convert to image coordinates, with the current platepar
+        matched_coords_x, matched_coords_y = raDecToXYPP(np.array(ra_list), np.array(dec_list),
+                                                         datetime2JD(self.img_handle.currentFrameTime(dt_obj=True)),
+                                                         self.platepar)
+
+        # Make into a list of integers of x and a list of integers of y
+        matched_im_x_list, matched_im_y_list = [],[]
+
+        # Iterate to discover the star which is the furthest away from all already matched stars
+        for im_coord_x, im_coord_y in zip(matched_coords_x, matched_coords_y):
+            matched_im_x_list.append(im_coord_x)
+            matched_im_y_list.append(im_coord_y)
+
+        # Find the unmatched star which is furthest away from all the already matched stars
+        for this_star_index, (x, y) in enumerate(zip(image_ra, image_dec)):
+
+            # Initialise avoidance of stars which are too close together for reliable picking
+            min_ang_sep_deg = np.inf
+            this_star_ra, this_star_dec = np.radians(x), np.radians(y)
+
+            for double_check_index, (double_ra, double_dec) in enumerate(zip(image_ra, image_dec)):
+
+                    # Exclude self
+                    if this_star_index == double_check_index:
+                        continue
+
+                    double_check_ra, double_check_dec = np.radians(double_ra),np.radians(double_dec)
+                    ang_sep_deg = np.degrees(angularSeparation(this_star_ra, this_star_dec, double_check_ra, double_check_dec))
+
+                    # Record the lowest angular separation
+                    if ang_sep_deg < min_ang_sep_deg:
+                        min_ang_sep_deg = ang_sep_deg
+
+            if min_ang_sep_deg < minimum_separation:
+                #skip this star as a candidate to pan to
+                continue
+
+
+            # Find the distance in image coordinates to closest matched star to this star
+            min_matched_distance = np.inf
+
+            # convert all the skycoordinates to image coordinates, with the current platepar
+            im_x, im_y = raDecToXYPP(np.array([x]), np.array([y]), datetime2JD(self.img_handle.currentFrameTime(dt_obj=True)),
+                                                             self.platepar)
+
+            # exclude stars within 10 pixels of image edge
+            if im_x < 10 or im_y < 10 or self.platepar.X_res - im_x < 10 or self.platepar.Y_res - im_y < 10:
+                continue
+
+
+            # iterate to find the closest matched star to this star - we are looking to exclude stars in this loop
+            for match_index, (matched_x, matched_y) in enumerate(zip(matched_im_x_list, matched_im_y_list)):
+                # ignore our self
+                if match_index == this_star_index:
+                    continue
+                #OK to use vector difference because these are cartesian image coordinates
+                matched_distance = (matched_x - im_x[0]) ** 2 + (matched_y - im_y[0]) ** 2
+                # if this is the smallest matched distance, but not the same star
+                if matched_distance < min_matched_distance:
+                    min_matched_distance = matched_distance
+                    _, ra_matched, dec_matched, _ = xyToRaDecPP([self.img.img_handle.currentTime()],
+                                                                [matched_x], [matched_y],
+                                                                [1], self.platepar, extinction_correction=False)
+
+                    if x != ra_matched and y != dec_matched:
+
+                        min_matched_radius = np.degrees(angularSeparation(np.radians(x),np.radians(y),
+                                                           np.radians(ra_matched),
+                                                           np.radians(dec_matched)))[0]
+
+
+            # if this star is further away from all stars checked so far, then it is the new furthest star
+            if min_matched_distance > max_dist and im_x[0] not in matched_im_x_list and im_y[0] not in matched_im_y_list:
+                    max_dist, next_index, matched_radius = min_matched_distance, this_star_index, min_matched_radius
+
+
+        # convert the index to ra and dec
+        next_ra = np.array(self.catalog_stars_filtered[next_index][0])
+        next_dec = np.array(self.catalog_stars_filtered[next_index][1])
+
+        # return as image coordinates
+        next_x, next_y = raDecToXYPP(np.array([next_ra]), np.array([next_dec]), \
+                    datetime2JD(self.img_handle.currentFrameTime(dt_obj=True)),
+                    self.platepar)
+        self.max_radius_between_matched_stars = matched_radius
+        return int(next_x),int(next_y)
+
 if __name__ == '__main__':
     ### COMMAND LINE ARGUMENTS
 
@@ -5750,6 +6075,10 @@ if __name__ == '__main__':
                             help="Flip the image upside down. Only applied to images and videos.")
 
 
+    arg_parser.add_argument('-m', '--mask', metavar='MASK_PATH', type=str,
+                            help="Path to a mask file which will be applied to the star catalog")
+
+
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -5788,7 +6117,19 @@ if __name__ == '__main__':
         # Create plate_tool without calling its constructor then calling loadstate
         plate_tool = PlateTool.__new__(PlateTool)
         super(PlateTool, plate_tool).__init__()
-        plate_tool.loadState(dir_path, state_name, beginning_time=beginning_time)
+
+        if cml_args.mask is not None:
+            print("Given a path to a mask at {}".format(cml_args.mask))
+            camera_mask = getMaskFile(os.path.expanduser(cml_args.mask), config)
+        elif os.path.exists(os.path.join(config.rms_root_dir, config.mask_file)):
+            print("No mask specified loading mask from {}".format(os.path.join(config.rms_root_dir, config.mask_file)))
+            camera_mask = getMaskFile(config.rms_root_dir, config)
+        elif os.path.exists("mask.bmp"):
+            camera_mask = getMaskFile(".", config)
+        elif True:
+            camera_mask = None
+
+        plate_tool.loadState(dir_path, state_name, beginning_time=beginning_time, camera_mask = camera_mask)
 
     else:
 
@@ -5802,9 +6143,21 @@ if __name__ == '__main__':
         # Load the config file
         config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
+
+        if cml_args.mask is not None:
+            print("Given a path to a mask at {}".format(cml_args.mask))
+            camera_mask = getMaskFile(os.path.expanduser(cml_args.mask), config)
+        elif os.path.exists(os.path.join(config.rms_root_dir, config.mask_file)):
+            print("No mask specified loading mask from {}".format(os.path.join(config.rms_root_dir, config.mask_file)))
+            camera_mask = getMaskFile(config.rms_root_dir, config)
+        elif os.path.exists("mask.bmp"):
+            camera_mask = getMaskFile(".", config)
+        elif True:
+            camera_mask = None
+
         # Init SkyFit
         plate_tool = PlateTool(input_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
-            gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints, 
+            gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints, camera_mask = camera_mask, \
             nobg=cml_args.nobg, flipud=cml_args.flipud)
 
 

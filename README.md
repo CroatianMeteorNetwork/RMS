@@ -90,7 +90,7 @@ conda install -y -c conda-forge numpy'<2.0' scipy gitpython cython matplotlib pa
 conda install -y -c conda-forge numba
 conda install -y pyqt==5.15.10
 conda install -y -c conda-forge Pillow pyqtgraph==0.12.3
-conda install -y -c conda-forge ephem
+conda install -y -c conda-forge ephem astrometry
 conda install -y -c conda-forge imageio pandas
 conda install -y -c conda-forge pygobject
 conda install -y -c astropy astropy
