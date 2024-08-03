@@ -337,6 +337,10 @@ if __name__ == "__main__":
     arg_parser.add_argument('-a', '--automatic', default=False,action="store_true",
                             help="Downloads files, displays on screen, refreshes every 24 hours")
 
+    arg_parser.add_argument('-t', '--time', nargs=1, type=int,
+                            help="Number of hours between refreshes, default 24")
+
+
 
     cml_args = arg_parser.parse_args()
 
@@ -376,16 +380,22 @@ if __name__ == "__main__":
     else:
         working_directory = cml_args.working_directory
 
+    if not cml_args.time == None:
+        cycle_hours = cml_args.time[0]
+    else:
+        cycle_hours = 24
+
+
     automatic_mode = cml_args.automatic
     run_count = 1
     # do the work
 
     exit_requested = False
-    last_run_duration = 0.25 * 3600
+    last_run_duration = cycle_hours * 3600
     while run_count > 0 and exit_requested == False:
 
         this_start_time = time.time()
-        target_run_duration = 0.25 * 3600 - (last_run_duration - 0.25 * 3600)
+        target_run_duration = cycle_hours * 3600 - (last_run_duration - cycle_hours * 3600)
 
         print(videoMosaic(cameras, x_shape=x_shape, y_shape=y_shape, generate=generate, x_res=x_res, y_res=y_res,
                      output_file_path=output, keep_files=keep_files, working_directory=working_directory)[0])
@@ -401,8 +411,8 @@ if __name__ == "__main__":
             print("Preparing to play {}".format(output))
             # play the video
             window_name = "Global Meteor Network"
-            print("Target  {} hours".format(target_run_duration / 3600))
-            print("Elapsed {} hours".format((time.time() - this_start_time)/3600))
+            print("Target  {:.2f} hours".format(target_run_duration / 3600))
+            print("Elapsed {:.2f} hours".format((time.time() - this_start_time)/3600))
             cap = cv2.VideoCapture(output)
             if not cap.isOpened():
                 print("Error: Could not open video.")
