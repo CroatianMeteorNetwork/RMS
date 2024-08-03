@@ -454,7 +454,10 @@ def printProgress(current, total, stack_start_time=None):
     percent = 100 * current / total
     if not stack_start_time is None and current > 0:
         try:
-            time_remaining = (time.time() - stack_start_time) / current * (total - progress)
+            time_elapsed = time.time() - stack_start_time
+            time_per_image = time_elapsed / current
+            images_remaining = total - current
+            time_remaining = time_per_image * images_remaining
             eta = datetime.datetime.fromtimestamp((time.time() + time_remaining)).strftime('%Y-%m-%d %H:%M:%S')
         except:
             eta = ""
