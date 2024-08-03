@@ -6157,7 +6157,7 @@ if __name__ == '__main__':
 
         # Init SkyFit
         plate_tool = PlateTool(input_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
-            gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints, camera_mask = camera_mask
+            gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints, camera_mask = camera_mask, \
             nobg=cml_args.nobg, flipud=cml_args.flipud)
 
 
