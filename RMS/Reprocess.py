@@ -37,10 +37,14 @@ from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
 from Utils.ShowerAssociation import showerAssociation
 from Utils.PlotTimeIntervals import plotFFTimeIntervals
 from Utils.TimestampRMSVideos import timestampRMSVideos
+from RMS.Formats.ObservationSummary import ObservationSummary
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
 
+
+# Initialise an observation summary object
+observation_summary = ObservationSummary()
 
 
 def getPlatepar(config, night_data_dir):
@@ -143,6 +147,12 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         detector: [QueuedPool instance] Handle to the detector.  
     """
 
+
+
+    # populate the observation summary object
+    observation_summary.gatherFileSystemInformation(os.path.split(night_data_dir)[0], config.stationID)
+    observation_summary.sensor_type = observation_summary.gatherCameraInformation(config)
+
     # Remove final slash in the night dir
     if night_data_dir.endswith(os.sep):
         night_data_dir = night_data_dir[:-1]
@@ -174,7 +184,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             # If the files were previously detected, there is no detector
             detector = None
 
-
+        observation_summary.number_fits_detected = len(ff_detected)
+        observation_summary.detections_before_ml = len(readFTPdetectinfo(night_data_dir,ftpdetectinfo_name))
 
         # Filter out detections using machine learning
         if config.ml_filter > 0:
@@ -183,12 +194,18 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
             ff_detected = filterFTPdetectinfoML(config, os.path.join(night_data_dir, ftpdetectinfo_name), \
                 threshold=config.ml_filter, keep_pngs=False, clear_prev_run=True)
+            observation_summary.detections_after_ml = len(ff_detected)
 
+
+        observation_summary.detections_after_ml = len(readFTPdetectinfo(night_data_dir,ftpdetectinfo_name))
 
         # Get the platepar file
         platepar, platepar_path, platepar_fmt = getPlatepar(config, night_data_dir)
 
-
+        if not platepar is None:
+            observation_summary.camera_pointing = format("az {:.2f}°, alt {:.2f}°".format(platepar.az_centre,platepar.alt_centre))
+            observation_summary.camera_fov = format("horizontal {:.2f}°, vertical {:.2f}°".format(platepar.fov_h,platepar.fov_v))
+            observation_summary.lens = observation_summary.estimateLens(platepar.fov_h)
         # Run calibration check and auto astrometry refinement
         if (platepar is not None) and (calstars_name is not None):
 
@@ -204,14 +221,14 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             if fit_status:
 
                 log.info('Astrometric calibration SUCCESSFUL!')
-
+                observation_summary.photometry_good = True
                 # Save the refined platepar to the night directory and as default
                 platepar.write(os.path.join(night_data_dir, config.platepar_name), fmt=platepar_fmt)
                 platepar.write(platepar_path, fmt=platepar_fmt)
 
             else:
                 log.info('Astrometric calibration FAILED!, Using old platepar for calibration...')
-
+                observation_summary.photometry_good = False
 
 
             # If a flat is used, disable vignetting correction
@@ -423,6 +440,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         # Add the timelapse to the extra files
         if intervals_path is not None:
             extra_files.append(intervals_path)
+        observation_summary.jitter_quality = jitter_quality
+        observation_summary.dropped_frame_rate = dropped_frame_rate
 
     except Exception as e:
         log.debug('Plotting timestamp interval failed with message:\n' + repr(e))
@@ -543,8 +562,16 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                     celestial_coords_given=(platepar is not None))
 
 
+    observation_summary_file_name = os.path.split(night_data_dir.strip(os.sep))[1] + '_observation_summary.txt'
+    observation_summary_path_file_name = os.path.join(night_data_dir, observation_summary_file_name)
+    observation_summary.writeToFile(observation_summary_path_file_name)
+
+    log.info("Observation summary file writen to {}".format(observation_summary_path_file_name))
+    extra_files.append(observation_summary_path_file_name)
     night_archive_dir = os.path.join(os.path.abspath(config.data_dir), config.archived_dir, 
         night_data_dir_name)
+
+
 
     log.info('Archiving detections to ' + night_archive_dir)
     
