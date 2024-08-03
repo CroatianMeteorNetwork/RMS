@@ -45,7 +45,9 @@ import os
 import sys
 import logging
 import subprocess
+import cv2
 from RMS.Misc import mkdirP
+import time
 
 if sys.version_info[0] < 3:
 
@@ -332,6 +334,10 @@ if __name__ == "__main__":
     arg_parser.add_argument('-w', '--working_directory', metavar='WORKING', type=str,
                             help="Working directory to use")
 
+    arg_parser.add_argument('-a', '--automatic', default=False,action="store_true",
+                            help="Downloads files, displays on screen, refreshes every 24 hours")
+
+
     cml_args = arg_parser.parse_args()
 
     if not cml_args.cameras is None:
@@ -370,7 +376,65 @@ if __name__ == "__main__":
     else:
         working_directory = cml_args.working_directory
 
+    automatic_mode = cml_args.automatic
+    run_count = 1
     # do the work
-    print(videoMosaic(cameras, x_shape=x_shape, y_shape=y_shape, generate=generate, x_res=x_res, y_res=y_res,
-                      output_file_path=output, keep_files=keep_files, working_directory=working_directory)[0])
 
+    exit_requested = False
+    last_run_duration = 24 * 3600
+    while run_count > 0 and exit_requested == False:
+
+        this_start_time = time.time()
+        target_run_duration = 0.25 * 3600 - (last_run_duration - 0.25 * 3600)
+
+        print(videoMosaic(cameras, x_shape=x_shape, y_shape=y_shape, generate=generate, x_res=x_res, y_res=y_res,
+                     output_file_path=output, keep_files=keep_files, working_directory=working_directory)[0])
+
+        if automatic_mode:
+
+            output = os.path.expanduser(output)
+            interframe_wait_ms = 40
+
+            #ref https://stackoverflow.com/questions/49949639/fullscreen-a-video-on-opencv
+
+
+            print("Preparing to play {}".format(output))
+            # play the video
+            window_name = "Global Meteor Network"
+            print("Target  {}".format(target_run_duration))
+            print("Elapsed {}".format(time.time() - this_start_time))
+            cap = cv2.VideoCapture(output)
+            if not cap.isOpened():
+                print("Error: Could not open video.")
+                exit()
+            exit_requested = False
+            while (target_run_duration > (time.time() - this_start_time)
+                    and run_count > 0 and not exit_requested):
+                print("Target run duration {}".format(target_run_duration / 3600))
+                print("Run duration so far {}".format(time.time() - this_start_time / 3600))
+
+
+
+                cv2.namedWindow(window_name, cv2.WND_PROP_FULLSCREEN)
+                cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+
+                while True:
+                    ret, frame = cap.read()
+                    if not ret:
+                        print("Reached end of video, exiting.")
+                        break
+
+                    cv2.imshow(window_name, frame)
+                    if cv2.waitKey(interframe_wait_ms) & 0x7F == ord('q'):
+                        print("Exit requested.")
+                        exit_requested = True
+                        break
+            run_count -= 1
+            run_count = 1 if automatic_mode and not exit_requested else 0
+            last_run_duration = time.time() - this_start_time
+
+            cap.release()
+            cv2.destroyAllWindows()
+
+        else:
+            run_count = 0
