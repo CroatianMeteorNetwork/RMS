@@ -310,7 +310,7 @@ def generateCommand(video_paths, resolution, shape, output_filename = "~/mosaic_
     durations = getVideoDurations(video_paths)
     duration_compensations = getDurationCompensationFactors(durations, equalise_durations=equalise_durations)
     print("Longest video is {}".format(durations))
-    ffmpeg_command_string = "ffmpeg -y -r 30 "
+    ffmpeg_command_string = "ffmpeg -y -r 30  "
     ffmpeg_command_string += generateInputVideo(video_paths, shape[0] * shape[1],print_nicely=print_nicely)
     ffmpeg_command_string += generateFilter(duration_compensations,resolution,shape,print_nicely=print_nicely)
     ffmpeg_command_string += generateOutput(output_filename, print_nicely=print_nicely)
@@ -357,7 +357,7 @@ def videoMosaic(station_ids, x_shape=2, y_shape=2, x_res=1280, y_res=720, equali
     ffmpeg_command_string = generateCommand(input_video_paths, [x_res, y_res],
                                             [x_shape, y_shape], output_file_path, equalise_durations = equalise_durations)
     if generate:
-        subprocess.call(ffmpeg_command_string.replace("\n", " "), shell=True)
+        subprocess.call(ffmpeg_command_string.replace("\n", " "), shell=True, stdout = subprocess.DEVNULL )
     if keep_files:
         print("Downloaded files in {:s}".format(working_directory))
     else:
