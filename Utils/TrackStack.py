@@ -460,9 +460,9 @@ def printProgress(current, total, stack_start_time=None):
             time_remaining = time_per_image * images_remaining
             eta = datetime.datetime.fromtimestamp((time.time() + time_remaining)).strftime('%Y-%m-%d %H:%M:%S')
         except:
-            eta = ""
+            eta = "         "
     else:
-        eta = " Estimating"
+        eta = "         "
     print("\rStacking : {:02.0f}%|{}{}| {}/{}  ETA: {:s}".format(percent, "#" * progress, " " * (progress_bar_len - progress), current, total, eta), end="")
     if current == total:
         print("")
