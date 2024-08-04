@@ -233,8 +233,9 @@ def generateFilter(duration_compensations, resolution_list, layout_list,print_ni
     """
 
     null_video = "nullsrc=size={}x{}[tmp_0]; ".format(resolution_list[0],resolution_list[1])
-    print(null_video)
+
     res_tile = []
+
     res_tile.append(int(resolution_list[0] / layout_list[0]))
     res_tile.append(int(resolution_list[1] / layout_list[1]))
 
@@ -346,9 +347,7 @@ def videoMosaic(station_ids, x_shape=2, y_shape=2, x_res=1280, y_res=720, equali
     return ffmpeg_command_string, video_directory
 
 
-if __name__ == "__main__":
-
-    import argparse
+def argumentHandler():
 
     def list_of_strings(arg):
         return arg.split(',')
@@ -363,6 +362,7 @@ if __name__ == "__main__":
     description += " -n inhibits generating the video and only prints the ffmpeg command string"
     description += " -k inhibits deletion of downloaded files"
     description += " -a displays on screen automatically and -t 8 sets a refresh time of 8 hours"
+    description += " press q while video is running to stop the program"
 
     arg_parser = argparse.ArgumentParser(description=description, formatter_class=argparse.RawTextHelpFormatter)
 
@@ -403,6 +403,14 @@ if __name__ == "__main__":
 
 
     cml_args = arg_parser.parse_args()
+
+    return cml_args
+
+if __name__ == "__main__":
+
+    import argparse
+
+    cml_args = argumentHandler()
 
     cameras = cml_args.cameras if not cml_args.cameras is None else ["AU000A","AU000C","AU000D","AU000G"]
 
