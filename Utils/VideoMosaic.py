@@ -119,7 +119,7 @@ def downloadFilesToTmp(urls, station_id, working_dir=None, no_download=False):
                 if video.status_code == 200:
                     open(destination_file,"wb").write(video.content)
                     video_paths.append(destination_file)
-                    print("Video is duration {:.1f}s".format(getVideoDurations([destination_file])[0]))
+                    print("Video duration is {:.1f} seconds".format(getVideoDurations([destination_file])[0]))
                     break
                 else:
                     print("No file found at {:s}, will retry".format(video_url))
