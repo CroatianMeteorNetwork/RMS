@@ -434,7 +434,7 @@ if __name__ == "__main__":
     if not cml_args.res is None:
         x_res, y_res = cml_args.res[0], cml_args.res[1]
     else:
-        x_res = 1280, y_res = 720
+        x_res, y_rest= 1280, 720
 
 
     run_count = 1
