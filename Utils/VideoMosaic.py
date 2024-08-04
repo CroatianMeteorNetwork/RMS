@@ -76,7 +76,7 @@ import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 log = logging.getLogger("logger")
 
-def downloadFilesToTmp(urls, station_id, working_dir=None):
+def downloadFilesToTmp(urls, station_id, working_dir=None, no_download=False):
 
     """
     Args:
@@ -100,14 +100,62 @@ def downloadFilesToTmp(urls, station_id, working_dir=None):
 
     video_paths = []
     for video_url, stationID in zip(urls, station_id):
-        print("Downloading from URL {:s}".format(video_url))
-        video = requests.get(video_url, allow_redirects=True)
+
         destination_file = os.path.join(working_dir, "{:s}.mp4".format(stationID.lower()))
-        open(destination_file,"wb").write(video.content)
+        if not no_download or not os.path.isfile(destination_file):
+            if no_download:
+                print("Ignoring no_download directive because file for {} did not exist.".format(stationID.upper()))
+            print("Downloading from URL {:s}".format(video_url))
+            video = requests.get(video_url, allow_redirects=True)
+            open(destination_file,"wb").write(video.content)
+
         video_paths.append(destination_file)
 
     return working_dir, video_paths
 
+def getVideoDurations(paths_to_videos):
+
+    """
+
+    Args:
+        paths_to_videos: list of paths to videos
+
+    Returns:
+        durations: list of durations in seconds
+    """
+
+    video_durations = []
+    for path_to_video in paths_to_videos:
+
+        video = cv2.VideoCapture(os.path.expanduser(path_to_video))
+        frames,fps = video.get(cv2.CAP_PROP_FRAME_COUNT),video.get(cv2.CAP_PROP_FPS)
+        duration = frames / fps
+        print("Video {}, duration : {}".format(path_to_video, duration))
+        video_durations.append(duration)
+
+
+    return video_durations
+
+def getDurationCompensationFactors(durations, equalise_durations=True):
+
+    """
+
+    Args:
+        durations: a list of durations
+
+    Returns:
+        compensation_factors: a list of compensation factors. factor < 1 means slow the video down
+                              should never return a factor greater than 1
+    """
+
+    compensation_factors = []
+    max_duration = max(durations)
+    for duration in durations:
+        if equalise_durations:
+            compensation_factors.append(duration/max_duration)
+        else:
+            compensation_factors.append(1)
+    return compensation_factors
 
 def convertListOfStationIDsToListOfUrls(station_ids):
 
@@ -145,7 +193,7 @@ def generateOutput(output_file, lib="libx264",print_nicely=False):
         output_clause: the string which forms the output part of the ffmpeg statement
     """
 
-    output_clause = " -c:v {} {}".format(lib,output_file)
+    output_clause = " -c:v {} {}".format(lib, os.path.expanduser(output_file))
     output_clause += "\n " if print_nicely else " "
     return output_clause
 
@@ -171,7 +219,7 @@ def generateInputVideo(input_videos, tile_count, print_nicely=False):
 
     return input
 
-def generateFilter(video_paths, resolution_list, layout_list,print_nicely = False):
+def generateFilter(duration_compensations, resolution_list, layout_list,print_nicely = False):
 
     """
     Args:
@@ -193,8 +241,9 @@ def generateFilter(video_paths, resolution_list, layout_list,print_nicely = Fals
     video_counter,filter = 0, '-filter_complex " '
     filter += null_video
     filter += "\n " if print_nicely else " "
-    for video in video_paths:
-        filter += "[{}:v] setpts=PTS-STARTPTS,scale={}x{}[tile_{}]; ".format(video_counter,res_tile[0],res_tile[1],video_counter)
+    for duration_compensation in duration_compensations:
+        filter += ("[{}:v] setpts=PTS/{}-STARTPTS,scale={}x{}[tile_{}]; "
+                   .format(video_counter,duration_compensation,res_tile[0],res_tile[1],video_counter))
         video_counter += 1
         if video_counter == layout_list[0] * layout_list[1]:
             break
@@ -218,7 +267,8 @@ def generateFilter(video_paths, resolution_list, layout_list,print_nicely = Fals
     return filter
 
 
-def generateCommand(video_paths, resolution, shape, output_filename = "~/mosaic_video.mp4", print_nicely=False):
+def generateCommand(video_paths, resolution, shape, output_filename = "~/mosaic_video.mp4", print_nicely=False,
+                        equalise_durations = True):
 
     """
     Calls the input, filter and output commands and assembled the full ffmpeg command string
@@ -235,17 +285,20 @@ def generateCommand(video_paths, resolution, shape, output_filename = "~/mosaic_
         command string
     """
 
-    output_filename = os.path.expanduser(output_filename)
+    durations = getVideoDurations(video_paths)
+    duration_compensations = getDurationCompensationFactors(durations, equalise_durations=equalise_durations)
+    print("Longest video is {}".format(durations))
     ffmpeg_command_string = "ffmpeg -y -r 30 "
     ffmpeg_command_string += generateInputVideo(video_paths, shape[0] * shape[1],print_nicely=print_nicely)
-    ffmpeg_command_string += generateFilter(video_paths,resolution,shape,print_nicely=print_nicely)
+    ffmpeg_command_string += generateFilter(duration_compensations,resolution,shape,print_nicely=print_nicely)
     ffmpeg_command_string += generateOutput(output_filename, print_nicely=print_nicely)
 
     return ffmpeg_command_string
 
 
-def videoMosaic(station_ids, x_shape=2, y_shape=2, x_res=1280, y_res=720,
-                generate=True, output_file_path="~/mosaic_video.mp4", keep_files=False, working_directory=None):
+def videoMosaic(station_ids, x_shape=2, y_shape=2, x_res=1280, y_res=720, equalise_durations=True,
+                generate=True, output_file_path="~/mosaic_video.mp4", keep_files=False, working_directory=None,
+                no_download=False):
 
     """
 
@@ -277,10 +330,10 @@ def videoMosaic(station_ids, x_shape=2, y_shape=2, x_res=1280, y_res=720,
         keep_files=True
 
     url_list = convertListOfStationIDsToListOfUrls(station_ids)
-    video_directory, input_video_paths = downloadFilesToTmp(url_list, station_ids, working_directory)
+    video_directory, input_video_paths = downloadFilesToTmp(url_list, station_ids, working_directory, no_download)
     output_file_path = os.path.expanduser(output_file_path)
     ffmpeg_command_string = generateCommand(input_video_paths, [x_res, y_res],
-                                            [x_shape, y_shape], output_file_path)
+                                            [x_shape, y_shape], output_file_path, equalise_durations = equalise_durations)
     if generate:
         subprocess.call(ffmpeg_command_string.replace("\n", " "), shell=True)
     if keep_files:
@@ -319,6 +372,10 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-n', '--no_generate', dest='generate_video', default=True, action="store_false",
                             help="Generate the command string but do not execute")
+
+    arg_parser.add_argument('-d', '--no_download', dest='no_download', default=False, action="store_true",
+                            help="Do not download")
+
 
     arg_parser.add_argument('-k', '--keep_files', dest='keep_files', default=False, action="store_true",
                             help="Do not delete files at end")
@@ -386,6 +443,12 @@ if __name__ == "__main__":
     else:
         cycle_hours = 24
 
+    if cml_args.no_download is None:
+        no_download = False
+    else:
+        no_download = cml_args.no_download
+
+
 
     automatic_mode = cml_args.automatic
     run_count = 1
@@ -398,13 +461,13 @@ if __name__ == "__main__":
         this_start_time = time.time()
         target_run_duration = cycle_hours * 3600 - (last_run_duration - cycle_hours * 3600)
 
-        print(videoMosaic(cameras, x_shape=x_shape, y_shape=y_shape, generate=generate, x_res=x_res, y_res=y_res,
-                     output_file_path=output, keep_files=keep_files, working_directory=working_directory)[0])
+        videoMosaic(cameras, x_shape=x_shape, y_shape=y_shape, generate=generate, x_res=x_res, y_res=y_res,
+                     output_file_path=output, keep_files=keep_files, working_directory=working_directory, no_download=no_download)
 
         if automatic_mode:
 
             output = os.path.expanduser(output)
-            interframe_wait_ms = 40
+            interframe_wait_ms = 100
 
             #ref https://stackoverflow.com/questions/49949639/fullscreen-a-video-on-opencv
 
@@ -412,8 +475,8 @@ if __name__ == "__main__":
             print("Preparing to play {}".format(output))
             # play the video
             window_name = "Global Meteor Network"
-            print("Target  {:.2f} hours".format(target_run_duration / 3600))
-            print("Elapsed {:.2f} hours".format((time.time() - this_start_time)/3600))
+            #print("Target  {:.2f} hours".format(target_run_duration / 3600))
+            #print("Elapsed {:.2f} hours".format((time.time() - this_start_time)/3600))
             cap = cv2.VideoCapture(output)
             if not cap.isOpened():
                 print("Error: Could not open video.")
@@ -421,8 +484,8 @@ if __name__ == "__main__":
             exit_requested = False
             while (target_run_duration > (time.time() - this_start_time)
                     and run_count > 0 and not exit_requested):
-                print("Target run duration {:.2f} hours".format(target_run_duration / 3600))
-                print("Run duration so far {:.2f} hours".format((time.time() - this_start_time) / 3600))
+                #print("Target run duration {:.2f} hours".format(target_run_duration / 3600))
+                #print("Run duration so far {:.2f} hours".format((time.time() - this_start_time) / 3600))
                 cap = cv2.VideoCapture(output)
 
 
@@ -432,7 +495,7 @@ if __name__ == "__main__":
                 while True:
                     ret, frame = cap.read()
                     if not ret:
-                        print("Reached end of video, exiting.")
+                        #print("Reached end of video")
                         break
 
                     cv2.imshow(window_name, frame)
