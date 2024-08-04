@@ -398,6 +398,8 @@ if __name__ == "__main__":
     arg_parser.add_argument('-t', '--time', nargs=1, type=int,
                             help="Number of hours between refreshes, default 24")
 
+    arg_parser.add_argument('-f', '--frame_duration', nargs=1, type=int,
+                            help="Duration of display of each frame in playback, default is 40ms")
 
 
     cml_args = arg_parser.parse_args()
@@ -448,6 +450,10 @@ if __name__ == "__main__":
     else:
         no_download = cml_args.no_download
 
+    if cml_args.frame_duration is None:
+        frame_duration = 40
+    else:
+        frame_duration = cml_args.frame_duration
 
 
     automatic_mode = cml_args.automatic
@@ -467,16 +473,12 @@ if __name__ == "__main__":
         if automatic_mode:
 
             output = os.path.expanduser(output)
-            interframe_wait_ms = 100
+            interframe_wait_ms = 25
 
             #ref https://stackoverflow.com/questions/49949639/fullscreen-a-video-on-opencv
 
-
-            print("Preparing to play {}".format(output))
             # play the video
-            window_name = "Global Meteor Network"
-            #print("Target  {:.2f} hours".format(target_run_duration / 3600))
-            #print("Elapsed {:.2f} hours".format((time.time() - this_start_time)/3600))
+            window_name = "Video Player"
             cap = cv2.VideoCapture(output)
             if not cap.isOpened():
                 print("Error: Could not open video.")
@@ -484,8 +486,8 @@ if __name__ == "__main__":
             exit_requested = False
             while (target_run_duration > (time.time() - this_start_time)
                     and run_count > 0 and not exit_requested):
-                #print("Target run duration {:.2f} hours".format(target_run_duration / 3600))
-                #print("Run duration so far {:.2f} hours".format((time.time() - this_start_time) / 3600))
+                print("Target run duration {:.2f} hours".format(target_run_duration / 3600))
+                print("Run duration so far {:.2f} hours".format((time.time() - this_start_time) / 3600))
                 cap = cv2.VideoCapture(output)
 
 
