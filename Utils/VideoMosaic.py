@@ -326,7 +326,7 @@ def videoMosaic(station_ids, x_shape=2, y_shape=2, x_res=1280, y_res=720, equali
         return
 
     if not working_directory is None and keep_files==False:
-        print("user has specified a directory, keeping files")
+        print("Working directory specified therefore keeping files at end of work")
         keep_files=True
 
     url_list = convertListOfStationIDsToListOfUrls(station_ids)
@@ -380,7 +380,7 @@ if __name__ == "__main__":
     arg_parser.add_argument('-k', '--keep_files', dest='keep_files', default=False, action="store_true",
                             help="Do not delete files at end")
 
-    arg_parser.add_argument('-r', '--resolution', nargs=2, metavar='RESOLUTION', type=int,
+    arg_parser.add_argument('-r', '--res', nargs=2, metavar='RESOLUTION', type=int,
                             help="outputresolution e.g 1280 720")
 
     arg_parser.add_argument('-s', '--shape', nargs=2, metavar='SHAPE', type=int,
@@ -404,64 +404,35 @@ if __name__ == "__main__":
 
     cml_args = arg_parser.parse_args()
 
-    if not cml_args.cameras is None:
-        cameras = cml_args.cameras
-    else:
-        cameras = ["AU000A","AU000C","AU000D","AU000G"]
+    cameras = cml_args.cameras if not cml_args.cameras is None else ["AU000A","AU000C","AU000D","AU000G"]
+
+
+    generate = cml_args.generate_video if not cml_args.generate_video is None else True
+    output = cml_args.output[0] if not cml_args.output is None else "~/mosaic_video.mp4"
+    keep_files = cml_args.keep_files if not cml_args.keep_files is None else False
+    working_directory = cml_args.working_directory if not cml_args.working_directory is None else cml_args.working_directory
+    cycle_hours = cml_args.time[0] if not cml_args.time == None else 24
+    no_download = False if cml_args.no_download is None else cml_args.no_download
+    frame_duration = 40 if cml_args.frame_duration is None else cml_args.frame_duration
+    automatic_mode = cml_args.automatic if not cml_args.automatic is None else False
 
     if not cml_args.shape is None:
-        x_shape,y_shape = cml_args.shape[0], cml_args.shape[1]
+        x_shape, y_shape = cml_args.shape[0], cml_args.shape[1]
     else:
         x_shape, y_shape = 2,2
 
-    if not cml_args.resolution is None:
-        x_res,y_res = cml_args.resolution[0], cml_args.resolution[1]
+
+
+    if not cml_args.res is None:
+        x_res, y_res = cml_args.res[0], cml_args.res[1]
     else:
-        x_res,y_res = 1280,720
-
-    if not cml_args.generate_video is None:
-        generate = cml_args.generate_video
-    else:
-        generate = True
-
-    if not cml_args.output is None:
-        output = cml_args.output[0]
-    else:
-        output = "~/mosaic_video.mp4"
-
-    if not cml_args.keep_files is None:
-        keep_files = cml_args.keep_files
-    else:
-        keep_files = False
-
-    if not cml_args.working_directory is None:
-        working_directory = cml_args.working_directory
-        print("Working in {}".format(working_directory))
-    else:
-        working_directory = cml_args.working_directory
-
-    if not cml_args.time == None:
-        cycle_hours = cml_args.time[0]
-    else:
-        cycle_hours = 24
-
-    if cml_args.no_download is None:
-        no_download = False
-    else:
-        no_download = cml_args.no_download
-
-    if cml_args.frame_duration is None:
-        frame_duration = 40
-    else:
-        frame_duration = cml_args.frame_duration
+        1280, 720
 
 
-    automatic_mode = cml_args.automatic
     run_count = 1
-    # do the work
-
     exit_requested = False
     last_run_duration = cycle_hours * 3600
+
     while run_count > 0 and exit_requested == False:
 
         this_start_time = time.time()
