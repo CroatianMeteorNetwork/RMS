@@ -115,19 +115,27 @@ def downloadFiles(urls, station_id, working_dir=None, no_download=False, minimum
         if not no_download or not os.path.isfile(destination_file):
 
             retry = 0
-            while retry < 5:
+            while retry < 10:
                 temp_dir = tempfile.mktemp()
                 mkdirP(temp_dir)
+                print("Created directory {:s}".format(temp_dir))
                 temp_download_destination_file = os.path.join(temp_dir,file_name)
 
-                print("Downloading {:s}".format(video_url), end="")
-                video = requests.get(video_url, allow_redirects=True)
-                if video.status_code == 200:
+                try:
+                    video = None
+                    video = requests.get(video_url, allow_redirects=True)
+                    connection_good = True
+                except:
+                    print("No connection to {:s}".format(video_url))
+                    connection_good = False
+
+                if connection_good and video.status_code == 200:
+                    print("Downloading {:s}".format(video_url), end="")
                     open(temp_download_destination_file,"wb").write(video.content)
                     video_duration = getVideoDurations([temp_download_destination_file])[0]
                     print(" - video duration is {:.1f} seconds".format(getVideoDurations([destination_file])[0]))
                     if video_duration < minimum_duration:
-                        print("This video is short duration {:.0f} seconds".format(video_duration))
+                        print("This video is short duration, only {:.1f} seconds".format(video_duration))
                         if os.path.exists(destination_file):
                             old_video_duration = getVideoDurations([temp_download_destination_file])[0]
                             if video_duration > old_video_duration:
@@ -139,7 +147,7 @@ def downloadFiles(urls, station_id, working_dir=None, no_download=False, minimum
                                 print("Removing directory {:s}".format(temp_dir))
                                 os.rmdir(temp_dir)
                             else:
-                                print("Keeping original file, which is duration {:.0f} seconds".format(video_duration))
+                                print("Keeping original file, which is duration {:.1f} seconds".format(video_duration))
                                 print("Deleting {} and removing directory".format(temp_download_destination_file,
                                                                                          temp_dir))
                                 os.unlink(temp_download_destination_file)
@@ -154,11 +162,18 @@ def downloadFiles(urls, station_id, working_dir=None, no_download=False, minimum
 
 
                 else:
-
-                    print("- No file found at {:s}, will retry".format(video_url))
+                    if connection_good:
+                        print("- No file found at {:s}, will retry".format(video_url))
                     time.sleep(6)
                     retry += 1
+                    print("Removing directory {:s}".format(temp_dir))
+                    os.rmdir(temp_dir)
 
+            # if we did not get any connection, exit the loop
+            if not connection_good:
+                print("Did not get any connection to {:s}, so relying on stored files"
+                            .format(video_url))
+                break
 
             if video.status_code != 200:
                 print("No file found at {:s} after {:.0f} retries".format(video_url, retry))
@@ -298,6 +313,7 @@ def generateFilter(duration_compensations, resolution_list, layout_list,print_ni
     for duration_compensation in duration_compensations:
         filter += ("[{}:v] setpts=PTS/{}-STARTPTS,scale={}x{}[tile_{}]; "
                    .format(video_counter,duration_compensation,res_tile[0],res_tile[1],video_counter))
+        filter += "\n " if print_nicely else " "
         video_counter += 1
         if video_counter == layout_list[0] * layout_list[1]:
             break
