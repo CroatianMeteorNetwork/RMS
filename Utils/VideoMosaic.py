@@ -306,7 +306,7 @@ def generateCommand(video_paths, resolution, shape, output_filename = "~/mosaic_
 
     durations = getVideoDurations(video_paths)
     duration_compensations = getDurationCompensationFactors(durations, equalise_durations=equalise_durations)
-    print("Longest video is {}".format(durations))
+
     ffmpeg_command_string = "ffmpeg -y -r 30  "
     ffmpeg_command_string += generateInputVideo(video_paths, shape[0] * shape[1],print_nicely=print_nicely)
     ffmpeg_command_string += generateFilter(duration_compensations,resolution,shape,print_nicely=print_nicely)
@@ -427,6 +427,7 @@ def argumentHandler():
 
 
 
+
 if __name__ == "__main__":
 
     import argparse
@@ -450,8 +451,6 @@ if __name__ == "__main__":
         x_shape, y_shape = cml_args.shape[0], cml_args.shape[1]
     else:
         x_shape, y_shape = 2,2
-
-
 
     if not cml_args.res is None:
         x_res, y_res = cml_args.res[0], cml_args.res[1]
