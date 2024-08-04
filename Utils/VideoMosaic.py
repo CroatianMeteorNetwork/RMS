@@ -119,6 +119,7 @@ def downloadFilesToTmp(urls, station_id, working_dir=None, no_download=False):
                 if video.status_code == 200:
                     open(destination_file,"wb").write(video.content)
                     video_paths.append(destination_file)
+                    print("Video is duration {:.1f}s".format(getVideoDurations([destination_file])[0]))
                     break
                 else:
                     print("No file found at {:s}, will retry".format(video_url))
@@ -147,13 +148,9 @@ def getVideoDurations(paths_to_videos):
 
     video_durations = []
     for path_to_video in paths_to_videos:
-
         video = cv2.VideoCapture(os.path.expanduser(path_to_video))
         frames,fps = video.get(cv2.CAP_PROP_FRAME_COUNT),video.get(cv2.CAP_PROP_FPS)
-        duration = frames / fps
-        print("Video {}, duration : {}".format(path_to_video, duration))
-        video_durations.append(duration)
-
+        video_durations.append(frames / fps)
 
     return video_durations
 
