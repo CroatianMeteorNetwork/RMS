@@ -77,7 +77,7 @@ import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 log = logging.getLogger("logger")
 
-def downloadFilesToTmp(urls, station_id, working_dir=None, no_download=False):
+def downloadFiles(urls, station_id, working_dir=None, no_download=False, minimum_duration = 20):
 
     """
     Args:
@@ -101,30 +101,65 @@ def downloadFilesToTmp(urls, station_id, working_dir=None, no_download=False):
 
     video_paths = []
     for video_url, stationID in zip(urls, station_id):
-
-        destination_file = os.path.join(working_dir, "{:s}.mp4".format(stationID.lower()))
+        file_name = "{:s}.mp4".format(stationID.lower())
+        destination_file = os.path.join(working_dir, file_name)
 
         if no_download and os.path.isfile(destination_file):
             print("Local copy of file {:s} available, not downloading".format(destination_file))
             video_paths.append(destination_file)
 
-        if not no_download or not os.path.isfile(destination_file):
-            if no_download:
+        if no_download and not os.path.isfile(destination_file):
                 print("Ignoring no_download directive because file for {} did not exist.".format(stationID.upper()))
-            print("Downloading from URL {:s}".format(video_url))
+                no_download = False
+
+        if not no_download or not os.path.isfile(destination_file):
 
             retry = 0
             while retry < 5:
+                temp_dir = tempfile.mktemp()
+                mkdirP(temp_dir)
+                temp_download_destination_file = os.path.join(temp_dir,file_name)
+
+                print("Downloading {:s}".format(video_url), end="")
                 video = requests.get(video_url, allow_redirects=True)
                 if video.status_code == 200:
-                    open(destination_file,"wb").write(video.content)
+                    open(temp_download_destination_file,"wb").write(video.content)
+                    video_duration = getVideoDurations([temp_download_destination_file])[0]
+                    print(" - video duration is {:.1f} seconds".format(getVideoDurations([destination_file])[0]))
+                    if video_duration < minimum_duration:
+                        print("This video is short duration {:.0f} seconds".format(video_duration))
+                        if os.path.exists(destination_file):
+                            old_video_duration = getVideoDurations([temp_download_destination_file])[0]
+                            if video_duration > old_video_duration:
+                                print("However is longer than existing video {:.0f} seconds, so using this video"
+                                      .format(old_video_duration))
+                                print("Moving downloaded video from {:s} to {:s}"
+                                      .format(temp_download_destination_file, destination_file))
+                                os.replace(temp_download_destination_file, destination_file)
+                                print("Removing directory {:s}".format(temp_dir))
+                                os.rmdir(temp_dir)
+                            else:
+                                print("Keeping original file, which is duration {:.0f} seconds".format(video_duration))
+                                print("Deleting {} and removing directory".format(temp_download_destination_file,
+                                                                                         temp_dir))
+                                os.unlink(temp_download_destination_file)
+                                os.rmdir(temp_dir)
+                    else:
+                        print("Moving downloaded video from {:s} to {:s}".format(temp_download_destination_file,destination_file))
+                        os.replace(temp_download_destination_file, destination_file)
+                        print("Removing directory {:s}".format(temp_dir))
+                        os.rmdir(temp_dir)
                     video_paths.append(destination_file)
-                    print("Video duration is {:.1f} seconds".format(getVideoDurations([destination_file])[0]))
                     break
+
+
                 else:
-                    print("No file found at {:s}, will retry".format(video_url))
+
+                    print("- No file found at {:s}, will retry".format(video_url))
                     time.sleep(6)
                     retry += 1
+
+
             if video.status_code != 200:
                 print("No file found at {:s} after {:.0f} retries".format(video_url, retry))
                 if os.path.exists(destination_file):
@@ -317,7 +352,7 @@ def generateCommand(video_paths, resolution, shape, output_filename = "~/mosaic_
 
 def videoMosaic(station_ids, x_shape=2, y_shape=2, x_res=1280, y_res=720, equalise_durations=True,
                 generate=True, output_file_path="~/mosaic_video.mp4", keep_files=False, working_directory=None,
-                no_download=False):
+                no_download=False, show_ffmpeg=False):
 
     """
 
@@ -329,7 +364,7 @@ def videoMosaic(station_ids, x_shape=2, y_shape=2, x_res=1280, y_res=720, equali
         y_res: y resolution e.g. 720
         generate: execute the command to generate the output
         output_file_path: file path for the generate file
-        keep_files: keep the files downloaded into the temporary directory
+        keep_files: keep the downloaded files
         working_directory: optional user specified directory for working, useful for downloading files
 
     Returns:
@@ -349,13 +384,29 @@ def videoMosaic(station_ids, x_shape=2, y_shape=2, x_res=1280, y_res=720, equali
         keep_files=True
 
     url_list = convertListOfStationIDsToListOfUrls(station_ids)
-    video_directory, input_video_paths = downloadFilesToTmp(url_list, station_ids, working_directory, no_download)
+    video_directory, input_video_paths = downloadFiles(url_list, station_ids, working_directory,
+                                                       no_download, minimum_duration=minimum_duration)
     output_file_path = os.path.expanduser(output_file_path)
     ffmpeg_command_string = generateCommand(input_video_paths, [x_res, y_res],
-                                            [x_shape, y_shape], output_file_path, equalise_durations = equalise_durations)
+                                            [x_shape, y_shape], output_file_path,
+                                            equalise_durations = equalise_durations,
+                                            print_nicely = True)
+
+    if show_ffmpeg:
+        print("ffmpeg command string \n {:s}".format(ffmpeg_command_string))
     if generate:
+        generation_start_time = time.time()
+        print("Video generation started at {:s}".format(
+            datetime.datetime.fromtimestamp(generation_start_time).strftime('%Y-%m-%d %H:%M:%S')))
+
+
         subprocess.call(ffmpeg_command_string.replace("\n", " "),
                         shell=True, stdout = subprocess.DEVNULL, stderr = subprocess.DEVNULL )
+        generation_end_time = time.time()
+        generation_duration = generation_end_time - generation_start_time
+        print("Video generation ended at {:s}, duration {:.0f} seconds".format(
+            datetime.datetime.fromtimestamp(generation_end_time).strftime('%Y-%m-%d %H:%M:%S'),
+                    generation_duration))
     if keep_files:
         print("Downloaded files in {:s}".format(working_directory))
     else:
@@ -417,8 +468,15 @@ def argumentHandler():
     arg_parser.add_argument('-t', '--time', nargs=1, type=int,
                             help="Number of hours between refreshes, default 24")
 
-    arg_parser.add_argument('-f', '--frame_duration', nargs=1, type=int,
-                            help="Duration of display of each frame in playback, default is 40ms")
+    arg_parser.add_argument('-v', '--frame_duration', nargs=1, type=int,
+                            help="Set the duration of each frame, default 40ms")
+
+    arg_parser.add_argument('-m', '--minimum_duration', nargs=1, type=int,
+                            help="Preferred minimum duration of video to use")
+
+    arg_parser.add_argument('-f', '--show_ffmpeg', dest="show_ffmpeg", default=False, action="store_true",
+                            help="Show the ffmpeg command")
+
 
 
     cml_args = arg_parser.parse_args()
@@ -443,7 +501,9 @@ if __name__ == "__main__":
     cycle_hours = cml_args.time[0] if not cml_args.time == None else 24
     no_download = False if cml_args.no_download is None else cml_args.no_download
     frame_duration = 40 if cml_args.frame_duration is None else cml_args.frame_duration
+    minimum_duration = 20 if cml_args.minimum_duration is None else cml_args.minimum_duration
     automatic_mode = cml_args.automatic if not cml_args.automatic is None else False
+    show_ffmpeg = cml_args.show_ffmpeg if not cml_args.automatic is None else False
 
     cameras = [camera.upper() for camera in cameras]
 
@@ -461,15 +521,22 @@ if __name__ == "__main__":
     run_count = 1
     exit_requested = False
     last_run_duration = cycle_hours * 3600
+    last_target_run_duration = cycle_hours * 3600
 
     while run_count > 0 and exit_requested == False:
 
         this_start_time = time.time()
-        print("Starting this run at {}".format(datetime.datetime.fromtimestamp((this_start_time)).strftime('%Y-%m-%d %H:%M:%S') ))
-        target_run_duration = cycle_hours * 3600 - (last_run_duration - cycle_hours * 3600)
+
+        target_run_duration = (last_target_run_duration - (last_run_duration - cycle_hours)) * 3600
+
+        print("Start time / target end time  {:s} / {:s}".format(
+            datetime.datetime.fromtimestamp(this_start_time).strftime('%Y-%m-%d %H:%M:%S'),
+            datetime.datetime.fromtimestamp(this_start_time + target_run_duration).strftime('%Y-%m-%d %H:%M:%S')))
+
 
         videoMosaic(cameras, x_shape=x_shape, y_shape=y_shape, generate=generate, x_res=x_res, y_res=y_res,
-                     output_file_path=output, keep_files=keep_files, working_directory=working_directory, no_download=no_download)
+                     output_file_path=output, keep_files=keep_files, working_directory=working_directory,
+                    no_download=no_download, show_ffmpeg=show_ffmpeg)
 
         if automatic_mode:
 
@@ -487,8 +554,9 @@ if __name__ == "__main__":
             exit_requested = False
             while (target_run_duration > (time.time() - this_start_time)
                     and run_count > 0 and not exit_requested):
-                print("Target run duration {:.2f} hours".format(target_run_duration / 3600))
-                print("Run duration so far {:.2f} hours".format((time.time() - this_start_time) / 3600))
+                print("Run duration target / elapsed {:.2f}/{:.2f} minutes"
+                      .format(target_run_duration / 60, (time.time() - this_start_time) / 60))
+
                 cap = cv2.VideoCapture(output)
 
 
@@ -515,3 +583,4 @@ if __name__ == "__main__":
 
         else:
             run_count = 0
+        last_target_run_duration = target_run_duration
