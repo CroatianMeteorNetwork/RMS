@@ -102,14 +102,33 @@ def downloadFilesToTmp(urls, station_id, working_dir=None, no_download=False):
     for video_url, stationID in zip(urls, station_id):
 
         destination_file = os.path.join(working_dir, "{:s}.mp4".format(stationID.lower()))
+
+        if no_download and os.path.isfile(destination_file):
+            print("Local copy of file {:s} available, not downloading".format(destination_file))
+            video_paths.append(destination_file)
+
         if not no_download or not os.path.isfile(destination_file):
             if no_download:
                 print("Ignoring no_download directive because file for {} did not exist.".format(stationID.upper()))
             print("Downloading from URL {:s}".format(video_url))
-            video = requests.get(video_url, allow_redirects=True)
-            open(destination_file,"wb").write(video.content)
 
-        video_paths.append(destination_file)
+            retry = 0
+            while retry < 5:
+                video = requests.get(video_url, allow_redirects=True)
+                if video.status_code == 200:
+                    open(destination_file,"wb").write(video.content)
+                    video_paths.append(destination_file)
+                else:
+                    print("No file found at {:s}, will retry".format(video_url))
+                    time.sleep(6)
+                    retry += 1
+            if video.status_code != 200:
+                print("No file found at {:s} after {:.0f} retries".format(video_url, retry))
+                if os.path.exists(destination_file):
+                    print("Local copy of {:s} available, continuing with local copy".format(destination_file))
+                else:
+                    print("Quitting, because no local copy of {:s}, and not available from server".format(destination_file))
+                    quit()
 
     return working_dir, video_paths
 
@@ -406,15 +425,16 @@ def argumentHandler():
 
     return cml_args
 
+
+
 if __name__ == "__main__":
 
     import argparse
 
     cml_args = argumentHandler()
 
-    cameras = cml_args.cameras if not cml_args.cameras is None else ["AU000A","AU000C","AU000D","AU000G"]
-
-
+    default_camera_list = ["AU000A","AU000C","AU000D","AU000G"]
+    cameras = cml_args.cameras if not cml_args.cameras is None else default_camera_list
     generate = cml_args.generate_video if not cml_args.generate_video is None else True
     output = cml_args.output[0] if not cml_args.output is None else "~/mosaic_video.mp4"
     keep_files = cml_args.keep_files if not cml_args.keep_files is None else False
