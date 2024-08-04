@@ -458,7 +458,7 @@ def printProgress(current, total, stack_start_time=None):
             time_per_image = time_elapsed / current
             images_remaining = total - current
             time_remaining = time_per_image * images_remaining
-            eta = datetime.datetime.fromtimestamp((time.time() + time_remaining)).strftime('%Y-%m-%d %H:%M:%S')
+            eta = datetime.datetime.fromtimestamp((time.time() + time_remaining)).strftime('%H:%M:%S')
         except:
             eta = "         "
     else:
