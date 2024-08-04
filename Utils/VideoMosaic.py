@@ -70,6 +70,7 @@ else:
 import numpy as np
 import requests
 import tempfile
+import datetime
 
 # Import Cython functions
 import pyximport
@@ -118,6 +119,7 @@ def downloadFilesToTmp(urls, station_id, working_dir=None, no_download=False):
                 if video.status_code == 200:
                     open(destination_file,"wb").write(video.content)
                     video_paths.append(destination_file)
+                    break
                 else:
                     print("No file found at {:s}, will retry".format(video_url))
                     time.sleep(6)
@@ -444,6 +446,8 @@ if __name__ == "__main__":
     frame_duration = 40 if cml_args.frame_duration is None else cml_args.frame_duration
     automatic_mode = cml_args.automatic if not cml_args.automatic is None else False
 
+    cameras = [camera.upper() for camera in cameras]
+
     if not cml_args.shape is None:
         x_shape, y_shape = cml_args.shape[0], cml_args.shape[1]
     else:
@@ -464,6 +468,7 @@ if __name__ == "__main__":
     while run_count > 0 and exit_requested == False:
 
         this_start_time = time.time()
+        print("Starting this run at {}".format(datetime.datetime.fromtimestamp((this_start_time)).strftime('%Y-%m-%d %H:%M:%S') ))
         target_run_duration = cycle_hours * 3600 - (last_run_duration - cycle_hours * 3600)
 
         videoMosaic(cameras, x_shape=x_shape, y_shape=y_shape, generate=generate, x_res=x_res, y_res=y_res,
