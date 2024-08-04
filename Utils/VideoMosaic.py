@@ -354,7 +354,8 @@ def videoMosaic(station_ids, x_shape=2, y_shape=2, x_res=1280, y_res=720, equali
     ffmpeg_command_string = generateCommand(input_video_paths, [x_res, y_res],
                                             [x_shape, y_shape], output_file_path, equalise_durations = equalise_durations)
     if generate:
-        subprocess.call(ffmpeg_command_string.replace("\n", " "), shell=True, stdout = subprocess.DEVNULL )
+        subprocess.call(ffmpeg_command_string.replace("\n", " "),
+                        shell=True, stdout = subprocess.DEVNULL, stderr = subprocess.DEVNULL )
     if keep_files:
         print("Downloaded files in {:s}".format(working_directory))
     else:
@@ -380,7 +381,7 @@ def argumentHandler():
     description += " -n inhibits generating the video and only prints the ffmpeg command string"
     description += " -k inhibits deletion of downloaded files"
     description += " -a displays on screen automatically and -t 8 sets a refresh time of 8 hours"
-    description += " press q while video is running to stop the program"
+    description += "    press q while video is running to stop the program"
 
     arg_parser = argparse.ArgumentParser(description=description, formatter_class=argparse.RawTextHelpFormatter)
 
