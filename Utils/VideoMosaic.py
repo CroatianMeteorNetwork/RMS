@@ -79,11 +79,13 @@ log = logging.getLogger("logger")
 
 verbosity_level = 0
 
-def printv(string,verbosity=0):
+def printv(string,verbosity=0, same_line = False):
 
     if verbosity < verbosity_level:
-        print(string)
-
+        if same_line:
+            print("\r {}   ".format(string), end="")
+        else:
+            print(string)
 
 def downloadFiles(urls, station_id, working_dir=None, no_download=False, minimum_duration = 20):
 
@@ -581,9 +583,12 @@ if __name__ == "__main__":
     while run_count > 0 and exit_requested == False:
         this_start_time = time.time()
         target_run_duration = (last_target_run_duration - (last_run_duration - cycle_hours)) * 3600
-        printv("Start time / target / end time  {:s} / {:s} / {:s}".format(
+        printv("Start time / target / end time  {:s} / {:.2f} / {:s}".format(
             datetime.datetime.fromtimestamp(this_start_time).strftime('%Y-%m-%d %H:%M:%S'),
-            datetime.datetime.fromtimestamp(this_start_time + target_run_duration).strftime('%Y-%m-%d %H:%M:%S')),verbosity=1)
+                        target_run_duration / 3600,
+            datetime.datetime.fromtimestamp(this_start_time + target_run_duration).strftime('%Y-%m-%d %H:%M:%S')),
+                            verbosity=1, same_line=False)
+
         videoMosaic(cameras, x_shape=x_shape, y_shape=y_shape, generate=generate, x_res=x_res, y_res=y_res,
                      output_file_path=output, keep_files=keep_files, working_directory=working_directory,
                     no_download=no_download, show_ffmpeg=show_ffmpeg)
@@ -602,11 +607,11 @@ if __name__ == "__main__":
             exit_requested = False
             while (target_run_duration > (time.time() - this_start_time)
                     and run_count > 0 and not exit_requested):
-                printv("Run duration target / elapsed / end time {:.2f}/{:.2f} minutes"
-                      .format(target_run_duration / 60,
-                              (time.time() - this_start_time) / 60,
-                       datetime.datetime.fromtimestamp(target_run_duration + this_start_time).strftime('%Y-%m-%d %H:%M:%S'))
-                                        ,verbosity=1)
+                printv("Start time / target / end time  {:s} / {:.2f} / {:s}".format(
+                    datetime.datetime.fromtimestamp(this_start_time).strftime('%Y-%m-%d %H:%M:%S'),
+                    target_run_duration / 3600,
+                    datetime.datetime.fromtimestamp(this_start_time + target_run_duration).strftime(
+                        '%Y-%m-%d %H:%M:%S')), verbosity=1, same_line=True)
 
                 cap = cv2.VideoCapture(output)
 
