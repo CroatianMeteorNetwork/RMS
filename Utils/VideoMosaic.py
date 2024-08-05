@@ -450,13 +450,18 @@ def argumentHandler():
     description += "which creates a video of 6 cameras, resolution 3840 x 1440, 3 across, 2 down saved in users root as station_video.mpg\n"
     description += " -n inhibits generating the video and only prints the ffmpeg command string"
     description += " -k inhibits deletion of downloaded files"
-    description += " -a displays on screen automatically and -t 8 sets a refresh time of 8 hours"
-    description += "    press q while video is running to stop the program"
+    description += " -a displays on screen automatically and -t 8 sets a refresh time of 8 hours \n"
+    description += "\n"
+    description += "python -m Utils.VideoMosaic -c AU000U,AU000V,AU000W,AU000X,AU000Y,AU000Z,AU000A,AU000C,AU000D  -m30 -r 1366 768 -s 3 3 -o ~/station_video.mpg -w ~/videos/pioneer/ -a -t 24 -f"
+    description += "\n"
+    description += " downloads videos for stations, as long as they are of minimum duration 30 seconds, and displays output automatically, refreshing every 24 hours \n"
+    description += "\n"
+    description += "press q while video is running to exit"
 
     arg_parser = argparse.ArgumentParser(description=description, formatter_class=argparse.RawTextHelpFormatter)
 
 
-    arg_parser.add_argument('-c', '--cameras', metavar='CAMERAS', type=list_of_strings,
+    arg_parser.add_argument('-c', '--cameras', type=list_of_strings,
                             help="Cameras to use.")
 
     arg_parser.add_argument('-n', '--no_generate', dest='generate_video', default=True, action="store_false",
@@ -469,16 +474,16 @@ def argumentHandler():
     arg_parser.add_argument('-k', '--keep_files', dest='keep_files', default=False, action="store_true",
                             help="Do not delete files at end")
 
-    arg_parser.add_argument('-r', '--res', nargs=2, metavar='RESOLUTION', type=int,
+    arg_parser.add_argument('-r', '--res', nargs=2, type=int,
                             help="outputresolution e.g 1280 720")
 
-    arg_parser.add_argument('-s', '--shape', nargs=2, metavar='SHAPE', type=int,
+    arg_parser.add_argument('-s', '--shape', nargs=2, type=int,
                             help="Number of tiles across, number of tiles down e.g 4 3")
 
-    arg_parser.add_argument('-o', '--output', nargs=1, metavar='OUTPUT', type=str,
+    arg_parser.add_argument('-o', '--output', nargs=1, type=str,
                             help="Output filename")
 
-    arg_parser.add_argument('-w', '--working_directory', metavar='WORKING', type=str,
+    arg_parser.add_argument('-w', '--working_directory', type=str,
                             help="Working directory to use")
 
     arg_parser.add_argument('-a', '--automatic', default=False,action="store_true",
