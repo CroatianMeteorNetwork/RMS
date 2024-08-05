@@ -581,7 +581,7 @@ if __name__ == "__main__":
     while run_count > 0 and exit_requested == False:
         this_start_time = time.time()
         target_run_duration = (last_target_run_duration - (last_run_duration - cycle_hours)) * 3600
-        printv("Start time / target end time  {:s} / {:s}".format(
+        printv("Start time / target / end time  {:s} / {:s} / {:s}".format(
             datetime.datetime.fromtimestamp(this_start_time).strftime('%Y-%m-%d %H:%M:%S'),
             datetime.datetime.fromtimestamp(this_start_time + target_run_duration).strftime('%Y-%m-%d %H:%M:%S')),verbosity=1)
         videoMosaic(cameras, x_shape=x_shape, y_shape=y_shape, generate=generate, x_res=x_res, y_res=y_res,
