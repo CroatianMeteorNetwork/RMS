@@ -431,9 +431,15 @@ def videoMosaic(station_ids, x_shape=2, y_shape=2, x_res=1280, y_res=720, equali
         printv("Video generation started at {:s}".format(
             datetime.datetime.fromtimestamp(generation_start_time).strftime('%Y-%m-%d %H:%M:%S')),verbosity=2)
 
+        if verbosity_level < 2:
+            stdout = subprocess.DEVNULL
+            stderr = subprocess.DEVNULL
+        else:
+            stdout = None
+            stdout = None
 
         subprocess.call(ffmpeg_command_string.replace("\n", " "),
-                        shell=True, stdout = subprocess.DEVNULL, stderr = subprocess.DEVNULL )
+                        shell=True, stdout = stdout, stderr = stderr)
         generation_end_time = time.time()
         generation_duration = generation_end_time - generation_start_time
         printv("Video generation ended at {:s}, duration {:.0f} seconds".format(
