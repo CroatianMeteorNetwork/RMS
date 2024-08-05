@@ -361,6 +361,7 @@ def generateCommand(video_paths, resolution, shape, output_filename = "~/mosaic_
     duration_compensations = getDurationCompensationFactors(durations, equalise_durations=equalise_durations)
 
     ffmpeg_command_string = "ffmpeg -y -r 30  "
+    ffmpeg_command_string += "\n " if print_nicely else " "
     ffmpeg_command_string += generateInputVideo(video_paths, shape[0] * shape[1],print_nicely=print_nicely)
     ffmpeg_command_string += generateFilter(duration_compensations,resolution,shape,print_nicely=print_nicely)
     ffmpeg_command_string += generateOutput(output_filename, print_nicely=print_nicely)
@@ -515,11 +516,11 @@ if __name__ == "__main__":
     generate = cml_args.generate_video if not cml_args.generate_video is None else True
     output = cml_args.output[0] if not cml_args.output is None else "~/mosaic_video.mp4"
     keep_files = cml_args.keep_files if not cml_args.keep_files is None else False
-    working_directory = cml_args.working_directory if not cml_args.working_directory is None else cml_args.working_directory
+    working_directory = cml_args.working_directory if not cml_args.working_directory is None else cml_args.working_directory[0]
     cycle_hours = cml_args.time[0] if not cml_args.time == None else 24
     no_download = False if cml_args.no_download is None else cml_args.no_download
-    frame_duration = 40 if cml_args.frame_duration is None else cml_args.frame_duration
-    minimum_duration = 20 if cml_args.minimum_duration is None else cml_args.minimum_duration
+    frame_duration = 40 if cml_args.frame_duration is None else cml_args.frame_duration[0]
+    minimum_duration = 20 if cml_args.minimum_duration is None else cml_args.minimum_duration[0]
     automatic_mode = cml_args.automatic if not cml_args.automatic is None else False
     show_ffmpeg = cml_args.show_ffmpeg if not cml_args.automatic is None else False
 
