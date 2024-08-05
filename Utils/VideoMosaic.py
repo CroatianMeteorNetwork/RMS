@@ -120,6 +120,9 @@ def downloadFiles(urls, station_id, working_dir=None, no_download=False, minimum
                 printv("Ignoring no_download directive because file for {} did not exist.".format(stationID.upper()),verbosity=2)
                 no_download = False
 
+        video = None
+        connection_good = False
+
         if not no_download or not os.path.isfile(destination_file):
 
             retry = 0
@@ -129,8 +132,8 @@ def downloadFiles(urls, station_id, working_dir=None, no_download=False, minimum
                 printv("Created directory {:s} for incoming file {:s}".format(temp_dir,destination_file), verbosity=3)
                 temp_download_destination_file = os.path.join(temp_dir,file_name)
 
+
                 try:
-                    video = None
                     video = requests.get(video_url, allow_redirects=True)
                     connection_good = True
                 except:
@@ -303,7 +306,7 @@ def generateFilter(duration_compensations, resolution_list, layout_list,print_ni
 
     """
     Args:
-        video_paths: list of input video paths
+        duration_compensations: list of duration_compensations
         resolution_list: list of resolution  e.g.[x,y]
         layout_list: the list of layout e.g.[3,2]
         print_nicely: optionally include \n characters, generally for debugging purposes
@@ -321,7 +324,7 @@ def generateFilter(duration_compensations, resolution_list, layout_list,print_ni
 
     video_counter,filter = 0, '-filter_complex " '
     filter += null_video
-    filter += "\n " if print_nicely else " "
+    filter += "\n \n " if print_nicely else " "
     for duration_compensation in duration_compensations:
         filter += ("[{}:v] setpts=PTS/{:.5f}-STARTPTS,scale={}x{}[tile_{}]; "
                    .format(video_counter,duration_compensation,res_tile[0],res_tile[1],video_counter))
@@ -595,8 +598,11 @@ if __name__ == "__main__":
             exit_requested = False
             while (target_run_duration > (time.time() - this_start_time)
                     and run_count > 0 and not exit_requested):
-                printv("Run duration target / elapsed {:.2f}/{:.2f} minutes"
-                      .format(target_run_duration / 60, (time.time() - this_start_time) / 60),verbosity=1)
+                printv("Run duration target / elapsed / end time {:.2f}/{:.2f} minutes"
+                      .format(target_run_duration / 60,
+                              (time.time() - this_start_time) / 60,
+                       datetime.datetime.fromtimestamp(target_run_duration + this_start_time).strftime('%Y-%m-%d %H:%M:%S'))
+                                        ,verbosity=1)
 
                 cap = cv2.VideoCapture(output)
 
