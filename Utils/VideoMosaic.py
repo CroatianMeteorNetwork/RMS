@@ -323,7 +323,7 @@ def generateFilter(duration_compensations, resolution_list, layout_list,print_ni
     filter += null_video
     filter += "\n " if print_nicely else " "
     for duration_compensation in duration_compensations:
-        filter += ("[{}:v] setpts=PTS/{}-STARTPTS,scale={}x{}[tile_{}]; "
+        filter += ("[{}:v] setpts=PTS/{:.5f}-STARTPTS,scale={}x{}[tile_{}]; "
                    .format(video_counter,duration_compensation,res_tile[0],res_tile[1],video_counter))
         filter += "\n " if print_nicely else " "
         video_counter += 1
