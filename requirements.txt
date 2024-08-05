@@ -23,3 +23,4 @@ tflite-runtime @ https://github.com/hjonnala/snippets/raw/main/wheels/python3.10
 PyGObject; python_version >= '3.6'
 astrometry; python_version >= "3.8"
 astrometry==3.0.0; python_version < "3.8"
+pyclean>=2.7.6
