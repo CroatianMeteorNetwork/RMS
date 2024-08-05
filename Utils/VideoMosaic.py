@@ -138,10 +138,12 @@ def downloadFiles(urls, station_id, working_dir=None, no_download=False, minimum
                     connection_good = False
 
                 if connection_good and video.status_code == 200:
-                    print("Downloading {:s}".format(video_url), end="")
+                    if verbosity_level > 0:
+                        print("Downloading {:s}".format(video_url), end="")
                     open(temp_download_destination_file,"wb").write(video.content)
                     video_duration = getVideoDurations([temp_download_destination_file])[0]
-                    print(" - video duration is {:.1f} seconds".format(getVideoDurations([destination_file])[0]))
+                    if verbosity_level > 0:
+                        print(" - video duration is {:.1f} seconds".format(getVideoDurations([destination_file])[0]))
                     if video_duration < minimum_duration:
                         printv("This video is shorter than minimum duration {:.1f}, only {:.1f} seconds"
                                         .format(minimum_duration, video_duration),verbosity=2)
