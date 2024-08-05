@@ -171,14 +171,15 @@ def downloadFiles(urls, station_id, working_dir=None, no_download=False, minimum
 
             # if we did not get any connection, exit the loop
             if not connection_good:
-                print("Did not get any connection to {:s}, so relying on stored files"
-                            .format(video_url))
+                print("Did not get any connection to {:s} - relying on stored files".format(video_url))
+                video_paths.append(destination_file)
                 break
 
             if video.status_code != 200:
                 print("No file found at {:s} after {:.0f} retries".format(video_url, retry))
                 if os.path.exists(destination_file):
                     print("Local copy of {:s} available, continuing with local copy".format(destination_file))
+                    video_paths.append(destination_file)
                 else:
                     print("Quitting, because no local copy of {:s}, and not available from server".format(destination_file))
                     quit()
