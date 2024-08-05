@@ -598,3 +598,39 @@ def sanitise(unsanitised, lower = False, space_substitution = "", log_changes = 
 
     return sanitised
 
+def niceFormat(string, delim=":", extra_space=5):
+
+    """
+    Takes a string of lines such as
+
+    key : value
+    key2 : value1
+    alongerkey : value2
+
+    and formats the string so that the delimiters are all in the same column
+
+    key        : value
+    key2       : value1
+    alongerkey : value2
+
+    Args:
+        string: takes a string, possibly including \n, each line of format key delimiter value
+        delim: delimited between key and value default :
+        extra_space: number of extra spaces between the key and the delimiter
+
+    Returns:
+        a string
+    """
+
+    max_to_delim = 0
+    for line in string.splitlines():
+        max_to_delim = line.find(delim) if line.find(delim) > max_to_delim else max_to_delim
+
+    formatted_string = ""
+    for line in string.splitlines():
+        field_name = line.split(delim)[0].strip()
+        value = line.split(delim)[1].strip()
+        padding = " " * (extra_space + max_to_delim - len(field_name))
+        formatted_string += "{:s}{:s}{:s} {:s}\n".format(field_name, padding, delim, value)
+
+    return formatted_string

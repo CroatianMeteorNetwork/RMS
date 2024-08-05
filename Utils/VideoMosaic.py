@@ -596,6 +596,7 @@ if __name__ == "__main__":
 
     while run_count > 0 and exit_requested == False:
 
+
         this_start_time = time.time()
         target_run_duration = (last_target_run_duration - (last_run_duration - cycle_hours * 3600))
         printv("\n Start time / target time (h) / end time  {:s} / {:.2f} / {:s}".format(
@@ -607,6 +608,7 @@ if __name__ == "__main__":
         videoMosaic(cameras, x_shape=x_shape, y_shape=y_shape, generate=generate, x_res=x_res, y_res=y_res,
                      output_file_path=output, keep_files=keep_files, working_directory=working_directory,
                     no_download=no_download, show_ffmpeg=show_ffmpeg)
+
 
         printv("Mosaic video duration is {:.1f} seconds".format(getVideoDurations([output])[0]),verbosity=2)
 
@@ -624,6 +626,7 @@ if __name__ == "__main__":
             exit_requested = False
 
             elapsed_time = time.time() - this_start_time
+
             play_count = 0
             while (target_run_duration > elapsed_time
                     and run_count > 0 and not exit_requested):
@@ -641,6 +644,7 @@ if __name__ == "__main__":
 
                 cv2.namedWindow(window_name, cv2.WND_PROP_FULLSCREEN)
                 cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+
                 play_count += 1
                 while True:
                     ret, frame = cap.read()
