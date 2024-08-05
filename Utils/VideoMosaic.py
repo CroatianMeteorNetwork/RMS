@@ -79,12 +79,15 @@ log = logging.getLogger("logger")
 
 verbosity_level = 0
 
-def printv(string,verbosity=0):
 
-    if verbosity < verbosity_level:
-        print(string)
+def printv(string,verbosity=0, same_line = False):
 
-
+    if verbosity <= verbosity_level:
+        if same_line:
+            print("\r {}   ".format(string), end="")
+        else:
+            print(string)
+            
 def downloadFiles(urls, station_id, working_dir=None, no_download=False, minimum_duration = 20):
 
     """
@@ -120,17 +123,24 @@ def downloadFiles(urls, station_id, working_dir=None, no_download=False, minimum
                 printv("Ignoring no_download directive because file for {} did not exist.".format(stationID.upper()),verbosity=2)
                 no_download = False
 
+
+        video = None
+        connection_good = False
+
+
         if not no_download or not os.path.isfile(destination_file):
 
             retry = 0
             while retry < 10:
                 temp_dir = tempfile.mktemp()
                 mkdirP(temp_dir)
-                printv("Created directory {:s}".format(temp_dir), verbosity=3)
+
+                printv("Created directory {:s} for incoming file {:s}".format(temp_dir,destination_file), verbosity=3)
                 temp_download_destination_file = os.path.join(temp_dir,file_name)
 
+
                 try:
-                    video = None
+
                     video = requests.get(video_url, allow_redirects=True)
                     connection_good = True
                 except:
@@ -138,10 +148,13 @@ def downloadFiles(urls, station_id, working_dir=None, no_download=False, minimum
                     connection_good = False
 
                 if connection_good and video.status_code == 200:
-                    print("Downloading {:s}".format(video_url), end="")
+
+                    if verbosity_level > 0:
+                        print("Downloading {:s}".format(video_url), end="")
                     open(temp_download_destination_file,"wb").write(video.content)
                     video_duration = getVideoDurations([temp_download_destination_file])[0]
-                    print(" - video duration is {:.1f} seconds".format(getVideoDurations([destination_file])[0]))
+                    if verbosity_level > 0:
+                        print(" - video duration is {:.1f} seconds".format(getVideoDurations([destination_file])[0]))
                     if video_duration < minimum_duration:
                         printv("This video is shorter than minimum duration {:.1f}, only {:.1f} seconds"
                                         .format(minimum_duration, video_duration),verbosity=2)
@@ -156,7 +169,9 @@ def downloadFiles(urls, station_id, working_dir=None, no_download=False, minimum
                                 printv("Removing directory {:s}".format(temp_dir),verbosity=4)
                                 os.rmdir(temp_dir)
                             else:
-                                printv("Keeping original file, which is duration {:.1f} seconds".format(video_duration),verbosity=4)
+
+                                printv("Keeping original file, which is duration {:.1f} seconds over new file with is {:1.f} seconds"
+                                       .format(old_video_duration, video_duration),verbosity=1)
                                 printv("Deleting {} and removing directory".format(temp_download_destination_file,
                                                                                          temp_dir),verbosity=4)
                                 os.unlink(temp_download_destination_file)
@@ -301,7 +316,8 @@ def generateFilter(duration_compensations, resolution_list, layout_list,print_ni
 
     """
     Args:
-        video_paths: list of input video paths
+
+        duration_compensations: list of duration_compensations
         resolution_list: list of resolution  e.g.[x,y]
         layout_list: the list of layout e.g.[3,2]
         print_nicely: optionally include \n characters, generally for debugging purposes
@@ -319,10 +335,11 @@ def generateFilter(duration_compensations, resolution_list, layout_list,print_ni
 
     video_counter,filter = 0, '-filter_complex " '
     filter += null_video
-    filter += "\n " if print_nicely else " "
+
+    filter += "\n \n " if print_nicely else " "
     for duration_compensation in duration_compensations:
-        filter += ("[{}:v] setpts=PTS/{}-STARTPTS,scale={}x{}[tile_{}]; "
-                   .format(video_counter,duration_compensation,res_tile[0],res_tile[1],video_counter))
+        filter += ("[{}:v] setpts=PTS/{:.5f}-STARTPTS,scale={}x{}[tile_{}]; "
+                   .format(video_counter,duration_compensation,res_tile[0] + 1,res_tile[1] + 1,video_counter))
         filter += "\n " if print_nicely else " "
         video_counter += 1
         if video_counter == layout_list[0] * layout_list[1]:
@@ -420,21 +437,28 @@ def videoMosaic(station_ids, x_shape=2, y_shape=2, x_res=1280, y_res=720, equali
                                             print_nicely = True)
 
     if show_ffmpeg:
-        printv("ffmpeg command string \n {:s}".format(ffmpeg_command_string),verbosity=0)
+        printv("\nffmpeg command string \n \n {:s}".format(ffmpeg_command_string),verbosity=0)
     if generate:
         generation_start_time = time.time()
         printv("Video generation started at {:s}".format(
             datetime.datetime.fromtimestamp(generation_start_time).strftime('%Y-%m-%d %H:%M:%S')),verbosity=2)
 
 
+        if verbosity_level < 3:
+            stdout,stderr = subprocess.DEVNULL, subprocess.DEVNULL
+        else:
+            stdout, stderr = None, None
+
         subprocess.call(ffmpeg_command_string.replace("\n", " "),
-                        shell=True, stdout = subprocess.DEVNULL, stderr = subprocess.DEVNULL )
+                        shell=True, stdout = stdout, stderr = stderr)
+
         generation_end_time = time.time()
         generation_duration = generation_end_time - generation_start_time
         printv("Video generation ended at {:s}, duration {:.0f} seconds".format(
             datetime.datetime.fromtimestamp(generation_end_time).strftime('%Y-%m-%d %H:%M:%S'),
-                    generation_duration),verbosity_level=2)
-    if keep_files:
+                    generation_duration),verbosity=2)
+
+        if keep_files:
         printv("Downloaded files in {:s}".format(working_directory),verbosity=2)
     else:
         for input_video in input_video_paths:
@@ -452,19 +476,20 @@ def argumentHandler():
     description = ""
     description += "Generate an n x n mosaic of videos. Minimum required to generate a video is\n"
     description += " python -m Utils.VideoMosaic \n\n"
-    description += "A more comprehensive example is \n"
+
+    description += "A more comprehensive example is \n \n"
     description += " python -m Utils.VideoMosaic -c AU000U,AU000V,AU000W,AU000X,AU000Y,AU000Z -r -a -t 8"
     description += "3840 1440 -s 3 2 -o ~/station_video.mpg \n \n"
-    description += "which creates a video of 6 cameras, resolution 3840 x 1440, 3 across, 2 down saved in users root as station_video.mpg\n"
-    description += " -n inhibits generating the video and only prints the ffmpeg command string"
-    description += " -k inhibits deletion of downloaded files"
-    description += " -a displays on screen automatically and -t 8 sets a refresh time of 8 hours \n"
+    description += "which creates a video of 6 cameras, resolution 3840 x 1440, 3 across, 2 down saved in users root as station_video.mpg\n\n"
+    description += " -n inhibits generating the video and only prints the ffmpeg command string \n"
+    description += " -k inhibits deletion of downloaded files \n"
+    description += " -a displays on screen automatically and  \n -t 8 sets a refresh time of 8 hours \n"
     description += "\n"
-    description += "python -m Utils.VideoMosaic -c AU000U,AU000V,AU000W,AU000X,AU000Y,AU000Z,AU000A,AU000C,AU000D  -m30 -r 1366 768 -s 3 3 -o ~/station_video.mpg -w ~/videos/pioneer/ -a -t 24 -p -f50 -v5"
-    description += "\n"
-    description += " downloads videos for stations, as long as they are of minimum duration 30 seconds, and displays output automatically, refreshing every 24 hours, each frame disaplayed for 50ms, verbosity level 5 \n"
-    description += "\n"
-    description += "press q while video is running to exit"
+    description += "python -m Utils.VideoMosaic -c AU000U,AU000V,AU000W,AU000X,AU000Y,AU000Z,AU000A,AU000C,AU000D \n"
+    description += "                                  -m30 -r 1366 768 -s 3 3 -o ~/station_video.mpg -w ~/videos/pioneer/ -a -t 24 -p -f50 -v5\n\n"
+    description += " downloads videos for stations, as long as they are of minimum duration 30 seconds, \n"
+    description += " and displays output automatically, refreshing every 24 hours, each frame disaplayed for 50ms, verbosity level 5 \n"
+    description += "\n press q while video is running to exit"
 
     arg_parser = argparse.ArgumentParser(description=description, formatter_class=argparse.RawTextHelpFormatter)
 
@@ -572,9 +597,12 @@ if __name__ == "__main__":
     while run_count > 0 and exit_requested == False:
         this_start_time = time.time()
         target_run_duration = (last_target_run_duration - (last_run_duration - cycle_hours)) * 3600
-        printv("Start time / target end time  {:s} / {:s}".format(
+        printv("Start time / target (h) / end time  {:s} / {:.2f} / {:s}".format(
             datetime.datetime.fromtimestamp(this_start_time).strftime('%Y-%m-%d %H:%M:%S'),
-            datetime.datetime.fromtimestamp(this_start_time + target_run_duration).strftime('%Y-%m-%d %H:%M:%S')),verbosity=1)
+                        target_run_duration / 3600,
+            datetime.datetime.fromtimestamp(this_start_time + target_run_duration).strftime('%Y-%m-%d %H:%M:%S')),
+                            verbosity=1, same_line=False)
+
         videoMosaic(cameras, x_shape=x_shape, y_shape=y_shape, generate=generate, x_res=x_res, y_res=y_res,
                      output_file_path=output, keep_files=keep_files, working_directory=working_directory,
                     no_download=no_download, show_ffmpeg=show_ffmpeg)
@@ -591,10 +619,17 @@ if __name__ == "__main__":
                 printv("Error: Could not open video.",verbosity=0)
                 exit()
             exit_requested = False
-            while (target_run_duration > (time.time() - this_start_time)
+
+            elapsed_time = time.time() - this_start_time
+            while (target_run_duration > elapsed_time
                     and run_count > 0 and not exit_requested):
-                printv("Run duration target / elapsed {:.2f}/{:.2f} minutes"
-                      .format(target_run_duration / 60, (time.time() - this_start_time) / 60),verbosity=1)
+
+                printv("Start time / target time / elapsed time (h) / end time  {:s} / {:.2f} / {:.2f} / {:s}".format(
+                    datetime.datetime.fromtimestamp(this_start_time).strftime('%Y-%m-%d %H:%M:%S'),
+                    target_run_duration / 3600,
+                    elapsed_time / 3600,
+                    datetime.datetime.fromtimestamp(this_start_time + target_run_duration).strftime(
+                        '%Y-%m-%d %H:%M:%S')), verbosity=1, same_line=True)
 
                 cap = cv2.VideoCapture(output)
 
@@ -610,9 +645,11 @@ if __name__ == "__main__":
 
                     cv2.imshow(window_name, frame)
                     if cv2.waitKey(interframe_wait_ms) & 0x7F == ord('q'):
-                        printv("Exit requested.",verbosity_level=1)
+
+                        printv("Exit requested.",verbosity=1)
                         exit_requested = True
                         break
+                elapsed_time = time.time() - this_start_time
             run_count -= 1
             run_count = 1 if automatic_mode and not exit_requested else 0
             last_run_duration = time.time() - this_start_time
@@ -622,4 +659,5 @@ if __name__ == "__main__":
 
         else:
             run_count = 0
+
         last_target_run_duration = target_run_duration
