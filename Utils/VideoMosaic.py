@@ -459,7 +459,7 @@ def videoMosaic(station_ids, x_shape=2, y_shape=2, x_res=1280, y_res=720, equali
                     generation_duration),verbosity=2)
 
         if keep_files:
-        printv("Downloaded files in {:s}".format(working_directory),verbosity=2)
+            printv("Downloaded files in {:s}".format(working_directory),verbosity=2)
     else:
         for input_video in input_video_paths:
             os.unlink(input_video)
