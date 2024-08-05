@@ -431,7 +431,7 @@ def videoMosaic(station_ids, x_shape=2, y_shape=2, x_res=1280, y_res=720, equali
         printv("Video generation started at {:s}".format(
             datetime.datetime.fromtimestamp(generation_start_time).strftime('%Y-%m-%d %H:%M:%S')),verbosity=2)
 
-        if verbosity_level < 2:
+        if verbosity_level < 3:
             stdout,stderr = subprocess.DEVNULL, subprocess.DEVNULL
         else:
             stdout, stderr = None, None
