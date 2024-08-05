@@ -436,7 +436,7 @@ def videoMosaic(station_ids, x_shape=2, y_shape=2, x_res=1280, y_res=720, equali
             stderr = subprocess.DEVNULL
         else:
             stdout = None
-            stdout = None
+            stderr = None
 
         subprocess.call(ffmpeg_command_string.replace("\n", " "),
                         shell=True, stdout = stdout, stderr = stderr)
