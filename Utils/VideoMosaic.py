@@ -126,7 +126,7 @@ def downloadFiles(urls, station_id, working_dir=None, no_download=False, minimum
             while retry < 10:
                 temp_dir = tempfile.mktemp()
                 mkdirP(temp_dir)
-                printv("Created directory {:s}".format(temp_dir), verbosity=3)
+                printv("Created directory {:s} for incoming file {:s}".format(temp_dir,destination_file), verbosity=3)
                 temp_download_destination_file = os.path.join(temp_dir,file_name)
 
                 try:
