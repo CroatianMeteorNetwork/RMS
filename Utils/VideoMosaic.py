@@ -81,7 +81,7 @@ verbosity_level = 0
 
 def printv(string,verbosity=0, same_line = False):
 
-    if verbosity < verbosity_level:
+    if verbosity <= verbosity_level:
         if same_line:
             print("\r {}   ".format(string), end="")
         else:
@@ -163,7 +163,8 @@ def downloadFiles(urls, station_id, working_dir=None, no_download=False, minimum
                                 printv("Removing directory {:s}".format(temp_dir),verbosity=4)
                                 os.rmdir(temp_dir)
                             else:
-                                printv("Keeping original file, which is duration {:.1f} seconds".format(video_duration),verbosity=4)
+                                printv("Keeping original file, which is duration {:.1f} seconds over new file with is {:1.f} seconds"
+                                       .format(old_video_duration, video_duration),verbosity=1)
                                 printv("Deleting {} and removing directory".format(temp_download_destination_file,
                                                                                          temp_dir),verbosity=4)
                                 os.unlink(temp_download_destination_file)
@@ -329,7 +330,7 @@ def generateFilter(duration_compensations, resolution_list, layout_list,print_ni
     filter += "\n \n " if print_nicely else " "
     for duration_compensation in duration_compensations:
         filter += ("[{}:v] setpts=PTS/{:.5f}-STARTPTS,scale={}x{}[tile_{}]; "
-                   .format(video_counter,duration_compensation,res_tile[0],res_tile[1],video_counter))
+                   .format(video_counter,duration_compensation,res_tile[0] + 1,res_tile[1] + 1,video_counter))
         filter += "\n " if print_nicely else " "
         video_counter += 1
         if video_counter == layout_list[0] * layout_list[1]:
@@ -427,7 +428,7 @@ def videoMosaic(station_ids, x_shape=2, y_shape=2, x_res=1280, y_res=720, equali
                                             print_nicely = True)
 
     if show_ffmpeg:
-        printv("ffmpeg command string \n {:s}".format(ffmpeg_command_string),verbosity=0)
+        printv("\nffmpeg command string \n \n {:s}".format(ffmpeg_command_string),verbosity=0)
     if generate:
         generation_start_time = time.time()
         printv("Video generation started at {:s}".format(
@@ -583,7 +584,7 @@ if __name__ == "__main__":
     while run_count > 0 and exit_requested == False:
         this_start_time = time.time()
         target_run_duration = (last_target_run_duration - (last_run_duration - cycle_hours)) * 3600
-        printv("Start time / target / end time  {:s} / {:.2f} / {:s}".format(
+        printv("Start time / target (h) / end time  {:s} / {:.2f} / {:s}".format(
             datetime.datetime.fromtimestamp(this_start_time).strftime('%Y-%m-%d %H:%M:%S'),
                         target_run_duration / 3600,
             datetime.datetime.fromtimestamp(this_start_time + target_run_duration).strftime('%Y-%m-%d %H:%M:%S')),
@@ -605,11 +606,14 @@ if __name__ == "__main__":
                 printv("Error: Could not open video.",verbosity=0)
                 exit()
             exit_requested = False
-            while (target_run_duration > (time.time() - this_start_time)
+            elapsed_time = time.time() - this_start_time
+            while (target_run_duration > elapsed_time
                     and run_count > 0 and not exit_requested):
-                printv("Start time / target / end time  {:s} / {:.2f} / {:s}".format(
+
+                printv("Start time / target time / elapsed time (h) / end time  {:s} / {:.2f} / {:.2f} / {:s}".format(
                     datetime.datetime.fromtimestamp(this_start_time).strftime('%Y-%m-%d %H:%M:%S'),
                     target_run_duration / 3600,
+                    elapsed_time / 3600,
                     datetime.datetime.fromtimestamp(this_start_time + target_run_duration).strftime(
                         '%Y-%m-%d %H:%M:%S')), verbosity=1, same_line=True)
 
@@ -627,9 +631,10 @@ if __name__ == "__main__":
 
                     cv2.imshow(window_name, frame)
                     if cv2.waitKey(interframe_wait_ms) & 0x7F == ord('q'):
-                        printv("Exit requested.",verbosity_level=1)
+                        printv("Exit requested.",verbosity=1)
                         exit_requested = True
                         break
+                elapsed_time = time.time() - this_start_time
             run_count -= 1
             run_count = 1 if automatic_mode and not exit_requested else 0
             last_run_duration = time.time() - this_start_time
