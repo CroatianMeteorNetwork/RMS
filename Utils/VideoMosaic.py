@@ -433,7 +433,7 @@ def videoMosaic(station_ids, x_shape=2, y_shape=2, x_res=1280, y_res=720, equali
         generation_duration = generation_end_time - generation_start_time
         printv("Video generation ended at {:s}, duration {:.0f} seconds".format(
             datetime.datetime.fromtimestamp(generation_end_time).strftime('%Y-%m-%d %H:%M:%S'),
-                    generation_duration),verbosity_level=2)
+                    generation_duration),verbosity=2)
     if keep_files:
         printv("Downloaded files in {:s}".format(working_directory),verbosity=2)
     else:
