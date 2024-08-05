@@ -135,7 +135,8 @@ def downloadFiles(urls, station_id, working_dir=None, no_download=False, minimum
                     video_duration = getVideoDurations([temp_download_destination_file])[0]
                     print(" - video duration is {:.1f} seconds".format(getVideoDurations([destination_file])[0]))
                     if video_duration < minimum_duration:
-                        print("This video is short duration, only {:.1f} seconds".format(video_duration))
+                        print("This video is shorter than minimum duration {:.1f}, only {:.1f} seconds"
+                                        .format(minimum_duration, video_duration))
                         if os.path.exists(destination_file):
                             old_video_duration = getVideoDurations([temp_download_destination_file])[0]
                             if video_duration > old_video_duration:
