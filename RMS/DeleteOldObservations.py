@@ -133,9 +133,11 @@ def rmList(delete_list, dummy_run=True):
 
     for full_path in delete_list:
         try:
-            if not dummy_run:
+            if dummy_run:
+                log.info("Config setting inhibited deletion of {}".format(os.path.basename(full_path)))
+            else:
                 shutil.rmtree(full_path)
-            log.info("Deleted {}".format(os.path.basename(full_path)))
+                log.info("Deleted {}".format(os.path.basename(full_path)))
         except:
             log.info("Could not delete {}".format(os.path.basename(full_path)))
 
@@ -366,27 +368,35 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
         if capt_dir_quota <= 0:
             log.warning("No quota allocation remains for captured directories, please increase rms_data_quota")
             capt_dir_quota = 0
+
+        arch_dir_use = usedSpace(archived_dir)
+        capt_dir_use = usedSpace(captured_dir)
+
         log.info("Directory quotas")
         log.info("----------------------------------------")
-        log.info("            Archived directories: {:.0f}GB".format(config.arch_dir_quota))
-        log.info("                        bz2 file: {:.0f}GB".format(config.bz2_files_quota))
+        log.info("Space used                              ")
+        log.ingo("    Archive directory space used: {:.0f)GB".format(usedSpace(archived_dir)))
+        log.ingo("    Archive directory space used: {:.0f)GB".format(usedSpace(captured_dir)))
+        log.info("Quotas allowed                          ")
+        log.info("        Total quota for RMS_data: {:.0f}GB".format(config.rms_data_quota))
+        log.info("      Archived directories quota: {:.0f}GB".format(config.arch_dir_quota))
+        log.info("                  bz2 file quota: {:.0f}GB".format(config.bz2_files_quota))
         log.info("          Remaining for captured: {:.0f}GB".format(capt_dir_quota))
-        log.info("Total for RMS_data              : {:.0f}GB".format(config.rms_data_quota))
         log.info("----------------------------------------")
 
 
 
         delete_list = objectsToDelete(captured_dir, config.stationID, capt_dir_quota,bz2=False)
-        log.info("Will be deleting {:.0f} CapturedFiles directories".format(len(delete_list)))
-        rmList(delete_list, dummy_run=True)
+        log.info("Deleting {:.0f} CapturedFiles directories".format(len(delete_list)))
+        rmList(delete_list, dummy_run=config.quota_management_disabled)
 
         delete_list = objectsToDelete(archived_dir, config.stationID, config.arch_dir_quota, bz2=False)
-        log.info("Will be deleting {:.0f} ArchivedFiles directories".format(len(delete_list)))
-        rmList(delete_list, dummy_run=True)
+        log.info("Deleting {:.0f} ArchivedFiles directories".format(len(delete_list)))
+        rmList(delete_list, dummy_run=config.quota_management_disabled)
 
         delete_list_bz2 = objectsToDelete(archived_dir, config.stationID, config.bz2_files_quota, bz2=True)
-        print("Will be deleting {:.0f} bz2 file".format(len(delete_list_bz2)))
-        rmList(delete_list, dummy_run=True)
+        log.info("Deleting {:.0f} bz2 file".format(len(delete_list_bz2)))
+        rmList(delete_list, dummy_run=config.quota_management_disabled)
 
 
 

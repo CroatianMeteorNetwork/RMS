@@ -344,6 +344,14 @@ class Config:
 
         # Space quotas in GB
 
+
+
+        # Space allocation for all of rms_data
+
+        # Disable the deletion by quota management for testing purposes
+        self.quota_management_disabled = False
+
+
         # Space allocation for all of rms_data
         self.rms_data_quota = None
 
@@ -903,6 +911,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "capt_dirs_to_keep"):
         config.capt_dirs_to_keep = int(parser.get(section, "capt_dirs_to_keep"))
+
+    if parser.has_option(section, "quota_management_disabled"):
+        config.quota_management_disabled = bool(parser.get(section, "quota_management_disabled"))
 
     if parser.has_option(section, "rms_data_quota"):
         config.rms_data_quota = int(parser.get(section, "rms_data_quota"))
