@@ -622,12 +622,6 @@ if __name__ == '__main__':
     log = logging.getLogger("logger")
 
 
-
-
-    print("Space used by {} is {}".format(config.data_dir, usedSpace(config.data_dir)))
-
-    exit()
-
     if not os.path.isdir(config.data_dir):
         log.info('Data Dir not found {}'.format(config.data_dir))
     else:
