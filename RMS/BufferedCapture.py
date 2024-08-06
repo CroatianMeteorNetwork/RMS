@@ -1011,7 +1011,7 @@ class BufferedCapture(Process):
                     else:
                         gray = frame[:, :, 0]
                         
-                    # Add another dimension with value 1
+                    # Add another dimension
                     gray = np.expand_dims(gray, axis=-1)
                 else:
                     gray = frame
