@@ -101,9 +101,9 @@ def objectsToDelete(object_path, stationID, quota_gb = 0, bz2=False):
         return []
     else:
         if bz2:
-            log.info("Quota for bz2 files set at {:.1f}".format(quota_gb))
+            log.info("Quota for bz2 files set at {:.1f}GB".format(quota_gb))
         else:
-            log.info("Quota for directory {:s} set at {:.1f}".format(object_path,quota_gb))
+            log.info("Quota for directory {:s} set at {:.1f}GB".format(object_path,quota_gb))
 
 
     # get a list of objects
@@ -123,9 +123,9 @@ def objectsToDelete(object_path, stationID, quota_gb = 0, bz2=False):
     # if all these items are deleted
     for obj in object_list:
         obj_size = usedSpace(os.path.join(object_path,obj))
-        n += obj_size / 1024
+        n += obj_size
         if n > quota_gb:
-            log.info("{}, size {:.1f}GB marked for deletion".format(obj, obj_size / 1024))
+            log.info("{}, size {:.1f}GB marked for deletion".format(obj, obj_size))
             objects_to_delete.append(os.path.join(object_path,obj))
 
     return objects_to_delete
