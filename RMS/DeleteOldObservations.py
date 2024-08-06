@@ -35,6 +35,23 @@ else:
         return date.timestamp()
 
 
+def quotaReport(archived_dir, captured_dir, capt_dir_quota, config, after=False):
+
+    if after:
+        log.info("Directory quotas after management")
+    else:
+        log.info("Directory quotas before management")
+    log.info("----------------------------------------")
+    log.info("Space used                              ")
+    log.info("    Archive directory space used: {:.2f}GB".format(usedSpace(archived_dir)))
+    log.info("   Captured directory space used: {:.2f}GB".format(usedSpace(captured_dir)))
+    log.info("Quotas allowed                          ")
+    log.info("        Total quota for RMS_data: {:.2f}GB".format(config.rms_data_quota))
+    log.info("      Archived directories quota: {:.2f}GB".format(config.arch_dir_quota))
+    log.info("                  bz2 file quota: {:.2f}GB".format(config.bz2_files_quota))
+    log.info("          Remaining for captured: {:.2f}GB".format(capt_dir_quota))
+    log.info("----------------------------------------")
+
 
 def availableSpace(dirname):
     """
@@ -370,38 +387,16 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
             log.warning("No quota allocation remains for captured directories, please increase rms_data_quota")
             capt_dir_quota = 0
 
-        log.info("Directory quotas")
-        log.info("----------------------------------------")
-        log.info("Space used                              ")
-        log.info("    Archive directory space used: {:.2f}GB".format(usedSpace(archived_dir)))
-        log.info("   Captured directory space used: {:.2f}GB".format(usedSpace(captured_dir)))
-        log.info("Quotas allowed                          ")
-        log.info("        Total quota for RMS_data: {:.2f}GB".format(config.rms_data_quota))
-        log.info("      Archived directories quota: {:.2f}GB".format(config.arch_dir_quota))
-        log.info("                  bz2 file quota: {:.2f}GB".format(config.bz2_files_quota))
-        log.info("          Remaining for captured: {:.2f}GB".format(capt_dir_quota))
-        log.info("----------------------------------------")
-
-
+        quotaReport(archived_dir, captured_dir, capt_dir_quota, config)
 
         delete_list = objectsToDelete(captured_dir, config.stationID, capt_dir_quota,bz2=False)
-        log.info("Deleting {:.0f} CapturedFiles directories".format(len(delete_list)))
         rmList(delete_list, dummy_run=config.quota_management_disabled)
-
         delete_list = objectsToDelete(archived_dir, config.stationID, config.arch_dir_quota, bz2=False)
-        log.info("Deleting {:.0f} ArchivedFiles directories".format(len(delete_list)))
+        rmList(delete_list, dummy_run=config.quota_management_disabled)
+        delete_list = objectsToDelete(archived_dir, config.stationID, config.bz2_files_quota, bz2=True)
         rmList(delete_list, dummy_run=config.quota_management_disabled)
 
-        delete_list_bz2 = objectsToDelete(archived_dir, config.stationID, config.bz2_files_quota, bz2=True)
-        log.info("Deleting {:.0f} bz2 file".format(len(delete_list_bz2)))
-        rmList(delete_list, dummy_run=config.quota_management_disabled)
-
-
-
-
-
-
-
+        quotaReport(archived_dir, captured_dir, capt_dir_quota, config, after=True)
 
     # Calculate the approximate needed disk space for the next night
 
