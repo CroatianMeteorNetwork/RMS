@@ -31,7 +31,7 @@ except:
     from ConfigParser import NoOptionError, RawConfigParser
 
 
-# Used to determine detection parametrs which will change in ML filtering is available
+# Used to determine if ML filtering is available
 TFLITE_AVAILABLE = False
 
 try:
