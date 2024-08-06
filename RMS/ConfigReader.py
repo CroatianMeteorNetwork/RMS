@@ -913,7 +913,9 @@ def parseCapture(config, parser):
         config.capt_dirs_to_keep = int(parser.get(section, "capt_dirs_to_keep"))
 
     if parser.has_option(section, "quota_management_disabled"):
-        config.quota_management_disabled = bool(parser.get(section, "quota_management_disabled"))
+        config.quota_management_disabled = parser.getboolean(section, "quota_management_disabled")
+
+
 
     if parser.has_option(section, "rms_data_quota"):
         config.rms_data_quota = int(parser.get(section, "rms_data_quota"))
