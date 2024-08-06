@@ -109,7 +109,10 @@ def generateThumbnails(dir_path, config, mosaic_type, file_list=None, no_stack=F
 
     for i in range(0, len(ff_list), thumb_stack):
 
-        img_stack = np.zeros((bin_h, bin_w))
+        if config.keep_color:
+            img_stack = np.zeros((bin_h, bin_w, 3))
+        else:
+            img_stack = np.zeros((bin_h, bin_w))
 
         # Stack thumb_stack images using the 'if lighter' method
         for j in range(thumb_stack):

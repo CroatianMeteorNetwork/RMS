@@ -423,7 +423,25 @@ def find3DLines(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, start_time, config
     return line_list
 
 
+def convert_to_grayscale(np.ndarray[np.uint8_t, ndim=4] frames):
+    # Assuming frames shape is (num_frames, height, width, 3) for RGB channels
+    cdef int num_frames = frames.shape[0]
+    cdef int height = frames.shape[1]
+    cdef int width = frames.shape[2]
+    cdef np.ndarray[np.uint8_t, ndim=3] grayscale_frames = np.empty((num_frames, height, width), dtype=np.uint8)
 
+    cdef int i, j, k
+    cdef float grayscale_value
+
+    for i in range(num_frames):
+        for j in range(height):
+            for k in range(width):
+                grayscale_value = (0.2989 * frames[i, j, k, 0] +
+                                   0.5870 * frames[i, j, k, 1] +
+                                   0.1140 * frames[i, j, k, 2])
+                grayscale_frames[i, j, k] = <np.uint8_t>grayscale_value
+
+    return grayscale_frames
 
 
 @cython.boundscheck(False)
@@ -488,6 +506,104 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
 
                 # Extract frame of maximum intensity
                 n = compressed[1, y, x]
+                
+                # Subsample frame in f*f squares
+                y2 = int(floor(y//f))
+                x2 = int(floor(x//f))
+                
+                # Check if there are enough of threshold passers inside of this square
+                if count[n, y2, x2] >= min_points:
+
+                    # Put this point to the final list
+                    pointsy[num] = y2
+                    pointsx[num] = x2
+                    pointsz[num] = n
+                    num += 1
+
+                    # Don't repeat this number
+                    count[n, y2, x2] = -1
+
+                # Increase counter if not enough threshold passers and this number isn't written already
+                elif count[n, y2, x2] != -1:
+                    count[n, y2, x2] += 1
+                
+    
+    # Cut point arrays to their maximum size
+    pointsy = pointsy[:num]
+    pointsx = pointsx[:num]
+    pointsz = pointsz[:num]
+
+    return num, pointsx, pointsy, pointsz
+
+@cython.boundscheck(False)
+@cython.wraparound(False) 
+@cython.cdivision(True)
+def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=4] frames, \
+    np.ndarray[UINT8_TYPE_t, ndim=4] compressed, int min_level, int min_points, float k1, float j1, int f):
+    """ Given the list of frames, threshold them, subsample the time and check if there are enough threshold
+        passers on the given frame. 
+
+    Arguments:
+        frames: [4D ndarray] Numpy array containing video frames. Structure: (nframe, y, x).
+        compressed: [4D ndarray] Numpy array containing compressed video frames. Structure: (frame, y, x), 
+            where frames are: maxpixel, maxframe, avepixel, stdpixel
+        min_level: [int] The point will be subsampled if it has this minimum pixel level (i.e. brightness).
+        min_points: [int] Minimum number of points in the subsampled block that is required to pass the 
+            threshold.
+        k1: [float] Threhsold max > avg + k1*stddev
+        j1: [float] Constant level offset in the threshold
+        f: [int] Decimation scale
+
+    Return:
+        num: [int] Number threshold passers.
+        pointsx: [ndarray] X coordinate of the subsampled point.
+        pointsy: [ndarray] Y coordinate of the subsampled point. 
+        pointsz: [ndarray] frame of the subsampled point.
+    """
+
+    cdef unsigned int x, y, x2, y2, n, max_val, nframes, x_size, y_size
+    cdef unsigned int num = 0
+    cdef unsigned int avg_std
+
+    # Convert frames and compressed to grayscale
+    cdef np.ndarray[np.uint8_t, ndim=3] frames_new = np.empty((frames.shape[0], frames.shape[1], frames.shape[2]), dtype=np.uint8)
+    cdef np.ndarray[np.uint8_t, ndim=3] compressed_new = np.empty((compressed.shape[0], compressed.shape[1], compressed.shape[2]), dtype=np.uint8)
+
+    frames_new = convert_to_grayscale(frames)
+    compressed_new = convert_to_grayscale(compressed)
+
+    # Calculate the shapes of the subsamples image
+    cdef shape_z = frames_new.shape[0]
+    cdef shape_y = int(floor(frames_new.shape[1]//f))
+    cdef shape_x = int(floor(frames_new.shape[2]//f))
+    
+    # Init subsampled image arrays
+    cdef np.ndarray[np.int32_t, ndim=3] count = np.zeros((shape_z, shape_y, shape_x), np.int32)
+    cdef np.ndarray[UINT16_TYPE_t, ndim=1] pointsy = np.zeros((shape_z*shape_y*shape_x), UINT16_TYPE)
+    cdef np.ndarray[UINT16_TYPE_t, ndim=1] pointsx = np.zeros((shape_z*shape_y*shape_x), UINT16_TYPE)
+    cdef np.ndarray[UINT16_TYPE_t, ndim=1] pointsz = np.zeros((shape_z*shape_y*shape_x), UINT16_TYPE)
+
+    # Extract frames dimensions 
+    nframes = frames_new.shape[0]
+    y_size = frames_new.shape[1]
+    x_size = frames_new.shape[2]
+    
+    for y in range(y_size):
+        for x in range(x_size):
+
+            max_val = compressed_new[0, y, x]
+
+            # Compute the threshold limit
+            avg_std = int(float(compressed_new[2, y, x]) + k1*float(compressed_new[3, y, x])) + j1
+
+            # Make sure the threshold limit is not above the maximum possible value
+            if avg_std > 255:
+                avg_std = 255
+            
+            if ((max_val > min_level) and (max_val >= avg_std)):
+
+                # Extract frame of maximum intensity
+                n = compressed_new[1, y, x]
                 
                 # Subsample frame in f*f squares
                 y2 = int(floor(y//f))

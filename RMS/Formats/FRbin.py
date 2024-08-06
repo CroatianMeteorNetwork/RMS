@@ -66,7 +66,7 @@ class fr_struct:
 
     @property
     def nframes(self):
-        return 256
+        return self.config.frames_per_block
 
     @property
     def maxpixel(self):

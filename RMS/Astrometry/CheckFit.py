@@ -403,7 +403,7 @@ def starListToDict(config, calstars_list, max_ffs=None):
         if len(stars_list) >= config.ff_min_stars:
 
             # Calculate the JD time of the FF file
-            dt = FFfile.getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True)
+            dt = FFfile.getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True,ff_frames=config.frames_per_block)
             jd = date2JD(*dt)
 
             # Add the time and the stars to the dict
@@ -465,7 +465,7 @@ def autoCheckFit(config, platepar, calstars_list, _fft_refinement=False):
             calstars_coords[:, [0, 1]] = calstars_coords[:, [1, 0]]
 
             # Get the time of the FF file
-            calstars_time = FFfile.getMiddleTimeFF(max_len_ff, config.fps, ret_milliseconds=True)
+            calstars_time = FFfile.getMiddleTimeFF(max_len_ff, config.fps, ret_milliseconds=True,ff_frames=config.frames_per_block)
 
 
             # Try aligning the platepar using FFT image registration
@@ -476,7 +476,7 @@ def autoCheckFit(config, platepar, calstars_list, _fft_refinement=False):
             min_radius = 10
 
             # Prepare star dictionary to check the match
-            dt = FFfile.getMiddleTimeFF(max_len_ff, config.fps, ret_milliseconds=True)
+            dt = FFfile.getMiddleTimeFF(max_len_ff, config.fps, ret_milliseconds=True,ff_frames=config.frames_per_block)
             jd = date2JD(*dt)
             star_dict_temp = {}
             star_dict_temp[jd] = calstars_dict[max_len_ff]

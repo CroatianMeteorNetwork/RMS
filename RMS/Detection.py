@@ -387,7 +387,7 @@ def checkWhiteRatio(img_thres, ff, max_white_ratio):
 
 
 def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_white_ratio, kht_lib_path, \
-    mask=None, flat_struct=None, dark=None, debug=False):
+    mask=None, flat_struct=None, dark=None, debug=False, keep_color=False):
     """ Get (rho, phi) pairs for each meteor present on the image using KHT.
         
     Arguments:
@@ -515,6 +515,8 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             # 3 - close (Close surrounded pixels)
             # 4 - thin (Thin all lines to 1px width)
             # 1 - Remove lonely pixels
+        if keep_color:
+            img=np.dot(img[...,:3],[0.2989,0.5870,0.1140]).astype(np.uint8)
         img = morph.morphApply(img, [1, 2, 3, 4, 1])
 
 
@@ -1106,7 +1108,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
     # Get lines on the image
     line_list = getLines(img_handle, config.k1_det, config.j1_det, config.time_slide, config.time_window_size, 
         config.max_lines_det, config.max_white_ratio, config.kht_lib_path, mask=mask, \
-        flat_struct=flat_struct, dark=dark, debug=debug)
+        flat_struct=flat_struct, dark=dark, debug=debug, keep_color=config.keep_color)
 
     # logDebug('List of lines:', line_list)
 

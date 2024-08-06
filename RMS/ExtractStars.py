@@ -119,7 +119,8 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
         return error_return
 
     data = ff.avepixel.astype(np.float32)
-
+    if config.keep_color:
+        data=np.dot(data[...,:3],[0.2989,0.5870,0.1140]).astype(np.float32)
 
     # Apply a mean filter to the image to reduce noise
     data = ndimage.filters.convolve(data, weights=np.full((2, 2), 1.0/4))
@@ -291,6 +292,8 @@ def fitPSF(ff, avepixel_mean, x2, y2, config):
 
         # Extract an image segment around each star
         star_seg = ff.avepixel[y_min:y_max, x_min:x_max]
+        if config.keep_color:
+            star_seg=np.dot(star_seg[...,:3],[0.2989,0.5870,0.1140])
 
         # Create x and y indices
         y_ind, x_ind = np.indices(star_seg.shape)

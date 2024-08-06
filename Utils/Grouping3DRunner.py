@@ -52,7 +52,7 @@ if __name__ == "__main__":
             plt.close()
 
             # Dummy frames from FF file
-            frames = FFfile.reconstruct(ff)
+            frames = FFfile.reconstruct(ff,config.frames_per_block)
 
             # Add avepixel to all reconstructed frames
             frames += ff.avepixel

@@ -268,12 +268,14 @@ class Config:
         # Media backend to use for capture. Options are gst, cv2, or v4l2
         self.media_backend = "gst"
         self.uyvy_pixelformat = False
+        self.keep_color=False
 
         self.width = 1280
         self.height = 720
         self.width_device = self.width
         self.height_device = self.height
         self.fps = 25.0
+        self.frames_per_block=256
 
         # Camera buffer in number of frames. This will applied a buffer/fps correction to
         # the timestamps when in GStreamer Standalone mode
@@ -958,6 +960,9 @@ def parseCapture(config, parser):
     if parser.has_option(section, "uyvy_pixelformat"):
         config.uyvy_pixelformat = parser.getboolean(section, "uyvy_pixelformat")
 
+    if parser.has_option(section, "keep_color"):
+        config.keep_color = parser.getboolean(section, "keep_color")
+
     if parser.has_option(section, "fps"):
         config.fps = parser.getfloat(section, "fps")
 
@@ -966,6 +971,9 @@ def parseCapture(config, parser):
             config.fps = 1000000
             print()
             print("WARNING! The FPS has been limited to 1,000,000!")
+
+    if parser.has_option(section, "frames_per_block"):
+        config.frames_per_block = parser.getint(section, "frames_per_block")
 
     if parser.has_option(section, "camera_buffer"):
         config.camera_buffer = parser.getint(section, "camera_buffer")

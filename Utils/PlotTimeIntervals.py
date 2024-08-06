@@ -330,4 +330,4 @@ if __name__ == '__main__':
                     fps = cml_args.fps
                 tar_file_path = os.path.join(root, file)
                 print("Processing {}".format(tar_file_path))
-                plotFFTimeIntervals(root, fps)
+                plotFFTimeIntervals(root, fps,ff_block_size=config.frames_per_block)

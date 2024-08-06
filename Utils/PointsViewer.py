@@ -10,7 +10,7 @@ def view(ff):
     config = cr.parse(".config")
     
     ve = VideoExtraction.Extractor(config)
-    ve.frames = np.empty((256, ff.nrows, ff.ncols))
+    ve.frames = np.empty((config.frames_per_block, ff.nrows, ff.ncols))
     ve.compressed = ff.array
     
     points = np.array(ve.findPoints())
