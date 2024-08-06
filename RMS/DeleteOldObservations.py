@@ -231,7 +231,7 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     deleteOldLogfiles(data_dir, config)
 
     # next purge out any old ArchivedFiles folders and compressed files
-    log.info('clearing down old data from ArchivedFiles')
+    log.info('clearing down old data')
     deleteOldDirs(data_dir, config)
 
     # Calculate the approximate needed disk space for the next night
@@ -376,6 +376,8 @@ def deleteOldDirs(data_dir, config):
         final_count = len(archdir_list)
     log.info('Purged {} older folders from ArchivedFiles'.format(orig_count - final_count))
 
+    orig_count = 0
+    final_count = 0
     captured_dir = os.path.join(data_dir, config.captured_dir)
     if config.capt_dirs_to_keep > 0:
         captdir_list = getNightDirs(captured_dir, config.stationID)
