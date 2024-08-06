@@ -19,6 +19,9 @@ from __future__ import print_function, division, absolute_import
 import os
 import sys
 import traceback
+
+import RMS.Reprocess
+
 # Set GStreamer debug level. Use '2' for warnings in production environments.
 os.environ['GST_DEBUG'] = '3'
 
@@ -356,7 +359,7 @@ class BufferedCapture(Process):
         if self.n > self.last_calculated_fps_n:
             self.last_calculated_fps = 1e9/m
             self.last_calculated_fps_n = self.n
-
+            RMS.Reprocess.observation_summary.last_calculated_fps = self.last_calculated_fps
         # On initial run or after a reset
         if self.n == 1:
             smoothed_pts = new_pts
@@ -542,12 +545,14 @@ class BufferedCapture(Process):
         if self.config.protocol == 'udp':
             protocol_str = "protocols=udp retry=5"
             # rtspsrc_params = ("rtspsrc buffer-mode=1 protocols=udp retry=5")
+            RMS.Reprocess.observation_summary.protocol = 'udp'
 
         else:  
             # Default to TCP
             protocol_str = "protocols=tcp tcp-timeout=5000000 retry=5"
             #rtspsrc_params = ("rtspsrc buffer-mode=1 protocols=tcp tcp-timeout=5000000 retry=5")
-            
+            RMS.Reprocess.observation_summary.protocol = 'tcp'
+
         # Define the source up to the point where we want to branch off
         source_to_tee = (
             "rtspsrc buffer-mode=1 {:s} "
@@ -638,11 +643,11 @@ class BufferedCapture(Process):
 
                 self.device = GstVideoFile(self.video_file, decoder=self.config.gst_decoder,
                                            video_format=self.config.gst_colorspace)
-
+                RMS.Reprocess.observation_summary.media_backend = 'gst'
             # Fall back to OpenCV if GStreamer is not available
             else:
                 self.device = cv2.VideoCapture(self.video_file)
-
+                RMS.Reprocess.observation_summary.media_backend = 'OpenCV'
         # Use a device as the video source
         else:
 
@@ -697,7 +702,7 @@ class BufferedCapture(Process):
             if (self.config.media_backend == 'gst') and (not GST_IMPORTED):
                 log.info("GStreamer is not available. Switching to alternative.")
                 self.media_backend_override = True
-
+                RMS.Reprocess.observation_summary.media_backend = None
             if (self.config.media_backend == 'gst') and GST_IMPORTED:
                 
                 log.info("Initialize GStreamer Standalone Device.")
@@ -783,14 +788,14 @@ class BufferedCapture(Process):
 
                     # Set the video device type
                     self.video_device_type = "gst"
-
+                    RMS.Reprocess.observation_summary.media_backend = "gst"
                     return True
 
                 except Exception as e:
                     log.info("Error initializing GStreamer, switching to alternative. Error: {}".format(e))
                     self.media_backend_override = True
                     self.releaseResources()
-
+                    RMS.Reprocess.observation_summary.media_backend = "OpenCV"
 
             if self.config.media_backend == 'v4l2':
                 try:
@@ -836,10 +841,10 @@ class BufferedCapture(Process):
 
                 time.sleep(5)
                 log.info('GStreamer Video device released!')
-
+                RMS.Reprocess.observation_summary.media_backend = "gst"
             except Exception as e:
                 log.error('Error releasing GStreamer pipeline: {}'.format(e))
-                
+                RMS.Reprocess.observation_summary.media_backend = "gst not successfully released"
         if self.device:
 
             try:
@@ -847,10 +852,10 @@ class BufferedCapture(Process):
                 if self.video_device_type == "cv2":
                     self.device.release()
                     log.info('OpenCV Video device released!')
-
+                    RMS.Reprocess.observation_summary.media_backend = "OpenCV"
             except Exception as e:
                 log.error('Error releasing OpenCV device: {}'.format(e))
-
+                RMS.Reprocess.observation_summary.media_backend = "OpenCV not successfully released"
             finally:
                 self.device = None  # Reset device to None after releasing
 
@@ -1070,7 +1075,7 @@ class BufferedCapture(Process):
                     if self.config.report_dropped_frames:
                         log.info("{}/{} frames dropped or late! Time for frame: {:.3f}, convert: {:.3f}, assignment: {:.3f}".format(
                             str(n_dropped), str(self.dropped_frames.value), t_frame, t_convert, t_assignment))
-
+                    RMS.Reprocess.observation_summary.dropped_frames = self.dropped_frames.value
 
                 # If cv2:
                 if (self.config.media_backend != 'gst') and not self.media_backend_override:
