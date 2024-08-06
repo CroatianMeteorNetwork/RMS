@@ -63,7 +63,7 @@ def plotFieldsums(dir_path, config):
             except TypeError:
                 print('File {:s} is corrupted!'.format(file_name))
 
-            # Extract the date and time from the FF file
+            # Extract the date and time from the FS file
             dt = filenameToDatetime(file_name)
 
             # Take the peak intensity value
