@@ -116,12 +116,6 @@ def objectsToDelete(object_path, stationID, quota_gb = 0, bz2=False):
     if quota_gb == 0 or quota_gb == None:
         log.info("Disc quota system disabled for {:s}".format(object_path))
         return []
-    else:
-        if bz2:
-            log.info("Quota for bz2 files set at {:.1f}GB".format(quota_gb))
-        else:
-            log.info("Quota for directory {:s} set at {:.1f}GB".format(object_path,quota_gb))
-
 
     # get a list of objects
     if bz2:
