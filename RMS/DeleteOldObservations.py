@@ -78,7 +78,7 @@ def usedSpace(obj_path):
                 continue
             n += os.path.getsize(directory_entry_path) / 1024 ** 3 if os.path.isfile(directory_entry_path) else usedSpace(directory_entry_path)
     else:
-        n += os.path.getsize(obj_path)
+        n += os.path.getsize(obj_path) / 1024 ** 3
 
     return n
 
