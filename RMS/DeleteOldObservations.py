@@ -369,14 +369,11 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
             log.warning("No quota allocation remains for captured directories, please increase rms_data_quota")
             capt_dir_quota = 0
 
-        arch_dir_use = usedSpace(archived_dir)
-        capt_dir_use = usedSpace(captured_dir)
-
         log.info("Directory quotas")
         log.info("----------------------------------------")
         log.info("Space used                              ")
         log.info("    Archive directory space used: {:.0f}GB".format(usedSpace(archived_dir)))
-        log.info("    Archive directory space used: {:.0f}GB".format(usedSpace(captured_dir)))
+        log.info("   Captured directory space used: {:.0f}GB".format(usedSpace(captured_dir)))
         log.info("Quotas allowed                          ")
         log.info("        Total quota for RMS_data: {:.0f}GB".format(config.rms_data_quota))
         log.info("      Archived directories quota: {:.0f}GB".format(config.arch_dir_quota))
