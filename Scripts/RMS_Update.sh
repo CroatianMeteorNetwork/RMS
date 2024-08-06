@@ -40,9 +40,16 @@ fi
 
 cd $RMSSOURCEDIR
 
+# Activate the virtual environment
+source ~/vRMS/bin/activate
+
 # Remove the build dir
+echo "Removing the build directory..."
 rm -r build
 
+# Perform cleanup before installations
+echo "Running pyclean for thorough cleanup..."
+pyclean . -v --debris all
 
 # Set the flag indicating that the RMS dir is reset
 echo "1" > $UPDATEINPROGRESSFILE
@@ -52,9 +59,6 @@ git stash
 
 # Pull new code from github
 git pull
-
-# Activate the virtual environment
-source ~/vRMS/bin/activate
 
 
 ### Install potentially missing libraries ###

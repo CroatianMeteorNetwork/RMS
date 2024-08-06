@@ -21,3 +21,4 @@ tflite-runtime; python_version>='3.6'
 PyGObject; python_version >= '3.6'
 astrometry; python_version >= "3.8"
 astrometry==3.0.0; python_version < "3.8"
+pyclean>=2.7.6
