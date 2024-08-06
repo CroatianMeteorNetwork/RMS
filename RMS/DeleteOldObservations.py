@@ -35,6 +35,23 @@ else:
         return date.timestamp()
 
 
+def quotaReport(archived_dir, captured_dir, capt_dir_quota, config, after=False):
+
+    if after:
+        log.info("Directory quotas after management")
+    else:
+        log.info("Directory quotas before management")
+    log.info("----------------------------------------")
+    log.info("Space used                              ")
+    log.info("    Archive directory space used: {:.2f}GB".format(usedSpace(archived_dir)))
+    log.info("   Captured directory space used: {:.2f}GB".format(usedSpace(captured_dir)))
+    log.info("Quotas allowed                          ")
+    log.info("        Total quota for RMS_data: {:.2f}GB".format(config.rms_data_quota))
+    log.info("      Archived directories quota: {:.2f}GB".format(config.arch_dir_quota))
+    log.info("                  bz2 file quota: {:.2f}GB".format(config.bz2_files_quota))
+    log.info("          Remaining for captured: {:.2f}GB".format(capt_dir_quota))
+    log.info("----------------------------------------")
+
 
 def availableSpace(dirname):
     """
@@ -56,6 +73,127 @@ def availableSpace(dirname):
         st = os.statvfs(dirname)
 
         return st.f_bavail*st.f_frsize
+
+
+def usedSpace(obj_path):
+
+    """
+
+    Args:
+        obj_path : path from which to start searching
+
+    Returns:
+        file size of files found in directory path
+    """
+
+    n = 0
+    if os.path.isdir(obj_path):
+        n += 4 / (1024 ** 2) # allowance for size of directory node 4.0k
+        for directory_entry in os.listdir(obj_path):
+            directory_entry_path = os.path.join(obj_path, directory_entry)
+            if os.path.islink(directory_entry_path):
+                continue
+            n += os.path.getsize(directory_entry_path) / 1024 ** 3 if os.path.isfile(directory_entry_path) else usedSpace(directory_entry_path)
+    else:
+        n += os.path.getsize(obj_path) / 1024 ** 3
+
+    return n
+
+
+def objectsToDelete(object_path, stationID, quota_gb = 0, bz2=False):
+
+    """
+
+    Args:
+        object_path: path to directory to be checked
+        quota_gb: target size of objects in directory
+        bz2: look at bz2 files if set true, else only work on directories
+
+    Returns:
+
+    """
+
+    if quota_gb == 0 or quota_gb == None:
+        log.info("Disc quota system disabled for {:s}".format(object_path))
+        return []
+
+    # get a list of objects
+    if bz2:
+        object_list = getBz2Files(object_path, stationID)
+    else:
+        object_list = getNightDirs(object_path, stationID)
+
+    # reverse it to put newest at top
+    object_list.reverse()
+
+    # initialise variables and a list
+    n, objects_to_delete = 0, []
+
+    # iterate through building up an accumulator, once the accumulator passes quota
+    # append items to delete to the list. This means that the space used will be under quota
+    # if all these items are deleted
+    for obj in object_list:
+        obj_size = usedSpace(os.path.join(object_path,obj))
+        n += obj_size
+        if n > quota_gb:
+            log.info("{}, size {:.1f}GB marked for deletion".format(obj, obj_size))
+            objects_to_delete.append(os.path.join(object_path,obj))
+
+    return objects_to_delete
+
+def rmList(delete_list, dummy_run=True):
+
+    for full_path in delete_list:
+        try:
+            if dummy_run:
+                log.info("Config setting inhibited deletion of {}".format(os.path.basename(full_path)))
+            else:
+                shutil.rmtree(full_path)
+                log.info("Deleted {}".format(os.path.basename(full_path)))
+        except:
+            log.info("Could not delete {}".format(os.path.basename(full_path)))
+
+
+def sizeArchivedDirs():
+    """
+
+    Returns:
+        size: byte size of all archived directories and subdirectories
+    """
+    archived_path = os.path.join(config.data_dir, config.archived_dir)
+    directory_list = getNightDirs(os.path.join(config.data_dir, config.archived_dir), config.stationID).reverse()
+    n = 0
+    print("Archived directory sizes")
+    for directory in directory_list:
+        dir_size = usedSpace(os.path.join(archived_path, directory))
+        print("{} {:.2f} Gb".format(directory, dir_size / 1024))
+        n += dir_size
+    return n / 1024
+
+def sizeBz2Files(target_size):
+
+
+    """
+
+    Args:
+        target_size: target total size of bz2 files
+
+    Returns:
+        list of files to delete
+    """
+
+
+    file_list = getBz2Files(os.path.join(config.data_dir, config.archived_dir), config.stationID).reverse()
+    bz2_path = os.path.join(config.data_dir, config.archived_dir)
+    n = 0
+    print("Captured directory sizes")
+    for bz2_file in file_list:
+        file_size = os.path.getsize(os.path.join(bz2_path, bz2_file))
+        print("{:s} {:.1f} Gb".format(bz2_file, file_size / 1024))
+        n += file_size
+
+    return n
+
 
 
 
@@ -231,8 +369,28 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     deleteOldLogfiles(data_dir, config)
 
     # next purge out any old ArchivedFiles folders and compressed files
-    log.info('clearing down old data from ArchivedFiles')
-    deleteOldArchivedDirs(data_dir, config)
+    log.info('clearing down old data')
+    deleteOldDirs(data_dir, config)
+
+    # calculate the captured directory allowance and print to log
+    if config.rms_data_quota is None or config.arch_dir_quota is None or config.bz2_files_quota is None:
+        log.info("Deleting files by space quota is not enabled, some quota is None.")
+    else:
+        capt_dir_quota = config.rms_data_quota - (config.arch_dir_quota + config.bz2_files_quota)
+        if capt_dir_quota <= 0:
+            log.warning("No quota allocation remains for captured directories, please increase rms_data_quota")
+            capt_dir_quota = 0
+
+        quotaReport(archived_dir, captured_dir, capt_dir_quota, config)
+
+        delete_list = objectsToDelete(captured_dir, config.stationID, capt_dir_quota,bz2=False)
+        rmList(delete_list, dummy_run=config.quota_management_disabled)
+        delete_list = objectsToDelete(archived_dir, config.stationID, config.arch_dir_quota, bz2=False)
+        rmList(delete_list, dummy_run=config.quota_management_disabled)
+        delete_list = objectsToDelete(archived_dir, config.stationID, config.bz2_files_quota, bz2=True)
+        rmList(delete_list, dummy_run=config.quota_management_disabled)
+
+        quotaReport(archived_dir, captured_dir, capt_dir_quota, config, after=True)
 
     # Calculate the approximate needed disk space for the next night
 
@@ -363,7 +521,8 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     return True
 
 
-def deleteOldArchivedDirs(data_dir, config):
+def deleteOldDirs(data_dir, config):
+
     archived_dir = os.path.join(data_dir, config.archived_dir)
     orig_count = 0
     final_count = 0
@@ -374,6 +533,18 @@ def deleteOldArchivedDirs(data_dir, config):
             archdir_list = deleteNightFolders(archived_dir, config)
         final_count = len(archdir_list)
     log.info('Purged {} older folders from ArchivedFiles'.format(orig_count - final_count))
+
+    orig_count = 0
+    final_count = 0
+    captured_dir = os.path.join(data_dir, config.captured_dir)
+    if config.capt_dirs_to_keep > 0:
+        captdir_list = getNightDirs(captured_dir, config.stationID)
+        orig_count = len(captdir_list)
+        while len(captdir_list) > config.capt_dirs_to_keep:
+            captdir_list = deleteNightFolders(captured_dir, config)
+        final_count = len(captdir_list)
+    log.info('Purged {} older folders from Captured Files'.format(orig_count - final_count))
+
 
     if config.bz2_files_to_keep > 0:
         bz2_list = getBz2Files(archived_dir, config.stationID)
@@ -431,18 +602,26 @@ if __name__ == '__main__':
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, help="Path to a config file")
     cml_args = arg_parser.parse_args()
 
+
+
     cfg_path = os.path.abspath('.') # default to using config from current folder
     cfg_file = '.config'
+
+
+
     if cml_args.config:
         if os.path.isfile(cml_args.config[0]):
             cfg_path, cfg_file = os.path.split(cml_args.config[0])
     config = loadConfigFromDirectory(cfg_file, cfg_path)
+
     # Initialize the logger
     initLogging(config)
     log = logging.getLogger("logger")
+
 
     if not os.path.isdir(config.data_dir):
         log.info('Data Dir not found {}'.format(config.data_dir))
     else:
         log.info('deleting obs from {}'.format(config.data_dir))
         deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config)
+
