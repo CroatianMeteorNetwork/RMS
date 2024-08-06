@@ -27,6 +27,8 @@ import time
 import datetime
 
 
+stack_start_time = time.time()
+
 def trackStack(dir_paths, config, border=5, background_compensation=True, 
         hide_plot=False, showers=None, darkbackground=False, out_dir=None,
         scalefactor=None, draw_constellations=False, one_core_free=False):
@@ -253,6 +255,8 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
 
     enumlist = ff_found_list
     # Create task pool
+
+
     cores = mp.cpu_count()
     if one_core_free and cores > 1:
         cores -= 1
@@ -262,11 +266,13 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
                                                                                    background_compensation, finished_count, num_ffs))
     thead_pool.startPool()
     # add jobs
+    stack_start_time = time.time()
+    print("Started stacking at {}".format(datetime.datetime.fromtimestamp((stack_start_time)).strftime('%Y-%m-%d %H:%M:%S')))
     for i, ff_name in enumerate(enumlist):
         if shouldInclude(showers, ff_name, associations):
             num_plotted += 1
             thead_pool.addJob([ff_name])
-    printProgress(0, num_plotted)
+    printProgress(0, num_plotted, stack_start_time)
     thead_pool.closePool()
 
     # End if the number of plotted FFs is zero
@@ -427,7 +433,7 @@ def stackFrame(ff_name, recalibrated_platepars, mask, border, pp_ref, img_size, 
     with finished_count.get_lock():
         finished_count.value += 1
     # print progress
-    printProgress(finished_count.value, num_ffs)
+    printProgress(finished_count.value, num_ffs, stack_start_time)
 
 
 def shouldInclude(shower_list, ff_name, associations):
@@ -442,11 +448,22 @@ def shouldInclude(shower_list, ff_name, associations):
             return False
 
 
-def printProgress(current, total):
+def printProgress(current, total, stack_start_time=None):
     progress_bar_len = 20
     progress = int(progress_bar_len * current / total)
     percent = 100 * current / total
-    print("\rStacking : {:02.0f}%|{}{}| {}/{} ".format(percent, "#" * progress, " " * (progress_bar_len - progress), current, total), end="")
+    if not stack_start_time is None and current > 0:
+        try:
+            time_elapsed = time.time() - stack_start_time
+            time_per_image = time_elapsed / current
+            images_remaining = total - current
+            time_remaining = time_per_image * images_remaining
+            eta = datetime.datetime.fromtimestamp((time.time() + time_remaining)).strftime('%H:%M:%S')
+        except:
+            eta = "         "
+    else:
+        eta = "         "
+    print("\rStacking : {:02.0f}%|{}{}| {}/{}  ETA: {:s}".format(percent, "#" * progress, " " * (progress_bar_len - progress), current, total, eta), end="")
     if current == total:
         print("")
 

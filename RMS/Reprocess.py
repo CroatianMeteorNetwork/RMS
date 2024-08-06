@@ -568,7 +568,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
     log.info("Observation summary file writen to {}".format(observation_summary_path_file_name))
     extra_files.append(observation_summary_path_file_name)
-    night_archive_dir = os.path.join(os.path.abspath(config.data_dir), config.archived_dir,
+    night_archive_dir = os.path.join(os.path.abspath(config.data_dir), config.archived_dir, 
         night_data_dir_name)
 
 

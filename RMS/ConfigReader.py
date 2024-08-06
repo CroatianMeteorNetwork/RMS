@@ -114,16 +114,26 @@ def findBinaryPath(config, dir_path, binary_name, binary_extension):
     else:
         # If there are more candidates, find the right one for the running version of python, platform, and
         #   bits
-        py_version = "{:d}.{:d}".format(sys.version_info.major, sys.version_info.minor)
+
 
         # Find the compiled module for the correct python version
         for file_path in file_candidates:
             
             # Extract the name of the dir where the binary is located
             binary_dir = os.path.split(os.path.split(file_path)[0])[1]
+            # take the final section as the version
+            binary_dir_version = binary_dir.split('-')[-1]
+
+
+            # the binary directory may or may not contain a dot in the version
+            # e.g lib.linux-x86_64-3.7 vs lib.linux-x86_64-cpython-311
+            if '.' in binary_dir_version:
+                py_version = "{:d}.{:d}".format(sys.version_info.major, sys.version_info.minor)
+            else:
+                py_version = "{:d}{:d}".format(sys.version_info.major, sys.version_info.minor)
 
             # If the directory ends with the correct python version, take that binary
-            if binary_dir.endswith('-' + py_version):
+            if binary_dir_version == py_version:
                 return file_path
 
 
@@ -337,6 +347,10 @@ class Config:
         self.arch_dirs_to_keep = 20
         # keep this many compressed ArchDirs. Zero means keep them all
         self.bz2_files_to_keep = 20
+
+        # CaptDirs to keep
+        # keep this many CapDirs. Zero means keep them all
+        self.capt_dirs_to_keep = 8
 
         # Extra space to leave on disk for the archive (in GB) after the captured files have been taken
         #   into account
@@ -884,6 +898,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "bz2_files_to_keep"):
         config.bz2_files_to_keep = int(parser.get(section, "bz2_files_to_keep"))
+
+    if parser.has_option(section, "capt_dirs_to_keep"):
+        config.capt_dirs_to_keep = int(parser.get(section, "capt_dirs_to_keep"))
 
     if parser.has_option(section, "captured_dir"):
         config.captured_dir = parser.get(section, "captured_dir")
