@@ -22,8 +22,9 @@ pyyaml; python_version>='3.6'
 tflite-runtime; python_version >= '3.6' and not tensorflow
 
 # Install tensorflow only if tflite-runtime is not installed and not installable
-tensorflow; python_version >= '3.6' and not tflite-runtimePyGObject; python_version >= '3.6'
+tensorflow; python_version >= '3.6' and not tflite-runtime
 
+PyGObject; python_version >= '3.6'
 astrometry; python_version >= "3.8"
 astrometry==3.0.0; python_version < "3.8"
 pyclean>=2.7.6
