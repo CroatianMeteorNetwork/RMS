@@ -71,15 +71,16 @@ def usedSpace(obj_path):
 
     n = 0
     if os.path.isdir(obj_path):
+        n += 4 / (1024 ** 2) # allowance for size of directory node 4.0k
         for directory_entry in os.listdir(obj_path):
             directory_entry_path = os.path.join(obj_path, directory_entry)
             if os.path.islink(directory_entry_path):
                 continue
-            n += os.path.getsize(directory_entry_path) if os.path.isfile(directory_entry_path) else usedSpace(directory_entry_path)
+            n += os.path.getsize(directory_entry_path) / 1024 ** 3 if os.path.isfile(directory_entry_path) else usedSpace(directory_entry_path)
     else:
         n += os.path.getsize(obj_path)
 
-    return n / (1024 * 1024)
+    return n
 
 
 def objectsToDelete(object_path, stationID, quota_gb = 0, bz2=False):
@@ -372,13 +373,13 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
         log.info("Directory quotas")
         log.info("----------------------------------------")
         log.info("Space used                              ")
-        log.info("    Archive directory space used: {:.0f}GB".format(usedSpace(archived_dir)))
-        log.info("   Captured directory space used: {:.0f}GB".format(usedSpace(captured_dir)))
+        log.info("    Archive directory space used: {:.2f}GB".format(usedSpace(archived_dir)))
+        log.info("   Captured directory space used: {:.2f}GB".format(usedSpace(captured_dir)))
         log.info("Quotas allowed                          ")
-        log.info("        Total quota for RMS_data: {:.0f}GB".format(config.rms_data_quota))
-        log.info("      Archived directories quota: {:.0f}GB".format(config.arch_dir_quota))
-        log.info("                  bz2 file quota: {:.0f}GB".format(config.bz2_files_quota))
-        log.info("          Remaining for captured: {:.0f}GB".format(capt_dir_quota))
+        log.info("        Total quota for RMS_data: {:.2f}GB".format(config.rms_data_quota))
+        log.info("      Archived directories quota: {:.2f}GB".format(config.arch_dir_quota))
+        log.info("                  bz2 file quota: {:.2f}GB".format(config.bz2_files_quota))
+        log.info("          Remaining for captured: {:.2f}GB".format(capt_dir_quota))
         log.info("----------------------------------------")
 
 
