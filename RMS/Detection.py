@@ -516,7 +516,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             # 4 - thin (Thin all lines to 1px width)
             # 1 - Remove lonely pixels
         if keep_color:
-            img=np.dot(img[...,:3],[0.2989,0.5870,0.1140])
+            img=np.dot(img[...,:3],[0.2989,0.5870,0.1140]).astype(np.uint8)
         img = morph.morphApply(img, [1, 2, 3, 4, 1])
 
 
