@@ -83,7 +83,10 @@ tryPasswordlessSudo() {
 sudoWithTimeout() {
     local timeout_duration=30
     local attempts=3
-    local prompt="[sudo] password for $USER: "
+    local prompt="[sudo] password for $USER (timeout in ${timeout_duration}s): "
+    local sudo_keep_alive_duration=$((timeout_duration / 2))
+    
+    echo "Please enter your sudo password. You have $attempts attempts, with a ${timeout_duration}-second timeout."
     
     for ((i=1; i<=attempts; i++)); do
         # Use read with timeout to get the password securely
@@ -92,26 +95,29 @@ sudoWithTimeout() {
         
         # Check if password is empty (timeout or Ctrl+D)
         if [[ -z "$password" ]]; then
-            echo "Password entry timed out."
             return 1
         fi
         
         # Validate the password
         if echo "$password" | sudo -S true 2>/dev/null; then
             # Keep sudo token alive in background
-            (while true; do sudo -v; sleep 50; done) &
+            (while true; do sudo -v; sleep $sudo_keep_alive_duration; done) &
             KEEP_SUDO_PID=$!
             return 0
         else
             if [ $i -lt $attempts ]; then
-                echo "Sorry, try again."
+                echo "Sorry, try again. You have $((attempts - i)) attempts remaining."
             else
-                echo "sudo: 3 incorrect password attempts"
+                echo "sudo: $attempts incorrect password attempts"
                 return 1
             fi
         fi
     done
+    
+    # If we've exhausted all attempts
+    return 1
 }
+
 
 # List of packages to check/install
 packages=(
@@ -140,11 +146,19 @@ else
     if tryPasswordlessSudo; then
         echo "Passwordless sudo available. Proceeding with installation."
         sudo apt-get update
+        all_installed=true
         for package in "${missing_packages[@]}"; do
             echo "Installing $package..."
-            sudo apt-get install -y "$package"
+            if ! sudo apt-get install -y "$package"; then
+                echo "Failed to install $package"
+                all_installed=false
+            fi
         done
-        echo "All required packages have been installed."
+        if $all_installed; then
+            echo "All required packages have been successfully installed."
+        else
+            echo "Some packages failed to install. Please check the output above for details."
+        fi
     else
         # Passwordless sudo not available, prompt for password
         echo "Passwordless sudo not available. Prompting for password."
@@ -154,11 +168,19 @@ else
             # Password entered successfully, proceed with update and install
             sudo apt-get update
             # Install missing packages
+            all_installed=true
             for package in "${missing_packages[@]}"; do
                 echo "Installing $package..."
-                sudo apt-get install -y "$package"
+                if ! sudo apt-get install -y "$package"; then
+                    echo "Failed to install $package"
+                    all_installed=false
+                fi
             done
-            echo "All required packages have been installed."
+            if $all_installed; then
+                echo "All required packages have been successfully installed."
+            else
+                echo "Some packages failed to install. Please check the output above for details."
+            fi
             # Kill the background sudo-keeping process
             kill $KEEP_SUDO_PID 2>/dev/null
         fi
