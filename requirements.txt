@@ -17,7 +17,6 @@ python-dvr>=0.0.1 ; python_version >='3.6'
 pyqtgraph @ git+https://github.com/pyqtgraph/pyqtgraph@develop#egg=pyqtgraph ; python_version=='2.7'
 pyqtgraph>=0.12,<0.13 ; python_version >='3.6'
 pyyaml; python_version>='3.6'
-tflite-runtime; python_version>='3.6'
 PyGObject; python_version >= '3.6'
 astrometry; python_version >= "3.8"
 astrometry==3.0.0; python_version < "3.8"

@@ -31,13 +31,18 @@ except:
     from ConfigParser import NoOptionError, RawConfigParser
 
 
-# Used to determine detection parametrs which will change in ML filtering is available
+# Used to determine if ML filtering is available
+TFLITE_AVAILABLE = False
+
 try:
     from tflite_runtime.interpreter import Interpreter
     TFLITE_AVAILABLE = True
 except ImportError:
-    TFLITE_AVAILABLE = False    
-
+    try:
+        from tensorflow.lite.python.interpreter import Interpreter
+        TFLITE_AVAILABLE = True
+    except ImportError:
+        TFLITE_AVAILABLE = False
 
 
 def choosePlatform(win_conf, rpi_conf, linux_pc_conf):
