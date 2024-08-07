@@ -48,6 +48,9 @@ import subprocess
 import cv2
 from RMS.Misc import mkdirP
 import time
+import json
+from random import shuffle
+from RMS.Misc import sanitise
 
 if sys.version_info[0] < 3:
 
@@ -134,7 +137,8 @@ def downloadFiles(urls, station_id, working_dir=None, no_download=False, minimum
             while retry < 10:
                 temp_dir = tempfile.mktemp()
                 mkdirP(temp_dir)
-
+                file_name = "{:s}.mp4".format(stationID.lower())
+                destination_file = os.path.join(working_dir, file_name)
                 printv("Created directory {:s} for incoming file {:s}".format(temp_dir,destination_file), verbosity=3)
                 temp_download_destination_file = os.path.join(temp_dir,file_name)
 
@@ -153,8 +157,15 @@ def downloadFiles(urls, station_id, working_dir=None, no_download=False, minimum
                         print("Downloading {:s}".format(video_url), end="")
                     open(temp_download_destination_file,"wb").write(video.content)
                     video_duration = getVideoDurations([temp_download_destination_file])[0]
+                    if video_duration == None:
+                        stationID = randomStations(1)[0]
+                        video_url = convertListOfStationIDsToListOfUrls([stationID])[0]
+                        printv("Got a duration of None, substituting {} from {}".format(stationID,video_url))
+                        printv("Removing {}".format(temp_dir))
+                        os.rmdir(temp_dir)
+                        continue
                     if verbosity_level > 0:
-                        print(" - video duration is {:.1f} seconds".format(getVideoDurations([destination_file])[0]))
+                        print(" - video duration is {:.1f} seconds".format(video_duration))
                     if video_duration < minimum_duration:
                         printv("This video is shorter than minimum duration {:.1f}, only {:.1f} seconds"
                                         .format(minimum_duration, video_duration),verbosity=2)
@@ -187,7 +198,13 @@ def downloadFiles(urls, station_id, working_dir=None, no_download=False, minimum
 
                 else:
                     if connection_good:
-                        print("- No file found at {:s}, will retry".format(video_url))
+                        printv("- No file found at {:s}, will try different station".format(video_url), verbosity=2)
+                        stationID = randomStations(1)[0]
+                        video_url = convertListOfStationIDsToListOfUrls([stationID])[0]
+                        printv("Substituting {} from {}".format(stationID,video_url), verbosity=3)
+                        os.rmdir(temp_dir)
+                        continue
+
                     time.sleep(6)
                     retry += 1
                     printv("Removing directory {:s}".format(temp_dir),verbosity=4)
@@ -195,20 +212,34 @@ def downloadFiles(urls, station_id, working_dir=None, no_download=False, minimum
 
             # if we did not get any connection, exit the loop
             if not connection_good:
-                printv("Did not get any connection to {:s} - relying on stored files".format(video_url),verbosity=1)
-                video_paths.append(destination_file)
-                break
+                printv("Did not get any connection to {:s}".format(video_url),verbosity=1)
+                printv("Removing directory {:s}".format(temp_dir), verbosity=4)
+                os.rmdir(temp_dir)
+                continue
 
             if video.status_code != 200:
-                printv("No file found at {:s} after {:.0f} retries".format(video_url, retry),verbosity=1)
+                printv("No file found at {:s} after {:.0f} retries".format(video_url[0], retry),verbosity=1)
                 if os.path.exists(destination_file):
                     printv("Local copy of {:s} available, continuing with local copy".format(destination_file),verbosity=1)
                     video_paths.append(destination_file)
                 else:
                     printv("Quitting, because no local copy of {:s}, and not available from server".format(destination_file),verbosity=1)
-                    quit()
+
 
     return working_dir, video_paths
+
+def randomStations(number_of_stations):
+
+    stationID_list = []
+
+    location_url = "https://globalmeteornetwork.org/data/kml_fov/GMN_station_coordinates_public.json"
+    station_data = requests.get(location_url, allow_redirects=True).content.decode("utf-8")
+    stationID_list = list(json.loads(station_data).keys())
+    shuffle(stationID_list)
+
+    return stationID_list[0:number_of_stations]
+
+
 
 def getVideoDurations(paths_to_videos):
 
@@ -225,7 +256,10 @@ def getVideoDurations(paths_to_videos):
     for path_to_video in paths_to_videos:
         video = cv2.VideoCapture(os.path.expanduser(path_to_video))
         frames,fps = video.get(cv2.CAP_PROP_FRAME_COUNT),video.get(cv2.CAP_PROP_FPS)
-        video_durations.append(frames / fps)
+        if fps == 0:
+            video_durations.append(None)
+        else:
+            video_durations.append(frames / fps)
 
     return video_durations
 
@@ -243,6 +277,7 @@ def getDurationCompensationFactors(durations, equalise_durations=True):
 
     compensation_factors = []
     max_duration = max(durations)
+    printv("Durations {}".format(durations), verbosity=4)
     for duration in durations:
         if equalise_durations:
             compensation_factors.append(duration/max_duration)
@@ -364,7 +399,7 @@ def generateFilter(duration_compensations, resolution_list, layout_list,print_ni
     return filter
 
 
-def generateCommand(video_paths, resolution, shape, output_filename = "~/mosaic_video.mp4", print_nicely=False,
+def generateCommand(video_paths, resolution, shape, output_filename="~/mosaic_video.mp4", print_nicely=False,
                         equalise_durations = True):
 
     """
@@ -415,13 +450,14 @@ def videoMosaic(station_ids, x_shape=2, y_shape=2, x_res=1280, y_res=720, equali
         [ffmpeg_command_string,working_directory]
     """
 
-    if station_ids == None:
-        return
-    if len(station_ids) == 0:
-        return
+
+
     if len(station_ids) < x_shape * y_shape:
-        printv("Too few stationIDs to create video of requested shape {:.f0} x {:.f0}".format(x_shape, y_shape))
-        return
+        printv("Too few stationIDs to create video of requested shape {:.0f} x {:.0f}".format(x_shape, y_shape), verbosity=3)
+        additional_stations = randomStations((x_shape * y_shape) - len(station_ids))
+        printv("Added {}".format(additional_stations), verbosity=1)
+        station_ids = station_ids + additional_stations
+        printv("New list of stations ids is {}".format(station_ids), verbosity=3)
 
     if not working_directory is None and keep_files==False:
         printv("Working directory specified therefore keeping files at end of work",verbosity=1)
@@ -440,9 +476,9 @@ def videoMosaic(station_ids, x_shape=2, y_shape=2, x_res=1280, y_res=720, equali
         printv("\nffmpeg command string \n \n {:s}".format(ffmpeg_command_string),verbosity=0)
     if generate:
         generation_start_time = time.time()
-        printv("Video generation started at {:s}".format(
-            datetime.datetime.fromtimestamp(generation_start_time).strftime('%Y-%m-%d %H:%M:%S')),verbosity=2)
-
+        printv("Video generation started at {:s}, saving to {:s}".format(
+            datetime.datetime.fromtimestamp(generation_start_time).strftime('%Y-%m-%d %H:%M:%S'),
+                output_file_path),verbosity=0)
 
         if verbosity_level < 3:
             stdout,stderr = subprocess.DEVNULL, subprocess.DEVNULL
@@ -476,7 +512,7 @@ def argumentHandler():
 
     description = ""
     description += "Generate an n x n mosaic of videos. Minimum required to generate a video is\n"
-    description += " python -m Utils.VideoMosaic \n\n"
+    description += " python -m Utils.VideoMosaic -a \n\n"
 
     description += "A more comprehensive example is \n \n"
     description += " python -m Utils.VideoMosaic -c AU000U,AU000V,AU000W,AU000X,AU000Y,AU000Z -r -a -t 8"
@@ -552,20 +588,26 @@ if __name__ == "__main__":
 
     cml_args = argumentHandler()
 
-    default_camera_list = ["AU000A","AU000C","AU000D","AU000G"]
-    cameras = cml_args.cameras if not cml_args.cameras is None else default_camera_list
+
+    cameras = cml_args.cameras if not cml_args.cameras is None else []
+    cameras = [sanitise(camera) for camera in cameras]
     generate = cml_args.generate_video if not cml_args.generate_video is None else True
     output = cml_args.output[0] if not cml_args.output is None else "~/mosaic_video.mp4"
+    output = output.replace(";","")
     keep_files = cml_args.keep_files if not cml_args.keep_files is None else False
-    working_directory = cml_args.working_directory if not cml_args.working_directory is None else cml_args.working_directory[0]
+    working_directory = cml_args.working_directory if cml_args.working_directory is None else cml_args.working_directory[0]
+    if not working_directory is None:
+        working_directory = working_directory.replace(";", "")
     cycle_hours = cml_args.time[0] if not cml_args.time == None else 24
+    cycle_hours = cycle_hours if type(cycle_hours) == int else 24
     no_download = False if cml_args.no_download is None else cml_args.no_download
     frame_duration = 40 if cml_args.frame_duration is None else cml_args.frame_duration[0]
     verbosity_level = 0 if cml_args.verbosity_level is None else cml_args.verbosity_level[0]
     minimum_duration = 20 if cml_args.minimum_duration is None else cml_args.minimum_duration[0]
     automatic_mode = cml_args.automatic if not cml_args.automatic is None else False
+    if not automatic_mode:
+        print("Running in background mode add -a to run in kiosk mode")
     show_ffmpeg = cml_args.show_ffmpeg if not cml_args.automatic is None else False
-
 
     printv("Cameras {}".format(cameras), verbosity=4)
     printv("Generate video {}".format(generate), verbosity=4)
@@ -583,7 +625,7 @@ if __name__ == "__main__":
     if not cml_args.shape is None:
         x_shape, y_shape = cml_args.shape[0], cml_args.shape[1]
     else:
-        x_shape, y_shape = 2,2
+        x_shape, y_shape = 4,4
 
     if not cml_args.res is None:
         x_res, y_res = cml_args.res[0], cml_args.res[1]
