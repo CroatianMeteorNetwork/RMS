@@ -37,6 +37,8 @@ from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
 from Utils.ShowerAssociation import showerAssociation
 from Utils.PlotTimeIntervals import plotFFTimeIntervals
 from Utils.TimestampRMSVideos import timestampRMSVideos
+from Utils.AuditConfig import compareConfigs
+
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -426,6 +428,27 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
     except Exception as e:
         log.debug('Plotting timestamp interval failed with message:\n' + repr(e))
+        log.debug(repr(traceback.format_exception(*sys.exc_info())))
+
+    # Generate a config audit report
+    log.info('Generate config audit report')
+    try:
+        # Make the name of the audit file
+        audit_file_name = night_data_dir_name.replace("_detected", "") + "_config_audit_report.txt"
+
+        # Construct the full path for files
+        audit_file_path = os.path.join(night_data_dir, audit_file_name)
+        config_file_path = os.path.join(night_data_dir, ".config")
+
+        with open(audit_file_path, 'w') as f:
+            f.write(compareConfigs(config_file_path,
+                                   os.path.join(config.rms_root_dir, ".configTemplate"),
+                                   os.path.join(config.rms_root_dir, "RMS/ConfigReader.py")))
+
+        extra_files.append(audit_file_path)
+
+    except Exception as e:
+        log.debug('Generating config audit failed with message:\n' + repr(e))
         log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
 
