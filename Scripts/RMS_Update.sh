@@ -63,13 +63,86 @@ git pull
 
 ### Install potentially missing libraries ###
 
-# Check if sudo requires a password
-if sudo -n true 2>/dev/null; then
-    sudo apt-get update
-    sudo apt-get install -y gobject-introspection libgirepository1.0-dev
-    sudo apt-get install -y gstreamer1.0-libav gstreamer1.0-plugins-bad
+# Function to check if a package is installed
+isInstalled() {
+    dpkg -s "$1" >/dev/null 2>&1
+}
+
+# Function to prompt for sudo password with timeout
+sudoWithTimeout() {
+    local timeout_duration=30  # Timeout in seconds
+    local attempts=3
+    local prompt="[sudo] password for $USER: "
+    
+    for ((i=1; i<=attempts; i++)); do
+        # Use read with timeout to get the password securely
+        read -s -t "$timeout_duration" -p "$prompt" password
+        echo  # Move to a new line after password input
+
+        # Check if password is empty (timeout or Ctrl+D)
+        if [[ -z "$password" ]]; then
+            echo "Password entry timed out."
+            return 1
+        fi
+
+        # Validate the password
+        if echo "$password" | sudo -S true 2>/dev/null; then
+            # Keep sudo token alive in background
+            (while true; do sudo -v; sleep 50; done) &
+            KEEP_SUDO_PID=$!
+            return 0
+        else
+            if [ $i -lt $attempts ]; then
+                echo "Sorry, try again."
+            else
+                echo "sudo: 3 incorrect password attempts"
+                return 1
+            fi
+        fi
+    done
+}
+
+# List of packages to check/install
+packages=(
+    "gobject-introspection"
+    "libgirepository1.0-dev"
+    "gstreamer1.0-libav"
+    "gstreamer1.0-plugins-bad"
+)
+
+# Check if any package is missing
+missing_packages=()
+for package in "${packages[@]}"; do
+    if ! isInstalled "$package"; then
+        missing_packages+=("$package")
+    fi
+done
+
+# If all packages are installed, inform and continue
+if [ ${#missing_packages[@]} -eq 0 ]; then
+    echo "All required packages are already installed."
 else
-    echo "sudo requires a password. Please run this script as a user with passwordless sudo access."
+    # Some packages are missing, so we need to update and install
+    echo "The following packages need to be installed: ${missing_packages[*]}"
+
+    # Prompt for sudo password with timeout
+    if ! sudoWithTimeout; then
+        echo "Password entry timed out or was incorrect. Skipping package installation."
+    else
+        # Password entered successfully, proceed with update and install
+        sudo apt-get update
+
+        # Install missing packages
+        for package in "${missing_packages[@]}"; do
+            echo "Installing $package..."
+            sudo apt-get install -y "$package"
+        done
+
+        echo "All required packages have been installed."
+        
+        # Kill the background sudo-keeping process
+        kill $KEEP_SUDO_PID 2>/dev/null
+    fi
 fi
 
 ### ###
