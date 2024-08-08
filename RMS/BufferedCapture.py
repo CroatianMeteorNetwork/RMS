@@ -512,7 +512,7 @@ class BufferedCapture(Process):
 
 
     def createGstreamDevice(self, video_format, gst_decoder='decodebin', 
-                            video_file_dir=None, segment_duration_sec=30, max_retries=5, retry_interval=1):
+                            video_file_dir=None, segment_duration_sec=30, max_retries=5, retry_interval=5):
         """
         Creates a GStreamer pipeline for capturing video from an RTSP source and 
         initializes playback with specific configurations.
@@ -582,7 +582,18 @@ class BufferedCapture(Process):
 
         # Set the pipeline to PLAYING state with retries
         for attempt in range(max_retries):
-            
+
+            log.info("Attempt {}: transitioning the Pipeline to PLAYING state.".format(attempt + 1))
+
+            # Reset pipeline if one already exists
+            if self.pipeline:
+                self.pipeline.set_state(Gst.State.NULL)
+
+                # Adding a sleep ensures the pipeline is fully cleaned up
+                time.sleep(retry_interval)
+
+                self.pipeline = None
+
             # Parse and create the pipeline
             self.pipeline = Gst.parse_launch(pipeline_str)
 
@@ -592,8 +603,8 @@ class BufferedCapture(Process):
             # Capture time
             start_time = time.time()
 
-            # Wait for the state change to complete
-            state_change_return, current_state, pending_state = self.pipeline.get_state(Gst.CLOCK_TIME_NONE)
+            # Wait for the state change to complete, with a timeout
+            state_change_return, current_state, _ = self.pipeline.get_state(Gst.SECOND*retry_interval)
 
             # Check if the state change was successful
             if state_change_return != Gst.StateChangeReturn.FAILURE and current_state == Gst.State.PLAYING:
@@ -672,10 +683,10 @@ class BufferedCapture(Process):
                         ping_success = ping(ip)
 
                         if ping_success:
-                            log.info("Camera IP ping successful! Waiting  10 seconds. ")
+                            log.info("Camera IP ping successful! Waiting 5 seconds. ")
 
                             # Wait for camera to finish booting up
-                            time.sleep(10)
+                            time.sleep(5)
                             break
 
                         time.sleep(5)
