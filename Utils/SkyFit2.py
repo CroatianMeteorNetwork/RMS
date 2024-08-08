@@ -2088,7 +2088,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 img_diagonal = np.hypot(self.platepar.X_res/2, self.platepar.Y_res/2)
 
                 # Plot radius from centre vs. fit residual (including vignetting)
-                ax_r.scatter(radius_list, fit_resids, s=8, c='b', alpha=0.5, zorder=3)
+                ax_r.scatter(radius_list, fit_resids, s=10, c='b', alpha=0.5, zorder=3)
 
                 # Plot a zero line
                 ax_r.plot(np.linspace(0, img_diagonal, 10), np.zeros(10), linestyle='dashed', alpha=0.5,
@@ -2126,7 +2126,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 ### PLOT MAG DIFFERENCE BY ELEVATION
 
                 # Plot elevation vs. fit residual
-                ax_e.scatter(elevation_list, fit_resids, s=8, c='b', alpha=0.5, zorder=3)
+                ax_e.scatter(elevation_list, fit_resids, s=10, c='b', alpha=0.5, zorder=3)
 
                 # Compute the fit residuals without extinction
                 fit_resids_noext = \
@@ -4993,8 +4993,13 @@ class PlateTool(QtWidgets.QMainWindow):
             rmsd_angular /= 60
             angular_error_label = 'deg'
 
-        else:
+        elif rmsd_angular > 0.5:
             angular_error_label = 'arcmin'
+
+        else:
+            rmsd_angular *= 60
+            angular_error_label = 'arcsec'
+
 
         print('RMSD: {:.2f} px, {:.2f} {:s}'.format(rmsd_img, rmsd_angular, angular_error_label))
 
@@ -5154,11 +5159,18 @@ class PlateTool(QtWidgets.QMainWindow):
         elev_max_ylim = np.max(np.abs(ax_elev.get_ylim()))
         skyradius_max_ylim = np.max(np.abs(ax_skyradius.get_ylim()))
         max_ylim = np.max([azim_max_ylim, elev_max_ylim, skyradius_max_ylim])
-        if max_ylim < 2.0:
+
+        if max_ylim < 0.5:
+            max_ylim = 0.5
+
+        elif max_ylim < 2.0:
             max_ylim = 2.0
+
         elif max_ylim < 5.0:
             max_ylim = 5.0
+
         else:
+
             # Make it a multiple of 5 arcmin if errors are large
             max_ylim = np.ceil(max_ylim/5)*5
 
