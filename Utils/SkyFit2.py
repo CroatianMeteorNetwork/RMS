@@ -1988,6 +1988,21 @@ class PlateTool(QtWidgets.QMainWindow):
                     # Determine the size of the residual text, larger the residual, larger the text
                     photom_resid_size = int(8 + np.abs(fit_diff)/(np.max(np.abs(self.photom_fit_resids))/5.0))
 
+                    # Determine the RGB color of the SNR text. 
+                    # SNR > 10 is green, SNR < 10 is yellow, SNR < 5 is orange, SNR < 3 is red
+                    if snr > 10:
+                        # Green
+                        snr_color = QtGui.QColor(0, 255, 0)
+                    elif (snr < 10) and (snr >= 5):
+                        # Yellow
+                        snr_color = QtGui.QColor(255, 255, 0)
+                    elif (snr < 5) and (snr >= 3):
+                        # Orange
+                        snr_color = QtGui.QColor(255, 165, 0)
+                    else:
+                        # Red
+                        snr_color = QtGui.QColor(255, 0, 0)
+
                     if self.stdev_text_filter*std <= abs(fit_diff):
 
                         # Add the photometric residual text below the star
@@ -2010,7 +2025,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         text_snr = TextItem(snr_txt, anchor=(-0.25, 0.5))
                         text_snr.setPos(star_x, star_y)
                         text_snr.setFont(QtGui.QFont('Arial', 8))
-                        text_snr.setColor(QtGui.QColor(255, 255, 255))
+                        text_snr.setColor(snr_color)
                         text_snr.setAlign(QtCore.Qt.AlignCenter)
                         self.residual_text.addTextItem(text_snr)
 
