@@ -76,7 +76,7 @@ if __name__ == "__main__":
     ref_dir = dir_dt_list[dt_diff_list.index(min(dt_diff_list))][0]
 
 
-    # Check if the config file exists in the refernce directory
+    # Check if the config file exists in the reference directory
     ref_config_path = os.path.join(cml_args.station_path, ref_dir, CONFIG_NAME)
     if not os.path.exists(ref_config_path):
         print("No config file in the reference directory:", ref_config_path)
@@ -112,7 +112,7 @@ if __name__ == "__main__":
             if not os.path.exists(config_bak_path):
                 shutil.copy2(config_path, config_bak_path)
 
-            # Copy the refernce config file in the place of the existing config file
+            # Copy the reference config file in the place of the existing config file
             shutil.copy2(ref_config_path, config_path)
 
             print("Replaced config in:", dir_name)

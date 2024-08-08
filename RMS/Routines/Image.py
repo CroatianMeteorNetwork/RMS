@@ -14,7 +14,7 @@ import cv2
 from PIL import Image, ImageFont, ImageDraw 
 import datetime
 
-# Check which imread funtion to use
+# Check which imread function to use
 try:
     imread = scipy.misc.imread
     imsave = scipy.misc.imsave
@@ -228,7 +228,7 @@ def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False, mask=None, mask_ave_
         stdpixel: [2D ndarray]
         k1: [float] relative thresholding factor (how many standard deviations above mean the maxpixel image 
             should be)
-        j1: [float] absolute thresholding factor (how many minimum abuolute levels above mean the maxpixel 
+        j1: [float] absolute thresholding factor (how many minimum absolute levels above mean the maxpixel 
             image should be)
 
     Keyword arguments:
@@ -266,7 +266,7 @@ def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False, mask=None, mask_ave_
         img_thresh = img_thresh & ~ave_saturation_mask
 
 
-    # If the mask was given, set all areas of the thresholded image convered by the mask to false
+    # If the mask was given, set all areas of the thresholded image covered by the mask to false
     if mask is not None:
         if img_thresh.shape == mask.img.shape:
             img_thresh[mask.img == 0] = False
@@ -283,7 +283,7 @@ def thresholdFF(ff, k1, j1, mask=None, mask_ave_bright=False):
         ff: [FF object] input FF image object on which the thresholding will be applied
         k1: [float] relative thresholding factor (how many standard deviations above mean the maxpixel image 
             should be)
-        j1: [float] absolute thresholding factor (how many minimum abuolute levels above mean the maxpixel 
+        j1: [float] absolute thresholding factor (how many minimum absolute levels above mean the maxpixel 
             image should be)
 
     Keyword arguments:
@@ -344,7 +344,7 @@ def gammaCorrectionImage(intensity, gamma, bp=0, wp=255):
         intensity = intensity.astype(np.float32)
 
     
-    # Clip intentities < 0 to 0
+    # Clip intensities < 0 to 0
     intensity[intensity < 0] = 0
 
     # Apply the gamma correction
@@ -660,7 +660,7 @@ def loadDark(dir_path, file_name, dtype=None, byteswap=False):
     """ Load the dark frame. 
 
     Arguments:
-        dir_path: [str] Path to the directory which containes the dark frame.
+        dir_path: [str] Path to the directory which contains the dark frame.
         file_name: [str] Name of the dark frame file.
 
     Keyword arguments:

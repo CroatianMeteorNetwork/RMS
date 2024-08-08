@@ -2,7 +2,7 @@
 
 # This script is used for updating the RMS code from GitHub
 
-# WARNING: The update might fail when new dependencies (libraires)
+# WARNING: The update might fail when new dependencies (libraries)
 #  are introduced! Further steps might have to be undertaken.
 
 

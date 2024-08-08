@@ -24,7 +24,7 @@ def fovKML(dir_path, platepar, mask=None, area_ht=100000, side_points=10, plot_s
     Keyword arguments:
         mask: [Mask object] Mask object, None by default.
         area_ht: [float] Height in meters of the computed area.
-        side_points: [int] How many points to use to evaluate the FOV on seach side of the image. Normalized
+        side_points: [int] How many points to use to evaluate the FOV on each side of the image. Normalized
             to the longest side.
         plot_station: [bool] Plot the location of the station. True by default.
 
@@ -36,7 +36,7 @@ def fovKML(dir_path, platepar, mask=None, area_ht=100000, side_points=10, plot_s
     # Find lat/lon/elev describing the view area
     polygon_sides = fovArea(platepar, mask, area_ht, side_points)
 
-    # Make longitued in the same wrap region
+    # Make longitude in the same wrap region
     lon_list = []
     for side in polygon_sides:
         side = np.array(side)
@@ -206,7 +206,7 @@ if __name__ == "__main__":
         platepar_path = cml_args.input
         dir_path = os.path.dirname(platepar_path)
 
-    # If the path to the dirctory is given
+    # If the path to the directory is given
     else:
         dir_path = cml_args.input
 

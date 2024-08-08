@@ -202,7 +202,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             platepar, fit_status = autoCheckFit(config, platepar, calstars_list)
 
 
-            # If the fit was sucessful, apply the astrometry to detected meteors
+            # If the fit was successful, apply the astrometry to detected meteors
             if fit_status:
 
                 log.info('Astrometric calibration SUCCESSFUL!')
@@ -372,7 +372,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         flat_img = None
         
 
-    # If making flat was sucessfull, save it
+    # If making flat was successful, save it
     if flat_img is not None:
 
         # Save the flat in the night directory, to keep the operational flat updated
@@ -492,7 +492,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     # If FFs are not uploaded, choose two to upload
     if config.upload_mode > 1:
     
-        # If all FF files are not uploaded, add two FF files which were successfuly recalibrated
+        # If all FF files are not uploaded, add two FF files which were successfully recalibrated
         recalibrated_ffs = []
         if recalibrated_platepars is not None:
             for ff_name in recalibrated_platepars:

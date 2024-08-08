@@ -22,7 +22,7 @@ from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
 class Shower(object):
     def __init__(self, shower_entry):
 
-        # Indicates wheter the flux parameters are defined (False by default)
+        # Indicates whether the flux parameters are defined (False by default)
         self.flux_entry = False
 
         self.iau_code = shower_entry[0]
@@ -104,7 +104,7 @@ class Shower(object):
         self.shower_vector = None
 
 
-        # Add a vactorized version of computeZHRFloat
+        # Add a vectorized version of computeZHRFloat
         self.computeZHR = np.vectorize(self.computeZHRFloat) 
 
 
@@ -284,7 +284,7 @@ class FluxShowers(object):
             la_sun_beg -= 360
         sol_array = np.arange(la_sun_beg, la_sun_end, 0.02)
 
-        # Compute ZHR values for every shower, accunting for the peak and base component
+        # Compute ZHR values for every shower, accounting for the peak and base component
         shower_codes = np.unique([shower.name for shower in self.showers])
         shower_zhrs = {shower_code: np.zeros_like(sol_array) for shower_code in shower_codes}
 
@@ -365,7 +365,7 @@ class FluxShowers(object):
         # # Plot the activity profile for all showers
         # plt.plot(sol_array, np.sum([shower_zhrs[shower_code] for shower_code in shower_codes], axis=0), color='k', label='TOTAL')
 
-        # # Plot individual activites
+        # # Plot individual activities
         # for shower in active_showers:
         #     plt.plot(sol_array, shower_zhrs[shower.name], label=shower.name)
 
@@ -408,7 +408,7 @@ def getColorList(num, color_map=None):
 def makeShowerColors(shower_data, color_map):
     """ Generates a map of distinct colours indexed by shower name """
 
-    # Sort showers into non-overlaping rows and assign them unique colors
+    # Sort showers into non-overlapping rows and assign them unique colors
     _, code_name_dict = sortShowersIntoRows(shower_data, color_map)
 
     # Assign each color to shower name
@@ -466,7 +466,7 @@ def sortShowersIntoRows(shower_data, color_map):
                         if sol_max_check > 360:
                             sol_max_check = 360
 
-                        # Check if the solar longitue range is free of other showers
+                        # Check if the solar longitude range is free of other showers
                         if not np.any(activity_stack[i, sol_min_check:sol_max_check]):
 
                             # Assign the shower code to activity stack
@@ -476,7 +476,7 @@ def sortShowersIntoRows(shower_data, color_map):
                 else:
                     if (sol_plot >= sol_min) or (sol_plot <= sol_max):
 
-                        # Check if the solar longitue range is free of other showers
+                        # Check if the solar longitude range is free of other showers
                         if (not np.any(activity_stack[i, 0:sol_max])) and \
                             (not np.any(activity_stack[i, sol_min:])):
 

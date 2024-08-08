@@ -76,7 +76,7 @@ def _solLon2jd(solFunc, year, month, L):
     """ Internal function. Numerically calculates the Julian date from the given solar longitude with the
         given method. The inverse precision is around 0.5 milliseconds.
 
-        Because the solar longitudes around Dec 31 and Jan 1 can be ambigous, the month also has to be given.
+        Because the solar longitudes around Dec 31 and Jan 1 can be ambiguous, the month also has to be given.
 
     Arguments:
         solFunc: [function] Function which calculates solar longitudes from Julian dates.

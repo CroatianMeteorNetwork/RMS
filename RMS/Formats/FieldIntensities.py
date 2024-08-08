@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-""" Format for saving image intensitites per every field. """
+""" Format for saving image intensities per every field. """
 
 from __future__ import print_function, division, absolute_import
 
@@ -28,7 +28,7 @@ def saveFieldIntensitiesText(intensity_array, dir_path, file_name, deinterlace=F
 	""" Saves sums of intensities per every field to a comma separated file. 
 	
 	Arguments:
-		intensity_array: [ndarray] Numpy array containing the sums of intensitites per every field.
+		intensity_array: [ndarray] Numpy array containing the sums of intensities per every field.
 		dir_path: [str] Path to the directory where the file will be saved.
 		file_name: [str] Name of the file in which the data will be saved.
 	"""
@@ -63,7 +63,7 @@ def saveFieldIntensitiesBin(intensity_array, dir_path, file_name):
 	""" Saves sums of intensities per every field to a binary file. 
 	
 	Arguments:
-		intensity_array: [ndarray] Numpy array containing the sums of intensitites per every field.
+		intensity_array: [ndarray] Numpy array containing the sums of intensities per every field.
 		dir_path: [str] Path to the directory where the file will be saved.
 		file_name: [str] Name of the file in which the data will be saved.
 	"""
@@ -112,7 +112,7 @@ def readFieldIntensitiesBin(dir_path, file_name, deinterlace=False):
 			# Calculate the half frame
 			half_frames[i] = float(i)/deinterlace_flag
 
-			# Read the summmed field intensity
+			# Read the summed field intensity
 			intensity_array[i] = int(np.fromfile(fid, dtype=np.uint32, count = 1))
 
 

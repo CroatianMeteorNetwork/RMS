@@ -178,7 +178,7 @@ def extractStarsAuto(img, mask=None,
             If there are too many, PSF fitting would take too long.
         segment_radius: [int] Radius (in pixels) of image segment around the detected star on which to 
             perform the fit.
-        min_stars_detect: [int] Minimum number of stars retrievied with a given intensity threshold before
+        min_stars_detect: [int] Minimum number of stars retrieved with a given intensity threshold before
             a new one is tried.
         max_stars_detect: [int] Maximum number of stars to be detected before the process is stopped.
         verbose: [bool] Print verbose output.
@@ -255,7 +255,7 @@ def extractStarsFF(
         ff_dir: [str] Path to directory where FF files are.
         ff_name: [str] Name of the FF file.
         config: [config object] configuration object (loaded from the .config file)
-        max_global_intensity: [int] maximum mean intensity of an image before it is discared as too bright
+        max_global_intensity: [int] maximum mean intensity of an image before it is discarded as too bright
         border: [int] apply a mask on the detections by removing all that are too close to the given image 
             border (in pixels)
         neighborhood_size: [int] size of the neighbourhood for the maximum search (in pixels)
@@ -347,7 +347,7 @@ def twoDGaussian(params, amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
     
     Arguments:
         params: [tuple of floats] 
-            - (x, y) independant variables, 
+            - (x, y) independent variables, 
             - saturation: [int] Value at which saturation occurs
         amplitude: [float] amplitude of the PSF
         xo: [float] PSF center, X component
@@ -478,7 +478,7 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
             continue
 
 
-        ### If the fitting was successfull, compute the star intensity
+        ### If the fitting was successful, compute the star intensity
 
         # Crop the star segment to take 3 sigma portion around the star
         crop_y_min = int(yo - 3*sigma_y) + 1
@@ -676,7 +676,7 @@ def extractStarsAndSave(config, ff_dir):
     # Write detected stars to the CALSTARS file
     CALSTARS.writeCALSTARS(star_list, ff_dir, calstars_name, config.stationID, config.height, config.width)
 
-    # Delete QueudPool backed up files
+    # Delete QueuedPool backed up files
     workpool.deleteBackupFiles()
 
     log.info('Total time taken: {:.2f} s'.format(time.time() - time_start))

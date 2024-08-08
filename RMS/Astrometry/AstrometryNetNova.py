@@ -331,8 +331,8 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
     Keyword arguments:
         ff_file_path: [str] Path to the FF file to load.
         img: [ndarray] Numpy array containing image data.
-        x_data: [list] A list of star x image coordiantes.
-        y_data: [list] A list of star y image coordiantes
+        x_data: [list] A list of star x image coordinates.
+        y_data: [list] A list of star y image coordinates
         fov_w_range: [2 element tuple] A tuple of scale_lower and scale_upper, i.e. the estimate of the 
             width of the FOV in degrees.
         api_key: [str] nova.astrometry.net user API key. None by default, in which case the default API

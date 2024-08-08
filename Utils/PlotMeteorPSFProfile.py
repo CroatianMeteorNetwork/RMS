@@ -60,7 +60,7 @@ if __name__ == "__main__":
                     help='FTPdetectinfo file with meteor detections.')
     
     arg_parser.add_argument('-s', '--sigma', metavar='SIGMA', type=float, default=-1, \
-                    help='Force sigma for fitting the Gaussian PSF (disable with -1). You can take this from the FWHM estiamted in the CALSTARS file. Sigma = FWHM/1.55.')
+                    help='Force sigma for fitting the Gaussian PSF (disable with -1). You can take this from the FWHM estimated in the CALSTARS file. Sigma = FWHM/1.55.')
     
     arg_parser.add_argument("--strip_width", metavar="STRIP_WIDTH", type=int, default=10, \
                             help="Width of the strip around the meteor. Default: 10")
@@ -202,7 +202,7 @@ if __name__ == "__main__":
                         count += 1
                         continue
 
-                    # Extract the fit parametrs
+                    # Extract the fit parameters
                     A, mu, sigma, bg = popt
                     if force_sigma > 0:
                         sigma = force_sigma

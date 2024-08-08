@@ -74,9 +74,9 @@ if __name__ == "__main__":
 		elev_list = np.linspace(0, 90, 1000)
 
 		# Compute relative extinction
-		rel_exticntion = atmosphericExtinctionCorrection(elev_list, 1000*ht) - atmosphericExtinctionCorrection(90, 1000*ht)
+		rel_extinction = atmosphericExtinctionCorrection(elev_list, 1000*ht) - atmosphericExtinctionCorrection(90, 1000*ht)
 
-		plt.plot(elev_list, rel_exticntion, label='Ht = {:.1f} km'.format(ht))
+		plt.plot(elev_list, rel_extinction, label='Ht = {:.1f} km'.format(ht))
 
 
 	plt.legend()

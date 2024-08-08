@@ -2,7 +2,7 @@
 
 # WARNING: This code will only run in Python 3+
 # Python 2 issues:
-#   - unexpcted behvaiour of the pointInsideConvexPolygonSphere (all points are always False)
+#   - unexpected behaviour of the pointInsideConvexPolygonSphere (all points are always False)
 #   - pyYAML doesn't work on Python 2
 
 from __future__ import print_function, division, absolute_import
@@ -67,7 +67,7 @@ class FluxConfig(object):
     def __init__(self):
         """Container for flux calculations."""
 
-        # How many points to use to evaluate the FOV on seach side of the image. Normalized to the longest
+        # How many points to use to evaluate the FOV on each side of the image. Normalized to the longest
         #   side.
         self.side_points = 20
 
@@ -83,7 +83,7 @@ class FluxConfig(object):
         # Limit of meteor's elevation above horizon (deg). 25 degrees by default.
         self.elev_limit = 20
 
-        # Minimum radiant elevation in the time bin (deg). 25 degreees by default
+        # Minimum radiant elevation in the time bin (deg). 25 degrees by default
         self.rad_elev_limit = 15
 
         # Radiant elevation correction exponent
@@ -230,7 +230,7 @@ class FluxMeasurements(object):
 
         # Meteors
         num_meteors_col = astropy.units.Quantity(self.meteors_data)
-        num_meteors_col.info.description = "Numer of meteors in the bin"
+        num_meteors_col.info.description = "Number of meteors in the bin"
         self.table['meteors'] = num_meteors_col
         formats['meteors'] = "%d"
 
@@ -254,7 +254,7 @@ class FluxMeasurements(object):
 
         # Shower initial velocity
         v_init_col = astropy.units.Quantity(self.v_init_data, unit=astropy.units.km/astropy.units.s)
-        v_init_col.info.description = "Aparent meteor velocity in the middle of the time bin"
+        v_init_col.info.description = "Apparent meteor velocity in the middle of the time bin"
         self.table['v_init'] = v_init_col
         formats['v_init'] = "%.3f"
 
@@ -354,7 +354,7 @@ class FluxMeasurements(object):
         data_hit = False
         for row in self.table:
 
-            # Skip rows from the beginning that have a NaN meteor_lm magntiude
+            # Skip rows from the beginning that have a NaN meteor_lm magnitude
             if np.isnan(row['meteor_lm']) and (not data_hit):
                 continue
 
@@ -376,7 +376,7 @@ class FluxMeasurements(object):
             # Get the row
             row = table_filtered[row_index]
             
-            # Skip rows from the end that have a NaN meteor_lm magntiude
+            # Skip rows from the end that have a NaN meteor_lm magnitude
             if np.isnan(row['meteor_lm']):
 
                 # Keep track of the edge of the time bin
@@ -406,7 +406,7 @@ class FluxMeasurements(object):
 
 def saveEmptyECSVTable(ecsv_file_path, shower_code, mass_index, flux_config, confidence_interval, \
     fixed_bins=False):
-    """ Save an emply ECSV table, so nothing needs to be computed. """
+    """ Save an empty ECSV table, so nothing needs to be computed. """
 
     # Save empty flux files
     flux_table = FluxMeasurements()
@@ -552,7 +552,7 @@ def loadRawCollectionAreas(dir_path, file_name):
 
 
 
-def saveTimeInvervals(config, dir_path, time_intervals):
+def saveTimeIntervals(config, dir_path, time_intervals):
     """ Save observing time intervals as determined by the cloud detector. 
     
     Arguments:
@@ -573,19 +573,19 @@ def saveTimeInvervals(config, dir_path, time_intervals):
             return o.strftime("%Y-%m-%dT%H:%M:%S.%f")
 
 
-    time_inverval_dict = {}
-    time_inverval_dict["time_intervals"] = time_intervals
-    time_inverval_dict["stationID"] = config.stationID
+    time_interval_dict = {}
+    time_interval_dict["time_intervals"] = time_intervals
+    time_interval_dict["stationID"] = config.stationID
 
     # Convert time intervals to a JSON string
-    time_interval_json = json.dumps(time_inverval_dict, default=_jsonFormatter, indent=4, sort_keys=True)
+    time_interval_json = json.dumps(time_interval_dict, default=_jsonFormatter, indent=4, sort_keys=True)
 
     with open(os.path.join(dir_path, FLUX_TIME_INTERVALS_JSON), 'w') as f:
         f.write(time_interval_json)
 
 
 
-def loadTimeInvervals(config, dir_path):
+def loadTimeIntervals(config, dir_path):
     """ Load observing time intervals as determined by the cloud detector. 
     
     Arguments:
@@ -925,7 +925,7 @@ def loadForcedBinFluxData(dir_path, file_name):
 
     ### Extract the data ###
 
-    # Add the ending bin to the solar longitdes, so they represent bin edges
+    # Add the ending bin to the solar longitudes, so they represent bin edges
     sol_bins = flux_table.table['sol'].data
     if len(sol_bins):
         sol_bins = np.radians(np.append(sol_bins, [flux_table.table.meta['sol_range'][1]]))
@@ -1171,7 +1171,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
     if not show_plots:
 
         # Try loading already computed time intervals and skip computing them anew
-        time_intervals = loadTimeInvervals(config, dir_path)
+        time_intervals = loadTimeIntervals(config, dir_path)
 
         if time_intervals is not None:
             print("Loaded already computed time intervals!")
@@ -1346,7 +1346,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
     time_intervals = computeClearSkyTimeIntervals(ratio, ratio_threshold=ratio_threshold)
 
     # Save the computed time intervals so they don't have to be recomputed later on
-    saveTimeInvervals(config, dir_path, time_intervals)
+    saveTimeIntervals(config, dir_path, time_intervals)
 
 
     if (show_plots or save_plots) and predicted_stars:
@@ -1586,7 +1586,7 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
 
     Keyword arguments:
         mask: [Mask object] Mask object, None by default.
-        side_points: [int] How many points to use to evaluate the FOV on seach side of the image. Normalized
+        side_points: [int] How many points to use to evaluate the FOV on each side of the image. Normalized
             to the longest side.
         ht_min: [float] Minimum height (km).
         ht_max: [float] Maximum height (km).
@@ -1613,7 +1613,7 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
     longer_dpx = int(platepar.X_res//longer_side_points)
     shorter_dpx = int(platepar.Y_res//shorter_side_points)
 
-    # Distionary of collection areas per height
+    # Dictionary of collection areas per height
     col_areas_ht = collections.OrderedDict()
 
     # Estimate the collection area for a given range of heights
@@ -1690,7 +1690,7 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
                 # Compute the pixel sum back assuming no corrections
                 rev_level = 10**((mag[0] - platepar.mag_lev)/(-2.5))
 
-                # Compute the sensitivty loss due to vignetting and extinction
+                # Compute the sensitivity loss due to vignetting and extinction
                 sensitivity_ratio = test_px_sum/rev_level
 
                 # print(np.abs(np.hypot(x_mean - platepar.X_res/2, y_mean - platepar.Y_res/2)), sensitivity_ratio, mag[0])
@@ -1707,7 +1707,7 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
 
                 ### ###
 
-                # Store the raw masked segment collection area, sensivitiy, and the range
+                # Store the raw masked segment collection area, sensitivity, and the range
                 col_areas_xy[(x_mean, y_mean)] = [area, azim, elev, sensitivity_ratio, r]
 
                 total_area += area
@@ -2140,7 +2140,7 @@ def computeFluxCorrectionsOnBins(
 
             if verbose:
                 print(
-                    "!!! Ang. vel in the middel of the FOV below the {:.2f} deg/s threshold, skipping time bin!".format(
+                    "!!! Ang. vel in the middle of the FOV below the {:.2f} deg/s threshold, skipping time bin!".format(
                         flux_config.ang_vel_min
                     )
                 )
@@ -2338,7 +2338,7 @@ def computeFluxCorrectionsOnBins(
 
             ### ###
 
-            # Final correction area value (height-weightned)
+            # Final correction area value (height-weighted)
             collection_area = 0
 
             # Keep track of the corrections
@@ -2625,7 +2625,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         config: [Config instance]
         dir_path: [str] Path to the working directory.
         ftpdetectinfo_path: [str] Path to a FTPdetectinfo file.
-        shower_code: [str or Shower object] IAU shower code (e.g. ETA, PER, SDA), or an instace of the Shower
+        shower_code: [str or Shower object] IAU shower code (e.g. ETA, PER, SDA), or an instance of the Shower
             class.
         dt_beg: [Datetime] Datetime object of the observation beginning.
         dt_end: [Datetime] Datetime object of the observation end.
@@ -2719,7 +2719,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
 
     if ref_height is not None:
-        print("Using a manually specificed reference height: {:.2f} km".format(ref_height))
+        print("Using a manually specified reference height: {:.2f} km".format(ref_height))
 
 
     ### Generate 5 minute bins ###
@@ -2861,7 +2861,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             print("Recalibrating...")
             recalibrated_platepars = applyRecalibrate(ftpdetectinfo_path, config)
 
-        # Compute nighly mean of the photometric zero point
+        # Compute nightly mean of the photometric zero point
         mag_lev_nightly_mean = np.mean(
             [recalibrated_platepars[ff_name].mag_lev for ff_name in recalibrated_platepars]
         )
@@ -2886,7 +2886,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             print("No sensor characterization could be loaded!")
             return None
 
-        # # Compute the nighly mean FWHM
+        # # Compute the nightly mean FWHM
         # fwhm_nightly_mean = np.mean([sensor_data[key][0] for key in sensor_data])
 
         ### ###
@@ -2962,7 +2962,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         num_meteors = 0
 
 
-        # Automatically deterine the number of meteors in the bin, if it's not given
+        # Automatically determine the number of meteors in the bin, if it's not given
         if binmeteors is None:
 
             if len(associations) > 0:
@@ -3129,7 +3129,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
 
 
-        # Compute the average angular velocity to which the flux variation throught the night will be normalized
+        # Compute the average angular velocity to which the flux variation through the night will be normalized
         #   The ang vel is of the middle of the FOV in the middle of observations
 
         # Middle Julian date of the night
@@ -3163,7 +3163,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         #   that amount of light. 1 magnitude difference scales as -0.4 of log of mass, thus:
         # frame_min_loss = np.log10(config.line_minimum_frame_range_det)/(-0.4)
         # However this makes the flux too high and is not consistent with other measurements (that doesn't make
-        #   those other measurements correct, something to be investiaged...)
+        #   those other measurements correct, something to be investigated...)
         frame_min_loss = 0.0 
         # print("Frame min loss: {:.2} mag".format(frame_min_loss))
         lm_s_nightly_mean += frame_min_loss
@@ -3383,7 +3383,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             nums, mag_bins, _ = plt.hist(corrected_peak_mags, cumulative=True, log=True, \
                 bins=len(corrected_peak_mags), density=True, color='0.5')
 
-            # Constrain the intercept so that it matchs the median magnitude
+            # Constrain the intercept so that it matches the median magnitude
             median_mag = np.median(corrected_peak_mags)
 
             # Find the bin closest to the median magnitude
@@ -3481,7 +3481,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         # nums, mag_bins, _ = ax_mag.hist(peak_mags, cumulative=True, log=True, bins=len(peak_mags), \
         #     density=True)
 
-        # # Constrain the intercept so that it matchs the median magnitude
+        # # Constrain the intercept so that it matches the median magnitude
         # median_mag = np.median(peak_mags)
 
         # # Find the bin closest to the median magnitude
@@ -3685,7 +3685,7 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path):
     # Compute collecting areas
     getCollectingArea(dir_path, config, flux_config, platepar, mask)
 
-    # Run cloud detection and store the approprite files (don't finish if Python 2 is used, 
+    # Run cloud detection and store the appropriate files (don't finish if Python 2 is used, 
     #   just recalibrate the platepar)
     print("Detecting clouds...")
     time_intervals = detectClouds(config, dir_path, mask=mask, save_plots=True, show_plots=False, 

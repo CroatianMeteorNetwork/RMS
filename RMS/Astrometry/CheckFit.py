@@ -439,7 +439,7 @@ def autoCheckFit(config, platepar, calstars_list, _fft_refinement=False):
     Return:
         (platepar, fit_status):
             platepar: [Platepar structure] Estimated/refined platepar.
-            fit_status: [bool] True if fit was successfuly, False if not.
+            fit_status: [bool] True if fit was successful, False if not.
     """
 
 
@@ -543,7 +543,7 @@ def autoCheckFit(config, platepar, calstars_list, _fft_refinement=False):
     fatol, xatol_ang = computeMinimizationTolerances(config, platepar, len(star_dict))
 
 
-    ### If the initial match is good enough, do only quick recalibratoin ###
+    ### If the initial match is good enough, do only quick recalibration ###
 
     # Match the stars and calculate the residuals
     n_matched, avg_dist, cost, _ = matchStarsResiduals(config, platepar, catalog_stars, star_dict, \
@@ -554,7 +554,7 @@ def autoCheckFit(config, platepar, calstars_list, _fft_refinement=False):
         # Check if the average distance with the tightest radius is close
         if avg_dist < config.dist_check_quick_threshold:
 
-            log.info("Using quick fit with smaller radiia...")
+            log.info("Using quick fit with smaller radii...")
 
             # Use a reduced set of initial radius values
             radius_list = [1.5, min_radius]
@@ -562,7 +562,7 @@ def autoCheckFit(config, platepar, calstars_list, _fft_refinement=False):
     ##########
 
 
-    # Match increasingly smaller search radiia around image stars
+    # Match increasingly smaller search radii around image stars
     for i, match_radius in enumerate(radius_list):
 
         # Match the stars and calculate the residuals
@@ -577,7 +577,7 @@ def autoCheckFit(config, platepar, calstars_list, _fft_refinement=False):
         log.info("    Average deviation = {:>6.2f} px".format(avg_dist))
 
 
-        # The initial number of matched stars has to be at least the number of FF imaages, otherwise it means
+        # The initial number of matched stars has to be at least the number of FF images, otherwise it means
         #   that the initial platepar is no good
         if n_matched < config.calstars_files_N:
             log.info("The total number of initially matched stars is too small! Please manually redo the plate or make sure there are enough calibration stars.")
@@ -732,10 +732,10 @@ if __name__ == "__main__":
     pp, fit_status = autoCheckFit(config, platepar, calstars_list)
 
 
-    # If the fit suceeded, save the platepar
+    # If the fit succeeded, save the platepar
     if fit_status:
 
-        log.info('ACF sucessful!')
+        log.info('ACF successful!')
 
         # Save the old platepar
         shutil.move(os.path.join(dir_path, config.platepar_name), os.path.join(dir_path, 

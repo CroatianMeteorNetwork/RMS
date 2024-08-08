@@ -24,7 +24,7 @@ import numpy as np
 
 
 def validDefaultFTPdetectinfo(file_name):
-    """ Given a name of a file, check if it's the defualt FTPdetectinfo file (without any extensions). 
+    """ Given a name of a file, check if it's the default FTPdetectinfo file (without any extensions). 
     """
 
     if file_name.startswith("FTPdetectinfo") and file_name.endswith('.txt') and \
@@ -220,8 +220,8 @@ def readFTPdetectinfo(ff_directory, file_name, ret_input_format=False):
 
     Keyword arguments:
         ret_input_format: [bool] If True, the list that can be written back using writeFTPdetectinfo is 
-            returned. False returnes the expanded list containing everyting that was read from the file (this
-            is the default behavious, thus it's False by default)
+            returned. False returns the expanded list containing everything that was read from the file (this
+            is the default behavior, thus it's False by default)
 
     Return:
         [tuple]: Two options, see ret_input_format.

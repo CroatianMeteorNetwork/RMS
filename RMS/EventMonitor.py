@@ -552,7 +552,7 @@ class EventContainer(object):
 
         arguments:
             population: [list] list of trajectories to be appended to
-            ob_ev: An observed event, specified as a lat (degrees), lon (degress), ht (km) and elevation (degrees)
+            ob_ev: An observed event, specified as a lat (degrees), lon (degrees), ht (km) and elevation (degrees)
             min_elevation: [degrees] observed elevation, which will always be the minimum
 
         returns:

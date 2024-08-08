@@ -176,7 +176,7 @@ def generateWebsite(index_dir, flux_showers, ref_dt, results_all_years, results_
     </p>
     <p>
         The ZHR is not the number of meteors an observer will see in reality - for example, during the 
-        peak of the Perseids when their ZHR is about 100, you can expect to see about one Persied every minute.
+        peak of the Perseids when their ZHR is about 100, you can expect to see about one Perseid every minute.
         However, if the Moon is full this number is easily halved, and if the radiant is low in the sky
         (below 30 degrees) you will see even less.
     </p>
@@ -960,7 +960,7 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-a', '--auto', metavar='H_FREQ', type=float, default=None, const=1.0, 
         nargs='?',
-        help="""Run continously every H_FREQ hours. If argument not given, the code will run every hour."""
+        help="""Run continuously every H_FREQ hours. If argument not given, the code will run every hour."""
         )
 
     arg_parser.add_argument(

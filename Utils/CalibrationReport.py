@@ -167,7 +167,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
             if (jd not in star_dict) or (jd not in ff_dict):
                 continue
 
-            # Make sure that the chosen file has been successfuly recalibrated
+            # Make sure that the chosen file has been successfully recalibrated
             if "auto_recalibrated" in recalibrated_platepars[ff_name_temp]:
                 if not recalibrated_platepars[ff_name_temp]["auto_recalibrated"]:
                     continue
@@ -299,7 +299,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
 
         ### Plot match residuals ###
 
-        # Compute preducted positions of matched image stars from the catalog
+        # Compute predicted positions of matched image stars from the catalog
         x_predicted, y_predicted = raDecToXYPP(matched_catalog_stars[:, 0], \
             matched_catalog_stars[:, 1], max_jd, platepar)
 
@@ -469,7 +469,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         if config.use_flat:
             platepar.vignetting_coeff = 0.0
 
-        # Extact intensities and mangitudes
+        # Extract intensities and magnitudes
         star_intensities = image_stars[:, 2]
         catalog_ra, catalog_dec, catalog_mags = matched_catalog_stars.T
 

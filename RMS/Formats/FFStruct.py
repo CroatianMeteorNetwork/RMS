@@ -1,4 +1,4 @@
-""" Definition of an FF file structure. This part is separated to avoid circual dependencies of modules. """
+""" Definition of an FF file structure. This part is separated to avoid circular dependencies of modules. """
 
 from __future__ import print_function, division, absolute_import
 

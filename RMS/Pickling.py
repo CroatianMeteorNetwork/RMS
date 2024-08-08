@@ -54,5 +54,5 @@ def loadPickle(dir_path, file_name):
 
         except (IOError, EOFError, TypeError, KeyError):
             
-            print('The pickle file was corruped and could not be loaded:', os.path.join(dir_path, file_name))
+            print('The pickle file was corrupted and could not be loaded:', os.path.join(dir_path, file_name))
             return None

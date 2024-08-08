@@ -78,7 +78,7 @@ def find3DLines(point_list, start_time, config, fireball_detection=True):
         point_list: [ndarray] list of all points
         start_time: [time.time() object] starting time of the loop
         config: [config object] defines configuration parameters fro the config file
-        get_single: [bool] returns only 1 line, does not perform recusrive line searching
+        get_single: [bool] returns only 1 line, does not perform recursive line searching
     
     Return:
         [list] list of found lines
@@ -118,7 +118,7 @@ def find3DLines(point_list, start_time, config, fireball_detection=True):
         # Find only one line
         get_single = True
 
-        # Load faint meteor detecion parameters instead of fireball detection parameters
+        # Load faint meteor detection parameters instead of fireball detection parameters
         grouping_config.max_time = config.max_time_det
         grouping_config.distance_threshold = config.distance_threshold_det
         grouping_config.gap_threshold = config.gap_threshold_det
@@ -199,7 +199,7 @@ def thresholdAndSubsample(frames, compressed, min_level, min_points, k1, j1, f):
         min_level: [int] The point will be subsampled if it has this minimum pixel level (i.e. brightness).
         min_points: [int] Minimum number of points in the subsampled block that is required to pass the 
             threshold.
-        k1: [float] Threhsold max > avg + k1*stddev
+        k1: [float] Threshold max > avg + k1*stddev
         j1: [float] Constant offset in the threshold levels.
         f: [int] Decimation scale
 

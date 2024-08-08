@@ -27,7 +27,7 @@ usage:
 	success = exit code 0
  2. feed somagic-capture over standard input/output
 restrictions:
- - has to use binary-blob (firmware)... can be extracted over USB, extracted from CD or downloaded illegally (propertary)
+ - has to use binary-blob (firmware)... can be extracted over USB, extracted from CD or downloaded illegally (proprietary)
  - no V4L2 driver, unless kernel is recompiled (no way!)
 
 ## Arkmicro UVC

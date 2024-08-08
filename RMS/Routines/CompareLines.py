@@ -20,7 +20,7 @@ def frechetDist(P,Q):
     """
 
     def eucDist(pt1, pt2):
-        """ Eucledian distance between 2 points in 2D space.
+        """ Euclidean distance between 2 points in 2D space.
         """
 
         return math.sqrt((pt2[0] - pt1[0])**2 + (pt2[1] - pt1[1])**2)
@@ -47,7 +47,7 @@ def frechetDist(P,Q):
 
 
 def samplePolarLine(rho, theta, img_h, img_w, nsamples=10):
-    """ Samples the line given in polar coordinates and returns Caretsian coordinates of the samples.
+    """ Samples the line given in polar coordinates and returns Cartesian coordinates of the samples.
 
     @param rho: distance parameter of the line in polar coordinates (px)
     @param theta: angle parameter of the line in polar coordinates (degrees)

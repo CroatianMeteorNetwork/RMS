@@ -40,7 +40,7 @@ def drawText(img_arr, img_text):
     im = im.convert('RGB')
     draw = ImageDraw.Draw(im)
 
-    # Draw the text on the image, in the upper left corent
+    # Draw the text on the image, in the upper left corner
     draw.text((0, 0), img_text, (255,255,0), font=PIL_FONT)
     draw = ImageDraw.Draw(im)
 

@@ -75,7 +75,7 @@ class BackupContainer(object):
             saved to disk when the worker function finishes, and can be later restored. 
         """
 
-        # Take the input list a tuple, as it has to be imutable to be a dictionary key
+        # Take the input list a tuple, as it has to be immutable to be a dictionary key
         self.inputs = listToTupleRecursive(inputs)
 
         self.outputs = outputs
@@ -160,7 +160,7 @@ class QueuedPool(object):
         # blocking when using get_nowait)
         manager = multiprocessing.Manager()
 
-        # Only init with maxsize if given, otherwise it return a TypeErorr when fed data from Compressor
+        # Only init with maxsize if given, otherwise it return a TypeError when fed data from Compressor
         if input_queue_maxsize is None:
             self.input_queue = manager.Queue()
         else:

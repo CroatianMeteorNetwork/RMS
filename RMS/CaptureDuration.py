@@ -6,7 +6,7 @@ import ephem
 
 
 def captureDuration(lat, lon, elevation, current_time=None, max_hours=23):
-    """ Calcualtes the start time and the duration of capturing, for the given geographical coordinates. 
+    """ Calculates the start time and the duration of capturing, for the given geographical coordinates. 
     
     Arguments:
         lat: [float] latitude +N in degrees

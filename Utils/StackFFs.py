@@ -25,11 +25,11 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
         file_format: [str] Image format for the stack. E.g. jpg, png, bmp
 
     Keyword arguments:
-        deinterlace: [bool] True if the image shoud be deinterlaced prior to stacking. False by default.
+        deinterlace: [bool] True if the image should be deinterlaced prior to stacking. False by default.
         subavg: [bool] Whether the average pixel image should be subtracted form the max pixel image. False
             by default. 
         filter_bright: [bool] Whether images with bright backgrounds (after average subtraction) should be
-            skipped. False by defualt.
+            skipped. False by default.
         flat_path: [str] Path to the flat calibration file. None by default. Will only be used if subavg is
             False.
         file_list: [list] A list of file for stacking. False by default, in which case all FF files in the
@@ -84,7 +84,7 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
             # Load FF file
             ff = readFF(dir_path, ff_name)
 
-            # Skip the file if it is corruped
+            # Skip the file if it is corrupted
             if ff is None:
                 continue
 
@@ -93,7 +93,7 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
             maxpixel = ff.maxpixel
             avepixel = ff.avepixel
 
-            # Dinterlace the images
+            # Deinterlace the images
             if deinterlace:
                 maxpixel = deinterlaceBlend(maxpixel)
                 avepixel = deinterlaceBlend(avepixel)
