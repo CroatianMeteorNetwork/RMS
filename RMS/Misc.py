@@ -403,7 +403,7 @@ def checkListEquality(t1, t2):
 
         else:
 
-            # If the elements are someting else, compare them directly
+            # If the elements are something else, compare them directly
             if e1 != e2:
                 return False
 

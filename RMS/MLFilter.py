@@ -1,5 +1,5 @@
 """ 
-    Filter records in FTDetectionInfo file by using machine learning, to avoid artefacts
+    Filter records in FTDetectionInfo file by using machine learning, to avoid artifacts
     The old unfiltered file is renamed to _unfiltered'
     by Milan Kalina, 2022
     based on https://github.com/fiachraf/meteorml 
@@ -80,7 +80,7 @@ def classify_image(interpreter, image, top_k=1):
 
 
 def classifyPNGs(file_dir, model_path):
-    """ Given a directory with PNG files of meteors, classify them into meteors vs artefacts using the ML 
+    """ Given a directory with PNG files of meteors, classify them into meteors vs artifacts using the ML 
         model. 
     """
 
@@ -118,7 +118,7 @@ def classifyPNGs(file_dir, model_path):
 
         #image = standardize_me1(image)
         
-        # Classify the image and mesaure the time
+        # Classify the image and measure the time
         #time1 = time.time()
         prob = classify_image(interpreter, image)
         #time2 = time.time()
@@ -184,7 +184,7 @@ def blackfill(image, leftover_top=0, leftover_bottom=0, leftover_left=0, leftove
     When squaring the image it will also keep the meteor detection in roughly the center
 
     Resizing of the images to be all the same size will be done in another script using the keras.preprocessing module
-    Could also do squaring of images using keras.preprocessing module I just thought doing it this might yield better results as it wont be stretched or distored in a potentially non-uniform way
+    Could also do squaring of images using keras.preprocessing module I just thought doing it this might yield better results as it wont be stretched or distorted in a potentially non-uniform way
     """
 
     if leftover_top > 0:
@@ -241,7 +241,7 @@ def crop_detections(detection_info, fits_dir):
         fits_file = FFfile.read(fits_dir, fits_file_name, fmt="fits")
 
         # image array with background set to 0 so detections stand out more
-        # TODO inlcude code to use mask for the camera, currently masks not available on the data given to me, Fiachra Feehilly (2021)
+        # TODO include code to use mask for the camera, currently masks not available on the data given to me, Fiachra Feehilly (2021)
         detect_only = fits_file.maxpixel - fits_file.avepixel
 
         # set image to only include frames where detection occurs, reduces likelihood that there will then be multiple detections in the same cropped image
@@ -361,7 +361,7 @@ def makePNGCrops(FTP_path, FF_dir_path):
 
                 #save the Numpy array as a png using PIL
                 im = Image.fromarray(square_crop_image)
-                im = im.convert("L")    #converts to grescale
+                im = im.convert("L")    #converts to grayscale
                 im.save(os.path.join(temp_png_dir, png_name + ".png"))
 
             else:
@@ -375,7 +375,7 @@ def makePNGCrops(FTP_path, FF_dir_path):
 
 
 def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=False, clear_prev_run=False):
-    """ Using machine learning, reject false positivies and only keep real meteors. An updated FTPdetectinfo
+    """ Using machine learning, reject false positives and only keep real meteors. An updated FTPdetectinfo
         file will be saved.  
 
     Arguments:  
@@ -455,13 +455,13 @@ def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=
     if keep_pngs:
 
         meteors_dir = os.path.abspath(os.path.join(png_dir, os.pardir, 'meteors'))
-        artefacts_dir = os.path.abspath(os.path.join(png_dir, os.pardir, 'artefacts'))
+        artifacts_dir = os.path.abspath(os.path.join(png_dir, os.pardir, 'artifacts'))
 
         if not os.path.exists(meteors_dir):
             os.mkdir(meteors_dir)
 
-        if not os.path.exists(artefacts_dir):
-            os.mkdir(artefacts_dir)
+        if not os.path.exists(artifacts_dir):
+            os.mkdir(artifacts_dir)
 
     # Otherwise remove any PNG directories that might already exist
     else:
@@ -517,7 +517,7 @@ def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=
             status_str = "artefact"
 
             if keep_pngs:
-                keep_png_dir = artefacts_dir
+                keep_png_dir = artifacts_dir
 
 
         log.info(png_name + " - " + "Score: {:6.1%} - {:s}".format(pred_score, status_str))

@@ -31,7 +31,7 @@ except:
     from ConfigParser import NoOptionError, RawConfigParser
 
 
-# Used to determine detection parametrs which will change in ML filtering is available
+# Used to determine detection parameters which will change in ML filtering is available
 try:
     from tflite_runtime.interpreter import Interpreter
     TFLITE_AVAILABLE = True
@@ -148,7 +148,7 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
         file to load. 
 
     Arguments:
-        cml_args_confg: [None/str/list] Input from cml_args.confg from argparse.
+        cml_args_config: [None/str/list] Input from cml_args.config from argparse.
         dir_path: [list or str] Path to the working directory, or multiple paths.
 
     Return:
@@ -390,7 +390,7 @@ class Config:
         # Flag determining if uploading is enabled or not
         self.upload_enabled = True
 
-        # Delay upload after files are added to the queue by the given number of minues
+        # Delay upload after files are added to the queue by the given number of minutes
         self.upload_delay = 0
 
         # Address of the upload server
@@ -481,7 +481,7 @@ class Config:
         self.kht_binary_extension = 'so'
 
         # 3D line finding for meteor detection
-        self.max_points_det = 600 # maximumum number of points during 3D line search in faint meteor detection (used to minimize runtime)
+        self.max_points_det = 600 # maximum number of points during 3D line search in faint meteor detection (used to minimize runtime)
         self.distance_threshold_det = 50**2 # maximum distance between the line and the point to be takes as a part of the same line
         self.gap_threshold_det = 500**2 # maximum allowed gap between points
         self.min_pixels_det = 10 # minimum number of pixels in a strip
@@ -497,7 +497,7 @@ class Config:
         self.centroids_max_deviation = 2 # maximum deviation of a centroid point from a LSQ fitted line (if above max, it will be rejected)
         self.centroids_max_distance =  30 # maximum distance in pixels between centroids (used for filtering spurious centroids)
 
-        # Angular veloicty filtering parameter - detections slower or faster than these angular velocities
+        # Angular velocity filtering parameter - detections slower or faster than these angular velocities
         # will be rejected (deg/s)
         self.ang_vel_min = 0.5
         self.ang_vel_max = 35.0
@@ -517,7 +517,7 @@ class Config:
         ##### StarExtraction
 
         # Extraction parameters
-        self.max_global_intensity = 150 # maximum mean intensity of an image before it is discared as too bright
+        self.max_global_intensity = 150 # maximum mean intensity of an image before it is discarded as too bright
         self.border = 10 #  apply a mask on the detections by removing all that are too close to the given image border (in pixels)
         self.neighborhood_size = 10 # size of the neighbourhood for the maximum search (in pixels)
         self.intensity_threshold = 5 # a threshold for cutting the detections which are too faint (0-255)

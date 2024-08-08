@@ -144,7 +144,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     Keyword arguments:
         duration: [float] Time in seconds to capture. None by default.
         video_file: [str] Path to the video file, if it was given as the video source. None by default.
-        nodetect: [bool] If True, detection will not be performed. False by defualt.
+        nodetect: [bool] If True, detection will not be performed. False by default.
         detect_end: [bool] If True, detection will be performed at the end of the night, when capture
             finishes. False by default.
         upload_manager: [UploadManager object] A handle to the UploadManager, which handles uploading files to
@@ -269,7 +269,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         
 
     log.info('Initializing frame buffers...')
-    ### For some reason, the RPi 3 does not like memory chunks which size is the multipier of its L2
+    ### For some reason, the RPi 3 does not like memory chunks which size is the multiplier of its L2
     ### cache size (512 kB). When such a memory chunk is provided, the compression becomes 10x slower
     ### then usual. We are applying a dirty fix here where we just add an extra image row and column
     ### if such a memory chunk will be created. The compression is performed, and the image is cropped
@@ -329,7 +329,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         # If the capture is being resumed into the directory, load all previously saved FF files
         if resume_capture:
 
-            # Load all preocessed FF files
+            # Load all processed FF files
             for i, ff_name in enumerate(sorted(os.listdir(night_data_dir))):
 
                 # Every 50 files loaded, update the flag file
@@ -546,7 +546,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         detector.deleteBackupFiles()
 
 
-    # !!! Currenty under testing
+    # !!! Currently under testing
     # # If the capture was run for a limited time, run the upload right away
     # if fixed_duration and (upload_manager is not None):
 
@@ -661,7 +661,7 @@ def processIncompleteCaptures(config, upload_manager):
             any_ftpdetectinfo_files = True
 
             # Is the platepar in the captured_dir_path newer than latest FTP file?
-            # i.e. has the operator replaced the platepar because of bad calibraton?
+            # i.e. has the operator replaced the platepar because of bad calibration?
             newest_FTPfile_older_than_platepar = True
             for FTPfile in FTPdetectinfo_files:
                 capture_platepar = os.path.join(captured_dir_path,config.platepar_name)
@@ -948,7 +948,7 @@ if __name__ == "__main__":
 
                     log.info('Rebooting now!')
 
-                    # Reboot the computer (script needs sudo priviledges, works only on Linux)
+                    # Reboot the computer (script needs sudo privileges, works only on Linux)
                     try:
                         os.system('sudo shutdown -r now')
 

@@ -263,7 +263,7 @@ class GeoPoints(object):
 
         for name, lat, lon, elev in zip(self.names, self.lat_data, self.lon_data, self.ele_data):
 
-            # Compute ECI coordiantes of the current point
+            # Compute ECI coordinates of the current point
             eci = geo2Cartesian(lat, lon, elev, jd)
 
             # Compute the vector pointing from the reference position to the current position
@@ -342,7 +342,7 @@ class PairedStars(object):
         """ Add a pair between image coordinates and a star or a geo point. 
     
         Arguments:
-            x: [float] Image X coordiante.
+            x: [float] Image X coordinate.
             y: [float] Image Y coordinate.
             intens_acc: [float] Sum of pixel intensities.
             obj: [object] Instance of CatalogStar or GeoPoint.
@@ -386,7 +386,7 @@ class PairedStars(object):
         if not len(self.paired_stars):
             return None
 
-        # Find the closest star to the coordiantes
+        # Find the closest star to the coordinates
         min_index = self.findClosestPickedStarIndex(pos_x, pos_y)
 
         # Remove the star from the list
@@ -416,7 +416,7 @@ class PairedStars(object):
 
 
     def allCoords(self):
-        """ Return all coordiantes, image and sky in the [(x, y, intens_acc), (ra, dec, mag)] list form 
+        """ Return all coordinates, image and sky in the [(x, y, intens_acc), (ra, dec, mag)] list form 
             for every entry. 
         """
 
@@ -519,7 +519,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.single_click_photometry = False
 
         # Star picking mode variables
-        self.star_aperature_radius = 5
+        self.star_aperture_radius = 5
         self.x_centroid = self.y_centroid = None
         self.closest_type = None
         self.closest_cat_star_indx = None
@@ -616,7 +616,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar.gamma = gamma
 
 
-        # Load distorion type index
+        # Load distortion type index
         self.dist_type_index = self.platepar.distortion_type_list.index(self.platepar.distortion_type)
 
 
@@ -908,17 +908,17 @@ class PlateTool(QtWidgets.QMainWindow):
         self.star_pick_info.setParentItem(self.img_frame)
         self.star_pick_info.setPos(0, self.platepar.Y_res)
 
-        # Default variables even when constructor isnt called
+        # Default variables even when constructor isn't called
         self.star_pick_mode = False
 
         # Cursor
-        self.cursor = CursorItem(self.star_aperature_radius, pxmode=True)
+        self.cursor = CursorItem(self.star_aperture_radius, pxmode=True)
         self.img_frame.addItem(self.cursor, ignoreBounds=True)
         self.cursor.hide()
         self.cursor.setZValue(20)
 
         # Cursor (window)
-        self.cursor2 = CursorItem(self.star_aperature_radius, pxmode=True, thickness=2)
+        self.cursor2 = CursorItem(self.star_aperture_radius, pxmode=True, thickness=2)
         self.zoom_window.addItem(self.cursor2, ignoreBounds=True)
         self.cursor2.hide()
         self.cursor2.setZValue(20)
@@ -1051,7 +1051,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.sigForceDistortionToggled.connect(self.onFitParametersChanged)
         self.tab.param_manager.sigOnVignettingFixedToggled.connect(self.onVignettingChanged)
 
-        # Connect astronmetry & photometry buttons to functions
+        # Connect astrometry & photometry buttons to functions
         self.tab.param_manager.sigFitPressed.connect(lambda: self.fitPickedStars())
         self.tab.param_manager.sigPhotometryPressed.connect(lambda: self.photometry(show_plot=True))
         self.tab.param_manager.sigAstrometryPressed.connect(self.showAstrometryFitPlots)
@@ -1318,7 +1318,7 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Format the status message which will be printed in the status bar below the plot.
 
         Arguments:
-            x: [float] Plot X coordiante.
+            x: [float] Plot X coordinate.
             y: [float] Plot Y coordinate.
 
         Return:
@@ -1563,7 +1563,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.geo_points = np.c_[self.geo_points_obj.ra_data, self.geo_points_obj.dec_data, \
                 np.ones_like(self.geo_points_obj.ra_data)]
 
-            # Compute image coordiantes of geo points (always without refraction)
+            # Compute image coordinates of geo points (always without refraction)
             pp_noref = copy.deepcopy(self.platepar)
             pp_noref.refraction = False
             pp_noref.updateRefRADec(preserve_rotation=True)
@@ -1586,7 +1586,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.geo_filtered_indices = filtered_indices_all
 
 
-            # Hold a list of geo points (equatorial coordiantes) which are visible inside the FOV (with a 
+            # Hold a list of geo points (equatorial coordinates) which are visible inside the FOV (with a 
             #   fake magnitude)
             geo_xy = geo_xy[self.geo_filtered_indices]
             self.geo_x_filtered, self.geo_y_filtered = geo_xy.T
@@ -1609,7 +1609,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         cat_stars_xy = np.c_[self.catalog_x, self.catalog_y, catalog_mag]
 
-        ### Take only those stars inside the FOV  and iamge ###
+        ### Take only those stars inside the FOV  and image ###
 
         # Get indices of stars inside the fov
         filtered_indices, _ = self.filterCatalogStarsInsideFOV(self.catalog_stars)
@@ -2263,7 +2263,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     min_frame = min(self.pick_list.keys())
                     next_frame = self.img.getFrame() + n
 
-                    # Only allow changing frames to adjecent ones to the max/min
+                    # Only allow changing frames to adjacent ones to the max/min
                     if (next_frame < (min_frame - 1)) or (next_frame > (max_frame + 1)):
                         change_allowed = False
 
@@ -2507,7 +2507,7 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             if self.input_path:
 
-                # Normalize separator so it's system indepentent
+                # Normalize separator so it's system independent
                 self.input_path = self.input_path.replace('\\', os.sep).replace('/', os.sep)
 
                 # Check if the last part of the input path is a file or a directory (check for the dot)
@@ -2719,7 +2719,7 @@ class PlateTool(QtWidgets.QMainWindow):
                                                                       prev_y_cent=self.y_centroid)
                         else:
 
-                            # Check if a star centroid is available from CALSTARS, and use it first becuase
+                            # Check if a star centroid is available from CALSTARS, and use it first because
                             #   the PSF fit should result in a better centroid estimate
 
                             # Check if the closest CALSTARS star is within the radius
@@ -2750,7 +2750,7 @@ class PlateTool(QtWidgets.QMainWindow):
                                         closest_dist_indx = np.argmin(dist_arr)
 
                                         # If the CALSTARS entry is within the aperture radius, take that star
-                                        if dist_arr[closest_dist_indx] <= self.star_aperature_radius:
+                                        if dist_arr[closest_dist_indx] <= self.star_aperture_radius:
 
                                             self.x_centroid = stars_x[closest_dist_indx]
                                             self.y_centroid = stars_y[closest_dist_indx]
@@ -2786,7 +2786,7 @@ class PlateTool(QtWidgets.QMainWindow):
                             y=[self.y_centroid + 0.5])
 
 
-                        # Find coordiantes of the star or geo points closest to the clicked point
+                        # Find coordinates of the star or geo points closest to the clicked point
                         x_data, y_data = self.findClickedStarOrGeoPoint(self.x_centroid, self.y_centroid)
 
 
@@ -2807,7 +2807,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         self.sel_cat_star_markers2.setData(pos=self.paired_stars.imageCoords(draw=True))
 
 
-                        # Find coordiantes of the star or geo points closest to the clicked point
+                        # Find coordinates of the star or geo points closest to the clicked point
                         x_data, y_data = self.findClickedStarOrGeoPoint(self.mouse_x, self.mouse_y)
 
                         # Add the new point
@@ -3316,7 +3316,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.updateDistortion()
 
 
-            # Change extintion scale
+            # Change extinction scale
             elif event.key() == QtCore.Qt.Key_9:
                 
                 self.platepar.extinction_scale += 0.1
@@ -3577,7 +3577,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def wheelEvent(self, event, axis=None):
-        """ Change star selector aperature on scroll. """
+        """ Change star selector aperture on scroll. """
         
         # Read the wheel direction
         try:
@@ -3596,16 +3596,16 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Increase aperture size
                 if delta < 0:
                     self.scrolls_back = 0
-                    self.star_aperature_radius += 0.5
-                    self.cursor.setRadius(self.star_aperature_radius)
-                    self.cursor2.setRadius(self.star_aperature_radius)
+                    self.star_aperture_radius += 0.5
+                    self.cursor.setRadius(self.star_aperture_radius)
+                    self.cursor2.setRadius(self.star_aperture_radius)
 
                 # Decrease aperture size
-                elif delta > 0 and self.star_aperature_radius > 1:
+                elif delta > 0 and self.star_aperture_radius > 1:
                     self.scrolls_back = 0
-                    self.star_aperature_radius -= 0.5
-                    self.cursor.setRadius(self.star_aperature_radius)
-                    self.cursor2.setRadius(self.star_aperature_radius)
+                    self.star_aperture_radius -= 0.5
+                    self.cursor.setRadius(self.star_aperture_radius)
+                    self.cursor2.setRadius(self.star_aperture_radius)
 
             else:
 
@@ -3787,7 +3787,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def toggleShowRegion(self):
-        """ Togle whether to show the photometry region for manualreduction """
+        """ Toggle whether to show the photometry region for manualreduction """
         if self.region.isVisible():
             self.region.hide()
         else:
@@ -3821,7 +3821,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def updateMeasurementRefractionCorrection(self):
 
-        # If the refraction is disabled and the groud points are not measured, then correct the measured
+        # If the refraction is disabled and the group points are not measured, then correct the measured
         #   points on the sky for refraction (as it is not taken into account)
         # WARNING: This should not be used if the distortion model itself compensates for the refraction 
         #   (e.g. the polynomial model)
@@ -3893,7 +3893,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def getInitialParamsAstrometryNet(self, upload_image=True):
-        """ Get the estimate of the initial astrometric parameters using astromety.net. """
+        """ Get the estimate of the initial astrometric parameters using astrometry.net. """
 
         fail = False
         solution = None
@@ -3931,7 +3931,7 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             fail = True
 
-        # Try finding the soluting by uploading the whole image
+        # Try finding the solution by uploading the whole image
         if fail or upload_image:
 
             print("Using the whole image in astrometry.net...")
@@ -4113,7 +4113,7 @@ class PlateTool(QtWidgets.QMainWindow):
                                    "Image Files (*.png *.jpg *.bmp *.nef *.tif)")[0]
 
 
-        # If no previous ways of opening data was sucessful, open a file
+        # If no previous ways of opening data was successful, open a file
         if img_handle is None:
             img_handle = detectInputTypeFile(self.input_path, self.config, beginning_time=beginning_time, 
                                              flipud=self.flipud)
@@ -4400,7 +4400,7 @@ class PlateTool(QtWidgets.QMainWindow):
     def loadFlat(self):
         """ Open a file dialog and ask user to load a flat field. """
 
-        # Check if flat exists in the folder, and set it as the defualt file name if it does
+        # Check if flat exists in the folder, and set it as the default file name if it does
         if self.config.flat_file in os.listdir(self.dir_path):
             initial_file = os.path.join(self.dir_path, self.config.flat_file)
         else:
@@ -4442,7 +4442,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             flat = None
 
-        # Check if the flat field was successfuly loaded
+        # Check if the flat field was successfully loaded
         if flat is None:
             qmessagebox(title='Flat field file error',
                         message='The file you selected could not be loaded as a flat field!',
@@ -4454,7 +4454,7 @@ class PlateTool(QtWidgets.QMainWindow):
     def loadDark(self):
         """ Open a file dialog and ask user to load a dark frame. """
 
-        # Check if dark exists in the folder, and set it as the defualt file name if it does
+        # Check if dark exists in the folder, and set it as the default file name if it does
         if self.config.dark_file in os.listdir(self.dir_path):
             initial_file = os.path.join(self.dir_path, self.config.dark_file)
         else:
@@ -4501,7 +4501,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             dark = None
 
-        # Check if the dark frame was successfuly loaded
+        # Check if the dark frame was successfully loaded
         if dark is None:
             qmessagebox(title='Dark field file error',
                         message='The file you selected could not be loaded as a dark field!',
@@ -4580,7 +4580,7 @@ class PlateTool(QtWidgets.QMainWindow):
         ######################################################################################################
 
         # Outer circle radius
-        outer_radius = self.star_aperature_radius*2
+        outer_radius = self.star_aperture_radius*2
 
         x_min = int(round(mouse_x - outer_radius))
         if x_min < 0: x_min = 0
@@ -4617,7 +4617,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 pix_dist = math.sqrt(i_rel**2 + j_rel**2)
 
                 # Take only those pixels between the inner and the outer circle
-                if (pix_dist <= outer_radius) and (pix_dist > self.star_aperature_radius):
+                if (pix_dist <= outer_radius) and (pix_dist > self.star_aperture_radius):
                     bg_acc += img_crop[i, j]
                     bg_counter += 1
 
@@ -4644,7 +4644,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 pix_dist = math.sqrt(i_rel**2 + j_rel**2)
 
                 # Take only those pixels between the inner and the outer circle
-                if pix_dist <= self.star_aperature_radius:
+                if pix_dist <= self.star_aperture_radius:
                     x_acc += i*(img_crop[i, j] - bg_intensity)
                     y_acc += j*(img_crop[i, j] - bg_intensity)
                     intens_acc += img_crop[i, j] - bg_intensity
@@ -5358,7 +5358,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             time_data = [self.img.img_handle.currentFrameTime(fr) for fr in frames]
 
-            # Compute the magntiudes
+            # Compute the magnitudes
             _, _, _, mag_data = xyToRaDecPP(time_data, x_centroids, y_centroids, intensities, self.platepar)
 
             # Plot the magnitudes
@@ -5479,20 +5479,20 @@ class PlateTool(QtWidgets.QMainWindow):
 
         ### Add all pixels within the aperture to the list for photometry ###
 
-        x_list = range(mouse_x - int(self.star_aperature_radius), mouse_x \
-                       + int(self.star_aperature_radius) + 1)
-        y_list = range(mouse_y - int(self.star_aperature_radius), mouse_y \
-                       + int(self.star_aperature_radius) + 1)
+        x_list = range(mouse_x - int(self.star_aperture_radius), mouse_x \
+                       + int(self.star_aperture_radius) + 1)
+        y_list = range(mouse_y - int(self.star_aperture_radius), mouse_y \
+                       + int(self.star_aperture_radius) + 1)
 
         for x in x_list:
             for y in y_list:
 
-                # Skip pixels ourside the image
+                # Skip pixels outside the image
                 if (x < 0) or (x >= self.img.data.shape[0]) or (y < 0) or (y >= self.img.data.shape[1]):
                     continue
 
                 # Check if the given pixels are within the aperture radius
-                if ((x - mouse_x)**2 + (y - mouse_y)**2) <= self.star_aperature_radius**2:
+                if ((x - mouse_x)**2 + (y - mouse_y)**2) <= self.star_aperture_radius**2:
                     pixel_list.append((x, y))
 
         ##########
@@ -5848,7 +5848,7 @@ if __name__ == '__main__':
     arg_parser.add_argument('-n', '--nobg', action="store_true", \
                             help="Do not subtract the background when doing photometry. This is useful when"
                             "calibrating saturated objects, as the background can vary between images and the" 
-                            "idea is that the initensity is used as a measure of the radius of the saturated "
+                            "idea is that the intensity is used as a measure of the radius of the saturated "
                             "object.")
     
     arg_parser.add_argument('--flipud', action="store_true", \

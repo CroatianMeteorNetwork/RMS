@@ -172,7 +172,7 @@ def write(ff, directory, filename):
         ff.avepixel = ff.avepixel[0]
         ff.stdpixel = ff.stdpixel[0]
 
-    # Add the maxpixle to the list
+    # Add the maxpixel to the list
     maxpixel_hdu = fits.ImageHDU(ff.maxpixel, name='MAXPIXEL')
     maxframe_hdu = fits.ImageHDU(ff.maxframe, name='MAXFRAME')
     avepixel_hdu = fits.ImageHDU(ff.avepixel, name='AVEPIXEL')

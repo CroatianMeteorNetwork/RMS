@@ -391,7 +391,7 @@ def stackFrame(ff_name, recalibrated_platepars, mask, border, pp_ref, img_size, 
     # Compute deaveraged maxpixel image
     max_deavg = maxpixel - avepixel
 
-    # Normalize the backgroud brightness by applying a large-kernel median filter to avepixel
+    # Normalize the background brightness by applying a large-kernel median filter to avepixel
     if background_compensation:
 
         # # Apply a median filter to the avepixel to get an estimate of the background brightness
