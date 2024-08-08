@@ -1,5 +1,5 @@
 """ 
-    Filter records in FTDetectionInfo file by using machine learning, to avoid artifacts
+    Filter records in FTDetectionInfo file by using machine learning, to avoid artefacts
     The old unfiltered file is renamed to _unfiltered'
     by Milan Kalina, 2022
     based on https://github.com/fiachraf/meteorml 
@@ -80,7 +80,7 @@ def classify_image(interpreter, image, top_k=1):
 
 
 def classifyPNGs(file_dir, model_path):
-    """ Given a directory with PNG files of meteors, classify them into meteors vs artifacts using the ML 
+    """ Given a directory with PNG files of meteors, classify them into meteors vs artefacts using the ML 
         model. 
     """
 
