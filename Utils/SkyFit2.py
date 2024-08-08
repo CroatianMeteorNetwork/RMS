@@ -1983,7 +1983,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     
                     photom_resid_txt = "{:.2f}".format(fit_diff)
 
-                    snr_txt = "S/N {:.1f}".format(snr)
+                    snr_txt = "S/N\n{:.1f}".format(snr)
 
                     # Determine the size of the residual text, larger the residual, larger the text
                     photom_resid_size = int(8 + np.abs(fit_diff)/(np.max(np.abs(self.photom_fit_resids))/5.0))
