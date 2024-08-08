@@ -338,7 +338,7 @@ class PairedStars(object):
         self.paired_stars = []
 
 
-    def addPair(self, x, y, intens_acc, obj):
+    def addPair(self, x, y, intens_acc, obj, snr=0):
         """ Add a pair between image coordinates and a star or a geo point. 
     
         Arguments:
@@ -349,7 +349,7 @@ class PairedStars(object):
 
         """
 
-        self.paired_stars.append([x, y, intens_acc, obj])
+        self.paired_stars.append([x, y, intens_acc, obj, snr])
 
 
     def removeGeoPoints(self):
@@ -404,7 +404,7 @@ class PairedStars(object):
         if draw:
             offset = 0.5
 
-        img_coords = [(x + offset, y + offset, intens_acc) for x, y, intens_acc, _ in self.paired_stars]
+        img_coords = [(x + offset, y + offset, intens_acc) for x, y, intens_acc, _, _ in self.paired_stars]
 
         return img_coords
 
@@ -412,7 +412,7 @@ class PairedStars(object):
     def skyCoords(self):
         """ Return a list of sky coordinates. """
 
-        return [obj.coords() for _, _, _, obj in self.paired_stars]
+        return [obj.coords() for _, _, _, obj, _ in self.paired_stars]
 
 
     def allCoords(self):
@@ -420,9 +420,12 @@ class PairedStars(object):
             for every entry. 
         """
 
-        return [[(x, y, intens_acc), obj.coords()] for x, y, intens_acc, obj in self.paired_stars]
+        return [[(x, y, intens_acc, snr), obj.coords()] for x, y, intens_acc, obj, snr in self.paired_stars]
 
+    def snr(self):
+        """ Return a list of SNR values. """
 
+        return [snr for _, _, _, _, snr in self.paired_stars]
 
 
     def __len__(self):
@@ -566,6 +569,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # Flag indicating that the astrometry will be automatically re-fit when the station is moved (only 
         #   when geopoints are available)
         self.station_moved_auto_refit = False
+
+        # Photometry parameters
+        self.photom_fit_stddev = None
+        self.photom_fit_resids = None
 
         ###################################################################################################
 
@@ -1903,7 +1910,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             img_star, catalog_star = paired_star
 
-            star_x, star_y, px_intens = img_star
+            star_x, star_y, px_intens, snr = img_star
             star_ra, star_dec, star_mag = catalog_star
 
             # Skip intensities which were not properly calculated
@@ -1948,15 +1955,15 @@ class PlateTool(QtWidgets.QMainWindow):
 
             
             # Fit the photometric offset (disable vignetting fit if a flat is used)
-            photom_params, fit_stddev, fit_resids = photometryFit(px_intens_list, radius_list, catalog_mags, \
-                fixed_vignetting=fixed_vignetting)
+            photom_params, self.photom_fit_stddev, self.photom_fit_resids = photometryFit(
+                px_intens_list, radius_list, catalog_mags, fixed_vignetting=fixed_vignetting)
 
             photom_offset, vignetting_coeff = photom_params
 
             # Set photometry parameters
             self.platepar.mag_0 = -2.5
             self.platepar.mag_lev = photom_offset
-            self.platepar.mag_lev_stddev = fit_stddev
+            self.platepar.mag_lev_stddev = self.photom_fit_stddev
             self.platepar.vignetting_coeff = vignetting_coeff
 
             # Update the values in the platepar tab in the GUI
@@ -1968,28 +1975,47 @@ class PlateTool(QtWidgets.QMainWindow):
                 star_coords = np.array(star_coords)
                 star_coords_x, star_coords_y = star_coords.T
 
-                std = np.std(fit_resids)
-                for star_x, star_y, fit_diff, star_mag in zip(star_coords_x, star_coords_y, fit_resids,
-                                                              catalog_mags):
+                std = np.std(self.photom_fit_resids)
+                for star_x, star_y, fit_diff, star_mag, snr in zip(star_coords_x, star_coords_y, 
+                                                              self.photom_fit_resids, catalog_mags, 
+                                                              self.paired_stars.snr()
+                                                              ):
+                    
                     photom_resid_txt = "{:.2f}".format(fit_diff)
 
+                    snr_txt = "S/N {:.1f}".format(snr)
+
                     # Determine the size of the residual text, larger the residual, larger the text
-                    photom_resid_size = int(8 + np.abs(fit_diff)/(np.max(np.abs(fit_resids))/5.0))
+                    photom_resid_size = int(8 + np.abs(fit_diff)/(np.max(np.abs(self.photom_fit_resids))/5.0))
 
                     if self.stdev_text_filter*std <= abs(fit_diff):
-                        text1 = TextItem(photom_resid_txt, anchor=(0.5, -0.5))
-                        text1.setPos(star_x, star_y)
-                        text1.setFont(QtGui.QFont('times', photom_resid_size))
-                        text1.setColor(QtGui.QColor(255, 255, 255))
-                        text1.setAlign(QtCore.Qt.AlignCenter)
-                        self.residual_text.addTextItem(text1)
 
-                        text2 = TextItem("{:+6.2f}".format(star_mag), anchor=(0.5, 1.5))
-                        text2.setPos(star_x, star_y)
-                        text2.setFont(QtGui.QFont('times', 10))
-                        text2.setColor(QtGui.QColor(0, 255, 0))
-                        text2.setAlign(QtCore.Qt.AlignCenter)
-                        self.residual_text.addTextItem(text2)
+                        # Add the photometric residual text below the star
+                        text_resid = TextItem(photom_resid_txt, anchor=(0.5, -0.5))
+                        text_resid.setPos(star_x, star_y)
+                        text_resid.setFont(QtGui.QFont('Arial', photom_resid_size))
+                        text_resid.setColor(QtGui.QColor(255, 255, 255))
+                        text_resid.setAlign(QtCore.Qt.AlignCenter)
+                        self.residual_text.addTextItem(text_resid)
+                        
+                        # Add the star magnitude above the star
+                        text_mag = TextItem("{:+6.2f}".format(star_mag), anchor=(0.5, 1.5))
+                        text_mag.setPos(star_x, star_y)
+                        text_mag.setFont(QtGui.QFont('Arial', 10))
+                        text_mag.setColor(QtGui.QColor(0, 255, 0))
+                        text_mag.setAlign(QtCore.Qt.AlignCenter)
+                        self.residual_text.addTextItem(text_mag)
+
+                        # Add SNR to the right of the star
+                        text_snr = TextItem(snr_txt, anchor=(-0.25, 0.5))
+                        text_snr.setPos(star_x, star_y)
+                        text_snr.setFont(QtGui.QFont('Arial', 8))
+                        text_snr.setColor(QtGui.QColor(255, 255, 255))
+                        text_snr.setAlign(QtCore.Qt.AlignCenter)
+                        self.residual_text.addTextItem(text_snr)
+
+
+
                 self.residual_text.update()
 
             # Show the photometry fit plot
@@ -2048,8 +2074,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 y_max_w = y_max + 3
 
                 # Plot fit info
-                fit_info = "{:+.1f}*LSP + {:.2f} +/- {:.2f} ".format(self.platepar.mag_0,
-                                                                          self.platepar.mag_lev, fit_stddev) \
+                fit_info = "{:+.1f}*LSP + {:.2f} $\\pm$ {:.2f} mag".format(self.platepar.mag_0,
+                                                                          self.platepar.mag_lev, 
+                                                                          self.photom_fit_stddev) \
                            + "\nVignetting coeff = {:.5f} rad/px".format(self.platepar.vignetting_coeff) \
                            + "\nGamma = {:.2f}".format(self.platepar.gamma)
 
@@ -2088,7 +2115,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 img_diagonal = np.hypot(self.platepar.X_res/2, self.platepar.Y_res/2)
 
                 # Plot radius from centre vs. fit residual (including vignetting)
-                ax_r.scatter(radius_list, fit_resids, s=10, c='b', alpha=0.5, zorder=3)
+                ax_r.scatter(radius_list, self.photom_fit_resids, s=10, c='b', alpha=0.5, zorder=3)
 
                 # Plot a zero line
                 ax_r.plot(np.linspace(0, img_diagonal, 10), np.zeros(10), linestyle='dashed', alpha=0.5,
@@ -2126,11 +2153,11 @@ class PlateTool(QtWidgets.QMainWindow):
                 ### PLOT MAG DIFFERENCE BY ELEVATION
 
                 # Plot elevation vs. fit residual
-                ax_e.scatter(elevation_list, fit_resids, s=10, c='b', alpha=0.5, zorder=3)
+                ax_e.scatter(elevation_list, self.photom_fit_resids, s=10, c='b', alpha=0.5, zorder=3)
 
                 # Compute the fit residuals without extinction
                 fit_resids_noext = \
-                    fit_resids + self.platepar.extinction_scale*atmosphericExtinctionCorrection(
+                    self.photom_fit_resids + self.platepar.extinction_scale*atmosphericExtinctionCorrection(
                         np.array(elevation_list), self.platepar.elev)
                 
                 # Plot elevation vs. fit residual (excluding extinction)
@@ -2573,13 +2600,18 @@ class PlateTool(QtWidgets.QMainWindow):
             for entry in self.paired_stars:
                 
                 img_coords, sky_coords = entry
-                x, y, intens_acc = img_coords
+                x, y, intens_acc, snr = img_coords
                 sky_obj = CatalogStar(*sky_coords)
 
-                paired_stars_new.addPair(x, y, intens_acc, sky_obj)
+                paired_stars_new.addPair(x, y, intens_acc, sky_obj, snr=snr)
 
             self.paired_stars = paired_stars_new
 
+        # Add SNR to paired_stars if missing
+        else:
+            for paired_star in self.paired_stars.paired_stars:
+                if len(paired_star) == 4:
+                    paired_star.append(0.0)
 
 
         if self.platepar is not None:
@@ -2715,8 +2747,8 @@ class PlateTool(QtWidgets.QMainWindow):
                             self.y_centroid = self.mouse_y - 0.5
 
                             # Compute the star intensity
-                            _, _, self.star_intensity = self.centroid(prev_x_cent=self.x_centroid,
-                                                                      prev_y_cent=self.y_centroid)
+                            _, _, self.star_intensity, self.star_snr = self.centroid(
+                                prev_x_cent=self.x_centroid, prev_y_cent=self.y_centroid)
                         else:
 
                             # Check if a star centroid is available from CALSTARS, and use it first becuase
@@ -2756,7 +2788,7 @@ class PlateTool(QtWidgets.QMainWindow):
                                             self.y_centroid = stars_y[closest_dist_indx]
 
                                             # Compute the star intensity
-                                            _, _, self.star_intensity = self.centroid(\
+                                            _, _, self.star_intensity, self.star_snr = self.centroid( \
                                                 prev_x_cent=self.x_centroid, prev_y_cent=self.y_centroid)
 
                                             calstars_centroid = True
@@ -2766,15 +2798,14 @@ class PlateTool(QtWidgets.QMainWindow):
                             if not calstars_centroid:
 
                                 # Perform centroiding with 2 iterations
-                                x_cent_tmp, y_cent_tmp, _ = self.centroid()
+                                x_cent_tmp, y_cent_tmp, _, _ = self.centroid()
 
                                 # Check that the centroiding was successful
                                 if x_cent_tmp is not None:
 
                                     # Centroid the star around the pressed coordinates
-                                    self.x_centroid, self.y_centroid, self.star_intensity = self.centroid(
-                                        prev_x_cent=x_cent_tmp,
-                                        prev_y_cent=y_cent_tmp)
+                                    self.x_centroid, self.y_centroid, self.star_intensity, self.star_snr \
+                                        = self.centroid(prev_x_cent=x_cent_tmp, prev_y_cent=y_cent_tmp)
 
                                 else:
                                     return None
@@ -2840,7 +2871,7 @@ class PlateTool(QtWidgets.QMainWindow):
                                  self.img.img_handle.input_type == 'dfn'):
                             self.x_centroid, self.y_centroid = self.mouse_x - 0.5, self.mouse_y - 0.5
                         else:
-                            self.x_centroid, self.y_centroid, _ = self.centroid()
+                            self.x_centroid, self.y_centroid, _, _ = self.centroid()
 
                         if (modifiers & QtCore.Qt.AltModifier or QtCore.Qt.Key_0 in self.keys_pressed) and \
                                 self.img.img_handle.input_type == 'dfn':
@@ -3492,8 +3523,9 @@ class PlateTool(QtWidgets.QMainWindow):
                         else:
                             selected_coords = self.geo_points[self.closest_geo_point_indx]
 
-                            # Set a fixed value for star intensity
+                            # Set a fixed value for star intensity and SNR
                             self.star_intensity = 10.0
+                            self.star_snr = 1.0
 
                             # Init a geo point pair object
                             pair_obj = GeoPoint(self.geo_points_obj, self.closest_geo_point_indx)
@@ -3503,7 +3535,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
                         # Add the image/catalog pair to the list
                         self.paired_stars.addPair(self.x_centroid, self.y_centroid, self.star_intensity, \
-                            pair_obj)
+                            pair_obj, snr=self.star_snr)
 
                         # Switch back to centroiding mode
                         self.cursor.setMode(0)
@@ -3664,6 +3696,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.x_centroid = None
             self.y_centroid = None
             self.star_intensity = None
+            self.star_snr = None
             self.cursor.setMode(0)
             self.updatePairedStars()
 
@@ -4606,8 +4639,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
         ### Estimate the background ###
         ######################################################################################################
-        bg_acc = 0
-        bg_counter = 0
+
+        # Create an image mask with the same size as the cropped image
+        mask = np.zeros_like(img_crop)
+
+        # Create a circular mask
         for i in range(img_crop.shape[0]):
             for j in range(img_crop.shape[1]):
 
@@ -4618,14 +4654,15 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # Take only those pixels between the inner and the outer circle
                 if (pix_dist <= outer_radius) and (pix_dist > self.star_aperature_radius):
-                    bg_acc += img_crop[i, j]
-                    bg_counter += 1
+                    mask[i, j] = 1
 
-        # Calculate mean background intensity
-        if bg_counter == 0:
-            print('Zero division error')
-            raise NotImplementedError
-        bg_intensity = bg_acc/bg_counter
+        
+        # Compute the mean of the pixels in the mask
+        bg_mean = np.mean(img_crop[mask == 1])
+
+        # Compute the standard deviation of the pixels in the mask
+        bg_std = np.std(img_crop[mask == 1])
+
 
         ######################################################################################################
 
@@ -4633,7 +4670,8 @@ class PlateTool(QtWidgets.QMainWindow):
         ######################################################################################################
         x_acc = 0
         y_acc = 0
-        intens_acc = 0
+        source_intens = 0
+        source_px_count = 0
 
         for i in range(img_crop.shape[0]):
             for j in range(img_crop.shape[1]):
@@ -4645,16 +4683,23 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # Take only those pixels between the inner and the outer circle
                 if pix_dist <= self.star_aperature_radius:
-                    x_acc += i*(img_crop[i, j] - bg_intensity)
-                    y_acc += j*(img_crop[i, j] - bg_intensity)
-                    intens_acc += img_crop[i, j] - bg_intensity
+                    x_acc += i*(img_crop[i, j] - bg_mean)
+                    y_acc += j*(img_crop[i, j] - bg_mean)
+                    source_intens += img_crop[i, j] - bg_mean
+                    source_px_count += 1
 
-        x_centroid = x_acc/intens_acc + x_min
-        y_centroid = y_acc/intens_acc + y_min
+        x_centroid = x_acc/source_intens + x_min
+        y_centroid = y_acc/source_intens + y_min
 
         ######################################################################################################
 
-        return x_centroid, y_centroid, intens_acc
+        # Compute the SNR using the "CCD equation" (Howell et al., 1989)
+        snr = source_intens/(math.sqrt(source_intens + source_px_count*(bg_mean + bg_std**2)))
+
+        # print('Centroid at ({:.2f}, {:.2f}) with intensity {:.2f} and SNR {:.2f}'.format(
+        # x_centroid, y_centroid, source_intens, snr))
+
+        return x_centroid, y_centroid, source_intens, snr
 
 
     def updateGreatCircle(self):
@@ -4947,13 +4992,13 @@ class PlateTool(QtWidgets.QMainWindow):
         print('Residuals')
         print('----------')
         print(
-            ' No,       Img X,       Img Y, RA cat (deg), Dec cat (deg),    Mag, -2.5*LSP,    Cat X,   Cat Y, RA img (deg), Dec img (deg), Err amin,  Err px, Direction')
+            ' No,       Img X,       Img Y, RA cat (deg), Dec cat (deg),    Cat X,   Cat Y, RA img (deg), Dec img (deg), Err amin,  Err px, Direction,    Mag, -2.5*LSP, Mag err,    SNR')
 
         # Calculate the distance and the angle between each pair of image positions and catalog predictions
-        for star_no, (cat_x, cat_y, cat_coords, img_c) in enumerate(zip(catalog_x, catalog_y, catalog_stars, \
-                                                                        img_stars)):
+        for star_no, (cat_x, cat_y, cat_coords, paired_stars, mag_err) in enumerate(
+            zip(catalog_x, catalog_y, catalog_stars, self.paired_stars.allCoords(), self.photom_fit_resids)):
 
-            img_x, img_y, sum_intens = img_c
+            img_x, img_y, sum_intens, snr = paired_stars[0]
             ra, dec, mag = cat_coords
 
             delta_x = cat_x - img_x
@@ -4977,11 +5022,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
             residuals.append([img_x, img_y, angle, distance, angular_distance])
 
+            lsp = -2.5*np.log10(sum_intens)
+
             # Print out the residuals
             print(
-                '{:3d}, {:11.6f}, {:11.6f}, {:>12.6f}, {:>+13.6f}, {:+6.2f},  {:7.2f}, {:8.2f}, {:7.2f}, {:>12.6f}, {:>+13.6f}, {:8.2f}, {:7.2f}, {:+9.1f}'.format(
-                    star_no + 1, img_x, img_y, ra, dec, mag, -2.5*np.log10(sum_intens), cat_x, cat_y, \
-                    ra_img, dec_img, 60*angular_distance, distance, np.degrees(angle)))
+                '{:3d}, {:11.6f}, {:11.6f}, {:>12.6f}, {:>+13.6f}, {:8.2f}, {:7.2f}, {:>12.6f}, {:>+13.6f}, {:8.2f}, {:7.2f}, {:+9.1f},  {:+6.2f}, {:7.2f}, {:+7.2f}, {:6.1f}'.format(
+                    star_no + 1, img_x, img_y, ra, dec, cat_x, cat_y, \
+                    ra_img, dec_img, 60*angular_distance, distance, np.degrees(angle), mag, lsp, mag_err, snr))
 
 
         # Compute RMSD errors
