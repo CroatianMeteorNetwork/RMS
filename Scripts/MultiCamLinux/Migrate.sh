@@ -19,13 +19,13 @@
 # Initial release
 #
 #
-# This script automates the trasnsfer of the 3  RMS station configuration files and places these into the correct Stations folder on this host
-# It prompts the user for the target hostname and copies this hosts public to the targert host to enable passwordless authentication host using ssh keys, 
+# This script automates the transfer of the 3  RMS station configuration files and places these into the correct Stations folder on this host
+# It prompts the user for the target hostname and copies this hosts public to the target host to enable passwordless authentication host using ssh keys, 
 # and if that fails will prompt for a password to install this hosts public key on the target host.
 # Since presumably this is a new host it will likely not have it's public keys loaded on your target host and also the host id keys will also not be known to 
 # this host so you will be prompted to accept and trust each new host..
 # It then will copy those config files to a temporary dir, parse the .config.tmp for the hostname and check if that station exists within ~/source/Stations
-# and if it does then it will transfer them all to the appropriate Stations dir, it then finaly edits in-place the .config to update the new RMS_data dir.
+# and if it does then it will transfer them all to the appropriate Stations dir, it then finally edits in-place the .config to update the new RMS_data dir.
 # The script will continue to prompt for additional hosts and repeat the process until the user enters a <CR> at the host prompt
 
 

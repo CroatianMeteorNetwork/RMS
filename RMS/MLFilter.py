@@ -455,13 +455,13 @@ def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=
     if keep_pngs:
 
         meteors_dir = os.path.abspath(os.path.join(png_dir, os.pardir, 'meteors'))
-        artifacts_dir = os.path.abspath(os.path.join(png_dir, os.pardir, 'artifacts'))
+        artefacts_dir = os.path.abspath(os.path.join(png_dir, os.pardir, 'artefacts'))
 
         if not os.path.exists(meteors_dir):
             os.mkdir(meteors_dir)
 
-        if not os.path.exists(artifacts_dir):
-            os.mkdir(artifacts_dir)
+        if not os.path.exists(artefacts_dir):
+            os.mkdir(artefacts_dir)
 
     # Otherwise remove any PNG directories that might already exist
     else:
@@ -517,7 +517,7 @@ def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=
             status_str = "artefact"
 
             if keep_pngs:
-                keep_png_dir = artifacts_dir
+                keep_png_dir = artefacts_dir
 
 
         log.info(png_name + " - " + "Score: {:6.1%} - {:s}".format(pred_score, status_str))

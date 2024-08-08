@@ -35,9 +35,9 @@ from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile
 from RMS.Math import angularSeparation
 from RMS.Logger import initLogging
 
-# Neighborhood size around individual FFs with detections which will be takes for recalibration
+# Neighbourhood size around individual FFs with detections which will be takes for recalibration
 #   A size of e.g. 3 means that an FF before, the FF with the detection, an an FF after will be taken
-RECALIBRATE_NEIGHBORHOOD_SIZE = 3
+RECALIBRATE_NEIGHBOURHOOD_SIZE = 3
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -123,7 +123,7 @@ def recalibrateFF(
 
     Return:
         result: [?] A Platepar instance if refinement is successful, None if it failed.
-        min_match_radius: [float] Minimum radius that successful matched the stars (pixels).
+        min_match_radius: [float] Minimum radius that successfully matched the stars (pixels).
     """
 
     working_platepar = copy.deepcopy(working_platepar)
@@ -653,7 +653,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
             ff_indx = calstars_ffs.index(ff_name)
 
             # Add neighbours to the processing list
-            for k in range(-(RECALIBRATE_NEIGHBORHOOD_SIZE // 2), RECALIBRATE_NEIGHBORHOOD_SIZE // 2 + 1):
+            for k in range(-(RECALIBRATE_NEIGHBOURHOOD_SIZE // 2), RECALIBRATE_NEIGHBOURHOOD_SIZE // 2 + 1):
 
                 k_indx = ff_indx + k
 
@@ -716,7 +716,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
             photom_offset_tmp_list = []
             photom_offset_std_tmp_list = []
             neighboring_ffs = []
-            for k in range(-(RECALIBRATE_NEIGHBORHOOD_SIZE // 2), RECALIBRATE_NEIGHBORHOOD_SIZE // 2 + 1):
+            for k in range(-(RECALIBRATE_NEIGHBOURHOOD_SIZE // 2), RECALIBRATE_NEIGHBOURHOOD_SIZE // 2 + 1):
 
                 k_indx = ff_indx + k
 

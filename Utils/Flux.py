@@ -2,7 +2,7 @@
 
 # WARNING: This code will only run in Python 3+
 # Python 2 issues:
-#   - unexpected behavior of the pointInsideConvexPolygonSphere (all points are always False)
+#   - unexpected behaviour of the pointInsideConvexPolygonSphere (all points are always False)
 #   - pyYAML doesn't work on Python 2
 
 from __future__ import print_function, division, absolute_import
