@@ -692,7 +692,7 @@ class BufferedCapture(Process):
                             time.sleep(5)
                             break
 
-                        time.sleep(5)
+                        time.sleep(1)
 
                     if not ping_success:
                         log.error("Can't ping the camera IP!")
