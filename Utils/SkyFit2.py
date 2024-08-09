@@ -2630,6 +2630,13 @@ class PlateTool(QtWidgets.QMainWindow):
         if not hasattr(self, "pick_list"):
             self.pick_list = {}
 
+        # If SNR and saturation flags are missing in the pick list, add them
+        for _, pick in self.pick_list.items():
+            if 'snr' not in pick:
+                pick['snr'] = 1.0
+            if 'saturated' not in pick:
+                pick['saturated'] = False
+
         # Update possibly missing flag for measuring ground points
         if not hasattr(self, "meas_ground_points"):
             self.meas_ground_points = False
@@ -2668,7 +2675,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # Add SNR if it's missing
                 if len(paired_star) == 4:
-                    paired_star.append(0.0)
+                    paired_star.append(1.0)
 
                 # Add the saturation flag is it's missing
                 if len(paired_star) == 5:
@@ -5390,7 +5397,7 @@ class PlateTool(QtWidgets.QMainWindow):
         if pick:
             # If there are no photometry pixels, set the intensity to 0
             if not pick['photometry_pixels']:
-                print("No photometry selected, setting intensity sum to 1")
+                # print("No photometry selected, setting intensity sum to 1")
                 pick['intensity_sum'] = 1
                 return None
 
@@ -5463,6 +5470,21 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Set the intensity sum to the pick
             pick['intensity_sum'] = intensity_sum
+
+
+            ### Determine if there is any saturation in the measured photometric area
+            
+            # Compute the saturation threshold
+            saturation_threshold = int(0.98*(2**self.config.bit_depth))
+
+            # If at least 2 pixels are saturated in the photometric area, mark the pick as saturated
+            if np.sum(crop_img > saturation_threshold) >= 2:
+                pick['saturated'] = True
+            else:
+                pick['saturated'] = False
+
+            ###
+
 
             # If the DFN image is used, correct intensity sum for exposure difference
             # Of the total 27 second, the stars are exposed 4.31 seconds, and every fireball dot is exposed
