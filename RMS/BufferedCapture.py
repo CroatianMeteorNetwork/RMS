@@ -169,7 +169,9 @@ class BufferedCapture(Process):
 
                 if GST_IMPORTED:
 
-                    state = self.device.get_state(Gst.CLOCK_TIME_NONE).state
+                    # Use a 10-second timeout to avoid indefinite blocking while checking if the device is in the PLAYING state
+                    state = self.device.get_state(Gst.SECOND * 10).state
+
                     if state == Gst.State.PLAYING:
                         return True
                     else:
