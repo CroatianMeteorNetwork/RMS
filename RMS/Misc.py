@@ -11,7 +11,7 @@ import subprocess
 import random
 import string
 import inspect
-
+import datetime
 
 # tkinter import that works on both Python 2 and 3
 if sys.version_info[0] < 3:
@@ -597,4 +597,15 @@ def sanitise(unsanitised, lower = False, space_substitution = "", log_changes = 
         log.info("String {} was sanitised to {}".format(unsanitised, sanitised))
 
     return sanitised
+
+
+class rms_datetime():
+    """ Class to hold utcnow() wrapper function definition.
+        Select the best approach to retrieve current UCT time according to Python version
+    """
+    if sys.version_info[0] < 3:
+        utcnow = datetime.datetime.utcnow
+    else:
+        @staticmethod
+        def utcnow(): return datetime.datetime.now(datetime.UTC)
 
