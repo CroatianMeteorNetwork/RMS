@@ -2501,6 +2501,10 @@ class PlateTool(QtWidgets.QMainWindow):
             # Update the dir path
             self.img_handle.dir_path = dir_path
 
+            # Add the missing flipud parameter
+            if not hasattr(self.img_handle, "flipud"):
+                self.img_handle.flipud = False
+
             # If the input type is FF and the path to the actual FF file got saved, update it
             if self.img_handle.input_type == 'ff':
                 if "ff_file" in variables:
@@ -2513,6 +2517,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Make sure an option is not missing
             if self.img_handle.input_type == 'images':
+
+                # Add the fripon mode flag if it's missing
                 if not hasattr(self.img_handle, "fripon_mode"):
                     self.img_handle.fripon_mode = False
                     self.img_handle.fripon_header = None
