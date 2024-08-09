@@ -512,7 +512,7 @@ class BufferedCapture(Process):
 
 
     def createGstreamDevice(self, video_format, gst_decoder='decodebin', 
-                            video_file_dir=None, segment_duration_sec=30, max_retries=5, retry_interval=5):
+                            video_file_dir=None, segment_duration_sec=30, max_retries=5, retry_interval=1):
         """
         Creates a GStreamer pipeline for capturing video from an RTSP source and 
         initializes playback with specific configurations.
