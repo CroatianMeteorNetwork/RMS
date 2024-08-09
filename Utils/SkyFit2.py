@@ -5068,6 +5068,9 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
                 intensity_sum = intensity_sum.astype(int)
 
+            # Set the intensity sum to the pick
+            pick['intensity_sum'] = intensity_sum
+
 
             # If the DFN image is used, correct intensity sum for exposure difference
             # Of the total 27 second, the stars are exposed 4.31 seconds, and every fireball dot is exposed
