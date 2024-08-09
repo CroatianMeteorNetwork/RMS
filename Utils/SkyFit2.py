@@ -5358,7 +5358,14 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Compute the background subtracted intensity sum (do as a float to avoid artificially pumping
             #   up the magnitude)
-            pick['intensity_sum'] = np.ma.sum(crop_img.astype(float) - background_lvl).astype(int)
+            intensity_sum = np.ma.sum(crop_img.astype(float) - background_lvl)
+
+            # Check if the result is masked
+            if np.ma.is_masked(intensity_sum):
+                # If the result is masked (i.e. error reading pixels), set the intensity sum to 1
+                intensity_sum = 1  
+            else:
+                intensity_sum = intensity_sum.astype(int)
 
 
             # If the DFN image is used, correct intensity sum for exposure difference
@@ -5638,6 +5645,10 @@ class PlateTool(QtWidgets.QMainWindow):
             # If the global shutter is used, the frame number can only be an integer
             if self.config.deinterlace_order == -2:
                 frame_no = round(frame_no, 0)
+
+            # If the intensity sum is masked, assume it's 1
+            if np.ma.is_masked(pick['intensity_sum']):
+                pick['intensity_sum'] = 1
             
             centroids.append([frame_no, pick['x_centroid'], pick['y_centroid'], pick['intensity_sum']])
 
