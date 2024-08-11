@@ -70,7 +70,7 @@ def _agentAuth(transport, username, rsa_private_key):
     for key in agent_keys:
 
         if key is not None:
-            log.info('Trying ssh-agent key ' + str(binascii.hexlify(key.get_fingerprint())))
+            log.info('Trying ssh-agent key {}'.format(binascii.hexlify(key.get_fingerprint())))
 
             # Try the key to authenticate
             try:
@@ -158,15 +158,15 @@ def createRemoteDirectory(sftp, path):
             # Check if the directory exists
             try:
                 sftp.stat(path)
-                print(f"Directory '{path}' already exists.")
+                print("Directory '{}' already exists.".format(path))
 
-            except FileNotFoundError:
+            except IOError:
 
                 sftp.mkdir(path)
-                print(f"Directory '{path}' created.")
+                print("Directory '{}' created.".format(path))
             
             except Exception as e:
-                log.error(f"Unable to stat directory '{path}': {e}")
+                log.error("Unable to stat directory '{}': {}".format(path, e))
                 return False
         
         return True
@@ -175,7 +175,7 @@ def createRemoteDirectory(sftp, path):
     except Exception as e:
 
         # Log the exception (assuming a logging setup is in place)
-        log.error(f"Unable to create directory '{path}': {e}")
+        log.error("Unable to create directory '{0}': {1}".format(path, e))
         return False
 
 
