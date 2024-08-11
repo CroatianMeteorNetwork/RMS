@@ -553,7 +553,7 @@ cpdef (double, double, double) equatorialCoordAndRotPrecession(double start_epoc
     # Normalize the new rotation angle to be between -pi and pi
     new_rot_angle = fmod(new_rot_angle + M_PI, 2*M_PI) - M_PI
 
-    # print(f"Rotation change due to precession: {degrees(rotation_change)*60} arcmin")
+    # print("Rotation change due to precession: {} arcmin".format(degrees(rotation_change) * 60))
 
     return ra_precessed, dec_precessed, new_rot_angle
 
