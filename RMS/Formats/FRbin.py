@@ -44,7 +44,7 @@ class fr_struct:
         # X coordinates of the centre of the cutout on the full image
         self.xc = []
 
-        # Frame indices (as referece to the FF file) of cutouts for every line
+        # Frame indices (as reference to the FF file) of cutouts for every line
         self.t = []
 
         # The width and height of every cutout (the cutouts are square, so only one size is saved)
@@ -91,7 +91,7 @@ class fr_struct:
                                       int(self.yc[line][i] + self.size[line][i]//2))
                     X_img, Y_img = np.meshgrid(x_img, y_img)
 
-                    # Compute FR frame coordiantes
+                    # Compute FR frame coordinates
                     y_frame = np.arange(len(y_img))
                     x_frame = np.arange(len(x_img))
                     Y_frame, X_frame = np.meshgrid(y_frame, x_frame)
@@ -131,7 +131,7 @@ class fr_struct:
                                       int(self.yc[line][i] + self.size[line][i]//2))
                     X_img, Y_img = np.meshgrid(x_img, y_img)
 
-                    # Compute FR frame coordiantes
+                    # Compute FR frame coordinates
                     y_frame = np.arange(len(y_img))
                     x_frame = np.arange(len(x_img))
                     Y_frame, X_frame = np.meshgrid(y_frame, x_frame)

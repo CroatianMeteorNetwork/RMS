@@ -30,8 +30,8 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
         ff_file_path: [str] Path to the FF file to load.
         img: [ndarray] Numpy array containing image data.
         mask: [ndarray] Mask image. None by default.
-        x_data: [list] A list of star x image coordiantes.
-        y_data: [list] A list of star y image coordiantes
+        x_data: [list] A list of star x image coordinates.
+        y_data: [list] A list of star y image coordinates
         fov_w_range: [2 element tuple] A tuple of scale_lower and scale_upper, i.e. the estimate of the 
             width of the FOV in degrees.
         max_stars: [int] Maximum number of stars to use for the astrometry.net solution. Default is 100.
@@ -190,7 +190,7 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
         # Use wcs.all_pix2world to get the RA and Dec at the new center
         ra_mid, dec_mid = wcs_obj.all_pix2world(x_center, y_center, 1)
 
-        # Image coordinate slighty right of the centre
+        # Image coordinate slightly right of the centre
         x_right = x_center + 10
         y_right = y_center
         ra_right, dec_right = wcs_obj.all_pix2world(x_right, y_right, 1)
@@ -212,7 +212,7 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
             fov_h = img_ht *solution.best_match().scale_arcsec_per_pixel/3600
 
         else:
-            # Take the range of image coordiantes as a FOV indicator
+            # Take the range of image coordinates as a FOV indicator
             x_max = np.max(x_data)
             y_max = np.max(y_data)
 

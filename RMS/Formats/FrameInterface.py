@@ -39,7 +39,7 @@ if os.environ.get('DISPLAY') is None:
 
 else:
 
-    # Try importaing a Qt message box if available
+    # Try importing a Qt message box if available
     try:
         from RMS.Routines.CustomPyqtgraphClasses import qmessagebox as messagebox
     except:
@@ -408,7 +408,7 @@ class InputTypeFRFF(InputType):
                     avepixel_list.append(avepixel)
                     stdpixel_list.append(ff_temp.stdpixel)
 
-                # Immidiately extract the appropriate frames
+                # Immediately extract the appropriate frames
                 if len(maxpixel_list) == 1:
 
                     ff.maxpixel = maxpixel_list[0]
@@ -475,7 +475,7 @@ class InputTypeFRFF(InputType):
                                               int(fr_files[fr].yc[line][i] + fr_files[fr].size[line][i]//2))
                             X_img, Y_img = np.meshgrid(x_img, y_img)
 
-                            # Compute FR frame coordiantes
+                            # Compute FR frame coordinates
                             y_frame = np.arange(len(y_img))
                             x_frame = np.arange(len(x_img))
                             Y_frame, X_frame = np.meshgrid(y_frame, x_frame)
@@ -948,7 +948,7 @@ class InputTypeVideo(InputType):
             Alternatively, the beginning of the whole file can be returned.
 
         Keyword arguments:
-            beginning: [bool] If True, the beginning time of the file will be retunred instead of the middle
+            beginning: [bool] If True, the beginning time of the file will be returned instead of the middle
                 time of the chunk.
         """
 
@@ -1247,7 +1247,7 @@ class InputTypeUWOVid(InputType):
             Alternatively, the beginning of the whole file can be returned.
 
         Keyword arguments:
-            beginning: [bool] If True, the beginning time of the file will be retunred instead of the middle
+            beginning: [bool] If True, the beginning time of the file will be returned instead of the middle
                 time of the chunk.
         """
 
@@ -1379,7 +1379,7 @@ class InputTypeImages(object):
         # This type of input probably won't have any calstars files
         self.require_calstars = False
 
-        # Disctionary which holds the time of every frame, used for fast frame time lookup
+        # Dictionary which holds the time of every frame, used for fast frame time lookup
         self.frame_dt_dict = {}
 
         self.fripon_mode = False
@@ -1605,7 +1605,7 @@ class InputTypeImages(object):
 
         if self.single_image_mode:
 
-            # Start at frame 100 to accomodate reversing picks, set the max number of frames to 1024
+            # Start at frame 100 to accommodate reversing picks, set the max number of frames to 1024
             self.current_frame = 100
             self.total_frames = 1024
 
@@ -1790,7 +1790,7 @@ class InputTypeImages(object):
         self.current_frame = (self.current_frame + 1)%self.total_frames
 
 
-        # In the single image mode, continously cycle through the same frame
+        # In the single image mode, continuously cycle through the same frame
         if self.single_image_mode:
             pass
         else:
@@ -1802,7 +1802,7 @@ class InputTypeImages(object):
 
         self.current_frame = (self.current_frame - 1)%self.total_frames
 
-        # In the single image mode, continously cycle through the same frame
+        # In the single image mode, continuously cycle through the same frame
         if self.single_image_mode:
             pass
         else:
@@ -2004,7 +2004,7 @@ class InputTypeImages(object):
             Alternatively, the beginning of the whole file can be returned.
 
         Keyword arguments:
-            beginning: [bool] If True, the beginning time of the file will be retunred instead of the middle
+            beginning: [bool] If True, the beginning time of the file will be returned instead of the middle
                 time of the chunk.
         """
 
@@ -2177,7 +2177,7 @@ class InputTypeDFN(InputType):
         print('Using folder:', self.dir_path)
 
 
-        # DFN frames start at 100 to accomodate picking previous frames, and 1024 picks total are allowed
+        # DFN frames start at 100 to accommodate picking previous frames, and 1024 picks total are allowed
         self.current_frame = 100
         self.total_frames = 1024
 
