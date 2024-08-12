@@ -2,6 +2,11 @@ import re
 import configparser
 import argparse
 import os
+import sys
+
+# Map FileNotFoundError to IOError in Python 2 as it does not exist
+if sys.version_info[0] < 3:
+    FileNotFoundError = IOError
 
 
 OMIT_FROM_CONFIG = {'lat',

@@ -18,9 +18,13 @@ from __future__ import absolute_import, division, print_function
 
 import datetime
 import os
-
+import sys
 import git
 import numpy as np
+
+# Map FileNotFoundError to IOError in Python 2 as it does not exist
+if sys.version_info[0] < 3:
+    FileNotFoundError = IOError
 
 
 def validDefaultFTPdetectinfo(file_name):

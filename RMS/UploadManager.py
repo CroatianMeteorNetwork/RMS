@@ -25,6 +25,9 @@ except:
 
 from RMS.Misc import mkdirP
 
+# Map FileNotFoundError to IOError in Python 2 as it does not exist
+if sys.version_info[0] < 3:
+    FileNotFoundError = IOError
 
 # Get the logger from the main module
 log = logging.getLogger("logger")

@@ -30,6 +30,9 @@ except:
     # Python 2
     from ConfigParser import NoOptionError, RawConfigParser
 
+# Map FileNotFoundError to IOError in Python 2 as it does not exist
+if sys.version_info[0] < 3:
+    FileNotFoundError = IOError
 
 # Used to determine detection parameters which will change in ML filtering is available
 try:

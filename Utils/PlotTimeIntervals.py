@@ -9,6 +9,7 @@ If fps is not provided, the default value of 25 is used.
 from __future__ import print_function, division, absolute_import
 
 import os
+import sys
 import argparse
 import tarfile
 import math
@@ -19,6 +20,10 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
 import RMS.ConfigReader as cr
+
+# Map FileNotFoundError to IOError in Python 2 as it does not exist
+if sys.version_info[0] < 3:
+    FileNotFoundError = IOError
 
 
 def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50):
