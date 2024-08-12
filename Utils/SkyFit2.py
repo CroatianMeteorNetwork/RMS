@@ -435,7 +435,7 @@ class PairedStars(object):
 
 class PlateTool(QtWidgets.QMainWindow):
     def __init__(self, input_path, config, beginning_time=None, fps=None, gamma=None, use_fr_files=False, \
-        geo_points_input=None, startUI=True, camera_mask=None, nobg=False, flipud=False):
+        geo_points_input=None, startUI=True, mask=None, nobg=False, flipud=False):
         """ SkyFit interactive window.
 
         Arguments:
@@ -544,7 +544,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar_fmt = None
 
         # Store the mask
-        self.camera_mask = camera_mask
+        self.mask = mask
 
         # Flat field
         self.flat_struct = None
@@ -1651,7 +1651,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Create a filtered catalog
         self.catalog_stars_filtered_unmasked = self.catalog_stars[filtered_indices_all]
 
-        if self.camera_mask is None:
+        if self.mask is None:
             cat_stars_xy, self.catalog_stars_filtered = [], []
             for star_xy, star_radec in zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked):
                     cat_stars_xy.append(star_xy)
@@ -1661,7 +1661,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             cat_stars_xy, self.catalog_stars_filtered = [], []
             for star_xy, star_radec in zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked):
-                if self.camera_mask.img[int(star_xy[1]),int(star_xy[0])] != 0:
+                if self.mask.img[int(star_xy[1]), int(star_xy[0])] != 0:
                     cat_stars_xy.append(star_xy)
                     self.catalog_stars_filtered.append(star_radec)
 
@@ -2420,7 +2420,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.loadState(os.path.dirname(file_), os.path.basename(file_))
 
 
-    def loadState(self, dir_path, state_name, beginning_time=None, camera_mask=None):
+    def loadState(self, dir_path, state_name, beginning_time=None, mask=None):
         """ Loads state with path to file dir_path and file name state_name. Works mid-program and at the start of
         the program (if done properly).
 
@@ -2586,8 +2586,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         # Add the mask
-        if not hasattr(self, "camera_mask"):
-            self.camera_mask = camera_mask
+        if not hasattr(self, "mask"):
+            self.mask = mask
 
 
         # If the previous beginning time is None and the new one is not, update the beginning time
@@ -6120,16 +6120,25 @@ if __name__ == '__main__':
 
         if cml_args.mask is not None:
             print("Given a path to a mask at {}".format(cml_args.mask))
-            camera_mask = getMaskFile(os.path.expanduser(cml_args.mask), config)
+            mask = getMaskFile(os.path.expanduser(cml_args.mask), config)
+
         elif os.path.exists(os.path.join(config.rms_root_dir, config.mask_file)):
             print("No mask specified loading mask from {}".format(os.path.join(config.rms_root_dir, config.mask_file)))
-            camera_mask = getMaskFile(config.rms_root_dir, config)
-        elif os.path.exists("mask.bmp"):
-            camera_mask = getMaskFile(".", config)
-        elif True:
-            camera_mask = None
+            mask = getMaskFile(config.rms_root_dir, config)
 
-        plate_tool.loadState(dir_path, state_name, beginning_time=beginning_time, camera_mask = camera_mask)
+        elif os.path.exists("mask.bmp"):
+            mask = getMaskFile(".", config)
+
+        elif True:
+            mask = None
+
+        # If the dimensions of the mask do not match the config file, ignore the mask
+        if not mask.checkResolution(config.width, config.height):
+            print("Mask resolution ({:d}, {:d}) does not match the image resolution ({:d}, {:d}). Ignoring the mask.".format(
+                mask.width, mask.height, config.width, config.height))
+            mask = None
+
+        plate_tool.loadState(dir_path, state_name, beginning_time=beginning_time, mask=mask)
 
     else:
 
@@ -6146,19 +6155,29 @@ if __name__ == '__main__':
 
         if cml_args.mask is not None:
             print("Given a path to a mask at {}".format(cml_args.mask))
-            camera_mask = getMaskFile(os.path.expanduser(cml_args.mask), config)
+            mask = getMaskFile(os.path.expanduser(cml_args.mask), config)
+
         elif os.path.exists(os.path.join(config.rms_root_dir, config.mask_file)):
+            
             print("No mask specified loading mask from {}".format(os.path.join(config.rms_root_dir, config.mask_file)))
-            camera_mask = getMaskFile(config.rms_root_dir, config)
+            mask = getMaskFile(config.rms_root_dir, config)
+
         elif os.path.exists("mask.bmp"):
-            camera_mask = getMaskFile(".", config)
-        elif True:
-            camera_mask = None
+            mask = getMaskFile(".", config)
+
+        else:
+            mask = None
+
+        # If the dimensions of the mask do not match the config file, ignore the mask
+        if not mask.checkResolution(config.width, config.height):
+            print("Mask resolution ({:d}, {:d}) does not match the image resolution ({:d}, {:d}). Ignoring the mask.".format(
+                mask.width, mask.height, config.width, config.height))
+            mask = None
 
         # Init SkyFit
         plate_tool = PlateTool(input_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
-            gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints, camera_mask = camera_mask, \
-            nobg=cml_args.nobg, flipud=cml_args.flipud)
+            gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints, 
+            mask=mask, nobg=cml_args.nobg, flipud=cml_args.flipud)
 
 
     # Run the GUI app
