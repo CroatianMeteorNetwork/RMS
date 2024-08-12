@@ -5689,9 +5689,10 @@ class PlateTool(QtWidgets.QMainWindow):
                 value_str = str(value)
 
             out_str += "# - {" + "{:s}: {:s}".format(key, value_str) + "}\n"
-            out_str += "datetime,ra,dec,azimuth,altitude,mag_data,x_image,y_image\n"
+
 
         out_str += "# schema: astropy-2.0\n"
+        out_str += "datetime,ra,dec,azimuth,altitude,mag_data,x_image,y_image\n"
 
         # Add the data (sort by frame)
         for frame, pick in sorted(self.pick_list.items(), key=lambda x: x[0]):
