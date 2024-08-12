@@ -160,7 +160,7 @@ def createRemoteDirectory(sftp, path):
                 sftp.stat(path)
                 print("Directory '{}' already exists.".format(path))
 
-            except IOError:
+            except FileNotFoundError:
 
                 sftp.mkdir(path)
                 print("Directory '{}' created.".format(path))
