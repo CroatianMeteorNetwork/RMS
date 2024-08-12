@@ -48,6 +48,9 @@ try:
 except ImportError as e:
     log.info('Could not import gi: {}. Using OpenCV.'.format(e))
 
+except ValueError as e:
+    log.info('Could not import Gst: {}. Using OpenCV.'.format(e))
+
 
 class BufferedCapture(Process):
     """ Capture from device to buffer in memory.
