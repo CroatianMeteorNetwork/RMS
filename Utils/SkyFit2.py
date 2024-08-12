@@ -525,7 +525,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.single_click_photometry = False
 
         # Star picking mode variables
-        self.star_aperature_radius = 5
+        self.star_aperture_radius = 5
         self.x_centroid = self.y_centroid = self.snr_centroid = None
         self.saturated_centroid = False
         self.closest_type = None
@@ -2527,6 +2527,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Update the RMS root directory
         self.config.rms_root_dir = os.path.abspath(os.path.join(os.path.dirname(RMS.__file__), os.pardir))
+
+        # Swap the fixed variable name
+        if hasattr(self, "star_aperature_radius"):
+            self.star_aperture_radius = self.star_aperature_radius
 
 
         # Update img_handle parameters
@@ -4741,11 +4745,11 @@ class PlateTool(QtWidgets.QMainWindow):
                 pix_dist = math.sqrt(i_rel**2 + j_rel**2)
 
                 # Take only those pixels between the inner and the outer circle
-                if (pix_dist <= outer_radius) and (pix_dist > self.star_aperature_radius):
+                if (pix_dist <= outer_radius) and (pix_dist > self.star_aperture_radius):
                     annulus_mask[i, j] = 1
 
-                # Take only those pixels within the star aperature radius
-                if pix_dist <= self.star_aperature_radius:
+                # Take only those pixels within the star aperture radius
+                if pix_dist <= self.star_aperture_radius:
                     aperture_mask[i, j] = 1
 
         
@@ -4767,7 +4771,7 @@ class PlateTool(QtWidgets.QMainWindow):
         saturation_threshold = int(0.98*(2**self.config.bit_depth))
 
         # Count the number of pixels above the saturation threshold (original non-gramma corrected image)
-        # Apply the mask to only include the pixels within the star aperature radius
+        # Apply the mask to only include the pixels within the star aperture radius
         saturated_count = np.sum(img_crop_orig[aperture_mask == 1] > saturation_threshold)
 
         # print("Saturation threshold: {:.2f}, count: {:d}".format(saturation_threshold, saturated_count))
@@ -4799,7 +4803,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 pix_dist = math.sqrt(i_rel**2 + j_rel**2)
 
                 # Take only those pixels between the inner and the outer circle
-                if pix_dist <= self.star_aperature_radius:
+                if pix_dist <= self.star_aperture_radius:
                     x_acc += i*(img_crop[i, j] - bg_median)
                     y_acc += j*(img_crop[i, j] - bg_median)
                     source_intens += img_crop[i, j] - bg_median
