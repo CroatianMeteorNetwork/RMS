@@ -74,9 +74,9 @@ cpdef double angularSeparation(double ra1, double dec1, double ra2, double dec2)
     Source of the equation: http://www.astronomycafe.net/qadir/q1890.html (May 1, 2016)
 
     @param ra1: [float] right ascension of the first stars (in degrees)
-    @param dec1: [float] decliantion of the first star (in degrees)
+    @param dec1: [float] declination of the first star (in degrees)
     @param ra2: [float] right ascension of the decons stars (in degrees)
-    @param dec2: [float] decliantion of the decons star (in degrees)
+    @param dec2: [float] declination of the decons star (in degrees)
 
     @return angular_separation: [float] angular separation (in degrees)
     """
@@ -128,8 +128,8 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
 
     Return:
         filtered_indices, filtered_list: (ndarray, ndarray)
-            - filtered_indices - Indices of catalog_list entries which satifly the filters.
-            - filtered_list - catalog_list entires that satifly the filters.
+            - filtered_indices - Indices of catalog_list entries which satisfy the filters.
+            - filtered_list - catalog_list entires that satisfy the filters.
         ...
 
     """
@@ -207,7 +207,7 @@ def matchStars(np.ndarray[FLOAT_TYPE_t, ndim=2] stars_list, np.ndarray[FLOAT_TYP
     cdef double min_dist, dist
     cdef double cat_match_indx, im_star_y, im_star_x, cat_x, cat_y
 
-    # Get the lenghts of input arrays
+    # Get the lengths of input arrays
     cdef int stars_len = stars_list.shape[0]
     cdef int cat_len = cat_good_indices.shape[0]
     
@@ -553,7 +553,7 @@ cpdef (double, double, double) equatorialCoordAndRotPrecession(double start_epoc
     # Normalize the new rotation angle to be between -pi and pi
     new_rot_angle = fmod(new_rot_angle + M_PI, 2*M_PI) - M_PI
 
-    # print(f"Rotation change due to precession: {degrees(rotation_change)*60} arcmin")
+    # print("Rotation change due to precession: {} arcmin".format(degrees(rotation_change) * 60))
 
     return ra_precessed, dec_precessed, new_rot_angle
 
@@ -870,7 +870,7 @@ cpdef (double, double) cyaltAz2RADec(double azim, double elev, double jd, double
         elev: [float] Elevation above horizon in radians.
         jd: [float] Julian date.
         lat: [float] Latitude of the observer in radians.
-        lon: [float] Longitde of the observer in radians.
+        lon: [float] Longitude of the observer in radians.
 
     Return:
         (RA, dec): [tuple]
@@ -907,7 +907,7 @@ cpdef (double, double) cyApparentAltAz2TrueRADec(double azim, double elev, doubl
         elev: [float] Elevation above horizon in radians (epoch of date).
         jd: [float] Julian date.
         lat: [float] Latitude of the observer in radians.
-        lon: [float] Longitde of the observer in radians.
+        lon: [float] Longitude of the observer in radians.
 
     Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
@@ -947,7 +947,7 @@ def cyApparentAltAz2TrueRADec_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] azim_arr, np
         elev_arr: [float] Elevation above horizon in radians (epoch of date).
         jd: [float] Julian date.
         lat: [float] Latitude of the observer in radians.
-        lon: [float] Longitde of the observer in radians.
+        lon: [float] Longitude of the observer in radians.
     Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
     Return:
@@ -1053,7 +1053,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     double pix_scale, np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, 
     np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev, str dist_type, bool refraction=True, bool equal_aspect=False, 
     bool force_distortion_centre=False, bool asymmetry_corr=True):
-    """ Convert RA, Dec to distorion corrected image coordinates. 
+    """ Convert RA, Dec to distortion corrected image coordinates. 
 
     Arguments:
         RA_data: [ndarray] Array of right ascensions (degrees).
@@ -1067,10 +1067,10 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
         jd_ref: [float] Reference Julian date of plate solution.
         ra_ref: [float] Reference right ascension of the image centre (degrees).
         dec_ref: [float] Reference declination of the image centre (degrees).
-        pos_angle_ref: [float] Rotation from the celestial meridial (degrees).
+        pos_angle_ref: [float] Rotation from the celestial meridian (degrees).
         pix_scale: [float] Image scale (px/deg).
         x_poly_rev: [ndarray float] Distortion polynomial in X direction for reverse mapping.
-        y_poly_rev: [ndarray float] Distortion polynomail in Y direction for reverse mapping.
+        y_poly_rev: [ndarray float] Distortion polynomial in Y direction for reverse mapping.
         dist_type: [str] Distortion type. Can be: poly3+radial, radial3, radial4, or radial5.
         
     Keyword arguments:
@@ -1222,7 +1222,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
 
         ### ###
 
-        # Set initial distorsion values
+        # Set initial distortion values
         dx = 0
         dy = 0
 
@@ -1431,9 +1431,9 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         x_data: [ndarray] 1D numpy array containing the image column.
         y_data: [ndarray] 1D numpy array containing the image row.
         lat: [float] Latitude of the observer in degrees.
-        lon: [float] Longitde of the observer in degress.
+        lon: [float] Longitude of the observer in degrees.
         x_res: [int] Image size, X dimension (px).
-        y_res: [int] Image size, Y dimenstion (px).
+        y_res: [int] Image size, Y dimension (px).
         h0: [float] Reference hour angle (deg).
         jd_ref: [float] Reference Julian date when the plate was fit.
         ra_ref: [float] Reference right ascension of the image centre (degrees).
@@ -1557,7 +1557,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     # Go through all given data points and convert them from X, Y to RA, Dec
     for i in range(jd_data.shape[0]):
 
-        # Choose time and image coordiantes
+        # Choose time and image coordinates
         jd = jd_data[i]
         x_img = x_data[i]
         y_img = y_data[i]

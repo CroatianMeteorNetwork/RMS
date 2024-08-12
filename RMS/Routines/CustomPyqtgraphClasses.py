@@ -36,7 +36,7 @@ def qmessagebox(message="", title="Error", message_type="warning"):
     msg.exec_()
 
 
-class QHSeperationLine(QtWidgets.QFrame):
+class QHSeparationLine(QtWidgets.QFrame):
   """ A horizontal separation line """
   def __init__(self):
     super().__init__()
@@ -904,7 +904,7 @@ class HistogramLUTItem(pg.HistogramLUTItem):
         pass
 
     def regionChanging(self):
-        pass  # doesnt update when moving it
+        pass  # doesn't update when moving it
 
     def imageChanged(self, autoLevel=False, autoRange=False):
         if not self.auto_levels:
@@ -1665,7 +1665,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
         group.setLayout(box)
         full_layout.addWidget(group)
 
-        hline = QHSeperationLine()
+        hline = QHSeparationLine()
         full_layout.addWidget(hline)
         full_layout.addWidget(QtWidgets.QLabel("Astrometry parameters"))
 
@@ -1807,7 +1807,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
 
 
         # Add horizontal line
-        hline = QHSeperationLine()
+        hline = QHSeparationLine()
         form.addRow(hline)
         form.addRow(QtWidgets.QLabel("Photometry parameters"))
 
@@ -2052,7 +2052,7 @@ class ArrayTabWidget(QtWidgets.QTabWidget):
         self.n_shown = n
 
     def setupTab(self, i):
-        """ Setup all boxes with polynomail values. """
+        """ Setup all boxes with polynomial values. """
 
         layout = QtWidgets.QFormLayout()
 

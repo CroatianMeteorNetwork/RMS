@@ -72,13 +72,13 @@ def rmsExternal(captured_night_dir, archived_night_dir, config):
     log.info('Exit status: {}'.format(exit_code))
     log.info('iStream external script finished')
 
-    # Relase lock file so RMS is authorized to reboot, if needed
+    # Release lock file so RMS is authorized to reboot, if needed
     os.remove(lockfile)
 
     # Only reboot RPis, don't reboot Linux machines
     if isRaspberryPi():
 
-        # Reboot the computer (script needs sudo priviledges, works only on Pis)
+        # Reboot the computer (script needs sudo privileges, works only on Pis)
         try:
             log.info("Rebooting system...")
             os.system('sudo shutdown -r now')

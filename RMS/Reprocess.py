@@ -37,6 +37,8 @@ from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
 from Utils.ShowerAssociation import showerAssociation
 from Utils.PlotTimeIntervals import plotFFTimeIntervals
 from Utils.TimestampRMSVideos import timestampRMSVideos
+from Utils.AuditConfig import compareConfigs
+
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -200,7 +202,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             platepar, fit_status = autoCheckFit(config, platepar, calstars_list)
 
 
-            # If the fit was sucessful, apply the astrometry to detected meteors
+            # If the fit was successful, apply the astrometry to detected meteors
             if fit_status:
 
                 log.info('Astrometric calibration SUCCESSFUL!')
@@ -370,7 +372,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         flat_img = None
         
 
-    # If making flat was sucessfull, save it
+    # If making flat was successful, save it
     if flat_img is not None:
 
         # Save the flat in the night directory, to keep the operational flat updated
@@ -428,6 +430,27 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         log.debug('Plotting timestamp interval failed with message:\n' + repr(e))
         log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
+    # Generate a config audit report
+    log.info('Generate config audit report')
+    try:
+        # Make the name of the audit file
+        audit_file_name = night_data_dir_name.replace("_detected", "") + "_config_audit_report.txt"
+
+        # Construct the full path for files
+        audit_file_path = os.path.join(night_data_dir, audit_file_name)
+        config_file_path = os.path.join(night_data_dir, ".config")
+
+        with open(audit_file_path, 'w') as f:
+            f.write(compareConfigs(config_file_path,
+                                   os.path.join(config.rms_root_dir, ".configTemplate"),
+                                   os.path.join(config.rms_root_dir, "RMS/ConfigReader.py")))
+
+        extra_files.append(audit_file_path)
+
+    except Exception as e:
+        log.debug('Generating config audit failed with message:\n' + repr(e))
+        log.debug(repr(traceback.format_exception(*sys.exc_info())))
+
 
     ### Add extra files to archive
 
@@ -469,7 +492,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     # If FFs are not uploaded, choose two to upload
     if config.upload_mode > 1:
     
-        # If all FF files are not uploaded, add two FF files which were successfuly recalibrated
+        # If all FF files are not uploaded, add two FF files which were successfully recalibrated
         recalibrated_ffs = []
         if recalibrated_platepars is not None:
             for ff_name in recalibrated_platepars:

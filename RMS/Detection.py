@@ -347,7 +347,7 @@ def merge3DLines(line_list, vect_angle_thresh, last_count=0):
 
                     found_pair = True
 
-                    # Add megred line to the list
+                    # Add merged line to the list
                     final_list.append([line1[0], line1[1], max(line1[2], line2[2]), max(line1[3], line2[3]), frame_min, frame_max])
 
                     break
@@ -367,7 +367,7 @@ def merge3DLines(line_list, vect_angle_thresh, last_count=0):
 def checkWhiteRatio(img_thres, ff, max_white_ratio):
     """ Checks if there are too many threshold passers on an image. """
 
-    # Check if the image is too "white" and any futher processing makes no sense
+    # Check if the image is too "white" and any further processing makes no sense
     # Compute the radio between the number of threshold passers and all pixels
     white_ratio = np.count_nonzero(img_thres)/float(ff.nrows*ff.ncols)
 
@@ -400,7 +400,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         max_white_ratio: [float] max ratio between write and all pixels after thresholding
         kht_lib_path: [string] path to the compiled KHT library
         mask: [MaskStruct] Mask structure.
-        flat_struct: [FlatStruct]  Flat frame sturcture.
+        flat_struct: [FlatStruct]  Flat frame structure.
         dark: [ndarray] Dark frame.
 
     
@@ -823,7 +823,7 @@ def checkAngularVelocity(centroids, config):
     
     Return:
         ang_vel, ang_vel_status: [float, bool]
-            - ang_vel - angular velovity in deg/s
+            - ang_vel - angular velocity in deg/s
             - ang_vel_status - True if the velocity is in the meteor ang. velocity range, False otherwise
 
     """
@@ -1099,7 +1099,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
         # If the FF file could not be loaded, skip it
         if img_handle.ff is None:
-            logDebug("FF file cound not be loaded, skipping it...")
+            logDebug("FF file could not be loaded, skipping it...")
             return []
 
         # Apply mask and flat to FF
@@ -1686,7 +1686,7 @@ if __name__ == "__main__":
         img_handle_main = img_handle_list[0]
 
 
-        # If folders with images are gicen, dump the detections in the parent directory
+        # If folders with images are given, dump the detections in the parent directory
         if img_handle_main.input_type == 'images':
             
             # Set the main directory to be the parent directory of all files
@@ -1773,7 +1773,7 @@ if __name__ == "__main__":
         meteor_detections = detectMeteors(img_handle, config, flat_struct=flat_struct, dark=dark, mask=mask, \
             debug=cml_args.debugplots, asgard=(cml_args.asgard is not None))
 
-        # Supress numpy scientific notation printing
+        # Suppress numpy scientific notation printing
         np.set_printoptions(suppress=True)
 
         meteor_No = 1

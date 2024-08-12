@@ -169,7 +169,9 @@ class BufferedCapture(Process):
 
                 if GST_IMPORTED:
 
-                    state = self.device.get_state(Gst.CLOCK_TIME_NONE).state
+                    # Use a 10-second timeout to avoid indefinite blocking while checking if the device is in the PLAYING state
+                    state = self.device.get_state(Gst.SECOND * 10).state
+
                     if state == Gst.State.PLAYING:
                         return True
                     else:
@@ -582,7 +584,19 @@ class BufferedCapture(Process):
 
         # Set the pipeline to PLAYING state with retries
         for attempt in range(max_retries):
-            
+
+            log.info("Attempt {}: transitioning Pipeline to PLAYING state.".format(attempt + 1))
+
+            # Reset pipeline if one already exists
+            if self.pipeline:
+                self.pipeline.set_state(Gst.State.NULL)
+
+                # Waiting to ensure the pipeline is fully cleaned up
+                time.sleep(retry_interval)
+
+                # Clear the pipeline reference to avoid using a stale or invalid pipeline object
+                self.pipeline = None
+
             # Parse and create the pipeline
             self.pipeline = Gst.parse_launch(pipeline_str)
 
@@ -592,8 +606,10 @@ class BufferedCapture(Process):
             # Capture time
             start_time = time.time()
 
-            # Wait for the state change to complete
-            state_change_return, current_state, pending_state = self.pipeline.get_state(Gst.CLOCK_TIME_NONE)
+            # Wait for the state change to complete, with an increasing timeout for each attempt
+            max_timeout = Gst.SECOND * 60
+            current_timeout = min(Gst.SECOND * 5 * (attempt + 1), max_timeout)
+            state_change_return, current_state, _ = self.pipeline.get_state(current_timeout)
 
             # Check if the state change was successful
             if state_change_return != Gst.StateChangeReturn.FAILURE and current_state == Gst.State.PLAYING:
@@ -672,13 +688,13 @@ class BufferedCapture(Process):
                         ping_success = ping(ip)
 
                         if ping_success:
-                            log.info("Camera IP ping successful! Waiting  10 seconds. ")
+                            log.info("Camera IP ping successful! Waiting 5 seconds. ")
 
                             # Wait for camera to finish booting up
-                            time.sleep(10)
+                            time.sleep(5)
                             break
 
-                        time.sleep(5)
+                        time.sleep(1)
 
                     if not ping_success:
                         log.error("Can't ping the camera IP!")
