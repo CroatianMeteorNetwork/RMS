@@ -2186,7 +2186,7 @@ class SettingsWidget(QtWidgets.QWidget):
             self.invert.setChecked(False)
         vbox.addWidget(self.invert)
 
-        self.autopan_chk = QtWidgets.QCheckBox('Auto Pan')
+        self.autopan_chk = QtWidgets.QCheckBox('Auto Pan To Next Star')
         self.autopan_chk.released.connect(self.sigAutoPanToggled.emit)
         self.autopan_chk.setChecked(False)
         vbox.addWidget(self.autopan_chk)
