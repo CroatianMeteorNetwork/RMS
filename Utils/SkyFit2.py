@@ -5759,10 +5759,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
             # Add an entry to the ECSV file
-            entry = [frame_time.strftime(isodate_format_entry), "{:10.6f}".format(ra),
-                "{:+10.6f}".format(dec), "{:10.6f}".format(azim), "{:+10.6f}".format(alt),
-                "{:9.3f}".format(pick['x_centroid']), "{:9.3f}".format(pick['y_centroid']),
-                "{:+7.2f}".format(mag)]
+            entry = [frame_time.strftime(isodate_format_entry),
+                     "{:10.6f}".format(ra),  "{:+10.6f}".format(dec),
+                     "{:10.6f}".format(azim), "{:+10.6f}".format(alt), "{:+7.2f}".format(mag),
+                     "{:9.3f}".format(pick['x_centroid']), "{:9.3f}".format(pick['y_centroid'])]
 
             out_str += ",".join(entry) + "\n"
 
