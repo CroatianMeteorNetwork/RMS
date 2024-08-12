@@ -5689,10 +5689,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 value_str = str(value)
 
             out_str += "# - {" + "{:s}: {:s}".format(key, value_str) + "}\n"
-
+            out_str += "datetime,ra,dec,azimuth,altitude,mag_data,x_image,y_image\n"
 
         out_str += "# schema: astropy-2.0\n"
-        out_str += "datetime,ra,dec,azimuth,altitude,x_image,y_image,integrated_pixel_value,mag_data\n"
 
         # Add the data (sort by frame)
         for frame, pick in sorted(self.pick_list.items(), key=lambda x: x[0]):
@@ -5757,11 +5756,12 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Compute the datetime of the point
                 frame_time = dt_ref + datetime.timedelta(seconds=t_rel)
 
+
             # Add an entry to the ECSV file
-            entry = [frame_time.strftime(isodate_format_entry), "{:10.6f}".format(ra), \
-                "{:+10.6f}".format(dec), "{:10.6f}".format(azim), "{:+10.6f}".format(alt), \
-                "{:9.3f}".format(pick['x_centroid']), "{:9.3f}".format(pick['y_centroid']), 
-                "{:10d}".format(int(pick['intensity_sum'])), "{:+7.2f}".format(mag)]
+            entry = [frame_time.strftime(isodate_format_entry), "{:10.6f}".format(ra),
+                "{:+10.6f}".format(dec), "{:10.6f}".format(azim), "{:+10.6f}".format(alt),
+                "{:9.3f}".format(pick['x_centroid']), "{:9.3f}".format(pick['y_centroid']),
+                "{:+7.2f}".format(mag)]
 
             out_str += ",".join(entry) + "\n"
 
