@@ -53,12 +53,16 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
     # done here so that trackStack() can be called from other modules
     dir_paths = [os.path.normpath(dir_path) for dir_path in dir_paths]
 
+    # Make sure the paths are directories and not files, by stripping the file name
+    dir_paths = [os.path.dirname(dir_path) for dir_path in dir_paths]
+
     # Find recalibrated platepars file per FF file
     recalibrated_platepars = {}
     for dir_path in dir_paths: 
         platepars_recalibrated_file = glob(os.path.join(dir_path, config.platepars_recalibrated_name))
         if len(platepars_recalibrated_file) != 1:
             print('unable to find a unique platepars file in {}'.format(dir_path))
+            print('found: {}'.format(platepars_recalibrated_file))
             return False
         print('loading {}'.format(platepars_recalibrated_file[0]))
         with open(platepars_recalibrated_file[0]) as f:
