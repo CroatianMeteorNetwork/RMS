@@ -530,6 +530,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.paired_stars = PairedStars()
         self.residuals = None
 
+        # List of unsuitable stars
+        self.unsuitable_stars = PairedStars()
+
         # Positions of the mouse cursor
         self.mouse_x = 0
         self.mouse_y = 0
@@ -830,6 +833,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.zoom_window.addItem(self.geo_markers2)
 
         self.selected_stars_visible = True
+        self.unsuitable_stars_visible = True
 
         # selected catalog star markers (main window)
         self.sel_cat_star_markers = pg.ScatterPlotItem()
@@ -864,6 +868,24 @@ class PlateTool(QtWidgets.QMainWindow):
         self.zoom_window.addItem(self.centroid_star_markers2)
 
         self.draw_calstars = True
+
+        # selected unsuitable star markers (main window)
+        self.unsuitable_star_markers = pg.ScatterPlotItem()
+        self.unsuitable_star_markers.setPen('r', width=3)
+        self.unsuitable_star_markers.setSize(10)
+        self.unsuitable_star_markers.setSymbol('s')
+        self.unsuitable_star_markers.setZValue(4)
+        self.img_frame.addItem(self.unsuitable_star_markers)
+
+        # selected catalog star markers (zoom window)
+        self.unsuitable_star_markers2 = pg.ScatterPlotItem()
+        self.unsuitable_star_markers2.setPen('r', width=3)
+        self.unsuitable_star_markers2.setSize(10)
+        self.unsuitable_star_markers2.setSymbol('s')
+        self.unsuitable_star_markers2.setZValue(4)
+        self.zoom_window.addItem(self.unsuitable_star_markers2)
+
+        self.unsuitable_stars_visble = True
 
         # calstar markers (main window)
         self.calstar_markers = pg.ScatterPlotItem()
@@ -900,6 +922,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.star_pick_info_text_str += "LEFT CLICK - Centroid star\n"
         self.star_pick_info_text_str += "CTRL + LEFT CLICK - Manual star position\n"
         self.star_pick_info_text_str += "ENTER or SPACE - Accept pair\n"
+        self.star_pick_info_text_str += "K  - Mark star as unsuitable\n"
         self.star_pick_info_text_str += "RIGHT CLICK - Remove pair\n"
         self.star_pick_info_text_str += "CTRL + SCROLL - Aperture radius adjust\n"
         self.star_pick_info_text_str += "CTRL + Z - Fit stars\n"
@@ -1701,6 +1724,13 @@ class PlateTool(QtWidgets.QMainWindow):
             self.sel_cat_star_markers.setData(pos=[])
             self.sel_cat_star_markers2.setData(pos=[])
 
+        if len(self.unsuitable_stars) > 0:
+            self.unsuitable_star_markers.setData(pos=self.unsuitable_stars.imageCoords(draw=True))
+            self.unsuitable_star_markers2.setData(pos=self.unsuitable_stars.imageCoords(draw=True))
+        else:
+            self.unsuitable_star_markers.setData(pos=[])
+            self.unsuitable_star_markers2.setData(pos=[])
+
         self.centroid_star_markers.setData(pos=[])
         self.centroid_star_markers2.setData(pos=[])
 
@@ -1939,6 +1969,7 @@ class PlateTool(QtWidgets.QMainWindow):
         catalog_mags = []
         elevation_list = []
 
+
         for paired_star in self.paired_stars.allCoords():
 
             img_star, catalog_star = paired_star
@@ -1964,6 +1995,7 @@ class PlateTool(QtWidgets.QMainWindow):
                                                 self.platepar.refraction)
             
             elevation_list.append(alt)
+
 
 
         # Make sure there are at least 2 stars picked
@@ -3541,16 +3573,18 @@ class PlateTool(QtWidgets.QMainWindow):
                 # updates image automatically
 
 
-            # Save the point to the fit list by pressing Enter or Space
+            # Save the point to the matched stars list by pressing Enter or Space or to the
+            # unsuitable stars list by pressing K
+
             elif (event.key() == QtCore.Qt.Key_Return) or (event.key() == QtCore.Qt.Key_Enter) \
-                or (event.key() == QtCore.Qt.Key_Space):
-                
+                or (event.key() == QtCore.Qt.Key_Space) or (event.key() == QtCore.Qt.Key_K):
+
                 if self.star_pick_mode:
-                    
+                    unsuitable = True if event.key() == QtCore.Qt.Key_K else False
                     # If the catalog star or geo points has been selected, save the pair to the list
                     if self.cursor.mode == 1:
 
-                        
+
                         # Star catalog points
                         if self.closest_type == 'catalog':
                             selected_coords = self.catalog_stars_filtered[self.closest_cat_star_indx]
@@ -3572,9 +3606,18 @@ class PlateTool(QtWidgets.QMainWindow):
                             self.closest_geo_point_indx = None
 
 
-                        # Add the image/catalog pair to the list
-                        self.paired_stars.addPair(self.x_centroid, self.y_centroid, self.star_intensity, \
-                            pair_obj)
+                        # Add the image/catalog pair to the appropriate list
+                        if unsuitable:
+                            self.unsuitable_stars.addPair(self.x_centroid, self.y_centroid, self.star_intensity, \
+                                                      pair_obj)
+                            self.unsuitable_star_markers.addPoints(x=[self.x_centroid + 0.5], \
+                                                                 y=[self.y_centroid + 0.5])
+                            self.unsuitable_star_markers2.addPoints(x=[self.x_centroid + 0.5], \
+                                                                  y=[self.y_centroid + 0.5])
+
+                        else:
+                            self.paired_stars.addPair(self.x_centroid, self.y_centroid, self.star_intensity, \
+                                pair_obj)
 
                         # Switch back to centroiding mode
                         self.cursor.setMode(0)
@@ -5932,12 +5975,17 @@ class PlateTool(QtWidgets.QMainWindow):
         #intialise
 
         next_index, max_dist, min_matched_radius = 0,0, np.inf
+
+        # get the maximum radius between stars so far
         if self.max_radius_between_matched_stars < 360:
             matched_radius = self.max_radius_between_matched_stars
         else:
             matched_radius = np.inf
         image_ra = [star[0] for star in self.catalog_stars_filtered]
         image_dec = [star[1] for star in self.catalog_stars_filtered]
+
+        unsuitable_ra_list = [star[0] for star in self.unsuitable_stars.skyCoords()]
+        unsuitable_dec_list = [star[1] for star in self.unsuitable_stars.skyCoords()]
 
         # get all the matched stars in sky coordinates
         matched_sky_coords = self.paired_stars.skyCoords()
@@ -5966,6 +6014,7 @@ class PlateTool(QtWidgets.QMainWindow):
             min_ang_sep_deg = np.inf
             this_star_ra, this_star_dec = np.radians(x), np.radians(y)
 
+            # iterate through the list of stars to find any doubles
             for double_check_index, (double_ra, double_dec) in enumerate(zip(image_ra, image_dec)):
 
                     # Exclude self
@@ -5975,12 +6024,31 @@ class PlateTool(QtWidgets.QMainWindow):
                     double_check_ra, double_check_dec = np.radians(double_ra),np.radians(double_dec)
                     ang_sep_deg = np.degrees(angularSeparation(this_star_ra, this_star_dec, double_check_ra, double_check_dec))
 
-                    # Record the lowest angular separation
+                    # Record the lowest angular separation between this star and the star we are checking against
                     if ang_sep_deg < min_ang_sep_deg:
                         min_ang_sep_deg = ang_sep_deg
 
+            # skip any stars which are close to double stars
             if min_ang_sep_deg < minimum_separation:
                 #skip this star as a candidate to pan to
+                #print("Skipping this star {},{} as too close to another star".format(this_star_ra, this_star_dec))
+                continue
+
+            #handle unsuitable stars - if this star is within minimum separation of an unsuitable star, skip
+            min_ang_sep_deg = np.inf
+            for unsuitable_ra, unsuitable_dec in zip(unsuitable_ra_list, unsuitable_dec_list):
+
+                unsuitable_ra, unsuitable_dec = np.radians(unsuitable_ra), np.radians(unsuitable_dec)
+                ang_sep_deg = np.degrees(
+                    angularSeparation(this_star_ra, this_star_dec, unsuitable_ra, unsuitable_dec))
+
+                # Record the lowest angular separation between this star and the star we are checking against
+                if ang_sep_deg < min_ang_sep_deg:
+                    min_ang_sep_deg = ang_sep_deg
+
+            # skip any stars which are close to unsuitable stars
+            if min_ang_sep_deg < (10 * minimum_separation):
+                # skip this star as a candidate to pan to
                 continue
 
 
