@@ -55,7 +55,6 @@ from RMS.DownloadMask import downloadNewMask
 from RMS.Formats.ObservationSummary import startObservationSummaryReport
 from Utils.AuditConfig import compareConfigs
 
-
 # Flag indicating that capturing should be stopped
 STOP_CAPTURE = False
 
