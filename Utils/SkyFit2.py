@@ -6291,7 +6291,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     min_ang_sep_deg = ang_sep_deg
 
             # skip any stars which are close to unsuitable stars
-            if min_ang_sep_deg < (10 * minimum_separation):
+            if min_ang_sep_deg < (20 * minimum_separation):
                 # skip this star as a candidate to pan to
                 continue
 
