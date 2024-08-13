@@ -348,6 +348,30 @@ class Config:
         # keep this many compressed ArchDirs. Zero means keep them all
         self.bz2_files_to_keep = 20
 
+        # CaptDirs to keep
+        # keep this many CapDirs. Zero means keep them all
+        self.capt_dirs_to_keep = 8
+
+        # Space quotas in GB
+
+
+
+        # Space allocation for all of rms_data
+
+        # Disable the deletion by quota management for testing purposes
+        self.quota_management_disabled = False
+
+
+        # Space allocation for all of rms_data
+        self.rms_data_quota = None
+
+        # Of that allocation for all of rms_data, this is set aside for archived directories
+        self.arch_dir_quota = None
+
+        # Of that allocation for all of rms_data, this is set aside for bz2 files
+        self.bz2_files_quota = None
+
+
         # Extra space to leave on disk for the archive (in GB) after the captured files have been taken
         #   into account
         self.extra_space_gb = 6
@@ -892,6 +916,23 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "bz2_files_to_keep"):
         config.bz2_files_to_keep = int(parser.get(section, "bz2_files_to_keep"))
+
+    if parser.has_option(section, "capt_dirs_to_keep"):
+        config.capt_dirs_to_keep = int(parser.get(section, "capt_dirs_to_keep"))
+
+    if parser.has_option(section, "quota_management_disabled"):
+        config.quota_management_disabled = parser.getboolean(section, "quota_management_disabled")
+
+
+
+    if parser.has_option(section, "rms_data_quota"):
+        config.rms_data_quota = int(parser.get(section, "rms_data_quota"))
+
+    if parser.has_option(section, "arch_dir_quota"):
+        config.arch_dir_quota = int(parser.get(section, "arch_dir_quota"))
+
+    if parser.has_option(section, "bz2_files_quota"):
+        config.bz2_files_quota = int(parser.get(section, "bz2_files_quota"))
 
     if parser.has_option(section, "captured_dir"):
         config.captured_dir = parser.get(section, "captured_dir")
