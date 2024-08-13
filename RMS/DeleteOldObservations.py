@@ -11,6 +11,7 @@ import time
 import logging
 import glob
 import argparse
+import subprocess
 
 import ephem
 
