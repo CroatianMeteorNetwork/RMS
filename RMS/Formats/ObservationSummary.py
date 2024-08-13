@@ -245,6 +245,7 @@ def nightSummaryData(config, night_data_dir):
     capture_duration_from_fits = (time_last_fits_file - time_first_fits_file).total_seconds()
     total_expected_fits = round(capture_duration_from_fits / duration_one_fits_file)
     fits_file_shortfall = total_expected_fits - fits_count
+    fits_file_shortfall = 0 if fits_file_shortfall < 1 else fits_file_shortfall
     fits_file_shortfall_as_time = str(datetime.timedelta(seconds=fits_file_shortfall * duration_one_fits_file))
     return capture_duration_from_fits, fits_count, fits_file_shortfall, fits_file_shortfall_as_time, \
                         time_first_fits_file, time_last_fits_file, total_expected_fits
