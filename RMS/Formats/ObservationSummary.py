@@ -235,6 +235,9 @@ def nightSummaryData(config, night_data_dir):
     fits_files_list = glob.glob(os.path.join(night_data_dir, "*.fits"))
     fits_files_list.sort()
     fits_count = len(fits_files_list)
+    if fits_count < 1:
+        return 0,0,0,0,0,0,0
+
     time_first_fits_file = datetime.datetime.strptime(filenameToDatetimeStr(os.path.basename(fits_files_list[0])),
                                                       "%Y-%m-%d %H:%M:%S.%f")
     time_last_fits_file = datetime.datetime.strptime(filenameToDatetimeStr(
