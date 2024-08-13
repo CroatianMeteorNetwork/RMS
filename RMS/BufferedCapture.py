@@ -591,22 +591,26 @@ class BufferedCapture(Process):
         # Set the pipeline to PLAYING state with retries
         for attempt in range(max_retries):
 
-            log.info("Attempt {}: transitioning Pipeline to PLAYING state.".format(attempt + 1))
+            log.info("Attempt {}: transitioning Pipeline to PLAYING state, retry interval {}."
+                                .format(attempt + 1, retry_interval))
 
             # Reset pipeline if one already exists
             if self.pipeline:
+                log.info("Attempting to reset pipeline")
                 self.pipeline.set_state(Gst.State.NULL)
-
+                log.info("Pipeline reset. Waiting for {} seconds".format(retry_interval))
                 # Waiting to ensure the pipeline is fully cleaned up
                 time.sleep(retry_interval)
-
+                log.info("Wait completed")
                 # Clear the pipeline reference to avoid using a stale or invalid pipeline object
                 self.pipeline = None
 
             # Parse and create the pipeline
+            log.info("Parsing and creating pipeline")
             self.pipeline = Gst.parse_launch(pipeline_str)
 
             # Set the pipeline to PLAYING state
+            log.info("Set pipeline to playing state")
             self.pipeline.set_state(Gst.State.PLAYING)
 
             # Capture time
