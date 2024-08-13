@@ -180,7 +180,7 @@ def startObservationSummaryReport(config, duration, force_delete = False):
     fits_files_from_duration = duration * fps / no_of_frames_per_fits_file
     addObsParam(conn, "fits_files_from_duration", fits_files_from_duration)
     conn.close()
-    return "Opening a new observations summary for duration {}".format(duration)
+    return "Opening a new observations summary for duration {} seconds".format(duration)
 
 def finalizeObservationSummary(config, night_data_dir, platepar=None):
 
