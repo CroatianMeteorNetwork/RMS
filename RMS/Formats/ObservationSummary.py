@@ -242,7 +242,7 @@ def nightSummaryData(config, night_data_dir):
                                                       "%Y-%m-%d %H:%M:%S.%f")
     time_last_fits_file = datetime.datetime.strptime(filenameToDatetimeStr(
         os.path.basename(fits_files_list[-1])), "%Y-%m-%d %H:%M:%S.%f")
-    capture_duration_from_fits = (time_last_fits_file - time_first_fits_file).total_seconds()
+    capture_duration_from_fits = (time_last_fits_file - time_first_fits_file).total_seconds() + duration_one_fits_file
     total_expected_fits = round(capture_duration_from_fits / duration_one_fits_file)
     fits_file_shortfall = total_expected_fits - fits_count
     fits_file_shortfall = 0 if fits_file_shortfall < 1 else fits_file_shortfall
