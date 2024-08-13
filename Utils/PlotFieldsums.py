@@ -38,7 +38,7 @@ def plotFieldsums(dir_path, config):
     """ Plots a graph of all intensity sums from FS*.bin files in the given directory. 
     
     Arguments:
-        dir_path: [str] Path to the directory which containes the FS*.bin files.
+        dir_path: [str] Path to the directory which contains the FS*.bin files.
         config: [Config structure] Configuration.
 
     Return:
@@ -63,7 +63,7 @@ def plotFieldsums(dir_path, config):
             except TypeError:
                 print('File {:s} is corrupted!'.format(file_name))
 
-            # Extract the date and time from the FF file
+            # Extract the date and time from the FS file
             dt = filenameToDatetime(file_name)
 
             # Take the peak intensity value
@@ -86,10 +86,10 @@ def plotFieldsums(dir_path, config):
 
     plt.figure()
     
-    # Plot peak intensitites
+    # Plot peak intensities
     plt.plot(time_data, intensity_data_peak, color='r', linewidth=0.5, zorder=3, label='Peak')
 
-    # Plot average intensitites
+    # Plot average intensities
     plt.plot(time_data, intensity_data_avg, color='k', linewidth=0.5, zorder=3, label='Average')
 
     plt.gca().set_yscale('log')

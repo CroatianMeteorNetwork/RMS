@@ -1,4 +1,4 @@
-""" Functions for reading/writing FF files with respet to the rheir format (.bin for .fits). """
+""" Functions for reading/writing FF files with respect to the their format (.bin for .fits). """
 
 
 from __future__ import print_function, division, absolute_import
@@ -126,7 +126,7 @@ def write(ff, directory, filename, fmt=None):
 
         else:
 
-            # Set the defualt format to FITS
+            # Set the default format to FITS
             fmt = 'fits'
 
 
@@ -164,7 +164,7 @@ def reconstructFrame(ff, frame_no, avepixel=False):
     else:
         frame = np.zeros_like(ff.maxpixel)
 
-    # Find where the max values occured for this frame
+    # Find where the max values occurred for this frame
     indices = np.where(ff.maxframe == int(frame_no))
     frame[indices] = ff.maxpixel[indices]
 
@@ -215,7 +215,7 @@ def selectFFFrames(img_input, ff, frame_min, frame_max):
         [ndarray] image with pixels only from the given frame range
     """
 
-    # Get the indices of image positions with times correspondng to the subdivision
+    # Get the indices of image positions with times corresponding to the subdivision
     indices = np.where((ff.maxframe >= frame_min) & (ff.maxframe <= frame_max))
 
     # Reconstruct the image with given indices
@@ -227,14 +227,16 @@ def selectFFFrames(img_input, ff, frame_min, frame_max):
 
 
 
-def filenameToDatetime(file_name, microseconds=False):
+def filenameToDatetime(file_name, microseconds='auto'):
     """ Converts FF bin file name to a datetime object.
 
     Arguments:
         file_name: [str] Name of a FF file.
 
     Keyword arguments:
-        microseconds: [bool] If True, the file name contains microseconds instead of milliseconds.
+        microseconds: [str/bool] If auto, the function will try to guess if the last number in the file name
+            is in milliseconds or microseconds. If True, the file name contains microseconds instead of 
+            milliseconds.
 
     Return:
         [datetime object] Date and time of the first frame in the FF file.
@@ -261,11 +263,22 @@ def filenameToDatetime(file_name, microseconds=False):
     minute = int(time[2:4])
     seconds = int(time[4:6])
 
+    # Read the last number (either ms or us)
+    ms_us_str = file_name[i + 3]
+
+    # Check if the last number is in milliseconds or microseconds
+    if microseconds == 'auto':
+        if len(ms_us_str) == 6:
+            microseconds = True
+        else:
+            microseconds = False
+
     if microseconds:
         us = int(file_name[i + 3])
     
     else:
         us = 1000*int(file_name[i + 3])
+
 
     return datetime.datetime(year, month, day, hour, minute, seconds, us)
 
@@ -279,7 +292,7 @@ def getMiddleTimeFF(ff_name, fps, ret_milliseconds=True, ff_frames=256):
         fps: [float] Frames per second of the video compressed in the FF file.
 
     Keyword arguments:
-        ret_milliseconds: [bool] If True, the last number returned will be in milliseconds. Otverwise, it will
+        ret_milliseconds: [bool] If True, the last number returned will be in milliseconds. Otherwise, it will
             be in microseconds.
         ff_frames: [int] Number of frames that were compressed in the FF file.
         UT_corr: [float] UT correction (hours).

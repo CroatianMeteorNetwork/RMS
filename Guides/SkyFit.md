@@ -35,7 +35,7 @@ If you are using a different lens or a sensor, you can calculate the field of vi
 
 *FOV = 2\*arctan(d/(2\*f))* 
 
-where *d* is the size of the sensor in the given directon (width or height), and *f* is the focal length of the lens.
+where *d* is the size of the sensor in the given direction (width or height), and *f* is the focal length of the lens.
 
 For example, a 1/2" sensor has a width of 6.4mm, and when coupled with a 4mm lens its FOV width will be about 77 degrees. Its height is 4.8mm and it has a FOV height of around 62 degrees with the same lens.
 
@@ -78,7 +78,7 @@ Next, a dialog asking you to input an approximate azimuth and altitude of the ca
 
 #### 4. Recognize stars
 
-Use arrow keys **<-- Left** and **Right -->** to cycle through images. Find an image which has clearly visible stars and has no clouds. **Green circles** are stars detected on the image using an automatci algorithm, but there might be some which were not automatically detected. You will also notice **red plusses** on the image, those are projected positions of catalog stars, and the projection is done by using the current astrometric parameters. The size of the catalog star marker is proportional to the brightness of the star, which can help you with identifying which star is which. You will notice that the stars on the image and the catalog stars do not match at all. Our goal is to tweak the astrometric parameters until they do match.
+Use arrow keys **<-- Left** and **Right -->** to cycle through images. Find an image which has clearly visible stars and has no clouds. **Green circles** are stars detected on the image using an automatic algorithm, but there might be some which were not automatically detected. You will also notice **red plusses** on the image, those are projected positions of catalog stars, and the projection is done by using the current astrometric parameters. The size of the catalog star marker is proportional to the brightness of the star, which can help you with identifying which star is which. You will notice that the stars on the image and the catalog stars do not match at all. Our goal is to tweak the astrometric parameters until they do match.
 
 If the image is dark, **use U and J keys to change the image gamma.** You can press **CTRL + A** to automatically adjust the image levels.
 
@@ -89,7 +89,7 @@ If the position angle is large, you might find it tedious to change it by only 1
 The next step is very important and can sometimes be quite difficult - you need to recognize the stars on the image, and match the stars. Use software like [Stellarium](http://stellarium.org/) to help you with that task. **Make sure the location in Stellarium is set to the location of the camera, and the time is set to the time of the image. Please note that the image time is in the UTC timezone.** Alternatively, you can press **CTRL + X** use the inbuilt feature that sends the image to astrometry.net and tries to get an approximate pointing. This might not always work.
 
 In this example, the great dipper and the star Arcturus was visible on the image, telling us where the camera was pointing at the time:
-![Sky fit constallations](media/skyfit_constellations.png)
+![Sky fit constellations](media/skyfit_constellations.png)
 
 Use keys **A** and **D** to change the azimuth, and **W** and **S** to change the elevation of the centre of the field of view until the image and the catalog stars are approximately matching. You might need to adjust the rotation as well. Adjust the step size (**+** and **-**) to fine tune the parameters.
 
@@ -114,7 +114,7 @@ A **purple +** will appear next to the closest catalog star, which is probably t
 
 You can press **H** to hide/show catalog stars which might help you with selecting good candidates for matching, and press **F1** to show/hide the help text on the screen. 
 
-**You should strive to cover the whole image uniformley, and you need at least 14 stars for a good fit.** The more stars you have, the better! You can remove a star by right clicking on it.
+**You should strive to cover the whole image uniformly, and you need at least 14 stars for a good fit.** The more stars you have, the better! You can remove a star by right clicking on it.
 
 When you have enough stars, press **CTRL + Z** to fit the plate. You will notice that the catalog stars will match the image stars better. **Press CTRL + Z** several more times until the solution stabilizes and doesn't change any more. Note **orange lines** emanating from the selected image stars. These lines are indicating the direction and the 100x magnitude of the fit residuals. **If there is a star with a line that is much longer than the average length of the others (by several lengths), remove that star by right clicking it and do the fit again (CTRL + Z).**
 
@@ -129,7 +129,7 @@ Take a look around the edges of the image and see if the fit is good everywhere.
 
 The second part is the photometric calibration which is used to convert the intensity of the meteor from image levels to stellar magnitudes. This is later used to estimate the mass of the meteor.
 
-With all stars selected in the previous step, press **P** which will show the photometric fit. The points on the plot represent the logarithm of the pixel intensity sum vs. the star magnitude. They should show a linear correleation, and a line is fitted through them. You will notice a large scatter around the fitted line. If you look back on the image, you can notice that the star magnitude is plotted above the star in red text, and the offset is plotted below the star in white. The size of the text is proportional to the offset. Deselect (right click) the stars with the largest offet and do the photometric fit again (**P**). Repeat the process until the standard deviation of the fit is around +/- 0.2, or as best as you can do. You will also notice that the brightest stars tend to devaite the most. The reason is that they are saturating the image, and their real intensity is effectively being cut off by the upper limit of the sensor's dynamic range (level 255 for an 8-bit sensor). You might not get the fit below +/- 0.2, but do the best job you can.
+With all stars selected in the previous step, press **P** which will show the photometric fit. The points on the plot represent the logarithm of the pixel intensity sum vs. the star magnitude. They should show a linear correlation, and a line is fitted through them. You will notice a large scatter around the fitted line. If you look back on the image, you can notice that the star magnitude is plotted above the star in red text, and the offset is plotted below the star in white. The size of the text is proportional to the offset. Deselect (right click) the stars with the largest offset and do the photometric fit again (**P**). Repeat the process until the standard deviation of the fit is around +/- 0.2, or as best as you can do. You will also notice that the brightest stars tend to deviate the most. The reason is that they are saturating the image, and their real intensity is effectively being cut off by the upper limit of the sensor's dynamic range (level 255 for an 8-bit sensor). You might not get the fit below +/- 0.2, but do the best job you can.
 
 ![Photometric fit](media/imx225_photometry_fit.png)
 

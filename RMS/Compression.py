@@ -141,7 +141,7 @@ class Compressor(multiprocessing.Process):
         ff.camno = self.config.stationID
         ff.fps = self.config.fps
         
-        # Format the time using datettime .isoformat() method
+        # Format the time using datetime .isoformat() method
         ff.starttime = datetime.datetime.fromtimestamp(startTime, tz=datetime.timezone.utc).isoformat(timespec='microseconds')
         
         # Write the FF file

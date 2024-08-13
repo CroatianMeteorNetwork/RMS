@@ -197,7 +197,7 @@ def makeFlat(dir_path, config, nostars=False, use_images=False, make_dark=False)
             else:
                 ff = readFF(dir_path, ff_list_good[i])
 
-                # Skip the file if it is corruped
+                # Skip the file if it is corrupted
                 if ff is None:
                     continue
 
@@ -262,13 +262,13 @@ if __name__ == "__main__":
         help="""Disable requiring stars on images for generating the flat field.""")
 
     arg_parser.add_argument('-i', '--images', action="store_true",
-        help="""Use image files (bmp, png, jpg) for flat instead of FF files. Images of the file type with the higest frequency in the directory will be taken.""")
+        help="""Use image files (bmp, png, jpg) for flat instead of FF files. Images of the file type with the highest frequency in the directory will be taken.""")
 
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
         help="Path to a config file which will be used instead of the default one.")
 
     arg_parser.add_argument('-d', '--dark', action="store_true",
-        help="Make a dark frame instead by taking the minimum value of the images insted of the median.")
+        help="Make a dark frame instead by taking the minimum value of the images instead of the median.")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()

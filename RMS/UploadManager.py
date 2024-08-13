@@ -40,7 +40,7 @@ def _agentAuth(transport, username, rsa_private_key):
         rsa_private_key: [str] Path to the RSA private key on the system.
 
     Return:
-        [bool] True if successfull, False otherwise.
+        [bool] True if successful, False otherwise.
     """
 
     # Try loading the private key
@@ -70,7 +70,7 @@ def _agentAuth(transport, username, rsa_private_key):
     for key in agent_keys:
 
         if key is not None:
-            log.info('Trying ssh-agent key ' + str(binascii.hexlify(key.get_fingerprint())))
+            log.info('Trying ssh-agent key {}'.format(binascii.hexlify(key.get_fingerprint())))
 
             # Try the key to authenticate
             try:
@@ -149,7 +149,7 @@ def createRemoteDirectory(sftp, path):
         path = ''
         for i, folder in enumerate(folders):
 
-            # Joing the path (if it's the first folder, don't add a slash in front to avoid make it absolute)
+            # Join the path (if it's the first folder, don't add a slash in front to avoid make it absolute)
             if (i == 0) and (not is_abspath):
                 path = folder
             else:
@@ -158,15 +158,15 @@ def createRemoteDirectory(sftp, path):
             # Check if the directory exists
             try:
                 sftp.stat(path)
-                print(f"Directory '{path}' already exists.")
+                print("Directory '{}' already exists.".format(path))
 
-            except FileNotFoundError:
+            except IOError:
 
                 sftp.mkdir(path)
-                print(f"Directory '{path}' created.")
+                print("Directory '{}' created.".format(path))
             
             except Exception as e:
-                log.error(f"Unable to stat directory '{path}': {e}")
+                log.error("Unable to stat directory '{}': {}".format(path, e))
                 return False
         
         return True
@@ -175,7 +175,7 @@ def createRemoteDirectory(sftp, path):
     except Exception as e:
 
         # Log the exception (assuming a logging setup is in place)
-        log.error(f"Unable to create directory '{path}': {e}")
+        log.error("Unable to create directory '{0}': {1}".format(path, e))
         return False
 
 
@@ -198,7 +198,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
             file names, not full paths. The full path is constructed from the dir_local (on the local 
             machine) and the dir_remote (on the server).
 
-    Ketword arguments:
+    Keyword arguments:
         port: [int] SSH port. 22 by default.
         rsa_private_key: [str] Path to the SSH private key. ~/.ssh/id_rsa by default.
         allow_dir_creation: [bool] Create a remote directory if it doesn't exist. False by default.
@@ -311,7 +311,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
 class UploadManager(multiprocessing.Process):
     def __init__(self, config):
         """ Uploads all processed data which has not yet been uploaded to the server. The files will be tried 
-            to be uploaded every 15 minutes, until successfull. 
+            to be uploaded every 15 minutes, until successful. 
         
         """
 
@@ -512,7 +512,7 @@ class UploadManager(multiprocessing.Process):
 
 
     def delayNextUpload(self, delay=0):
-        """ Delay the upload by the given number of seconds frmo now. Zero by default. """
+        """ Delay the upload by the given number of seconds from now. Zero by default. """
 
         # Set the next run time using a delay
         with self.next_runtime_lock:

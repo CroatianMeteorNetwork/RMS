@@ -209,7 +209,7 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     """ Deletes old observation directories to free up space for new ones.
 
     Arguments:
-        data_dir: [str] Path to the RMS data directory which contains the Captured and Archived diretories
+        data_dir: [str] Path to the RMS data directory which contains the Captured and Archived directories
         captured_dir: [str] Captured directory name.
         archived_dir: [str] Archived directory name.
         config: [Configuration object]
@@ -390,7 +390,7 @@ def deleteOldLogfiles(data_dir, config, days_to_keep=None):
     """ Deletes old observation directories to free up space for new ones.
 
     Arguments:
-        data_dir: [str] Path to the RMS data directory which contains the Captured and Archived diretories
+        data_dir: [str] Path to the RMS data directory which contains the Captured and Archived directories
         config: [Configuration object]
         duration: [int] number of days to retain, default None means read from config file
     """

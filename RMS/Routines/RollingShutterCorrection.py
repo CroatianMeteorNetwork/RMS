@@ -45,7 +45,7 @@ def correctRollingShutterTemporalList(frames_list, height_list, n_rows):
 
     # Check if the list of frames has the same number of elements as the list of Y image coordinates
     if len(frames_list) != len(height_list):
-        raise ValueError("The lenght of the list of frames and the list of Y image coordinates must be the same!")
+        raise ValueError("The length of the list of frames and the list of Y image coordinates must be the same!")
 
 
     # Compute the corrected timestamp for every centroid
