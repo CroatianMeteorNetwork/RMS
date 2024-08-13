@@ -173,8 +173,10 @@ def startObservationSummaryReport(config, duration, force_delete = False):
 
     captured_directories = captureDirectories(os.path.join(config.data_dir, config.captured_dir), config.stationID)
     addObsParam(conn, "captured_directories", captured_directories)
-    camera_informatoin = gatherCameraInformation(config)
-
+    try:
+        addObsParam(conn, "camera_information", gatherCameraInformation(config))
+    except:
+        addObsParam(conn, "camera_information", "Unavailable")
     no_of_frames_per_fits_file = 256
     fps = config.fps
     fits_files_from_duration = duration * fps / no_of_frames_per_fits_file
@@ -406,10 +408,12 @@ def unserialize(self):
 if __name__ == "__main__":
     config = parse("/home/david/source/RMS/.config")
 
-    if False:
+    if True:
         obs_db_conn = getObsDBConn(config)
         startObservationSummaryReport(config, 100, force_delete=False)
-        night_data_dir = "/home/david/RMS_data/CapturedFiles/AU0004_20240810_185301_776066"
+        night_data_dir = "/home/david/RMS_data/CapturedFiles/AU0006_20240811_101142_903530"
+
+
         pp = Platepar()
         pp.read("/home/david/source/RMS/platepar_cmn2010.cal")
         finalizeObservationSummary(config, night_data_dir, pp)
