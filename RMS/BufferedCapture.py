@@ -622,7 +622,7 @@ class BufferedCapture(Process):
             log.info("Max timeout is set to {}".format(max_timeout))
             log.info("Gst.SECOND is set to {}".format(Gst.SECOND))
             log.info("Attempting to read state with a current time out of {} seconds".format(current_timeout))
-            state_change_return, current_state, _ = self.pipeline.get_state(current_timeout)
+            state_change_return, current_state, _ = self.pipeline.get_state(Gst.CLOCK_TIME_NONE)
 
             # Check if the state change was successful
             if state_change_return != Gst.StateChangeReturn.FAILURE and current_state == Gst.State.PLAYING:
