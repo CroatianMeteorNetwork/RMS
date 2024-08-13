@@ -53,8 +53,13 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
     # done here so that trackStack() can be called from other modules
     dir_paths = [os.path.normpath(dir_path) for dir_path in dir_paths]
 
-    # Make sure the paths are directories and not files, by stripping the file name
-    dir_paths = [os.path.dirname(dir_path) for dir_path in dir_paths]
+    # Make sure the paths are directories and not files
+    # If a file is given, take the directory of the file. If the directory is given, take the directory.
+    dir_paths = [os.path.dirname(dir_path) if os.path.isfile(dir_path) else dir_path for dir_path in dir_paths]
+
+    print('Stacking images from the following directories:')
+    for dir_path in dir_paths:
+        print(dir_path)
 
     # Find recalibrated platepars file per FF file
     recalibrated_platepars = {}
