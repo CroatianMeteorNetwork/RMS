@@ -619,6 +619,8 @@ class BufferedCapture(Process):
             # Wait for the state change to complete, with an increasing timeout for each attempt
             max_timeout = Gst.SECOND * 60
             current_timeout = min(Gst.SECOND * 5 * (attempt + 1), max_timeout)
+            log.info("Max timeout is set to {}".format(max_timeout))
+            log.info("Gst.SECOND is set to {}".format(Gst.SECOND))
             log.info("Attempting to read state with a current time out of {} seconds".format(current_timeout))
             state_change_return, current_state, _ = self.pipeline.get_state(current_timeout)
 
