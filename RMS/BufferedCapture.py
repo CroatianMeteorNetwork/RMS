@@ -591,26 +591,22 @@ class BufferedCapture(Process):
         # Set the pipeline to PLAYING state with retries
         for attempt in range(max_retries):
 
-            log.info("Attempt {}: transitioning Pipeline to PLAYING state, retry interval {}."
-                                .format(attempt + 1, retry_interval))
+            log.info("Attempt {}: transitioning Pipeline to PLAYING state.".format(attempt + 1))
 
             # Reset pipeline if one already exists
             if self.pipeline:
-                log.info("Attempting to reset pipeline")
                 self.pipeline.set_state(Gst.State.NULL)
-                log.info("Pipeline reset. Waiting for {} seconds".format(retry_interval))
+
                 # Waiting to ensure the pipeline is fully cleaned up
                 time.sleep(retry_interval)
-                log.info("Wait completed")
+
                 # Clear the pipeline reference to avoid using a stale or invalid pipeline object
                 self.pipeline = None
 
             # Parse and create the pipeline
-            log.info("Parsing and creating pipeline")
             self.pipeline = Gst.parse_launch(pipeline_str)
 
             # Set the pipeline to PLAYING state
-            log.info("Set pipeline to playing state")
             self.pipeline.set_state(Gst.State.PLAYING)
 
             # Capture time
@@ -619,10 +615,7 @@ class BufferedCapture(Process):
             # Wait for the state change to complete, with an increasing timeout for each attempt
             max_timeout = Gst.SECOND * 60
             current_timeout = min(Gst.SECOND * 5 * (attempt + 1), max_timeout)
-            log.info("Max timeout is set to {}".format(max_timeout))
-            log.info("Gst.SECOND is set to {}".format(Gst.SECOND))
-            log.info("Attempting to read state with a current time out of {} seconds".format(current_timeout))
-            state_change_return, current_state, _ = self.pipeline.get_state(Gst.CLOCK_TIME_NONE)
+            state_change_return, current_state, _ = self.pipeline.get_state(current_timeout)
 
             # Check if the state change was successful
             if state_change_return != Gst.StateChangeReturn.FAILURE and current_state == Gst.State.PLAYING:
