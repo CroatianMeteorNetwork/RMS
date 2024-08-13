@@ -3721,12 +3721,15 @@ class PlateTool(QtWidgets.QMainWindow):
 
                         # Add the image/catalog pair to the appropriate list
                         if unsuitable:
-                            self.unsuitable_stars.addPair(self.x_centroid, self.y_centroid, self.star_intensity, \
-                                                      pair_obj)
-                            self.unsuitable_star_markers.addPoints(x=[self.x_centroid + 0.5], \
-                                                                 y=[self.y_centroid + 0.5])
-                            self.unsuitable_star_markers2.addPoints(x=[self.x_centroid + 0.5], \
-                                                                  y=[self.y_centroid + 0.5])
+                            self.unsuitable_stars.addPair(self.x_centroid, self.y_centroid,
+                                                          self.star_intensity, pair_obj)
+
+
+                            self.unsuitable_star_markers.addPoints(x=[self.mouse_x ],
+                                                                   y=[self.mouse_y ])
+                            self.unsuitable_star_markers2.addPoints(x=[self.mouse_x],
+                                                                    y=[self.mouse_y])
+
 
                         else:
                             # Add the image/catalog pair to the list
@@ -6243,13 +6246,24 @@ class PlateTool(QtWidgets.QMainWindow):
                                                          datetime2JD(self.img_handle.currentFrameTime(dt_obj=True)),
                                                          self.platepar)
 
+        unsuitable_coords_x, unsuitable_coords_y = raDecToXYPP(np.array(unsuitable_ra_list), np.array(unsuitable_dec_list),
+                                                         datetime2JD(self.img_handle.currentFrameTime(dt_obj=True)),
+                                                         self.platepar)
+
+
+
         # Make into a list of integers of x and a list of integers of y
-        matched_im_x_list, matched_im_y_list = [],[]
+        marked_im_x_list, marked_im_y_list = [],[]
 
         # Iterate to discover the star which is the furthest away from all already matched stars
         for im_coord_x, im_coord_y in zip(matched_coords_x, matched_coords_y):
-            matched_im_x_list.append(im_coord_x)
-            matched_im_y_list.append(im_coord_y)
+            marked_im_x_list.append(im_coord_x)
+            marked_im_y_list.append(im_coord_y)
+
+        for im_coord_x, im_coord_y in zip(unsuitable_coords_x, unsuitable_coords_y):
+            marked_im_x_list.append(im_coord_x)
+            marked_im_y_list.append(im_coord_y)
+
 
         # Find the unmatched star which is furthest away from all the already matched stars
         for this_star_index, (x, y) in enumerate(zip(image_ra, image_dec)):
@@ -6275,7 +6289,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # skip any stars which are close to double stars
             if min_ang_sep_deg < minimum_separation:
                 #skip this star as a candidate to pan to
-                #print("Skipping this star {},{} as too close to another star".format(this_star_ra, this_star_dec))
+
                 continue
 
             #handle unsuitable stars - if this star is within minimum separation of an unsuitable star, skip
@@ -6291,8 +6305,9 @@ class PlateTool(QtWidgets.QMainWindow):
                     min_ang_sep_deg = ang_sep_deg
 
             # skip any stars which are close to unsuitable stars
-            if min_ang_sep_deg < (20 * minimum_separation):
+            if min_ang_sep_deg < (40 * minimum_separation):
                 # skip this star as a candidate to pan to
+
                 continue
 
 
@@ -6309,7 +6324,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
             # iterate to find the closest matched star to this star - we are looking to exclude stars in this loop
-            for match_index, (matched_x, matched_y) in enumerate(zip(matched_im_x_list, matched_im_y_list)):
+            for match_index, (matched_x, matched_y) in enumerate(zip(marked_im_x_list, marked_im_y_list)):
                 # ignore our self
                 if match_index == this_star_index:
                     continue
@@ -6330,7 +6345,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
             # if this star is further away from all stars checked so far, then it is the new furthest star
-            if min_matched_distance > max_dist and im_x[0] not in matched_im_x_list and im_y[0] not in matched_im_y_list:
+            if min_matched_distance > max_dist and im_x[0] not in marked_im_x_list and im_y[0] not in marked_im_y_list:
                     max_dist, next_index, matched_radius = min_matched_distance, this_star_index, min_matched_radius
 
 
