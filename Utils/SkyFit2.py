@@ -16,6 +16,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import pyqtgraph as pg
+import random
 
 import RMS
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
@@ -933,7 +934,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.star_pick_info_text_str += "LEFT CLICK - Centroid star\n"
         self.star_pick_info_text_str += "CTRL + LEFT CLICK - Manual star position\n"
         self.star_pick_info_text_str += "ENTER or SPACE - Accept pair\n"
-        self.star_pick_info_text_str += "K  - Mark star as unsuitable\n"
+        self.star_pick_info_text_str += "CTRL + SPACE - Mark pair bad\n"
+        self.star_pick_info_text_str += "SHIFT + SPACE - Jump random\n"
         self.star_pick_info_text_str += "RIGHT CLICK - Remove pair\n"
         self.star_pick_info_text_str += "CTRL + SCROLL - Aperture radius adjust\n"
         self.star_pick_info_text_str += "CTRL + Z - Fit stars\n"
@@ -1406,14 +1408,17 @@ class PlateTool(QtWidgets.QMainWindow):
             status_str += ", RA={:6.2f} Dec={:+6.2f} (J2000)".format(ra[0], dec[0])
 
             # Show mode for debugging purposes
-            if False:
-                if self.star_pick_mode and not self.autopan_mode:
-                    pass
-                elif self.star_pick_mode and self.autopan_mode:
-                    status_str += ", Auto pan"
 
-                if self.max_radius_between_matched_stars != np.inf:
-                    status_str += ", Angle {:3.2f} {}/{}".format(self.max_radius_between_matched_stars, len(self.paired_stars), len(self.catalog_x_filtered))
+            if self.star_pick_mode and not self.autopan_mode:
+                pass
+            elif self.star_pick_mode and self.autopan_mode:
+                status_str += ", Auto pan"
+
+            if self.max_radius_between_matched_stars != np.inf:
+                status_str += ", Max angle {:3.2f} good:{} bad:{} progress {:.0f}%".format(
+                    self.max_radius_between_matched_stars, len(self.paired_stars),
+                    len(self.unsuitable_stars),
+                    100 * (len(self.paired_stars)+len(self.unsuitable_stars))/len(self.catalog_x_filtered))
 
 
         return status_str
@@ -3097,6 +3102,14 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img_zoom.reloadImage()
             self.img.reloadImage()
 
+        # Jump to the next star
+        elif event.key() == QtCore.Qt.Key_Space and (modifiers == QtCore.Qt.ShiftModifier):
+
+            plate_tool.jumpNextStar(miss_this_one=True)
+            self.updateBottomLabel()
+
+
+
         # Load the flat
         elif event.key() == QtCore.Qt.Key_F and (modifiers == QtCore.Qt.ControlModifier):
             
@@ -3395,7 +3408,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 self.toggleAutoPan()
                 self.tab.settings.updateAutoPan()
-
+                self.updateBottomLabel()
 
 
 
@@ -3688,10 +3701,12 @@ class PlateTool(QtWidgets.QMainWindow):
             # unsuitable stars list by pressing K
 
             elif (event.key() == QtCore.Qt.Key_Return) or (event.key() == QtCore.Qt.Key_Enter) \
-                or (event.key() == QtCore.Qt.Key_Space) or (event.key() == QtCore.Qt.Key_K):
+                or (event.key() == QtCore.Qt.Key_Space) :
 
                 if self.star_pick_mode:
-                    unsuitable = True if event.key() == QtCore.Qt.Key_K else False
+                    unsuitable = True if modifiers == QtCore.Qt.ControlModifier else False
+                    if unsuitable:
+                        print("Marking star unsuitable")
                     # If the catalog star or geo points has been selected, save the pair to the list
                     if self.cursor.mode == 1:
 
@@ -4945,8 +4960,12 @@ class PlateTool(QtWidgets.QMainWindow):
                     source_intens += img_crop[i, j] - bg_median
                     source_px_count += 1
 
-        x_centroid = x_acc/source_intens + x_min
-        y_centroid = y_acc/source_intens + y_min
+        if source_intens > 0:
+            x_centroid = x_acc/source_intens + x_min
+            y_centroid = y_acc/source_intens + y_min
+        else:
+            x_centroid = mouse_x
+            y_centroid = mouse_y
 
         ######################################################################################################
 
@@ -5331,10 +5350,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.updatePlatepar()
 
 
-    def jumpNextStar(self):
+    def jumpNextStar(self, miss_this_one=False):
 
 
-        new_x, new_y = self.furthestStar()
+        new_x, new_y = self.furthestStar(miss_this_one=miss_this_one)
         new_x, new_y = int(new_x), int(new_y)
         self.img_frame.setRange(xRange=(new_x + 15, new_x - 15), yRange=(new_y + 15, new_y - 15))
         self.checkParamRange()
@@ -6206,7 +6225,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.time = time.time()
 
 
-    def furthestStar(self, minimum_separation = 0.12):
+    def furthestStar(self, minimum_separation=0.12, miss_this_one=False):
 
         """
 
@@ -6255,6 +6274,11 @@ class PlateTool(QtWidgets.QMainWindow):
         # Make into a list of integers of x and a list of integers of y
         marked_im_x_list, marked_im_y_list = [],[]
 
+        if miss_this_one:
+            marked_im_x_list.append(self.mouse_x)
+            marked_im_y_list.append(self.mouse_y)
+
+
         # Iterate to discover the star which is the furthest away from all already matched stars
         for im_coord_x, im_coord_y in zip(matched_coords_x, matched_coords_y):
             marked_im_x_list.append(im_coord_x)
@@ -6264,7 +6288,7 @@ class PlateTool(QtWidgets.QMainWindow):
             marked_im_x_list.append(im_coord_x)
             marked_im_y_list.append(im_coord_y)
 
-
+        candidate_stars_index = []
         # Find the unmatched star which is furthest away from all the already matched stars
         for this_star_index, (x, y) in enumerate(zip(image_ra, image_dec)):
 
@@ -6305,7 +6329,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     min_ang_sep_deg = ang_sep_deg
 
             # skip any stars which are close to unsuitable stars
-            if min_ang_sep_deg < (40 * minimum_separation):
+            if min_ang_sep_deg < (5 * minimum_separation):
                 # skip this star as a candidate to pan to
 
                 continue
@@ -6348,6 +6372,11 @@ class PlateTool(QtWidgets.QMainWindow):
             if min_matched_distance > max_dist and im_x[0] not in marked_im_x_list and im_y[0] not in marked_im_y_list:
                     max_dist, next_index, matched_radius = min_matched_distance, this_star_index, min_matched_radius
 
+            # build this list of candidate stars, in case we pick at random
+            candidate_stars_index.append(this_star_index)
+
+        if miss_this_one:
+            next_index = random.choice(candidate_stars_index)
 
         # convert the index to ra and dec
         next_ra = np.array(self.catalog_stars_filtered[next_index][0])
