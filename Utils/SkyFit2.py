@@ -2505,7 +2505,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # Remove class that inherits from something
                 to_remove.append(k)
-                print(k,v)
+                # print(k,v)
 
         for remove in to_remove:
             del dic[remove]
@@ -3704,7 +3704,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
             # Save the point to the matched stars list by pressing Enter or Space or to the
-            # unsuitable stars list by pressing K
+            # unsuitable stars
 
             elif (event.key() == QtCore.Qt.Key_Return) or (event.key() == QtCore.Qt.Key_Enter) \
                 or (event.key() == QtCore.Qt.Key_Space) :
@@ -3713,6 +3713,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     unsuitable = True if modifiers == QtCore.Qt.ControlModifier else False
                     if unsuitable:
                         print("Marking star unsuitable")
+
                     # If the catalog star or geo points has been selected, save the pair to the list
                     if self.cursor.mode == 1:
 
