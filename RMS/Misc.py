@@ -11,6 +11,7 @@ import subprocess
 import random
 import string
 import inspect
+import datetime
 
 
 # tkinter import that works on both Python 2 and 3
@@ -599,6 +600,21 @@ def sanitise(unsanitised, lower = False, space_substitution = "", log_changes = 
     return sanitised
 
 
+class RmsDateTime:
+    """ Class to hold utcnow() wrapper function definition.
+        Select the best approach to retrieve current UTC time according to Python version.
+    """
+    if sys.version_info[0] < 3:
+        @staticmethod
+        def utcnow():
+            # Python 2: Use the existing utcnow, which is not timezone-aware.
+            return datetime.datetime.utcnow()
+    else:
+        @staticmethod
+        def utcnow():
+            # Python 3: Get timezone-aware UTC time and then make it naive.
+            return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        
 def maxDistBetweenPoints(points_x, points_y):
     """
     Routine to calculate the maximum cartesian distance between any two points in a

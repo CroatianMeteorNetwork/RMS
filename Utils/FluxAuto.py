@@ -19,7 +19,7 @@ from RMS.Math import isAngleBetween
 from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
 from Utils.FluxBatch import fluxBatch, plotBatchFlux, FluxBatchBinningParams, saveBatchFluxCSV, \
     reportCameraTally
-from RMS.Misc import mkdirP, walkDirsToDepth
+from RMS.Misc import mkdirP, walkDirsToDepth, RmsDateTime
 from Utils.FluxFitActivityCurve import computeCurrentPeakZHR, loadFluxActivity, plotYearlyZHR
 
 
@@ -1004,7 +1004,7 @@ if __name__ == "__main__":
     while True:
 
         # Clock for measuring script time
-        t1 = datetime.datetime.utcnow()
+        t1 = RmsDateTime.utcnow()
 
 
         if cml_args.time is not None:
@@ -1012,7 +1012,7 @@ if __name__ == "__main__":
 
         # If no manual time was given, use current time.
         else:
-            ref_dt = datetime.datetime.utcnow()
+            ref_dt = RmsDateTime.utcnow()
 
 
         print("Computing flux using reference time:", ref_dt)
@@ -1042,7 +1042,7 @@ if __name__ == "__main__":
 
             # Otherwise wait to run
             wait_time = (datetime.timedelta(hours=cml_args.auto) \
-                - (datetime.datetime.utcnow() - t1)).total_seconds()
+                - (RmsDateTime.utcnow() - t1)).total_seconds()
 
             # Run immediately if the wait time has elapsed
             if wait_time < 0:

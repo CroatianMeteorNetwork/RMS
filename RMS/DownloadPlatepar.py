@@ -2,7 +2,6 @@
 
 from __future__ import print_function, division, absolute_import
 
-import datetime
 import logging
 import os
 from os.path import exists as file_exists
@@ -11,7 +10,7 @@ import paramiko
 
 
 from RMS.UploadManager import _agentAuth
-
+from RMS.Misc import RmsDateTime
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -82,7 +81,7 @@ def downloadNewPlatepar(config):
 
     # Construct a new name with the time of the download included
     dl_pp_name = remote_platepar_path + 'platepar_dl_' \
-        + datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S.%f') + '.cal'
+        + RmsDateTime.utcnow().strftime('%Y%m%d_%H%M%S.%f') + '.cal'
 
     sftp.posix_rename(remote_platepar, dl_pp_name)
 

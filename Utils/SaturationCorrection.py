@@ -3,7 +3,6 @@
 
 from __future__ import absolute_import, division, print_function
 
-import datetime
 import os
 
 import matplotlib.pyplot as plt
@@ -15,6 +14,7 @@ from RMS.Formats.FTPdetectinfo import (findFTPdetectinfoFile,
 from RMS.Routines.Image import applyFlat, loadFlat, thickLine
 
 from Utils.SaturationSimulation import findUnsaturatedMagnitude
+from RMS.Misc import RmsDateTime
 
 if __name__ == "__main__":
 
@@ -154,7 +154,7 @@ if __name__ == "__main__":
 
 
     # Calibration string to be written to the FTPdetectinfo file
-    calib_str = "RMS - Saturation corrected on {:s} UTC".format(str(datetime.datetime.utcnow()))
+    calib_str = "RMS - Saturation corrected on {:s} UTC".format(str(RmsDateTime.utcnow()))
 
     # Write a corrected FTPdetectinfo file
     corrected_ftpdetectinfo_name = ftpdetectinfo_name.strip('.txt') + '_saturation_corrected.txt'
