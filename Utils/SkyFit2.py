@@ -3756,6 +3756,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         self.updatePairedStars()
 
                         if self.autopan_mode:
+                            self.updateBottomLabel()
                             new_x, new_y = self.furthestStar()
                             new_x, new_y = int(new_x), int(new_y)
                             self.img_frame.setRange(xRange=(new_x + 15, new_x - 15), yRange=(new_y + 15, new_y - 15))
@@ -4838,6 +4839,7 @@ class PlateTool(QtWidgets.QMainWindow):
     def centroid(self, prev_x_cent=None, prev_y_cent=None):
         """ Find the centroid of the star clicked on the image. """
 
+        self.updateBottomLabel()
         # If the centroid from the previous iteration is given, use that as the centre
         if (prev_x_cent is not None) and (prev_y_cent is not None):
             mouse_x = prev_x_cent
