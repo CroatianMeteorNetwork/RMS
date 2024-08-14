@@ -538,6 +538,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.paired_stars = PairedStars()
         self.residuals = None
 
+        # Autopan coordinates
+        self.old_autopan_x, self.old_autopan_y = None, None
+        self.current_autopan_x, self.current_autopan_y = None, None
+
         # List of unsuitable stars
         self.unsuitable_stars = PairedStars()
 
@@ -2388,6 +2392,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Reset paired stars
             self.pick_list = {}
             self.paired_stars = PairedStars()
+            self.unsuitable_stars = PairedStars()
             self.residuals = None
             self.drawPhotometryColoring()
 
@@ -3400,15 +3405,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             elif event.key() == QtCore.Qt.Key_U and modifiers == QtCore.Qt.ControlModifier:
 
-                new_x, new_y = self.furthestStar()
-                new_x, new_y = int(new_x), int(new_y)
-                self.img_frame.setRange(xRange=(new_x+15, new_x-15), yRange=(new_y+15, new_y-15))
-                self.checkParamRange()
-                self.platepar.updateRefRADec(preserve_rotation=True)
-                self.checkParamRange()
-                self.tab.param_manager.updatePlatepar()
-                self.updateLeftLabels()
-                self.updateStars()
+                self.jumpNextStar(miss_this_one=False)
 
             elif event.key() == QtCore.Qt.Key_O and modifiers == QtCore.Qt.ControlModifier:
 
@@ -3707,16 +3704,44 @@ class PlateTool(QtWidgets.QMainWindow):
             # unsuitable stars
 
             elif (event.key() == QtCore.Qt.Key_Return) or (event.key() == QtCore.Qt.Key_Enter) \
-                or (event.key() == QtCore.Qt.Key_Space) :
+                or (event.key() == QtCore.Qt.Key_Space):
 
                 if self.star_pick_mode:
-                    unsuitable = True if modifiers == QtCore.Qt.ControlModifier else False
+                    
+                    # Check if the star has been skipped
+                    unsuitable = False
+                    if modifiers == QtCore.Qt.ControlModifier:
+                        
+                        # If a star has been skipped, mark it as unsuitable
+                        if (self.old_autopan_x is not None) and (self.old_autopan_y is not None):
+                            
+                            # Check that a new star has been selected
+                            if (self.old_autopan_x != self.current_autopan_x) or \
+                                (self.old_autopan_y != self.current_autopan_y):
+                                
+                                unsuitable = True
+                        
+                        elif (self.current_autopan_x is None) and (self.current_autopan_y is None):
+                            unsuitable = False
+
+                        else:
+                            unsuitable = True
+                    
                     if unsuitable:
                         print("Marking star unsuitable")
 
+                        print("   coordinates: ({}, {})".format(self.current_autopan_x, self.current_autopan_y))
+
+                        self.unsuitable_stars.addPair(self.current_autopan_x, self.current_autopan_y,
+                                                        0, None)
+
+                        self.unsuitable_star_markers.addPoints(x=[self.current_autopan_x],
+                                                                y=[self.current_autopan_y])
+                        self.unsuitable_star_markers2.addPoints(x=[self.current_autopan_x],
+                                                                y=[self.current_autopan_y])
+
                     # If the catalog star or geo points has been selected, save the pair to the list
                     if self.cursor.mode == 1:
-
 
                         # Star catalog points
                         if self.closest_type == 'catalog':
@@ -3741,40 +3766,27 @@ class PlateTool(QtWidgets.QMainWindow):
                             self.closest_geo_point_indx = None
 
 
-                        # Add the image/catalog pair to the appropriate list
-                        if unsuitable:
-                            self.unsuitable_stars.addPair(self.x_centroid, self.y_centroid,
-                                                          self.star_intensity, pair_obj)
-
-
-                            self.unsuitable_star_markers.addPoints(x=[self.mouse_x ],
-                                                                   y=[self.mouse_y ])
-                            self.unsuitable_star_markers2.addPoints(x=[self.mouse_x],
-                                                                    y=[self.mouse_y])
-
-
-                        else:
-                            # Add the image/catalog pair to the list
-                            self.paired_stars.addPair(self.x_centroid, self.y_centroid, self.star_intensity, \
-                                    pair_obj, snr=self.star_snr, saturated=self.star_saturated)
+                        # Add the image/catalog pair to the list
+                        self.paired_stars.addPair(self.x_centroid, self.y_centroid, self.star_intensity, \
+                                pair_obj, snr=self.star_snr, saturated=self.star_saturated)
 
                         # Switch back to centroiding mode
                         self.cursor.setMode(0)
                         self.updatePairedStars()
 
                         if self.autopan_mode:
+
                             self.updateBottomLabel()
-                            new_x, new_y = self.furthestStar()
-                            new_x, new_y = int(new_x), int(new_y)
-                            self.img_frame.setRange(xRange=(new_x + 15, new_x - 15), yRange=(new_y + 15, new_y - 15))
-                            self.checkParamRange()
-                            self.platepar.updateRefRADec(preserve_rotation=True)
-                            self.checkParamRange()
-                            self.tab.param_manager.updatePlatepar()
-                            self.updateLeftLabels()
-                            self.updateStars()
+
+                            self.jumpNextStar(miss_this_one=False)
 
 
+                    else:
+
+                        # Jump to next star if CTRL + SPACE is pressed
+                        if modifiers == QtCore.Qt.ControlModifier:
+                            print("Jumping to the next star")
+                            self.jumpNextStar(miss_this_one=False)
 
 
             elif event.key() == QtCore.Qt.Key_Escape:
@@ -5361,9 +5373,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def jumpNextStar(self, miss_this_one=False):
 
-
         new_x, new_y = self.furthestStar(miss_this_one=miss_this_one)
-        new_x, new_y = int(new_x), int(new_y)
+        self.old_autopan_x, self.old_autopan_y = self.current_autopan_x, self.current_autopan_y
+        self.current_autopan_x, self.current_autopan_y = new_x, new_y
         self.img_frame.setRange(xRange=(new_x + 15, new_x - 15), yRange=(new_y + 15, new_y - 15))
         self.checkParamRange()
         self.platepar.updateRefRADec(preserve_rotation=True)
@@ -6247,7 +6259,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         """
 
-        #intialise
+        # Intialise
 
         next_index, max_dist, min_matched_radius = 0,0, np.inf
 
@@ -6256,13 +6268,27 @@ class PlateTool(QtWidgets.QMainWindow):
             matched_radius = self.max_radius_between_matched_stars
         else:
             matched_radius = np.inf
+
         image_ra = [star[0] for star in self.catalog_stars_filtered]
         image_dec = [star[1] for star in self.catalog_stars_filtered]
 
-        unsuitable_ra_list = [star[0] for star in self.unsuitable_stars.skyCoords()]
-        unsuitable_dec_list = [star[1] for star in self.unsuitable_stars.skyCoords()]
+        # Convert coordinates of unsuitable stars to RA and Dec
+        unsuitable_xy = self.unsuitable_stars.imageCoords()
 
-        # get all the matched stars in sky coordinates
+        if len(unsuitable_xy):
+
+            unsuitable_x = [coord[0] for coord in unsuitable_xy]
+            unsuitable_y = [coord[1] for coord in unsuitable_xy]
+
+            _, unsuitable_ra_list, unsuitable_dec_list, _ = xyToRaDecPP(
+                [self.img.img_handle.currentTime()]*len(unsuitable_xy),
+                    unsuitable_x, unsuitable_y, [1]*len(unsuitable_xy), self.platepar)
+            
+        else:
+            unsuitable_ra_list, unsuitable_dec_list = [], []
+
+
+        # Get all the matched stars in sky coordinates
         matched_sky_coords = self.paired_stars.skyCoords()
         ra_list, dec_list = [],[]
         for coords in matched_sky_coords:
@@ -6396,7 +6422,9 @@ class PlateTool(QtWidgets.QMainWindow):
                     datetime2JD(self.img_handle.currentFrameTime(dt_obj=True)),
                     self.platepar)
         self.max_radius_between_matched_stars = matched_radius
-        return int(next_x),int(next_y)
+
+
+        return int(next_x), int(next_y)
 
 if __name__ == '__main__':
     ### COMMAND LINE ARGUMENTS
