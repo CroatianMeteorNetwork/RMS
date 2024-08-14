@@ -5,6 +5,6 @@ for Dir in ~/source/Stations/*
   do
 	Station=$(basename $Dir)
 	echo "Starting camera ${Station}"
-	lxterminal --title=${Station} -e "~/source/RMS/Scripts/MultiCamLinux/StartCapture.sh ${Station}"  &
+	lxterminal --title=${Station} -e "$(HOME)/source/RMS/Scripts/MultiCamLinux/StartCapture.sh ${Station}"  &
 	sleep 30
   done
