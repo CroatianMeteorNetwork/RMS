@@ -1645,6 +1645,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
 
         self.next_star_button = QtWidgets.QPushButton("Next Star")
         self.next_star_button.clicked.connect(self.sigNextStarPressed.emit)
+        self.next_star_button.setEnabled(False)
         box.addWidget(self.next_star_button)
 
 

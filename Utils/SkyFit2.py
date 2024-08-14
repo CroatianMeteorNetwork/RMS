@@ -3136,12 +3136,18 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 self.star_pick_info.show()
 
+                # Enable the Next button for star panning
+                self.tab.param_manager.next_star_button.setEnabled(True)
+
             else:
                 self.img_frame.setMouseEnabled(True, True)
                 self.cursor2.hide()
                 self.cursor.hide()
 
                 self.star_pick_info.hide()
+
+                # Disable the Next button for star panning
+                self.tab.param_manager.next_star_button.setEnabled(False)
 
 
         # Toggle grid
