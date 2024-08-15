@@ -598,6 +598,7 @@ def sanitise(unsanitised, lower = False, space_substitution = "", log_changes = 
 
     return sanitised
 
+
 def niceFormat(string, delim=":", extra_space=5):
 
     """
@@ -660,3 +661,29 @@ def getRMSStyleFileName(night_data_dir, name_suffix):
     """
 
     return os.path.join(night_data_dir, os.path.split(night_data_dir.strip(os.sep))[1] + "_" + name_suffix)
+
+def maxDistBetweenPoints(points_x, points_y):
+    """
+    Routine to calculate the maximum cartesian distance between any two points in a
+    list of points
+
+    Args:
+        points_x: list of points
+        points_y: list of points
+
+    Returns:
+        maximum cartesian distance between points
+    """
+
+    max_separation = 0
+    for ref_x, ref_y in zip(points_x, points_y):
+        min_separation = np.inf
+        for x, y in zip(points_x, points_y):
+            pixel_separation = ((ref_x - x) ** 2 + (ref_y - y) ** 2) ** 0.5
+            if pixel_separation < min_separation and pixel_separation != 0:
+                min_separation = pixel_separation
+        if min_separation > max_separation:
+            max_separation = min_separation
+
+    return max_separation
+
