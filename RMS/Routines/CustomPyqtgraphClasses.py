@@ -367,6 +367,12 @@ class ImageItem(pg.ImageItem):
         else:
             self.invert_img = False
 
+        if 'autopan' in kwargs.keys():
+            self.autopan_chk = kwargs['autopan']
+        else:
+            self.autopan_chk = False
+
+
         if 'dark' in kwargs.keys():
             self.dark = kwargs['dark']
         else:
@@ -631,6 +637,9 @@ class ImageItem(pg.ImageItem):
     def invert(self):
         self.invert_img = not self.invert_img
         self.updateImage()
+
+    def autopan(self):
+        self.autopan_chk = not self.autopan_chk
 
     def setLevels(self, levels, update=True):
         super().setLevels(levels, update)
@@ -1605,6 +1614,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
     sigVignettingChanged = QtCore.pyqtSignal()
 
     sigFitPressed = QtCore.pyqtSignal()
+    sigNextStarPressed = QtCore.pyqtSignal()
     sigAstrometryPressed = QtCore.pyqtSignal()
     sigPhotometryPressed = QtCore.pyqtSignal()
     sigResetDistortionPressed = QtCore.pyqtSignal()
@@ -1628,9 +1638,17 @@ class PlateparParameterManager(QtWidgets.QWidget):
         # buttons
         box = QtWidgets.QVBoxLayout()
 
+
         self.fit_astrometry_button = QtWidgets.QPushButton("Fit")
         self.fit_astrometry_button.clicked.connect(self.sigFitPressed.emit)
         box.addWidget(self.fit_astrometry_button)
+
+        self.next_star_button = QtWidgets.QPushButton("Next Star")
+        self.next_star_button.clicked.connect(self.sigNextStarPressed.emit)
+        self.next_star_button.setEnabled(False)
+        box.addWidget(self.next_star_button)
+
+
 
         box.addWidget(QtWidgets.QLabel("Residuals:"))
 
@@ -2088,6 +2106,7 @@ class SettingsWidget(QtWidgets.QWidget):
     sigDistortionToggled = QtCore.pyqtSignal()
     sigMeasGroundPointsToggled = QtCore.pyqtSignal()
     sigInvertToggled = QtCore.pyqtSignal()
+    sigAutoPanToggled = QtCore.pyqtSignal()
     sigGridToggled = QtCore.pyqtSignal()
     sigSelStarsToggled = QtCore.pyqtSignal()
     sigPicksToggled = QtCore.pyqtSignal()
@@ -2168,6 +2187,11 @@ class SettingsWidget(QtWidgets.QWidget):
         except AttributeError:
             self.invert.setChecked(False)
         vbox.addWidget(self.invert)
+
+        self.autopan_chk = QtWidgets.QCheckBox('Auto Pan To Next Star')
+        self.autopan_chk.released.connect(self.sigAutoPanToggled.emit)
+        self.autopan_chk.setChecked(False)
+        vbox.addWidget(self.autopan_chk)
 
 
         self.meas_ground_points = QtWidgets.QCheckBox('Measure ground points')
@@ -2255,6 +2279,9 @@ class SettingsWidget(QtWidgets.QWidget):
 
     def updateInvertColours(self):
         self.invert.setChecked(self.gui.img.invert_img)
+
+    def updateAutoPan(self):
+        self.autopan_chk.setChecked(self.gui.img.autopan_chk)
 
     def updateSingleClickPhotometry(self):
         self.single_click_photometry.setChecked(self.gui.single_click_photometry)
