@@ -6251,16 +6251,16 @@ class PlateTool(QtWidgets.QMainWindow):
             pass
         self.time = time.time()
 
-    def furthestStar(self,minimum_separation=15, miss_this_one=False, min_separation=15):
-
+    def furthestStar(self, miss_this_one=False, min_separation=15):
         """
+        Find the star which is furthest away from all other stars that have already been matched.
 
-        Args:
-            minimum_separation: minimum separation to avoid double stars default is 15 pixels
-            miss_this_one: return coordinates of a different star at random, but don't mark anything
+        Keyword arguments:
+            miss_this_one: Return coordinates of a different star at random, but don't mark anything.
+            min_separation: Minimum separation in pixels between stars.
 
-        Returns: (x,y) integers of the image location of the furthest star
-        away from all other matched stars
+        Returns: 
+            (x,y) integers of the image location of the furthest star away from all other matched stars.
 
         """
 
@@ -6373,23 +6373,40 @@ class PlateTool(QtWidgets.QMainWindow):
 
             candidate_x_list, candidate_y_list, dist_nearest_marked_list = [], [], []
 
+
+            # Reject stars which are too close to the edge
+            edge_margin = 5 # px
+
             for x, y in zip(visible_x, visible_y):
                 ignore_this_star = False
+
                 if isDouble(x,y, visible_x, visible_y):
                     continue
+
                 nearest_pixel_separation = np.inf
 
                 for marked_x, marked_y in zip(marked_x_list, marked_y_list):
+                    
                     # calculate cartesian separation
                     pixel_separation = ((marked_x - x) ** 2 + (marked_y - y) ** 2) ** 0.5
+                    
                     # If this star is less than minimum separation away
                     if pixel_separation < min_separation or ignore_this_star:
                         # do not use this visible star in any further iteration
                         ignore_this_star = True
                         break
+                    
+                    # If this star is too close to the edge, do not use it
+                    if (x < edge_margin) or (x > self.platepar.X_res - edge_margin) or \
+                        (y < edge_margin) or (y > self.platepar.Y_res - edge_margin):
+
+                        ignore_this_star = True
+                        break
+
 
                     else:
                         if pixel_separation < nearest_pixel_separation:
+
                             # Update the x, y coordinates and the nearest star by pixel separation
                             nearest_x, nearest_y, nearest_pixel_separation = x, y, pixel_separation
 
@@ -6401,14 +6418,16 @@ class PlateTool(QtWidgets.QMainWindow):
                     dist_nearest_marked_list.append(nearest_pixel_separation)
 
             return candidate_x_list, candidate_y_list, dist_nearest_marked_list, nearest_pixel_separation
-        ##############################################################################################################
+        
+        ######################################################################################################
 
         marked_x_list, marked_y_list = getMarkedStars(include_unsuitable=False)
         max_distance_between_paired = maxDistBetweenPoints(marked_x_list, marked_y_list)
 
         marked_x_list, marked_y_list = getMarkedStars(include_unsuitable=True)
         unmarked_x_list, unmarked_y_list, dist_nearest_marked_list, distance_between_unmarked = \
-            getVisibleUnmarkedStarsAndDistanceToMarked(marked_x_list, marked_y_list, min_separation=min_separation)
+            getVisibleUnmarkedStarsAndDistanceToMarked(marked_x_list, marked_y_list, 
+                                                       min_separation=min_separation)
 
         if len(dist_nearest_marked_list) == 0:
             print("No stars left to pick")
