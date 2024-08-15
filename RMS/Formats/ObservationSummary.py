@@ -148,8 +148,8 @@ def startObservationSummaryReport(config, duration, force_delete = False):
 
 
     conn = getObsDBConn(config, force_delete=force_delete)
-    addObsParam(conn, "StartTime", datetime.datetime.utcnow() - datetime.timedelta(seconds=1))
-    addObsParam(conn, "Duration", duration)
+    addObsParam(conn, "start_time", datetime.datetime.utcnow() - datetime.timedelta(seconds=1))
+    addObsParam(conn, "duration", duration)
 
     if isRaspberryPi():
         with open('/sys/firmware/devicetree/base/model', 'r') as m:

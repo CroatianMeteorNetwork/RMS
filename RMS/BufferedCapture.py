@@ -885,7 +885,7 @@ class BufferedCapture(Process):
             except Exception as e:
                 log.error('Error releasing OpenCV device: {}'.format(e))
                 conn = getObsDBConn(self.config)
-                addObsParam(conn, "media_backend", "gst not successfully released")
+                addObsParam(conn, "media_backend", "OpenCV not successfully released")
                 conn.close()
             finally:
                 self.device = None  # Reset device to None after releasing
