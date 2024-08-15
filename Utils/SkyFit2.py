@@ -6252,8 +6252,7 @@ class PlateTool(QtWidgets.QMainWindow):
         """
 
         Args:
-            minimum_separation: minimum separation to avoid double stars default is 5 pixels
-            separation of Alpha_1 and Alpha_2 Cap as a reference
+            minimum_separation: minimum separation to avoid double stars default is 15 pixels
             miss_this_one: return coordinates of a different star at random, but don't mark anything
 
         Returns: (x,y) integers of the image location of the furthest star
@@ -6273,7 +6272,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
 
-        # Return the image coordinates of the star which is furthest way from the nearest marked star
+        # Return the image coordinates of the star which is furthest away from any marked star
         # Create marked_x, marked_y in image coordinates which is composed of matched stars and unsuitable stars
 
         # Get all the matched stars in image coordinates
@@ -6304,6 +6303,7 @@ class PlateTool(QtWidgets.QMainWindow):
         def isDouble(x,y, reference_x_list, reference_y_list, min_separation=5):
 
             """
+            Are x,y coordinates which are very close to, but distinct from all coordinates in reference list
 
             Args:
                 x: image coordinates of star
@@ -6327,6 +6327,8 @@ class PlateTool(QtWidgets.QMainWindow):
         def getVisibleUnmarkedStarsAndDistanceToMarked(marked_x_list, marked_y_list, min_separation=15):
 
             """
+            From the catalogue of filtered stars return a lists of coordinates stars which are not marked,
+            and another list which is the distance to the nearest marked star
 
             Args:
                 marked_x_list: list of marked star x coordinates
