@@ -13,6 +13,7 @@ import string
 import inspect
 import datetime
 
+
 # tkinter import that works on both Python 2 and 3
 if sys.version_info[0] < 3:
     import Tkinter as tkinter
@@ -403,7 +404,7 @@ def checkListEquality(t1, t2):
 
         else:
 
-            # If the elements are someting else, compare them directly
+            # If the elements are something else, compare them directly
             if e1 != e2:
                 return False
 
@@ -599,13 +600,18 @@ def sanitise(unsanitised, lower = False, space_substitution = "", log_changes = 
     return sanitised
 
 
-class rms_datetime():
+class RmsDateTime:
     """ Class to hold utcnow() wrapper function definition.
-        Select the best approach to retrieve current UCT time according to Python version
+        Select the best approach to retrieve current UTC time according to Python version.
     """
     if sys.version_info[0] < 3:
-        utcnow = datetime.datetime.utcnow
+        @staticmethod
+        def utcnow():
+            # Python 2: Use the existing utcnow, which is not timezone-aware.
+            return datetime.datetime.utcnow()
     else:
         @staticmethod
-        def utcnow(): return datetime.datetime.now(datetime.UTC)
-
+        def utcnow():
+            # Python 3: Get timezone-aware UTC time and then make it naive.
+            return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        
