@@ -45,6 +45,7 @@ from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle, greatCirclePha
 from RMS.Routines.MaskImage import getMaskFile
 from RMS.Routines import RollingShutterCorrection
 from RMS.Routines.MaskImage import loadMask, MaskStructure, getMaskFile
+from RMS.Misc import maxDistBetweenPoints
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
@@ -6280,31 +6281,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Get all the matched stars in image coordinates
 
-        def maxDistBetweenPoints(points_x, points_y):
-
-            """
-            Routine to calculate the maximum cartesian distance between points
-
-            Args:
-                points_x: list of points
-                points_y: list of points
-
-            Returns:
-                maximum cartesian distance between points
-            """
-
-
-            max_separation = 0
-            for ref_x, ref_y in zip(points_x, points_y):
-                min_separation = np.inf
-                for x, y in zip(points_x, points_y):
-                    pixel_separation = ((ref_x - x) ** 2 + (ref_y - y) ** 2) ** 0.5
-                    if pixel_separation < min_separation and pixel_separation != 0:
-                        min_separation = pixel_separation
-                if min_separation > max_separation:
-                    max_separation = min_separation
-
-            return max_separation
 
 
         def getMarkedStars(include_unsuitable=True):
