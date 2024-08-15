@@ -1421,11 +1421,12 @@ class PlateTool(QtWidgets.QMainWindow):
             if self.max_pixels_between_matched_stars != np.inf:
                 percentage_complete = min([100,100 * (len(self.paired_stars)+len(self.unsuitable_stars))/
                                                                 len(self.catalog_x_filtered)])
-                status_str += ", pixels between matches {:.0f} good:{} bad:{} progress {:.0f}%".format(
-                    self.max_pixels_between_matched_stars, len(self.paired_stars),
-                    len(self.unsuitable_stars), percentage_complete)
 
+                if self.max_pixels_between_matched_stars != 0:
+                    status_str += ", max gap {:.0f}px".format(self.max_pixels_between_matched_stars)
 
+                status_str += " good:{} bad:{} progress {:.0f}%".format(
+                    len(self.paired_stars), len(self.unsuitable_stars), percentage_complete)
 
         return status_str
 
@@ -3769,8 +3770,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
                         # Add the image/catalog pair to the list
-                        self.paired_stars.addPair(self.x_centroid, self.y_centroid, self.star_intensity, \
-                                pair_obj, snr=self.star_snr, saturated=self.star_saturated)
+                        if not unsuitable:
+                            self.paired_stars.addPair(self.x_centroid, self.y_centroid, self.star_intensity, \
+                                    pair_obj, snr=self.star_snr, saturated=self.star_saturated)
 
                         # Switch back to centroiding mode
                         self.cursor.setMode(0)
@@ -5376,6 +5378,7 @@ class PlateTool(QtWidgets.QMainWindow):
     def jumpNextStar(self, miss_this_one=False):
 
         new_x, new_y, self.max_pixels_between_matched_stars  = self.furthestStar(miss_this_one=miss_this_one)
+        self.updateBottomLabel()
         self.old_autopan_x, self.old_autopan_y = self.current_autopan_x, self.current_autopan_y
         self.current_autopan_x, self.current_autopan_y = new_x, new_y
         self.img_frame.setRange(xRange=(new_x + 15, new_x - 15), yRange=(new_y + 15, new_y - 15))
@@ -6277,9 +6280,34 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Get all the matched stars in image coordinates
 
+        def maxDistBetweenPoints(points_x, points_y):
+
+            """
+            Routine to calculate the maximum cartesian distance between points
+
+            Args:
+                points_x: list of points
+                points_y: list of points
+
+            Returns:
+                maximum cartesian distance between points
+            """
 
 
-        def getMarkedStars():
+            max_separation = 0
+            for ref_x, ref_y in zip(points_x, points_y):
+                min_separation = np.inf
+                for x, y in zip(points_x, points_y):
+                    pixel_separation = ((ref_x - x) ** 2 + (ref_y - y) ** 2) ** 0.5
+                    if pixel_separation < min_separation and pixel_separation != 0:
+                        min_separation = pixel_separation
+                if min_separation > max_separation:
+                    max_separation = min_separation
+
+            return max_separation
+
+
+        def getMarkedStars(include_unsuitable=True):
 
             """
 
@@ -6293,12 +6321,14 @@ class PlateTool(QtWidgets.QMainWindow):
                 marked_x.append(coords[0])
                 marked_y.append(coords[1])
 
-            coords_list = self.unsuitable_stars.imageCoords()
-            for coords in coords_list:
-                marked_x.append(coords[0])
-                marked_y.append(coords[1])
+            if include_unsuitable:
+                coords_list = self.unsuitable_stars.imageCoords()
+                for coords in coords_list:
+                    marked_x.append(coords[0])
+                    marked_y.append(coords[1])
 
             return marked_x, marked_y
+        ##############################################################################################################
 
         def isDouble(x,y, reference_x_list, reference_y_list, min_separation=5):
 
@@ -6323,6 +6353,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     return True
 
             return False
+        ##############################################################################################################
 
         def getVisibleUnmarkedStarsAndDistanceToMarked(marked_x_list, marked_y_list, min_separation=15):
 
@@ -6394,31 +6425,30 @@ class PlateTool(QtWidgets.QMainWindow):
                     dist_nearest_marked_list.append(nearest_pixel_separation)
 
             return candidate_x_list, candidate_y_list, dist_nearest_marked_list, nearest_pixel_separation
+        ##############################################################################################################
 
+        marked_x_list, marked_y_list = getMarkedStars(include_unsuitable=False)
+        max_distance_between_paired = maxDistBetweenPoints(marked_x_list, marked_y_list)
 
-
-        marked_x_list, marked_y_list = getMarkedStars()
-
-        unmarked_x_list, unmarked_y_list, dist_nearest_marked_list, self.pixel_distance_between_unmarked = \
+        marked_x_list, marked_y_list = getMarkedStars(include_unsuitable=True)
+        unmarked_x_list, unmarked_y_list, dist_nearest_marked_list, distance_between_unmarked = \
             getVisibleUnmarkedStarsAndDistanceToMarked(marked_x_list, marked_y_list, min_separation=min_separation)
 
         if len(dist_nearest_marked_list) == 0:
             print("No stars left to pick")
-            return marked_x_list[-1], marked_y_list[-1], 0
+            return marked_x_list[-1], marked_y_list[-1], max_distance_between_paired
 
         if miss_this_one:
             # Pick a distance at random
             next_star_index = dist_nearest_marked_list.index(random.choice(dist_nearest_marked_list))
         else:
-            # Find the index of this star, check that there are some items in list
+            # Find the index of this star
             next_star_index = dist_nearest_marked_list.index(max(dist_nearest_marked_list))
 
 
+        # Return coordinates of next star and maximum pixel distance between marked stars
 
-
-        # Return coordinates of next star and maximum radius betrween unmarked stars
-
-        return unmarked_x_list[next_star_index], unmarked_y_list[next_star_index], max(dist_nearest_marked_list)
+        return unmarked_x_list[next_star_index], unmarked_y_list[next_star_index], max_distance_between_paired
 
 
 
