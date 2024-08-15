@@ -470,7 +470,7 @@ class PlateTool(QtWidgets.QMainWindow):
         #   of position on frames and photometry
         self.mode = 'skyfit'
         self.mode_list = ['skyfit', 'manualreduction']
-        self.max_radius_between_matched_stars = np.inf
+        self.max_pixels_between_matched_stars = np.inf
         self.autopan_mode = False
         self.input_path = input_path
         if os.path.isfile(self.input_path):
@@ -1418,11 +1418,13 @@ class PlateTool(QtWidgets.QMainWindow):
             elif self.star_pick_mode and self.autopan_mode:
                 status_str += ", Auto pan"
 
-            if self.max_radius_between_matched_stars != np.inf:
-                status_str += ", Max angle {:3.2f} good:{} bad:{} progress {:.0f}%".format(
-                    self.max_radius_between_matched_stars, len(self.paired_stars),
-                    len(self.unsuitable_stars),
-                    100 * (len(self.paired_stars)+len(self.unsuitable_stars))/len(self.catalog_x_filtered))
+            if self.max_pixels_between_matched_stars != np.inf:
+                percentage_complete = min([100,100 * (len(self.paired_stars)+len(self.unsuitable_stars))/
+                                                                len(self.catalog_x_filtered)])
+                status_str += ", pixels between matches {:.0f} good:{} bad:{} progress {:.0f}%".format(
+                    self.max_pixels_between_matched_stars, len(self.paired_stars),
+                    len(self.unsuitable_stars), percentage_complete)
+
 
 
         return status_str
@@ -3133,6 +3135,7 @@ class PlateTool(QtWidgets.QMainWindow):
         elif event.key() == QtCore.Qt.Key_R and (modifiers == QtCore.Qt.ControlModifier):
 
             self.star_pick_mode = not self.star_pick_mode
+            self.updateBottomLabel()
 
             if self.star_pick_mode:
                 #self.img_frame.setMouseEnabled(False, False)
@@ -3728,13 +3731,12 @@ class PlateTool(QtWidgets.QMainWindow):
                             unsuitable = True
                     
                     if unsuitable:
-                        print("Marking star unsuitable")
 
-                        print("   coordinates: ({}, {})".format(self.current_autopan_x, self.current_autopan_y))
+                        print("Unsuitable star at coordinates: ({}, {})".format(self.current_autopan_x, self.current_autopan_y))
 
                         self.unsuitable_stars.addPair(self.current_autopan_x, self.current_autopan_y,
                                                         0, None)
-
+                        self.updateBottomLabel()
                         self.unsuitable_star_markers.addPoints(x=[self.current_autopan_x],
                                                                 y=[self.current_autopan_y])
                         self.unsuitable_star_markers2.addPoints(x=[self.current_autopan_x],
@@ -5373,7 +5375,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def jumpNextStar(self, miss_this_one=False):
 
-        new_x, new_y = self.furthestStar(miss_this_one=miss_this_one)
+        new_x, new_y, self.max_pixels_between_matched_stars  = self.furthestStar(miss_this_one=miss_this_one)
         self.old_autopan_x, self.old_autopan_y = self.current_autopan_x, self.current_autopan_y
         self.current_autopan_x, self.current_autopan_y = new_x, new_y
         self.img_frame.setRange(xRange=(new_x + 15, new_x - 15), yRange=(new_y + 15, new_y - 15))
@@ -6245,13 +6247,184 @@ class PlateTool(QtWidgets.QMainWindow):
             pass
         self.time = time.time()
 
-
-    def furthestStar(self, minimum_separation=0.12, miss_this_one=False):
+    def furthestStar(self,minimum_separation=15, miss_this_one=False, min_separation=15):
 
         """
 
         Args:
-            minimum_separation: minimum separation to avoid double stars default is 0.12 degrees
+            minimum_separation: minimum separation to avoid double stars default is 5 pixels
+            separation of Alpha_1 and Alpha_2 Cap as a reference
+            miss_this_one: return coordinates of a different star at random, but don't mark anything
+
+        Returns: (x,y) integers of the image location of the furthest star
+        away from all other matched stars
+
+        """
+
+        # Strategy
+
+        # Working in image coordinates
+
+        # Get two lists marked_x, marked_y of each marked star - getMarkedStars()
+        # Get three lists candidate_x, candidate_y of each unmarked star, and the distance to nearest
+        # marked star which is more than minimum separation away
+
+        # Get star with the greatest distance to the nearest marked star
+
+
+
+        # Return the image coordinates of the star which is furthest way from the nearest marked star
+        # Create marked_x, marked_y in image coordinates which is composed of matched stars and unsuitable stars
+
+        # Get all the matched stars in image coordinates
+
+
+
+        def getMarkedStars():
+
+            """
+
+            Returns: a list of stars which are either marked as paired, or bad in image coordinates
+
+            """
+
+            marked_x, marked_y = [], []
+            coords_list = self.paired_stars.imageCoords()
+            for coords in coords_list:
+                marked_x.append(coords[0])
+                marked_y.append(coords[1])
+
+            coords_list = self.unsuitable_stars.imageCoords()
+            for coords in coords_list:
+                marked_x.append(coords[0])
+                marked_y.append(coords[1])
+
+            return marked_x, marked_y
+
+        def isDouble(x,y, reference_x_list, reference_y_list, min_separation=5):
+
+            """
+
+            Args:
+                x: image coordinates of star
+                y: image coordinates of star
+                reference_x_list: list of x image coordinates
+                reference_y_list: list of y image coordinates
+
+            Returns:
+                [bool] True if star is within min_separation of another star
+            """
+
+            for reference_x, reference_y in zip(reference_x_list, reference_y_list):
+                # Check if this the reference is the same star
+                if reference_x == x and reference_y == y:
+                    continue
+                if ((reference_x - x) ** 2 + (reference_y - y) ** 2) ** 0.5 < min_separation:
+                    return True
+
+            return False
+
+        def getVisibleUnmarkedStarsAndDistanceToMarked(marked_x_list, marked_y_list, min_separation=15):
+
+            """
+
+            Args:
+                marked_x_list: list of marked star x coordinates
+                marked_y_list: list of marked star y coordinates
+                min_separation: minimum separation to be regarded as a different stra
+
+            Returns:
+                unmarked_x_list: list of unmarked star x coordinates
+                unmarked_y_list: list of unmarked star x coordinates
+                dist_nearest_marked_list: distance of the nearest marked star for returned star coordinates
+
+
+            """
+
+            # Is there a way to get this in image coordinates directly
+            visible_ra_list = [star[0] for star in self.catalog_stars_filtered]
+            visible_dec_list = [star[1] for star in self.catalog_stars_filtered]
+
+            # Convert all visible star to image coordinates
+
+            visible_x, visible_y = raDecToXYPP(np.array(visible_ra_list), np.array(visible_dec_list),
+                                               datetime2JD(self.img_handle.currentFrameTime(dt_obj=True)),
+                                               self.platepar)
+
+            # Handle jump when no stars are marked - just pick and return a single random star
+            if len(marked_x_list) == 0 or len(marked_y_list) == 0:
+                random_star = random.randint(0, len(visible_x) - 1)
+                return [visible_x[random_star]], [visible_y[random_star]], [np.inf], [np.inf]
+
+            # Iterate through all visible stars creating a list of stars which are more than
+            # min separation from a marked star, and then add coordinates of the visible star
+            # and minimum distance to the nearest marked star, which is more than min_separation away
+            # If a visible star is too close to an already marked star then ignore this star
+            # and do not append to the candidate star list
+
+            candidate_x_list, candidate_y_list, dist_nearest_marked_list = [], [], []
+
+            for x, y in zip(visible_x, visible_y):
+                ignore_this_star = False
+                if isDouble(x,y, visible_x, visible_y):
+                    continue
+                nearest_pixel_separation = np.inf
+
+                for marked_x, marked_y in zip(marked_x_list, marked_y_list):
+                    # calculate cartesian separation
+                    pixel_separation = ((marked_x - x) ** 2 + (marked_y - y) ** 2) ** 0.5
+                    # If this star is less than minimum separation away
+                    if pixel_separation < min_separation or ignore_this_star:
+                        # do not use this visible star in any further iteration
+                        ignore_this_star = True
+                        break
+
+                    else:
+                        if pixel_separation < nearest_pixel_separation:
+                            # Update the x, y coordinates and the nearest star by pixel separation
+                            nearest_x, nearest_y, nearest_pixel_separation = x, y, pixel_separation
+
+
+                # Append once for each visible star that is not marked to be ignored
+                if not ignore_this_star:
+                    candidate_x_list.append(nearest_x)
+                    candidate_y_list.append(nearest_y)
+                    dist_nearest_marked_list.append(nearest_pixel_separation)
+
+            return candidate_x_list, candidate_y_list, dist_nearest_marked_list, nearest_pixel_separation
+
+
+
+        marked_x_list, marked_y_list = getMarkedStars()
+
+        unmarked_x_list, unmarked_y_list, dist_nearest_marked_list, self.pixel_distance_between_unmarked = \
+            getVisibleUnmarkedStarsAndDistanceToMarked(marked_x_list, marked_y_list, min_separation=min_separation)
+
+        if len(dist_nearest_marked_list) == 0:
+            print("No stars left to pick")
+            return marked_x_list[-1], marked_y_list[-1], 0
+
+        if miss_this_one:
+            # Pick a distance at random
+            next_star_index = dist_nearest_marked_list.index(random.choice(dist_nearest_marked_list))
+        else:
+            # Find the index of this star, check that there are some items in list
+            next_star_index = dist_nearest_marked_list.index(max(dist_nearest_marked_list))
+
+
+
+
+        # Return coordinates of next star and maximum radius betrween unmarked stars
+
+        return unmarked_x_list[next_star_index], unmarked_y_list[next_star_index], max(dist_nearest_marked_list)
+
+
+    def furthestStarOld(self, minimum_separation=0.12, miss_this_one=False):
+
+        """
+
+        Args:
+            minimum_separation: minimum separation to avoid double stars default is 0.12
             separation of Alpha_1 and Alpha_2 Cap as a reference
 
         Returns: (x,y) integers of the image location of the furthest star
@@ -6259,7 +6432,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         """
 
-        # Intialise
+        # Initialise
 
         next_index, max_dist, min_matched_radius = 0,0, np.inf
 
@@ -6424,7 +6597,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.max_radius_between_matched_stars = matched_radius
 
 
-        return int(next_x), int(next_y)
+        return int(next_x[0]), int(next_y[0])
 
 if __name__ == '__main__':
     ### COMMAND LINE ARGUMENTS
