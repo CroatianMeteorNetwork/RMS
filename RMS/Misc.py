@@ -614,7 +614,8 @@ class RmsDateTime:
         def utcnow():
             # Python 3: Get timezone-aware UTC time and then make it naive.
             return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
-        
+
+
 def maxDistBetweenPoints(points_x, points_y):
     """
     Routine to calculate the maximum cartesian distance between any two points in a
