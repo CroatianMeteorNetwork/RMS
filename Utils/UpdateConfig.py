@@ -21,8 +21,6 @@ def parseConfigFileBySection(config_path):
 
     """
 
-    print("Reading in configuration from {:s}".format(config_path))
-
     config = configparser.ConfigParser()
     config.read(os.path.expanduser(config_path))
 
@@ -40,7 +38,7 @@ def parseConfigFileBySection(config_path):
                 value = config.get(section,option)
                 if ";" in value:
                     value = value[:value.index(";")].strip()
-                values_list.append(config.get(section,option))
+                values_list.append(value)
         options_list_of_lists.append(options_list)
         values_list_of_lists.append(values_list)
 
@@ -134,7 +132,7 @@ def getOption(line, delimiter =":"):
     else:
         return None
 
-def getValue(line, delimiter = ":"):
+def getValue(line, delimiter=":", comment=";"):
 
 
     """
@@ -151,7 +149,10 @@ def getValue(line, delimiter = ":"):
 
 
     if delimiter in line:
-        return line[line.index(delimiter) + 1:].strip()
+        value = line[line.index(delimiter) + 1:].strip()
+        if comment in value:
+            value = value[:value.index(comment)]
+        return value
     else:
         return None
 
@@ -428,7 +429,7 @@ if __name__ == "__main__":
     arg_parser.add_argument("config_file_path", nargs='?', default="./.config",
                             help="Path to the .config file")
 
-    arg_parser.add_argument("--template", default="./.configTemplate",
+    arg_parser.add_argument("-t","--template", default="./.configTemplate",
                         help="Path to .configTemplate (default: ./.configTemplate)")
 
     arg_parser.add_argument("-i", "--interactive", default=False, action="store_true",
