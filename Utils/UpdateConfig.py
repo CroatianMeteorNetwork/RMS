@@ -304,7 +304,17 @@ def populateTemplateConfig(config_template_file_path, config_file_path,
 def compare(new_config_path, sections_list, options_list_of_lists, values_list_of_lists):
 
     """
-    Compares a configuration file on disc against
+    Compares a configuration file on disc against data held in lists
+
+    Arguments:
+        new_config_path: path to the config file to be checked
+        sections_list: list of sections
+        options_list_of_lists: list of lists of options
+        values_list_of_lists: list of lists of values
+
+    Returns:
+        errors: human-readable list of errors
+        missing_options: list of lists of [section, option, value], intended to be passed to insert
 
     """
 
@@ -350,7 +360,21 @@ def compare(new_config_path, sections_list, options_list_of_lists, values_list_o
 
 def updateConfig(config_file_path, config_template_file_path, interactive=False):
 
+    """
+    Reads an existing station config, and writes out in the same format as the template file.
 
+
+    Arguments:
+        new_config_path: path to the config file to be checked
+        sections_list: list of sections
+        options_list_of_lists: list of lists of options
+        values_list_of_lists: list of lists of values
+
+    Returns:
+        errors: human-readable list of errors
+        missing_options: list of lists of [section, option, value], intended to be passed to insert
+
+    """
 
 
     config_file_path = os.path.expanduser(config_file_path)
