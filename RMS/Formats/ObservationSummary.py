@@ -417,6 +417,6 @@ if __name__ == "__main__":
         pp = Platepar()
         pp.read("/home/david/source/RMS/platepar_cmn2010.cal")
         finalizeObservationSummary(config, night_data_dir, pp)
-        writeToFile(config, "/home/david/RMS_data/observation_summary.txt")
+        writeToFile(config, os.path.expanduser("~/RMS_data/observation_summary.txt"))
     print(serialize(config, as_json=True))
     writeToJSON(config, "/home/david/RMS_data/summary.json")
