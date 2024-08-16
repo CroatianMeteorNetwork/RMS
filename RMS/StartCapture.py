@@ -30,6 +30,7 @@ import logging
 import multiprocessing
 import traceback
 import git
+from RMS.Formats.ObservationSummary import getObsDBConn, addObsParam
 
 import numpy as np
 
@@ -51,6 +52,7 @@ from RMS.RunExternalScript import runExternalScript
 from RMS.UploadManager import UploadManager
 from RMS.EventMonitor import EventMonitor
 from RMS.DownloadMask import downloadNewMask
+from RMS.Formats.ObservationSummary import startObservationSummaryReport
 from Utils.AuditConfig import compareConfigs
 
 # Flag indicating that capturing should be stopped
@@ -380,6 +382,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, config,
         detector=detector)
 
+    # Open the observation summary report
+    log.info(startObservationSummaryReport(config, duration, force_delete=False))
 
     # Start buffered capture
     bc.startCapture()
@@ -402,7 +406,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     log.debug('Capture stopped')
 
     log.info('Total number of late or dropped frames: ' + str(dropped_frames))
-
+    obs_db_conn = getObsDBConn(config)
+    addObsParam(obs_db_conn, "dropped_frames", dropped_frames)
+    obs_db_conn.close()
 
     # Stop the compressor
     log.debug('Stopping compression...')

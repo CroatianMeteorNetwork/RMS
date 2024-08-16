@@ -25,6 +25,19 @@
 # second command line arg is optional, can be used to adjust the sleep time in seconds
 # so that there can be a delay between starting each station
 
+delay_by_station_sequence() {
+
+# implement a delay based on position of station in directory
+# this is not used presently
+
+delay=$(ls /home/$(whoami)/source/Stations/ | grep -n $1 | cut -d':' -f1)
+delay=$((delay*30))
+echo Additional $delay second delay will be added.
+sleep $delay
+
+}
+
+
 if [[  -z "$1" ]]	# called with no args
 then
 	echo " No Station directory specified, quitting now"
@@ -41,7 +54,7 @@ else
 fi
 
 source ~/vRMS/bin/activate
-cd ~/source/Stations/$1
+cd ~/source/RMS
 
 # Init log file
 LOGPATH=~/RMS_data/logs/
@@ -54,7 +67,14 @@ mkdir -p $LOGPATH
 # Log the output to a file (warning: this breaks Ctrl+C passing to StartCapture)
 #python -m RMS.StartCapture 2>&1 | tee $LOGFILE
 
-python -m RMS.StartCapture
+configpath=/home/$(whoami)/source/Stations/$1/.config
+echo Using config from $configpath
+echo $configpath
+
+
+
+
+python -m RMS.StartCapture -c $configpath
 
 read -p "Press any key to continue... "
 
