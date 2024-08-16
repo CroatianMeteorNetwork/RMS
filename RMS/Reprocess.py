@@ -10,6 +10,7 @@ import traceback
 import argparse
 import logging
 import random
+import glob
 
 from RMS.ArchiveDetections import archiveDetections, archiveFieldsums
 # from RMS.Astrometry.ApplyAstrometry import applyAstrometryFTPdetectinfo
@@ -37,6 +38,8 @@ from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
 from Utils.ShowerAssociation import showerAssociation
 from Utils.PlotTimeIntervals import plotFFTimeIntervals
 from Utils.TimestampRMSVideos import timestampRMSVideos
+from RMS.Formats.ObservationSummary import addObsParam, getObsDBConn, nightSummaryData
+from RMS.Formats.ObservationSummary import serialize, startObservationSummaryReport, finalizeObservationSummary
 from Utils.AuditConfig import compareConfigs
 
 
@@ -178,6 +181,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
 
 
+
+        obs_db_conn = getObsDBConn(config)
         # Filter out detections using machine learning
         if config.ml_filter > 0:
 
@@ -185,7 +190,10 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
             ff_detected = filterFTPdetectinfoML(config, os.path.join(night_data_dir, ftpdetectinfo_name), \
                 threshold=config.ml_filter, keep_pngs=False, clear_prev_run=True)
+            addObsParam(obs_db_conn, "detections_after_ml", len(ff_detected))
 
+        addObsParam(obs_db_conn,"detections_after_ml", len(readFTPdetectinfo(night_data_dir,ftpdetectinfo_name)))
+        obs_db_conn.close()
 
         # Get the platepar file
         platepar, platepar_path, platepar_fmt = getPlatepar(config, night_data_dir)
@@ -201,21 +209,21 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             # Run astrometry check and refinement
             platepar, fit_status = autoCheckFit(config, platepar, calstars_list)
 
-
+            obs_db_conn = getObsDBConn(config)
             # If the fit was successful, apply the astrometry to detected meteors
             if fit_status:
 
                 log.info('Astrometric calibration SUCCESSFUL!')
-
+                addObsParam(obs_db_conn, "photometry_good", "True")
                 # Save the refined platepar to the night directory and as default
                 platepar.write(os.path.join(night_data_dir, config.platepar_name), fmt=platepar_fmt)
                 platepar.write(platepar_path, fmt=platepar_fmt)
 
             else:
                 log.info('Astrometric calibration FAILED!, Using old platepar for calibration...')
+                addObsParam(obs_db_conn, "photometry_good", "False")
 
-
-
+            obs_db_conn.close()
             # If a flat is used, disable vignetting correction
             if config.use_flat:
                 platepar.vignetting_coeff = 0.0
@@ -425,6 +433,10 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         # Add the timelapse to the extra files
         if intervals_path is not None:
             extra_files.append(intervals_path)
+        obs_db_conn = getObsDBConn(config)
+        addObsParam(obs_db_conn,"jitter_quality",jitter_quality)
+        addObsParam(obs_db_conn,"dropped_frame_rate",dropped_frame_rate)
+        obs_db_conn.close()
 
     except Exception as e:
         log.debug('Plotting timestamp interval failed with message:\n' + repr(e))
@@ -565,9 +577,17 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                     night_data_dir, cams_code_formatted, fps, calibration=cal_file_name, \
                     celestial_coords_given=(platepar is not None))
 
+    observation_summary_path_file_name, observation_summary_json_path_file_name = finalizeObservationSummary(config, night_data_dir, pp)
 
-    night_archive_dir = os.path.join(os.path.abspath(config.data_dir), config.archived_dir, 
+    log.info("\n\n " + serialize(config) + "\n\n")
+
+
+    extra_files.append(observation_summary_path_file_name)
+    extra_files.append(observation_summary_json_path_file_name)
+    night_archive_dir = os.path.join(os.path.abspath(config.data_dir), config.archived_dir,
         night_data_dir_name)
+
+
 
     log.info('Archiving detections to ' + night_archive_dir)
     
@@ -628,6 +648,8 @@ if __name__ == "__main__":
             log.info("Using all available cores for detection.")
 
 
+    duration, _,_,_,_,_,_, = nightSummaryData(config, cml_args.dir_path[0])
+    log.info(startObservationSummaryReport(config, duration, force_delete=False))
     # Process the night
     _, archive_name, detector = processNight(cml_args.dir_path[0], config)
 
