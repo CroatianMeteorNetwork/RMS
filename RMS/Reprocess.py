@@ -579,10 +579,9 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
     try:
         observation_summary_path_file_name, observation_summary_json_path_file_name = (
-            finalizeObservationSummary(config, night_data_dir, platepar.read(platepar_path)))
+                finalizeObservationSummary(config, night_data_dir))
     except:
-        observation_summary_path_file_name, observation_summary_json_path_file_name = (
-            finalizeObservationSummary(config, night_data_dir))
+        pass
 
     log.info("\n\n " + serialize(config) + "\n\n")
 

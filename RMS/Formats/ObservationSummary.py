@@ -49,7 +49,7 @@ else:
     # Python2 compatible version
     import Utils.CameraControl27 as dvr
 
-EM_RAISE = False
+EM_RAISE = True
 
 
 
@@ -191,7 +191,7 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
             arguments:
                 config: config file
                 night_data_dir: the directory of captured files
-                force_delete: forces deletion of the obseration summary database, default False
+
 
             returns:
                 conn: [connection] connection to database if success else None
@@ -203,9 +203,11 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
 
 
     obs_db_conn = getObsDBConn(config)
-    if not platepar is None:
-
-        addObsParam(obs_db_conn, "camera_pointing_az", format("{:.2f}".format(platepar.az_centre)))
+    platepar_path = os.path.join(config.config_file_path, config.platepar_name)
+    if os.path.exists(platepar_path):
+        platepar = Platepar()
+        platepar.read(platepar_path, use_flat=config.use_flat)
+        addObsParam(obs_db_conn, "camera_pointing_az", format("{:.2f} degrees".format(platepar.az_centre)))
         addObsParam(obs_db_conn, "camera_pointing_alt", format("{:.2f} degrees".format(platepar.alt_centre)))
         addObsParam(obs_db_conn, "camera_fov_h","{:.2f}".format(platepar.fov_h))
         addObsParam(obs_db_conn, "camera_fov_v","{:2f}".format(platepar.fov_v))
@@ -266,6 +268,7 @@ def addObsParam(conn, key, value):
                 conn: [connection] connection to database if success else None
 
             """
+    print("Key:Value {}:{}".format(key, value))
 
     sql_statement = ""
     sql_statement += "INSERT INTO records \n"
