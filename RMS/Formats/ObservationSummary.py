@@ -339,7 +339,7 @@ def getLastStartTime(conn):
 
     sql_statement = ""
     sql_statement += "SELECT Value from records \n"
-    sql_statement += "      WHERE Key = 'StartTime' \n"
+    sql_statement += "      WHERE Key = 'start_time' \n"
     sql_statement += "      ORDER BY TimeStamp desc \n"
 
     result = conn.cursor().execute(sql_statement).fetchone()
