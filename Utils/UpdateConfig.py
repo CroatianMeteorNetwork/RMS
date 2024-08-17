@@ -14,14 +14,40 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import configparser
+
 import argparse
 import os
+import sys
+
 from Utils.AuditConfig import validatePath
 import glob
 import shutil
 import tempfile
 from RMS.Misc import mkdirP
+
+try:
+    # Python 3
+    import configparser
+
+
+except:
+    # Python 2
+    import ConfigParser as configparser
+
+
+def printWarning(config_path, template):
+
+    print("This utility will copy all the options from the config file {} ".format(config_path))
+    print("into a new file based on the template {} \n".format(template))
+    print("Any options in the config file which are not in the template")
+    print("will be copied to the new config, however any commented options,")
+    print("or bespoke comments will be lost. \n\n")
+
+    response = input("Would you like to proceed?")
+    if response.lower() != "y":
+        exit()
+    else:
+        return
 
 def parseConfigFileBySection(config_path):
     """Parse the .config file, into one list and two lists of lists
@@ -78,8 +104,12 @@ def backupConfig(config_file_path, number_to_keep=5):
     config_file_backups = sorted(glob.glob(config_file_path + "_*"), reverse=True)
     for config_backup in config_file_backups:
         name, number = config_backup.split("_")[0], config_backup.split("_")[1]
-
-        number = int(number)
+        try:
+            number = int(number)
+        except:
+            continue
+        if number > number_to_keep:
+            continue
         if int(number) < number_to_keep:
             number += 1
             os.rename(config_backup,"{}_{}".format(name,number))
@@ -472,8 +502,8 @@ if __name__ == "__main__":
     arg_parser.add_argument("-t","--template", default="./.configTemplate",
                         help="Path to .configTemplate (default: ./.configTemplate)")
 
-    arg_parser.add_argument("-i", "--interactive", default=False, action="store_true",
-                            help="Run interactively")
+    arg_parser.add_argument("-q", "--quiet", default=False, action="store_true",
+                            help="Run silently, always the case in python < 3")
 
 
 
@@ -481,5 +511,11 @@ if __name__ == "__main__":
     cml_args = arg_parser.parse_args()
 
     #########################
+    interactive = not cml_args.quiet
 
-    updateConfig(cml_args.config_file_path, cml_args.template, cml_args.interactive)
+    if sys.version_info.major < 3:
+        interactive = False
+
+    if interactive:
+        printWarning(cml_args.config_file_path, cml_args.template)
+    updateConfig(cml_args.config_file_path, cml_args.template, interactive)
