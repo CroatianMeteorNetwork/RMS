@@ -577,7 +577,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                     night_data_dir, cams_code_formatted, fps, calibration=cal_file_name, \
                     celestial_coords_given=(platepar is not None))
 
-    observation_summary_path_file_name, observation_summary_json_path_file_name = finalizeObservationSummary(config, night_data_dir, pp)
+    observation_summary_path_file_name, observation_summary_json_path_file_name = (
+        finalizeObservationSummary(config, night_data_dir, platepar.read(platepar_path)))
 
     log.info("\n\n " + serialize(config) + "\n\n")
 
