@@ -211,7 +211,7 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
         addObsParam(obs_db_conn, "camera_pointing_alt", format("{:.2f} degrees".format(platepar.alt_centre)))
         addObsParam(obs_db_conn, "camera_fov_h","{:.2f}".format(platepar.fov_h))
         addObsParam(obs_db_conn, "camera_fov_v","{:2f}".format(platepar.fov_v))
-        addObsParam(obs_db_conn, "lens", estimateLens(platepar.fov_h))
+        addObsParam(obs_db_conn, "camera_lens", estimateLens(platepar.fov_h))
 
 
     addObsParam(obs_db_conn, "time_first_fits_file", time_first_fits_file)
