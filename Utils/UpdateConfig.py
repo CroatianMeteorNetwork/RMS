@@ -223,8 +223,9 @@ def insert(current_section, insert_options_list, interactive=False, newline_afte
 
     """
 
-    output_lines = "; These options added automatically by {:s}\n".format(__file__)
-    output_lines += "; On {:s}\n".format(datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S+%f'))
+    if len(insert_options_list):
+        output_lines = "; These options added automatically by {:s}\n".format(__file__)
+        output_lines += "; On {:s}\n".format(datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S+%f'))
 
     for section, option, value in insert_options_list:
         if section == current_section:
@@ -238,8 +239,9 @@ def insert(current_section, insert_options_list, interactive=False, newline_afte
             else:
                 output_lines += insert
 
-    if newline_after_last:
-        output_lines += "\n"
+    if len(insert_options_list):
+        if newline_after_last:
+            output_lines += "\n"
 
     return output_lines
 
