@@ -45,7 +45,7 @@ from RMS.Compression import Compressor
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
 from RMS.Formats.FFfile import validFFName
-from RMS.Misc import mkdirP
+from RMS.Misc import mkdirP, RmsDateTime
 from RMS.QueuedPool import QueuedPool
 from RMS.Reprocess import getPlatepar, processNight
 from RMS.RunExternalScript import runExternalScript
@@ -100,7 +100,7 @@ def wait(duration, compressor, buffered_capture, video_file):
     log.info('Press Ctrl+C to stop capturing...')
 
     # Get the time of capture start
-    time_start = datetime.datetime.utcnow()
+    time_start = RmsDateTime.utcnow()
 
 
     while True:
@@ -118,7 +118,7 @@ def wait(duration, compressor, buffered_capture, video_file):
         # If some wait time was given, check if it passed
         if duration is not None:
 
-            time_elapsed = (datetime.datetime.utcnow() - time_start).total_seconds()
+            time_elapsed = (RmsDateTime.utcnow() - time_start).total_seconds()
 
             # If the total time is elapsed, break the wait
             if time_elapsed >= duration:
@@ -206,7 +206,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         # Create a directory for captured files based on the current time
         if video_file is None:
             night_data_dir_name = str(config.stationID) + '_' \
-                + datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')
+                + RmsDateTime.utcnow().strftime('%Y%m%d_%H%M%S_%f')
 
         # If a video file is given, take the folder name from the video file
         else:
@@ -566,9 +566,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
                 # Wait for the upload delay to pass
                 sleep_time = None
-                while (datetime.datetime.utcnow() - upload_manager.next_runtime).total_seconds() < 0:
+                while (RmsDateTime.utcnow() - upload_manager.next_runtime).total_seconds() < 0:
                     
-                    wait_time = (datetime.datetime.utcnow() - upload_manager.next_runtime).total_seconds()
+                    wait_time = (RmsDateTime.utcnow() - upload_manager.next_runtime).total_seconds()
                     log.info("Waiting for upload delay to pass: {:.1f} seconds...".format(abs(wait_time)))
 
                     # Sleep for a short interval between 1 and 30 seconds
@@ -973,7 +973,7 @@ if __name__ == "__main__":
                     if start_time:
                         break
 
-                time_now = datetime.datetime.utcnow()
+                time_now = RmsDateTime.utcnow()
                 waiting_time = start_time - time_now
                 if waiting_time.total_seconds() <= 0:
                     break
@@ -1082,7 +1082,7 @@ if __name__ == "__main__":
             if not isinstance(start_time, bool):
 
                 # Calculate how many seconds to wait until capture starts, and with for that time
-                time_now = datetime.datetime.utcnow()
+                time_now = RmsDateTime.utcnow()
                 waiting_time = start_time - time_now
 
                 log.info('Waiting {:s} to start recording for {:.3f} hrs'.format(str(waiting_time), \
