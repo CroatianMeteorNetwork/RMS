@@ -229,15 +229,17 @@ def insert(current_section, insert_options_list, interactive=False, newline_afte
 
     for section, option, value in insert_options_list:
         if section == current_section:
-            insert_made = True
+
             insert = "{}: {}\n".format(option, value)
             if interactive:
                 print("Working in section {}".format(section))
                 response = input("Would you like to insert {}".format(insert))
                 if response.lower() == "y":
                     output_lines += insert
+                    insert_made = True
             else:
                 output_lines += insert
+                insert_made = True
 
     if insert_made:
         comment_lines = ""
