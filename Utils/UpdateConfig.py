@@ -24,6 +24,7 @@ import glob
 import shutil
 import tempfile
 from RMS.Misc import mkdirP
+from datetime import datetime
 
 try:
     # Python 3
@@ -222,7 +223,8 @@ def insert(current_section, insert_options_list, interactive=False, newline_afte
 
     """
 
-    output_lines = ""
+    output_lines = "; These options added automatically by {}",format(__file__)
+    output_lines += "; On {}".format(datetime.utcnow().strftime('%Y%m%d_%H%M%S.%f'))
 
     for section, option, value in insert_options_list:
         if section == current_section:
