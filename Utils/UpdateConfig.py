@@ -223,13 +223,13 @@ def insert(current_section, insert_options_list, interactive=False, newline_afte
 
     """
     output_lines = ""
-    if len(insert_options_list):
-        output_lines += "; These options added automatically by {:s}\n".format(os.path.basename(sys.argv[0]))
-        output_lines += "; On {:s}\n".format(datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S+%f'))
+    insert_made = False
+
+
 
     for section, option, value in insert_options_list:
         if section == current_section:
-
+            insert_made = True
             insert = "{}: {}\n".format(option, value)
             if interactive:
                 print("Working in section {}".format(section))
@@ -239,7 +239,11 @@ def insert(current_section, insert_options_list, interactive=False, newline_afte
             else:
                 output_lines += insert
 
-    if len(insert_options_list):
+    if insert_made:
+        comment_lines = ""
+        comment_lines += "; These options added automatically by {:s}\n".format(os.path.basename(sys.argv[0]))
+        comment_lines += "; On {:s}\n".format(datetime.utcnow().strftime('%Y-%m-%dT%H:%M'))
+        output_lines = comment_lines + output_lines
         if newline_after_last:
             output_lines += "\n"
 
