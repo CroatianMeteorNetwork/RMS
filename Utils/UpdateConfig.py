@@ -241,8 +241,8 @@ def insert(current_section, insert_options_list, interactive=False, newline_afte
 
     if insert_made:
         comment_lines = ""
-        comment_lines += "; These options added automatically by {:s}\n".format(os.path.basename(sys.argv[0]))
-        comment_lines += "; On {:s}\n".format(datetime.utcnow().strftime('%Y-%m-%dT%H:%M'))
+        comment_lines += "; These options added automatically by {:s} ".format(os.path.basename(sys.argv[0]))
+        comment_lines += "; on {:s}\n\n".format(datetime.utcnow().strftime('%Y-%m-%dT%H:%M'))
         output_lines = comment_lines + output_lines
         if newline_after_last:
             output_lines += "\n"
