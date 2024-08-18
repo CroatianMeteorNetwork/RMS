@@ -133,13 +133,22 @@ def captureDirectories(captured_dir, stationID):
     return capture_directories
 
 
-def startObservationSummaryReport(config, duration, force_delete = False):
+def getRmsRepo():
+    rms_path = os.path.expanduser("~/source/RMS")
+    try:
+        return git.Repo(rms_path)
+    except InvalidGitRepositoryError:
+        print(f"Warning: No valid Git repository found at {rms_path}")
+        return None
+
+
+def startObservationSummaryReport(config, duration, force_delete=False):
     """ Enters the parameters known at the start of observation into the database
 
         arguments:
             config: config file
             duration: the initially calculated duration
-            force_delete: forces deletion of the obseration summary database, default False
+            force_delete: forces deletion of the observation summary database, default False
 
         returns:
             conn: [connection] connection to database if success else None
@@ -159,12 +168,13 @@ def startObservationSummaryReport(config, duration, force_delete = False):
 
     addObsParam(conn, "hardware_version", hardware_version)
 
-    repo = git.Repo(search_parent_directories=True)
-    addObsParam(conn, "commit_date",
-                datetime.datetime.fromtimestamp(repo.head.object.committed_date).strftime('%Y%m%d_%H%M%S'))
-
-    repo = git.Repo(search_parent_directories=True)
-    addObsParam(conn, "commit_hash", repo.head.object.hexsha)
+    repo = getRmsRepo()
+    if repo:
+        addObsParam(conn, "commit_date",
+                    datetime.datetime.fromtimestamp(repo.head.object.committed_date).strftime('%Y%m%d_%H%M%S'))
+        addObsParam(conn, "commit_hash", repo.head.object.hexsha)
+    else:
+        print("RMS Git repository not found. Skipping Git-related information.")
 
     storage_total, storage_used, storage_free = shutil.disk_usage("/")
     addObsParam(conn, "storage_total_gb", round(storage_total / (1024 **3 ),2))
@@ -191,7 +201,7 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
             arguments:
                 config: config file
                 night_data_dir: the directory of captured files
-                force_delete: forces deletion of the obseration summary database, default False
+                force_delete: forces deletion of the observation summary database, default False
 
             returns:
                 conn: [connection] connection to database if success else None
@@ -258,7 +268,7 @@ def addObsParam(conn, key, value):
     """ Add a single key value pair into the database
 
             arguments:
-                conn: the connnection to the database
+                conn: the connection to the database
                 key: the key for the value to be added
                 value: the value to be added
 
