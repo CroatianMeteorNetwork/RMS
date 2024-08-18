@@ -127,6 +127,9 @@ def sectionHeaderLine(line, section_list):
 
     """
     Detect if this is a section header line
+    Qualification is an opening [
+    A word which is the the list of sections
+    Following by a closing ]
 
     Arguments:
         line: line to be checked
@@ -204,7 +207,7 @@ def getValue(line, delimiter=":", comment=";"):
 
 
 
-def insert(current_section, insert_options_list, interactive=False):
+def insert(current_section, insert_options_list, interactive=False, newline_after_last = True):
 
 
     """
@@ -232,6 +235,8 @@ def insert(current_section, insert_options_list, interactive=False):
                     output_lines += insert
             else:
                 output_lines += insert
+
+    output_lines += "/n" if newline_after_last else ""
 
     return output_lines
 
@@ -262,47 +267,65 @@ def populateTemplateConfig(config_template_file_path, config_file_path,
     """
 
 
-
+    # Create paths for reuse later
     config_template_file_path = os.path.expanduser(config_template_file_path)
     config_file_path = os.path.expanduser(config_file_path)
     config_template_file_name = os.path.basename(config_template_file_path)
     config_file_name = os.path.basename(config_file_path)
 
+    # Create a temporary directory
     temp_directory = tempfile.mkdtemp()
     if os.path.isfile(temp_directory):
         os.unlink(temp_directory)
     mkdirP(temp_directory)
 
+    # Copy the .config file to the temporary directory
     shutil.copy(config_file_path, os.path.join(temp_directory, config_template_file_name))
+    # Copy the template file to the temporary directory
     shutil.copy(config_template_file_path, os.path.join(temp_directory, config_template_file_name))
+
+    # Create paths for reuse later
     temporary_template = os.path.join(temp_directory, os.path.basename(config_template_file_path))
     temporary_output_file = os.path.join(temp_directory, "{}_{}".format(config_file_name,temporary_suffix))
 
+    # Create file handles
     input_file_handle = open(temporary_template, "r")
     output_file_handle = open(temporary_output_file,"w")
 
+    # Read the template file in as a list of lines
     lines_list = []
     for line in input_file_handle:
         lines_list.append(line)
 
+    # Work through the template file
     current_section = ""
     for line in lines_list:
         output_line = ""
+
+        # Set up booleans to track the type of each line
         blank_line, comment_line, section_header_line, uncomment_line = False, False, False, False
+
+        # Remove newlines
         line = line.replace("\n","")
+
         if not len(line):
             blank_line = True
+
+        # Detect a comment line, or a comment line that should be uncommented
         elif line.strip()[0] == ";" or line.strip()[0] == "#":
             comment = line.strip()[1:].strip()
             comment_line = True
             # Could this be an option that is commented out
+            # Check to see if it is an option in the current section
             if ":" in comment:
                 if current_section in sections_list:
                     option = comment[:comment.index(":")]
                     if option in options_list_of_lists[sections_list.index(current_section)]:
                         uncomment_line = True
                         # This option is required in the station configuration file.
-                        # Does it exist elsewhere uncommented?
+                        # Does it exist elsewhere uncommented - even in the wrong section
+                        # This will be overly cautious when the same option name occurs in
+                        # multiple sections.
                         for line2 in lines_list:
                             if option in line2:
                                 if option == line2[:len(option)]:
@@ -310,27 +333,36 @@ def populateTemplateConfig(config_template_file_path, config_file_path,
                                     uncomment_line = False
             else:
                 comment_line = True
+
+        # Detect a section header line
         elif sectionHeaderLine(line, sections_list):
             section_header_line = True
 
+        # If this is a section header line, add any additional options before this line
         if section_header_line:
             if current_section != "":
                 # This is the last line of this section, so insert any missing options
+                # that were passed in as parameters
                 output_line += insert(current_section, insert_options_list, interactive=interactive)
+            #Get the current section name from the line
             current_section = line.strip()[1:-1]
 
-
+        # If this was a line that should be uncommented
         if uncomment_line:
+            # Retrieve the value
             option_number = options_list_of_lists[sections_list.index(current_section)].index(option)
             value = values_list_of_lists[sections_list.index(current_section)][option_number]
+            # Generate the line, without the comment mark
             line = "{}: {}".format(option, value)
 
+        # If not any of these, then it must be a line with an option and value
         if not blank_line and not comment_line and not section_header_line and not uncomment_line:
             option = getOption(line)
             section_number = sections_list.index(current_section)
             if option.lower() in options_list_of_lists[section_number]:
                 option_number = options_list_of_lists[section_number].index(option.lower())
                 station_value = values_list_of_lists[section_number][option_number]
+                # Generate the line
                 output_line = "{}: {}\n".format(option, station_value)
             else:
                 if interactive:
@@ -342,6 +374,8 @@ def populateTemplateConfig(config_template_file_path, config_file_path,
             output_line += "{}\n".format(line)
 
         output_file_handle.write(output_line)
+
+    # Close the files
     input_file_handle.close()
     output_file_handle.close()
 
@@ -374,7 +408,8 @@ def compare(new_config_path, sections_list, options_list_of_lists, values_list_o
 
     correct_section = False
     for section in sections_list:
-        for option, value in zip(options_list_of_lists[sections_list.index(section)], values_list_of_lists[sections_list.index(section)]):
+        for option, value in zip(options_list_of_lists[sections_list.index(section)],
+                                                                values_list_of_lists[sections_list.index(section)]):
             correct_section, option_value_mismatch, found_option_value = False, False, False
             wrong_value = ""
 
@@ -398,7 +433,8 @@ def compare(new_config_path, sections_list, options_list_of_lists, values_list_o
                                     format(option, section, wrong_value, value))
 
             if not found_option_value:
-                errors.append("Did not find option {} in section {} with expected value {}".format(option, section, value))
+                errors.append("Did not find option {} in section {} with expected value {}"
+                                                                            .format(option, section, value))
                 missing_options.append([section,option,value])
 
     return errors, missing_options
@@ -510,9 +546,9 @@ if __name__ == "__main__":
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
-    #########################
     interactive = not cml_args.quiet
 
+    # input is not safe in python < 3
     if sys.version_info.major < 3:
         interactive = False
 
