@@ -398,8 +398,11 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     # Plot timestamp intervals
     try:
         jitter_quality, dropped_frame_rate, intervals_path = plotFFTimeIntervals(night_data_dir, fps=config.fps)
-        log.info('Timestamp Intervals Analysis: Jitter Quality: {:.1f}%, Dropped Frame Rate: {:.1f}%'.format(
-            jitter_quality, dropped_frame_rate))
+        if jitter_quality is None:
+            log.info('Timestamp Intervals Analysis: Jitter Quality not available')
+        else:
+            log.info('Timestamp Intervals Analysis: Jitter Quality: {:.1f}%, Dropped Frame Rate: {:.1f}%'.format(
+                jitter_quality, dropped_frame_rate))
         # Add the timelapse to the extra files
         if intervals_path is not None:
             extra_files.append(intervals_path)
