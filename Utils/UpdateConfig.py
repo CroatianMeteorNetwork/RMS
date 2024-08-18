@@ -238,7 +238,7 @@ def insert(current_section, insert_options_list, interactive=False, newline_afte
             else:
                 output_lines += insert
 
-    output_lines += "\n" if newline_after_last else output_lines
+    output_lines += "\n" if newline_after_last else ""
 
     return output_lines
 
