@@ -222,9 +222,9 @@ def insert(current_section, insert_options_list, interactive=False, newline_afte
         str: value
 
     """
-
+    output_lines = ""
     if len(insert_options_list):
-        output_lines = "; These options added automatically by {:s}\n".format(__file__)
+        output_lines += "; These options added automatically by {:s}\n".format(__file__)
         output_lines += "; On {:s}\n".format(datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S+%f'))
 
     for section, option, value in insert_options_list:
