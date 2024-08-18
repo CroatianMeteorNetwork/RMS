@@ -18,6 +18,7 @@ import ephem
 from RMS.CaptureDuration import captureDuration
 from RMS.ConfigReader import loadConfigFromDirectory
 from RMS.Logger import initLogging
+from RMS.Misc import RmsDateTime
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -456,7 +457,7 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     if duration is None:
 
         # Time of next local noon
-        #ct = datetime.datetime.utcnow()
+        #ct = RmsDateTime.utcnow()
         #noon_time = datetime.datetime(ct.year, ct.month, ct.date, 12)
 
         # Initialize the observer and find the time of next noon

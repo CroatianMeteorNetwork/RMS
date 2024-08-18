@@ -23,7 +23,7 @@ except:
 
 
 
-from RMS.Misc import mkdirP
+from RMS.Misc import mkdirP, RmsDateTime
 
 
 # Get the logger from the main module
@@ -516,7 +516,7 @@ class UploadManager(multiprocessing.Process):
 
         # Set the next run time using a delay
         with self.next_runtime_lock:
-            self.next_runtime = datetime.datetime.utcnow() + datetime.timedelta(seconds=delay)
+            self.next_runtime = RmsDateTime.utcnow() + datetime.timedelta(seconds=delay)
 
             log.info("Upload delayed for {:.1f} min until {:s}".format(delay/60, str(self.next_runtime)))
 
@@ -534,7 +534,7 @@ class UploadManager(multiprocessing.Process):
 
                 # Check if the upload should be run (if 15 minutes are up)
                 if self.last_runtime is not None:
-                    if (datetime.datetime.utcnow() - self.last_runtime).total_seconds() < 15*60:
+                    if (RmsDateTime.utcnow() - self.last_runtime).total_seconds() < 15*60:
                         time.sleep(1)
                         continue
 
@@ -542,12 +542,12 @@ class UploadManager(multiprocessing.Process):
 
                 # Check if the upload delay is up
                 if self.next_runtime is not None:
-                    if (datetime.datetime.utcnow() - self.next_runtime).total_seconds() < 0:
+                    if (RmsDateTime.utcnow() - self.next_runtime).total_seconds() < 0:
                         time.sleep(1)
                         continue
 
             with self.last_runtime_lock:
-                self.last_runtime = datetime.datetime.utcnow()
+                self.last_runtime = RmsDateTime.utcnow()
 
             # Run the upload procedure
             self.uploadData()
