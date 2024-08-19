@@ -29,7 +29,7 @@ from RMS.Formats.FFfile import read as readFF
 from RMS.Misc import mkdirP
 
 
-def generateMP4s(dir_path, ftpfile_name, shower_code=None, min_mag=None, config=None):
+def generateMP4s(dir_path, ftpfile_name, shower_code=None, min_mag=None, config=None, frbinviewer=None):
     t1 = datetime.datetime.utcnow()
 
     # Load the font for labeling
@@ -113,6 +113,7 @@ def generateMP4s(dir_path, ftpfile_name, shower_code=None, min_mag=None, config=
             
         mkdirP(dir_tmp_path)
         print("Created directory : " + dir_tmp_path)
+        
 
         # extract the individual frames
         name_time_list = f2f.FFtoFrames(dir_path+'/'+ff_name, dir_tmp_path, 'jpg', -1, first_frame, last_frame)
@@ -177,8 +178,8 @@ def generateMP4s(dir_path, ftpfile_name, shower_code=None, min_mag=None, config=
 
         #print(com)
         subprocess.call(com, shell=True, cwd=dir_path)
-        
-        #Delete temporary directory and files inside
+
+        #Delete temporary images directory and files inside
         if os.path.exists(dir_tmp_path):
             try:
                 shutil.rmtree(dir_tmp_path)
@@ -189,6 +190,59 @@ def generateMP4s(dir_path, ftpfile_name, shower_code=None, min_mag=None, config=
                 shutil.rmtree(dir_tmp_path)
 
             print("Deleted temporary directory : " + dir_tmp_path)
+            
+        # Create a temp dir for FRbinViewer
+        dir_frbv_path = os.path.join(dir_path, "temp_frbv_dir")
+
+        if os.path.exists(dir_frbv_path):
+            shutil.rmtree(dir_frbv_path)
+            print("Deleted directory : " + dir_frbv_path)
+            
+        mkdirP(dir_frbv_path)
+        print("Created directory : " + dir_frbv_path)        
+        
+        # Copy files to temp_frbv_dir for processing
+        try:
+        	ff_path = os.path.join(dir_path, ff_name)
+        	shutil.copy2(ff_path, dir_frbv_path)
+        	print("Copied " + ff_path + " to: " + dir_frbv_path)
+        	bin_path = ff_path.replace(".fits", ".bin")
+        	bin_path = bin_path.replace("FF_", "FR_")
+        	shutil.copy2(bin_path, dir_frbv_path)
+        	print("Copied " + bin_path + " to: " + dir_frbv_path)
+        except:
+        	print("No FF/FR File!")
+        
+        
+        # Split switches, then run FRbinViewer command, and copy resulting files back to the main dir
+        if frbinviewer is not None:
+        	frbv_switches = []
+        	options = frbinviewer.split(',')
+        	for o in options:
+        		o = "-" + o
+        		frbv_switches.append(o)
+        	options = ' '.join(frbv_switches)
+        	command = '/home/rms/vRMS/bin/python -m Utils.FRbinViewer ' + options + " " + "-c " + frbvconfig + " " + dir_frbv_path
+        	os.system(command)
+        	files = os.listdir(dir_frbv_path)
+        	files = [s for s in files if not (s.endswith('.fits') or s.endswith('.bin'))]
+        	try:
+        		for f in files:
+        			shutil.copy2(dir_frbv_path + '/' + f, dir_path)
+        	except:
+        		print("File copy error from FRbinViewer Temp directory!")
+        		
+        #Delete temporary frbinv directory and files inside
+        if os.path.exists(dir_frbv_path):
+            try:
+                shutil.rmtree(dir_frbv_path)
+            except:
+                # may occasionally fail due to ffmpeg thread still terminating
+                # so catch this and wait a bit
+                time.sleep(2)
+                shutil.rmtree(dir_frbv_path)
+
+            print("Deleted temporary directory : " + dir_frbv_path)      
 
     print("Total time:", datetime.datetime.utcnow() - t1)
 
@@ -211,6 +265,11 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-c', '--config', metavar='CONFIG', type=str, \
         help="full path to config file. Only required if filtering by shower and no config file in the target folder")
+    
+    arg_parser.add_argument('-f', '--frbinviewer', metavar='FRBINVIEWER', type=str, \
+    	help="run FRBinViewer with a comma separated list of options on the same meteor \
+    	files; use \'\' around an option to pass one with a space, e.g. t,x,\'-f mp4\'. Note: \
+    	If you do not specify options, it will throw an error about missing the DIR_PATH.")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -224,13 +283,20 @@ if __name__ == "__main__":
         print('unable to access target folder - check path')
         exit(1)
 
+
     # Load the config file
     config = None
+    frbvconfig = None
     if cml_args.config:
-        config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
+    	frbvconfig = str(cml_args.config)
+    	config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
+
     else:
         if os.path.isfile(os.path.join(dir_path, '.config')):
-            config = cr.loadConfigFromDirectory('.config', dir_path)
+        	frbvconfig = (cml_args.dir_path + '/.config')
+        	config = cr.loadConfigFromDirectory('.config', dir_path)
+
+            
 
     if len(ftps) == 0:
         print('no ftpdetect files in target folder - unable to continue')
@@ -240,4 +306,4 @@ if __name__ == "__main__":
         if len(ftps) == 0:
             print('no usable ftpdetect file present')
         else:
-            generateMP4s(dir_path, os.path.basename(ftps[0]), shower_code=cml_args.shower, min_mag=cml_args.minmag, config=config)
+            generateMP4s(dir_path, os.path.basename(ftps[0]), shower_code=cml_args.shower, min_mag=cml_args.minmag, config=config, frbinviewer=cml_args.frbinviewer)
