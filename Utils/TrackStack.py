@@ -29,12 +29,13 @@ import datetime
 
 def trackStack(dir_paths, config, border=5, background_compensation=True, 
         hide_plot=False, showers=None, darkbackground=False, out_dir=None,
-        scalefactor=None, draw_constellations=False, one_core_free=False):
+        scalefactor=None, draw_constellations=False, one_core_free=False,
+        textoption=0):
     """ Generate a stack with aligned stars, so the sky appears static. The folder should have a
         platepars_all_recalibrated.json file.
 
     Arguments:
-        dir_path: [str] Path to the directory with image files.
+        dir_paths: [str] Path to the directory with image files.
         config: [Config instance]
 
     Keyword arguments:
@@ -47,6 +48,9 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
         darkbackground: [bool] force the sky background to be dark
         out_dir: target folder to save into
         scalefactor: factor to scale the canvas by; default 1, increase if image cropped
+        draw_constellations: [bool] Show constellation lines on stacked image
+        one_core_free: [bool] leave one core free whilst processing
+        overlay_file_name: [bool] show the filename on the completed image
     """
     start_time = time.time()
     # normalise the path in a platform neutral way
@@ -334,6 +338,22 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
         filenam = os.path.join(out_dir, os.path.basename(dir_path) + "_track_stack.jpg")
     else:
         filenam = os.path.join(dir_path, os.path.basename(dir_path) + "_track_stack.jpg")
+
+    # Overlay the filename on the image\
+    bf = os.path.basename(filenam)
+
+    # Overlay filename only
+    if textoption is not None:
+        if textoption[0] == 1:
+            ax.text(10, stack_img.shape[0] + 30, bf, color='grey', fontsize=6, fontname='Source Sans Pro',
+                    weight='ultralight')
+
+    # Overlay stationID, YYYY-MM-DD Meteor count
+        if textoption[0] == 2:
+            annotation = "{}  {}-{}-{}      Meteors: {}".format(bf[0:6],bf[7:11],bf[11:13],bf[13:15],num_plotted)
+            ax.text(10, stack_img.shape[0] + 30, annotation, color='grey', fontsize=6, fontname='Source Sans Pro',
+                weight='ultralight')
+
     plt.savefig(filenam, bbox_inches='tight', pad_inches=0, dpi=dpi, facecolor='k', edgecolor='k')
     print('saved to {}'.format(filenam))
     #
@@ -476,6 +496,12 @@ if __name__ == "__main__":
     arg_parser.add_argument('-o', '--output', type=str,
         help="""folder to save the image in.""")
 
+    arg_parser.add_argument('-t', '--textoption', nargs=1, type=int,
+                            help="""Add text beneath image. 
+                                        0 - No text
+                                        1 - Filename 
+                                        2 - Station id, date, meteor count""")
+
     arg_parser.add_argument('-f', '--scalefactor', type=int,
         help="""scale factor to apply. Increase if image is cropped""")
 
@@ -508,4 +534,5 @@ if __name__ == "__main__":
     trackStack(dir_paths, config, background_compensation=(not cml_args.bkgnormoff),
         hide_plot=cml_args.hideplot, showers=showers,
         darkbackground=cml_args.darkbackground, out_dir=cml_args.output, scalefactor=cml_args.scalefactor,
-        draw_constellations=cml_args.constellations, one_core_free=cml_args.freecore)
+        draw_constellations=cml_args.constellations, one_core_free=cml_args.freecore,
+        textoption = cml_args.textoption)
