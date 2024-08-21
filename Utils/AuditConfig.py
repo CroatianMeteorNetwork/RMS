@@ -174,21 +174,21 @@ def compareConfigs(config_path, template_path, configreader_path, dev_report=Fal
         output.append("Default values will be used:".center(80))
         output.append("-" * 80)
         for option in sorted(missing_in_config_wrt_template):
-            output.append(" • {}".format(option))
+            output.append(" - {}".format(option))
         output.append("")
 
     if missing_in_template_wrt_cr and dev_report and found_template and found_configreader:
         output.append("OPTIONS NOT IN TEMPLATE FILE BUT IMPLEMENTED IN RMS:".center(80))
         output.append("-" * 80)
         for option in sorted(missing_in_template_wrt_cr):
-            output.append(" • {}".format(option))
+            output.append(" - {}".format(option))
         output.append("")
 
     if missing_in_config_wrt_cr and dev_report and found_config and found_configreader:
         output.append("OPTIONS NOT IN CONFIG FILE BUT IMPLEMENTED IN RMS:".center(80))
         output.append("-" * 80)
         for option in sorted(missing_in_config_wrt_cr):
-            output.append(" • {}".format(option))
+            output.append(" - {}".format(option))
         output.append("")
 
     if commented_options_in_config and found_config:
@@ -196,28 +196,28 @@ def compareConfigs(config_path, template_path, configreader_path, dev_report=Fal
         output.append("Default values will be used:".center(80))
         output.append("-" * 80)
         for option in sorted(commented_options_in_config):
-            output.append(" • {}".format(option))
+            output.append(" - {}".format(option))
         output.append("")
 
     if commented_options_in_template and dev_report and found_template:
         output.append("OPTIONS COMMENTED OUT IN TEMPLATE FILE:".center(80))
         output.append("-" * 80)
         for option in sorted(commented_options_in_template):
-            output.append(" • {}".format(option))
+            output.append(" - {}".format(option))
         output.append("")
 
     if extra_in_config and found_config and found_configreader:
         output.append("OPTIONS IN .CONFIG FILE NOT IMPLEMENTED IN RMS (will be ignored):".center(80))
         output.append("-" * 80)
         for option in sorted(extra_in_config):
-            output.append(" • {}".format(option))
+            output.append(" - {}".format(option))
         output.append("")
 
     if extra_in_template and dev_report and found_template and found_configreader:
         output.append("OPTIONS IN TEMPLATE FILE NOT IMPLEMENTED IN RMS (will be ignored):".center(80))
         output.append("-" * 80)
         for option in sorted(extra_in_template):
-            output.append(" • {}".format(option))
+            output.append(" - {}".format(option))
         output.append("")
 
     if found_config and found_template and found_configreader:
