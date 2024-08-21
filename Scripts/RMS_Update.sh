@@ -51,6 +51,10 @@ rm -r build
 echo "Running pyclean for thorough cleanup..."
 pyclean . -v --debris all
 
+# Cleanup for *.so files in the repository folder
+echo "Cleaning up *.so files in the repository..."
+find . -name "*.so" -type f -delete
+
 # Set the flag indicating that the RMS dir is reset
 echo "1" > $UPDATEINPROGRESSFILE
 
