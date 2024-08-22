@@ -32,7 +32,7 @@ from RMS.Formats.FFfile import validFFName
 from RMS.Formats.FrameInterface import detectInputType
 from RMS.ExtractStars import extractStarsFF
 from RMS.Detection import detectMeteors
-from RMS.DetectionTools import loadImageCalibration
+from RMS.ImageCalibrationLoader import getImageCalibrationLoader
 from RMS.QueuedPool import QueuedPool
 from RMS.Misc import RmsDateTime
 
@@ -78,8 +78,9 @@ def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None, dark=
 
 
     # Load mask, dark, flat
-    mask, dark, flat_struct = loadImageCalibration(ff_directory, config, dtype=img_handle.ff.dtype, \
-        byteswap=img_handle.byteswap)
+    loader = getImageCalibrationLoader()
+    mask, dark, flat_struct = loader.loadImageCalibration(ff_directory, config, dtype=img_handle.ff.dtype,
+                                                          byteswap=img_handle.byteswap)
 
 
     # Run star extraction on FF files

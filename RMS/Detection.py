@@ -36,7 +36,8 @@ from mpl_toolkits.mplot3d import Axes3D
 # RMS imports
 from RMS.Astrometry.Conversions import jd2Date, raDec2AltAz
 import RMS.ConfigReader as cr
-from RMS.DetectionTools import getThresholdedStripe3DPoints, loadImageCalibration, binImageCalibration
+from RMS.DetectionTools import getThresholdedStripe3DPoints, binImageCalibration
+from RMS.ImageCalibrationLoader import getImageCalibrationLoader
 from RMS.Formats.AsgardEv import writeEv
 from RMS.Formats.AST import xyToRaDecAST
 from RMS.Formats import FFfile
@@ -1747,8 +1748,9 @@ if __name__ == "__main__":
 
 
     # Load mask, dark, flat
-    mask, dark, flat_struct = loadImageCalibration(main_dir, config, dtype=img_handle_main.ff.dtype, \
-        byteswap=img_handle_main.byteswap)
+    loader = getImageCalibrationLoader()
+    mask, dark, flat_struct = loader.loadImageCalibration(main_dir, config, dtype=img_handle_main.ff.dtype,
+                                                          byteswap=img_handle_main.byteswap)
 
 
     # Init results list
