@@ -1,5 +1,5 @@
 gitpython>=2.1.8
-# Use versions up to 2.4.0 due to compatibility issues with OpenSSL on Pi3/Jessie
+# Use versions 2.4.0 due to compatibility issues with OpenSSL on Pi3/Jessie
 paramiko==2.4.0; python_version=='2.7'
 paramiko>=2.9.0; python_version>='3.6'
 numpy>=1.13.3,<1.22.0 ; python_version=='2.7'
