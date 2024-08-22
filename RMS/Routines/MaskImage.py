@@ -36,9 +36,15 @@ class MaskStructure(object):
         
         self.img = img
 
-        # Get the mask resolution
-        self.height = img.shape[0]
-        self.width = img.shape[1]
+        if img is not None:
+            
+            # Get the mask resolution
+            self.height = img.shape[0]
+            self.width = img.shape[1]
+
+        else:
+            self.height = None
+            self.width = None
 
     def resetEmpty(self, x_res, y_res):
         """ Reset the mask to an empty array. """
