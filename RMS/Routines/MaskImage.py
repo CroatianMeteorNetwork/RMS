@@ -36,6 +36,16 @@ class MaskStructure(object):
         
         self.img = img
 
+        if img is not None:
+            
+            # Get the mask resolution
+            self.height = img.shape[0]
+            self.width = img.shape[1]
+
+        else:
+            self.height = None
+            self.width = None
+
     def resetEmpty(self, x_res, y_res):
         """ Reset the mask to an empty array. """
 
@@ -80,6 +90,7 @@ def getMaskFile(dir_path, config, file_list=None):
     # Look through files and if there is mask.bmp or mask.zip, keep track of that then load it
     mask = max(2*(os.path.splitext(os.path.basename(config.mask_file))[0] == os.path.splitext(os.path.basename(filename))[0]) - filename.endswith('.zip')
                for filename in file_list)
+    
     if mask > 0:
         mask_path = os.path.join(dir_path, config.mask_file if mask == 2 else os.path.splitext(os.path.basename(config.mask_file))[0] + '.zip')
         mask = loadMask(mask_path)

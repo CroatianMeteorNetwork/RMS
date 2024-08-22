@@ -11,6 +11,7 @@ import subprocess
 import random
 import string
 import inspect
+import datetime
 
 
 # tkinter import that works on both Python 2 and 3
@@ -600,4 +601,111 @@ def sanitise(unsanitised, lower = False, space_substitution = "", log_changes = 
         log.info("String {} was sanitised to {}".format(unsanitised, sanitised))
 
     return sanitised
+
+
+
+class RmsDateTime:
+    """ Class to hold utcnow() wrapper function definition.
+        Select the best approach to retrieve current UTC time according to Python version.
+    """
+    if sys.version_info[0] < 3:
+        @staticmethod
+        def utcnow():
+            # Python 2: Use the existing utcnow, which is not timezone-aware.
+            return datetime.datetime.utcnow()
+    else:
+        @staticmethod
+        def utcnow():
+            # Python 3: Get timezone-aware UTC time and then make it naive.
+            return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
+
+def niceFormat(string, delim=":", extra_space=5):
+
+    """
+    Takes a string of lines such as
+
+    key : value
+    key2 : value1
+    alongerkey : value2
+
+    and formats the string so that the delimiters are all in the same column
+
+    key        : value
+    key2       : value1
+    alongerkey : value2
+
+    Args:
+        string: takes a string, possibly including \n, each line of format key delimiter value
+        delim: delimited between key and value default :
+        extra_space: number of extra spaces between the key and the delimiter
+
+    Returns:
+        a string
+    """
+
+    max_to_delim = 0
+    for line in string.splitlines():
+        max_to_delim = line.find(delim) if line.find(delim) > max_to_delim else max_to_delim
+
+    formatted_string = ""
+    for line in string.splitlines():
+        field_name = line.split(delim)[0].strip()
+        value = line[len(field_name) + 1:]
+        padding = " " * (extra_space + max_to_delim - len(field_name))
+        formatted_string += "{:s}{:s}{:s} {:s}\n".format(field_name, padding, delim, value)
+
+    return formatted_string
+
+
+
+def getRMSStyleFileName(night_data_dir, name_suffix):
+
+    """ Given path to a night_data_dir and a name suffix generate an RMS style file name
+
+        e.g
+
+        night_data_dir  :    /home/david/RMS_data/ArchivedFiles/AU0006_20240811_101142_903530
+        name_suffix     :    observation_summary.txt
+
+        yields          :   /home/david/RMS_data/ArchivedFiles/AU0006_20240811_101142_903530/
+                                                    AU0006_20240811_101142_903530_observation_summary.txt
+
+
+        arguments:
+            night_data_dir: path to the night data directory
+            suffix: suffix of the file to be created
+
+        returns:
+            full path and filename of the file to be created
+
+    """
+
+    return os.path.join(night_data_dir, os.path.split(night_data_dir.strip(os.sep))[1] + "_" + name_suffix)
+
+
+def maxDistBetweenPoints(points_x, points_y):
+    """
+    Routine to calculate the maximum cartesian distance between any two points in a
+    list of points
+
+    Args:
+        points_x: list of points
+        points_y: list of points
+
+    Returns:
+        maximum cartesian distance between points
+    """
+
+    max_separation = 0
+    for ref_x, ref_y in zip(points_x, points_y):
+        min_separation = np.inf
+        for x, y in zip(points_x, points_y):
+            pixel_separation = ((ref_x - x) ** 2 + (ref_y - y) ** 2) ** 0.5
+            if pixel_separation < min_separation and pixel_separation != 0:
+                min_separation = pixel_separation
+        if min_separation > max_separation:
+            max_separation = min_separation
+
+    return max_separation
 

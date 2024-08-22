@@ -66,7 +66,7 @@ from Utils.StackFFs import stackFFs
 from Utils.FRbinViewer import view
 from Utils.BatchFFtoImage import batchFFtoImage
 from RMS.CaptureDuration import captureDuration
-from RMS.Misc import sanitise
+from RMS.Misc import sanitise, RmsDateTime
 
 
 # Import Cython functions
@@ -1168,7 +1168,7 @@ class EventMonitor(multiprocessing.Process):
         sql_statement += "UPDATE event_monitor                 \n"
         sql_statement += "SET                                  \n"
         sql_statement += "processedstatus = 1,                 \n"
-        sql_statement += "timecompleted   = CURRENT_TIMESTAMP  \n".format(datetime.datetime.utcnow())
+        sql_statement += "timecompleted   = CURRENT_TIMESTAMP  \n".format(RmsDateTime.utcnow())
         sql_statement += "                                     \n"
         sql_statement += "WHERE                                \n"
         sql_statement += "uuid = '{}'                          \n".format(event.uuid)
@@ -1855,9 +1855,9 @@ class EventMonitor(multiprocessing.Process):
             # if the end of the event is before the next scheduled execution of event monitor loop,
             # then set the loop to execute after the event ends
             if convertGMNTimeToPOSIX(observed_event.dt) + \
-                    datetime.timedelta(seconds=int(observed_event.time_tolerance)) > datetime.datetime.utcnow():
+                    datetime.timedelta(seconds=int(observed_event.time_tolerance)) > RmsDateTime.utcnow():
                 time_until_event_end_seconds = (convertGMNTimeToPOSIX(observed_event.dt) -
-                                                    datetime.datetime.utcnow() +
+                                                    RmsDateTime.utcnow() +
                                                     datetime.timedelta(seconds=int(observed_event.time_tolerance))).total_seconds()
                 future_events += 1
                 log.info("The end of event at {} is in the future by {:.1f} minutes"
@@ -1878,7 +1878,7 @@ class EventMonitor(multiprocessing.Process):
 
 
             log.info("Checks on trajectories for event at {}".format(observed_event.dt))
-            check_time_start = datetime.datetime.utcnow()
+            check_time_start = RmsDateTime.utcnow()
             # Iterate through the work
             # Events can be specified in different ways, make sure converted to LatLon
             observed_event.latLonAzElToLatLonLatLon()
@@ -1967,7 +1967,7 @@ class EventMonitor(multiprocessing.Process):
                 if min_dist < event.close_radius * 1000 and not test_mode:
                     # this is just for info
                     log.info("Event at {} was {:.0f}km away, inside {:.0f}km so is uploaded with no further checks.".format(event.dt, min_dist / 1000, event.close_radius))
-                    check_time_end = datetime.datetime.utcnow()
+                    check_time_end = RmsDateTime.utcnow()
                     check_time_seconds = (check_time_end- check_time_start).total_seconds()
                     log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
                     count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
@@ -1989,7 +1989,7 @@ class EventMonitor(multiprocessing.Process):
                     count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(event)
                     if count != 0:
                         log.info("Event at {} had {} points out of 100 in the trajectory in the FOV. Uploading.".format(event.dt, count))
-                        check_time_end = datetime.datetime.utcnow()
+                        check_time_end = RmsDateTime.utcnow()
                         check_time_seconds = (check_time_end - check_time_start).total_seconds()
                         log.info("Check of trajectories took {:2f} seconds".format(check_time_seconds))
                         if self.doUpload(observed_event, ev_con, file_list, test_mode=test_mode):
@@ -2020,12 +2020,12 @@ class EventMonitor(multiprocessing.Process):
             # End of the processing loop for this event
             if self.eventProcessed(observed_event.uuid):
                 log.info("Reached end of checks - {} is processed".format(observed_event.dt))
-                check_time_end = datetime.datetime.utcnow()
+                check_time_end = RmsDateTime.utcnow()
                 check_time_seconds = (check_time_end - check_time_start).total_seconds()
                 log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
 
             else:
-                check_time_end = datetime.datetime.utcnow()
+                check_time_end = RmsDateTime.utcnow()
                 check_time_seconds = (check_time_end - check_time_start).total_seconds()
                 log.info("Reached end of checks - {} is processed, nothing to upload".format(observed_event.dt))
                 log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
@@ -2038,7 +2038,7 @@ class EventMonitor(multiprocessing.Process):
             log.info("{} event was processed, EventMonitor work completed"
                      .format(len(unprocessed) - future_events))
 
-        next_run = (datetime.datetime.utcnow() + datetime.timedelta(minutes=self.check_interval)).replace(microsecond = 0)
+        next_run = (RmsDateTime.utcnow() + datetime.timedelta(minutes=self.check_interval)).replace(microsecond = 0)
         if future_events == 1:
             log.info("{} future event is scheduled, running again at {}"
                      .format(future_events, next_run))
@@ -2123,10 +2123,10 @@ class EventMonitor(multiprocessing.Process):
 
 
         time.sleep(60)
-        last_check_start_time = datetime.datetime.utcnow()
+        last_check_start_time = RmsDateTime.utcnow()
         while not self.exit.is_set():
-            check_start_time = datetime.datetime.utcnow()
-            next_check_start_time = (datetime.datetime.utcnow() + datetime.timedelta(minutes=self.check_interval))
+            check_start_time = RmsDateTime.utcnow()
+            next_check_start_time = (RmsDateTime.utcnow() + datetime.timedelta(minutes=self.check_interval))
             next_check_start_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
             self.checkDBExists()
             self.getEventsAndCheck(last_check_start_time,next_check_start_time)
@@ -2136,10 +2136,10 @@ class EventMonitor(multiprocessing.Process):
 
             if not isinstance(start_time, bool):
 
-                time_left_before_start = (start_time - datetime.datetime.utcnow())
+                time_left_before_start = (start_time - RmsDateTime.utcnow())
                 time_left_before_start = time_left_before_start - datetime.timedelta(microseconds=time_left_before_start.microseconds)
                 time_left_before_start_minutes = int(time_left_before_start.total_seconds() / 60)
-                next_check_start_time = (datetime.datetime.utcnow() + datetime.timedelta(minutes=self.check_interval))
+                next_check_start_time = (RmsDateTime.utcnow() + datetime.timedelta(minutes=self.check_interval))
                 next_check_start_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
                 log.info('Next EventMonitor run : {} UTC; {:3.1f} minutes from now'.format(next_check_start_time_str, int(self.check_interval)))
                 if time_left_before_start_minutes < 120:
@@ -2147,7 +2147,7 @@ class EventMonitor(multiprocessing.Process):
                 else:
                     log.info('Next Capture start    : {} UTC'.format(str(start_time.strftime('%H:%M:%S'))))
             else:
-                next_check_start_time = (datetime.datetime.utcnow() + datetime.timedelta(minutes=self.check_interval))
+                next_check_start_time = (RmsDateTime.utcnow() + datetime.timedelta(minutes=self.check_interval))
                 next_check_start_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
                 log.info('Next EventMonitor run : {} UTC {:3.1f} minutes from now'.format(next_check_start_time_str, self.check_interval))
             # Wait for the next check

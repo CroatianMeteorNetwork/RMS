@@ -19,6 +19,8 @@ from __future__ import print_function, division, absolute_import
 import os
 import sys
 import traceback
+import RMS.Reprocess
+
 # Set GStreamer debug level. Use '2' for warnings in production environments.
 os.environ['GST_DEBUG'] = '3'
 
@@ -34,6 +36,7 @@ import numpy as np
 
 from RMS.Misc import ping
 from RMS.Routines.GstreamerCapture import GstVideoFile
+from RMS.Formats.ObservationSummary import getObsDBConn, addObsParam
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -47,6 +50,9 @@ try:
 
 except ImportError as e:
     log.info('Could not import gi: {}. Using OpenCV.'.format(e))
+
+except ValueError as e:
+    log.info('Could not import Gst: {}. Using OpenCV.'.format(e))
 
 
 class BufferedCapture(Process):
@@ -800,6 +806,10 @@ class BufferedCapture(Process):
                     # Set the video device type
                     self.video_device_type = "gst"
 
+                    conn = getObsDBConn(self.config)
+                    addObsParam(conn, "media_backend", self.video_device_type)
+                    conn.close()
+
                     return True
 
                 except Exception as e:
@@ -807,6 +817,9 @@ class BufferedCapture(Process):
                     self.media_backend_override = True
                     self.releaseResources()
 
+                    conn = getObsDBConn(self.config)
+                    addObsParam(conn, "media_backend", self.video_device_type)
+                    conn.close()
 
             if self.config.media_backend == 'v4l2':
                 try:
@@ -852,10 +865,15 @@ class BufferedCapture(Process):
 
                 time.sleep(5)
                 log.info('GStreamer Video device released!')
-
+                conn = getObsDBConn(self.config)
+                addObsParam(conn, "media_backend", self.video_device_type)
+                conn.close()
             except Exception as e:
                 log.error('Error releasing GStreamer pipeline: {}'.format(e))
-                
+                conn = getObsDBConn(self.config)
+                addObsParam(conn, "media_backend", "gst not successfully released")
+                conn.close()
+
         if self.device:
 
             try:
@@ -866,7 +884,9 @@ class BufferedCapture(Process):
 
             except Exception as e:
                 log.error('Error releasing OpenCV device: {}'.format(e))
-
+                conn = getObsDBConn(self.config)
+                addObsParam(conn, "media_backend", "OpenCV not successfully released")
+                conn.close()
             finally:
                 self.device = None  # Reset device to None after releasing
 

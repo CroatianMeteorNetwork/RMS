@@ -16,6 +16,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import pyqtgraph as pg
+import random
 
 import RMS
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
@@ -43,6 +44,8 @@ from RMS.Routines.CustomPyqtgraphClasses import *
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle, greatCirclePhase
 from RMS.Routines.MaskImage import getMaskFile
 from RMS.Routines import RollingShutterCorrection
+from RMS.Routines.MaskImage import loadMask, MaskStructure, getMaskFile
+from RMS.Misc import maxDistBetweenPoints
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
@@ -338,7 +341,7 @@ class PairedStars(object):
         self.paired_stars = []
 
 
-    def addPair(self, x, y, intens_acc, obj):
+    def addPair(self, x, y, intens_acc, obj, snr=0, saturated=False):
         """ Add a pair between image coordinates and a star or a geo point. 
     
         Arguments:
@@ -349,7 +352,7 @@ class PairedStars(object):
 
         """
 
-        self.paired_stars.append([x, y, intens_acc, obj])
+        self.paired_stars.append([x, y, intens_acc, obj, snr, saturated])
 
 
     def removeGeoPoints(self):
@@ -404,7 +407,7 @@ class PairedStars(object):
         if draw:
             offset = 0.5
 
-        img_coords = [(x + offset, y + offset, intens_acc) for x, y, intens_acc, _ in self.paired_stars]
+        img_coords = [(x + offset, y + offset, intens_acc) for x, y, intens_acc, _, _, _ in self.paired_stars]
 
         return img_coords
 
@@ -412,17 +415,23 @@ class PairedStars(object):
     def skyCoords(self):
         """ Return a list of sky coordinates. """
 
-        return [obj.coords() for _, _, _, obj in self.paired_stars]
+        return [obj.coords() for _, _, _, obj, _, _ in self.paired_stars]
 
 
     def allCoords(self):
-        """ Return all coordinates, image and sky in the [(x, y, intens_acc), (ra, dec, mag)] list form 
+        """ Return all coordiantes, image and sky in the [(x, y, intens_acc, snr), (ra, dec, mag)] list form
             for every entry. 
         """
 
-        return [[(x, y, intens_acc), obj.coords()] for x, y, intens_acc, obj in self.paired_stars]
+        return [
+            [(x, y, intens_acc, snr, saturated), obj.coords()]
+            for x, y, intens_acc, obj, snr, saturated in self.paired_stars
+            ]
 
+    def snr(self):
+        """ Return a list of SNR values. """
 
+        return [snr for _, _, _, _, snr, _ in self.paired_stars]
 
 
     def __len__(self):
@@ -434,7 +443,7 @@ class PairedStars(object):
 
 class PlateTool(QtWidgets.QMainWindow):
     def __init__(self, input_path, config, beginning_time=None, fps=None, gamma=None, use_fr_files=False, \
-        geo_points_input=None, startUI=True, nobg=False, flipud=False):
+        geo_points_input=None, startUI=True, mask=None, nobg=False, flipud=False):
         """ SkyFit interactive window.
 
         Arguments:
@@ -462,8 +471,8 @@ class PlateTool(QtWidgets.QMainWindow):
         #   of position on frames and photometry
         self.mode = 'skyfit'
         self.mode_list = ['skyfit', 'manualreduction']
-
-
+        self.max_pixels_between_matched_stars = np.inf
+        self.autopan_mode = False
         self.input_path = input_path
         if os.path.isfile(self.input_path):
             self.dir_path = os.path.dirname(self.input_path)
@@ -520,7 +529,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Star picking mode variables
         self.star_aperture_radius = 5
-        self.x_centroid = self.y_centroid = None
+        self.x_centroid = self.y_centroid = self.snr_centroid = None
+        self.saturated_centroid = False
         self.closest_type = None
         self.closest_cat_star_indx = None
 
@@ -528,6 +538,13 @@ class PlateTool(QtWidgets.QMainWindow):
         self.pick_list = {}
         self.paired_stars = PairedStars()
         self.residuals = None
+
+        # Autopan coordinates
+        self.old_autopan_x, self.old_autopan_y = None, None
+        self.current_autopan_x, self.current_autopan_y = None, None
+
+        # List of unsuitable stars
+        self.unsuitable_stars = PairedStars()
 
         # Positions of the mouse cursor
         self.mouse_x = 0
@@ -542,6 +559,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # Platepar format (json or txt)
         self.platepar_fmt = None
 
+        # Store the mask
+        self.mask = mask
 
         # Flat field
         self.flat_struct = None
@@ -566,6 +585,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # Flag indicating that the astrometry will be automatically re-fit when the station is moved (only 
         #   when geopoints are available)
         self.station_moved_auto_refit = False
+
+        # Photometry parameters
+        self.photom_fit_stddev = None
+        self.photom_fit_resids = None
 
         ###################################################################################################
 
@@ -726,6 +749,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.status_bar.addPermanentWidget(self.skyfit_button)
         self.status_bar.addPermanentWidget(self.manualreduction_button)
 
+        self.nextstar_button = QtWidgets.QPushButton('SkyFit')
+        self.nextstar_button.pressed.connect(lambda: self.nextstar())
+
         ###################################################################################################
         # CENTRAL WIDGET (DISPLAY)
 
@@ -824,6 +850,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.zoom_window.addItem(self.geo_markers2)
 
         self.selected_stars_visible = True
+        self.unsuitable_stars_visible = True
 
         # selected catalog star markers (main window)
         self.sel_cat_star_markers = pg.ScatterPlotItem()
@@ -858,6 +885,24 @@ class PlateTool(QtWidgets.QMainWindow):
         self.zoom_window.addItem(self.centroid_star_markers2)
 
         self.draw_calstars = True
+
+        # selected unsuitable star markers (main window)
+        self.unsuitable_star_markers = pg.ScatterPlotItem()
+        self.unsuitable_star_markers.setPen('r', width=3)
+        self.unsuitable_star_markers.setSize(10)
+        self.unsuitable_star_markers.setSymbol('s')
+        self.unsuitable_star_markers.setZValue(4)
+        self.img_frame.addItem(self.unsuitable_star_markers)
+
+        # selected catalog star markers (zoom window)
+        self.unsuitable_star_markers2 = pg.ScatterPlotItem()
+        self.unsuitable_star_markers2.setPen('r', width=3)
+        self.unsuitable_star_markers2.setSize(10)
+        self.unsuitable_star_markers2.setSymbol('s')
+        self.unsuitable_star_markers2.setZValue(4)
+        self.zoom_window.addItem(self.unsuitable_star_markers2)
+
+        self.unsuitable_stars_visble = True
 
         # calstar markers (main window)
         self.calstar_markers = pg.ScatterPlotItem()
@@ -894,6 +939,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.star_pick_info_text_str += "LEFT CLICK - Centroid star\n"
         self.star_pick_info_text_str += "CTRL + LEFT CLICK - Manual star position\n"
         self.star_pick_info_text_str += "ENTER or SPACE - Accept pair\n"
+        self.star_pick_info_text_str += "CTRL + SPACE - Mark pair bad\n"
+        self.star_pick_info_text_str += "SHIFT + SPACE - Jump random\n"
         self.star_pick_info_text_str += "RIGHT CLICK - Remove pair\n"
         self.star_pick_info_text_str += "CTRL + SCROLL - Aperture radius adjust\n"
         self.star_pick_info_text_str += "CTRL + Z - Fit stars\n"
@@ -1006,7 +1053,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Add main image
         self.img_type_flag = 'avepixel'
-        self.img = ImageItem(img_handle=self.img_handle, gamma=gamma, invert=invert, saturation_mask=self.saturation_mask)
+        self.img = ImageItem(img_handle=self.img_handle, gamma=gamma, invert=invert,
+                             saturation_mask=self.saturation_mask)
         self.img_frame.addItem(self.img)
         self.img_frame.autoRange(padding=0)
 
@@ -1053,6 +1101,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Connect astrometry & photometry buttons to functions
         self.tab.param_manager.sigFitPressed.connect(lambda: self.fitPickedStars())
+        self.tab.param_manager.sigNextStarPressed.connect(lambda: self.jumpNextStar())
         self.tab.param_manager.sigPhotometryPressed.connect(lambda: self.photometry(show_plot=True))
         self.tab.param_manager.sigAstrometryPressed.connect(self.showAstrometryFitPlots)
         self.tab.param_manager.sigResetDistortionPressed.connect(self.resetDistortion)
@@ -1072,6 +1121,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigMeasGroundPointsToggled.connect(self.toggleMeasGroundPoints)
         self.tab.settings.sigGridToggled.connect(self.onGridChanged)
         self.tab.settings.sigInvertToggled.connect(self.toggleInvertColours)
+        self.tab.settings.sigAutoPanToggled.connect(self.toggleAutoPan)
         self.tab.settings.sigSingleClickPhotometryToggled.connect(self.toggleSingleClickPhotometry)
 
         layout.addWidget(self.tab, 0, 2)
@@ -1098,6 +1148,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateDistortion()
         self.tab.param_manager.updatePlatepar()
         self.changeMode(self.mode)
+
+
 
 
     def changeMode(self, new_mode):
@@ -1352,14 +1404,30 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # If ground points are measured, change the text for alt/az
             if self.meas_ground_points:
-                status_str += ",  Azim={:6.2f}  Alt={:6.2f} (GROUND)".format(azim, alt)
+                status_str += ",  Azim={:6.2f} Alt={:6.2f} (GROUND)".format(azim, alt)
             else:
-                status_str += ",  Azim={:6.2f}  Alt={:6.2f} (date)".format(azim, alt)
+                status_str += ",  Azim={:6.2f} Alt={:6.2f} (date)".format(azim, alt)
 
 
             # Add RA/Dec info
-            status_str += ", RA={:6.2f}  Dec={:+6.2f} (J2000)".format(ra[0], dec[0])
+            status_str += ", RA={:6.2f} Dec={:+6.2f} (J2000)".format(ra[0], dec[0])
 
+            # Show mode for debugging purposes
+
+            if self.star_pick_mode and not self.autopan_mode:
+                pass
+            elif self.star_pick_mode and self.autopan_mode:
+                status_str += ", Auto pan"
+
+            if self.max_pixels_between_matched_stars != np.inf:
+                percentage_complete = min([100,100 * (len(self.paired_stars)+len(self.unsuitable_stars))/
+                                                                len(self.catalog_x_filtered)])
+
+                if self.max_pixels_between_matched_stars != 0:
+                    status_str += ", max gap {:.0f}px".format(self.max_pixels_between_matched_stars)
+
+                status_str += " good:{} bad:{} progress {:.0f}%".format(
+                    len(self.paired_stars), len(self.unsuitable_stars), percentage_complete)
 
         return status_str
 
@@ -1482,6 +1550,8 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'CTRL + D - Load dark\n'
             text_str += 'CTRL + F - Load flat\n'
             text_str += 'CTRL + G - Cycle grids\n'
+            text_str += 'CTRL + U - Pan to next\n'
+            text_str += 'CTRL + O - Toggle auto pan\n'
             text_str += 'CTRL + X - astrometry.net img upload\n'
             text_str += 'CTRL + SHIFT + X - astrometry.net XY only\n'
             text_str += 'SHIFT + Z - Show zoomed window\n'
@@ -1586,7 +1656,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.geo_filtered_indices = filtered_indices_all
 
 
-            # Hold a list of geo points (equatorial coordinates) which are visible inside the FOV (with a 
+            # Hold a list of geo points (equatorial coordinates) which are visible inside the FOV (with a
             #   fake magnitude)
             geo_xy = geo_xy[self.geo_filtered_indices]
             self.geo_x_filtered, self.geo_y_filtered = geo_xy.T
@@ -1622,14 +1692,37 @@ class PlateTool(QtWidgets.QMainWindow):
                                                 & (cat_stars_xy[:, 1] > 0) \
                                                 & (cat_stars_xy[:, 1] < self.platepar.Y_res)
 
+
         # Filter out catalog image stars
-        cat_stars_xy = cat_stars_xy[filtered_indices_all]
+        cat_stars_xy_unmasked = cat_stars_xy[filtered_indices_all]
 
         # Create a filtered catalog
-        self.catalog_stars_filtered = self.catalog_stars[filtered_indices_all]
+        self.catalog_stars_filtered_unmasked = self.catalog_stars[filtered_indices_all]
+
+        if (self.mask is None) or (not hasattr(self.mask, 'img')):
+            cat_stars_xy, self.catalog_stars_filtered = [], []
+            for star_xy, star_radec in zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked):
+                    cat_stars_xy.append(star_xy)
+                    self.catalog_stars_filtered.append(star_radec)
+
+        else:
+
+            cat_stars_xy, self.catalog_stars_filtered = [], []
+            for star_xy, star_radec in zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked):
+                
+                # Check if the star is inside the mask
+                if self.mask.img[int(star_xy[1]), int(star_xy[0])] != 0:
+                    cat_stars_xy.append(star_xy)
+                    self.catalog_stars_filtered.append(star_radec)
+
+        # Convert to an array in any case
+        cat_stars_xy = np.array(cat_stars_xy)
 
         # Create a list of filtered catalog image coordinates
-        self.catalog_x_filtered, self.catalog_y_filtered, catalog_mag_filtered = cat_stars_xy.T
+        if len(cat_stars_xy):
+            self.catalog_x_filtered, self.catalog_y_filtered, catalog_mag_filtered = cat_stars_xy.T
+        else:
+            self.catalog_x_filtered, self.catalog_y_filtered, catalog_mag_filtered = [], [], []
 
         # Show stars on the image
         if self.catalog_stars_visible:
@@ -1660,6 +1753,13 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             self.sel_cat_star_markers.setData(pos=[])
             self.sel_cat_star_markers2.setData(pos=[])
+
+        if len(self.unsuitable_stars) > 0:
+            self.unsuitable_star_markers.setData(pos=self.unsuitable_stars.imageCoords(draw=True))
+            self.unsuitable_star_markers2.setData(pos=self.unsuitable_stars.imageCoords(draw=True))
+        else:
+            self.unsuitable_star_markers.setData(pos=[])
+            self.unsuitable_star_markers2.setData(pos=[])
 
         self.centroid_star_markers.setData(pos=[])
         self.centroid_star_markers2.setData(pos=[])
@@ -1898,12 +1998,15 @@ class PlateTool(QtWidgets.QMainWindow):
         catalog_dec = []
         catalog_mags = []
         elevation_list = []
+        snr_list = []
+        saturation_list = []
+
 
         for paired_star in self.paired_stars.allCoords():
 
             img_star, catalog_star = paired_star
 
-            star_x, star_y, px_intens = img_star
+            star_x, star_y, px_intens, snr, saturated = img_star
             star_ra, star_dec, star_mag = catalog_star
 
             # Skip intensities which were not properly calculated
@@ -1917,6 +2020,8 @@ class PlateTool(QtWidgets.QMainWindow):
             catalog_ra.append(star_ra)
             catalog_dec.append(star_dec)
             catalog_mags.append(star_mag)
+            snr_list.append(snr)
+            saturation_list.append(saturated)
 
             # Compute the azimuth and elevation of the star
             _, alt = trueRaDec2ApparentAltAz(star_ra, star_dec, date2JD(*self.img_handle.currentTime()),
@@ -1926,9 +2031,9 @@ class PlateTool(QtWidgets.QMainWindow):
             elevation_list.append(alt)
 
 
-        # Make sure there are at least 2 stars picked
+        # Make sure there are at least 2 stars picked which are not saturated
         self.residual_text.clear()
-        if len(px_intens_list) >= 2:
+        if (len(px_intens_list) - np.sum(saturation_list)) >= 2:
 
             # Compute apparent magnitude corrected for extinction
             catalog_mags = extinctionCorrectionTrueToApparent(catalog_mags, catalog_ra, catalog_dec,
@@ -1947,16 +2052,23 @@ class PlateTool(QtWidgets.QMainWindow):
                 fixed_vignetting = self.platepar.vignetting_coeff
 
             
+            # Set the fit weights so that everyting with SNR > 10 is weighted the maximum value
+            weights = np.clip(snr_list, 0, 10)/10.0
+
             # Fit the photometric offset (disable vignetting fit if a flat is used)
-            photom_params, fit_stddev, fit_resids = photometryFit(px_intens_list, radius_list, catalog_mags, \
-                fixed_vignetting=fixed_vignetting)
+            # The fit is going to be weighted by the signal to noise ratio to reduce the influence of
+            #  faint stars with large errors
+            # Saturated stars are excluded from the fit
+            photom_params, self.photom_fit_stddev, self.photom_fit_resids = photometryFit(
+                px_intens_list, radius_list, catalog_mags, fixed_vignetting=fixed_vignetting,
+                weights=weights, exclude_list=saturation_list)
 
             photom_offset, vignetting_coeff = photom_params
 
             # Set photometry parameters
             self.platepar.mag_0 = -2.5
             self.platepar.mag_lev = photom_offset
-            self.platepar.mag_lev_stddev = fit_stddev
+            self.platepar.mag_lev_stddev = self.photom_fit_stddev
             self.platepar.vignetting_coeff = vignetting_coeff
 
             # Update the values in the platepar tab in the GUI
@@ -1968,28 +2080,62 @@ class PlateTool(QtWidgets.QMainWindow):
                 star_coords = np.array(star_coords)
                 star_coords_x, star_coords_y = star_coords.T
 
-                std = np.std(fit_resids)
-                for star_x, star_y, fit_diff, star_mag in zip(star_coords_x, star_coords_y, fit_resids,
-                                                              catalog_mags):
+                std = np.std(self.photom_fit_resids)
+                for star_x, star_y, fit_diff, star_mag, snr in zip(star_coords_x, star_coords_y,
+                                                              self.photom_fit_resids, catalog_mags,
+                                                              self.paired_stars.snr()
+                                                              ):
+
                     photom_resid_txt = "{:.2f}".format(fit_diff)
 
+                    snr_txt = "S/N\n{:.1f}".format(snr)
+
                     # Determine the size of the residual text, larger the residual, larger the text
-                    photom_resid_size = int(8 + np.abs(fit_diff)/(np.max(np.abs(fit_resids))/5.0))
+                    photom_resid_size = int(8 + np.abs(fit_diff)/(np.max(np.abs(self.photom_fit_resids))/5.0))
+
+                    # Determine the RGB color of the SNR text.
+                    # SNR > 10 is green, SNR < 10 is yellow, SNR < 5 is orange, SNR < 3 is red
+                    if snr > 10:
+                        # Green
+                        snr_color = QtGui.QColor(0, 255, 0)
+                    elif (snr < 10) and (snr >= 5):
+                        # Yellow
+                        snr_color = QtGui.QColor(255, 255, 0)
+                    elif (snr < 5) and (snr >= 3):
+                        # Orange
+                        snr_color = QtGui.QColor(255, 165, 0)
+                    else:
+                        # Red
+                        snr_color = QtGui.QColor(255, 0, 0)
 
                     if self.stdev_text_filter*std <= abs(fit_diff):
-                        text1 = TextItem(photom_resid_txt, anchor=(0.5, -0.5))
-                        text1.setPos(star_x, star_y)
-                        text1.setFont(QtGui.QFont('times', photom_resid_size))
-                        text1.setColor(QtGui.QColor(255, 255, 255))
-                        text1.setAlign(QtCore.Qt.AlignCenter)
-                        self.residual_text.addTextItem(text1)
 
-                        text2 = TextItem("{:+6.2f}".format(star_mag), anchor=(0.5, 1.5))
-                        text2.setPos(star_x, star_y)
-                        text2.setFont(QtGui.QFont('times', 10))
-                        text2.setColor(QtGui.QColor(0, 255, 0))
-                        text2.setAlign(QtCore.Qt.AlignCenter)
-                        self.residual_text.addTextItem(text2)
+                        # Add the photometric residual text below the star
+                        text_resid = TextItem(photom_resid_txt, anchor=(0.5, -0.5))
+                        text_resid.setPos(star_x, star_y)
+                        text_resid.setFont(QtGui.QFont('Arial', photom_resid_size))
+                        text_resid.setColor(QtGui.QColor(255, 255, 255))
+                        text_resid.setAlign(QtCore.Qt.AlignCenter)
+                        self.residual_text.addTextItem(text_resid)
+
+                        # Add the star magnitude above the star
+                        text_mag = TextItem("{:+6.2f}".format(star_mag), anchor=(0.5, 1.5))
+                        text_mag.setPos(star_x, star_y)
+                        text_mag.setFont(QtGui.QFont('Arial', 10))
+                        text_mag.setColor(QtGui.QColor(0, 255, 0))
+                        text_mag.setAlign(QtCore.Qt.AlignCenter)
+                        self.residual_text.addTextItem(text_mag)
+
+                        # Add SNR to the right of the star
+                        text_snr = TextItem(snr_txt, anchor=(-0.25, 0.5))
+                        text_snr.setPos(star_x, star_y)
+                        text_snr.setFont(QtGui.QFont('Arial', 8))
+                        text_snr.setColor(snr_color)
+                        text_snr.setAlign(QtCore.Qt.AlignCenter)
+                        self.residual_text.addTextItem(text_snr)
+
+
+
                 self.residual_text.update()
 
             # Show the photometry fit plot
@@ -2003,7 +2149,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 #                                    gridspec_kw={'height_ratios': [3, 1, 1]})
 
                 # Init plot for photometry
-                fig_p = plt.figure(figsize=(12, 6))  # Adjust the figure size as needed
+                fig_p = plt.figure(figsize=(10, 5))  # Adjust the figure size as needed
 
                 # Create a grid with 2 columns and 2 rows
                 gs = gridspec.GridSpec(2, 2, width_ratios=[1, 1], height_ratios=[1, 1])
@@ -2030,6 +2176,22 @@ class PlateTool(QtWidgets.QMainWindow):
                 ax_p.scatter(-2.5*lsp_arr, catalog_mags, s=5, c='r', zorder=3, alpha=0.5,
                              label="Raw (extinction corrected)")
 
+                # Circle saturated stars in red empty circles
+                saturation_label_set = False
+                for lsp, cat_mag, sat in zip(lsp_arr, catalog_mags, saturation_list):
+
+                    if sat:
+
+                        # Set the label only once
+                        if not saturation_label_set:
+                            saturation_label = "Saturated"
+                            saturation_label_set = True
+                        else:
+                            saturation_label = None
+
+                        ax_p.scatter(-2.5*lsp, cat_mag, s=30, zorder=3, edgecolor='r',
+                                     facecolor='none', label=saturation_label)
+
                 # Plot catalog magnitude vs. raw logsum of pixel intensities (only when no flat is used)
                 if self.flat_struct is None:
                     lsp_corr_arr = np.log10(correctVignetting(np.array(px_intens_list),
@@ -2048,8 +2210,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 y_max_w = y_max + 3
 
                 # Plot fit info
-                fit_info = "{:+.1f}*LSP + {:.2f} +/- {:.2f} ".format(self.platepar.mag_0,
-                                                                          self.platepar.mag_lev, fit_stddev) \
+                fit_info = "{:+.1f}*LSP + {:.2f} $\\pm$ {:.2f} mag".format(self.platepar.mag_0,
+                                                                          self.platepar.mag_lev,
+                                                                          self.photom_fit_stddev) \
                            + "\nVignetting coeff = {:.5f} rad/px".format(self.platepar.vignetting_coeff) \
                            + "\nGamma = {:.2f}".format(self.platepar.gamma)
 
@@ -2060,9 +2223,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # Plot the line fit
                 logsum_arr = np.linspace(x_min_w, x_max_w, 10)
-                ax_p.plot(logsum_arr, photomLine((10**(logsum_arr/(-2.5)), np.zeros_like(logsum_arr)),
-                                                 photom_offset, self.platepar.vignetting_coeff), label=fit_info,
-                          linestyle='--', color='k', alpha=0.5, zorder=3)
+                ax_p.plot(
+                    logsum_arr,
+                    photomLine((10**(logsum_arr/(-2.5)), np.zeros_like(logsum_arr)), photom_offset,
+                               self.platepar.vignetting_coeff),
+                    label=fit_info, linestyle='--', color='k', alpha=0.5, zorder=3)
 
                 ax_p.legend()
 
@@ -2088,7 +2253,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 img_diagonal = np.hypot(self.platepar.X_res/2, self.platepar.Y_res/2)
 
                 # Plot radius from centre vs. fit residual (including vignetting)
-                ax_r.scatter(radius_list, fit_resids, s=8, c='b', alpha=0.5, zorder=3)
+                ax_r.scatter(radius_list, self.photom_fit_resids, s=10, c='b', alpha=0.5, zorder=3)
 
                 # Plot a zero line
                 ax_r.plot(np.linspace(0, img_diagonal, 10), np.zeros(10), linestyle='dashed', alpha=0.5,
@@ -2126,11 +2291,11 @@ class PlateTool(QtWidgets.QMainWindow):
                 ### PLOT MAG DIFFERENCE BY ELEVATION
 
                 # Plot elevation vs. fit residual
-                ax_e.scatter(elevation_list, fit_resids, s=8, c='b', alpha=0.5, zorder=3)
+                ax_e.scatter(elevation_list, self.photom_fit_resids, s=10, c='b', alpha=0.5, zorder=3)
 
                 # Compute the fit residuals without extinction
                 fit_resids_noext = \
-                    fit_resids + self.platepar.extinction_scale*atmosphericExtinctionCorrection(
+                    self.photom_fit_resids + self.platepar.extinction_scale*atmosphericExtinctionCorrection(
                         np.array(elevation_list), self.platepar.elev)
                 
                 # Plot elevation vs. fit residual (excluding extinction)
@@ -2236,6 +2401,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Reset paired stars
             self.pick_list = {}
             self.paired_stars = PairedStars()
+            self.unsuitable_stars = PairedStars()
             self.residuals = None
             self.drawPhotometryColoring()
 
@@ -2352,7 +2518,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 (not isinstance(v, float)):
 
                 # Remove class that inherits from something
-                to_remove.append(k)  
+                to_remove.append(k)
+                # print(k,v)
 
         for remove in to_remove:
             del dic[remove]
@@ -2379,7 +2546,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.loadState(os.path.dirname(file_), os.path.basename(file_))
 
 
-    def loadState(self, dir_path, state_name, beginning_time=None):
+    def loadState(self, dir_path, state_name, beginning_time=None, mask=None):
         """ Loads state with path to file dir_path and file name state_name. Works mid-program and at the start of
         the program (if done properly).
 
@@ -2418,7 +2585,6 @@ class PlateTool(QtWidgets.QMainWindow):
             if not hasattr(self.platepar, "vignetting_fixed"):
                 self.platepar.vignetting_fixed = False
 
-
             if not hasattr(self.platepar, "measurement_apparent_to_true_refraction"):
                 self.platepar.measurement_apparent_to_true_refraction = False
 
@@ -2452,12 +2618,20 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update the RMS root directory
         self.config.rms_root_dir = os.path.abspath(os.path.join(os.path.dirname(RMS.__file__), os.pardir))
 
+        # Swap the fixed variable name
+        if hasattr(self, "star_aperature_radius"):
+            self.star_aperture_radius = self.star_aperature_radius
+
 
         # Update img_handle parameters
         if hasattr(self, "img_handle"):
 
             # Update the dir path
             self.img_handle.dir_path = dir_path
+
+            # Add the missing flipud parameter
+            if not hasattr(self.img_handle, "flipud"):
+                self.img_handle.flipud = False
 
             # If the input type is FF and the path to the actual FF file got saved, update it
             if self.img_handle.input_type == 'ff':
@@ -2471,6 +2645,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Make sure an option is not missing
             if self.img_handle.input_type == 'images':
+
+                # Add the fripon mode flag if it's missing
                 if not hasattr(self.img_handle, "fripon_mode"):
                     self.img_handle.fripon_mode = False
                     self.img_handle.fripon_header = None
@@ -2541,17 +2717,39 @@ class PlateTool(QtWidgets.QMainWindow):
         if not hasattr(self, "beginning_time"):
             self.beginning_time = beginning_time
 
+
+        # Add the mask
+        if not hasattr(self, "mask"):
+            self.mask = mask
+
+
         # If the previous beginning time is None and the new one is not, update the beginning time
         if (self.beginning_time is None) and (beginning_time is not None):
             self.beginning_time = beginning_time
 
+
         if not hasattr(self, "pick_list"):
             self.pick_list = {}
+
+        # If SNR and saturation flags are missing in the pick list, add them
+        for _, pick in self.pick_list.items():
+            if 'snr' not in pick:
+                pick['snr'] = 1.0
+            if 'saturated' not in pick:
+                pick['saturated'] = False
 
         # Update possibly missing flag for measuring ground points
         if not hasattr(self, "meas_ground_points"):
             self.meas_ground_points = False
 
+        if not hasattr(self, "autopan_mode"):
+            self.autopan_mode = False
+
+        if not hasattr(self, "unsuitable_stars"):
+            self.unsuitable_stars = PairedStars()
+
+        if not hasattr(self, "max_pixels_between_matched_stars"):
+            self.max_pixels_between_matched_stars = np.inf
 
         # Update possibly missing flag for measuring ground points
         if not hasattr(self, "single_click_photometry"):
@@ -2573,13 +2771,24 @@ class PlateTool(QtWidgets.QMainWindow):
             for entry in self.paired_stars:
                 
                 img_coords, sky_coords = entry
-                x, y, intens_acc = img_coords
+                x, y, intens_acc, snr = img_coords
                 sky_obj = CatalogStar(*sky_coords)
 
-                paired_stars_new.addPair(x, y, intens_acc, sky_obj)
+                paired_stars_new.addPair(x, y, intens_acc, sky_obj, snr=snr)
 
             self.paired_stars = paired_stars_new
 
+        # Add missing paired_stars parameters
+        else:
+            for paired_star in self.paired_stars.paired_stars:
+
+                # Add SNR if it's missing
+                if len(paired_star) == 4:
+                    paired_star.append(1.0)
+
+                # Add the saturation flag is it's missing
+                if len(paired_star) == 5:
+                    paired_star.append(False)
 
 
         if self.platepar is not None:
@@ -2715,8 +2924,8 @@ class PlateTool(QtWidgets.QMainWindow):
                             self.y_centroid = self.mouse_y - 0.5
 
                             # Compute the star intensity
-                            _, _, self.star_intensity = self.centroid(prev_x_cent=self.x_centroid,
-                                                                      prev_y_cent=self.y_centroid)
+                            _, _, self.star_intensity, self.star_snr, self.star_saturated = self.centroid(
+                                prev_x_cent=self.x_centroid, prev_y_cent=self.y_centroid)
                         else:
 
                             # Check if a star centroid is available from CALSTARS, and use it first because
@@ -2756,7 +2965,8 @@ class PlateTool(QtWidgets.QMainWindow):
                                             self.y_centroid = stars_y[closest_dist_indx]
 
                                             # Compute the star intensity
-                                            _, _, self.star_intensity = self.centroid(\
+                                            _, _, self.star_intensity, self.star_snr, self.star_saturated = \
+                                                self.centroid( \
                                                 prev_x_cent=self.x_centroid, prev_y_cent=self.y_centroid)
 
                                             calstars_centroid = True
@@ -2766,15 +2976,16 @@ class PlateTool(QtWidgets.QMainWindow):
                             if not calstars_centroid:
 
                                 # Perform centroiding with 2 iterations
-                                x_cent_tmp, y_cent_tmp, _ = self.centroid()
+                                x_cent_tmp, y_cent_tmp, _, _, _ = self.centroid()
 
                                 # Check that the centroiding was successful
                                 if x_cent_tmp is not None:
 
                                     # Centroid the star around the pressed coordinates
-                                    self.x_centroid, self.y_centroid, self.star_intensity = self.centroid(
-                                        prev_x_cent=x_cent_tmp,
-                                        prev_y_cent=y_cent_tmp)
+                                    (
+                                        self.x_centroid, self.y_centroid,
+                                        self.star_intensity, self.star_snr, self.star_saturated
+                                    ) = self.centroid(prev_x_cent=x_cent_tmp, prev_y_cent=y_cent_tmp)
 
                                 else:
                                     return None
@@ -2838,15 +3049,21 @@ class PlateTool(QtWidgets.QMainWindow):
                         if modifiers & QtCore.Qt.ControlModifier or \
                                 ((modifiers & QtCore.Qt.AltModifier or QtCore.Qt.Key_0 in self.keys_pressed) and
                                  self.img.img_handle.input_type == 'dfn'):
+
                             self.x_centroid, self.y_centroid = self.mouse_x - 0.5, self.mouse_y - 0.5
+
                         else:
-                            self.x_centroid, self.y_centroid, _ = self.centroid()
+                            (
+                                self.x_centroid, self.y_centroid,
+                                _, self.snr_centroid, self.saturated_centroid
+                            ) = self.centroid()
 
                         if (modifiers & QtCore.Qt.AltModifier or QtCore.Qt.Key_0 in self.keys_pressed) and \
                                 self.img.img_handle.input_type == 'dfn':
                             mode = 0
 
-                        self.addCentroid(self.img.getFrame(), self.x_centroid, self.y_centroid, mode=mode)
+                        self.addCentroid(self.img.getFrame(), self.x_centroid, self.y_centroid, mode=mode,
+                                         snr=self.snr_centroid, saturated=self.saturated_centroid)
 
                         self.updatePicks()
 
@@ -2882,7 +3099,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Toggle auto levels
         if event.key() == QtCore.Qt.Key_A and (modifiers == QtCore.Qt.ControlModifier):
-            
+
             self.tab.hist.toggleAutoLevels()
             # This updates image automatically
 
@@ -2904,6 +3121,14 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img_zoom.reloadImage()
             self.img.reloadImage()
 
+        # Jump to the next star
+        elif event.key() == QtCore.Qt.Key_Space and (modifiers == QtCore.Qt.ShiftModifier):
+
+            plate_tool.jumpNextStar(miss_this_one=True)
+            self.updateBottomLabel()
+
+
+
         # Load the flat
         elif event.key() == QtCore.Qt.Key_F and (modifiers == QtCore.Qt.ControlModifier):
             
@@ -2922,6 +3147,7 @@ class PlateTool(QtWidgets.QMainWindow):
         elif event.key() == QtCore.Qt.Key_R and (modifiers == QtCore.Qt.ControlModifier):
 
             self.star_pick_mode = not self.star_pick_mode
+            self.updateBottomLabel()
 
             if self.star_pick_mode:
                 #self.img_frame.setMouseEnabled(False, False)
@@ -2930,12 +3156,18 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 self.star_pick_info.show()
 
+                # Enable the Next button for star panning
+                self.tab.param_manager.next_star_button.setEnabled(True)
+
             else:
                 self.img_frame.setMouseEnabled(True, True)
                 self.cursor2.hide()
                 self.cursor.hide()
 
                 self.star_pick_info.hide()
+
+                # Disable the Next button for star panning
+                self.tab.param_manager.next_star_button.setEnabled(False)
 
 
         # Toggle grid
@@ -2994,7 +3226,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         # Increase image gamma
-        elif event.key() == QtCore.Qt.Key_U:
+        elif event.key() == QtCore.Qt.Key_U and not modifiers == QtCore.Qt.ControlModifier:
 
             # Increase image gamma by a factor of 1.1x
             self.img.updateGamma(1/0.9)
@@ -3003,7 +3235,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateLeftLabels()
             self.tab.settings.updateImageGamma()
 
-        elif event.key() == QtCore.Qt.Key_J:
+        elif event.key() == QtCore.Qt.Key_J and not modifiers == QtCore.Qt.ControlModifier:
 
             # Decrease image gamma by a factor of 0.9x
             self.img.updateGamma(0.9)
@@ -3183,6 +3415,19 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.tab.param_manager.updatePlatepar()
                 self.updateLeftLabels()
                 self.updateStars()
+
+            # Pan to unmatched star most distant from all other matched stars
+
+            elif event.key() == QtCore.Qt.Key_U and modifiers == QtCore.Qt.ControlModifier:
+
+                self.jumpNextStar(miss_this_one=False)
+
+            elif event.key() == QtCore.Qt.Key_O and modifiers == QtCore.Qt.ControlModifier:
+
+                self.toggleAutoPan()
+                self.tab.settings.updateAutoPan()
+                self.updateBottomLabel()
+
 
 
             # Move rotation parameter
@@ -3470,16 +3715,48 @@ class PlateTool(QtWidgets.QMainWindow):
                 # updates image automatically
 
 
-            # Save the point to the fit list by pressing Enter or Space
+            # Save the point to the matched stars list by pressing Enter or Space or to the
+            # unsuitable stars
+
             elif (event.key() == QtCore.Qt.Key_Return) or (event.key() == QtCore.Qt.Key_Enter) \
                 or (event.key() == QtCore.Qt.Key_Space):
-                
+
                 if self.star_pick_mode:
                     
+                    # Check if the star has been skipped
+                    unsuitable = False
+                    if modifiers == QtCore.Qt.ControlModifier:
+                        
+                        # If a star has been skipped, mark it as unsuitable
+                        if (self.old_autopan_x is not None) and (self.old_autopan_y is not None):
+                            
+                            # Check that a new star has been selected
+                            if (self.old_autopan_x != self.current_autopan_x) or \
+                                (self.old_autopan_y != self.current_autopan_y):
+                                
+                                unsuitable = True
+                        
+                        elif (self.current_autopan_x is None) and (self.current_autopan_y is None):
+                            unsuitable = False
+
+                        else:
+                            unsuitable = True
+                    
+                    if unsuitable:
+
+                        print("Unsuitable star at coordinates: ({}, {})".format(self.current_autopan_x, self.current_autopan_y))
+
+                        self.unsuitable_stars.addPair(self.current_autopan_x, self.current_autopan_y,
+                                                        0, None)
+                        self.updateBottomLabel()
+                        self.unsuitable_star_markers.addPoints(x=[self.current_autopan_x],
+                                                                y=[self.current_autopan_y])
+                        self.unsuitable_star_markers2.addPoints(x=[self.current_autopan_x],
+                                                                y=[self.current_autopan_y])
+
                     # If the catalog star or geo points has been selected, save the pair to the list
                     if self.cursor.mode == 1:
 
-                        
                         # Star catalog points
                         if self.closest_type == 'catalog':
                             selected_coords = self.catalog_stars_filtered[self.closest_cat_star_indx]
@@ -3492,8 +3769,10 @@ class PlateTool(QtWidgets.QMainWindow):
                         else:
                             selected_coords = self.geo_points[self.closest_geo_point_indx]
 
-                            # Set a fixed value for star intensity
+                            # Set a fixed value for star intensity and SNR
                             self.star_intensity = 10.0
+                            self.star_snr = 1.0
+                            self.star_saturated = False
 
                             # Init a geo point pair object
                             pair_obj = GeoPoint(self.geo_points_obj, self.closest_geo_point_indx)
@@ -3502,12 +3781,27 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
                         # Add the image/catalog pair to the list
-                        self.paired_stars.addPair(self.x_centroid, self.y_centroid, self.star_intensity, \
-                            pair_obj)
+                        if not unsuitable:
+                            self.paired_stars.addPair(self.x_centroid, self.y_centroid, self.star_intensity, \
+                                    pair_obj, snr=self.star_snr, saturated=self.star_saturated)
 
                         # Switch back to centroiding mode
                         self.cursor.setMode(0)
                         self.updatePairedStars()
+
+                        if self.autopan_mode:
+
+                            self.updateBottomLabel()
+
+                            self.jumpNextStar(miss_this_one=False)
+
+
+                    else:
+
+                        # Jump to next star if CTRL + SPACE is pressed
+                        if modifiers == QtCore.Qt.ControlModifier:
+                            print("Jumping to the next star")
+                            self.jumpNextStar(miss_this_one=False)
 
 
             elif event.key() == QtCore.Qt.Key_Escape:
@@ -3518,7 +3812,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.updatePairedStars()
 
             # Show the photometry plot
-            elif event.key() == QtCore.Qt.Key_P:
+            elif event.key() == QtCore.Qt.Key_P and not modifiers == QtCore.Qt.ControlModifier:
                 self.photometry(show_plot=True)
 
             # Show astrometry residuals plot
@@ -3663,7 +3957,11 @@ class PlateTool(QtWidgets.QMainWindow):
         if self.cursor.mode:
             self.x_centroid = None
             self.y_centroid = None
+            self.snr_centroid = None
+            self.saturated_centroid = False
             self.star_intensity = None
+            self.star_snr = None
+            self.star_saturated = False
             self.cursor.setMode(0)
             self.updatePairedStars()
 
@@ -3814,6 +4112,12 @@ class PlateTool(QtWidgets.QMainWindow):
     def toggleInvertColours(self):
         self.img.invert()
         self.img_zoom.invert()
+
+    def toggleAutoPan(self):
+
+        self.img.autopan()
+        self.autopan_mode = not self.autopan_mode
+
 
     def toggleSingleClickPhotometry(self):
         self.single_click_photometry = not self.single_click_photometry
@@ -4510,15 +4814,19 @@ class PlateTool(QtWidgets.QMainWindow):
         return dark_file, dark
 
 
-    def addCentroid(self, frame, x_centroid, y_centroid, mode=1):
+    def addCentroid(self, frame, x_centroid, y_centroid, mode=1, snr=0, saturated=False):
         """
         Adds or modifies a pick marker at given frame to self.pick_list with given information
 
         Arguments:
-            frame: [int] Frame to add/modify pick to
-            x_centroid: [float] x coordinate of pick
-            y_centroid: [float] y coordinate of pick
-            mode: [0 or 1] The mode of the pick, 0 is yellow, 1 is red
+            frame: [int] Frame to add/modify pick to.
+            x_centroid: [float] x coordinate of pick.
+            y_centroid: [float] y coordinate of pick.
+
+        Keyword arguments:
+            mode: [0 or 1] The mode of the pick, 0 is yellow, 1 is red.
+            snr: [float] Signal to noise ratio of the pick.
+            saturated: [bool] Whether the pick is saturated.
 
         """
         print('Added centroid at ({:.2f}, {:.2f}) on frame {:d}'.format(x_centroid, y_centroid, frame))
@@ -4534,7 +4842,9 @@ class PlateTool(QtWidgets.QMainWindow):
                     'y_centroid': y_centroid,
                     'mode': mode,
                     'intensity_sum': 1,
-                    'photometry_pixels': None}
+                    'photometry_pixels': None,
+                    'snr': snr,
+                    'saturated': saturated}
             self.pick_list[frame] = pick
 
         self.tab.debruijn.modifyRow(frame, mode)
@@ -4563,6 +4873,7 @@ class PlateTool(QtWidgets.QMainWindow):
     def centroid(self, prev_x_cent=None, prev_y_cent=None):
         """ Find the centroid of the star clicked on the image. """
 
+        self.updateBottomLabel()
         # If the centroid from the previous iteration is given, use that as the centre
         if (prev_x_cent is not None) and (prev_y_cent is not None):
             mouse_x = prev_x_cent
@@ -4597,17 +4908,21 @@ class PlateTool(QtWidgets.QMainWindow):
             y_max = self.platepar.Y_res - 1
 
         # Crop the image
-        img_crop = self.img.data[x_min:x_max, y_min:y_max]
+        img_crop_orig = self.img.data[x_min:x_max, y_min:y_max]
 
         # Perform gamma correction
-        img_crop = Image.gammaCorrectionImage(img_crop, self.config.gamma)
+        img_crop = Image.gammaCorrectionImage(img_crop_orig, self.config.gamma)
 
         ######################################################################################################
 
         ### Estimate the background ###
         ######################################################################################################
-        bg_acc = 0
-        bg_counter = 0
+
+        # Create an image mask with the same size as the cropped image
+        annulus_mask = np.zeros_like(img_crop)
+        aperture_mask = np.zeros_like(img_crop)
+
+        # Create a circular mask
         for i in range(img_crop.shape[0]):
             for j in range(img_crop.shape[1]):
 
@@ -4618,22 +4933,53 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # Take only those pixels between the inner and the outer circle
                 if (pix_dist <= outer_radius) and (pix_dist > self.star_aperture_radius):
-                    bg_acc += img_crop[i, j]
-                    bg_counter += 1
+                    annulus_mask[i, j] = 1
 
-        # Calculate mean background intensity
-        if bg_counter == 0:
-            print('Zero division error')
-            raise NotImplementedError
-        bg_intensity = bg_acc/bg_counter
+                # Take only those pixels within the star aperture radius
+                if pix_dist <= self.star_aperture_radius:
+                    aperture_mask[i, j] = 1
+
+
+        # Compute the median of the pixels in the aperture mask as the background
+        bg_median = np.median(img_crop[annulus_mask == 1])
+
+        # Compute the standard deviation of the pixels in the aperture mask
+        bg_std = np.std(img_crop[annulus_mask == 1])
+
 
         ######################################################################################################
+
+
+        ### Check for saturation ###
+        ######################################################################################################
+        # If 10 or more pixels are saturated (within 2% of the maximum value), mark the pick as saturated
+
+        # Compute the saturation threshold
+        saturation_threshold = int(0.98*(2**self.config.bit_depth))
+
+        # Count the number of pixels above the saturation threshold (original non-gramma corrected image)
+        # Apply the mask to only include the pixels within the star aperture radius
+        saturated_count = np.sum(img_crop_orig[aperture_mask == 1] > saturation_threshold)
+
+        # print("Saturation threshold: {:.2f}, count: {:d}".format(saturation_threshold, saturated_count))
+
+        # If 2 or more pixels are saturated, mark the pick as saturated
+        min_saturated_px_count = 2
+        if saturated_count >= min_saturated_px_count:
+            saturated = True
+        else:
+            saturated = False
+
+        ######################################################################################################
+
+
 
         ### Calculate the centroid ###
         ######################################################################################################
         x_acc = 0
         y_acc = 0
-        intens_acc = 0
+        source_intens = 0
+        source_px_count = 0
 
         for i in range(img_crop.shape[0]):
             for j in range(img_crop.shape[1]):
@@ -4645,16 +4991,28 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # Take only those pixels between the inner and the outer circle
                 if pix_dist <= self.star_aperture_radius:
-                    x_acc += i*(img_crop[i, j] - bg_intensity)
-                    y_acc += j*(img_crop[i, j] - bg_intensity)
-                    intens_acc += img_crop[i, j] - bg_intensity
+                    x_acc += i*(img_crop[i, j] - bg_median)
+                    y_acc += j*(img_crop[i, j] - bg_median)
+                    source_intens += img_crop[i, j] - bg_median
+                    source_px_count += 1
 
-        x_centroid = x_acc/intens_acc + x_min
-        y_centroid = y_acc/intens_acc + y_min
+        if source_intens > 0:
+            x_centroid = x_acc/source_intens + x_min
+            y_centroid = y_acc/source_intens + y_min
+        else:
+            x_centroid = mouse_x
+            y_centroid = mouse_y
 
         ######################################################################################################
 
-        return x_centroid, y_centroid, intens_acc
+        # Compute the SNR using the "CCD equation" (Howell et al., 1989)
+        snr = source_intens/(math.sqrt(source_intens + source_px_count*(bg_median + bg_std**2)))
+
+        # Debug print
+        print('Centroid at ({:.2f}, {:.2f}) with intensity {:.2f} and SNR {:.2f}, saturated: {}'.format(
+           x_centroid, y_centroid, source_intens, snr, saturated))
+
+        return x_centroid, y_centroid, source_intens, snr, saturated
 
 
     def updateGreatCircle(self):
@@ -4947,13 +5305,13 @@ class PlateTool(QtWidgets.QMainWindow):
         print('Residuals')
         print('----------')
         print(
-            ' No,       Img X,       Img Y, RA cat (deg), Dec cat (deg),    Mag, -2.5*LSP,    Cat X,   Cat Y, RA img (deg), Dec img (deg), Err amin,  Err px, Direction')
+            ' No,       Img X,       Img Y, RA cat (deg), Dec cat (deg),    Cat X,   Cat Y, RA img (deg), Dec img (deg), Err amin,  Err px, Direction,    Mag, -2.5*LSP, Mag err,    SNR, Saturated')
 
         # Calculate the distance and the angle between each pair of image positions and catalog predictions
-        for star_no, (cat_x, cat_y, cat_coords, img_c) in enumerate(zip(catalog_x, catalog_y, catalog_stars, \
-                                                                        img_stars)):
+        for star_no, (cat_x, cat_y, cat_coords, paired_stars, mag_err) in enumerate(
+            zip(catalog_x, catalog_y, catalog_stars, self.paired_stars.allCoords(), self.photom_fit_resids)):
 
-            img_x, img_y, sum_intens = img_c
+            img_x, img_y, sum_intens, snr, saturated = paired_stars[0]
             ra, dec, mag = cat_coords
 
             delta_x = cat_x - img_x
@@ -4977,11 +5335,16 @@ class PlateTool(QtWidgets.QMainWindow):
 
             residuals.append([img_x, img_y, angle, distance, angular_distance])
 
+            lsp = -2.5*np.log10(sum_intens)
+
             # Print out the residuals
             print(
-                '{:3d}, {:11.6f}, {:11.6f}, {:>12.6f}, {:>+13.6f}, {:+6.2f},  {:7.2f}, {:8.2f}, {:7.2f}, {:>12.6f}, {:>+13.6f}, {:8.2f}, {:7.2f}, {:+9.1f}'.format(
-                    star_no + 1, img_x, img_y, ra, dec, mag, -2.5*np.log10(sum_intens), cat_x, cat_y, \
-                    ra_img, dec_img, 60*angular_distance, distance, np.degrees(angle)))
+                '{:3d}, {:11.6f}, {:11.6f}, {:>12.6f}, {:>+13.6f}, {:8.2f}, {:7.2f}, {:>12.6f}, {:>+13.6f}, {:8.2f}, {:7.2f}, {:+9.1f},  {:+6.2f}, {:7.2f}, {:+7.2f}, {:6.1f}, {:9s}'.format(
+                    star_no + 1, img_x, img_y, ra, dec, cat_x, cat_y, \
+                    ra_img, dec_img, 60*angular_distance, distance, np.degrees(angle),
+                    mag, lsp, mag_err, snr, str(saturated)
+                    )
+                )
 
 
         # Compute RMSD errors
@@ -4993,8 +5356,13 @@ class PlateTool(QtWidgets.QMainWindow):
             rmsd_angular /= 60
             angular_error_label = 'deg'
 
-        else:
+        elif rmsd_angular > 0.5:
             angular_error_label = 'arcmin'
+
+        else:
+            rmsd_angular *= 60
+            angular_error_label = 'arcsec'
+
 
         print('RMSD: {:.2f} px, {:.2f} {:s}'.format(rmsd_img, rmsd_angular, angular_error_label))
 
@@ -5017,6 +5385,20 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateFitResiduals()
         self.tab.param_manager.updatePlatepar()
 
+
+    def jumpNextStar(self, miss_this_one=False):
+
+        new_x, new_y, self.max_pixels_between_matched_stars  = self.furthestStar(miss_this_one=miss_this_one)
+        self.updateBottomLabel()
+        self.old_autopan_x, self.old_autopan_y = self.current_autopan_x, self.current_autopan_y
+        self.current_autopan_x, self.current_autopan_y = new_x, new_y
+        self.img_frame.setRange(xRange=(new_x + 15, new_x - 15), yRange=(new_y + 15, new_y - 15))
+        self.checkParamRange()
+        self.platepar.updateRefRADec(preserve_rotation=True)
+        self.checkParamRange()
+        self.tab.param_manager.updatePlatepar()
+        self.updateLeftLabels()
+        self.updateStars()
 
     def showAstrometryFitPlots(self):
         """ Show window with astrometry fit details. """
@@ -5154,11 +5536,18 @@ class PlateTool(QtWidgets.QMainWindow):
         elev_max_ylim = np.max(np.abs(ax_elev.get_ylim()))
         skyradius_max_ylim = np.max(np.abs(ax_skyradius.get_ylim()))
         max_ylim = np.max([azim_max_ylim, elev_max_ylim, skyradius_max_ylim])
-        if max_ylim < 2.0:
+
+        if max_ylim < 0.5:
+            max_ylim = 0.5
+
+        elif max_ylim < 2.0:
             max_ylim = 2.0
+
         elif max_ylim < 5.0:
             max_ylim = 5.0
+
         else:
+
             # Make it a multiple of 5 arcmin if errors are large
             max_ylim = np.ceil(max_ylim/5)*5
 
@@ -5217,6 +5606,7 @@ class PlateTool(QtWidgets.QMainWindow):
         if pick:
             # If there are no photometry pixels, set the intensity to 0
             if not pick['photometry_pixels']:
+                # print("No photometry selected, setting intensity sum to 1")
                 pick['intensity_sum'] = 1
                 return None
 
@@ -5278,7 +5668,31 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Compute the background subtracted intensity sum (do as a float to avoid artificially pumping
             #   up the magnitude)
-            pick['intensity_sum'] = np.ma.sum(crop_img.astype(float) - background_lvl).astype(int)
+            intensity_sum = np.ma.sum(crop_img.astype(float) - background_lvl)
+
+            # Check if the result is masked
+            if np.ma.is_masked(intensity_sum):
+                # If the result is masked (i.e. error reading pixels), set the intensity sum to 1
+                intensity_sum = 1
+            else:
+                intensity_sum = intensity_sum.astype(int)
+
+            # Set the intensity sum to the pick
+            pick['intensity_sum'] = intensity_sum
+
+
+            ### Determine if there is any saturation in the measured photometric area
+
+            # Compute the saturation threshold
+            saturation_threshold = int(0.98*(2**self.config.bit_depth))
+
+            # If at least 2 pixels are saturated in the photometric area, mark the pick as saturated
+            if np.sum(crop_img > saturation_threshold) >= 2:
+                pick['saturated'] = True
+            else:
+                pick['saturated'] = False
+
+            ###
 
 
             # If the DFN image is used, correct intensity sum for exposure difference
@@ -5320,7 +5734,8 @@ class PlateTool(QtWidgets.QMainWindow):
             if pick['mode'] == 0:
                 continue
 
-            centroids.append([frame, pick['x_centroid'], pick['y_centroid'], pick['intensity_sum']])
+            centroids.append([frame, pick['x_centroid'], pick['y_centroid'],
+                              pick['intensity_sum'], pick['snr'], pick['saturated']])
 
         # If there are less than 3 points, don't show the lightcurve
         if len(centroids) < 3:
@@ -5347,7 +5762,10 @@ class PlateTool(QtWidgets.QMainWindow):
             return 1
 
         # Extract frames and intensities
-        frames, x_centroids, y_centroids, intensities = np.array(fr_intens).T
+        frames, x_centroids, y_centroids, intensities, snr, saturated = np.array(fr_intens).T
+
+        # Convert the saturated array to bool where >0.5 is saturated
+        saturated = saturated > 0.5
 
         # Init plot
         fig_p = plt.figure(facecolor=None)
@@ -5361,8 +5779,16 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute the magnitudes
             _, _, _, mag_data = xyToRaDecPP(time_data, x_centroids, y_centroids, intensities, self.platepar)
 
+            # Compute the total magnitude error as the combination of the photometric fit errors and SNR
+            mag_err_random = 2.5*np.log10(1 + 1/snr)
+            mag_err_total = np.sqrt(mag_err_random**2 + self.platepar.mag_lev_stddev**2)
+
             # Plot the magnitudes
-            ax_p.errorbar(frames, mag_data, yerr=self.platepar.mag_lev_stddev, capsize=5, color='k')
+            ax_p.errorbar(frames, mag_data, yerr=mag_err_total, capsize=5, color='k')
+
+            # Mark saturated points in red
+            if np.any(saturated):
+                ax_p.scatter(frames[saturated], mag_data[saturated], color='r', zorder=3, alpha=0.5)
 
             if 'BSC' in self.config.star_catalog_file:
                 mag_str = "V"
@@ -5380,8 +5806,14 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute the instrumental magnitude
             inst_mag = -2.5*np.log10(intensities)
 
+            # Compute the SNR error
+            mag_err_random = 2.5*np.log10(1 + 1/snr)
+
             # Plot the magnitudes
-            ax_p.plot(frames, inst_mag)
+            ax_p.errorbar(frames, inst_mag, yerr=mag_err_random, capsize=5, color='k')
+
+            # Mark saturated points in red
+            ax_p.scatter(frames[saturated], inst_mag[saturated], color='r', zorder=3, alpha=0.5)
 
             ax_p.set_ylabel("Instrumental magnitude")
 
@@ -5558,7 +5990,11 @@ class PlateTool(QtWidgets.QMainWindow):
             # If the global shutter is used, the frame number can only be an integer
             if self.config.deinterlace_order == -2:
                 frame_no = round(frame_no, 0)
-            
+
+            # If the intensity sum is masked, assume it's 1
+            if np.ma.is_masked(pick['intensity_sum']):
+                pick['intensity_sum'] = 1
+
             centroids.append([frame_no, pick['x_centroid'], pick['y_centroid'], pick['intensity_sum']])
 
         # If there are no centroids, don't save anything
@@ -5653,7 +6089,7 @@ class PlateTool(QtWidgets.QMainWindow):
             'image_file' : ff_name,                                   # The name of the original image or video
             'isodate_start_obs': str(dt_ref.strftime(isodate_format_entry)), # The date and time of the start of the video or exposure
             'astrometry_number_stars' : n_stars,                      # The number of stars identified and used in the astrometric calibration
-            'mag_label': 'mag',                                       # The label of the Magnitude column in the Point Observation data
+            'mag_label': 'mag_data',                                  # The label of the Magnitude column in the Point Observation data
             'no_frags': 1,                                            # The number of meteoroid fragments described in this data
             'obs_az': azim,                                           # The azimuth of the centre of the field of view in decimal degrees. North = 0, increasing to the East
             'obs_ev': elev,                                           # The elevation of the centre of the field of view in decimal degrees. Horizon =0, Zenith = 90
@@ -5672,9 +6108,13 @@ class PlateTool(QtWidgets.QMainWindow):
 # - {name: dec, unit: deg, datatype: float64}
 # - {name: azimuth, datatype: float64}
 # - {name: altitude, datatype: float64}
-# - {name: mag_data, datatype: float64}
 # - {name: x_image, unit: pix, datatype: float64}
 # - {name: y_image, unit: pix, datatype: float64}
+# - {name: integrated_pixel_value, datatype: int64}
+# - {name: saturated_pixels, datatype: bool}
+# - {name: mag_data, datatype: float64}
+# - {name: err_minus_mag, datatype: float64}
+# - {name: err_plus_mag, datatype: float64}
 # delimiter: ','
 # meta: !!omap
 """
@@ -5692,7 +6132,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         out_str += "# schema: astropy-2.0\n"
-        out_str += "datetime,ra,dec,azimuth,altitude,x_image,y_image,integrated_pixel_value,mag_data\n"
+        out_str += "datetime,ra,dec,azimuth,altitude,x_image,y_image,integrated_pixel_value,saturated_pixels,mag_data,err_minus_mag,err_plus_mag\n"
 
         # Add the data (sort by frame)
         for frame, pick in sorted(self.pick_list.items(), key=lambda x: x[0]):
@@ -5704,6 +6144,10 @@ class PlateTool(QtWidgets.QMainWindow):
             # Only store real picks, and not gaps
             if pick['mode'] == 0:
                 continue
+
+            # Compute the magnitude errors
+            mag_err_random = 2.5*np.log10(1 + 1/pick['snr'])
+            mag_err_total = np.sqrt(mag_err_random**2 + self.platepar.mag_lev_stddev**2)
 
             # Use a modified platepar if ground points are being picked
             pp_tmp = copy.deepcopy(self.platepar)
@@ -5758,10 +6202,15 @@ class PlateTool(QtWidgets.QMainWindow):
                 frame_time = dt_ref + datetime.timedelta(seconds=t_rel)
 
             # Add an entry to the ECSV file
-            entry = [frame_time.strftime(isodate_format_entry), "{:10.6f}".format(ra), \
-                "{:+10.6f}".format(dec), "{:10.6f}".format(azim), "{:+10.6f}".format(alt), \
+            entry = [
+                frame_time.strftime(isodate_format_entry),
+                "{:10.6f}".format(ra), "{:+10.6f}".format(dec),
+                "{:10.6f}".format(azim), "{:+10.6f}".format(alt),
                 "{:9.3f}".format(pick['x_centroid']), "{:9.3f}".format(pick['y_centroid']), 
-                "{:10d}".format(int(pick['intensity_sum'])), "{:+7.2f}".format(mag)]
+                "{:10d}".format(int(pick['intensity_sum'])),
+                "{:5s}".format(str(pick['saturated'])),
+                "{:+7.2f}".format(mag), "{:+6.2f}".format(-mag_err_total), "{:+6.2f}".format(mag_err_total)
+                ]
 
             out_str += ",".join(entry) + "\n"
 
@@ -5812,6 +6261,202 @@ class PlateTool(QtWidgets.QMainWindow):
             pass
         self.time = time.time()
 
+    def furthestStar(self, miss_this_one=False, min_separation=15):
+        """
+        Find the star which is furthest away from all other stars that have already been matched.
+
+        Keyword arguments:
+            miss_this_one: Return coordinates of a different star at random, but don't mark anything.
+            min_separation: Minimum separation in pixels between stars.
+
+        Returns: 
+            (x,y) integers of the image location of the furthest star away from all other matched stars.
+
+        """
+
+        # Strategy
+
+        # Working in image coordinates
+
+        # Get two lists marked_x, marked_y of each marked star - getMarkedStars()
+        # Get three lists candidate_x, candidate_y of each unmarked star, and the distance to nearest
+        # marked star which is more than minimum separation away
+
+        # Get star with the greatest distance to the nearest marked star
+
+
+
+        # Return the image coordinates of the star which is furthest away from any marked star
+        # Create marked_x, marked_y in image coordinates which is composed of matched stars and unsuitable stars
+
+        # Get all the matched stars in image coordinates
+
+
+
+        def getMarkedStars(include_unsuitable=True):
+
+            """
+
+            Returns: a list of stars which are either marked as paired, or bad in image coordinates
+
+            """
+
+            marked_x, marked_y = [], []
+            coords_list = self.paired_stars.imageCoords()
+            for coords in coords_list:
+                marked_x.append(coords[0])
+                marked_y.append(coords[1])
+
+            if include_unsuitable:
+                coords_list = self.unsuitable_stars.imageCoords()
+                for coords in coords_list:
+                    marked_x.append(coords[0])
+                    marked_y.append(coords[1])
+
+            return marked_x, marked_y
+        ##############################################################################################################
+
+        def isDouble(x,y, reference_x_list, reference_y_list, min_separation=5):
+
+            """
+            Are x,y coordinates which are very close to, but distinct from all coordinates in reference list
+
+            Args:
+                x: image coordinates of star
+                y: image coordinates of star
+                reference_x_list: list of x image coordinates
+                reference_y_list: list of y image coordinates
+
+            Returns:
+                [bool] True if star is within min_separation of another star
+            """
+
+            for reference_x, reference_y in zip(reference_x_list, reference_y_list):
+                # Check if this the reference is the same star
+                if reference_x == x and reference_y == y:
+                    continue
+                if ((reference_x - x) ** 2 + (reference_y - y) ** 2) ** 0.5 < min_separation:
+                    return True
+
+            return False
+        ##############################################################################################################
+
+        def getVisibleUnmarkedStarsAndDistanceToMarked(marked_x_list, marked_y_list, min_separation=15):
+
+            """
+            From the catalogue of filtered stars return a lists of coordinates stars which are not marked,
+            and another list which is the distance to the nearest marked star
+
+            Args:
+                marked_x_list: list of marked star x coordinates
+                marked_y_list: list of marked star y coordinates
+                min_separation: minimum separation to be regarded as a different stra
+
+            Returns:
+                unmarked_x_list: list of unmarked star x coordinates
+                unmarked_y_list: list of unmarked star x coordinates
+                dist_nearest_marked_list: distance of the nearest marked star for returned star coordinates
+
+
+            """
+
+            # Is there a way to get this in image coordinates directly
+            visible_ra_list = [star[0] for star in self.catalog_stars_filtered]
+            visible_dec_list = [star[1] for star in self.catalog_stars_filtered]
+
+            # Convert all visible star to image coordinates
+
+            visible_x, visible_y = raDecToXYPP(np.array(visible_ra_list), np.array(visible_dec_list),
+                                               datetime2JD(self.img_handle.currentFrameTime(dt_obj=True)),
+                                               self.platepar)
+
+            # Handle jump when no stars are marked - just pick and return a single random star
+            if len(marked_x_list) == 0 or len(marked_y_list) == 0:
+                random_star = random.randint(0, len(visible_x) - 1)
+                return [visible_x[random_star]], [visible_y[random_star]], [np.inf], [np.inf]
+
+            # Iterate through all visible stars creating a list of stars which are more than
+            # min separation from a marked star, and then add coordinates of the visible star
+            # and minimum distance to the nearest marked star, which is more than min_separation away
+            # If a visible star is too close to an already marked star then ignore this star
+            # and do not append to the candidate star list
+
+            candidate_x_list, candidate_y_list, dist_nearest_marked_list = [], [], []
+
+
+            # Reject stars which are too close to the edge
+            edge_margin = 5 # px
+
+            for x, y in zip(visible_x, visible_y):
+                ignore_this_star = False
+
+                if isDouble(x,y, visible_x, visible_y):
+                    continue
+
+                nearest_pixel_separation = np.inf
+
+                for marked_x, marked_y in zip(marked_x_list, marked_y_list):
+                    
+                    # calculate cartesian separation
+                    pixel_separation = ((marked_x - x) ** 2 + (marked_y - y) ** 2) ** 0.5
+                    
+                    # If this star is less than minimum separation away
+                    if pixel_separation < min_separation or ignore_this_star:
+                        # do not use this visible star in any further iteration
+                        ignore_this_star = True
+                        break
+                    
+                    # If this star is too close to the edge, do not use it
+                    if (x < edge_margin) or (x > self.platepar.X_res - edge_margin) or \
+                        (y < edge_margin) or (y > self.platepar.Y_res - edge_margin):
+
+                        ignore_this_star = True
+                        break
+
+
+                    else:
+                        if pixel_separation < nearest_pixel_separation:
+
+                            # Update the x, y coordinates and the nearest star by pixel separation
+                            nearest_x, nearest_y, nearest_pixel_separation = x, y, pixel_separation
+
+
+                # Append once for each visible star that is not marked to be ignored
+                if not ignore_this_star:
+                    candidate_x_list.append(nearest_x)
+                    candidate_y_list.append(nearest_y)
+                    dist_nearest_marked_list.append(nearest_pixel_separation)
+
+            return candidate_x_list, candidate_y_list, dist_nearest_marked_list, nearest_pixel_separation
+        
+        ######################################################################################################
+
+        marked_x_list, marked_y_list = getMarkedStars(include_unsuitable=False)
+        max_distance_between_paired = maxDistBetweenPoints(marked_x_list, marked_y_list)
+
+        marked_x_list, marked_y_list = getMarkedStars(include_unsuitable=True)
+        unmarked_x_list, unmarked_y_list, dist_nearest_marked_list, distance_between_unmarked = \
+            getVisibleUnmarkedStarsAndDistanceToMarked(marked_x_list, marked_y_list, 
+                                                       min_separation=min_separation)
+
+        if len(dist_nearest_marked_list) == 0:
+            print("No stars left to pick")
+            return marked_x_list[-1], marked_y_list[-1], max_distance_between_paired
+
+        if miss_this_one:
+            # Pick a distance at random
+            next_star_index = dist_nearest_marked_list.index(random.choice(dist_nearest_marked_list))
+        else:
+            # Find the index of this star
+            next_star_index = dist_nearest_marked_list.index(max(dist_nearest_marked_list))
+
+
+        # Return coordinates of next star and maximum pixel distance between marked stars
+
+        return unmarked_x_list[next_star_index], unmarked_y_list[next_star_index], max_distance_between_paired
+
+
+
 
 if __name__ == '__main__':
     ### COMMAND LINE ARGUMENTS
@@ -5855,6 +6500,10 @@ if __name__ == '__main__':
                             help="Flip the image upside down. Only applied to images and videos.")
 
 
+    arg_parser.add_argument('-m', '--mask', metavar='MASK_PATH', type=str,
+                            help="Path to a mask file which will be applied to the star catalog")
+
+
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -5893,7 +6542,28 @@ if __name__ == '__main__':
         # Create plate_tool without calling its constructor then calling loadstate
         plate_tool = PlateTool.__new__(PlateTool)
         super(PlateTool, plate_tool).__init__()
-        plate_tool.loadState(dir_path, state_name, beginning_time=beginning_time)
+
+        if cml_args.mask is not None:
+            print("Given a path to a mask at {}".format(cml_args.mask))
+            mask = getMaskFile(os.path.expanduser(cml_args.mask), config)
+
+        elif os.path.exists(os.path.join(config.rms_root_dir, config.mask_file)):
+            print("No mask specified loading mask from {}".format(os.path.join(config.rms_root_dir, config.mask_file)))
+            mask = getMaskFile(config.rms_root_dir, config)
+
+        elif os.path.exists("mask.bmp"):
+            mask = getMaskFile(".", config)
+
+        elif True:
+            mask = None
+
+        # If the dimensions of the mask do not match the config file, ignore the mask
+        if (mask is not None) and (not mask.checkResolution(config.width, config.height)):
+            print("Mask resolution ({:d}, {:d}) does not match the image resolution ({:d}, {:d}). Ignoring the mask.".format(
+                mask.width, mask.height, config.width, config.height))
+            mask = None
+
+        plate_tool.loadState(dir_path, state_name, beginning_time=beginning_time, mask=mask)
 
     else:
 
@@ -5907,10 +6577,32 @@ if __name__ == '__main__':
         # Load the config file
         config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
+
+        if cml_args.mask is not None:
+            print("Given a path to a mask at {}".format(cml_args.mask))
+            mask = getMaskFile(os.path.expanduser(cml_args.mask), config)
+
+        elif os.path.exists(os.path.join(config.rms_root_dir, config.mask_file)):
+
+            print("No mask specified loading mask from {}".format(os.path.join(config.rms_root_dir, config.mask_file)))
+            mask = getMaskFile(config.rms_root_dir, config)
+
+        elif os.path.exists("mask.bmp"):
+            mask = getMaskFile(".", config)
+
+        else:
+            mask = None
+
+        # If the dimensions of the mask do not match the config file, ignore the mask
+        if (mask is not None) and (not mask.checkResolution(config.width, config.height)):
+            print("Mask resolution ({:d}, {:d}) does not match the image resolution ({:d}, {:d}). Ignoring the mask.".format(
+                mask.width, mask.height, config.width, config.height))
+            mask = None
+
         # Init SkyFit
         plate_tool = PlateTool(input_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
-            gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints, 
-            nobg=cml_args.nobg, flipud=cml_args.flipud)
+            gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints,
+            mask=mask, nobg=cml_args.nobg, flipud=cml_args.flipud)
 
 
     # Run the GUI app

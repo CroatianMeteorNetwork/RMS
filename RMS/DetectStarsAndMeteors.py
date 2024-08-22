@@ -19,7 +19,6 @@ from __future__ import print_function, division, absolute_import
 import sys
 import os
 import time
-import datetime
 import logging
 import argparse
 
@@ -35,6 +34,7 @@ from RMS.ExtractStars import extractStarsFF
 from RMS.Detection import detectMeteors
 from RMS.DetectionTools import loadImageCalibration
 from RMS.QueuedPool import QueuedPool
+from RMS.Misc import RmsDateTime
 
 
 # Get the logger from the main module
@@ -286,7 +286,7 @@ def detectStarsAndMeteorsDirectory(dir_path, config):
 
 if __name__ == "__main__":
 
-    time_start = datetime.datetime.utcnow()
+    time_start = RmsDateTime.utcnow()
 
 
     ### COMMAND LINE ARGUMENTS
@@ -325,4 +325,4 @@ if __name__ == "__main__":
     # Delete backup files
     detector.deleteBackupFiles()
 
-    log.info('Total time taken: {}'.format(datetime.datetime.utcnow() - time_start))
+    log.info('Total time taken: {}'.format(RmsDateTime.utcnow() - time_start))

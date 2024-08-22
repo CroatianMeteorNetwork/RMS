@@ -51,6 +51,7 @@ from RMS.Astrometry.CyFunctions import (cyraDecToXY, cyTrueRaDec2ApparentAltAz,
                                         cyXYToRADec,
                                         eqRefractionApparentToTrue,
                                         equatorialCoordPrecession)
+from RMS.Misc import RmsDateTime
 
 # Handle Python 2/3 compatibility
 if sys.version_info.major == 3:
@@ -225,8 +226,20 @@ def photomLine(input_params, photom_offset, vignetting_coeff):
 
 
 
-def photomLineMinimize(params, px_sum, radius, catalog_mags, fixed_vignetting):
+def photomLineMinimize(params, px_sum, radius, catalog_mags, fixed_vignetting, weights):
     """ Modified photomLine function used for minimization. The function uses the L1 norm for minimization.
+
+    Arguments:
+        params: [tuple]
+            - photom_offset: [float] The photometric offset.
+            - vignetting_coeff: [float] Vignetting coefficient (rad/px).
+        px_sum: [ndarray] Sums of pixel intensities.
+        radius: [ndarray] Radii from the focal plane centre (px).
+        catalog_mags: [ndarray] Catalog magnitudes.
+        fixed_vignetting: [float] Fixed vignetting coefficient. None by default, in which case it will be
+            computed.
+        weights: [ndarray] Weights for the fit.
+
     """
 
     photom_offset, vignetting_coeff = params
@@ -234,21 +247,29 @@ def photomLineMinimize(params, px_sum, radius, catalog_mags, fixed_vignetting):
     if fixed_vignetting is not None:
         vignetting_coeff = fixed_vignetting
 
-    # Compute the sum of squared residuals
-    return np.sum(np.abs(catalog_mags - photomLine((px_sum, radius), photom_offset, vignetting_coeff)))
+    # Compute the sum of squred residuals
+    return np.sum(
+        weights*np.abs(catalog_mags - photomLine((px_sum, radius), photom_offset, vignetting_coeff))
+        )
 
 
 
-def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=None):
+def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=None, weights=None, 
+                  exclude_list=None):
     """ Fit the photometry on given data.
 
     Arguments:
         px_intens_list: [list] A list of sums of pixel intensities.
         radius_list: [list] A list of radii from the focal plane centre (px).
         catalog_mags: [list] A list of corresponding catalog magnitudes of stars.
+
     Keyword arguments:
         fixed_vignetting: [float] Fixed vignetting coefficient. None by default, in which case it will be
             computed.
+        weights: [list] Weights for the fit. None by default, in which case the weights will be equal to 1.
+        exclude_list: [list] A mask for excluding certain data points from the fit. None by default, in which
+            case all data points will be used.
+
     Return:
         (photom_offset, fit_stddev, fit_resid):
             photom_params: [list]
@@ -258,10 +279,30 @@ def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=No
             fit_resid: [float] Magnitude fit residuals.
     """
 
+    # If the weights are not given, set them to 1
+    if weights is None:
+        weights = np.ones(len(px_intens_list))
+    else:
+        # Normalize the weights to have a sum of 1
+        weights = np.array(weights)/np.sum(weights)
+
+    # If the exclude list is not given, set it to an empty list
+    if exclude_list is None:
+        exclude_list = np.zeros(len(px_intens_list), dtype=np.int32)
+    else:
+        exclude_list = np.array(exclude_list, dtype=np.int32)
+
+
+    # Filter the data points to exclude the ones which are marked for exclusion
+    px_intens_list_fit = np.array(px_intens_list)[exclude_list == 0]
+    radius_list_fit = np.array(radius_list)[exclude_list == 0]
+    catalog_mags_fit = np.array(catalog_mags)[exclude_list == 0]
+    weights_fit = np.array(weights)[exclude_list == 0]
+
     # Fit a line to the star data, where only the intercept has to be estimated
     p0 = [10.0, 0.0]
-    res = scipy.optimize.minimize(photomLineMinimize, p0, args=(np.array(px_intens_list), \
-        np.array(radius_list), np.array(catalog_mags), fixed_vignetting), method='Nelder-Mead')
+    res = scipy.optimize.minimize(photomLineMinimize, p0, args=(px_intens_list_fit, \
+        radius_list_fit, catalog_mags_fit, fixed_vignetting, weights_fit), method='Nelder-Mead')
     photom_offset, vignetting_coeff = res.x
 
     # Handle the vignetting coeff
@@ -271,10 +312,13 @@ def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=No
 
     photom_params = (photom_offset, vignetting_coeff)
 
-    # Calculate the standard deviation
+    # Calculate the fit residuals
     fit_resids = np.array(catalog_mags) - photomLine((np.array(px_intens_list), np.array(radius_list)), \
         *photom_params)
-    fit_stddev = np.std(fit_resids)
+    
+    # Compute the fit standard deviation excluding the excluded data points and including the weights
+    #fit_stddev = np.std(fit_resids[exclude_list == 0])
+    fit_stddev = np.sqrt(np.sum(weights_fit*(fit_resids[exclude_list == 0])**2)/np.sum(weights_fit))
 
     return photom_params, fit_stddev, fit_resids
 
@@ -833,7 +877,7 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, U
 
 
     # Calibration string to be written to the FTPdetectinfo file
-    calib_str = 'Calibrated with RMS on: ' + str(datetime.datetime.utcnow()) + ' UTC'
+    calib_str = 'Calibrated with RMS on: ' + str(RmsDateTime.utcnow()) + ' UTC'
 
     # If no meteors were detected, set dummpy parameters
     if len(meteor_list) == 0:
