@@ -344,12 +344,12 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
 
     # Overlay filename only
     if textoption is not None:
-        if textoption[0] == 1:
+        if textoption == 1:
             ax.text(10, stack_img.shape[0] + 30, bf, color='grey', fontsize=6, fontname='Source Sans Pro',
                     weight='ultralight')
 
     # Overlay stationID, YYYY-MM-DD Meteor count
-        if textoption[0] == 2:
+        if textoption == 2:
             annotation = "{}  {}-{}-{}      Meteors: {}".format(bf[0:6],bf[7:11],bf[11:13],bf[13:15],num_plotted)
             ax.text(10, stack_img.shape[0] + 30, annotation, color='grey', fontsize=6, fontname='Source Sans Pro',
                 weight='ultralight')
@@ -530,9 +530,13 @@ if __name__ == "__main__":
         showers = showers.split(",")
         showers = [s.upper() for s in showers]
 
+    text_option = 0
+    if cml_args.textoption:
+        text_option = cml_args.textoption[0]
+
     dir_paths = [os.path.normpath(dir_path) for dir_path in cml_args.dir_paths]
     trackStack(dir_paths, config, background_compensation=(not cml_args.bkgnormoff),
         hide_plot=cml_args.hideplot, showers=showers,
         darkbackground=cml_args.darkbackground, out_dir=cml_args.output, scalefactor=cml_args.scalefactor,
         draw_constellations=cml_args.constellations, one_core_free=cml_args.freecore,
-        textoption = cml_args.textoption)
+        textoption = text_option)
