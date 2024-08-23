@@ -50,7 +50,7 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
         scalefactor: factor to scale the canvas by; default 1, increase if image cropped
         draw_constellations: [bool] Show constellation lines on stacked image
         one_core_free: [bool] leave one core free whilst processing
-        textoption: [int] 0 - no text, 1 - filename, 2 - stationID, date, meteorcount overlayed
+        textoption: [int] 0 - no text, 1 - filename, 2 - stationID, date, meteor count overlayed
     """
     start_time = time.time()
     # normalise the path in a platform neutral way
