@@ -6558,7 +6558,7 @@ if __name__ == '__main__':
             mask = None
 
         # If the dimensions of the mask do not match the config file, ignore the mask
-        if not mask.checkResolution(config.width, config.height):
+        if (mask is not None) and (not mask.checkResolution(config.width, config.height)):
             print("Mask resolution ({:d}, {:d}) does not match the image resolution ({:d}, {:d}). Ignoring the mask.".format(
                 mask.width, mask.height, config.width, config.height))
             mask = None
@@ -6594,7 +6594,7 @@ if __name__ == '__main__':
             mask = None
 
         # If the dimensions of the mask do not match the config file, ignore the mask
-        if not mask.checkResolution(config.width, config.height):
+        if (mask is not None) and (not mask.checkResolution(config.width, config.height)):
             print("Mask resolution ({:d}, {:d}) does not match the image resolution ({:d}, {:d}). Ignoring the mask.".format(
                 mask.width, mask.height, config.width, config.height))
             mask = None

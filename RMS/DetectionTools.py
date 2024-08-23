@@ -25,6 +25,7 @@ import RMS.Routines.MorphCy as morph
 log = logging.getLogger("logger")
 
 
+
 def binImageCalibration(config, mask, dark, flat_struct):
     """ Bin the calibration images. """
 

@@ -25,6 +25,9 @@ except:
 
 from RMS.Misc import mkdirP, RmsDateTime
 
+# Map FileNotFoundError to IOError in Python 2 as it does not exist
+if sys.version_info[0] < 3:
+    FileNotFoundError = IOError
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -160,7 +163,7 @@ def createRemoteDirectory(sftp, path):
                 sftp.stat(path)
                 print("Directory '{}' already exists.".format(path))
 
-            except IOError:
+            except FileNotFoundError:
 
                 sftp.mkdir(path)
                 print("Directory '{}' created.".format(path))

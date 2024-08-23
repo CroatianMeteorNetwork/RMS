@@ -4,6 +4,7 @@ from __future__ import print_function, division, absolute_import
 
 import datetime
 import os
+import sys
 import shlex
 import sys
 import collections
@@ -28,6 +29,10 @@ from Utils.Flux import calculatePopulationIndex, calculateMassIndex, computeFlux
 from RMS.Routines.SolarLongitude import unwrapSol
 from RMS.Misc import formatScientific, roundToSignificantDigits, SegmentedScale, mkdirP
 from RMS.QueuedPool import QueuedPool
+
+# Map FileNotFoundError to IOError in Python 2 as it does not exist
+if sys.version_info[0] < 3:
+    FileNotFoundError = IOError
 
 # Now that the Scale class has been defined, it must be registered so
 # that ``matplotlib`` can find it.
