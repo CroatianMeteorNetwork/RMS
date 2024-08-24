@@ -122,7 +122,24 @@ def backupConfig(config_file_path, number_to_keep=5):
 
     return config_backup
 
+def getSectionHeaderFromLine(line):
 
+    opening_square_bracket, closing_square_bracket = False, False
+    opening_square_bracket_position, closing_square_bracket_position = 0, 0
+
+    n = 0
+    for c in line:
+        if c == "[" and opening_square_bracket_position == False:
+            opening_square_bracket = True
+            opening_square_bracket_position = n
+        if c == "]" and opening_square_bracket:
+            closing_square_bracket = True
+            closing_square_bracket_position = n
+        n += 1
+    if opening_square_bracket and closing_square_bracket:
+        return line[opening_square_bracket_position + 1:closing_square_bracket_position]
+    else:
+        return None
 
 def sectionHeaderLine(line, section_list):
 
@@ -142,26 +159,12 @@ def sectionHeaderLine(line, section_list):
     """
 
 
-    opening_square_bracket, closing_square_bracket = False, False
-    opening_square_bracket_position, closing_square_bracket_position = 0, 0
 
-    n = 0
-    for c in line:
-        if c == "[" and opening_square_bracket_position == False:
-            opening_square_bracket = True
-            opening_square_bracket_position = n
-        if c == "]" and opening_square_bracket:
-            closing_square_bracket = True
-            closing_square_bracket_position = n
-        n += 1
-    if opening_square_bracket and closing_square_bracket:
-        header = line[opening_square_bracket_position + 1:closing_square_bracket_position]
-        if header in section_list:
-            return True
-        else:
-            return False
+    if getSectionHeaderFromLine(line) in section_list:
+        return True
     else:
         return False
+
 
 def getOption(line, delimiter =":"):
 
@@ -253,7 +256,7 @@ def insert(current_section, insert_options_list, interactive=False, newline_afte
 
 def populateTemplateConfig(config_template_file_path, config_file_path,
                             sections_list, options_list_of_lists, values_list_of_lists,
-                                 temporary_suffix="new", insert_options_list = [], interactive = False):
+                                 temporary_suffix="new", insert_options_list=[], interactive=False):
 
 
     """
@@ -308,6 +311,16 @@ def populateTemplateConfig(config_template_file_path, config_file_path,
     for line in input_file_handle:
         lines_list.append(line)
 
+    # Get the list of sections from the template file
+    template_sections_list, _, _ = parseConfigFileBySection(config_template_file_path)
+
+    # Record any sections which are in the template .config and not in the station .config
+    new_sections_list = []
+    for template_section in template_sections_list:
+        if template_section not in sections_list:
+            print("{} is a new section in the template, not in the config".format(template_section))
+            new_sections_list.append(template_section)
+
     # Work through the template file
     current_section = ""
     for line in lines_list:
@@ -319,8 +332,9 @@ def populateTemplateConfig(config_template_file_path, config_file_path,
         # Remove newlines
         line = line.replace("\n","")
 
-        if not len(line):
+        if not len(line.strip()):
             blank_line = True
+
 
         # Detect a comment line, or a comment line that should be uncommented
         elif line.strip()[0] == ";" or line.strip()[0] == "#":
@@ -345,9 +359,14 @@ def populateTemplateConfig(config_template_file_path, config_file_path,
             else:
                 comment_line = True
 
-        # Detect a section header line
+        # Detect a section header line that is in the regular .config file
         elif sectionHeaderLine(line, sections_list):
             section_header_line = True
+
+        # Detect a section header line that is only in the template file
+        elif sectionHeaderLine(line, template_sections_list):
+            section_header_line = True
+            sections_list.append(getSectionHeaderFromLine(line))
 
         # If this is a section header line, add any additional options before this line
         if section_header_line:
@@ -355,9 +374,9 @@ def populateTemplateConfig(config_template_file_path, config_file_path,
                 # This is the last line of this section, so insert any missing options
                 # that were passed in as parameters
                 output_line += insert(current_section, insert_options_list, interactive=interactive)
-            #Get the current section name from the line
-            current_section = line.strip()[1:-1]
 
+            # Set the current section
+            current_section = getSectionHeaderFromLine(line)
         # If this was a line that should be uncommented
         if uncomment_line:
             # Retrieve the value
@@ -368,19 +387,23 @@ def populateTemplateConfig(config_template_file_path, config_file_path,
 
         # If not any of these, then it must be a line with an option and value
         if not blank_line and not comment_line and not section_header_line and not uncomment_line:
-            # added print call for debugging purposes
-            print("[{}]  {}".format(current_section,line))
             option = getOption(line)
-            section_number = sections_list.index(current_section)
-            if option.lower() in options_list_of_lists[section_number]:
-                option_number = options_list_of_lists[section_number].index(option.lower())
-                station_value = values_list_of_lists[section_number][option_number]
-                # Generate the line
-                output_line = "{}: {}\n".format(option, station_value)
-            else:
-                if interactive:
-                    print("Option:{} from Section:{} was not found in station .config, set to {}"
+            if current_section in sections_list:
+                section_number = sections_list.index(current_section)
+
+            if section_number < len(options_list_of_lists):
+                if option.lower() in options_list_of_lists[section_number]:
+                    option_number = options_list_of_lists[section_number].index(option.lower())
+                    station_value = values_list_of_lists[section_number][option_number]
+                    # Generate the line
+                    output_line = "{}: {}\n".format(option, station_value)
+                else:
+                    if interactive:
+                        print("Option:{} from Section:{} was not found in station .config, set to {}"
                                                 .format(option, current_section, getValue(line)))
+                    output_line = line
+            else:
+                print("Section {} was not found in station .config, copying this line across".format(current_section))
                 output_line = line
 
         else:
@@ -419,8 +442,12 @@ def compare(new_config_path, sections_list, options_list_of_lists, values_list_o
     for line in fh:
         config_file_as_list.append(line.replace("\n",""))
 
+    # Initialize here to palliate warnings
     correct_section = False
     for section in sections_list:
+        if not sections_list.index(section) < len(options_list_of_lists):
+            print("Section {} is in the template file only, not comparing.".format(section))
+            continue
         for option, value in zip(options_list_of_lists[sections_list.index(section)],
                                                                 values_list_of_lists[sections_list.index(section)]):
             correct_section, option_value_mismatch, found_option_value = False, False, False
@@ -540,7 +567,7 @@ def updateConfig(config_file_path, config_template_file_path, interactive=False)
 
 
 if __name__ == "__main__":
-    ### COMMAND LINE ARGUMENTS
+    ### COMMAND LINE ARGUMENTSy
 
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Upgrade a .config file to match the .configTemplate format")
