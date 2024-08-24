@@ -18,9 +18,14 @@ from __future__ import absolute_import, division, print_function
 
 import datetime
 import os
-
+import sys
 import git
 import numpy as np
+from RMS.Misc import RmsDateTime
+
+# Map FileNotFoundError to IOError in Python 2 as it does not exist
+if sys.version_info[0] < 3:
+    FileNotFoundError = IOError
 
 
 def validDefaultFTPdetectinfo(file_name):
@@ -80,7 +85,7 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
         ftpdetect_file.write("Meteor Count = " + str(total_meteors).zfill(6) + "\n")
         ftpdetect_file.write("-----------------------------------------------------\n")
         ftpdetect_file.write("Processed with RMS 1.0 " + commit_time + " " + str(sha) + " on " \
-            + str(datetime.datetime.utcnow()) + " UTC\n")
+            + str(RmsDateTime.utcnow()) + " UTC\n")
         ftpdetect_file.write("-----------------------------------------------------\n")
         ftpdetect_file.write("FF  folder = " + ff_directory + "\n")
         ftpdetect_file.write("CAL folder = " + cal_directory + "\n")

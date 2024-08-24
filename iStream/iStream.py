@@ -3,11 +3,10 @@ import os
 import sys
 import traceback
 import subprocess
-import datetime
 import logging
 from RMS.CaptureDuration import captureDuration
 from RMS.Logger import initLogging
-from RMS.Misc import isRaspberryPi
+from RMS.Misc import isRaspberryPi, RmsDateTime
 
 
 def rmsExternal(captured_night_dir, archived_night_dir, config):
@@ -34,7 +33,7 @@ def rmsExternal(captured_night_dir, archived_night_dir, config):
     # Compute the capture duration from now
     start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation)
 
-    timenow = datetime.datetime.utcnow()
+    timenow = RmsDateTime.utcnow()
     remaining_seconds = 0
 
     # Compute how long to wait before capture

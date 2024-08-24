@@ -10,14 +10,13 @@ import platform
 import argparse
 import subprocess
 import shutil
-import datetime
 import cv2
 
 from PIL import ImageFont
 
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName, filenameToDatetime
-from RMS.Misc import mkdirP
+from RMS.Misc import mkdirP, RmsDateTime
 
 
 
@@ -55,7 +54,7 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
         crf = 29
 
 
-    t1 = datetime.datetime.utcnow()
+    t1 = RmsDateTime.utcnow()
 
     # Load the font for labeling
     try:
@@ -121,7 +120,7 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
         # Print elapsed time
         if c % 30 == 0:
             print("{:>5d}/{:>5d}, Elapsed: {:s}".format(c + 1, len(ff_list), \
-                str(datetime.datetime.utcnow() - t1)), end="\r")
+                str(RmsDateTime.utcnow() - t1)), end="\r")
             sys.stdout.flush()
 
 
@@ -176,7 +175,7 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
         shutil.rmtree(dir_tmp_path)
         print("Deleted temporary directory : " + dir_tmp_path)
 		
-    print("Total time:", datetime.datetime.utcnow() - t1)
+    print("Total time:", RmsDateTime.utcnow() - t1)
 
 
 if __name__ == "__main__":

@@ -51,6 +51,7 @@ from RMS.Astrometry.CyFunctions import (cyraDecToXY, cyTrueRaDec2ApparentAltAz,
                                         cyXYToRADec,
                                         eqRefractionApparentToTrue,
                                         equatorialCoordPrecession)
+from RMS.Misc import RmsDateTime
 
 # Handle Python 2/3 compatibility
 if sys.version_info.major == 3:
@@ -876,7 +877,7 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, U
 
 
     # Calibration string to be written to the FTPdetectinfo file
-    calib_str = 'Calibrated with RMS on: ' + str(datetime.datetime.utcnow()) + ' UTC'
+    calib_str = 'Calibrated with RMS on: ' + str(RmsDateTime.utcnow()) + ' UTC'
 
     # If no meteors were detected, set dummpy parameters
     if len(meteor_list) == 0:

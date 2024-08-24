@@ -1699,7 +1699,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Create a filtered catalog
         self.catalog_stars_filtered_unmasked = self.catalog_stars[filtered_indices_all]
 
-        if self.mask is None:
+        if (self.mask is None) or (not hasattr(self.mask, 'img')):
             cat_stars_xy, self.catalog_stars_filtered = [], []
             for star_xy, star_radec in zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked):
                     cat_stars_xy.append(star_xy)
@@ -1709,6 +1709,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
             cat_stars_xy, self.catalog_stars_filtered = [], []
             for star_xy, star_radec in zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked):
+                
+                # Check if the star is inside the mask
                 if self.mask.img[int(star_xy[1]), int(star_xy[0])] != 0:
                     cat_stars_xy.append(star_xy)
                     self.catalog_stars_filtered.append(star_radec)
@@ -1717,7 +1719,10 @@ class PlateTool(QtWidgets.QMainWindow):
         cat_stars_xy = np.array(cat_stars_xy)
 
         # Create a list of filtered catalog image coordinates
-        self.catalog_x_filtered, self.catalog_y_filtered, catalog_mag_filtered = cat_stars_xy.T
+        if len(cat_stars_xy):
+            self.catalog_x_filtered, self.catalog_y_filtered, catalog_mag_filtered = cat_stars_xy.T
+        else:
+            self.catalog_x_filtered, self.catalog_y_filtered, catalog_mag_filtered = [], [], []
 
         # Show stars on the image
         if self.catalog_stars_visible:
@@ -2580,9 +2585,6 @@ class PlateTool(QtWidgets.QMainWindow):
             if not hasattr(self.platepar, "vignetting_fixed"):
                 self.platepar.vignetting_fixed = False
 
-            if not hasattr(self.autopan_mode, "autopan_mode"):
-                self.autopan_mode = False
-
             if not hasattr(self.platepar, "measurement_apparent_to_true_refraction"):
                 self.platepar.measurement_apparent_to_true_refraction = False
 
@@ -2740,6 +2742,14 @@ class PlateTool(QtWidgets.QMainWindow):
         if not hasattr(self, "meas_ground_points"):
             self.meas_ground_points = False
 
+        if not hasattr(self, "autopan_mode"):
+            self.autopan_mode = False
+
+        if not hasattr(self, "unsuitable_stars"):
+            self.unsuitable_stars = PairedStars()
+
+        if not hasattr(self, "max_pixels_between_matched_stars"):
+            self.max_pixels_between_matched_stars = np.inf
 
         # Update possibly missing flag for measuring ground points
         if not hasattr(self, "single_click_photometry"):
@@ -6548,7 +6558,7 @@ if __name__ == '__main__':
             mask = None
 
         # If the dimensions of the mask do not match the config file, ignore the mask
-        if not mask.checkResolution(config.width, config.height):
+        if (mask is not None) and (not mask.checkResolution(config.width, config.height)):
             print("Mask resolution ({:d}, {:d}) does not match the image resolution ({:d}, {:d}). Ignoring the mask.".format(
                 mask.width, mask.height, config.width, config.height))
             mask = None
@@ -6584,7 +6594,7 @@ if __name__ == '__main__':
             mask = None
 
         # If the dimensions of the mask do not match the config file, ignore the mask
-        if not mask.checkResolution(config.width, config.height):
+        if (mask is not None) and (not mask.checkResolution(config.width, config.height)):
             print("Mask resolution ({:d}, {:d}) does not match the image resolution ({:d}, {:d}). Ignoring the mask.".format(
                 mask.width, mask.height, config.width, config.height))
             mask = None
