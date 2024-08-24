@@ -48,8 +48,9 @@ def mkdirP(path):
             return True
 
     # Raise all other errors
-    except:
-        raise 
+    except Exception as e:
+        log.error("Error creating directory: " + str(e))
+        return False
 
     return False
 
