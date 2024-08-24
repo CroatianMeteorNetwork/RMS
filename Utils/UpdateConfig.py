@@ -369,7 +369,7 @@ def populateTemplateConfig(config_template_file_path, config_file_path,
         # If not any of these, then it must be a line with an option and value
         if not blank_line and not comment_line and not section_header_line and not uncomment_line:
             # added print call for debugging purposes
-            print(line)
+            print("[{}]  {}".format(current_section,line))
             option = getOption(line)
             section_number = sections_list.index(current_section)
             if option.lower() in options_list_of_lists[section_number]:
