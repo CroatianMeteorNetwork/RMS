@@ -40,15 +40,18 @@ def mkdirP(path):
     # Try to make a directory
     try:
         os.makedirs(path)
+        return True
 
     # If it already exist, do nothing
     except OSError as exc:
         if exc.errno == errno.EEXIST:
-            pass
+            return True
 
     # Raise all other errors
     except:
         raise 
+
+    return False
 
 
 def walkDirsToDepth(dir_path, depth=-1):
