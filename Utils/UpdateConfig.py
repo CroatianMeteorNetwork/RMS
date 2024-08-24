@@ -50,6 +50,7 @@ def printWarning(config_path, template):
     else:
         return
 
+
 def parseConfigFileBySection(config_path):
     """Parse the .config file, into one list and two lists of lists
 
@@ -84,6 +85,7 @@ def parseConfigFileBySection(config_path):
                 values_list.append(value)
         options_list_of_lists.append(options_list)
         values_list_of_lists.append(values_list)
+
 
     return sections_list, options_list_of_lists, values_list_of_lists
 
@@ -166,7 +168,7 @@ def sectionHeaderLine(line, section_list):
         return False
 
 
-def getOption(line, delimiter =":"):
+def getOption(line, delimiter =":", preserve_case=True):
 
     """
     Get the option, if any from a line
@@ -181,7 +183,11 @@ def getOption(line, delimiter =":"):
     """
 
     if delimiter in line:
-        return line[0:line.index(delimiter)].strip().lower()
+        line = line[0:line.index(delimiter)].strip()
+        if preserve_case:
+            return line
+        else:
+            return line.lower()
     else:
         return None
 
@@ -459,13 +465,13 @@ def compare(new_config_path, sections_list, options_list_of_lists, values_list_o
 
                 if correct_section:
 
-                    if getOption(line) == option and getValue(line) != value:
+                    if getOption(line, preserve_case=False) == option and getValue(line) != value:
                         option_value_mismatch = True
                         found_option_value = True
                         wrong_value = getValue(line)
                         break
 
-                    if getOption(line) == option and getValue(line) == value:
+                    if getOption(line, preserve_case=False) == option and getValue(line) == value:
                         found_option_value = True
 
             if option_value_mismatch and found_option_value:
