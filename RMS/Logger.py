@@ -43,10 +43,10 @@ def initLogging(config, log_file_prefix="", safedir=None):
     # Make directories
     print("Creating directory: " + config.data_dir)
     data_dir_status = mkdirP(config.data_dir)
-    print("   {}".format(data_dir_status))
+    print("   Success: {}".format(data_dir_status))
     print("Creating directory: " + log_path)
     log_path_status = mkdirP(log_path)
-    print("   {}".format(log_path_status))
+    print("   Sucess: {}".format(log_path_status))
 
     # If the log directory doesn't exist or is not writable, use the safe directory
     if safedir is not None:

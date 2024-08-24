@@ -46,6 +46,9 @@ def mkdirP(path):
     except OSError as exc:
         if exc.errno == errno.EEXIST:
             return True
+        else:
+            log.error("Error creating directory: " + str(exc))
+            return False
 
     # Raise all other errors
     except Exception as e:
