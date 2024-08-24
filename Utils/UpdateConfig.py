@@ -38,6 +38,18 @@ except:
 
 def printWarning(config_path, template):
 
+    """
+
+    Prints a warning to the user
+
+    Args:
+        config_path (): path to a config file
+        template (): path to the template file
+
+    Returns:
+
+    """
+
     print("This utility will copy all the options from the config file {} ".format(config_path))
     print("into a new file based on the template {} \n".format(template))
     print("Any options in the config file which are not in the template")
@@ -52,7 +64,10 @@ def printWarning(config_path, template):
 
 
 def parseConfigFileBySection(config_path):
-    """Parse the .config file, into one list and two lists of lists
+    """
+
+    Parse the .config file, into one list and two lists of lists
+
 
 
     Arguments:
@@ -91,7 +106,9 @@ def parseConfigFileBySection(config_path):
 
 def backupConfig(config_file_path, number_to_keep=5):
 
-    """Create numbered backups of the .config file
+    """
+
+    Create numbered backups of the .config file
 
 
         Arguments:
@@ -126,6 +143,24 @@ def backupConfig(config_file_path, number_to_keep=5):
 
 def getSectionHeaderFromLine(line):
 
+    """
+    Get the section header from a line
+
+    Qualification is an opening [
+    A word which is the the list of sections
+    Following by a closing ]
+
+    Args:
+        line (str): a string of text
+
+    Returns:
+        either
+            a string if a section header is found
+        or
+            None if no header is found
+    """
+
+
     opening_square_bracket, closing_square_bracket = False, False
     opening_square_bracket_position, closing_square_bracket_position = 0, 0
 
@@ -146,10 +181,8 @@ def getSectionHeaderFromLine(line):
 def sectionHeaderLine(line, section_list):
 
     """
-    Detect if this is a section header line
-    Qualification is an opening [
-    A word which is the the list of sections
-    Following by a closing ]
+    Detect if this is a section header line found in the section list
+
 
     Arguments:
         line: line to be checked
@@ -160,8 +193,6 @@ def sectionHeaderLine(line, section_list):
 
     """
 
-
-
     if getSectionHeaderFromLine(line) in section_list:
         return True
     else:
@@ -169,6 +200,7 @@ def sectionHeaderLine(line, section_list):
 
 
 def getOption(line, delimiter =":", preserve_case=True):
+
 
     """
     Get the option, if any from a line
@@ -233,8 +265,6 @@ def insert(current_section, insert_options_list, interactive=False, newline_afte
     """
     output_lines = ""
     insert_made = False
-
-
 
     for section, option, value in insert_options_list:
         if section == current_section:
@@ -324,7 +354,8 @@ def populateTemplateConfig(config_template_file_path, config_file_path,
     new_sections_list = []
     for template_section in template_sections_list:
         if template_section not in sections_list:
-            print("{} is a new section in the template, not in the config".format(template_section))
+            if interactive:
+                print("{} is a new section in the template, not in the config".format(template_section))
             new_sections_list.append(template_section)
 
     # Work through the template file
@@ -397,6 +428,8 @@ def populateTemplateConfig(config_template_file_path, config_file_path,
             if current_section in sections_list:
                 section_number = sections_list.index(current_section)
 
+            # If this section number is going to return a an option then it must have
+            # been in the station .config file
             if section_number < len(options_list_of_lists):
                 if option.lower() in options_list_of_lists[section_number]:
                     option_number = options_list_of_lists[section_number].index(option.lower())
@@ -409,7 +442,8 @@ def populateTemplateConfig(config_template_file_path, config_file_path,
                                                 .format(option, current_section, getValue(line)))
                     output_line = line
             else:
-                print("Section {} was not found in station .config, copying this line across".format(current_section))
+                if interactive:
+                    print("From new section {} adding new line {}".format(template_sections_list[-1],line))
                 output_line = line
 
         else:
@@ -452,7 +486,8 @@ def compare(new_config_path, sections_list, options_list_of_lists, values_list_o
     correct_section = False
     for section in sections_list:
         if not sections_list.index(section) < len(options_list_of_lists):
-            print("Section {} is in the template file only, not comparing.".format(section))
+            if interactive:
+                print("Section {} is in the template file only, not comparing.".format(section))
             continue
         for option, value in zip(options_list_of_lists[sections_list.index(section)],
                                                                 values_list_of_lists[sections_list.index(section)]):
