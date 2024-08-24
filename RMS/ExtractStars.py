@@ -607,7 +607,7 @@ def extractStarsAndSave(config, ff_dir):
 
     # Load mask, dark, flat
     loader = getImageCalibrationLoader()
-    mask, dark, flat_struct = loader.loadImageCalibration(ff_dir, config)
+    (mask, dark, flat_struct), _ = loader.loadImageCalibration(ff_dir, config)
     
 
     extraction_list = []

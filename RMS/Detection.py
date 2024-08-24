@@ -36,7 +36,7 @@ from mpl_toolkits.mplot3d import Axes3D
 # RMS imports
 from RMS.Astrometry.Conversions import jd2Date, raDec2AltAz
 import RMS.ConfigReader as cr
-from RMS.DetectionTools import getThresholdedStripe3DPoints, binImageCalibration
+from RMS.DetectionTools import getThresholdedStripe3DPoints
 from RMS.ImageCalibrationLoader import getImageCalibrationLoader
 from RMS.Formats.AsgardEv import writeEv
 from RMS.Formats.AST import xyToRaDecAST
@@ -1051,7 +1051,7 @@ def thresholdAndCorrectGammaFF(img_handle, config, mask):
 
 
 
-def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, asgard=False, debug=False):
+def detectMeteors(img_handle, config, calibration_data=None, asgard=False, debug=False):
     """ Detect meteors on the given image. Here are the steps in the detection:
             - input image (FF bin format file) is thresholded (converted to black and white)
             - several morphological operations are applied to clean the image
@@ -1068,9 +1068,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
         config: [config object] configuration object (loaded from the .config file)
 
     Keyword arguments:
-        flat_struct: [Flat struct] Structure containing the flat field. None by default.
-        dark: [ndarray] Dark frame. None by default.
-        mask: [ndarray] Mask image. None by default.
+        calibration_data: Tuple of (original, binned) calibration data, where each is (mask, dark, flat_struct)
         asgard: [bool] If True, the vid file sequence number will be added in with the frame. False by 
             default, in which case only the frame number will be in the centroids.
         debug: [bool] If True, graphs for testing the detection settings will be shown. False by default.
@@ -1086,12 +1084,17 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
     t1 = time()
     t_all = time()
 
+    mask, dark, flat_struct = None, None, None
+    
+    if calibration_data is not None:
+        # Use the binned mask, dark and flat, only when not running on FF files
+        if (img_handle.input_type != 'ff') and (config.detection_binning_factor > 1):
 
-    # Bin the mask, dark and flat, only when not running on FF files
-    if (img_handle.input_type != 'ff') and (config.detection_binning_factor > 1):
-
-        # Bin the calibration images
-        mask, dark, flat_struct = binImageCalibration(config, mask, dark, flat_struct)
+            # Use binned calibration images
+            _, (mask, dark, flat_struct) = calibration_data
+        else:
+            # Use original calibration images
+            (mask, dark, flat_struct), _ = calibration_data
 
 
     # Do all image processing on single FF file, if given
@@ -1749,9 +1752,8 @@ if __name__ == "__main__":
 
     # Load mask, dark, flat
     loader = getImageCalibrationLoader()
-    mask, dark, flat_struct = loader.loadImageCalibration(main_dir, config, dtype=img_handle_main.ff.dtype,
+    calibration_data = loader.loadImageCalibration(main_dir, config, dtype=img_handle_main.ff.dtype,
                                                           byteswap=img_handle_main.byteswap)
-
 
     # Init results list
     results_list = []
@@ -1772,7 +1774,7 @@ if __name__ == "__main__":
         logDebug(img_handle.name())
 
         # Run the meteor detection algorithm
-        meteor_detections = detectMeteors(img_handle, config, flat_struct=flat_struct, dark=dark, mask=mask, \
+        meteor_detections = detectMeteors(img_handle, config, calibration_data=calibration_data, \
             debug=cml_args.debugplots, asgard=(cml_args.asgard is not None))
 
         # Suppress numpy scientific notation printing

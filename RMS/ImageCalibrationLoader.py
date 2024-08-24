@@ -21,6 +21,7 @@ class ImageCalibrationLoader:
     """
     def __init__(self):
         self.file_cache = {}
+        self.binned_cache = {}
 
     def loadFile(self, file_path, loader_func, *args, **kwargs):
         """
@@ -69,9 +70,11 @@ class ImageCalibrationLoader:
         byteswap: [bool] If the dark and flat should be byteswapped. False by
                   default, and should be True for UWO PNGs.
 
-        Return:
-        mask, dark, flat_struct: [tuple of ndarrays]
+        Returns:
+            tuple: A tuple containing (original, binned), where each is a
+                   tuple of (mask, dark, flat_struct).
         """
+
         # Load mask
         mask_path = None
         for p in [os.path.join(dir_path, config.mask_file),
@@ -153,11 +156,52 @@ class ImageCalibrationLoader:
                     log.info('{0} flat: {1}'.format("Reloaded" if flat_reloaded else "Using cached",
                                                     flat_path))
 
-        return mask, dark, flat_struct
+        # Create binned versions if any file was reloaded or don't exist
+        bin_key = (config.detection_binning_factor, 'avg')
+        if mask_reloaded or dark_reloaded or flat_reloaded or bin_key not in self.binned_cache:
+            binned_mask, binned_dark, binned_flat = self.binImageCalibration(config, mask, dark, flat_struct)
+            self.binned_cache[bin_key] = (binned_mask, binned_dark, binned_flat)
+
+        original = (mask, dark, flat_struct)
+        binned = self.binned_cache[bin_key]
+
+        return original, binned
+
+    def binImageCalibration(self, config, mask, dark, flat_struct):
+        """Bin the calibration images."""
+        binning_factor = config.detection_binning_factor
+        binning_method = 'avg'
+
+        # Bin the mask
+        if mask is not None:
+            binned_mask = mask.copy()
+        else:
+            binned_mask = None
+
+        if binned_mask is not None:
+            binned_mask.img = Image.binImage(binned_mask.img, binning_factor, binning_method)
+
+        # Bin the dark
+        if dark is not None:
+            binned_dark = Image.binImage(dark, binning_factor, binning_method)
+        else:
+            binned_dark = None
+
+        # Bin the flat
+        if flat_struct is not None:
+            binned_flat = flat_struct.copy()
+        else:
+            binned_flat = None
+
+        if binned_flat is not None:
+            binned_flat.binFlat(binning_factor, binning_method)
+
+        return binned_mask, binned_dark, binned_flat
 
     def clearCache(self):
         """Clear the entire file cache."""
         self.file_cache.clear()
+        self.binned_cache.clear()
 
     def remove_from_cache(self, file_path):
         """Remove a specific file from the cache."""
