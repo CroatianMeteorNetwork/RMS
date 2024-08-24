@@ -173,27 +173,21 @@ class ImageCalibrationLoader:
         binning_method = 'avg'
 
         # Bin the mask
+        binned_mask = None
         if mask is not None:
             binned_mask = mask.copy()
-        else:
-            binned_mask = None
-
-        if binned_mask is not None:
             binned_mask.img = Image.binImage(binned_mask.img, binning_factor, binning_method)
 
         # Bin the dark
+        binned_dark = None
         if dark is not None:
+            binned_dark = np.copy(dark)
             binned_dark = Image.binImage(dark, binning_factor, binning_method)
-        else:
-            binned_dark = None
 
         # Bin the flat
+        binned_flat = None
         if flat_struct is not None:
             binned_flat = flat_struct.copy()
-        else:
-            binned_flat = None
-
-        if binned_flat is not None:
             binned_flat.binFlat(binning_factor, binning_method)
 
         return binned_mask, binned_dark, binned_flat

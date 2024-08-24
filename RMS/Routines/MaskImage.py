@@ -22,6 +22,7 @@ import zipfile
 
 import numpy as np
 import cv2
+import copy
 
 from RMS.Routines.Image import loadImage
 
@@ -78,6 +79,11 @@ class MaskStructure(object):
             print("MASK RESET because the resolution didn't match!")
             self.resetEmpty(x_res, y_res)
 
+
+    def copy(self):
+        """ Create a deep copy of the MaskStructure. """
+        new_instance = MaskStructure(copy.deepcopy(self.img))
+        return new_instance
 
 
 def getMaskFile(dir_path, config, file_list=None):
