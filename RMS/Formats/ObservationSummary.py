@@ -488,15 +488,15 @@ def unserialize(self):
 if __name__ == "__main__":
     config = parse(os.path.expanduser("~/source/RMS/.config"))
 
-    if True:
-        obs_db_conn = getObsDBConn(config)
-        startObservationSummaryReport(config, 100, force_delete=False)
-        pp = Platepar()
-        pp.read(os.path.expanduser(os.path.join(config.rms_root_dir, "platepar_cmn2010.cal")))
-        night_data_dir = os.path.join(config.data_dir, config.captured_dir)
-        finalizeObservationSummary(config, os.listdir(night_data_dir)[-1], pp)
-        output_directory = os.path.join(config.data_dir, os.listdir(night_data_dir)[-1])
-        print("Writing to directory {}".format(output_directory))
-        writeToFile(config, config.data_dir)
+
+    obs_db_conn = getObsDBConn(config)
+    startObservationSummaryReport(config, 100, force_delete=False)
+    pp = Platepar()
+    pp.read(os.path.expanduser(os.path.join(config.rms_root_dir, "platepar_cmn2010.cal")))
+    night_data_dir = os.path.join(config.data_dir, config.captured_dir)
+    finalizeObservationSummary(config, os.listdir(night_data_dir)[-1], pp)
+    output_directory = os.path.join(config.data_dir, os.listdir(night_data_dir)[-1])
+    print("Writing to directory {}".format(output_directory))
+    writeToFile(config, config.data_dir)
     print(serialize(config, as_json=True))
     writeToJSON(config,os.path.expanduser( "~/RMS_data/summary.json"))
