@@ -126,8 +126,8 @@ def captureDirectories(captured_dir, stationID):
     if len(os.listdir(captured_dir)) < 1:
         return 0
 
-    for items in os.listdir(captured_dir):
-        if items[0:len(stationID)] == stationID:
+    for item in os.listdir(captured_dir):
+        if item.startswith(stationID) and os.path.isdir(os.path.join(captured_dir, item)):
             capture_directories += 1
 
     return capture_directories
