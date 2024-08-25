@@ -492,7 +492,7 @@ if __name__ == "__main__":
         obs_db_conn = getObsDBConn(config)
         startObservationSummaryReport(config, 100, force_delete=False)
         pp = Platepar()
-        pp.read(os.path.expanduser(config.rms_root_dir, "platepar_cmn2010.cal"))
+        pp.read(os.path.expanduser(os.path.join(config.rms_root_dir, "platepar_cmn2010.cal")))
         finalizeObservationSummary(config, os.listdir(config.night_data_dir)[-1], pp)
         writeToFile(config, config.data_dir)
     print(serialize(config, as_json=True))
