@@ -3,6 +3,7 @@ from __future__ import print_function, division, absolute_import
 import os
 import logging
 import numpy as np
+import copy
 
 from RMS.Routines import Image
 from RMS.Routines import MaskImage
@@ -175,7 +176,7 @@ class ImageCalibrationLoader:
         # Bin the mask
         binned_mask = None
         if mask is not None:
-            binned_mask = mask.copy()
+            binned_mask = copy.deepcopy(mask)
             binned_mask.img = Image.binImage(binned_mask.img, binning_factor, binning_method)
 
         # Bin the dark
@@ -187,7 +188,7 @@ class ImageCalibrationLoader:
         # Bin the flat
         binned_flat = None
         if flat_struct is not None:
-            binned_flat = flat_struct.copy()
+            binned_flat = copy.deepcopy(flat_struct)
             binned_flat.binFlat(binning_factor, binning_method)
 
         return binned_mask, binned_dark, binned_flat
