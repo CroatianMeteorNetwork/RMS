@@ -504,5 +504,7 @@ if __name__ == "__main__":
     print("Writing to directory {}".format(output_directory))
     writeToFile(config, output_directory)
     writeToJSON(config, output_directory)
+    print("Summary as colon delimited text")
     print(serialize(config, as_json=False))
+    print("Summary as json")
     print(serialize(config, as_json=True))
