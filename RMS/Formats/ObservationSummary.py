@@ -138,7 +138,7 @@ def getRmsRepo():
     try:
         return git.Repo(rms_path)
     except InvalidGitRepositoryError:
-        print(f"Warning: No valid Git repository found at {rms_path}")
+        print("Warning: No valid Git repository found at {}".format(rms_path))
         return None
 
 
@@ -244,6 +244,24 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
 
 
 def nightSummaryData(config, night_data_dir):
+    """ Calculate the summary data for the night. This is based on work by others
+        and translated from the original source code
+
+                arguments:
+                    config: config file
+                    night_data_dir: the directory of captured files
+
+
+                returns:
+                    capture_duration_from_fits: the duration from the start of first fits to the end of the last
+                    fits_count: the count of *.fits files in the directory
+                    fits_file_shortfall: the number of expected fits expected vs the number actually found
+                    fits_file_shortfall_as_time: this shortfall expressed in seconds, never negative
+                    time_first_fits_file: the time of the first fits file
+                    time_last_fits_file: the time of the last fits file
+                    total_expected_fits: the number of fits files expected
+
+                """
 
     duration_one_fits_file = 256 / config.fps
     fits_files_list = glob.glob(os.path.join(night_data_dir, "*.fits"))
@@ -346,6 +364,15 @@ def estimateLens(fov_h):
     return None
 
 def getLastStartTime(conn):
+    """ Query the database to discover the previous start time
+        arguments:
+                conn: connection to database
+
+        returns:
+                the previous start time
+
+    """
+
 
     sql_statement = ""
     sql_statement += "SELECT Value from records \n"
@@ -364,6 +391,14 @@ def getLastStartTime(conn):
     return result[0]
 
 def retrieveObservationData(conn, obs_start_time):
+    """ Query the database to get the data more recent than the time passed in.
+        Usually this will be the start of the most recent observation session
+            arguments:
+                    conn: connection to database
+
+            returns:
+                    key value pairs committed to the database since the obs_start_time
+    """
 
     sql_statement = ""
     sql_statement += "SELECT Key, Value from records \n"
@@ -373,7 +408,19 @@ def retrieveObservationData(conn, obs_start_time):
     return conn.cursor().execute(sql_statement).fetchall()
 
 
-def serialize(config, format_nicely=True, consider_security=True, utf8=True, as_json=False):
+def serialize(config, format_nicely=True, as_json=False):
+    """ Returns the data from the most recent observation session as either colon
+        delimited text file, ar as a json
+                arguments:
+                        config: station config file
+                        format_nicely: optional, default true, present the data with
+                                        delimeter characters aligned
+                        as_json: optional, default false, return the data as a json
+
+                returns:
+                        string of key value pairs committed to the database since the
+                        start of the previous observation session
+        """
 
     conn = getObsDBConn(config)
     data = retrieveObservationData(conn, getLastStartTime(conn))
@@ -394,12 +441,32 @@ def serialize(config, format_nicely=True, consider_security=True, utf8=True, as_
 
 
 def writeToFile(config, file_path_and_name):
+    """Write colon delimited text to file
+                arguments:
+                        config: station config file
+                        file_path_and_name: full path to the target file
+
+                returns:
+                        string of key value pairs committed to the database since the
+                        start of the previous observation session
+        """
+
+
     with open(file_path_and_name, "w") as summary_file_handle:
         as_ascii = serialize(config).encode("ascii", errors="ignore").decode("ascii")
         summary_file_handle.write(as_ascii)
 
 
 def writeToJSON(config, file_path_and_name):
+    """Write colon delimited text to file as a json
+                    arguments:
+                            config: station config file
+                            file_path_and_name: full path to the target file
+
+                    returns:
+                            string of key value pairs committed to the database since the
+                            start of the previous observation session
+            """
     with open(file_path_and_name, "w") as summary_file_handle:
         as_ascii = serialize(config, as_json=True).encode("ascii", errors="ignore").decode("ascii")
         summary_file_handle.write(as_ascii)
@@ -419,17 +486,14 @@ def unserialize(self):
 
 
 if __name__ == "__main__":
-    config = parse("/home/david/source/RMS/.config")
+    config = parse(os.path.expanduser("~/source/RMS/.config"))
 
     if True:
         obs_db_conn = getObsDBConn(config)
         startObservationSummaryReport(config, 100, force_delete=False)
-        night_data_dir = "/home/david/RMS_data/CapturedFiles/AU0006_20240811_101142_903530"
-
-
         pp = Platepar()
-        pp.read("/home/david/source/RMS/platepar_cmn2010.cal")
-        finalizeObservationSummary(config, night_data_dir, pp)
-        writeToFile(config, os.path.expanduser("~/RMS_data/observation_summary.txt"))
+        pp.read(os.path.expanduser(config.rms_root_dir, "platepar_cmn2010.cal"))
+        finalizeObservationSummary(config, os.listdir(config.night_data_dir)[-1], pp)
+        writeToFile(config, config.data_dir)
     print(serialize(config, as_json=True))
     writeToJSON(config, "/home/david/RMS_data/summary.json")
