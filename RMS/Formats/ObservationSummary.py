@@ -495,7 +495,7 @@ if __name__ == "__main__":
         pp.read(os.path.expanduser(os.path.join(config.rms_root_dir, "platepar_cmn2010.cal")))
         night_data_dir = os.path.join(config.data_dir, config.captured_dir)
         finalizeObservationSummary(config, os.listdir(night_data_dir)[-1], pp)
-        output_directory = os.path.join(os.listdir(night_data_dir)[-1])
+        output_directory = os.path.join(config.data_dir, os.listdir(night_data_dir)[-1])
         print("Writing to directory {}".format(output_directory))
         writeToFile(config, config.data_dir)
     print(serialize(config, as_json=True))
