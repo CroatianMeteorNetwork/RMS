@@ -499,4 +499,4 @@ if __name__ == "__main__":
         print("Writing to directory {}".format(output_directory))
         writeToFile(config, config.data_dir)
     print(serialize(config, as_json=True))
-    writeToJSON(config, "/home/david/RMS_data/summary.json")
+    writeToJSON(config,os.path.expanduser( "~/RMS_data/summary.json"))
