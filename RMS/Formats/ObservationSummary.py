@@ -497,6 +497,6 @@ if __name__ == "__main__":
     finalizeObservationSummary(config, os.listdir(night_data_dir)[-1], pp)
     output_directory = os.path.join(config.data_dir, os.listdir(night_data_dir)[-1])
     print("Writing to directory {}".format(output_directory))
-    writeToFile(config, config.data_dir)
+    writeToFile(config, output_directory)
     print(serialize(config, as_json=True))
     writeToJSON(config,os.path.expanduser( "~/RMS_data/summary.json"))
