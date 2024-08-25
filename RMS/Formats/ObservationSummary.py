@@ -296,7 +296,7 @@ def addObsParam(conn, key, value):
                 conn: [connection] connection to database if success else None
 
             """
-    print("Key:Value {}:{}".format(key, value))
+
 
     sql_statement = ""
     sql_statement += "INSERT INTO records \n"
@@ -494,14 +494,9 @@ if __name__ == "__main__":
     pp = Platepar()
     pp.read(os.path.expanduser(os.path.join(config.rms_root_dir, "platepar_cmn2010.cal")))
     night_data_dir = os.path.join(config.data_dir, config.captured_dir)
-    print("data_dir {}".format(config.data_dir))
-    print("captured_dir {}".format(config.captured_dir))
-    print("night_data_dir {}".format(night_data_dir))
     target = os.path.join(night_data_dir, os.listdir(night_data_dir)[-1])
-    print("Target directory {}".format(target))
     finalizeObservationSummary(config, target , pp)
     output_directory = os.path.join(os.path.expanduser(config.data_dir), os.listdir(night_data_dir)[-1])
-    print("Writing to directory {}".format(output_directory))
     writeToFile(config, output_directory)
     writeToJSON(config, output_directory)
     print("Summary as colon delimited text")
