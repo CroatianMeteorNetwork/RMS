@@ -72,18 +72,40 @@ class ImageCalibrationLoader:
             file_content is the loaded file data and was_reloaded is a boolean
             indicating if the file was reloaded or loaded from cache.
         """
+
+        # Determine if the file is intended to be a mask
         is_mask = kwargs.get('is_mask', False)
+
         if file_path and os.path.exists(file_path):
+
+            # Get the last modification time of the file
             current_mtime = os.path.getmtime(file_path)
+
+            # Check if the file is not cached or has been modified
             if file_path not in self.file_cache or current_mtime != self.file_cache[file_path][0]:
+
+                # Load the file content using the provided loader function
                 content = loader_func(*args)
+
+                # If mask, determine if the image content is entirely white
                 if is_mask:
                     is_all_white = np.all(content.img == 255) if content is not None else None
+
+                    # Cache the time, content, and the all-white status
                     self.file_cache[file_path] = (current_mtime, content, is_all_white)
                 else:
+                    # Cache the time, content, and the non-all-white status
                     self.file_cache[file_path] = (current_mtime, content, None)
-                return content, True  # True indicates the file was reloaded
-            return self.file_cache[file_path][1], False  # False indicates the cached version was used
+
+                # Return the content and True, indicating the file was reloaded
+                return content, True
+
+            # If the file was already cached and hasn't been modified,
+            # return the cached content and False
+            return self.file_cache[file_path][1], False
+
+        # If the file path is invalid or the file does not exist,
+        # return None and False
         return None, False
 
     def loadImageCalibration(self, dir_path, config, dtype=None, byteswap=False):
@@ -225,7 +247,9 @@ class ImageCalibrationLoader:
 
         log.info("imageCalibrationLoader instance has been cleaned up.")
 
-# Create a single instance to be used across modules
+
+# Create an instance. This will be shared across modules within the same
+# process, but each separate Python process will have its own instance.
 imageCalibrationLoader = ImageCalibrationLoader()
 
 
