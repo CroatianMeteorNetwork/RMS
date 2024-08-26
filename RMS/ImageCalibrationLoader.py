@@ -20,9 +20,39 @@ class ImageCalibrationLoader:
     This class provides methods to load mask, dark, and flat field images
     with efficient caching to reduce I/O operations.
     """
+
     def __init__(self):
         self.file_cache = {}
         self.binned_cache = {}
+
+    def findFile(self, file_name, dir_path, config_path):
+        """
+        Helper function to find the first valid file in given directories.
+        """
+
+        # List paths to check in order of priority
+        paths_to_check = [
+            os.path.join(dir_path, file_name),
+            os.path.join(config_path, file_name)
+        ]
+
+        # Initialize result_path
+        result_path = None
+
+        # Find the first valid path
+        for path in paths_to_check:
+            if os.path.exists(path):
+                result_path = path
+                break
+
+        # Log
+        if result_path:
+            log.info("Found {file_name} at: {result_path}"
+                     .format(file_name=file_name, result_path=result_path))
+        else:
+            log.info("No {file_name} file has been found in.".format(file_name=file_name))
+
+        return result_path
 
     def loadFile(self, file_path, loader_func, *args, **kwargs):
         """
@@ -76,55 +106,46 @@ class ImageCalibrationLoader:
                    tuple of (mask, dark, flat_struct).
         """
 
-        # Load mask
-        mask_path = None
-        for p in [os.path.join(dir_path, config.mask_file),
-                  os.path.join(config.config_file_path, config.mask_file)]:
-            if os.path.exists(p):
-                mask_path = p
-                break
+        # Initialize variables
+        mask, dark, flat_struct = None, None, None
+        mask_reloaded, dark_reloaded, flat_reloaded = False, False, False
+        mask_path, dark_path, flat_path = None, None, None
 
-        if mask_path is None:
-            log_message = 'No mask file has been found.'
-            log.info(log_message)
-            return None, None, None
+        # --- Load mask ---
 
+        # Try loading the mask from CaptureFiles directory first,
+        # then from the config directory
+        mask_path = self.findFile(config.mask_file, dir_path, config.config_file_path)
         mask, mask_reloaded = self.loadFile(mask_path, MaskImage.loadMask, mask_path, is_mask=True)
 
         if mask_reloaded or (mask_path in self.file_cache and self.file_cache[mask_path][2] is None):
 
             # Check if all white only if the mask was reloaded
             if mask is not None and np.all(mask.img == 255):
-                log_message = 'Loaded mask is all white, setting it to None: {0}'.format(mask_path)
-                log.info(log_message)
+                log.info('Loaded mask is all white, setting it to None: {0}'.format(mask_path))
                 mask = None
                 # Update cache to reflect all-white status
                 self.file_cache[mask_path] = (self.file_cache[mask_path][0], None, True)
 
             else:
-                log_message = 'Loaded mask: {0}'.format(mask_path)
-                log.info(log_message)
+                log.info('Loaded mask: {0}'.format(mask_path))
 
         # Check cached all-white status
         elif mask_path in self.file_cache and self.file_cache[mask_path][2]:
-            log_message = 'Cached mask is all white, setting it to None: {0}'.format(mask_path)
-            log.info(log_message)
+            log.info('Cached mask is all white, setting it to None: {0}'.format(mask_path))
             mask = None
 
         else:
-            log_message = 'Using cached mask: {0}'.format(mask_path)
-            log.info(log_message)
+            log.info('Using cached mask: {0}'.format(mask_path))
 
-        # Load dark frame
-        dark = None
+        # --- Load dark frame ---
         if config.use_dark:
-            dark_path = None
-            for p in [os.path.join(dir_path, config.dark_file),
-                      os.path.abspath(config.dark_file)]:
-                if os.path.exists(p):
-                    dark_path = p
-                    break
 
+            # Try loading the dark file from CaptureFiles directory first,
+            # then from the config directory
+            dark_path = self.findFile(config.dark_file, dir_path, config.config_file_path)
+
+            # Load the dark file if a valid path was found
             if dark_path:
                 dark, dark_reloaded = self.loadFile(dark_path,
                                                     Image.loadDark,
@@ -136,16 +157,14 @@ class ImageCalibrationLoader:
                     log.info('{0} dark: {1}'.format("Reloaded" if dark_reloaded else "Using cached",
                                                     dark_path))
 
-        # Load flat field image
-        flat_struct = None
+        # --- Load flat field image ---
         if config.use_flat:
-            flat_path = None
-            for p in [os.path.join(dir_path, config.flat_file),
-                      os.path.abspath(config.flat_file)]:
-                if os.path.exists(p):
-                    flat_path = p
-                    break
 
+            # Try loading the flat file from CaptureFiles directory first,
+            # then from the config directory
+            flat_path = self.findFile(config.flat_file, dir_path, config.config_file_path)
+
+            # Load the flat file if a valid path was found
             if flat_path:
                 flat_struct, flat_reloaded = self.loadFile(flat_path,
                                                            Image.loadFlat,
@@ -193,16 +212,18 @@ class ImageCalibrationLoader:
 
         return binned_mask, binned_dark, binned_flat
 
-    def clearCache(self):
-        """Clear the entire file cache."""
+    def cleanup(self):
+        """
+        Clean up the instance by clearing caches and removing attributes.
+        """
         self.file_cache.clear()
         self.binned_cache.clear()
 
-    def remove_from_cache(self, file_path):
-        """Remove a specific file from the cache."""
-        if file_path in self.file_cache:
-            del self.file_cache[file_path]
+        # Explicitly remove attributes
+        self.file_cache = None
+        self.binned_cache = None
 
+        log.info("imageCalibrationLoader instance has been cleaned up.")
 
 # Create a single instance to be used across modules
 imageCalibrationLoader = ImageCalibrationLoader()
