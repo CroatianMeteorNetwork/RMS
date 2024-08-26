@@ -23,6 +23,71 @@ import logging.handlers
 
 from RMS.Misc import mkdirP, RmsDateTime
 
+# Initialize variables for GStreamer import status
+GST_IMPORTED = False
+GST_IMPORT_ERROR = None
+
+# Attempt to import GStreamer
+try:
+    import gi
+    gi.require_version('Gst', '1.0')
+    from gi.repository import Gst
+    GST_IMPORTED = True
+
+except ImportError as e:
+    GST_IMPORT_ERROR = f"Could not import gi: {e}"
+
+except ValueError as e:
+    GST_IMPORT_ERROR = f"Could not import Gst: {e}"
+
+
+class LoggerWriter:
+    def __init__(self, logger, level):
+        self.logger = logger
+        self.level = level
+
+    def write(self, message):
+        if message.strip():  # Avoid logging empty lines
+            self.logger.log(self.level, message.strip())
+
+    def flush(self):
+        pass  # No need to flush anything for logging
+
+
+def gstDebugLogger(category, level, file, function, line, object, message, user_data):
+    """
+    The function maps GStreamer debug levels to Python logging levels and logs
+    the message using the 'gstreamer' logger. If a GStreamer debug level
+    doesn't have a direct mapping, it defaults to the Python DEBUG level.
+
+    Args:
+        category (Gst.DebugCategory): The debug category of the message.
+        level (Gst.DebugLevel): The debug level of the message.
+        file (str): The file where the message originated.
+        function (str): The function where the message originated.
+        line (int): The line number where the message originated.
+        object (GObject.Object): The object that emitted the message, or None.
+        message (Gst.DebugMessage): The debug message.
+        user_data: User data passed to the log function.
+    """
+
+    # Get or create a logger specifically for GStreamer messages
+    logger = logging.getLogger('gstreamer')
+
+    # Map GStreamer debug levels to Python logging levels
+    level_map = {
+        Gst.DebugLevel.ERROR: logging.ERROR,
+        Gst.DebugLevel.WARNING: logging.WARNING,
+        Gst.DebugLevel.INFO: logging.INFO,
+        Gst.DebugLevel.DEBUG: logging.DEBUG
+    }
+
+    # Convert GStreamer level to Python logging level, defaulting to DEBUG
+    py_level = level_map.get(level, logging.DEBUG)
+
+    # Log the message with the appropriate level
+    logger.log(py_level, f"GStreamer: {category.get_name()}: {message.get()}")
+
 
 def initLogging(config, log_file_prefix="", safedir=None):
     """ Initializes the logger. 
@@ -76,5 +141,23 @@ def initLogging(config, log_file_prefix="", safedir=None):
     ch.setFormatter(formatter)
     log.addHandler(ch)
 
+    # Optionally redirect stdout to the logger
+    if config.log_stdout:
+        sys.stdout = LoggerWriter(log, logging.INFO)
 
+    # Redirect stderr to the logger
+    sys.stderr = LoggerWriter(log, logging.INFO)
 
+    # Log GStreamer import status
+    if GST_IMPORTED:
+        log.info("GStreamer successfully imported")
+    else:
+        log.warning(f"GStreamer import failed: {GST_IMPORT_ERROR}. GStreamer-specific logging is disabled.")
+
+    # Set up GStreamer logging
+    if GST_IMPORTED:
+        Gst.init(None)
+        Gst.debug_remove_log_function(None)
+        Gst.debug_add_log_function(gstDebugLogger, None)
+        Gst.debug_set_default_threshold(Gst.DebugLevel.WARNING)
+        log.info("GStreamer logging successfully initialized")

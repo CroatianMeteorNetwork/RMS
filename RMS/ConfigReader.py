@@ -345,6 +345,9 @@ class Config:
         # days of logfiles to keep
         self.logdays_to_keep = 30
 
+        # Toggle logging stdout messages
+        self.log_stdout = False
+
         # ArchDirs and bzs to keep
         # keep this many ArchDirs. Zero means keep them all
         self.arch_dirs_to_keep = 20
@@ -913,6 +916,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "logdays_to_keep"):
         config.logdays_to_keep = int(parser.get(section, "logdays_to_keep"))
+
+    if parser.has_option(section, "log_stdout"):
+        config.log_stdout = parser.getboolean(section, "log_stdout")
 
     if parser.has_option(section, "arch_dirs_to_keep"):
         config.arch_dirs_to_keep = int(parser.get(section, "arch_dirs_to_keep"))
