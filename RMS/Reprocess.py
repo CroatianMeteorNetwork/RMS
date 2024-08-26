@@ -27,7 +27,6 @@ from RMS.Formats import CALSTARS
 from RMS.MLFilter import filterFTPdetectinfoML
 from RMS.UploadManager import UploadManager
 from RMS.Routines.Image import saveImage
-from RMS.Routines.MaskImage import loadMask
 from Utils.CalibrationReport import generateCalibrationReport
 from Utils.Flux import prepareFluxFiles
 from Utils.FOVKML import fovKML
@@ -40,6 +39,7 @@ from Utils.PlotTimeIntervals import plotFFTimeIntervals
 from Utils.TimestampRMSVideos import timestampRMSVideos
 from RMS.Formats.ObservationSummary import addObsParam, getObsDBConn, nightSummaryData
 from RMS.Formats.ObservationSummary import serialize, startObservationSummaryReport, finalizeObservationSummary
+from RMS.ImageCalibrationLoader import getImageCalibrationLoader
 from Utils.AuditConfig import compareConfigs
 
 
@@ -272,27 +272,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             # Generate the FOV KML file
             log.info("Generating a FOV KML file...")
             try:
-
-                mask_path = None
-                mask = None
-
-                # Get the path to the default mask
-                mask_path_default = os.path.join(config.config_file_path, config.mask_file)
-
-                # Try loading the mask from the night directory
-                if os.path.exists(os.path.join(night_data_dir, config.mask_file)):
-                    mask_path = os.path.join(night_data_dir, config.mask_file)
-
-                # Try loading the default mask if the mask is not in the night directory
-                elif os.path.exists(mask_path_default):
-                    mask_path = os.path.abspath(mask_path_default)
-
-                # Load the mask if given
-                if mask_path:
-                    mask = loadMask(mask_path)
-
-                if mask is not None:
-                    log.info("Loaded mask: {:s}".format(mask_path))
+                loader = getImageCalibrationLoader()
+                (mask, _, _), _ = loader.loadImageCalibration(night_data_dir, config)
 
                 # Generate the KML (only the FOV is shown, without the station) - 100 km
                 kml_file100 = fovKML(night_data_dir, platepar, mask=mask, plot_station=False, \
@@ -599,6 +580,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     archive_name = archiveDetections(night_data_dir, night_archive_dir, ff_detected, config, \
         extra_files=extra_files)
 
+    # Cleanup
+    loader.cleanup()
 
     return night_archive_dir, archive_name, detector
 
