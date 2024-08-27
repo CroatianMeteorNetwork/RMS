@@ -18,14 +18,18 @@ except:
     # Python 2
     import ConfigParser as configparser
 
-OMIT_FROM_CONFIG = {'lat',
-                    'lon',
-                    'location',
-                    'altitude',
-                    'event_monitor_db_name',
-                    'force_v4l2',
-                    'mask',
-                    'platepar_name'
+OMIT_FROM_CONFIG = {'lat',  # Deprecated DFNS Station
+                    'lon',  # Deprecated DFNS Station
+                    'location',  # Deprecated DFNS Station
+                    'altitude',  # Deprecated DFNS Station
+                    'event_monitor_db_name',  # Should not be exposed
+                    'force_v4l2',  # Deprecated
+                    'mask',  # Should not be exposed
+                    'platepar_name',  # Should not be exposed
+                    'brightness',  # Deprecated
+                    'contrast',  # Deprecated
+                    'dark_file',  # Deprecated
+                    'use_dark'  # Deprecated
                     }
 
 
