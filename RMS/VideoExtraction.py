@@ -23,7 +23,7 @@ from multiprocessing import Process, Event
 
 import numpy as np
 
-from RMS.DetectionTools import loadImageCalibration, binImageCalibration
+from RMS.ImageCalibrationLoader import getImageCalibrationLoader
 from RMS.Routines import Grouping3D
 from RMS.Routines.MaskImage import maskImage
 from RMS.Formats import FRbin
@@ -52,12 +52,9 @@ class Extractor(Process):
         self.config = config
         self.data_dir = data_dir
 
-        # Load the calibration files (only the mask is used currently)
-        self.mask, self.dark, self.flat_struct = loadImageCalibration(self.data_dir, self.config)
-
-        # Bin the calibration images
-        self.mask, self.dark, self.flat_struct = binImageCalibration(self.config, self.mask, self.dark, \
-            self.flat_struct)
+        # Load the binned calibration files (only the mask is used currently)
+        loader = getImageCalibrationLoader()
+        _, (self.mask, self.dark, self.flat_struct) = loader.loadImageCalibration(self.data_dir, self.config)
 
 
     

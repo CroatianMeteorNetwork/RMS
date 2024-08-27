@@ -34,7 +34,7 @@ import scipy.ndimage.filters as filters
 import RMS.ConfigReader as cr
 from RMS.Formats import FFfile
 from RMS.Formats import CALSTARS
-from RMS.DetectionTools import loadImageCalibration
+from RMS.ImageCalibrationLoader import getImageCalibrationLoader
 from RMS.Routines import MaskImage
 from RMS.Routines import Image
 from RMS.QueuedPool import QueuedPool
@@ -606,7 +606,8 @@ def extractStarsAndSave(config, ff_dir):
     time_start = time.time()
 
     # Load mask, dark, flat
-    mask, dark, flat_struct = loadImageCalibration(ff_dir, config)
+    loader = getImageCalibrationLoader()
+    (mask, dark, flat_struct), _ = loader.loadImageCalibration(ff_dir, config)
     
 
     extraction_list = []

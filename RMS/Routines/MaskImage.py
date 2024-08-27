@@ -22,6 +22,7 @@ import zipfile
 
 import numpy as np
 import cv2
+import copy
 
 from RMS.Routines.Image import loadImage
 
@@ -77,6 +78,8 @@ class MaskStructure(object):
         elif not self.checkResolution(x_res, y_res):
             print("MASK RESET because the resolution didn't match!")
             self.resetEmpty(x_res, y_res)
+
+
 
 
 
