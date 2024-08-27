@@ -20,22 +20,14 @@ import math
 import os
 import sys
 
+# Consolidated version-specific imports and definitions
 if sys.version_info[0] == 3:
     import importlib.util
+    from configparser import NoOptionError, RawConfigParser
 else:
     import pkgutil
-
-try:
-    # Python 3
-    from configparser import NoOptionError, RawConfigParser 
-
-except:
-    # Python 2
     from ConfigParser import NoOptionError, RawConfigParser
-
-# Map FileNotFoundError to IOError in Python 2 as it does not exist
-if sys.version_info[0] < 3:
-    FileNotFoundError = IOError
+    FileNotFoundError = IOError  # Map FileNotFoundError to IOError in Python 2
 
 # Used to determine detection parameters which will change in ML filtering is available
 try:
