@@ -507,15 +507,18 @@ class FlatStruct(object):
         """ Structure containing the flat field.
 
         Arguments:
-            flat_img: [ndarray] Flat field.
-
+            flat_img: [ndarray] Flat field (8-bit or 16-bit single channel image).
         """
+        # Determine the appropriate dtype based on input
+        if flat_img.dtype == np.uint8:
+            self.dtype = np.uint8
+            self.max_value = 255
+        else:
+            self.dtype = np.uint16
+            self.max_value = 65535
 
-        # Convert the flat to float64
-        self.flat_img = flat_img.astype(np.float64)
-
-        # Store the original flat
-        self.flat_img_raw = np.copy(self.flat_img)
+        # Store the flat as the appropriate integer type
+        self.flat_img_raw = flat_img.astype(self.dtype)
 
         # Apply the dark, if given
         self.applyDark(dark)
@@ -532,11 +535,12 @@ class FlatStruct(object):
 
         # Apply a dark frame to the flat, if given
         if dark is not None:
-            self.flat_img = applyDark(self.flat_img_raw, dark)
+            # Ensure dark is the same dtype as flat and apply subtraction
+            dark = dark.astype(self.dtype)
+            self.flat_img_raw = np.maximum(self.flat_img_raw.astype(np.int32) - dark, 0).astype(self.dtype)
             self.dark_applied = True
 
         else:
-            self.flat_img = np.copy(self.flat_img_raw)
             self.dark_applied = False
 
         # Compute flat median
@@ -551,7 +555,7 @@ class FlatStruct(object):
 
 
         # Bin the flat by a factor of 4 using the average method
-        flat_binned = binImage(self.flat_img, 4, method='avg')
+        flat_binned = binImage(self.flat_img_raw, 4, method='avg')
 
         # Take the maximum average level of pixels that are in a square of 1/4*height from the centre
         radius = flat_binned.shape[0]//4
@@ -561,24 +565,26 @@ class FlatStruct(object):
             img_w_half-radius:img_w_half+radius])
 
         # Make sure the self.flat_avg value is relatively high
-        if self.flat_avg < 1:
-            self.flat_avg = 1
+        self.flat_avg = max(self.flat_avg, 1)
 
 
     def fixValues(self):
         """ Handle values close to 0 on flats. """
 
         # Make sure there are no values close to 0, as images are divided by flats
-        self.flat_img[(self.flat_img < self.flat_avg/10) | (self.flat_img < 10)] = self.flat_avg
+        mask = (self.flat_img_raw < self.flat_avg/10) | (self.flat_img_raw < 10)
+        self.flat_img_raw[mask] = self.flat_avg
 
+
+    def getFlatImage(self):
+        """Return the processed flat image as float32 for calculations."""
+        return self.flat_img_raw.astype(np.float32) / self.max_value
+    
 
     def binFlat(self, binning_factor, binning_method):
         """ Bin the flat. """
 
-        # Bin the processed flat
-        self.flat_img = binImage(self.flat_img, binning_factor, binning_method)
-
-        # Bin the raw flat image
+        # Bin the raw flat image in-place
         self.flat_img_raw = binImage(self.flat_img_raw, binning_factor, binning_method)
 
 
@@ -636,18 +642,25 @@ def applyFlat(img, flat_struct):
 
     """
 
+    # Get the processed flat image
+    flat_img = flat_struct.getFlatImage()
+
     # Check that the input image and the flat have the same dimensions, otherwise do not apply it
-    if img.shape != flat_struct.flat_img.shape:
+    if img.shape != flat_img.shape:
+        print("Warning: Flat field dimensions do not match the image. Flat field not applied.")
         return img
 
     input_type = img.dtype
 
-    # Apply the flat
-    img = flat_struct.flat_avg*img.astype(np.float64)/flat_struct.flat_img
+    # Convert image to float32 for calculations
+    img = img.astype(np.float32)
 
-    # Limit the image values to image type range
-    dtype_info = np.iinfo(input_type)
-    img = np.clip(img, dtype_info.min, dtype_info.max)
+    # Apply the flat field correction
+    np.divide(img, flat_img, out=img)
+    np.multiply(img, flat_struct.flat_avg / flat_struct.max_value, out=img)
+
+    # Clip the values to the input type's range
+    np.clip(img, np.iinfo(input_type).min, np.iinfo(input_type).max, out=img)
 
     # Make sure the output array is the same as the input type
     img = img.astype(input_type)
