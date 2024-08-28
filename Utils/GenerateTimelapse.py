@@ -11,6 +11,7 @@ import argparse
 import subprocess
 import shutil
 import cv2
+import glob
 
 from PIL import ImageFont
 
@@ -176,6 +177,69 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
         print("Deleted temporary directory : " + dir_tmp_path)
 		
     print("Total time:", RmsDateTime.utcnow() - t1)
+
+
+def generateTimelapseFromJpeg(jpg_dir, video_path, fps=30, crf=20, delete_images=False):
+    """
+    Generate a timelapse video from JPEG images and optionally delete the
+    source images.
+    
+    Keyword arguments:
+        frames_dir: [str] Directory containing JPEG images.
+        video_path: [str] Output path for the generated video.
+        fps: [int] Frames per second for the output video. 30 by default.
+        crf: [int] Constant Rate Factor for video compression. 20 by default.
+        delete_images: [bool] Whether to delete the source dir after
+                        successful video creation. False by default.
+
+    """
+    
+    images = [img for img in sorted(glob.glob(os.path.join(jpg_dir, "*.jpg")))]
+    if len(images) == 0:
+        print("No images found.")
+        return
+
+    # Create a text file listing all the images
+    list_file_path = os.path.join(jpg_dir, "filelist.txt")
+    with open(list_file_path, 'w') as f:
+        for img_path in images:
+            f.write("file '{0}'\n".format(os.path.basename(img_path)))
+
+    # Formulate the ffmpeg command
+    # base_command = (f"-nostdin -f concat -safe 0 -v quiet -r {fps} -y -i {list_file_path} -c:v libx264 "
+    #                 f"-pix_fmt yuv420p -crf {crf} -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)\" "
+    #                 f"{video_path}"
+
+    base_command = ("-nostdin -f concat -safe 0 -v quiet -r {fps} -y -i "
+                    "{list_file_path} -c:v libx264 -crf {crf} -g 15 {video_path}")
+
+    if platform.system() in ['Linux', 'Darwin']:  # Darwin is macOS
+        software_name = "ffmpeg"
+    elif platform.system() == 'Windows':
+        software_name = os.path.join(os.path.dirname(__file__), "ffmpeg.exe")
+    else:
+        print("Unsupported platform.")
+        return
+    encode_command = "{0} {1}".format(software_name, base_command)
+
+    # Execute the command
+    print("Creating timelapse using ffmpeg...")
+    subprocess.call(encode_command.format(fps=fps, list_file_path=list_file_path, crf=crf,
+                                          video_path=video_path), shell=True)
+
+    if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
+        print("Video created successfully at {0}".format(video_path))
+
+        # Delete the jpg_dir if requested
+        if delete_images:
+            try:
+                shutil.rmtree(jpg_dir)
+                print(f"Successfully deleted the source directory: {0}".format(jpg_dir))
+            except Exception as e:
+                print("Error deleting the source images: {0}".format(e))
+    else:
+        print("Video creation failed or resulted in an empty file.")
+
 
 
 if __name__ == "__main__":
