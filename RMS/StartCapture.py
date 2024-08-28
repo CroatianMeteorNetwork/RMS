@@ -216,6 +216,13 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         night_data_dir = os.path.join(os.path.abspath(config.data_dir), config.captured_dir, \
             night_data_dir_name)
 
+        # Full path to the JPEG directory
+        if config.save_jpgs:
+            session_jpg_dir = os.path.join(os.path.abspath(config.data_dir), config.jpg_dir,
+                                           night_data_dir_name)
+        else:
+            session_jpg_dir = None
+
 
 
     # Add a note about Patreon supporters
@@ -241,6 +248,16 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     mkdirP(night_data_dir)
 
     log.info('Data directory: ' + night_data_dir)
+
+    # Make a directory for the JPEGs
+    if session_jpg_dir:
+        # Create the main session directory
+        mkdirP(session_jpg_dir)
+
+        # Create frames subdirectory
+        mkdirP(os.path.join(session_jpg_dir, config.jpg_subdir))
+
+    log.info('JPEG directory: ' + session_jpg_dir)
 
     # Copy the used config file to the capture directory
     if os.path.isfile(config.config_file_name):
@@ -360,7 +377,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
     # Initialize buffered capture
     bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config, video_file=video_file,
-                         night_data_dir=night_data_dir)
+                         night_data_dir=night_data_dir, session_jpg_dir=session_jpg_dir)
 
 
     # Initialize the live image viewer
