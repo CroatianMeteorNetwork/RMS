@@ -1208,11 +1208,10 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
 
     # Get the platepar
     platepar = Platepar.Platepar()
-    platepar.read(os.path.join(dir_path, config.platepar_name), use_flat=config.use_flat)
-
+    platepar.read(os.path.join(config.config_file_path, config.platepar_name), use_flat=config.use_flat)
 
     # Locate and load the mask file
-    mask = getMaskFile(dir_path, config, file_list=file_list)
+    mask = getMaskFile(config.config_file_path, config, file_list=None)
 
     if mask is not None:
         mask.checkMask(platepar.X_res, platepar.Y_res)
@@ -2851,7 +2850,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             return None
 
         platepar = Platepar.Platepar()
-        platepar.read(os.path.join(dir_path, config.platepar_name), use_flat=config.use_flat)
+        platepar.read(os.path.join(config.config_file_path, config.platepar_name), use_flat=config.use_flat)
 
         recalibrated_platepars = loadRecalibratedPlatepar(dir_path, config, file_list, type='meteor')
         recalibrated_flux_platepars = loadRecalibratedPlatepar(dir_path, config, file_list, type='flux')
@@ -2867,7 +2866,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         )
 
         # Locate and load the mask file
-        mask = getMaskFile(dir_path, config, file_list=file_list)
+        mask = getMaskFile(config.config_file_path, config, file_list=None)
 
         # If the resolution of the loaded mask doesn't match the resolution in the platepar, reset the mask
         if mask is not None:
@@ -3659,20 +3658,17 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path):
     flux_config = FluxConfig()
 
 
-    file_list = sorted(os.listdir(dir_path))
-
-
     # Load meteor data from the FTPdetectinfo file
     meteor_data = readFTPdetectinfo(*os.path.split(ftpdetectinfo_path))
 
 
     # Load the platepar file
     platepar = Platepar.Platepar()
-    platepar.read(os.path.join(dir_path, config.platepar_name), use_flat=config.use_flat)
+    platepar.read(os.path.join(config.config_file_path, config.platepar_name), use_flat=config.use_flat)
 
 
     # Locate and load the mask file
-    mask = getMaskFile(dir_path, config, file_list=file_list)
+    mask = getMaskFile(config.config_file_path, config, file_list=None)
 
     if mask is not None:
         mask.checkMask(platepar.X_res, platepar.Y_res)
