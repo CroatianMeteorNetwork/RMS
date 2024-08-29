@@ -44,16 +44,11 @@ from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle, greatCirclePha
 from RMS.Routines.MaskImage import getMaskFile
 from RMS.Routines import RollingShutterCorrection
 from RMS.Routines.MaskImage import loadMask, MaskStructure, getMaskFile
-from RMS.Misc import maxDistBetweenPoints
+from RMS.Misc import maxDistBetweenPoints, getRmsRootDir
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
-
-if sys.version_info[0] == 3:
-    import importlib.util
-else:
-    import pkgutil
 
 
 class QFOVinputDialog(QtWidgets.QDialog):
@@ -2618,26 +2613,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # Set the dir path in case it changed
         self.dir_path = dir_path
 
-        # Update the path to the RMS root directory without importing the whole codebase
-        if sys.version_info[0] == 3:
-            # Python 3.x: Use importlib to find the RMS module
-            rms_spec = importlib.util.find_spec('RMS')
-            if rms_spec is None or rms_spec.origin is None:
-                raise ImportError("RMS module not found.")
-
-            # Get the absolute path to the RMS root directory
-            self.rms_root_dir = os.path.abspath(os.path.dirname(os.path.dirname(rms_spec.origin)))
-        else:
-            # Python 2.7: Use pkgutil (deprecated) to locate the RMS module
-            loader = pkgutil.get_loader('RMS')
-            if loader is None:
-                raise ImportError("RMS module not found.")
-
-            # Get the filename associated with the loader
-            rms_file = loader.get_filename()
-
-            # Get the absolute path to the RMS root directory
-            self.rms_root_dir = os.path.abspath(os.path.dirname(os.path.dirname(rms_file)))
+        # Update the path to the RMS root directory
+        self.rms_root_dir = getRmsRootDir()
         
         # Swap the fixed variable name
         if hasattr(self, "star_aperature_radius"):

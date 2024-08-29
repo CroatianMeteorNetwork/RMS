@@ -19,13 +19,12 @@ from __future__ import absolute_import, division, print_function
 import math
 import os
 import sys
+from RMS.Misc import getRmsRootDir
 
 # Consolidated version-specific imports and definitions
 if sys.version_info[0] == 3:
-    import importlib.util
     from configparser import NoOptionError, RawConfigParser
 else:
-    import pkgutil
     from ConfigParser import NoOptionError, RawConfigParser
     FileNotFoundError = IOError  # Map FileNotFoundError to IOError in Python 2
 
@@ -229,26 +228,8 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
 class Config:
     def __init__(self):
 
-        # Get the path to the RMS root directory without importing the whole codebase
-        if sys.version_info[0] == 3:
-            # Python 3.x: Use importlib to find the RMS module
-            rms_spec = importlib.util.find_spec('RMS')
-            if rms_spec is None or rms_spec.origin is None:
-                raise ImportError("RMS module not found.")
-
-            # Get the absolute path to the RMS root directory
-            self.rms_root_dir = os.path.abspath(os.path.dirname(os.path.dirname(rms_spec.origin)))
-        else:
-            # Python 2.7: Use pkgutil (deprecated) to locate the RMS module
-            loader = pkgutil.get_loader('RMS')
-            if loader is None:
-                raise ImportError("RMS module not found.")
-
-            # Get the filename associated with the loader
-            rms_file = loader.get_filename()
-
-            # Get the absolute path to the RMS root directory
-            self.rms_root_dir = os.path.abspath(os.path.dirname(os.path.dirname(rms_file)))
+        # Get the path to the RMS root directory
+        self.rms_root_dir = getRmsRootDir()
 
         # default config file absolute path
         self.config_file_name = os.path.join(self.rms_root_dir, '.config')
