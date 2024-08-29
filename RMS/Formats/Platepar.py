@@ -1495,11 +1495,15 @@ def findBestPlatepar(config, night_data_dir=None):
     if (night_data_dir is not None) and os.path.exists(night_platepar_path):
         platepar.read(night_platepar_path, use_flat=config.use_flat)
 
+        return platepar
+
     elif os.path.exists(default_platepar_path):
         platepar.read(default_platepar_path, use_flat=config.use_flat)
 
-    else:
-        return None
+        return platepar
+
+    
+    return None
 
 
 if __name__ == "__main__":
