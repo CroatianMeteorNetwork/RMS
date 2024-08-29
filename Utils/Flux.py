@@ -3638,13 +3638,16 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
 
 
-def prepareFluxFiles(config, dir_path, ftpdetectinfo_path):
+def prepareFluxFiles(config, dir_path, ftpdetectinfo_path, mask=None):
     """ Prepare files necessary for quickly computing the flux. 
     
     Arguments:
         config: [Config]
         dir_path: [str] Path to the data directory.
         ftpdetectinfo_path: [str] Path to the FTPdetectinfo file.
+
+    Keyword arguments:
+        mask: [Mask] Mask object. If None, the mask will be loaded from the file.
 
     Return:
         None
@@ -3669,9 +3672,12 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path):
 
 
     # Locate and load the mask file
-    mask = getMaskFile(dir_path, config, file_list=file_list)
+    if mask is None:
+        mask = getMaskFile(dir_path, config, file_list=file_list)
 
     if mask is not None:
+        
+        # Check that the mask has the correct resolution
         mask.checkMask(platepar.X_res, platepar.Y_res)
 
 
