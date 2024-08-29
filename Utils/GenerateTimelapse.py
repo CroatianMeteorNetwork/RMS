@@ -12,14 +12,13 @@ import subprocess
 import shutil
 import cv2
 import glob
+import tarfile
 
 from PIL import ImageFont
 
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName, filenameToDatetime
 from RMS.Misc import mkdirP, RmsDateTime
-
-
 
 def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, hires=False):
     """ Generate an High Quality MP4 movie from FF files. 
@@ -179,37 +178,36 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
     print("Total time:", RmsDateTime.utcnow() - t1)
 
 
-def generateTimelapseFromJpeg(jpg_dir, video_path, fps=30, crf=20, delete_images=False):
+def generateTimelapseFromJpeg(frames_dir, parent_dir, video_path, fps=30, crf=20, cleanup_mode='none',
+                              compression='bz2'):
     """
-    Generate a timelapse video from JPEG images and optionally delete the
-    source images.
-    
+    Generate a timelapse video from JPEG images and optionally cleanup the
+    source directory.
+
     Keyword arguments:
         frames_dir: [str] Directory containing JPEG images.
+        parent_dir: [str] Parent directory where the video will be saved.
         video_path: [str] Output path for the generated video.
         fps: [int] Frames per second for the output video. 30 by default.
         crf: [int] Constant Rate Factor for video compression. 20 by default.
-        delete_images: [bool] Whether to delete the source dir after
-                        successful video creation. False by default.
-
+        cleanup_mode: [str] Cleanup mode after video creation.
+                      Options: 'none', 'delete', 'tar'. 'none' by default.
+        compression: [str] Compression method for tar.
+                     Options: 'bz2', 'gz'. 'bz2' by default.
     """
     
-    images = [img for img in sorted(glob.glob(os.path.join(jpg_dir, "*.jpg")))]
+    images = [img for img in sorted(glob.glob(os.path.join(frames_dir, "*.jpg")))]
     if len(images) == 0:
         print("No images found.")
         return
 
     # Create a text file listing all the images
-    list_file_path = os.path.join(jpg_dir, "filelist.txt")
+    list_file_path = os.path.join(frames_dir, "filelist.txt")
     with open(list_file_path, 'w') as f:
         for img_path in images:
             f.write("file '{0}'\n".format(os.path.basename(img_path)))
 
     # Formulate the ffmpeg command
-    # base_command = (f"-nostdin -f concat -safe 0 -v quiet -r {fps} -y -i {list_file_path} -c:v libx264 "
-    #                 f"-pix_fmt yuv420p -crf {crf} -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)\" "
-    #                 f"{video_path}"
-
     base_command = ("-nostdin -f concat -safe 0 -v quiet -r {fps} -y -i "
                     "{list_file_path} -c:v libx264 -crf {crf} -g 15 {video_path}")
 
@@ -220,6 +218,7 @@ def generateTimelapseFromJpeg(jpg_dir, video_path, fps=30, crf=20, delete_images
     else:
         print("Unsupported platform.")
         return
+
     encode_command = "{0} {1}".format(software_name, base_command)
 
     # Execute the command
@@ -229,14 +228,29 @@ def generateTimelapseFromJpeg(jpg_dir, video_path, fps=30, crf=20, delete_images
 
     if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
         print("Video created successfully at {0}".format(video_path))
-
-        # Delete the jpg_dir if requested
-        if delete_images:
+        
+        # Cleanup based on the specified mode
+        if cleanup_mode == 'delete':
             try:
-                shutil.rmtree(jpg_dir)
-                print(f"Successfully deleted the source directory: {0}".format(jpg_dir))
+                shutil.rmtree(frames_dir)
+                print("Successfully deleted the source directory: {0}".format(frames_dir))
             except Exception as e:
-                print("Error deleting the source images: {0}".format(e))
+                print("Error deleting the source directory: {0}".format(e))
+        elif cleanup_mode == 'tar':
+            try:
+                ext = '.tar.bz2' if compression == 'bz2' else '.tar.gz'
+                tar_path = os.path.join(parent_dir, os.path.basename(frames_dir) + ext)
+                
+                # Create tar archive
+                mode = 'w:bz2' if compression == 'bz2' else 'w:gz'
+                with tarfile.open(tar_path, mode) as tar:
+                    tar.add(frames_dir, arcname=os.path.basename(frames_dir))
+                
+                # Remove the original directory
+                shutil.rmtree(frames_dir)
+                print("Successfully created tar archive at: {0}".format(tar_path))
+            except Exception as e:
+                print("Error creating tar archive: {0}".format(e))
     else:
         print("Video creation failed or resulted in an empty file.")
 
