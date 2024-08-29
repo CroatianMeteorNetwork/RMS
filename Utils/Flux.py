@@ -1830,15 +1830,30 @@ def sensorCharacterization(config, flux_config, dir_path, meteor_data, default_f
 
 
 
-def getCollectingArea(dir_path, config, flux_config, platepar, mask):
-    """ Generate collection areas and save to file, or load from file if available. """
+def getCollectingArea(dir_path, config, flux_config, platepar, mask, overwrite=False):
+    """ Generate collection areas and save to file, or load from file if available. 
+    
+    Arguments:
+        dir_path: [str] Path to the directory where the collection areas are stored.
+        config: [Config object]
+        flux_config: [FluxConfig object]
+        platepar: [Platepar object]
+        mask: [Mask object]
+
+    Keyword arguments:
+        overwrite: [bool] Whether to overwrite the existing collection areas file. False by default.
+
+    Return:
+        col_areas_ht: [dict] Collection areas per height.
+        col_area_100km_raw: [float] Raw collection area at 100 km.
+    """
 
     col_areas_file_name = generateColAreaJSONFileName(config.stationID, flux_config.side_points, \
         flux_config.ht_min, flux_config.ht_max, flux_config.dht, flux_config.elev_limit,
     )
 
     # Check if the collection area file exists. If yes, load the data. If not, generate collection areas
-    if col_areas_file_name in os.listdir(dir_path):
+    if (col_areas_file_name in os.listdir(dir_path)) and (not overwrite):
         col_areas_ht = loadRawCollectionAreas(dir_path, col_areas_file_name)
         print("Loaded collection areas from:", col_areas_file_name)
 
