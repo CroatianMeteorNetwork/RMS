@@ -151,7 +151,7 @@ def startObservationSummaryReport(config, duration, force_delete=False):
             force_delete: forces deletion of the observation summary database, default False
 
         returns:
-            conn: [connection] connection to database if success else None
+            conn: [connection] connection to database
 
         """
 
@@ -159,6 +159,7 @@ def startObservationSummaryReport(config, duration, force_delete=False):
     conn = getObsDBConn(config, force_delete=force_delete)
     addObsParam(conn, "start_time", datetime.datetime.utcnow() - datetime.timedelta(seconds=1))
     addObsParam(conn, "duration", duration)
+    addObsParam(conn, "stationID", config.stationID)
 
     if isRaspberryPi():
         with open('/sys/firmware/devicetree/base/model', 'r') as m:
@@ -486,6 +487,7 @@ def unserialize(self):
 
 
 if __name__ == "__main__":
+
     config = parse(os.path.expanduser("~/source/RMS/.config"))
 
 
