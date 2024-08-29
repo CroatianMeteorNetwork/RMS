@@ -1206,10 +1206,12 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
             bin_used = new_bin
 
 
-    # Get the platepar
-    platepar = Platepar.Platepar()
-    platepar.read(os.path.join(dir_path, config.platepar_name), use_flat=config.use_flat)
+    # Get the platepar (first from the night directory, then the default one)
+    platepar = Platepar.findBestPlatepar(config, dir_path)
 
+    if platepar is None:
+        print("Platepar not found!")
+        return None
 
     # Locate and load the mask file
     mask = getMaskFile(dir_path, config, file_list=file_list)
@@ -2862,8 +2864,11 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             print("No meteors in the FTPdetectinfo file!")
             return None
 
-        platepar = Platepar.Platepar()
-        platepar.read(os.path.join(dir_path, config.platepar_name), use_flat=config.use_flat)
+        platepar = Platepar.findBestPlatepar(config, dir_path)
+
+        if platepar is None:
+            print("No platepar file available!")
+            return None
 
         recalibrated_platepars = loadRecalibratedPlatepar(dir_path, config, file_list, type='meteor')
         recalibrated_flux_platepars = loadRecalibratedPlatepar(dir_path, config, file_list, type='flux')
@@ -3684,8 +3689,12 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path, mask=None, platepar=N
 
     # Load the platepar file
     if platepar is None:
-        platepar = Platepar.Platepar()
-        platepar.read(os.path.join(dir_path, config.platepar_name), use_flat=config.use_flat)
+        platepar = Platepar.findBestPlatepar(config, dir_path)
+
+        if platepar is None:
+            print("No platepar file found in the directory or in the config dir!")
+            return None
+
 
 
     # Locate and load the mask file
