@@ -1831,7 +1831,7 @@ def sensorCharacterization(config, flux_config, dir_path, meteor_data, default_f
 
 
 def getCollectingArea(dir_path, config, flux_config, platepar, mask):
-    """ Make a file name to save the raw collection areas. """
+    """ Generate collection areas and save to file, or load from file if available. """
 
     col_areas_file_name = generateColAreaJSONFileName(config.stationID, flux_config.side_points, \
         flux_config.ht_min, flux_config.ht_max, flux_config.dht, flux_config.elev_limit,
