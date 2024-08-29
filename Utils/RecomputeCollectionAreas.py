@@ -43,6 +43,9 @@ def recomputeCollectionAreas(root_dir_path, ncores=1):
 
     dir_list = []
 
+    print()
+    print("Building the list of directories...")
+
     # Go through all directories in the STATIONID/NIGHT/ directory structure
     for station_id in sorted(os.listdir(root_dir_path)):
         
@@ -52,6 +55,8 @@ def recomputeCollectionAreas(root_dir_path, ncores=1):
         
         # Path to the station directory
         station_dir_path = os.path.join(root_dir_path, station_id)
+
+        print("Station:", station_id)
 
         # Go through all nights
         for night in sorted(os.listdir(station_dir_path)):
