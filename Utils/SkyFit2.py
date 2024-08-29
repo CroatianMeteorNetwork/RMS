@@ -2614,7 +2614,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.dir_path = dir_path
 
         # Update the path to the RMS root directory
-        self.rms_root_dir = getRmsRootDir()
+        self.config.rms_root_dir = getRmsRootDir()
         
         # Swap the fixed variable name
         if hasattr(self, "star_aperature_radius"):
