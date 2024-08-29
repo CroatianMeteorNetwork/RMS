@@ -3638,7 +3638,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
 
 
-def prepareFluxFiles(config, dir_path, ftpdetectinfo_path, mask=None):
+def prepareFluxFiles(config, dir_path, ftpdetectinfo_path, mask=None, platepar=None):
     """ Prepare files necessary for quickly computing the flux. 
     
     Arguments:
@@ -3648,6 +3648,7 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path, mask=None):
 
     Keyword arguments:
         mask: [Mask] Mask object. If None, the mask will be loaded from the file.
+        platepar: [Platepar] Platepar object. If None, the platepar will be loaded from the file.
 
     Return:
         None
@@ -3667,8 +3668,9 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path, mask=None):
 
 
     # Load the platepar file
-    platepar = Platepar.Platepar()
-    platepar.read(os.path.join(dir_path, config.platepar_name), use_flat=config.use_flat)
+    if platepar is None:
+        platepar = Platepar.Platepar()
+        platepar.read(os.path.join(dir_path, config.platepar_name), use_flat=config.use_flat)
 
 
     # Locate and load the mask file

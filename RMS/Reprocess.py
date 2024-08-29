@@ -311,7 +311,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             log.info("Preparing flux files...")
             try:
                 prepareFluxFiles(config, night_data_dir, os.path.join(night_data_dir, ftpdetectinfo_name),
-                                 mask=mask)
+                                 mask=mask, platepar=platepar)
 
             except Exception as e:
                 log.debug("Preparing flux files failed with the message:\n" + repr(e))
