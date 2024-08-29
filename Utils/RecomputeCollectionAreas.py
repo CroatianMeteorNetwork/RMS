@@ -13,23 +13,28 @@ from Utils.Flux import getCollectingArea, FluxConfig
 
 def updateCollectionAreaNight(dir_path, flux_config):
 
-    # Load the config file
-    config = loadConfigFromDirectory(['.'], dir_path)
+    try:
+        # Load the config file
+        config = loadConfigFromDirectory(['.'], dir_path)
 
-    # Load the platepar
-    platepar = Platepar.Platepar()
-    platepar.read(os.path.join(dir_path, config.platepar_name), use_flat=config.use_flat)
+        # Load the platepar
+        platepar = Platepar.Platepar()
+        platepar.read(os.path.join(dir_path, config.platepar_name), use_flat=config.use_flat)
 
-    # Load the mask
-    mask = getMaskFile(dir_path, config)
+        # Load the mask
+        mask = getMaskFile(dir_path, config)
 
-    if mask is not None:
-        
-        # Check that the mask has the correct resolution
-        mask.checkMask(platepar.X_res, platepar.Y_res)
+        if mask is not None:
+            
+            # Check that the mask has the correct resolution
+            mask.checkMask(platepar.X_res, platepar.Y_res)
 
-    # Recompute the collecting area file
-    getCollectingArea(dir_path, config, flux_config, platepar, mask, overwrite=True)
+        # Recompute the collecting area file
+        getCollectingArea(dir_path, config, flux_config, platepar, mask, overwrite=True)
+
+    except Exception as e:
+        print("Error in", dir_path)
+        print(e)
 
 
 
