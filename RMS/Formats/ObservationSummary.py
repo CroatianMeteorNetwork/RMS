@@ -159,7 +159,7 @@ def startObservationSummaryReport(config, duration, force_delete=False):
     conn = getObsDBConn(config, force_delete=force_delete)
     addObsParam(conn, "start_time", datetime.datetime.utcnow() - datetime.timedelta(seconds=1))
     addObsParam(conn, "duration", duration)
-    addObsParam(conn, "stationID", config.stationID)
+    addObsParam(conn, "stationID", sanitise(config.stationID, space_substitution=""))
 
     if isRaspberryPi():
         with open('/sys/firmware/devicetree/base/model', 'r') as m:
@@ -178,9 +178,9 @@ def startObservationSummaryReport(config, duration, force_delete=False):
         print("RMS Git repository not found. Skipping Git-related information.")
 
     storage_total, storage_used, storage_free = shutil.disk_usage("/")
-    addObsParam(conn, "storage_total_gb", round(storage_total / (1024 **3 ),2))
-    addObsParam(conn, "storage_used_gb", round(storage_used / (1024 **3 ),2))
-    addObsParam(conn, "storage_free_gb", round(storage_free / (1024 **3 ),2))
+    addObsParam(conn, "storage_total_gb", round(storage_total / (1024 ** 3), 2))
+    addObsParam(conn, "storage_used_gb", round(storage_used / (1024 ** 3), 2))
+    addObsParam(conn, "storage_free_gb", round(storage_free / (1024 ** 3), 2))
 
     captured_directories = captureDirectories(os.path.join(config.data_dir, config.captured_dir), config.stationID)
     addObsParam(conn, "captured_directories", captured_directories)
