@@ -38,6 +38,7 @@ from math import floor
 from RMS.Misc import ping
 from RMS.Routines.GstreamerCapture import GstVideoFile
 from RMS.Formats.ObservationSummary import getObsDBConn, addObsParam
+from QueuedPool import QueuedPool
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -63,7 +64,7 @@ class BufferedCapture(Process):
     running = False
     
     def __init__(self, array1, startTime1, array2, startTime2, config, video_file=None, night_data_dir=None,
-                 session_jpg_dir=None):
+                 frame_save_dir=None):
         """ Populate arrays with (startTime, frames) after startCapture is called.
         
         Arguments:
@@ -95,7 +96,7 @@ class BufferedCapture(Process):
         self.video_file = video_file
 
         self.night_data_dir = night_data_dir
-        self.session_jpg_dir = session_jpg_dir
+        self.frame_save_dir = frame_save_dir
 
         # A frame will be considered dropped if it was late more then half a frame
         self.time_for_drop = 1.5*(1.0/config.fps)
@@ -113,6 +114,11 @@ class BufferedCapture(Process):
         self.start_timestamp = 0
         self.frame_shape = None
         self.convert_to_gray = False
+
+        # Initialize QueuedPool for image saving
+        self.frame_saver = QueuedPool(self.saveFrameToDisk, cores=1, log=log, 
+                                      backup_dir=os.path.join(self.frame_save_dir, 'image_backups'))
+        self.frame_saver.startPool()
 
 
     def startCapture(self, cameraID=0):
@@ -157,6 +163,9 @@ class BufferedCapture(Process):
         except Exception as e:
             log.debug('Freeing frame buffers failed with error:' + repr(e))
             log.debug(repr(traceback.format_exception(*sys.exc_info())))
+        
+        # Stop the image saver pool
+        self.frame_saver.closePool()
 
         return self.dropped_frames.value
 
@@ -195,7 +204,7 @@ class BufferedCapture(Process):
             return False
 
 
-    def saveImageToDisk(self, frame_timestamp, frame):
+    def saveFrameToDisk(self, frame_timestamp, frame):
         """Saves an image frame to disk with a timestamp-based filename.
 
         This method generates a filename based on the station ID and the
@@ -225,10 +234,10 @@ class BufferedCapture(Process):
         filename = (str(self.config.stationID).zfill(3) + "_" + date_string + "_"
                     + str(millis).zfill(3) + ".jpg")
 
-        img_path = os.path.join(self.session_jpg_dir, self.config.jpg_subdir, filename)
+        frame_path = os.path.join(self.frame_save_dir, self.config.frame_subdir, filename)
 
         try:
-            cv2.imwrite(img_path, frame, [int(cv2.IMWRITE_JPEG_QUALITY), self.config.jpgs_quality])
+            cv2.imwrite(frame_path, frame, [int(cv2.IMWRITE_JPEG_QUALITY), self.config.jpgs_quality])
             log.info(f"Saving completed: {filename}")
         except Exception as e:
             log.info(f"Could not save image to disk: {e}")
@@ -948,7 +957,15 @@ class BufferedCapture(Process):
 
                 finally:
                     self.device = None
-            
+
+        # Close the image saver pool
+        if hasattr(self, 'image_saver'):
+            try:
+                self.frame_saver.closePool()
+                log.info('Image saver pool closed.')
+            except Exception as e:
+                log.error(f'Error closing image saver pool: {e}')
+
 
     def run(self):
         """ Capture frames.
@@ -1127,9 +1144,9 @@ class BufferedCapture(Process):
                 # If save_jpgs is set and a video device is used, save a jpg every nth frames
                 if (self.config.save_jpgs
                         and self.video_file is None
-                        and total_frames%(self.config.jpgs_interval) == 0):
+                        and total_frames%(self.config.frame_save_interval) == 0):
 
-                    self.saveImageToDisk(frame_timestamp, frame)
+                    self.frame_saver.addJob([frame_timestamp, frame])
 
 
                 # If the end of the video file was reached, stop the capture
