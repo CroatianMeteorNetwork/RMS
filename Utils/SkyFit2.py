@@ -18,7 +18,6 @@ import matplotlib.gridspec as gridspec
 import pyqtgraph as pg
 import random
 
-import RMS
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
@@ -45,12 +44,11 @@ from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle, greatCirclePha
 from RMS.Routines.MaskImage import getMaskFile
 from RMS.Routines import RollingShutterCorrection
 from RMS.Routines.MaskImage import loadMask, MaskStructure, getMaskFile
-from RMS.Misc import maxDistBetweenPoints
+from RMS.Misc import maxDistBetweenPoints, getRmsRootDir
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
-
 
 
 class QFOVinputDialog(QtWidgets.QDialog):
@@ -2615,9 +2613,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Set the dir path in case it changed
         self.dir_path = dir_path
 
-        # Update the RMS root directory
-        self.config.rms_root_dir = os.path.abspath(os.path.join(os.path.dirname(RMS.__file__), os.pardir))
-
+        # Update the path to the RMS root directory
+        self.config.rms_root_dir = getRmsRootDir()
+        
         # Swap the fixed variable name
         if hasattr(self, "star_aperature_radius"):
             self.star_aperture_radius = self.star_aperature_radius

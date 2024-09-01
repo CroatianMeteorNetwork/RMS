@@ -19,20 +19,14 @@ from __future__ import absolute_import, division, print_function
 import math
 import os
 import sys
+from RMS.Misc import getRmsRootDir
 
-import RMS
-
-try:
-    # Python 3
-    from configparser import NoOptionError, RawConfigParser 
-
-except:
-    # Python 2
+# Consolidated version-specific imports and definitions
+if sys.version_info[0] == 3:
+    from configparser import NoOptionError, RawConfigParser
+else:
     from ConfigParser import NoOptionError, RawConfigParser
-
-# Map FileNotFoundError to IOError in Python 2 as it does not exist
-if sys.version_info[0] < 3:
-    FileNotFoundError = IOError
+    FileNotFoundError = IOError  # Map FileNotFoundError to IOError in Python 2
 
 # Used to determine detection parameters which will change in ML filtering is available
 try:
@@ -234,8 +228,8 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
 class Config:
     def __init__(self):
 
-        # Get the package root directory
-        self.rms_root_dir = os.path.abspath(os.path.join(os.path.dirname(RMS.__file__), os.pardir))
+        # Get the path to the RMS root directory
+        self.rms_root_dir = getRmsRootDir()
 
         # default config file absolute path
         self.config_file_name = os.path.join(self.rms_root_dir, '.config')
