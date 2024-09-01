@@ -132,16 +132,6 @@ def captureDirectories(captured_dir, stationID):
 
     return capture_directories
 
-
-def getRmsRepo():
-    rms_path = os.path.expanduser("~/source/RMS")
-    try:
-        return git.Repo(rms_path)
-    except InvalidGitRepositoryError:
-        print("Warning: No valid Git repository found at {}".format(rms_path))
-        return None
-
-
 def startObservationSummaryReport(config, duration, force_delete=False):
     """ Enters the parameters known at the start of observation into the database
 
@@ -168,7 +158,7 @@ def startObservationSummaryReport(config, duration, force_delete=False):
 
     addObsParam(conn, "hardware_version", hardware_version)
 
-    repo = getRmsRepo()
+    repo = git.Repo(search_parent_directories=True)
     if repo:
         addObsParam(conn, "commit_date",
                     datetime.datetime.fromtimestamp(repo.head.object.committed_date).strftime('%Y%m%d_%H%M%S'))
