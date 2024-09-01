@@ -583,7 +583,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     except:
         pass
 
-    log.info("\n\n " + serialize(config) + "\n\n")
+    log.info("\n\nObservation Summary\n===================\n\n" + serialize(config) + "\n\n")
 
 
     extra_files.append(observation_summary_path_file_name)
