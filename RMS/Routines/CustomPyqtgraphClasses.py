@@ -562,8 +562,15 @@ class ImageItem(pg.ImageItem):
     def setFrame(self, n):
         self.img_handle.setFrame(n)
 
-    def getAutolevels(self, lower=0.1, upper=99.95):
-        return np.percentile(self.image, lower), np.percentile(self.image, upper)
+    def getAutolevels(self, lower=0.1, upper=99.95, ignoretopperc=10):
+
+        # Ignore the top 10% of the image pixel brightness (from the maximum) to avoid auto leveling on
+        #  saturated pixels
+        max_level = np.max(self.image)
+        ignore_level = (100 - ignoretopperc)*max_level/100
+
+        return np.percentile(self.image[self.image < ignore_level], lower), \
+            np.percentile(self.image[self.image < ignore_level], upper)
 
     def loadImage(self, mode, flag='avepixel'):
         """

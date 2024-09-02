@@ -1,7 +1,7 @@
 
 import os
 import logging
-
+import inspect
 
 import numpy as np
 from PIL import Image
@@ -144,20 +144,37 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
     if verbose:
         logging.getLogger().setLevel(logging.INFO)
 
-    solution = solver.solve(
-        stars_xs=x_data,
-        stars_ys=y_data,
-        size_hint=size_hint,
-        position_hint=None,
-        solution_parameters=astrometry.SolutionParameters(
+    # Init solution parameters
+    solution_parameters = astrometry.SolutionParameters(
             # Return the first solution if the log odds ratio is greater than 100 (very good solution)
             logodds_callback=lambda logodds_list: (
             astrometry.Action.STOP
             if logodds_list[0] > 100.0
             else astrometry.Action.CONTINUE
-        ),
-        )
+            )
     )
+
+    # If the solver.solve has the argument "stars", use a 2D array of stars instead of stars_xs and stars_ys
+    solve_args = inspect.getfullargspec(solver.solve).args
+    if "stars" in solve_args:
+        star_data = np.array([x_data, y_data]).T
+
+        solution = solver.solve(
+            stars=star_data,
+            size_hint=size_hint,
+            position_hint=None,
+            solution_parameters=solution_parameters
+            )
+
+    else:
+
+        solution = solver.solve(
+            stars_xs=x_data,
+            stars_ys=y_data,
+            size_hint=size_hint,
+            position_hint=None,
+            solution_parameters=solution_parameters
+            )
 
     if solution.has_match():
         
