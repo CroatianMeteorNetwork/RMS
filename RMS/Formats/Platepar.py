@@ -1485,7 +1485,7 @@ def findBestPlatepar(config, night_data_dir=None):
     """
 
     # Get the platepar (first from the night directory, then the default one)
-    platepar = Platepar.Platepar()
+    platepar = Platepar()
     
     if night_data_dir is not None:
         night_platepar_path = os.path.join(night_data_dir, config.platepar_name)
