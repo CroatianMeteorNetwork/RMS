@@ -70,11 +70,24 @@ class MaskStructure(object):
 
 
 
-def getMaskFile(dir_path, config, file_list=None):
-    """
-    From a directory, fine the mask file, load it and return it
+def getMaskFile(dir_path, config, file_list=None, default_as_backup=False):
+    """ Get the mask file from the given directory. If the mask file is not found, return None.
+        It will also check if the mask is a zip file and load it if it is.
+
+    Arguments:
+        dir_path: [str] Path to the directory where the mask file is located.
+        config: [Config] Configuration object.
+
+    Keyword arguments:
+        file_list: [list] List of files in the directory. If None, the files will be listed.
+        default_as_backup: [bool] If True, the default mask file will be used as a backup, from the RMS 
+            directory.
+
+    Returns:
+        mask: [MaskStructure] Mask structure object. If the mask file is not found, None is returned.
     """
 
+    mask = None
 
     if file_list is None:
         file_list = os.listdir(dir_path)
@@ -86,6 +99,7 @@ def getMaskFile(dir_path, config, file_list=None):
                for filename in file_list
     )
     
+    # If a mask file is found, load it
     if mask > 0:
         
         mask_path = os.path.join(
@@ -95,11 +109,22 @@ def getMaskFile(dir_path, config, file_list=None):
         )
         
         mask = loadMask(mask_path)
-        print("Using mask:", mask_path)
 
-    else:
+        if mask is not None:
+            print("Using mask:", mask_path)
+
+    # If the mask file is not found, use the default mask file as a backup
+    if (mask is None) and default_as_backup:
+
+        default_mask_path = os.path.join(config.config_file_path, config.mask_file)
+        mask = loadMask(default_mask_path)
+
+        if mask is not None:
+            print("Using default mask:", default_mask_path)
+
+
+    if mask is None:
         print("No mask used!")
-        mask = None
 
     return mask
     
