@@ -1669,8 +1669,10 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
                 if mask_segment.size == 0:
                     continue
 
-                # Compute ratio of masked portion of the segment
-                unmasked_ratio = 1 - np.count_nonzero(~mask_segment)/mask_segment.size
+                # Compute ratio of masked portion of the segment. Assume that a masked area has a black pixel
+                #   and an unmasked area has a white pixel (0 and 255, respectively)
+                mask_thresholded = mask_segment > 0
+                unmasked_ratio = np.count_nonzero(mask_thresholded)/mask_segment.size
 
                 # Compute the pointing direction and the vignetting and extinction loss for the mean location
 
