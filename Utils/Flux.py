@@ -1692,16 +1692,13 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
                 # Compute the sensitivty loss due to vignetting and extinction
                 sensitivity_ratio = test_px_sum/rev_level
 
-                # print(np.abs(np.hypot(x_mean - platepar.X_res/2, y_mean - platepar.Y_res/2)), sensitivity_ratio, mag[0])
-
-                ##
-
                 # Compute the range correction (w.r.t 100 km) to the mean point
                 r, _, _, _ = xyHt2Geo(
                     platepar, x_mean, y_mean, ht, indicate_limit=True, elev_limit=elev_limit
                 )
 
                 # Correct the area for the masked portion
+                raw_area = area
                 area *= unmasked_ratio
 
                 ### ###
@@ -1710,6 +1707,19 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
                 col_areas_xy[(x_mean, y_mean)] = [area, azim, elev, sensitivity_ratio, r]
 
                 total_area += area
+
+
+                # DEBUG - print a status message for every segment, including all computed values
+                print()
+                print("(x = {:4d}, y = {:4d})".format(x0, y0))
+                print("  A: {:6.2f} km^2, Az = {:7.2f}, Ev = {:7.2f}, Sens.: {:6.2f}, Ae: {:6.2f}".format(
+                    raw_area/1e6, azim, elev, sensitivity_ratio, area/1e6
+                    )
+                )
+
+                # print(np.abs(np.hypot(x_mean - platepar.X_res/2, y_mean - platepar.Y_res/2)), sensitivity_ratio, mag[0])
+
+                ##
 
         # Store segments to the height dictionary (save a copy so it doesn't get overwritten)
         col_areas_ht[float(ht)] = dict(col_areas_xy)
@@ -3696,6 +3706,9 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path, mask=None, platepar=N
             return None
 
 
+    # TEST
+    print(platepar)
+    #
 
     # Locate and load the mask file
     if mask is None:
