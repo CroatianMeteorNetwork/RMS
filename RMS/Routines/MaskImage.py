@@ -120,7 +120,14 @@ def getMaskFile(dir_path, config, file_list=None, default_as_backup=False):
     # If the mask file is not found, use the default mask file as a backup
     if (mask is None) and default_as_backup:
 
+        # Path to the mask file in the config directory
         default_mask_path = os.path.join(config.config_file_path, config.mask_file)
+
+        # Check if the mask file is in the config directory, if not, use the default mask file
+        if not os.path.isfile(default_mask_path):
+
+            # Path to the mask in RMS source directory
+            default_mask_path = os.path.join(config.rms_root_dir, config.mask_file)
 
         print("Mask file not found! Using default mask file as a backup:", default_mask_path)
 
