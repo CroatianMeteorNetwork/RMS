@@ -108,19 +108,28 @@ def getMaskFile(dir_path, config, file_list=None, default_as_backup=False):
                 os.path.basename(config.mask_file))[0] + '.zip'
         )
         
+        print("Loading mask:", mask_path)
         mask = loadMask(mask_path)
 
-        if mask is not None:
-            print("Using mask:", mask_path)
+        if mask is None:
+            print("  Mask file could not be loaded!")
+        else:
+            print("  Mask file loaded!")
+            
 
     # If the mask file is not found, use the default mask file as a backup
     if (mask is None) and default_as_backup:
 
         default_mask_path = os.path.join(config.config_file_path, config.mask_file)
+
+        print("Mask file not found! Using default mask file as a backup:", default_mask_path)
+
         mask = loadMask(default_mask_path)
 
-        if mask is not None:
-            print("Using default mask:", default_mask_path)
+        if mask is None:
+            print("  Default mask file could not be loaded!")
+        else:
+            print("  Default mask file loaded!")
 
 
     if mask is None:
