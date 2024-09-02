@@ -1711,18 +1711,16 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
                 total_area += area
 
 
-                # DEBUG - print a status message for every segment, including all computed values
-                # Only print on the diagonal
-                if i == j:
-                    print()
-                    print("(x = {:4d}, y = {:4d})".format(x0, y0))
-                    print("  A: {:6.2f} km^2, Az = {:7.2f}, Ev = {:7.2f}, Sens.: {:6.2f}, Ae: {:6.2f}".format(
-                        raw_area/1e6, azim, elev, sensitivity_ratio, area/1e6
-                        )
-                    )
-                    print("Mask:", mask_segment, np.count_nonzero(~mask_segment), mask_segment.size, unmasked_ratio)
-
-                # print(np.abs(np.hypot(x_mean - platepar.X_res/2, y_mean - platepar.Y_res/2)), sensitivity_ratio, mag[0])
+                # # DEBUG - print a status message for every segment, including all computed values
+                # # Only print on the diagonal
+                # if i == j:
+                #     print()
+                #     print("(x = {:4d}, y = {:4d})".format(x0, y0))
+                #     print("  A: {:6.2f} km^2, Az = {:7.2f}, Ev = {:7.2f}, Sens.: {:6.2f}, Ae: {:6.2f}".format(
+                #         raw_area/1e6, azim, elev, sensitivity_ratio, area/1e6
+                #         )
+                #     )
+                #     print("Mask:", mask_segment, np.count_nonzero(~mask_segment), mask_segment.size, unmasked_ratio)
 
                 ##
 
@@ -3709,11 +3707,6 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path, mask=None, platepar=N
         if platepar is None:
             print("No platepar file found in the directory or in the config dir!")
             return None
-
-
-    # TEST
-    print(platepar)
-    #
 
     # Locate and load the mask file
     if mask is None:
