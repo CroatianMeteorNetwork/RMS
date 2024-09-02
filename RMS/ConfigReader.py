@@ -335,8 +335,8 @@ class Config:
         self.log_dir = "logs"
         self.captured_dir = "CapturedFiles"
         self.archived_dir = "ArchivedFiles"
-        self.jpg_dir = "JpgFiles"
-        self.jpg_subdir = "frames"
+        self.frame_dir = "FramesFiles"
+        self.frame_subdir = "Images"
 
         # days of logfiles to keep
         self.logdays_to_keep = 30
@@ -381,14 +381,17 @@ class Config:
         # Enable/disable saving a live.jpg file in the data directory with the latest image
         self.live_jpg = False
 
-        # Toggle saving video frames to JPEG at a set interval to the jpg_dir
-        self.save_jpgs = False
+        # Toggle saving video frames at a set interval to the frame_dir
+        self.save_frames = False
 
-        # Set JPEG compression quality for the save_jpgs feature
+        # The file extension for saved frames ('jpg' or 'png')
+        frame_file_type = 'jpg'
+
+        # Set JPEG compression quality for the saved frames for jpg file type
         self.jpgs_quality = 90
 
         # Set the interval for saving video frames to JPEG
-        self.jpgs_interval: 256
+        self.frame_save_interval: 256
 
         # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
         self.slideshow_enable = False
@@ -949,11 +952,11 @@ def parseCapture(config, parser):
     if parser.has_option(section, "archived_dir"):
         config.archived_dir = parser.get(section, "archived_dir")
 
-    if parser.has_option(section, "jpg_dir"):
-        config.jpg_dir = parser.get(section, "jpg_dir")
+    if parser.has_option(section, "frame_dir"):
+        config.frame_dir = parser.get(section, "frame_dir")
 
-    if parser.has_option(section, "jpg_subdir"):
-        config.jpg_subdir = parser.get(section, "jpg_subdir")
+    if parser.has_option(section, "frame_subdir"):
+        config.frame_subdir = parser.get(section, "frame_subdir")
 
     if parser.has_option(section, "width"):
         config.width = parser.getint(section, "width")
@@ -1127,9 +1130,12 @@ def parseCapture(config, parser):
     if parser.has_option(section, "live_jpg"):
         config.live_jpg = parser.getboolean(section, "live_jpg")
 
-    # Enable/disable saving video frames to jpg
-    if parser.has_option(section, "save_jpgs"):
-        config.save_jpgs = parser.getboolean(section, "save_jpgs")
+    # Enable/disable saving video frames
+    if parser.has_option(section, "save_frames"):
+        config.save_frames = parser.getboolean(section, "save_frames")
+
+    if parser.has_option(section, "frame_file_type"):
+        config.frame_file_type = parser.get(section, "frame_file_type")
 
     # Load the JPEG compression quality
     if parser.has_option(section, "jpgs_quality"):
@@ -1141,15 +1147,15 @@ def parseCapture(config, parser):
             print()
             print("WARNING! The jpgs_quality must be between 0 and 100. It has been reset to 90!")
 
-    # Load the interval for saving video frame to jpg
-    if parser.has_option(section, "jpgs_interval"):
-        config.jpgs_interval = parser.getint(section, "jpgs_interval")
+    # Load the interval for saving video frame
+    if parser.has_option(section, "frame_save_interval"):
+        config.frame_save_interval = parser.getint(section, "frame_save_interval")
 
         # Must be greater than 5
-        if config.jpgs_interval < 5:
-            config.jpgs_interval = 256
+        if config.frame_save_interval < 5:
+            config.frame_save_interval = 256
             print()
-            print("WARNING! The jpgs_interval must be greater than 5. It has been reset to 256!")
+            print("WARNING! The frame_save_interval must be greater than 5. It has been reset to 256!")
 
     # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
     if parser.has_option(section, "slideshow_enable"):

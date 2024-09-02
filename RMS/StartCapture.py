@@ -216,12 +216,12 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         night_data_dir = os.path.join(os.path.abspath(config.data_dir), config.captured_dir, \
             night_data_dir_name)
 
-        # Full path to the JPEG directory
-        if config.save_jpgs:
-            session_jpg_dir = os.path.join(os.path.abspath(config.data_dir), config.jpg_dir,
-                                           night_data_dir_name)
+        # Full path to the saved frames directory
+        if config.save_frames:
+            saved_frames_dir = os.path.join(os.path.abspath(config.data_dir), config.frame_dir,
+                                            night_data_dir_name)
         else:
-            session_jpg_dir = None
+            saved_frames_dir = None
 
 
 
@@ -249,15 +249,15 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
     log.info('Data directory: ' + night_data_dir)
 
-    # Make a directory for the JPEGs
-    if session_jpg_dir:
+    # Make a directory for the saved frames
+    if saved_frames_dir:
         # Create the main session directory
-        mkdirP(session_jpg_dir)
+        mkdirP(saved_frames_dir)
 
         # Create frames subdirectory
-        mkdirP(os.path.join(session_jpg_dir, config.jpg_subdir))
+        mkdirP(os.path.join(saved_frames_dir, config.frame_subdir))
 
-    log.info('JPEG directory: ' + session_jpg_dir)
+    log.info('Saved frames directory: ' + saved_frames_dir)
 
     # Copy the used config file to the capture directory
     if os.path.isfile(config.config_file_name):
@@ -377,7 +377,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
     # Initialize buffered capture
     bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config, video_file=video_file,
-                         night_data_dir=night_data_dir, frame_save_dir=session_jpg_dir)
+                         night_data_dir=night_data_dir, frame_save_dir=saved_frames_dir)
 
 
     # Initialize the live image viewer

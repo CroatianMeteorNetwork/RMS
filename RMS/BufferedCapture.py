@@ -76,7 +76,7 @@ class BufferedCapture(Process):
         Keyword arguments:
             video_file: [str] Path to the video file, if it was given as the video source. None by default.
             night_data_dir: [str] Path to the directory where night data is stored. None by default.
-            session_jpg_dir: [str] Path to the directory where night JPEGs are stored. None by default.
+            frame_save_dir: [str] Path to the directory where saved frames are stored. None by default.
 
         """
         
@@ -208,14 +208,14 @@ class BufferedCapture(Process):
         """Saves an image frame to disk with a timestamp-based filename.
 
         This method generates a filename based on the station ID and the
-        timestamp of the frame, then saves the image in JPEG format to the
-        session_jpg_dir/frames directory.
+        timestamp of the frame, then saves the frame in the specified format
+        to the saved_frames_dir/frame_subdir directory.
 
         The method calculates the filename using the station ID, the UTC date
         and time from the timestamp, and the milliseconds part of the timestamp
         to ensure uniqueness.
 
-        The filename format is 'stationID_YYYYMMDD_HHMMSS_MMM.jpg'.
+        The filename format is 'stationID_YYYYMMDD_HHMMSS_MMM.ttt'.
 
         Arguments:
             frame_timestamp: [float] The timestamp of the frame to be saved,
@@ -1141,8 +1141,8 @@ class BufferedCapture(Process):
                     first_frame_timestamp = frame_timestamp
  
  
-                # If save_jpgs is set and a video device is used, save a jpg every nth frames
-                if (self.config.save_jpgs
+                # If save_frames is set and a video device is used, save a frame every nth frames
+                if (self.config.save_frames
                         and self.video_file is None
                         and total_frames%(self.config.frame_save_interval) == 0):
 
