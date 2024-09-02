@@ -1214,7 +1214,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         return None
 
     # Locate and load the mask file
-    mask = getMaskFile(dir_path, config, file_list=file_list)
+    mask = getMaskFile(dir_path, config, file_list=file_list, default_as_backup=True)
 
     if mask is not None:
         mask.checkMask(platepar.X_res, platepar.Y_res)
@@ -2897,7 +2897,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         )
 
         # Locate and load the mask file
-        mask = getMaskFile(dir_path, config, file_list=file_list)
+        mask = getMaskFile(dir_path, config, file_list=file_list, default_as_backup=True)
 
         # If the resolution of the loaded mask doesn't match the resolution in the platepar, reset the mask
         if mask is not None:
@@ -3710,7 +3710,7 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path, mask=None, platepar=N
 
     # Locate and load the mask file
     if mask is None:
-        mask = getMaskFile(dir_path, config, file_list=file_list)
+        mask = getMaskFile(dir_path, config, file_list=file_list, default_as_backup=True)
 
     if mask is not None:
         
