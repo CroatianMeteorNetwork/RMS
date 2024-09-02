@@ -29,7 +29,10 @@ OMIT_FROM_CONFIG = {'lat',  # Deprecated DFNS Station
                     'brightness',  # Deprecated
                     'contrast',  # Deprecated
                     'dark_file',  # Deprecated
-                    'use_dark'  # Deprecated
+                    'use_dark',  # Deprecated
+                    'mask_remote_name',  # Should not be exposed
+                    'remote_mask_dir',  # Should not be exposed
+                    'platepar_template_dir'  # Should not be exposed
                     }
 
 
