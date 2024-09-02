@@ -1718,7 +1718,7 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
                         raw_area/1e6, azim, elev, sensitivity_ratio, area/1e6
                         )
                     )
-                    print("Mask:", mask_segment, unmasked_ratio)
+                    print("Mask:", mask_segment, np.count_nonzero(~mask_segment), mask_segment.size, unmasked_ratio)
 
                 # print(np.abs(np.hypot(x_mean - platepar.X_res/2, y_mean - platepar.Y_res/2)), sensitivity_ratio, mag[0])
 
