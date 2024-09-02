@@ -1627,8 +1627,8 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
         col_areas_xy = collections.OrderedDict()
 
         # Sample the image
-        for x0 in np.linspace(0, platepar.X_res, longer_side_points, dtype=int, endpoint=False):
-            for y0 in np.linspace(0, platepar.Y_res, shorter_side_points, dtype=int, endpoint=False):
+        for i, x0 in enumerate(np.linspace(0, platepar.X_res, longer_side_points, dtype=int, endpoint=False)):
+            for j, y0 in enumerate(np.linspace(0, platepar.Y_res, shorter_side_points, dtype=int, endpoint=False)):
 
                 # Compute lower right corners of the segment
                 xe = x0 + longer_dpx
@@ -1710,12 +1710,15 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
 
 
                 # DEBUG - print a status message for every segment, including all computed values
-                print()
-                print("(x = {:4d}, y = {:4d})".format(x0, y0))
-                print("  A: {:6.2f} km^2, Az = {:7.2f}, Ev = {:7.2f}, Sens.: {:6.2f}, Ae: {:6.2f}".format(
-                    raw_area/1e6, azim, elev, sensitivity_ratio, area/1e6
+                # Only print on the diagonal
+                if i == j:
+                    print()
+                    print("(x = {:4d}, y = {:4d})".format(x0, y0))
+                    print("  A: {:6.2f} km^2, Az = {:7.2f}, Ev = {:7.2f}, Sens.: {:6.2f}, Ae: {:6.2f}".format(
+                        raw_area/1e6, azim, elev, sensitivity_ratio, area/1e6
+                        )
                     )
-                )
+                    print("Mask:", mask_segment, unmasked_ratio)
 
                 # print(np.abs(np.hypot(x_mean - platepar.X_res/2, y_mean - platepar.Y_res/2)), sensitivity_ratio, mag[0])
 
