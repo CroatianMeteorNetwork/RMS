@@ -196,18 +196,18 @@ def generateTimelapseFromFrames(frames_dir, mp4_dir, video_path, fps=30, crf=20,
                      Options: 'bz2', 'gz'. 'bz2' by default.
     """
 
-    jpg_images = [img for img in sorted(glob.glob(os.path.join(frames_dir, "*.jpg")))]
-    png_images = [img for img in sorted(glob.glob(os.path.join(frames_dir, "*.png")))]
-    images = jpg_images + png_images
+    jpg_files = [img for img in sorted(glob.glob(os.path.join(frames_dir, "*.jpg")))]
+    png_files = [img for img in sorted(glob.glob(os.path.join(frames_dir, "*.png")))]
+    images_files = jpg_files + png_files
 
-    if len(images) == 0:
+    if len(images_files) == 0:
         print("No images found.")
         return
 
     # Create a text file listing all the images
     list_file_path = os.path.join(frames_dir, "filelist.txt")
     with open(list_file_path, 'w') as f:
-        for img_path in images:
+        for img_path in images_files:
             f.write("file '{0}'\n".format(os.path.basename(img_path)))
 
     # Formulate the ffmpeg command
