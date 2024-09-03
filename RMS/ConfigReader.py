@@ -387,8 +387,11 @@ class Config:
         # The file extension for saved frames ('jpg' or 'png')
         frame_file_type = 'jpg'
 
-        # Set JPEG compression quality for the saved frames for jpg file type
+        # Set JPEG quality for the saved frames for jpg file type
         self.jpgs_quality = 90
+
+        # Set PNG compression for the saved frames for png file type
+        self.png_compression = 3
 
         # Set the interval for saving video frames to JPEG
         self.frame_save_interval: 256
@@ -1137,7 +1140,7 @@ def parseCapture(config, parser):
     if parser.has_option(section, "frame_file_type"):
         config.frame_file_type = parser.get(section, "frame_file_type")
 
-    # Load the JPEG compression quality
+    # Load the JPEG quality
     if parser.has_option(section, "jpgs_quality"):
         config.jpgs_quality = parser.getint(section, "jpgs_quality")
 
@@ -1146,6 +1149,17 @@ def parseCapture(config, parser):
             config.jpgs_quality = 90
             print()
             print("WARNING! The jpgs_quality must be between 0 and 100. It has been reset to 90!")
+
+    # Load the PNG compression
+    if parser.has_option(section, "png_compression"):
+        config.png_compression = parser.getint(section, "png_compression")
+
+        # Must be an integer between 0 and 9
+        if not 0 <= config.png_compression <= 9:
+            config.png_compression = 3
+            print()
+            print("WARNING! The png_compression must be between 0 and 9. It has been reset to 90!")
+
 
     # Load the interval for saving video frame
     if parser.has_option(section, "frame_save_interval"):

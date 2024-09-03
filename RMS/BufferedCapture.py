@@ -231,16 +231,32 @@ class BufferedCapture(Process):
         millis = int((frame_timestamp - floor(frame_timestamp))*1000)
 
         # Create the filename
-        filename = (str(self.config.stationID).zfill(3) + "_" + date_string + "_"
-                    + str(millis).zfill(3) + ".jpg")
+        if self.config.frame_file_type == 'png':
+            file_extension = '.png'
+        else:
+            file_extension = '.jpg'
 
+        filename = "{0}_{1}_{2:03d}{3}".format(
+            str(self.config.stationID).zfill(3),
+            date_string,
+            millis,
+            file_extension
+        )
+
+        # Define the full path for saving the file
         frame_path = os.path.join(self.frame_save_dir, self.config.frame_subdir, filename)
 
+        # Write the image file
         try:
-            cv2.imwrite(frame_path, frame, [int(cv2.IMWRITE_JPEG_QUALITY), self.config.jpgs_quality])
-            log.info(f"Saving completed: {filename}")
+            if file_extension == '.png':
+                cv2.imwrite(frame_path, frame, [int(cv2.IMWRITE_PNG_COMPRESSION), self.config.png_compression])
+
+            else:
+                cv2.imwrite(frame_path, frame, [int(cv2.IMWRITE_JPEG_QUALITY), self.config.jpgs_quality])
+
+            log.info("Frame saved: {0}".format(filename))
         except Exception as e:
-            log.info(f"Could not save image to disk: {e}")
+            log.error("Could not save frame to disk: {0}".format(e))
 
 
     def calculatePTSRegressionParams(self, y):
