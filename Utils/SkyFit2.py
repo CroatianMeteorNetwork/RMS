@@ -3288,7 +3288,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Change distortion type to poly3+radial5
             if (event.key() == QtCore.Qt.Key_3) and (modifiers == QtCore.Qt.ControlModifier):
 
-                self.dist_type_index = 2
+                self.dist_type_index = 6
                 self.changeDistortionType()
                 self.tab.param_manager.updatePlatepar()
                 self.updateLeftLabels()
@@ -3298,7 +3298,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Change distortion type to radial3
             elif (event.key() == QtCore.Qt.Key_4) and (modifiers == QtCore.Qt.ControlModifier):
 
-                self.dist_type_index = 3
+                self.dist_type_index = 7
                 self.changeDistortionType()
                 self.tab.param_manager.updatePlatepar()
                 self.updateLeftLabels()
@@ -3308,7 +3308,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Change distortion type to radial5
             elif (event.key() == QtCore.Qt.Key_5) and (modifiers == QtCore.Qt.ControlModifier):
 
-                self.dist_type_index = 4
+                self.dist_type_index = 8
                 self.changeDistortionType()
                 self.tab.param_manager.updatePlatepar()
                 self.updateLeftLabels()
@@ -3318,7 +3318,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Change distortion type to radial7
             elif (event.key() == QtCore.Qt.Key_6) and (modifiers == QtCore.Qt.ControlModifier):
 
-                self.dist_type_index = 5
+                self.dist_type_index = 9
                 self.changeDistortionType()
                 self.tab.param_manager.updatePlatepar()
                 self.updateLeftLabels()
@@ -3328,7 +3328,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Change distortion type to radial9
             elif (event.key() == QtCore.Qt.Key_7) and (modifiers == QtCore.Qt.ControlModifier):
 
-                self.dist_type_index = 6
+                self.dist_type_index = 10
                 self.changeDistortionType()
                 self.tab.param_manager.updatePlatepar()
                 self.updateLeftLabels()

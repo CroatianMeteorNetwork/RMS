@@ -1206,13 +1206,15 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
             bin_used = new_bin
 
 
-    # Get the platepar
-    platepar = Platepar.Platepar()
-    platepar.read(os.path.join(dir_path, config.platepar_name), use_flat=config.use_flat)
+    # Get the platepar (first from the night directory, then the default one)
+    platepar = Platepar.findBestPlatepar(config, dir_path)
 
+    if platepar is None:
+        print("Platepar not found!")
+        return None
 
     # Locate and load the mask file
-    mask = getMaskFile(dir_path, config, file_list=file_list)
+    mask = getMaskFile(dir_path, config, file_list=file_list, default_as_backup=True)
 
     if mask is not None:
         mask.checkMask(platepar.X_res, platepar.Y_res)
@@ -1628,8 +1630,8 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
         col_areas_xy = collections.OrderedDict()
 
         # Sample the image
-        for x0 in np.linspace(0, platepar.X_res, longer_side_points, dtype=int, endpoint=False):
-            for y0 in np.linspace(0, platepar.Y_res, shorter_side_points, dtype=int, endpoint=False):
+        for i, x0 in enumerate(np.linspace(0, platepar.X_res, longer_side_points, dtype=int, endpoint=False)):
+            for j, y0 in enumerate(np.linspace(0, platepar.Y_res, shorter_side_points, dtype=int, endpoint=False)):
 
                 # Compute lower right corners of the segment
                 xe = x0 + longer_dpx
@@ -1670,8 +1672,10 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
                 if mask_segment.size == 0:
                     continue
 
-                # Compute ratio of masked portion of the segment
-                unmasked_ratio = 1 - np.count_nonzero(~mask_segment)/mask_segment.size
+                # Compute ratio of masked portion of the segment. Assume that a masked area has a black pixel
+                #   and an unmasked area has a white pixel (0 and 255, respectively)
+                mask_thresholded = mask_segment > 0
+                unmasked_ratio = np.count_nonzero(mask_thresholded)/mask_segment.size
 
                 # Compute the pointing direction and the vignetting and extinction loss for the mean location
 
@@ -1693,16 +1697,13 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
                 # Compute the sensitivity loss due to vignetting and extinction
                 sensitivity_ratio = test_px_sum/rev_level
 
-                # print(np.abs(np.hypot(x_mean - platepar.X_res/2, y_mean - platepar.Y_res/2)), sensitivity_ratio, mag[0])
-
-                ##
-
                 # Compute the range correction (w.r.t 100 km) to the mean point
                 r, _, _, _ = xyHt2Geo(
                     platepar, x_mean, y_mean, ht, indicate_limit=True, elev_limit=elev_limit
                 )
 
                 # Correct the area for the masked portion
+                raw_area = area
                 area *= unmasked_ratio
 
                 ### ###
@@ -1711,6 +1712,20 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
                 col_areas_xy[(x_mean, y_mean)] = [area, azim, elev, sensitivity_ratio, r]
 
                 total_area += area
+
+
+                # # DEBUG - print a status message for every segment, including all computed values
+                # # Only print on the diagonal
+                # if i == j:
+                #     print()
+                #     print("(x = {:4d}, y = {:4d})".format(x0, y0))
+                #     print("  A: {:6.2f} km^2, Az = {:7.2f}, Ev = {:7.2f}, Sens.: {:6.2f}, Ae: {:6.2f}".format(
+                #         raw_area/1e6, azim, elev, sensitivity_ratio, area/1e6
+                #         )
+                #     )
+                #     print("Mask:", mask_segment, np.count_nonzero(~mask_segment), mask_segment.size, unmasked_ratio)
+
+                ##
 
         # Store segments to the height dictionary (save a copy so it doesn't get overwritten)
         col_areas_ht[float(ht)] = dict(col_areas_xy)
@@ -1833,15 +1848,30 @@ def sensorCharacterization(config, flux_config, dir_path, meteor_data, default_f
 
 
 
-def getCollectingArea(dir_path, config, flux_config, platepar, mask):
-    """ Make a file name to save the raw collection areas. """
+def getCollectingArea(dir_path, config, flux_config, platepar, mask, overwrite=False):
+    """ Generate collection areas and save to file, or load from file if available. 
+    
+    Arguments:
+        dir_path: [str] Path to the directory where the collection areas are stored.
+        config: [Config object]
+        flux_config: [FluxConfig object]
+        platepar: [Platepar object]
+        mask: [Mask object]
+
+    Keyword arguments:
+        overwrite: [bool] Whether to overwrite the existing collection areas file. False by default.
+
+    Return:
+        col_areas_ht: [dict] Collection areas per height.
+        col_area_100km_raw: [float] Raw collection area at 100 km.
+    """
 
     col_areas_file_name = generateColAreaJSONFileName(config.stationID, flux_config.side_points, \
         flux_config.ht_min, flux_config.ht_max, flux_config.dht, flux_config.elev_limit,
     )
 
     # Check if the collection area file exists. If yes, load the data. If not, generate collection areas
-    if col_areas_file_name in os.listdir(dir_path):
+    if (col_areas_file_name in os.listdir(dir_path)) and (not overwrite):
         col_areas_ht = loadRawCollectionAreas(dir_path, col_areas_file_name)
         print("Loaded collection areas from:", col_areas_file_name)
 
@@ -2850,8 +2880,11 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             print("No meteors in the FTPdetectinfo file!")
             return None
 
-        platepar = Platepar.Platepar()
-        platepar.read(os.path.join(dir_path, config.platepar_name), use_flat=config.use_flat)
+        platepar = Platepar.findBestPlatepar(config, dir_path)
+
+        if platepar is None:
+            print("No platepar file available!")
+            return None
 
         recalibrated_platepars = loadRecalibratedPlatepar(dir_path, config, file_list, type='meteor')
         recalibrated_flux_platepars = loadRecalibratedPlatepar(dir_path, config, file_list, type='flux')
@@ -2867,7 +2900,7 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         )
 
         # Locate and load the mask file
-        mask = getMaskFile(dir_path, config, file_list=file_list)
+        mask = getMaskFile(dir_path, config, file_list=file_list, default_as_backup=True)
 
         # If the resolution of the loaded mask doesn't match the resolution in the platepar, reset the mask
         if mask is not None:
@@ -3641,13 +3674,17 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
 
 
-def prepareFluxFiles(config, dir_path, ftpdetectinfo_path):
+def prepareFluxFiles(config, dir_path, ftpdetectinfo_path, mask=None, platepar=None):
     """ Prepare files necessary for quickly computing the flux. 
     
     Arguments:
         config: [Config]
         dir_path: [str] Path to the data directory.
         ftpdetectinfo_path: [str] Path to the FTPdetectinfo file.
+
+    Keyword arguments:
+        mask: [Mask] Mask object. If None, the mask will be loaded from the file.
+        platepar: [Platepar] Platepar object. If None, the platepar will be loaded from the file.
 
     Return:
         None
@@ -3667,14 +3704,20 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path):
 
 
     # Load the platepar file
-    platepar = Platepar.Platepar()
-    platepar.read(os.path.join(dir_path, config.platepar_name), use_flat=config.use_flat)
+    if platepar is None:
+        platepar = Platepar.findBestPlatepar(config, dir_path)
 
+        if platepar is None:
+            print("No platepar file found in the directory or in the config dir!")
+            return None
 
     # Locate and load the mask file
-    mask = getMaskFile(dir_path, config, file_list=file_list)
+    if mask is None:
+        mask = getMaskFile(dir_path, config, file_list=file_list, default_as_backup=True)
 
     if mask is not None:
+        
+        # Check that the mask has the correct resolution
         mask.checkMask(platepar.X_res, platepar.Y_res)
 
 

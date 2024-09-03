@@ -218,7 +218,7 @@ def SearchXM(devices):
     print("detected network interfaces:", det_intfs)
     intfsf = list(filter(lambda i: i in intfs, det_intfs))       
     #print("prefferd interfaces:", intfsf)
-    intf = intfs[0]
+    intf = intfsf[0]
     server = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
     
     # hack to use eth0 interface instantly
