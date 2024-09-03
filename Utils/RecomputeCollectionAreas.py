@@ -1,6 +1,6 @@
 """ Go through all directories and recompute the .json collection areas files."""
 
-
+from __future__ import print_function, division, absolute_import
 
 import os
 import multiprocessing
