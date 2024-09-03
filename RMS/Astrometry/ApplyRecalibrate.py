@@ -600,6 +600,9 @@ def recalibrateIndividualFFsAndApplyAstrometry(
     # Use a copy of the config file
     config = copy.deepcopy(config)
 
+    # Use a copy of the platepar
+    platepar = copy.deepcopy(platepar)
+
     # If the given file does not exits, return nothing
     if not os.path.isfile(ftpdetectinfo_path):
         log.info('ERROR! The FTPdetectinfo file does not exist: {:s}'.format(ftpdetectinfo_path))

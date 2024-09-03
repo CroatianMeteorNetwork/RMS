@@ -70,24 +70,77 @@ class MaskStructure(object):
 
 
 
-def getMaskFile(dir_path, config, file_list=None):
+def getMaskFile(dir_path, config, file_list=None, default_as_backup=False):
+    """ Get the mask file from the given directory. If the mask file is not found, return None.
+        It will also check if the mask is a zip file and load it if it is.
+
+    Arguments:
+        dir_path: [str] Path to the directory where the mask file is located.
+        config: [Config] Configuration object.
+
+    Keyword arguments:
+        file_list: [list] List of files in the directory. If None, the files will be listed.
+        default_as_backup: [bool] If True, the default mask file will be used as a backup, from the RMS 
+            directory.
+
+    Returns:
+        mask: [MaskStructure] Mask structure object. If the mask file is not found, None is returned.
     """
-    From a directory, fine the mask file, load it and return it
-    """
+
+    mask = None
+
     if file_list is None:
         file_list = os.listdir(dir_path)
 
     # Look through files and if there is mask.bmp or mask.zip, keep track of that then load it
-    mask = max(2*(os.path.splitext(os.path.basename(config.mask_file))[0] == os.path.splitext(os.path.basename(filename))[0]) - filename.endswith('.zip')
-               for filename in file_list)
-    if mask > 0:
-        mask_path = os.path.join(dir_path, config.mask_file if mask == 2 else os.path.splitext(os.path.basename(config.mask_file))[0] + '.zip')
+    mask_status = max(
+        2*(os.path.splitext(os.path.basename(config.mask_file))[0] == os.path.splitext(os.path.basename(filename))[0]) 
+            - filename.endswith('.zip')
+               for filename in file_list
+    )
+    
+    # If a mask file is found, load it
+    if mask_status > 0:
+        
+        mask_path = os.path.join(
+            dir_path, 
+            config.mask_file if mask_status == 2 else os.path.splitext(
+                os.path.basename(config.mask_file))[0] + '.zip'
+        )
+        
+        print("Loading mask:", mask_path)
         mask = loadMask(mask_path)
-        print("Using mask:", mask_path)
 
-    else:
+        if mask is None:
+            print("  Mask file could not be loaded!")
+        else:
+            print("  Mask file loaded!")
+            
+
+    # If the mask file is not found, use the default mask file as a backup
+    if (mask is None) and default_as_backup:
+
+        # Path to the mask file in the config directory
+        default_mask_path = os.path.join(config.config_file_path, config.mask_file)
+
+        # Check if the mask file is in the config directory, if not, use the default mask file
+        if not os.path.isfile(default_mask_path):
+
+            # Path to the mask in RMS source directory
+            default_mask_path = os.path.join(config.rms_root_dir, config.mask_file)
+
+        print("Mask file not found! Using default mask file as a backup:", default_mask_path)
+
+        mask = loadMask(default_mask_path)
+
+        if mask is None:
+            print("  Default mask file could not be loaded!")
+        else:
+            print("  Default mask file loaded!")
+
+
+    if mask is None:
         print("No mask used!")
-        mask = None
 
     return mask
     
