@@ -31,7 +31,7 @@ from RMS.Routines.MaskImage import loadMask
 from Utils.CalibrationReport import generateCalibrationReport
 from Utils.Flux import prepareFluxFiles
 from Utils.FOVKML import fovKML
-from Utils.GenerateTimelapse import generateTimelapse, generateTimelapseFromJpeg
+from Utils.GenerateTimelapse import generateTimelapse, generateTimelapseFromFrames
 from Utils.MakeFlat import makeFlat
 from Utils.PlotFieldsums import plotFieldsums
 from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
@@ -464,48 +464,51 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
 
-    # Generate a timelapse from JPEGs
-    if config.timelapse_generate_from_jpeg:
+    # Generate a timelapse from frames
+    if config.timelapse_generate_from_frames:
 
-        log.info('Generating timelapse from JPEGs...')
+        log.info('Generating timelapse from saved frames...')
         try:
-            jpg_dir = os.path.join(config.data_dir, config.jpg_dir)
+            frame_dir = os.path.join(config.data_dir, config.frame_dir)
 
-            # Loop through each directory in the jpg dir
-            for jpg_subdir in os.listdir(jpg_dir):
-                full_jpg_subdir = os.path.join(jpg_dir, jpg_subdir)
+            # Loop through each directory in the frame dir
+            for saved_frames_dir in os.listdir(frame_dir):
+                full_saved_frames_dir = os.path.join(frame_dir, saved_frames_dir)
 
                 # If it's not a directory, skip
-                if not os.path.isdir(full_jpg_subdir):
+                if not os.path.isdir(full_saved_frames_dir):
                     continue
 
-                # Look for the frames subdirectory
-                frames_dir = os.path.join(full_jpg_subdir, config.jpg_subdir)
-                if not os.path.isdir(frames_dir):
+                # Look for the images subdirectory
+                frames_images_dir = os.path.join(full_saved_frames_dir, config.frame_subdir)
+                if not os.path.isdir(frames_images_dir):
                     continue
 
-                # Search for JPG files in the frames subdirectory
-                jpg_search_pattern = os.path.join(frames_dir, '*.jpg')
-                jpg_files = glob.glob(jpg_search_pattern)
-                if len(jpg_files) < 2:
+                # Search for both .jpg and .png files in the images subdirectory
+                jpg_files = glob.glob(os.path.join(frames_images_dir, '*.jpg'))
+                png_files = glob.glob(os.path.join(frames_images_dir, '*.png'))
+
+                # Combine the lists of files
+                image_files = jpg_files + png_files
+
+                if len(image_files) < 2:
                     # Skip this directory if fewer than 2 JPG files are found
                     continue
 
-                # Search for *_adsb_timelapse.mp4
-                search_pattern = os.path.join(full_jpg_subdir, '*_JPEG_timelapse.mp4')
+                # Search for *_frames_timelapse.mp4
+                search_pattern = os.path.join(full_saved_frames_dir, '*_frames_timelapse.mp4')
                 found_files = glob.glob(search_pattern)
 
                 # If not found, generate timelapse
                 if not found_files:
-                    log.info(f"No JPEG timelapse found in {jpg_subdir}, generating new timelapse...")
+                    log.info(f"No frames timelapse found in {saved_frames_dir}, generating new timelapse...")
 
                     # Make the name of the timelapse file
-                    jpg_subdir_cleaned = jpg_subdir.replace("JPG_", "")
-                    timelapse_file_name = jpg_subdir_cleaned + "_JPEG_timelapse.mp4"
-                    timelapse_path = os.path.join(full_jpg_subdir, config.jpg_subdir, timelapse_file_name)
+                    timelapse_file_name = saved_frames_dir + "_frames_timelapse.mp4"
+                    timelapse_path = os.path.join(full_saved_frames_dir, timelapse_file_name)
 
                     # Generate the timelapse and cleanup
-                    generateTimelapseFromJpeg(frames_dir, timelapse_path, delete_images=False)
+                    generateTimelapseFromFrames(frames_images_dir, timelapse_path, delete_images=False)
 
                     # Add the timelapse to the extra files
                     # extra_files.append(timelapse_path)

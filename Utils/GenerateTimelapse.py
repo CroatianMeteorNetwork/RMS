@@ -178,15 +178,15 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
     print("Total time:", RmsDateTime.utcnow() - t1)
 
 
-def generateTimelapseFromJpeg(frames_dir, parent_dir, video_path, fps=30, crf=20, cleanup_mode='none',
+def generateTimelapseFromFrames(frames_dir, mp4_dir, video_path, fps=30, crf=20, cleanup_mode='none',
                               compression='bz2'):
     """
-    Generate a timelapse video from JPEG images and optionally cleanup the
+    Generate a timelapse video from frame images and optionally cleanup the
     source directory.
 
     Keyword arguments:
-        frames_dir: [str] Directory containing JPEG images.
-        parent_dir: [str] Parent directory where the video will be saved.
+        frames_dir: [str] Directory containing frame image files.
+        mp4_dir: [str] directory where the video will be saved.
         video_path: [str] Output path for the generated video.
         fps: [int] Frames per second for the output video. 30 by default.
         crf: [int] Constant Rate Factor for video compression. 20 by default.
@@ -195,8 +195,11 @@ def generateTimelapseFromJpeg(frames_dir, parent_dir, video_path, fps=30, crf=20
         compression: [str] Compression method for tar.
                      Options: 'bz2', 'gz'. 'bz2' by default.
     """
-    
-    images = [img for img in sorted(glob.glob(os.path.join(frames_dir, "*.jpg")))]
+
+    jpg_images = [img for img in sorted(glob.glob(os.path.join(frames_dir, "*.jpg")))]
+    png_images = [img for img in sorted(glob.glob(os.path.join(frames_dir, "*.png")))]
+    images = jpg_images + png_images
+
     if len(images) == 0:
         print("No images found.")
         return
@@ -228,7 +231,7 @@ def generateTimelapseFromJpeg(frames_dir, parent_dir, video_path, fps=30, crf=20
 
     if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
         print("Video created successfully at {0}".format(video_path))
-        
+
         # Cleanup based on the specified mode
         if cleanup_mode == 'delete':
             try:
@@ -239,13 +242,13 @@ def generateTimelapseFromJpeg(frames_dir, parent_dir, video_path, fps=30, crf=20
         elif cleanup_mode == 'tar':
             try:
                 ext = '.tar.bz2' if compression == 'bz2' else '.tar.gz'
-                tar_path = os.path.join(parent_dir, os.path.basename(frames_dir) + ext)
-                
+                tar_path = os.path.join(mp4_dir, os.path.basename(frames_dir) + ext)
+
                 # Create tar archive
                 mode = 'w:bz2' if compression == 'bz2' else 'w:gz'
                 with tarfile.open(tar_path, mode) as tar:
                     tar.add(frames_dir, arcname=os.path.basename(frames_dir))
-                
+
                 # Remove the original directory
                 shutil.rmtree(frames_dir)
                 print("Successfully created tar archive at: {0}".format(tar_path))

@@ -626,7 +626,7 @@ class Config:
 
         ##### Timelapse
         self.timelapse_generate_captured = True
-        self.timelapse_generate_from_jpeg = False
+        self.timelapse_generate_from_frames = True
 
 
         #### Shower association
@@ -1723,8 +1723,8 @@ def parseTimelapse(config, parser):
     if parser.has_option(section, "timelapse_generate_captured"):
         config.timelapse_generate_captured = parser.getboolean(section, "timelapse_generate_captured")
 
-    if parser.has_option(section, "timelapse_generate_from_jpeg"):
-        config.timelapse_generate_from_jpeg = parser.getboolean(section, "timelapse_generate_from_jpeg")
+    if parser.has_option(section, "timelapse_generate_from_frames"):
+        config.timelapse_generate_from_frames = parser.getboolean(section, "timelapse_generate_from_frames")
 
 
 
