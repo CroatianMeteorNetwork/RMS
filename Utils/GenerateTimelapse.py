@@ -178,7 +178,7 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
     print("Total time:", RmsDateTime.utcnow() - t1)
 
 
-def generateTimelapseFromFrames(frames_dir, mp4_dir, video_path, fps=30, crf=20, cleanup_mode='none',
+def generateTimelapseFromFrames(frames_dir, video_path, fps=30, crf=20, cleanup_mode='none',
                               compression='bz2'):
     """
     Generate a timelapse video from frame images and optionally cleanup the
@@ -186,7 +186,6 @@ def generateTimelapseFromFrames(frames_dir, mp4_dir, video_path, fps=30, crf=20,
 
     Keyword arguments:
         frames_dir: [str] Directory containing frame image files.
-        mp4_dir: [str] directory where the video will be saved.
         video_path: [str] Output path for the generated video.
         fps: [int] Frames per second for the output video. 30 by default.
         crf: [int] Constant Rate Factor for video compression. 20 by default.
@@ -242,7 +241,7 @@ def generateTimelapseFromFrames(frames_dir, mp4_dir, video_path, fps=30, crf=20,
         elif cleanup_mode == 'tar':
             try:
                 ext = '.tar.bz2' if compression == 'bz2' else '.tar.gz'
-                tar_path = os.path.join(mp4_dir, os.path.basename(frames_dir) + ext)
+                tar_path = os.path.join(os.path.dirname(video_path), os.path.basename(frames_dir) + ext)
 
                 # Create tar archive
                 mode = 'w:bz2' if compression == 'bz2' else 'w:gz'
