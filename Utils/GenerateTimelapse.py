@@ -256,7 +256,7 @@ def generateTimelapseFromFrames(frames_dir, video_path, fps=30, crf=20, cleanup_
 
                 # Remove the original directory
                 shutil.rmtree(frames_dir)
-                print("Successfully created tar archive at: {0}".format(tar_path))  
+                print("Successfully created tar archive at: {0}".format(tar_path))
 
             except Exception as e:
                 print("Error creating tar archive: {0}".format(e))
