@@ -38,7 +38,7 @@ from math import floor
 from RMS.Misc import ping
 from RMS.Routines.GstreamerCapture import GstVideoFile
 from RMS.Formats.ObservationSummary import getObsDBConn, addObsParam
-from QueuedPool import QueuedPool
+from RMS.QueuedPool import QueuedPool
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
