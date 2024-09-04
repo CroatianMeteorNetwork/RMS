@@ -563,9 +563,9 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
         sol_diff_beg = (shower.lasun_beg - sol_ref_time + 180)%360 - 180
         sol_diff_end = (shower.lasun_end - sol_ref_time + 180)%360 - 180
         sol_diff_max = (shower.lasun_max - sol_ref_time + 180)%360 - 180
-        shower.dt_beg_ref_year = ref_dt + datetime.timedelta(days=sol_diff_beg*360/365.24219)
-        shower.dt_end_ref_year = ref_dt + datetime.timedelta(days=sol_diff_end*360/365.24219)
-        shower.dt_max_ref_year = ref_dt + datetime.timedelta(days=sol_diff_max*360/365.24219)
+        shower.dt_beg_ref_year = ref_dt + datetime.timedelta(days=sol_diff_beg*365.24219/360)
+        shower.dt_end_ref_year = ref_dt + datetime.timedelta(days=sol_diff_end*365.24219/360)
+        shower.dt_max_ref_year = ref_dt + datetime.timedelta(days=sol_diff_max*365.24219/360)
 
         # Add the shower to active showers
         active_showers = [shower]
