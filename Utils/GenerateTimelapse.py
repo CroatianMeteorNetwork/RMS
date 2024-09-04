@@ -241,18 +241,23 @@ def generateTimelapseFromFrames(frames_dir, video_path, fps=30, crf=20, cleanup_
         elif cleanup_mode == 'tar':
             try:
                 ext = '.tar.bz2' if compression == 'bz2' else '.tar.gz'
-                tar_path = os.path.join(os.path.dirname(video_path), os.path.basename(frames_dir) + ext)
 
-                # Create tar archive
+                # Derive the tar file name from video_path, stripping '_timelapse.mp4'
+                base_name = os.path.basename(video_path).replace('_timelapse.mp4', '')
+
+                # Construct the full path for the tar file
+                tar_path = os.path.join(os.path.dirname(video_path), base_name + ext)
+
+                # Create the tar archive with the correct mode
                 mode = 'w:bz2' if compression == 'bz2' else 'w:gz'
+
                 with tarfile.open(tar_path, mode) as tar:
-                    tar.add(frames_dir, arcname=(os.path.basename(video_path)
-                                                 + "_"
-                                                 + os.path.basename(frames_dir)))
+                    tar.add(frames_dir, arcname=os.path.basename(frames_dir))
 
                 # Remove the original directory
                 shutil.rmtree(frames_dir)
-                print("Successfully created tar archive at: {0}".format(tar_path))
+                print("Successfully created tar archive at: {0}".format(tar_path))  
+
             except Exception as e:
                 print("Error creating tar archive: {0}".format(e))
     else:
