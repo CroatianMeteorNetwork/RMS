@@ -248,7 +248,7 @@ def generateTimelapseFromFrames(frames_dir, video_path, fps=30, crf=20, cleanup_
                 with tarfile.open(tar_path, mode) as tar:
                     tar.add(frames_dir, arcname=(os.path.basename(video_path)
                                                  + "_"
-                                                 + os.path.basename(frames_dir))
+                                                 + os.path.basename(frames_dir)))
 
                 # Remove the original directory
                 shutil.rmtree(frames_dir)
