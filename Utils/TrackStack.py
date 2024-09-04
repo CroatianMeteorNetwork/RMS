@@ -57,12 +57,21 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
     # done here so that trackStack() can be called from other modules
     dir_paths = [os.path.normpath(dir_path) for dir_path in dir_paths]
 
+    # Make sure the paths are directories and not files
+    # If a file is given, take the directory of the file. If the directory is given, take the directory.
+    dir_paths = [os.path.dirname(dir_path) if os.path.isfile(dir_path) else dir_path for dir_path in dir_paths]
+
+    print('Stacking images from the following directories:')
+    for dir_path in dir_paths:
+        print(dir_path)
+
     # Find recalibrated platepars file per FF file
     recalibrated_platepars = {}
     for dir_path in dir_paths: 
         platepars_recalibrated_file = glob(os.path.join(dir_path, config.platepars_recalibrated_name))
         if len(platepars_recalibrated_file) != 1:
             print('unable to find a unique platepars file in {}'.format(dir_path))
+            print('found: {}'.format(platepars_recalibrated_file))
             return False
         print('loading {}'.format(platepars_recalibrated_file[0]))
         with open(platepars_recalibrated_file[0]) as f:
@@ -387,7 +396,7 @@ def stackFrame(ff_name, recalibrated_platepars, mask, border, pp_ref, img_size, 
     # Map image pixels to sky
     jd_arr, ra_coords, dec_coords, _ = xyToRaDecPP(
         len(x_coords) * [getMiddleTimeFF(ff_basename, conf.fps, ret_milliseconds=True)], x_coords, y_coords,
-        len(x_coords) * [1], pp_temp, extinction_correction=False)
+        len(x_coords) * [1], pp_temp, extinction_correction=False, precompute_pointing_corr=True)
     # Map sky coordinates to stack image coordinates
     stack_x, stack_y = raDecToXYPP(ra_coords, dec_coords, jd_middle, pp_stack)
 
@@ -411,7 +420,7 @@ def stackFrame(ff_name, recalibrated_platepars, mask, border, pp_ref, img_size, 
     # Compute deaveraged maxpixel image
     max_deavg = maxpixel - avepixel
 
-    # Normalize the backgroud brightness by applying a large-kernel median filter to avepixel
+    # Normalize the background brightness by applying a large-kernel median filter to avepixel
     if background_compensation:
 
         # # Apply a median filter to the avepixel to get an estimate of the background brightness

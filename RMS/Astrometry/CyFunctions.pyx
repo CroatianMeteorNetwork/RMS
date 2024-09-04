@@ -74,9 +74,9 @@ cpdef double angularSeparation(double ra1, double dec1, double ra2, double dec2)
     Source of the equation: http://www.astronomycafe.net/qadir/q1890.html (May 1, 2016)
 
     @param ra1: [float] right ascension of the first stars (in degrees)
-    @param dec1: [float] decliantion of the first star (in degrees)
+    @param dec1: [float] declination of the first star (in degrees)
     @param ra2: [float] right ascension of the decons stars (in degrees)
-    @param dec2: [float] decliantion of the decons star (in degrees)
+    @param dec2: [float] declination of the decons star (in degrees)
 
     @return angular_separation: [float] angular separation (in degrees)
     """
@@ -128,8 +128,8 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
 
     Return:
         filtered_indices, filtered_list: (ndarray, ndarray)
-            - filtered_indices - Indices of catalog_list entries which satifly the filters.
-            - filtered_list - catalog_list entires that satifly the filters.
+            - filtered_indices - Indices of catalog_list entries which satisfy the filters.
+            - filtered_list - catalog_list entires that satisfy the filters.
         ...
 
     """
@@ -207,7 +207,7 @@ def matchStars(np.ndarray[FLOAT_TYPE_t, ndim=2] stars_list, np.ndarray[FLOAT_TYP
     cdef double min_dist, dist
     cdef double cat_match_indx, im_star_y, im_star_x, cat_x, cat_y
 
-    # Get the lenghts of input arrays
+    # Get the lengths of input arrays
     cdef int stars_len = stars_list.shape[0]
     cdef int cat_len = cat_good_indices.shape[0]
     
@@ -391,6 +391,36 @@ cdef np.ndarray[np.float64_t, ndim=2] precessionMatrix(double zeta, double theta
     return P
 
 
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+cdef (double, double) nutationComponents(double T):
+    """ Calculate nutation corrections """
+
+    cdef double omega, L, Ll, delta_psi, delta_eps
+
+    # Longitude of the ascending node of the Moon's mean orbit on the ecliptic, measured from the mean equinox
+    # of the date
+    omega = radians(125.04452 - 1934.136261*T)
+
+    # Mean longitude of the Sun
+    L = radians(280.4665 + 36000.7698*T)
+
+    # Mean longitude of the Moon
+    Ll = radians(218.3165 + 481267.8813*T)
+
+    # Nutation in longitude
+    delta_psi = -17.2*sin(omega) - 1.32*sin(2*L) - 0.23*sin(2*Ll) + 0.21*sin(2*omega)
+
+    # Nutation in obliquity
+    delta_eps = 9.2*cos(omega) + 0.57*cos(2*L) + 0.1*cos(2*Ll) - 0.09*cos(2*omega)
+
+    # Convert to radians
+    delta_psi = radians(delta_psi/3600)
+    delta_eps = radians(delta_eps/3600)
+
+    return delta_psi, delta_eps
+
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
@@ -420,7 +450,9 @@ cpdef (double, double, double) equatorialCoordAndRotPrecession(double start_epoc
         np.ndarray[double, ndim=1] normal_vector, transformed_normal
         np.ndarray[double, ndim=1] proj_parallel, proj_parallel_precessed
         np.ndarray[double, ndim=2] P
-        double ra_precessed, dec_precessed, T, t, zeta, z, theta
+        np.ndarray[double, ndim=2] epsilon_matrix, psi_matrix
+
+        double ra_precessed, dec_precessed, T, t, zeta, z, theta, Delta_psi, Delta_epsilon
         double new_rot_angle, angle1, angle2, rotation_change
         int i
 
@@ -446,6 +478,25 @@ cpdef (double, double, double) equatorialCoordAndRotPrecession(double start_epoc
 
     # Apply precession
     transformed_vector = np.dot(P, initial_vector)
+
+
+
+    # Calculate nutation corrections
+    Delta_psi, Delta_epsilon = nutationComponents(T)
+
+    # Construct the nutation matrices
+    epsilon_matrix = np.array([[1,                  0,                   0],
+                               [0, cos(Delta_epsilon),  sin(Delta_epsilon)],
+                               [0, -sin(Delta_epsilon),  cos(Delta_epsilon)]])
+
+    psi_matrix = np.array([[cos(Delta_psi), -sin(Delta_psi), 0],
+                           [sin(Delta_psi),  cos(Delta_psi), 0],
+                           [0,                            0, 1]])
+
+    # Apply nutation
+    transformed_vector = np.dot(epsilon_matrix, transformed_vector)
+    transformed_vector = np.dot(psi_matrix, transformed_vector)
+
 
     # Calculate normal vector to the plane of precession
     normal_vector = np.cross(initial_vector, transformed_vector)
@@ -502,7 +553,7 @@ cpdef (double, double, double) equatorialCoordAndRotPrecession(double start_epoc
     # Normalize the new rotation angle to be between -pi and pi
     new_rot_angle = fmod(new_rot_angle + M_PI, 2*M_PI) - M_PI
 
-    # print(f"Rotation change due to precession: {degrees(rotation_change)*60} arcmin")
+    # print("Rotation change due to precession: {} arcmin".format(degrees(rotation_change) * 60))
 
     return ra_precessed, dec_precessed, new_rot_angle
 
@@ -819,7 +870,7 @@ cpdef (double, double) cyaltAz2RADec(double azim, double elev, double jd, double
         elev: [float] Elevation above horizon in radians.
         jd: [float] Julian date.
         lat: [float] Latitude of the observer in radians.
-        lon: [float] Longitde of the observer in radians.
+        lon: [float] Longitude of the observer in radians.
 
     Return:
         (RA, dec): [tuple]
@@ -856,7 +907,7 @@ cpdef (double, double) cyApparentAltAz2TrueRADec(double azim, double elev, doubl
         elev: [float] Elevation above horizon in radians (epoch of date).
         jd: [float] Julian date.
         lat: [float] Latitude of the observer in radians.
-        lon: [float] Longitde of the observer in radians.
+        lon: [float] Longitude of the observer in radians.
 
     Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
@@ -896,7 +947,7 @@ def cyApparentAltAz2TrueRADec_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] azim_arr, np
         elev_arr: [float] Elevation above horizon in radians (epoch of date).
         jd: [float] Julian date.
         lat: [float] Latitude of the observer in radians.
-        lon: [float] Longitde of the observer in radians.
+        lon: [float] Longitude of the observer in radians.
     Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
     Return:
@@ -1002,7 +1053,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     double pix_scale, np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, 
     np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev, str dist_type, bool refraction=True, bool equal_aspect=False, 
     bool force_distortion_centre=False, bool asymmetry_corr=True):
-    """ Convert RA, Dec to distorion corrected image coordinates. 
+    """ Convert RA, Dec to distortion corrected image coordinates. 
 
     Arguments:
         RA_data: [ndarray] Array of right ascensions (degrees).
@@ -1016,10 +1067,10 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
         jd_ref: [float] Reference Julian date of plate solution.
         ra_ref: [float] Reference right ascension of the image centre (degrees).
         dec_ref: [float] Reference declination of the image centre (degrees).
-        pos_angle_ref: [float] Rotation from the celestial meridial (degrees).
+        pos_angle_ref: [float] Rotation from the celestial meridian (degrees).
         pix_scale: [float] Image scale (px/deg).
         x_poly_rev: [ndarray float] Distortion polynomial in X direction for reverse mapping.
-        y_poly_rev: [ndarray float] Distortion polynomail in Y direction for reverse mapping.
+        y_poly_rev: [ndarray float] Distortion polynomial in Y direction for reverse mapping.
         dist_type: [str] Distortion type. Can be: poly3+radial, radial3, radial4, or radial5.
         
     Keyword arguments:
@@ -1035,7 +1086,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     """
 
     cdef int i
-    cdef double ra_centre, dec_centre, ra, dec, ra_centre_j2000, dec_centre_j2000, pos_angle_ref_corr
+    cdef double ra_centre, dec_centre, ra, dec
     cdef double radius, sin_ang, cos_ang, theta, x, y, r, dx, dy, x_img, y_img, r_corr, r_scale
     cdef double x0, y0, xy, a1, a2, k1, k2, k3, k4, k5
     cdef int index_offset
@@ -1045,27 +1096,34 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] y_array = np.zeros_like(ra_data)
 
 
-    # Compute the current RA of the FOV centre by adding the difference in between the current and the 
-    #   reference hour angle
-    ra_centre = radians((ra_ref + cyjd2LST(jd, 0) - h0 + 360)%360)
-    dec_centre = radians(dec_ref)
+    # Correct the pointing for precession (output in radians)
+    ra_centre, dec_centre, pos_angle_ref = pointingCorrection(
+            jd, radians(lat), radians(lon), 
+            radians(h0), jd_ref, radians(ra_ref), radians(dec_ref), radians(pos_angle_ref), 
+            refraction=refraction
+            )
 
-    # Correct the reference FOV centre for refraction
-    if refraction:
-        ra_centre, dec_centre = eqRefractionTrueToApparent(ra_centre, dec_centre, jd, radians(lat), \
-            radians(lon))
+    # # Compute the current RA of the FOV centre by adding the difference in between the current and the 
+    # #   reference hour angle
+    # ra_centre = radians((ra_ref + cyjd2LST(jd, 0) - h0 + 360)%360)
+    # dec_centre = radians(dec_ref)
+
+    # # Correct the reference FOV centre for refraction
+    # if refraction:
+    #     ra_centre, dec_centre = eqRefractionTrueToApparent(ra_centre, dec_centre, jd, radians(lat), \
+    #         radians(lon))
             
 
-    # Precess the FOV centre and rotation angle to J2000 (otherwise the FOV centre drifts with time)
-    ra_centre_j2000, dec_centre_j2000, pos_angle_ref_corr = equatorialCoordAndRotPrecession(jd, J2000_DAYS,
-                                                            ra_centre, dec_centre, radians(pos_angle_ref))
+    # # Precess the FOV centre and rotation angle to J2000 (otherwise the FOV centre drifts with time)
+    # ra_centre_j2000, dec_centre_j2000, pos_angle_ref_corr = equatorialCoordAndRotPrecession(jd, J2000_DAYS,
+    #                                                         ra_centre, dec_centre, radians(pos_angle_ref))
 
-    # The position angle needs to be corrected for precession, otherwise the FOV rotates with time
-    # Applying the difference in RA between the current and the reference epoch fixes the position angle
-    pos_angle_ref_corr = degrees(pos_angle_ref_corr)
+    # # The position angle needs to be corrected for precession, otherwise the FOV rotates with time
+    # # Applying the difference in RA between the current and the reference epoch fixes the position angle
+    # pos_angle_ref_corr = degrees(pos_angle_ref_corr)
 
-    ra_centre = ra_centre_j2000
-    dec_centre = dec_centre_j2000
+    # ra_centre = ra_centre_j2000
+    # dec_centre = dec_centre_j2000
 
 
     # If the radial distortion is used, unpack radial parameters
@@ -1156,7 +1214,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
         # Compute theta - the direction angle between the FOV centre, sky coordinate, and the image vertical
         sin_ang = cos(dec)*sin(ra - ra_centre)/sin(radius)
         cos_ang = (sin(dec) - sin(dec_centre)*cos(radius))/(cos(dec_centre)*sin(radius))
-        theta   = -atan2(sin_ang, cos_ang) + radians(pos_angle_ref_corr) - pi/2.0
+        theta   = -atan2(sin_ang, cos_ang) + pos_angle_ref - pi/2.0
 
         # Calculate the standard coordinates
         x = degrees(radius)*cos(theta)*pix_scale
@@ -1164,7 +1222,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
 
         ### ###
 
-        # Set initial distorsion values
+        # Set initial distortion values
         dx = 0
         dy = 0
 
@@ -1303,6 +1361,61 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
 
 
 
+cdef (double, double, double) pointingCorrection(
+    double jd, double lat, double lon, 
+    double h0, double jd_ref, double ra_ref, double dec_ref, double pos_angle_ref, 
+    bool refraction=True
+    ):
+    """ Compute the pointing correction for the given Julian date. The correction is done by computing the
+        difference in RA between the current and the reference epoch. The correction is done in the J2000
+        epoch to avoid the drift of the FOV centre over time.
+
+    Arguments:
+        jd: [float] Julian date.
+        lat: [float] Latitude of the observer in radians.
+        lon: [float] Longitude of the observer in radians.
+        h0: [float] Reference hour angle in radians.
+        jd_ref: [float] Reference Julian date of the plate solution.
+        ra_ref: [float] Reference right ascension of the image centre in radians.
+        dec_ref: [float] Reference declination of the image centre in radians.
+        pos_angle_ref: [float] Rotation from the celestial meridian in radians.
+    
+    Keyword arguments:
+        refraction: [bool] Apply refraction correction. True by default.
+
+    Return:
+        (ra_ref_now_corr, dec_ref_corr, pos_angle_ref_now_corr): [tuple]
+            ra_ref_now_corr: [float] Corrected right ascension of the image centre in J2000 (radians).
+            dec_ref_corr: [float] Corrected declination of the image centre in J2000 (radians).
+            pos_angle_ref_now_corr: [float] Corrected position angle in J2000 (radians).
+
+    """
+
+    cdef double ra_ref_now, ra_ref_now_corr, dec_ref_corr, ra_ref_now_corr_j2000, dec_ref_corr_j2000
+    cdef double pos_angle_ref_now_corr
+
+    # Compute the reference RA centre at the given JD by adding the hour angle difference
+    ra_ref_now = (ra_ref + radians(cyjd2LST(jd, 0)) - h0 + 2*pi)%(2*pi)
+
+    # Correct the FOV centre for refraction
+    if refraction:
+        ra_ref_now_corr, dec_ref_corr = eqRefractionTrueToApparent(ra_ref_now, dec_ref, jd, lat, lon)
+
+    else:
+        ra_ref_now_corr = ra_ref_now
+        dec_ref_corr = dec_ref
+
+
+    # Precess the reference RA, dec, position angle to J2000 (needs to be used to avoid FOV centre drift
+    # over time)
+    # The position angle needs to be corrected for precession, otherwise the FOV rotates with time
+    # Applying the difference in RA between the current and the reference epoch fixes the position angle
+    ra_ref_now_corr_j2000, dec_ref_corr_j2000, pos_angle_ref_now_corr = equatorialCoordAndRotPrecession(jd,
+                                        J2000_DAYS, ra_ref_now_corr, dec_ref_corr, pos_angle_ref)
+
+    return ra_ref_now_corr_j2000, dec_ref_corr_j2000, pos_angle_ref_now_corr
+
+
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
@@ -1311,16 +1424,16 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     double h0, double jd_ref, double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, \
     str dist_type, bool refraction=True, bool equal_aspect=False, bool force_distortion_centre=False,\
-    bool asymmetry_corr=True):
+    bool asymmetry_corr=True, bool precompute_pointing_corr=False):
     """
     Arguments:
         jd_data: [ndarray] Julian date of each data point.
         x_data: [ndarray] 1D numpy array containing the image column.
         y_data: [ndarray] 1D numpy array containing the image row.
         lat: [float] Latitude of the observer in degrees.
-        lon: [float] Longitde of the observer in degress.
+        lon: [float] Longitude of the observer in degrees.
         x_res: [int] Image size, X dimension (px).
-        y_res: [int] Image size, Y dimenstion (px).
+        y_res: [int] Image size, Y dimension (px).
         h0: [float] Reference hour angle (deg).
         jd_ref: [float] Reference Julian date when the plate was fit.
         ra_ref: [float] Reference right ascension of the image centre (degrees).
@@ -1338,6 +1451,9 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         force_distortion_centre: [bool] Force the distortion centre to the image centre. False by default.
         asymmetry_corr: [bool] Correct the distortion for asymmetry. Only for radial distortion. True by
             default.
+        precompute_pointing_corr: [bool] Precompute the pointing correction. False by default. This is used
+            to speed up the calculation when the input JD is the same for all data points, e.g. during
+            plate solving.
     
     Return:
         (ra_data, dec_data): [tuple of ndarrays]
@@ -1349,17 +1465,22 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 
     cdef int i
     cdef double jd, x_img, y_img, r, dx, x_corr, dy, y_corr, r_corr, r_scale
-    cdef double x0, y0, xy, a1, a2, k1, k2, k3, k4, k5, ra_ref_now_corr_j2000,dec_ref_corr_j2000
+    cdef double x0, y0, xy, a1, a2, k1, k2, k3, k4, k5
     cdef int index_offset
     cdef double radius, theta, sin_t, cos_t
-    cdef double ra_ref_now, ra_ref_now_corr, ra, dec, dec_ref_corr, pos_angle_ref_now_corr
-
-    # Convert the reference pointing direction to radians
-    ra_ref  = radians(ra_ref)
-    dec_ref = radians(dec_ref)
+    cdef double ra_ref_now_corr, ra, dec, dec_ref_corr, pos_angle_ref_now_corr
 
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data = np.zeros_like(jd_data)
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data = np.zeros_like(jd_data)
+
+    if precompute_pointing_corr:
+
+        # Correct the pointing for precession (output in radians)
+        ra_ref_now_corr, dec_ref_corr, pos_angle_ref_now_corr = pointingCorrection(
+            np.mean(jd_data), radians(lat), radians(lon), 
+            radians(h0), jd_ref, radians(ra_ref), radians(dec_ref), radians(pos_angle_ref), 
+            refraction=refraction
+            )
 
 
     # If the radial distortion is used, unpack radial parameters
@@ -1436,7 +1557,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     # Go through all given data points and convert them from X, Y to RA, Dec
     for i in range(jd_data.shape[0]):
 
-        # Choose time and image coordiantes
+        # Choose time and image coordinates
         jd = jd_data[i]
         x_img = x_data[i]
         y_img = y_data[i]
@@ -1578,37 +1699,22 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 
         ### Convert gnomonic X, Y to RA, Dec ###
 
-        # Compute the reference RA centre at the given JD by adding the hour angle difference
-        ra_ref_now = (ra_ref + radians(cyjd2LST(jd, 0)) - radians(h0) + 2*pi)%(2*pi)
+        if not precompute_pointing_corr:
 
-        # Correct the FOV centre for refraction
-        if refraction:
-            ra_ref_now_corr, dec_ref_corr = eqRefractionTrueToApparent(ra_ref_now, dec_ref, jd, \
-                radians(lat), radians(lon))
+            # Correct the pointing for precession (output in radians)
+            ra_ref_now_corr, dec_ref_corr, pos_angle_ref_now_corr = pointingCorrection(
+                jd, radians(lat), radians(lon), 
+                radians(h0), jd_ref, radians(ra_ref), radians(dec_ref), radians(pos_angle_ref), 
+                refraction=refraction
+                )
 
-        else:
-            ra_ref_now_corr = ra_ref_now
-            dec_ref_corr = dec_ref
-
-
-        # Precess the reference RA, dec, position angle to J2000 (needs to be used to avoid FOV centre drift
-        # over time)
-        ra_ref_now_corr_j2000, dec_ref_corr_j2000, pos_angle_ref_now_corr = equatorialCoordAndRotPrecession(jd,
-                                            J2000_DAYS, ra_ref_now_corr, dec_ref_corr, radians(pos_angle_ref))
-
-        # The position angle needs to be corrected for precession, otherwise the FOV rotates with time
-        # Applying the difference in RA between the current and the reference epoch fixes the position angle
-        pos_angle_ref_now_corr = degrees(pos_angle_ref_now_corr)
-
-        ra_ref_now_corr = ra_ref_now_corr_j2000
-        dec_ref_corr = dec_ref_corr_j2000
 
         # Radius from FOV centre to sky coordinate
         radius = radians(sqrt(x_corr**2 + y_corr**2))
 
         # Compute theta - the direction angle between the FOV centre, sky coordinate, and the north 
         #   celestial pole
-        theta = (pi/2 - radians(pos_angle_ref_now_corr) + atan2(y_corr, x_corr))%(2*pi)
+        theta = (pi/2 - pos_angle_ref_now_corr + atan2(y_corr, x_corr))%(2*pi)
 
 
         # Compute declination

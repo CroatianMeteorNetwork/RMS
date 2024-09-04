@@ -49,8 +49,202 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 log = logging.getLogger("logger")
 
 
-def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=10, neighborhood_size=10, 
-        intensity_threshold=5, flat_struct=None, dark=None, mask=None):
+
+def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates=1000, border=10,
+                 neighborhood_size=10, intensity_threshold=18, 
+                 segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8):
+    """ Extracts stars on a given image by searching for local maxima and applying PSF fit for star 
+        confirmation.
+
+    Arguments:
+        img: [ndarray] Image data.
+
+    Keyword arguments:
+        img_median: [float] Median value of the image. If not given, it will be computed.
+        mask: [ndarray] Mask image. None by default.
+        gamma: [float] Gamma correction factor for the image.
+        max_star_candidates: [int] Maximum number of star candidates to process. If the number of 
+            candidates is larger than this number, the image will be skipped.
+        border: [int] apply a mask on the detections by removing all that are too close to the given image 
+            border (in pixels)
+        neighborhood_size: [int] size of the neighbourhood for the maximum search (in pixels)
+        intensity_threshold: [float] a threshold for cutting the detections which are too faint (0-255)
+        segment_radius: [int] Radius (in pixels) of image segment around the detected star on which to 
+            perform the fit.
+        roundness_threshold: [float] Minimum ratio of 2D Gaussian sigma X and sigma Y to be taken as a stars
+            (hot pixels are narrow, while stars are round).
+        max_feature_ratio: [float] Maximum ratio between 2 sigma of the star and the image segment area.
+    
+    Return:
+        x2, y2, background, intensity, fwhm: [list of ndarrays]
+            - x2: X axis coordinates of the star
+            - y2: Y axis coordinates of the star
+            - background: background intensity
+            - intensity: intensity of the star
+            - Gaussian Full width at half maximum (FWHM) of fitted stars
+
+    """
+
+
+    # Compute the image median if not given
+    if img_median is None:
+        img_median = np.median(img)
+
+    # Apply a mean filter to the image to reduce noise
+    img = ndimage.filters.convolve(img, weights=np.full((2, 2), 1.0/4))
+
+    # Locate local maxima on the image
+    img_max = filters.maximum_filter(img, neighborhood_size)
+    maxima = (img == img_max)
+    img_min = filters.minimum_filter(img, neighborhood_size)
+    diff = ((img_max - img_min) > intensity_threshold)
+    maxima[diff == 0] = 0
+
+    # Apply a border mask
+    border_mask = np.ones_like(maxima)*255
+    border_mask[:border,:] = 0
+    border_mask[-border:,:] = 0
+    border_mask[:,:border] = 0
+    border_mask[:,-border:] = 0
+    maxima = MaskImage.applyMask(maxima, border_mask, image=True)
+
+    # Remove all detections close to the mask image
+    if mask is not None:
+        erosion_kernel = np.ones((5, 5), mask.img.dtype)
+        mask_eroded = cv2.erode(mask.img, erosion_kernel, iterations=1)
+
+        maxima = MaskImage.applyMask(maxima, mask_eroded, image=True)
+
+
+    # Find and label the maxima
+    labeled, num_objects = ndimage.label(maxima)
+
+    # Skip the image if there are too many maxima to process
+    if num_objects > max_star_candidates:
+        log.warning('Too many candidate stars to process! {:d}/{:d}'.format(num_objects, max_star_candidates))
+        return False
+
+    # Find centres of mass of each labeled objects
+    xy = np.array(ndimage.center_of_mass(img, labeled, range(1, num_objects + 1)))
+
+    # Remove all detection on the border
+    #xy = xy[np.where((xy[:, 1] > border) & (xy[:,1] < ff.ncols - border) & (xy[:,0] > border) & (xy[:,0] < ff.nrows - border))]
+
+    # Unpack star coordinates
+    y_init, x_init = np.hsplit(xy, 2)
+
+    # # Plot stars before the PSF fit
+    # plotStars(ff, x, y)
+
+    # Fit a PSF to each star
+    (
+        x_arr, y_arr, amplitude, intensity, 
+        sigma_y_fitted, sigma_x_fitted
+    ) = fitPSF(
+        img, img_median, x_init, y_init, 
+        gamma=gamma,
+        segment_radius=segment_radius, roundness_threshold=roundness_threshold, 
+        max_feature_ratio=max_feature_ratio
+        )
+    
+    # x_arr, y_arr, amplitude, intensity = list(x), list(y), [], [] # Skip PSF fit
+
+    # # Plot stars after PSF fit filtering
+    # plotStars(ff, x_arr, y_arr)
+    
+
+    # Compute FWHM from one dimensional sigma
+    sigma_x_fitted = np.array(sigma_x_fitted)
+    sigma_y_fitted = np.array(sigma_y_fitted)
+    sigma_fitted = np.sqrt(sigma_x_fitted**2 + sigma_y_fitted**2)
+    fwhm = 2.355*sigma_fitted
+
+    return x_arr, y_arr, amplitude, intensity, fwhm
+
+
+def extractStarsAuto(img, mask=None, 
+        max_star_candidates=1500, segment_radius=8, 
+        min_stars_detect=50, max_stars_detect=150,
+        verbose=False
+        ):
+    """ Automatically tried to extract stars from the given image by trying different intensity thresholds.
+    
+    Arguments:
+        img: [ndarray] Image data.
+
+    Keyword arguments:
+        mask: [ndarray] Mask image. None by default.
+        max_star_candidates: [int] Maximum number of star candidates when trying an intensity threshold.
+            If there are too many, PSF fitting would take too long.
+        segment_radius: [int] Radius (in pixels) of image segment around the detected star on which to 
+            perform the fit.
+        min_stars_detect: [int] Minimum number of stars retrieved with a given intensity threshold before
+            a new one is tried.
+        max_stars_detect: [int] Maximum number of stars to be detected before the process is stopped.
+        verbose: [bool] Print verbose output.
+    
+    """
+
+    # Precompute the median of the image
+    img_median = np.median(img)
+
+    x_data = []
+    y_data = []
+    amplitude = []
+    intensity = []
+    fwhm = []
+
+    # Try different intensity thresholds until the greatest number of stars is found
+    intens_thresh_list = [70, 50, 40, 30, 20, 10, 5]
+
+    # Repeat the process until the number of returned stars falls within the range
+    min_stars_detect = 50
+    max_stars_detect = 150
+    for intens_thresh in intens_thresh_list:
+
+        if verbose:
+            print("Detecting stars with intensity threshold: ", intens_thresh)
+
+        status = extractStars(img, img_median=img_median, mask=mask, 
+                                max_star_candidates=max_star_candidates, segment_radius=segment_radius, 
+                                intensity_threshold=intens_thresh)
+
+        if status == False:
+            continue
+
+        x_data, y_data, amplitude, intensity, fwhm = status
+        x_data = np.array(x_data)
+        y_data = np.array(y_data)
+
+        if len(x_data) < min_stars_detect:
+
+            if verbose:
+                print("Skipping, the number of stars {:d} outside {:d} - {:d} range".format(
+                    len(x_data), min_stars_detect, max_stars_detect))
+            
+            continue
+        
+        elif len(x_data) > max_stars_detect:
+            
+            # If too many stars are found even with the first very high threshold, take that solution
+            break
+
+        else:
+            break
+
+
+    return x_data, y_data, amplitude, intensity, fwhm
+
+
+def extractStarsFF(
+        ff_dir, ff_name, 
+        flat_struct=None, dark=None, mask=None,
+        config=None, 
+        border=10,
+        max_global_intensity=150, 
+        neighborhood_size=10, intensity_threshold=18, 
+        segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8
+        ):
     """ Extracts stars on a given FF bin by searching for local maxima and applying PSF fit for star 
         confirmation.
 
@@ -61,7 +255,7 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
         ff_dir: [str] Path to directory where FF files are.
         ff_name: [str] Name of the FF file.
         config: [config object] configuration object (loaded from the .config file)
-        max_global_intensity: [int] maximum mean intensity of an image before it is discared as too bright
+        max_global_intensity: [int] maximum mean intensity of an image before it is discarded as too bright
         border: [int] apply a mask on the detections by removing all that are too close to the given image 
             border (in pixels)
         neighborhood_size: [int] size of the neighbourhood for the maximum search (in pixels)
@@ -83,11 +277,14 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
     error_return = [[], [], [], [], [], []]
 
     # Load parameters from config if given
-    if config:
+    if config is not None:
         max_global_intensity = config.max_global_intensity
         border = config.border
         neighborhood_size = config.neighborhood_size
         intensity_threshold = config.intensity_threshold
+        segment_radius = config.segment_radius
+        roundness_threshold = config.roundness_threshold
+        max_feature_ratio = config.max_feature_ratio
         
     # Load the FF bin file
     ff = FFfile.read(ff_dir, ff_name)
@@ -112,79 +309,36 @@ def extractStars(ff_dir, ff_name, config=None, max_global_intensity=150, border=
 
 
     # Calculate image mean and stddev
-    global_mean = np.mean(ff.avepixel)
+    img_median = np.median(ff.avepixel)
 
     # Check if the image is too bright and skip the image
-    if global_mean > max_global_intensity:
+    if img_median > max_global_intensity:
         return error_return
 
-    data = ff.avepixel.astype(np.float32)
+    # Get the image data from the average pixel image
+    img = ff.avepixel.astype(np.float32)
 
 
-    # Apply a mean filter to the image to reduce noise
-    data = ndimage.filters.convolve(data, weights=np.full((2, 2), 1.0/4))
+    # Find the stars in the image
+    status = extractStars(
+        img, img_median=img_median, 
+        mask=mask, gamma=config.gamma,
+        max_star_candidates=config.max_stars, border=border,
+        neighborhood_size=neighborhood_size, intensity_threshold=intensity_threshold, 
+        segment_radius=segment_radius, roundness_threshold=roundness_threshold, 
+        max_feature_ratio=max_feature_ratio
+    )
 
-    # Locate local maxima on the image
-    data_max = filters.maximum_filter(data, neighborhood_size)
-    maxima = (data == data_max)
-    data_min = filters.minimum_filter(data, neighborhood_size)
-    diff = ((data_max - data_min) > intensity_threshold)
-    maxima[diff == 0] = 0
-
-    # Apply a border mask
-    border_mask = np.ones_like(maxima)*255
-    border_mask[:border,:] = 0
-    border_mask[-border:,:] = 0
-    border_mask[:,:border] = 0
-    border_mask[:,-border:] = 0
-    maxima = MaskImage.applyMask(maxima, border_mask, image=True)
-
-    # Remove all detections close to the mask image
-    if mask is not None:
-        erosion_kernel = np.ones((5, 5), mask.img.dtype)
-        mask_eroded = cv2.erode(mask.img, erosion_kernel, iterations=1)
-
-        maxima = MaskImage.applyMask(maxima, mask_eroded, image=True)
-
-
-    # Find and label the maxima
-    labeled, num_objects = ndimage.label(maxima)
-
-    # Skip the image if there are too many maxima to process
-    if num_objects > config.max_stars:
-        log.warning('Too many candidate stars to process! {:d}/{:d}'.format(num_objects, config.max_stars))
+    # If the star extraction failed, return an empty list
+    if status is False:
         return error_return
-
-    # Find centres of mass of each labeled objects
-    xy = np.array(ndimage.center_of_mass(data, labeled, range(1, num_objects+1)))
-
-    # Remove all detection on the border
-    #xy = xy[np.where((xy[:, 1] > border) & (xy[:,1] < ff.ncols - border) & (xy[:,0] > border) & (xy[:,0] < ff.nrows - border))]
-
-    # Unpack star coordinates
-    y, x = np.hsplit(xy, 2)
-
-    # # Plot stars before the PSF fit
-    # plotStars(ff, x, y)
-
-    # Fit a PSF to each star
-    x2, y2, amplitude, intensity, sigma_y_fitted, sigma_x_fitted = fitPSF(ff, global_mean, x, y, config)
     
-    # x2, y2, amplitude, intensity = list(x), list(y), [], [] # Skip PSF fit
-
-    # # Plot stars after PSF fit filtering
-    # plotStars(ff, x2, y2)
-    
-
-    # Compute FWHM from one dimensional sigma
-    sigma_x_fitted = np.array(sigma_x_fitted)
-    sigma_y_fitted = np.array(sigma_y_fitted)
-    sigma_fitted = np.sqrt(sigma_x_fitted**2 + sigma_y_fitted**2)
-    fwhm = 2.355*sigma_fitted
+    # Unpack the star data
+    x_arr, y_arr, amplitude, intensity, fwhm = status
 
 
-    log.info('extracted ' + str(len(xy)) + ' stars from ' + ff_name)
-    return ff_name, x2, y2, amplitude, intensity, fwhm
+    log.info('extracted ' + str(len(x_arr)) + ' stars from ' + ff_name)
+    return ff_name, x_arr, y_arr, amplitude, intensity, fwhm
 
 
 
@@ -193,7 +347,7 @@ def twoDGaussian(params, amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
     
     Arguments:
         params: [tuple of floats] 
-            - (x, y) independant variables, 
+            - (x, y) independent variables, 
             - saturation: [int] Value at which saturation occurs
         amplitude: [float] amplitude of the PSF
         xo: [float] PSF center, X component
@@ -228,27 +382,24 @@ def twoDGaussian(params, amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
 
 
 
-def fitPSF(ff, avepixel_mean, x2, y2, config):
+def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundness_threshold=0.5, 
+           max_feature_ratio=0.8):
     """ Fit a 2D Gaussian to the star candidate cutout to check if it's a star.
     
     Arguments:
-        ff: [ff bin struct] FF bin file loaded in the FF bin structure
-        avepixel_mean: [float] mean of the avepixel image
-        x2: [list] a list of estimated star position (X axis)
-        xy: [list] a list of estimated star position (Y axis)
-        config: [config object] configuration object (loaded from the .config file)
-    """
+        img: [ndarray] Image data.
+        x_init: [list] A list of estimated star position (X axis).
+        y_init: [list] A list of estimated star position (Y axis).
+        
+    Keyword arguments:
+        gamma: [float] Gamma correction factor for the image.
+        segment_radius: [int] Radius (in pixels) of image segment around the detected star on which to 
+            perform the fit.
+        roundness_threshold: [float] Minimum ratio of 2D Gaussian sigma X and sigma Y to be taken as a stars
+            (hot pixels are narrow, while stars are round).
+        max_feature_ratio: [float] Maximum ratio between 2 sigma of the star and the image segment area.
 
-    # Load parameters form config if present
-    if config is not None:
-        # segment_radius: [int] radius (in pixels) of image segment around the detected star on which to 
-        #     perform the fit
-        # roundness_threshold: [float] minimum ratio of 2D Gaussian sigma X and sigma Y to be taken as a stars
-        #     (hot pixels are narrow, while stars are round)
-        # max_feature_ratio: [float] maximum ratio between 2 sigma of the star and the image segment area
-        segment_radius = config.segment_radius
-        roundness_threshold = config.roundness_threshold
-        max_feature_ratio = config.max_feature_ratio
+    """
 
 
     x_fitted = []
@@ -259,10 +410,13 @@ def fitPSF(ff, avepixel_mean, x2, y2, config):
     sigma_x_fitted = []
 
     # Set the initial guess
-    initial_guess = (30.0, segment_radius, segment_radius, 1.0, 1.0, 0.0, avepixel_mean)
+    initial_guess = (30.0, segment_radius, segment_radius, 1.0, 1.0, 0.0, img_median)
+
+    # Get the image dimensions
+    nrows, ncols = img.shape
     
     # Go through all stars
-    for star in zip(list(y2), list(x2)):
+    for star in zip(list(y_init), list(x_init)):
 
         y, x = star
 
@@ -273,12 +427,12 @@ def fitPSF(ff, avepixel_mean, x2, y2, config):
 
         if y_min < 0:
             y_min = np.array([0])
-        if y_max > ff.nrows:
-            y_max = np.array([ff.nrows])
+        if y_max > nrows:
+            y_max = np.array([nrows])
         if x_min < 0:
             x_min = np.array([0])
-        if x_max > ff.ncols:
-            x_max = np.array([ff.ncols])
+        if x_max > ncols:
+            x_max = np.array([ncols])
 
         # Check if any of these values is NaN and skip the star
         if np.any(np.isnan([x_min, x_max, y_min, y_max])):
@@ -290,7 +444,7 @@ def fitPSF(ff, avepixel_mean, x2, y2, config):
         y_max = int(y_max)
 
         # Extract an image segment around each star
-        star_seg = ff.avepixel[y_min:y_max, x_min:x_max]
+        star_seg = img[y_min:y_max, x_min:x_max]
 
         # Create x and y indices
         y_ind, x_ind = np.indices(star_seg.shape)
@@ -324,7 +478,7 @@ def fitPSF(ff, avepixel_mean, x2, y2, config):
             continue
 
 
-        ### If the fitting was successfull, compute the star intensity
+        ### If the fitting was successful, compute the star intensity
 
         # Crop the star segment to take 3 sigma portion around the star
         crop_y_min = int(yo - 3*sigma_y) + 1
@@ -356,10 +510,10 @@ def fitPSF(ff, avepixel_mean, x2, y2, config):
             continue
 
         # Gamma correct the star segment
-        star_seg_crop = Image.gammaCorrection(star_seg_crop.astype(np.float32), config.gamma)
+        star_seg_crop = Image.gammaCorrectionImage(star_seg_crop.astype(np.float32), gamma)
 
         # Correct the background for gamma
-        bg_corrected = Image.gammaCorrection(offset, config.gamma)
+        bg_corrected = Image.gammaCorrectionScalar(offset, gamma)
 
         # Subtract the background from the star segment and compute the total intensity
         intensity = np.sum(star_seg_crop - bg_corrected)
@@ -469,13 +623,13 @@ def extractStarsAndSave(config, ff_dir):
 
 
     # Run the QueuedPool for detection
-    workpool = QueuedPool(extractStars, cores=-1, backup_dir=ff_dir, input_queue_maxsize=None)
+    workpool = QueuedPool(extractStarsFF, cores=config.num_cores, backup_dir=ff_dir, input_queue_maxsize=None)
 
 
     # Add jobs for the pool
     for ff_name in extraction_list:
         log.info('Adding for extraction: ' + ff_name)
-        workpool.addJob([ff_dir, ff_name, config, None, None, None, None, flat_struct, dark, mask])
+        workpool.addJob([ff_dir, ff_name, flat_struct, dark, mask, config, None, None, None, None, None, None, None])
 
 
     log.info('Starting pool...')
@@ -522,7 +676,7 @@ def extractStarsAndSave(config, ff_dir):
     # Write detected stars to the CALSTARS file
     CALSTARS.writeCALSTARS(star_list, ff_dir, calstars_name, config.stationID, config.height, config.width)
 
-    # Delete QueudPool backed up files
+    # Delete QueuedPool backed up files
     workpool.deleteBackupFiles()
 
     log.info('Total time taken: {:.2f} s'.format(time.time() - time_start))

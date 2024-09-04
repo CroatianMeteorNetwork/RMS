@@ -1,0 +1,121 @@
+{
+    "template_metadata": 
+    {
+      "description": "Generic 4mm (720p)"
+    },
+    "F_scale": 15.613072991092974,
+    "Ho": 110.28632699185982,
+    "JD": 2460322.495307095,
+    "RA_d": 0,
+    "UT_corr": 0,
+    "X_res": 1280,
+    "Y_res": 720,
+    "alt_centre": 0,
+    "asymmetry_corr": true,
+    "auto_check_fit_refined": false,
+    "auto_recalibrated": false,
+    "az_centre": 0,
+    "dec_d": 0,
+    "distortion_type": "radial7-odd",
+    "distortion_type_list": [
+        "poly3+radial",
+        "poly3+radial3",
+        "poly3+radial5",
+        "radial3-all",
+        "radial4-all",
+        "radial5-all",
+        "radial3-odd",
+        "radial5-odd",
+        "radial7-odd",
+        "radial9-odd"
+    ],
+    "distortion_type_poly_length": [
+        12,
+        13,
+        14,
+        7,
+        8,
+        9,
+        6,
+        7,
+        8,
+        9
+    ],
+    "elev": 0,
+    "equal_aspect": true,
+    "extinction_scale": 0.6,
+    "force_distortion_centre": false,
+    "fov_h": 89.32766981001313,
+    "fov_v": 47.33653438255317,
+    "gamma": 1.0,
+    "lat": 0,
+    "lon": 0,
+    "mag_0": -2.5,
+    "mag_lev": 10.828125,
+    "mag_lev_stddev": 0.215200101151149,
+    "measurement_apparent_to_true_refraction": false,
+    "poly_length": 7,
+    "pos_angle_ref": 0,
+    "refraction": true,
+    "rotation_from_horiz": 0,
+    "star_list": [
+    ],
+    "station_code": "XX0001",
+    "version": 2,
+    "vignetting_coeff": 0.001,
+    "vignetting_fixed": true,
+    "x_poly": [
+        0.08156125548550175,
+        0.14478354146926078,
+        0.003958844709754151,
+        -0.46868887179290325,
+        0.07306381818335275,
+        -0.00141500065459272,
+        0.014047563738564972
+    ],
+    "x_poly_fwd": [
+        0.08156125548550175,
+        0.14478354146926078,
+        0.003958844709754151,
+        -0.46868887179290325,
+        0.07306381818335275,
+        -0.00141500065459272,
+        0.014047563738564972
+    ],
+    "x_poly_rev": [
+        0.08154660827333139,
+        0.14481729844138602,
+        -0.004256177714460519,
+        0.02422022830591872,
+        0.06976729333010212,
+        -0.004283930872760523,
+        0.0014952226570211801
+    ],
+    "y_poly": [
+        0.5,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+    ],
+    "y_poly_fwd": [
+        0.5,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+    ],
+    "y_poly_rev": [
+        0.5,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+    ]
+}

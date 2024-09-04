@@ -9,6 +9,7 @@ If fps is not provided, the default value of 25 is used.
 from __future__ import print_function, division, absolute_import
 
 import os
+import sys
 import argparse
 import tarfile
 import math
@@ -20,8 +21,12 @@ import matplotlib.dates as mdates
 
 import RMS.ConfigReader as cr
 
+# Map FileNotFoundError to IOError in Python 2 as it does not exist
+if sys.version_info[0] < 3:
+    FileNotFoundError = IOError
 
-def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50):
+
+def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50, residual_time_window=None):
     """ Plot the intervals between timestamps from FF file and scores the timing performance.
     
     Arguments:
@@ -32,6 +37,8 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
         fps: [float] The expected frames per second. (default: 25.0)
         ff_ff_block_size: [int] The number of frames in each FF file. (default: 256)
         ma_window_size: [int] The window size for the moving average. (default: 50)
+        residual_time_window: [float] The size of the Y axis window for the residuals plot in seconds.
+            None by default, which sets the window to +/- 2 frames.
 
     Returns:
         jitter_quality: [float] The jitter quality score.
@@ -80,8 +87,8 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
                 except ValueError:
                     print("Skipping file with incorrect format: {}".format(member.name))
 
-    if len(timestamps) < 2:
-        print("Insufficient timestamps. At least two timestamps are required.")
+    if len(timestamps) < 3:
+        print("Insufficient timestamps. At least three timestamps are required.")
         return None, None, None
 
     timestamps.sort()
@@ -267,8 +274,28 @@ def plotFFTimeIntervals(dir_path, fps=25.0, ff_block_size=256, ma_window_size=50
     # Enable the grid
     ax_res.grid(alpha=0.7, zorder=0)
 
-    # Limit the plot to +/- 2 frames in the Y axis
-    ax_res.set_ylim(-2/fps, 2/fps)
+    # Limit the plot to +/- 2 frames in the Y axis of the residuals plot
+    if residual_time_window:
+        ax_res.set_ylim(-residual_time_window, residual_time_window)
+
+    else:
+
+        # Determine the data limits for the residuals plot
+        max_residual = np.max(residuals)
+        min_residual = np.min(residuals)
+
+        fps_lim = 2/fps
+
+        # If the residuals are over the limit, set the limit to the FPS limit
+        if max_residual > fps_lim:
+            ax_res.set_ylim(-2/fps, 2/fps)
+
+        # If the residuals are under the limit, set the limit to the max residual
+        elif min_residual < -fps_lim:
+            residual_range = max_residual - min_residual
+            y_min = min_residual - 0.05*residual_range
+            y_max = max_residual + 0.05*residual_range
+            ax_res.set_ylim(y_min, y_max)
 
     # Limit the plot to timings (all +/- 5% of the total duration on each size)
     total_duration_hrs = (np.max(timestamps_np) - np.min(timestamps_np)).total_seconds()/3600
@@ -312,8 +339,11 @@ if __name__ == '__main__':
     arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str,
                             help='Path to directory with FS*tar.bz2 files.')
 
-    arg_parser.add_argument('--fps', metavar='FPS', type=float, default=25.0, required=False,
+    arg_parser.add_argument('--fps', metavar='FPS', type=float,
                             help='Expected fps (default: taken from config file, 25.0 if config not found).')
+    
+    arg_parser.add_argument('--residual_window', metavar='RESIDUAL_WINDOW', type=float,
+                            help='Size of the Y axis window for the residuals plot in seconds. (default: +/- 2 frames)')
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -323,11 +353,21 @@ if __name__ == '__main__':
     for root, dirs, files in os.walk(cml_args.dir_path):
         for file in files:
             if file.endswith('.tar.bz2') and file.startswith('FS'):
-                try:
-                    config = cr.loadConfigFromDirectory('.config', root)
-                    fps = config.fps
-                except:
+                fps = 25.0
+
+                # If the FPS has been explicitly set, use that value
+                if cml_args.fps:
                     fps = cml_args.fps
+
+                # Otherwise, try to load the FPS from the config file
+                else:
+                    try:
+                        config = cr.loadConfigFromDirectory('.config', root)
+                        fps = config.fps
+                    except FileNotFoundError:
+                        print("Config file not found. Using default FPS of {:.1f}.".format(fps))
+
                 tar_file_path = os.path.join(root, file)
                 print("Processing {}".format(tar_file_path))
-                plotFFTimeIntervals(root, fps)
+
+                plotFFTimeIntervals(root, fps, residual_time_window=cml_args.residual_window)

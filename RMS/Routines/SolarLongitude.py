@@ -7,6 +7,7 @@ import datetime
 import numpy as np
 import scipy.optimize
 from RMS.Astrometry.Conversions import date2JD, datetime2JD, jd2Date
+from RMS.Misc import RmsDateTime
 
 @np.vectorize
 def jd2SolLonSteyaert(jd):
@@ -76,7 +77,7 @@ def _solLon2jd(solFunc, year, month, L):
     """ Internal function. Numerically calculates the Julian date from the given solar longitude with the
         given method. The inverse precision is around 0.5 milliseconds.
 
-        Because the solar longitudes around Dec 31 and Jan 1 can be ambigous, the month also has to be given.
+        Because the solar longitudes around Dec 31 and Jan 1 can be ambiguous, the month also has to be given.
 
     Arguments:
         solFunc: [function] Function which calculates solar longitudes from Julian dates.
@@ -201,9 +202,9 @@ if __name__ == "__main__":
 
     # ### ###
 
-    print("Current UTC time is: {}".format(datetime.datetime.utcnow()))
-    print("Current Julian date is: {:.12f}".format(datetime2JD(datetime.datetime.utcnow())))
-    print("Current solar longitude: {:.6f} deg".format(np.degrees(jd2SolLonSteyaert(datetime2JD(datetime.datetime.utcnow())))))
+    print("Current UTC time is: {}".format(RmsDateTime.utcnow()))
+    print("Current Julian date is: {:.12f}".format(datetime2JD(RmsDateTime.utcnow())))
+    print("Current solar longitude: {:.6f} deg".format(np.degrees(jd2SolLonSteyaert(datetime2JD(RmsDateTime.utcnow())))))
 
 
     # Test inverse function

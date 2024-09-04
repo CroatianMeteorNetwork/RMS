@@ -4,6 +4,7 @@ from __future__ import print_function, division, absolute_import
 
 import datetime
 import os
+import sys
 import shlex
 import sys
 import collections
@@ -28,6 +29,10 @@ from Utils.Flux import calculatePopulationIndex, calculateMassIndex, computeFlux
 from RMS.Routines.SolarLongitude import unwrapSol
 from RMS.Misc import formatScientific, roundToSignificantDigits, SegmentedScale, mkdirP
 from RMS.QueuedPool import QueuedPool
+
+# Map FileNotFoundError to IOError in Python 2 as it does not exist
+if sys.version_info[0] < 3:
+    FileNotFoundError = IOError
 
 # Now that the Scale class has been defined, it must be registered so
 # that ``matplotlib`` can find it.
@@ -438,8 +443,8 @@ def cameraTally(comb_sol, comb_sol_bins, single_fixed_bin_information):
     """ Tally contributions from individual cameras in every time bin. 
         
     Arguments:
-        comb_sol: [list] List of combined mean solar longitues (degrees).
-        comb_sol_bins: [list] List of combined solar longitue bin edges (degrees).
+        comb_sol: [list] List of combined mean solar longitudes (degrees).
+        comb_sol_bins: [list] List of combined solar longitude bin edges (degrees).
         single_fixed_bin_information: [list] A list of [station, [sol (rad)], [meteor_num], [area (m^2)], 
             [time_bin (hour)]] entries for every station.
     """
@@ -865,7 +870,7 @@ def computeTimeIntervalsParallel(dir_params, cpu_cores=1):
             - ratio_threshold - star match ratio for determining cloudiness. None to take a default value
 
     Keyword arguments:
-        cpu_cores: [int] Number of CPU cores to use. If -1, all availabe cores will be used. 1 by default.
+        cpu_cores: [int] Number of CPU cores to use. If -1, all available cores will be used. 1 by default.
     """
 
     # Compute the time intervals using the given number of CPU cores
@@ -1086,7 +1091,7 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
         compute_single: [bool] Compute single-station flux. False by default.
         metadata_dir: [str] A separate directory for flux metadata. If not given, the data directory will be
             used.
-        cpu_cores: [int] Number of CPU cores to use. If -1, all availabe cores will be used. 1 by default.
+        cpu_cores: [int] Number of CPU cores to use. If -1, all available cores will be used. 1 by default.
     """
 
     # Make the metadata directory, if given
@@ -1249,7 +1254,7 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
     comb_sol_tap_weighted = np.degrees(comb_sol_tap_weighted)
     comb_sol_bins = np.degrees(comb_sol_bins)
 
-    # Computed the weidghted mean initial velocity
+    # Computed the weighted mean initial velocity
     summary_v_init = np.sum(
         comb_v_init[~np.isnan(comb_v_init)]*comb_ta_prod[~np.isnan(comb_v_init)]) \
             /np.sum(comb_ta_prod[~np.isnan(comb_v_init)]
@@ -1410,7 +1415,7 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
     # If data was able to be combined, plot the weighted flux
     if len(fbr.comb_sol):
 
-        # Plotting weigthed flux
+        # Plotting weighted flux
         ax[0].errorbar(
             fbr.comb_sol_tap_weighted%360,
             fbr.comb_flux,
@@ -1722,7 +1727,7 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
 def saveBatchFluxCSV(fbr, dir_path, output_filename):
     """ Save the binned flux batch results to a CSV file. """
 
-    # Write the computed weigthed flux to disk
+    # Write the computed weighted flux to disk
     if len(fbr.comb_sol):
 
         data_out_path = os.path.join(dir_path, output_filename + ".csv")
@@ -1923,7 +1928,7 @@ if __name__ == "__main__":
     # Maximum bin duration (hours)
     max_bin_duration = fluxbatch_cml_args.maxduration
 
-    # Init the binning parametrs into a container
+    # Init the binning parameters into a container
     fb_bin_params = FluxBatchBinningParams(
         min_meteors=min_meteors, 
         min_tap=min_tap, 

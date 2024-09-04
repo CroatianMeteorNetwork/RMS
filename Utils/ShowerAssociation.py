@@ -110,7 +110,7 @@ class MeteorSingleStation(object):
         self.beg_vect = self.cartesian_points[0]
         self.end_vect = self.cartesian_points[-1]
 
-        # Compute alt of the begining and the last point
+        # Compute alt of the beginning and the last point
         self.beg_azim, self.beg_alt = raDec2AltAz(self.ra_array[0], self.dec_array[0], self.jd_array[0], \
             self.lat, self.lon)
         self.end_azim, self.end_alt = raDec2AltAz(self.ra_array[-1], self.dec_array[-1], self.jd_array[-1], \
@@ -214,7 +214,7 @@ class MeteorSingleStation(object):
 
 
     def angularSeparationFromGC(self, ra, dec):
-        """ Compute the angular separation from the given coordinaes to the great circle. 
+        """ Compute the angular separation from the given coordinates to the great circle. 
     
         Arguments;
             ra: [float] RA (deg).
@@ -658,7 +658,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
             ### Compute the association score ###
 
-            # Compute the difference between the observed and thoretical height
+            # Compute the difference between the observed and theoretical height
             meteor_ht_diff = abs(meteor_ht - ref_height)
 
             # Compute the association score
@@ -886,7 +886,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
 
 
-        # Plot station name and solar longiutde range
+        # Plot station name and solar longitude range
         allsky_plot.ax.text(-180, 89, "{:s}".format(cam_code), color='w', family='monospace')
 
         # Get a list of JDs of meteors

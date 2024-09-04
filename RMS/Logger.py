@@ -20,9 +20,8 @@ import os
 import sys
 import logging
 import logging.handlers
-import datetime
 
-from RMS.Misc import mkdirP
+from RMS.Misc import mkdirP, RmsDateTime
 
 
 def initLogging(config, log_file_prefix="", safedir=None):
@@ -41,16 +40,21 @@ def initLogging(config, log_file_prefix="", safedir=None):
     log_path = os.path.join(config.data_dir, config.log_dir)
 
     # Make directories
-    mkdirP(config.data_dir)
-    mkdirP(log_path)
+    print("Creating directory: " + config.data_dir)
+    data_dir_status = mkdirP(config.data_dir)
+    print("   Success: {}".format(data_dir_status))
+    print("Creating directory: " + log_path)
+    log_path_status = mkdirP(log_path)
+    print("   Sucess: {}".format(log_path_status))
 
     # If the log directory doesn't exist or is not writable, use the safe directory
     if safedir is not None:
         if not os.path.exists(log_path) or not os.access(log_path, os.W_OK):
+            print("Log directory not writable, using safe directory: " + safedir)
             log_path = safedir
 
     # Generate a file name for the log file
-    log_file_name = log_file_prefix + "log_" + str(config.stationID) + "_" + datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S.%f') + ".log"
+    log_file_name = log_file_prefix + "log_" + str(config.stationID) + "_" + RmsDateTime.utcnow().strftime('%Y%m%d_%H%M%S.%f') + ".log"
         
     # Init logging
     log = logging.getLogger('logger')
@@ -59,7 +63,7 @@ def initLogging(config, log_file_prefix="", safedir=None):
 
     # Make a new log file each day
     handler = logging.handlers.TimedRotatingFileHandler(os.path.join(log_path, log_file_name), when='D', \
-        interval=1) 
+        interval=1, utc=True)
     handler.setLevel(logging.INFO)
     handler.setLevel(logging.DEBUG)
 

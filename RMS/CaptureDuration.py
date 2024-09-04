@@ -3,10 +3,11 @@ from __future__ import absolute_import, print_function
 import datetime
 
 import ephem
+from RMS.Misc import RmsDateTime
 
 
 def captureDuration(lat, lon, elevation, current_time=None, max_hours=23):
-    """ Calcualtes the start time and the duration of capturing, for the given geographical coordinates. 
+    """ Calculates the start time and the duration of capturing, for the given geographical coordinates. 
     
     Arguments:
         lat: [float] latitude +N in degrees
@@ -38,7 +39,7 @@ def captureDuration(lat, lon, elevation, current_time=None, max_hours=23):
 
     # If the current time is not given, use the current time
     if current_time is None:
-        current_time = datetime.datetime.utcnow()
+        current_time = RmsDateTime.utcnow()
 
     # Set the current time
     o.date = current_time
