@@ -600,6 +600,9 @@ def recalibrateIndividualFFsAndApplyAstrometry(
     # Use a copy of the config file
     config = copy.deepcopy(config)
 
+    # Use a copy of the platepar
+    platepar = copy.deepcopy(platepar)
+
     # If the given file does not exits, return nothing
     if not os.path.isfile(ftpdetectinfo_path):
         log.info('ERROR! The FTPdetectinfo file does not exist: {:s}'.format(ftpdetectinfo_path))
@@ -813,7 +816,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
 
         ### Plot difference from reference platepar in angular distance from (0, 0) vs rotation ###
 
-        plt.figure()
+        plt.figure(figsize=(6, 5))
 
         plt.scatter(0, 0, marker='o', edgecolor='k', label='Reference platepar', s=100, c='none', zorder=3)
 
@@ -827,6 +830,17 @@ def recalibrateIndividualFFsAndApplyAstrometry(
 
         plt.grid()
         plt.legend()
+
+        # Scale the aspect ratio so X and Y units are the same but the plot is not too narrow
+        plt.axis('scaled')
+
+        # Make the plot square by adjusting the limits to the maximum
+        min_lim = min(plt.xlim()[0], plt.ylim()[0])
+        max_lim = max(plt.xlim()[1], plt.ylim()[1])
+        abs_lim = max_lim - min_lim
+        plt.xlim(-0.1*abs_lim, 0.9*abs_lim)
+        plt.ylim(min_lim, max_lim)
+
 
         plt.tight_layout()
 

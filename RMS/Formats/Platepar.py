@@ -1470,6 +1470,42 @@ class Platepar(object):
         return out_str
 
 
+def findBestPlatepar(config, night_data_dir=None):
+    """ Try loading the platepar from the night data directory, and if it doesn't exist, load the default one
+    from the config directory.
+    
+    Arguments:
+        config: [Config] Configuration object.
+
+    Keyword arguments:
+        night_data_dir: [str] Path to the night data directory. None by default.
+
+    Return:
+        platepar: [Platepar] Loaded platepar object. None if not found.
+    """
+
+    # Get the platepar (first from the night directory, then the default one)
+    platepar = Platepar()
+    
+    if night_data_dir is not None:
+        night_platepar_path = os.path.join(night_data_dir, config.platepar_name)
+
+    default_platepar_path = os.path.join(config.config_file_path, config.platepar_name)
+
+    if (night_data_dir is not None) and os.path.exists(night_platepar_path):
+        platepar.read(night_platepar_path, use_flat=config.use_flat)
+
+        return platepar
+
+    elif os.path.exists(default_platepar_path):
+        platepar.read(default_platepar_path, use_flat=config.use_flat)
+
+        return platepar
+
+    
+    return None
+
+
 if __name__ == "__main__":
 
     import argparse

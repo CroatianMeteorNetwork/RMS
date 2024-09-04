@@ -310,7 +310,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             # Prepare the flux files
             log.info("Preparing flux files...")
             try:
-                prepareFluxFiles(config, night_data_dir, os.path.join(night_data_dir, ftpdetectinfo_name))
+                prepareFluxFiles(config, night_data_dir, os.path.join(night_data_dir, ftpdetectinfo_name),
+                                 mask=mask, platepar=platepar)
 
             except Exception as e:
                 log.debug("Preparing flux files failed with the message:\n" + repr(e))
@@ -398,8 +399,11 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     # Plot timestamp intervals
     try:
         jitter_quality, dropped_frame_rate, intervals_path = plotFFTimeIntervals(night_data_dir, fps=config.fps)
-        log.info('Timestamp Intervals Analysis: Jitter Quality: {:.1f}%, Dropped Frame Rate: {:.1f}%'.format(
-            jitter_quality, dropped_frame_rate))
+        if jitter_quality is None:
+            log.info('Timestamp Intervals Analysis: Jitter Quality not available')
+        else:
+            log.info('Timestamp Intervals Analysis: Jitter Quality: {:.1f}%, Dropped Frame Rate: {:.1f}%'.format(
+                jitter_quality, dropped_frame_rate))
         # Add the timelapse to the extra files
         if intervals_path is not None:
             extra_files.append(intervals_path)
