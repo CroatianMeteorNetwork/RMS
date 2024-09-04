@@ -257,7 +257,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         # Create frames subdirectory
         mkdirP(os.path.join(saved_frames_dir, config.frame_subdir))
 
-    log.info('Saved frames directory: ' + saved_frames_dir)
+    log.info('Saved frames directory: {}'.format(saved_frames_dir))
 
     # Copy the used config file to the capture directory
     if os.path.isfile(config.config_file_name):
