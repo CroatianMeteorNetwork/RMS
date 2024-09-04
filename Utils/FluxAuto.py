@@ -573,7 +573,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
         print()
         print("Using the given shower {:s}:".format(shower.name))
         print("  Solar longitude at the reference time: {:.4f}".format(sol_ref_time))
-        print("  Activity range: {:.4f} - {:.4f} - {:.4f}".format(sol_diff_beg, sol_diff_max, sol_diff_end))
+        print("  Activity range: >{:.4f} - ^{:.4f} - {:.4f}<".format(shower.lasun_beg, shower.lasun_max, shower.lasun_end))
         print("  Reference year activity: {:s} - {:s}".format(
             shower.dt_beg_ref_year.strftime("%Y-%m-%d %H:%M:%S"), 
             shower.dt_end_ref_year.strftime("%Y-%m-%d %H:%M:%S")
