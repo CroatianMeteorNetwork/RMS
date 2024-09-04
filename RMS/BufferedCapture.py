@@ -166,7 +166,7 @@ class BufferedCapture(Process):
             log.debug(repr(traceback.format_exception(*sys.exc_info())))
         
         # Stop the image saver pool
-        if hasattr(self.frame_saver, 'closePool'):
+        if self.frame_saver is not None:
             self.frame_saver.closePool()
 
         return self.dropped_frames.value
