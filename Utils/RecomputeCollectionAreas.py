@@ -92,7 +92,7 @@ def recomputeCollectionAreas(root_dir_path, ncores=1):
         # Run in parallel
         pool = multiprocessing.Pool(ncores)
 
-        pool.starmap(updateCollectionAreaNight, [(dir_path, flux_config) for dir_path in dir_list])
+        pool.imap_unordered(updateCollectionAreaNight, [(dir_path, flux_config) for dir_path in dir_list])
 
         pool.close()
         pool.join()
