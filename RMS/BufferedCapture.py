@@ -115,10 +115,11 @@ class BufferedCapture(Process):
         self.frame_shape = None
         self.convert_to_gray = False
 
-        # Initialize QueuedPool for image saving
-        self.frame_saver = QueuedPool(self.saveFrameToDisk, cores=1, log=log, 
-                                      backup_dir=os.path.join(self.frame_save_dir, 'image_backups'))
-        self.frame_saver.startPool()
+        if self.config.save_frames:
+            # Initialize QueuedPool for image saving
+            self.frame_saver = QueuedPool(self.saveFrameToDisk, cores=1, log=log, 
+                                        backup_dir=os.path.join(self.frame_save_dir, 'image_backups'))
+            self.frame_saver.startPool()
 
 
     def startCapture(self, cameraID=0):
