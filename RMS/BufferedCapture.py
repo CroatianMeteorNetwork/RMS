@@ -118,7 +118,7 @@ class BufferedCapture(Process):
         if self.config.save_frames:
             # Initialize QueuedPool for image saving
             self.frame_saver = QueuedPool(self.saveFrameToDisk, cores=1, log=log, 
-                                        backup_dir=os.path.join(self.frame_save_dir, 'image_backups'))
+                                        backup_dir=self.night_data_dir, 'image_backups'))
             self.frame_saver.startPool()
 
 
