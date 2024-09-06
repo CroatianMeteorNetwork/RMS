@@ -112,7 +112,7 @@ def fovKML(dir_path, platepar, mask=None, area_ht=100000, side_points=10, plot_s
                 </Style>
                 <styleUrl>#camera</styleUrl>\n""" \
         + "<name>{:s}</name>\n".format(platepar.station_code) \
-        + "                <description>Area height: {:d} km\n".format(int(area_ht/1000))
+        + "                <description>Area height: {:g} km\n".format(round(area_ht/1000, 3))
 
     # Only add station info if the station is plotted
     if plot_station:
@@ -157,7 +157,7 @@ def fovKML(dir_path, platepar, mask=None, area_ht=100000, side_points=10, plot_s
 
 
     # Save the KML file to the directory with the platepar
-    kml_path = os.path.join(dir_path, "{:s}-{:d}km.kml".format(platepar.station_code, int(area_ht/1000)))
+    kml_path = os.path.join(dir_path, "{:s}-{:g}km.kml".format(platepar.station_code, round(area_ht/1000, 3)))
     with open(kml_path, 'w') as f:
         f.write(kml)
 
