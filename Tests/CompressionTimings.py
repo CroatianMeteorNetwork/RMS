@@ -40,9 +40,9 @@ def timing(img):
    
 def create(f):
 
-    arr = np.empty((256, HEIGHT, WIDTH), np.uint8)
+    arr = np.empty((config.frames_per_block, HEIGHT, WIDTH), np.uint8)
 
-    for i in range(256):
+    for i in range(config.frames_per_block):
         arr[i] = f()
 
     return arr

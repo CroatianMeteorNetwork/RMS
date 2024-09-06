@@ -171,7 +171,7 @@ def reconstructFrame(ff, frame_no, avepixel=False):
     return frame
 
 
-def reconstruct(ff):
+def reconstruct(ff,frames_per_block=256):
     """ Reconstruct video frames from the FF file. 
     
     Arguments:
@@ -186,7 +186,7 @@ def reconstruct(ff):
         nframes = ff.nframes
 
     else:
-        nframes = 256
+        nframes = frames_per_block
     
     frames = np.zeros((nframes, ff.nrows, ff.ncols), np.uint8)
     
@@ -288,7 +288,8 @@ def getMiddleTimeFF(ff_name, fps, ret_milliseconds=True, ff_frames=256):
         [tuple] (year, month, day, hour, minute, second, microsecond/millisecond)
 
     """
-
+    if ff_frames is None:
+        ff_frames = 256
     # Extract date and time of the FF file from its name
     dt_obj = filenameToDatetime(ff_name)
 

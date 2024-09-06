@@ -1056,7 +1056,7 @@ def detectMoon(file_list, platepar, config):
 
         # Getting right ascension and declination of middle of the FOV
         _, ra_mid, dec_mid, _ = xyToRaDecPP(
-            [FFfile.getMiddleTimeFF(filename, config.fps)],
+            [FFfile.getMiddleTimeFF(filename, config.fps,ff_frames=config.frames_per_block)],
             [platepar.X_res/2],
             [platepar.Y_res/2],
             [1],
@@ -1478,7 +1478,7 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
             if lim_mag is None:
                 continue
 
-            date = FFfile.getMiddleTimeFF(ff_file, config.fps, ret_milliseconds=True)
+            date = FFfile.getMiddleTimeFF(ff_file, config.fps, ret_milliseconds=True, ff_frames=config.frames_per_block)
             jd = date2JD(*date)
 
             # # make a polygon on a sphere out of 5 points on each side

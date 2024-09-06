@@ -4253,7 +4253,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Load the dark
             dark = Image.loadDark(*os.path.split(dark_file), dtype=self.img.data.dtype, \
-                                  byteswap=self.img_handle.byteswap)
+                                  byteswap=self.img_handle.byteswap, config=self.config.keep_color)
             
             print("Dark loaded successfully!")
 
