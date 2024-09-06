@@ -14,7 +14,7 @@ from RMS.Routines.MaskImage import loadMask
 from RMS.Routines.FOVArea import fovArea
 
 
-def fovKML(dir_path, platepar, mask=None, area_ht=100000, side_points=10, plot_station=True):
+def fovKML(dir_path, platepar, mask=None, area_ht=100000, side_points=10, plot_station=True, decimal_height=False):
     """ Given a platepar file and a mask file, make a KML file outlining the camera FOV.
 
     Arguments:
@@ -27,7 +27,8 @@ def fovKML(dir_path, platepar, mask=None, area_ht=100000, side_points=10, plot_s
         side_points: [int] How many points to use to evaluate the FOV on each side of the image. Normalized
             to the longest side.
         plot_station: [bool] Plot the location of the station. True by default.
-
+        decimal_height: [bool] Save area polygon height in decimal form. False by default.
+        
     Return:
         kml_path: [str] Path to the saved KML file.
 
@@ -112,7 +113,8 @@ def fovKML(dir_path, platepar, mask=None, area_ht=100000, side_points=10, plot_s
                 </Style>
                 <styleUrl>#camera</styleUrl>\n""" \
         + "<name>{:s}</name>\n".format(platepar.station_code) \
-        + "                <description>Area height: {:g} km\n".format(round(area_ht/1000, 3))
+        + "                <description>Area height: {:g} km\n".format(round(area_ht/1000, 3)
+                                                                       if decimal_height else int(area_ht/1000))
 
     # Only add station info if the station is plotted
     if plot_station:
@@ -157,7 +159,9 @@ def fovKML(dir_path, platepar, mask=None, area_ht=100000, side_points=10, plot_s
 
 
     # Save the KML file to the directory with the platepar
-    kml_path = os.path.join(dir_path, "{:s}-{:g}km.kml".format(platepar.station_code, round(area_ht/1000, 3)))
+    kml_path = os.path.join(dir_path, "{:s}-{:g}km.kml".format(platepar.station_code, 
+                                                               round(area_ht/1000, 3)
+                                                               if decimal_height else int(area_ht/1000)))
     with open(kml_path, 'w') as f:
         f.write(kml)
 
@@ -195,7 +199,10 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-s', '--station', action="store_true", \
         help="""Plot the location of the station.""")
-
+    
+    arg_parser.add_argument('-d', '--decimal', action="store_true", \
+        help="""Save area polygon height in decimal form.""")
+    
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -261,4 +268,4 @@ if __name__ == "__main__":
 
     # Generate a KML file from the platepar
     fovKML(dir_path, pp, mask, area_ht=1000*cml_args.elev, side_points=cml_args.pts, \
-        plot_station=cml_args.station)
+        plot_station=cml_args.station, decimal_height=cml_args.decimal)
