@@ -197,10 +197,10 @@ def timestampFromNTP(addr='0.us.pool.ntp.org'):
     refer https://stackoverflow.com/questions/36500197/how-to-get-time-from-an-ntp-server
 
     Args:
-        addr:
+        addr: optional, address of ntp server to use
 
     Returns:
-
+        [int]: time in seconds since epoch
     """
 
 
@@ -268,7 +268,11 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
     capture_duration_from_fits, fits_count, fits_file_shortfall, fits_file_shortfall_as_time, time_first_fits_file, \
         time_last_fits_file, total_expected_fits = nightSummaryData(config, night_data_dir)
 
-    timeSyncStatus(config)
+    try:
+        timeSyncStatus(config)
+    except Exception as e:
+        print(repr(e))
+
     obs_db_conn = getObsDBConn(config)
     platepar_path = os.path.join(config.config_file_path, config.platepar_name)
     if os.path.exists(platepar_path):
