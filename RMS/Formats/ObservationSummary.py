@@ -27,6 +27,9 @@
 
 import sys
 import os
+import subprocess
+
+
 from RMS.Misc import niceFormat, isRaspberryPi, sanitise, getRMSStyleFileName
 import re
 import sqlite3
@@ -51,7 +54,10 @@ else:
 
 EM_RAISE = True
 
-
+import socket
+import struct
+import sys
+import time
 
 
 def getObsDBConn(config, force_delete=False):
@@ -185,6 +191,66 @@ def startObservationSummaryReport(config, duration, force_delete=False):
     conn.close()
     return "Opening a new observations summary for duration {} seconds".format(duration)
 
+def timestampFromNTP(addr='0.us.pool.ntp.org'):
+
+    """
+    refer https://stackoverflow.com/questions/36500197/how-to-get-time-from-an-ntp-server
+
+    Args:
+        addr:
+
+    Returns:
+
+    """
+
+
+    REF_TIME_1970 = 2208988800  # Reference time
+    client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    data = b'\x1b' + 47 * b'\0'
+    client.sendto(data, (addr, 123))
+    data, address = client.recvfrom(1024)
+    if data:
+        t = struct.unpack('!12I', data)[10]
+        t -= REF_TIME_1970
+        return t
+    else:
+        return None
+
+
+def timeSyncStatus(config):
+
+    """
+
+    Determine approximate time sync error and report on status. Any error of fewer than ten seconds
+    may be caused by imprecision in the remote time query
+
+    Args:
+        config: configuration object
+
+    Returns:
+        Approximate time error in seconds
+    """
+
+    remote_time_query = timestampFromNTP()
+    if remote_time_query is not None:
+        local_time_query = (datetime.datetime.utcnow() - datetime.datetime(1970, 1, 1)).total_seconds()
+        time_error_seconds = round(abs(local_time_query - remote_time_query),1)
+        print("Approximate time error is {}".format(time_error_seconds))
+    else:
+        time_error_seconds = "Unknown"
+
+    result_list = subprocess.run(['timedatectl','status'], capture_output = True).stdout.splitlines()
+    print(result_list)
+    for raw_result in result_list:
+        result = raw_result.decode('ascii')
+        if "synchronized" in result:
+            conn = getObsDBConn(config)
+            addObsParam(conn, "clock_synchronized", result.split(":")[1].strip())
+            addObsParam(conn, "clock_error_seconds", time_error_seconds)
+            conn.close()
+
+    return time_error_seconds
+
 def finalizeObservationSummary(config, night_data_dir, platepar=None):
 
     """ Enters the parameters known at the end of observation into the database
@@ -202,7 +268,7 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
     capture_duration_from_fits, fits_count, fits_file_shortfall, fits_file_shortfall_as_time, time_first_fits_file, \
         time_last_fits_file, total_expected_fits = nightSummaryData(config, night_data_dir)
 
-
+    timeSyncStatus(config)
     obs_db_conn = getObsDBConn(config)
     platepar_path = os.path.join(config.config_file_path, config.platepar_name)
     if os.path.exists(platepar_path):
@@ -480,7 +546,7 @@ if __name__ == "__main__":
 
     config = parse(os.path.expanduser("~/source/RMS/.config"))
 
-
+    timeSyncStatus(config)
     obs_db_conn = getObsDBConn(config)
     startObservationSummaryReport(config, 100, force_delete=False)
     pp = Platepar()
