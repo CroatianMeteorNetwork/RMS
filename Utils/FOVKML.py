@@ -27,7 +27,7 @@ def fovKML(dir_path, platepar, mask=None, area_ht=100000, side_points=10, plot_s
         side_points: [int] How many points to use to evaluate the FOV on each side of the image. Normalized
             to the longest side.
         plot_station: [bool] Plot the location of the station. True by default.
-        decimal_height: [bool] Save area polygon height in decimal form. False by default.
+        decimal_height: [bool] Save area polygon height in decimal form (3 decimal places). False by default.
         
     Return:
         kml_path: [str] Path to the saved KML file.
@@ -201,7 +201,7 @@ if __name__ == "__main__":
         help="""Plot the location of the station.""")
     
     arg_parser.add_argument('-d', '--decimal', action="store_true", \
-        help="""Save area polygon height in decimal form.""")
+        help="""Save area polygon height in decimal form (3 decimal places).""")
     
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
