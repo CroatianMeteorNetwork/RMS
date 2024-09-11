@@ -1158,7 +1158,7 @@ def parseCapture(config, parser):
         if not 0 <= config.png_compression <= 9:
             config.png_compression = 3
             print()
-            print("WARNING! The png_compression must be between 0 and 9. It has been reset to 90!")
+            print("WARNING! The png_compression must be between 0 and 9. It has been reset to 3!")
 
 
     # Load the interval for saving video frame
