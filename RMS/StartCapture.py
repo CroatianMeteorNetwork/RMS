@@ -383,7 +383,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         detector=detector)
 
     # Open the observation summary report
-    log.info(startObservationSummaryReport(config, duration, force_delete=False))
+    if video_file is None:
+        log.info(startObservationSummaryReport(config, duration, force_delete=False))
 
     # Start buffered capture
     bc.startCapture()
