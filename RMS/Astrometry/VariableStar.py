@@ -1626,7 +1626,7 @@ def processStarTrackEvent(log, config, ev):
 
     if not len(observation_sequence_dict):
         log.info("No observations of this event")
-        return None
+        return []
 
     with open(json_path, 'w') as json_fh:
         json_fh.write(json.dumps(observation_sequence_dict, indent=4, sort_keys=True))

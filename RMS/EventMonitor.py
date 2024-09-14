@@ -1757,6 +1757,10 @@ class EventMonitor(multiprocessing.Process):
             if file is not None:
                 file_list.append(file)
 
+        if not len(file_list):
+            log.info("No files to upload")
+            return True
+
         if self.eventUploaded(event.uuid):
             log.warning("Call to doUpload for already uploaded event {}".format(event.dt))
 
@@ -1798,7 +1802,7 @@ class EventMonitor(multiprocessing.Process):
                 pack_size += os.path.getsize(file)
         log.info("File pack ({:.0f}MB) assembly started".format(pack_size/1024/1024))
 
-        # Don't upload things which are too large
+       # Don't upload things which are too large
         if pack_size > 1000*1024*1024:
             log.error("File pack too large")
             return False
@@ -1961,12 +1965,13 @@ class EventMonitor(multiprocessing.Process):
                 check_time_start = RmsDateTime.utcnow()
                 self.syscon.config = cr.parse(os.path.join(getRmsRootDir(), ".config"))
                 file_list = processStarTrackEvent(log, self.syscon.config, observed_event)
-
                 # If doUpload returned True mark the event as processed and uploaded
                 if self.doUpload(observed_event, self.syscon.config, file_list, test_mode):
                     log.info("Marking radec event at {} as processed".format(observed_event.dt))
                     self.markEventAsProcessed(observed_event)
-                    if len(file_list) > 0:
+                    if file_list is None:
+                        self.markEventAsUploaded(observed_event, file_list)
+                    elif len(file_list) > 0:
                         self.markEventAsUploaded(observed_event, file_list)
 
             else:
