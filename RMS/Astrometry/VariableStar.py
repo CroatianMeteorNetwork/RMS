@@ -1649,7 +1649,7 @@ def processStarTrackEvent(log, config, ev):
     csv_path = os.path.join(star_track_working_directory, csv_name)
 
     file_list.append(flattenDict(observation_sequence_dict, csv_path))
-
+    print(file_list)
     return file_list
 
 
