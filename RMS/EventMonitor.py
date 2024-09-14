@@ -2206,7 +2206,7 @@ class EventMonitor(multiprocessing.Process):
         # Delay to allow capture to check existing folders - keep the logs tidy
 
 
-        time.sleep(5)
+        time.sleep(60)
         last_check_start_time = RmsDateTime.utcnow()
         while not self.exit.is_set():
             check_start_time = RmsDateTime.utcnow()
