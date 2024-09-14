@@ -1045,8 +1045,10 @@ class BufferedCapture(Process):
 
         last_frame_timestamp = False
 
+        # setup additional timing variables for memory share with RawFrameSaver
         if self.config.save_frames:
             raw_buffer_one = True
+            first_raw_frame_timestamp = False
 
         # Run until stopped from the outside
         while not self.exit.is_set():
@@ -1186,7 +1188,7 @@ class BufferedCapture(Process):
                     self.raw_frame_count += 1
 
                     # switch buffers arrays every (self.num_raw_frames) frames
-                    if self.raw_frame_count == self.num_raw_frames - 1:
+                    if self.raw_frame_count == self.num_raw_frames:
 
                         if raw_buffer_one:
                             self.startRawTime1.value = first_raw_frame_timestamp
@@ -1313,13 +1315,12 @@ class BufferedCapture(Process):
                 wait_for_reconnect = False
                 log.info('Capture exited!')
 
-                # Save extra raw frames left in either buffer - these will belong to the last 
-                # block of 256 frames, so use the last_frame_timestamp
+                # Save leftover raw frames from last used buffer
                 if self.config.save_frames:
                     if raw_buffer_one:
-                        self.startRawTime1.value = last_frame_timestamp
+                        self.startRawTime1.value = first_raw_frame_timestamp
                     else:
-                        self.startRawTime2.value = last_frame_timestamp
+                        self.startRawTime2.value = first_raw_frame_timestamp
 
                 break
 
