@@ -27,9 +27,7 @@
 from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
 
-import pickle
 
-from PIL.ImageColor import colormap
 
 from RMS.DeleteOldObservations import getNightDirs
 import argparse
@@ -39,8 +37,7 @@ import sys
 import numpy as np
 # Import Cython functions
 import pyximport
-from RMS.Astrometry.Conversions import J2000_JD, date2JD, jd2Date, raDec2AltAz
-from RMS.Math import angularSeparation
+from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
 
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 
@@ -48,25 +45,23 @@ import RMS.ConfigReader as cr
 import glob as glob
 import sqlite3
 import tqdm
-import json
 import datetime
-import pickle
 import json
 
 from RMS.Formats.CALSTARS import readCALSTARS
 from RMS.Formats.Platepar import Platepar
-from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, correctVignetting, photometryFitRobust
-from RMS.Astrometry.FFTalign import getMiddleTimeFF, alignPlatepar
+from RMS.Astrometry.ApplyAstrometry import raDecToXYPP, correctVignetting, photometryFitRobust
+from RMS.Astrometry.FFTalign import getMiddleTimeFF
 from RMS.Astrometry.ApplyAstrometry import extinctionCorrectionTrueToApparent, xyToRaDecPP
 from RMS.Astrometry.CheckFit import matchStarsResiduals
 from RMS.Formats.StarCatalog import readStarCatalog
 from RMS.Astrometry.Conversions import datetime2JD
-from RMS.Routines.MaskImage import loadMask, MaskStructure
+from RMS.Routines.MaskImage import loadMask
 from RMS.Formats.FFfile import read
 from RMS.Math import angularSeparationDeg
-from RMS.Misc import getRmsRootDir, getRMSStyleFileName, mkdirP
+from RMS.Misc import getRmsRootDir, mkdirP
 
-from copy import deepcopy
+
 
 from matplotlib import pyplot as plt
 from matplotlib.dates import DateFormatter
@@ -138,7 +133,7 @@ def rmsTimeExtractor(rms_time, asTuple = False, asJD = False, delimiter = None):
     # Initialise delim in case nothing is detected
     delim = "_"
     # find the delimiter, which is probably the first non alpha numeric character
-    if delimiter == None:
+    if delimiter is None:
         for c in rms_time:
             if c.isnumeric() or c.isalpha():
                 continue
@@ -215,7 +210,20 @@ def rmsTimeExtractor(rms_time, asTuple = False, asJD = False, delimiter = None):
         return dt
 
 def plateparContainsRaDec(r, d, source_pp, file_name, mask_dir, check_mask=True, mask=None):
+    """
 
+    Args:
+        r (float): right ascension (degrees)
+        d (float): declination (degrees)
+        source_pp (platepar): instance of the source platepar
+        file_name (string): name of the fits file
+        mask_dir (string): directory holding the mask
+        check_mask (bool): check to see if radec is obstructed by the mask
+        mask (object): optional, default None, save time by passing a mask in memory
+
+    Returns:
+
+    """
 
     # Get the image time from the file_name
     source_JD = rmsTimeExtractor(file_name, asJD=True)
@@ -417,9 +425,9 @@ def computePhotometry(config, pp_all, calstar, match_radius=2.0, star_margin = 1
 
     # Extract stars from the catalogue one order of magnitude dimmer than config limit
     lim_mag = config.catalog_mag_limit + 1
-    catalog_stars, mag_band_str, config.star_catalog_band_ratios = readStarCatalog(config.star_catalog_path,
-                                            config.star_catalog_file, lim_mag=lim_mag,
-                                                mag_band_ratios=config.star_catalog_band_ratios)
+    catalog_stars, mag_band_str, config.star_catalog_band_ratios = \
+                        readStarCatalog(config.star_catalog_path, config.star_catalog_file,
+                                        lim_mag=lim_mag, mag_band_ratios=config.star_catalog_band_ratios)
 
     # star_dict contains the star data from calstars - indexed by jd
     # ff_name contains the fits file name - indexed by jd
@@ -478,6 +486,19 @@ def computePhotometry(config, pp_all, calstar, match_radius=2.0, star_margin = 1
     return photom_params
 
 def getFitsPathsAndCoords(config, earliest_jd, latest_jd, r=None, d=None):
+    """
+
+    Args:
+        config (obj): config instance
+        earliest_jd (float): earliest_jd to find
+        latest_jd (float): latest_jd to find
+        r (float):
+        d (float):
+
+    Returns:
+
+    """
+
 
     full_path_to_captured = os.path.expanduser(os.path.join(config.data_dir, config.captured_dir))
     directories_to_search = filterDirectoriesByJD(full_path_to_captured, earliest_jd, latest_jd)
@@ -518,6 +539,16 @@ def getFitsPathsAndCoords(config, earliest_jd, latest_jd, r=None, d=None):
     return fits_paths
 
 def getFitsPaths(path_to_search, jd_start, jd_end=None):
+    """
+    Search for fits files between jd
+    Args:
+        path_to_search (string): path to search for fits files
+        jd_start (): starting jd
+        jd_end (): ending jd
+
+    Returns:
+        [list] list of paths to fits_files
+    """
 
     directories_to_search = filterDirectoriesByJD(path_to_search, jd_start, jd_end)
     jd_end = jd_start if jd_end is None else jd_start
@@ -559,6 +590,20 @@ def readCroppedFF(path, x, y, width=20, height=20, allow_drift_in = False):
     return crop(ff, x, y, width, height, allow_drift_in)
 
 def crop(ff, x_centre, y_centre, width = 50, height = 50, allow_drift_in=False):
+    """
+
+    Args:
+        ff (object): instance of a fits file
+        x_centre (): x image coordinates fo the centre of the crop
+        y_centre (): y image coordinates of the centre of the crop
+        width (): width in pixels of the crop
+        height (): height in pixels
+        allow_drift_in (): optional, default false, if true fill the crop by offsetting the centre of the crop, if the
+                            object is off the edge of the image. If true, then always keep the object image centre
+
+    Returns:
+
+    """
 
     # Get resolution
     x_res, y_res = ff.ncols, ff.nrows
@@ -603,6 +648,18 @@ def crop(ff, x_centre, y_centre, width = 50, height = 50, allow_drift_in=False):
     return ff_cropped
 
 def createThumbnails(config, r, d, earliest_jd=0, latest_jd=np.inf):
+    """
+
+    Args:
+        config (object): config instance
+        r (float): right ascension (degrees)
+        d (float): declinration (degrees)
+        earliest_jd (float): optional, default 0, create a subset of thumbnails
+        latest_jd (float): optional_default 0
+
+    Returns:
+        list of thumbnails
+    """
 
     # get the paths to all the fits files in the jd window
     path_coords_list = getFitsPathsAndCoords(config, earliest_jd, latest_jd, r, d)
@@ -957,7 +1014,7 @@ def createPlot(values, r, d, w=0):
         w (): window, used only for title
 
     Returns:
-
+        (object) plot object
     """
 
     x_vals, y_vals = [], []
@@ -977,6 +1034,15 @@ def createPlot(values, r, d, w=0):
     return ax
 
 def areaToGoldenRatioXY(count, rotate=False):
+    """
+    Calculate dimensions close to the golden ratio for a given pixel count
+    Args:
+        count (float): pixel count
+        rotate (): optional, default false, gives landscape format
+
+    Returns:
+        (x, y) tuple of integers
+    """
 
     gr = (1 + 5 ** 0.5) / 2
     down = np.ceil((count * gr) ** 0.5)
@@ -987,7 +1053,20 @@ def areaToGoldenRatioXY(count, rotate=False):
     else:
         return int(across), int(down)
 
-def assembleContactSheet(thumbnail_list, x_across=None, border = 1, r=None, d=None):
+def assembleContactSheet(thumbnail_list, x_across=None, border=1):
+    """
+    Create a plot of the thumbnails in the the list
+    Args:
+        thumbnail_list (list): list of thumbnails
+        x_across (integer): optional, pixel count across
+        border (): optional, default 1 size of border between thumbnails
+
+
+    Returns:
+        contact_sheet_array (array): array of pixels
+        headings_list: list of headings - the timestamp of the first image in each column
+        position_list: images coordinates for the headings
+    """
 
     thumbnail_count = len(thumbnail_list)
     if thumbnail_count < 1:
@@ -1026,6 +1105,23 @@ def assembleContactSheet(thumbnail_list, x_across=None, border = 1, r=None, d=No
     return contact_sheet_array, headings_list, position_list
 
 def renderContactSheet(config, contact_sheet_array, headings_list, position_list, r, d, e_jd, l_jd, plot_format='png'):
+    """
+
+    Args:
+        config (object): config instance
+        contact_sheet_array (array): contact sheet array
+        headings_list (list): list of headings
+        position_list (list): position for the headings
+        r (float): right asccension, only used for filenames and headings
+        d (float): declination, only used for filenames and headings
+        e_jd (float): earliest julian date
+        l_jd (float): latest julian date
+        plot_format (str): plot format
+
+    Returns:
+        plt (object): plot object
+        filename (string): path to file
+    """
 
     r, d = round(r, 2), round(d, 2)
     if len(contact_sheet_array) and len(headings_list) and len(position_list):
@@ -1045,6 +1141,23 @@ def renderContactSheet(config, contact_sheet_array, headings_list, position_list
         return None, ""
 
 def renderMagnitudePlot(config, magnitude_list, elevation_list, r, d, e_jd, l_jd, plot_format='png'):
+    """
+    Render the magnitude plot from information passed in
+    Args:
+        config (object): magnitude plot object
+        magnitude_list (list): list of magnitudes
+        elevation_list (list): list of elevations
+        r (float): right ascension, only used for plot titles and filenames
+        d (float): declination, only used for plot titles and filenames
+        e_jd (float): earliest julian date, only used for plot titles and filenames
+        l_jd (float): latest julian date, only used for plot titles and filenames
+        plot_format (string): plot format
+
+    Returns:
+        plt (object): plot object
+        filename (string): filename to save plot
+    """
+
 
     if len(magnitude_list):
         x_vals, y_vals = [], []
@@ -1078,25 +1191,24 @@ def renderMagnitudePlot(config, magnitude_list, elevation_list, r, d, e_jd, l_jd
         plt.ylabel("Magnitude")
 
         plt.title(title)
-        '''
-        ax.scatter(x_vals, y_vals, c=elevation_list, cmap='viridis')
-        ax.title.set_size(20)
-        plt.title(title)
-        plt.ylabel("Magnitude")
-        ax.set_xticks(x_vals)
-        
-
-
-        plt.xlabel("Julian Date")
-        plt.colorbar(ax.get_children()[2], ax=ax)
-        plt.ylim((min(y_vals) * 0.8, max(y_vals) * 1.2))
-        
-        '''
 
 
         return plt, plot_filename
 
 def saveThumbnailsRaDec(config, r, d, e_jd=0, l_jd=np.inf, file_path=None):
+    """
+    Create and save thumbnails of the right ascension and declination between julian datres
+    Args:
+        config (object): config instance
+        r (float): right ascension
+        d (float): declination
+        e_jd (float): earliest julian date
+        l_jd (float): latest julian date
+        file_path (path): path
+
+    Returns:
+        Nothing
+    """
 
     thumbnail_list = createThumbnails(config, r, d, earliest_jd=e_jd, latest_jd=l_jd)
     contact_sheet, headings_list, position_list = assembleContactSheet(thumbnail_list)
@@ -1109,7 +1221,20 @@ def saveThumbnailsRaDec(config, r, d, e_jd=0, l_jd=np.inf, file_path=None):
         plt.savefig(filename)
 
 def jsonToThumbnails(config, observations_json, r, d, e_jd, l_jd,  file_path=None):
+    """
+    Plot thumbnails from json information
+    Args:
+        config (object): config object
+        observations_json (json): json of observation information
+        r (float): right ascension (degreees)
+        d (float): declination (degrees)
+        e_jd (float):
+        l_jd (float):
+        file_path (float):
 
+    Returns:
+        filename (string)
+    """
 
     thumbnail_list = []
     print(len(observations_json))
@@ -1131,7 +1256,20 @@ def jsonToThumbnails(config, observations_json, r, d, e_jd, l_jd,  file_path=Non
     return filename
 
 def jsonToMagnitudePlot(config, observations_json, r, d, e_jd, l_jd, file_path=None):
+    """
+    From a json of magnitude information produce a magnitude plot
+    Args:
+        config (object): config instance
+        observations_json (json): json of observations
+        r (): right ascension (degrees)
+        d (): declination (degrees)
+        e_jd (): earliest julian date
+        l_jd (): latest julian date
+        file_path (): optional, path to save files
 
+    Returns:
+
+    """
     magnitude_list, elevation_list = [], []
     if not len(observations_json):
         return None
@@ -1157,7 +1295,17 @@ def jsonToMagnitudePlot(config, observations_json, r, d, e_jd, l_jd, file_path=N
     return filename
 
 def filterCalstarByJD(config, calstar, e_jd, l_jd):
+    """
+    Filter a calstar by julian date
+    Args:
+        config (object): config instance
+        calstar (structure): calstar structure
+        e_jd (float): earlest julian date
+        l_jd (float): latest julian date
 
+    Returns:
+        filtered_fits (list): list of fits files and star informaton per fits file
+    """
     filtered_fits = []
     for fits_file, star_list in calstar:
 
@@ -1176,7 +1324,16 @@ def filterCalstarByJD(config, calstar, e_jd, l_jd):
     return filtered_fits
 
 def filterDirByJD(directory_path, e_jd, l_jd):
+    """
+    Given a directory return a list of fits between jd limits
+    Args:
+        directory_path (string): full path to a directory
+        e_jd (): earliest julian date
+        l_jd (): latest julian date
 
+    Returns:
+        filtered_fits (list): list of fits files
+    """
     filtered_fits = []
     directory_list = os.listdir(directory_path)
     for fits_file in directory_list:
@@ -1214,6 +1371,8 @@ def calstarRaDecToDict(data_dir_path, config, pp, pp_recal_json, r_target, d_tar
     candidate_fits.sort()
 
     sequence_dict = dict()
+
+    # Iterate through the candidate fits files
     for fits_file, star_list in tqdm.tqdm(candidate_fits):
 
         date_time, jd = rmsTimeExtractor(fits_file, asTuple=True)
@@ -1425,7 +1584,17 @@ def jsonMagsRaDec(config, r, d, e_jd=0, l_jd=np.inf, require_calstar=True, requi
 
 
 def processStarTrackEvent(log, config, ev):
+    """
+    Interface intended to be used by EventMonitor
 
+    Args:
+        log (instance): logger instance
+        config (instance): config instance
+        ev (obj): event object
+
+    Returns:
+        list of files to be uploaded
+    """
     log.info("Processing star track event")
     log.info("===========================")
     log.info("JD start        : {}".format(ev.jd_start))
@@ -1450,14 +1619,15 @@ def processStarTrackEvent(log, config, ev):
     star_track_working_directory = os.path.join(config.data_dir, "TrackingFiles")
     mkdirP(star_track_working_directory)
     json_path = os.path.join(star_track_working_directory, json_name)
-    '''
-    observation_sequence_dict = jsonMagsRaDec(config, ev.star_ra, ev.star_dec,
+
+    if False:
+        observation_sequence_dict = jsonMagsRaDec(config, ev.star_ra, ev.star_dec,
                                               e_jd=ev.jd_start, l_jd=ev.jd_end,
                                               require_calstar=require_calstar)
     
-    with open(json_path, 'w') as json_fh:
-        json_fh.write(json.dumps(observation_sequence_dict, indent=4, sort_keys=True))
-    '''
+        with open(json_path, 'w') as json_fh:
+            json_fh.write(json.dumps(observation_sequence_dict, indent=4, sort_keys=True))
+
 
 
     with open(json_path, 'r') as json_fh:
@@ -1474,44 +1644,95 @@ def processStarTrackEvent(log, config, ev):
                                          ev.jd_start, ev.jd_end,
                                          file_path=star_track_working_directory))
 
-    file_list.append(flattenDict(observation_sequence_dict, star_track_working_directory, ev))
+    csv_name = "r_{}_d_{}_jd_{}_{}_{}.csv".format(ev.star_ra, ev.star_dec,
+                                                    ev.jd_start, ev.jd_end,
+                                                    config.stationID)
+    csv_path = os.path.join(star_track_working_directory, csv_name)
+
+    file_list.append(flattenDict(observation_sequence_dict, csv_path))
 
     return file_list
 
 
+def flattenDict(input_dict, output_path):
+    """
+    Convert any recursively defined dictionary into a csv file
+
+    Args:
+        input_dict (dict): input dict
+        output_path (string): file path
+
+    Returns:
+        output_path (string): path which has been saved
+    """
+    output_lines_list = []
+    csv_header = ""
+
+    # Iterate through entries in input_dict writing out to a list
+    for entry in input_dict:
+        value_list, csv_header, key_stack = flattenDictEntry(input_dict[entry])
+        output_lines_list.append(value_list)
+
+    # Reverse the list
+    output_lines_list.reverse()
+    # Put the csv header at the end
+    output_lines_list.append(csv_header)
+    # And reverse again
+    output_lines_list.reverse()
+
+    # Write to file
+    with open(output_path, 'w') as fh_out:
+        for out_line in output_lines_list:
+            fh_out.write("{}\n".format(out_line))
+
+    return output_path
 
 
 
-def flattenDict(node, key_list=None, key_stack=None, value_list=None):
+def flattenDictEntry(node, key_list=None, key_stack=None, value_list=None):
+    """
+    Recursively walk a dictionary structure
+    Args:
+        node (): a dictionary or a key value pair
+        key_list (): optional, list of keys to be used as a header in csv format
+        key_stack (): optional, stack of keys level1.level2.level3 - only used during recursion
+        value_list (): optional, list of values is csv format
 
+    Returns:
+        value_list (): list of values in csv format
+    """
     for key, value in node.items():
 
         if isinstance(value, dict):
+            # Recurse into the sub dictionaries
             if key_stack is None:
-                value_list, key_list, key_stack = flattenDict(value, key_list, key, value_list)
+                value_list, key_list, key_stack = flattenDictEntry(value, key_list, key, value_list)
             else:
-                value_list, key_list, key_stack = flattenDict(value, key_list, "{}.{}".format(key_stack, key), value_list)
+                value_list, key_list, key_stack = flattenDictEntry(value, key_list, "{}.{}".format(key_stack, key), value_list)
 
         else:
+            # First value in the line
             if value_list is None:
                 value_list = value
-
+            # Or add to the value line
             else:
                 value_list = "{},{}".format(value_list, value)
 
+            # First level key
             if key_stack is None:
                 key_stack = key
+            # Subsequent level key
             else:
                 key_stack = "{}.{}".format(key_stack, key)
 
-
-
+            # First key in the line
             if key_list is None:
                 key_list = key_stack
+            # Subsequent key in the line
             else:
                 key_list = "{},{}".format(key_list, key_stack)
 
-
+        # Moving onto the next key, value pair get rid of the last entry in the key stack
         if "."  in key_stack:
             key_stack = key_stack[:key_stack.rindex(".")]
         else:
@@ -1522,8 +1743,8 @@ def flattenDict(node, key_list=None, key_stack=None, value_list=None):
 
 if __name__ == "__main__":
 
-    ent = {'actual_deviation_degrees': 0.009614816231951446, 'coords': {'equatorial': {'dec': -81.37185347767333, 'ra': 341.5240561630952}, 'horizontal': {'az': 171.36898381118533, 'el': 37.28865759260427}, 'image': {'x': 780.4, 'y': 450.49}}, 'fits': 'FF_AU0006_20240913_120002_552_0083968.fits', 'photometry': {'FWHM': 3.71, 'amp': 50, 'bg': 361, 'mag': 4.342539211658279, 'p_offset': 10.766061944799436, 'p_vig': 0.0007}, 'pixels': [[90, 93, 92, 94, 95, 92, 92, 91, 91, 91, 90, 89, 90, 92, 91, 91, 90, 92, 93, 93], [90, 91, 91, 95, 96, 92, 91, 90, 92, 95, 90, 90, 90, 92, 92, 91, 90, 92, 92, 92], [91, 91, 91, 94, 94, 90, 90, 89, 91, 94, 90, 90, 90, 92, 92, 91, 92, 94, 92, 92], [95, 91, 90, 90, 90, 88, 88, 89, 91, 91, 90, 91, 92, 92, 91, 90, 94, 96, 90, 90], [93, 92, 89, 92, 91, 90, 89, 93, 97, 93, 89, 91, 95, 95, 91, 91, 96, 96, 89, 89], [91, 91, 91, 91, 89, 89, 89, 92, 93, 90, 90, 91, 92, 93, 92, 93, 96, 94, 92, 90], [92, 89, 90, 90, 91, 89, 90, 92, 92, 92, 91, 91, 90, 91, 91, 92, 93, 94, 94, 90], [93, 95, 93, 92, 93, 91, 92, 93, 90, 90, 92, 93, 90, 90, 93, 93, 93, 95, 94, 93], [92, 96, 93, 96, 92, 92, 90, 97, 92, 91, 95, 97, 96, 94, 98, 98, 96, 92, 91, 91], [91, 94, 96, 95, 92, 90, 92, 97, 95, 97, 98, 104, 98, 99, 94, 93, 92, 92, 90, 90], [92, 94, 99, 97, 90, 88, 91, 90, 90, 97, 137, 151, 109, 98, 95, 93, 92, 91, 89, 89], [92, 94, 100, 100, 91, 89, 95, 92, 94, 106, 152, 169, 142, 111, 95, 94, 93, 93, 93, 90], [91, 93, 98, 94, 91, 91, 93, 99, 94, 107, 130, 139, 126, 112, 95, 95, 98, 94, 90, 91], [91, 92, 93, 92, 90, 90, 89, 94, 94, 99, 104, 103, 99, 93, 95, 94, 94, 93, 90, 90], [91, 92, 91, 89, 89, 89, 91, 92, 91, 94, 91, 94, 92, 92, 92, 91, 91, 90, 88, 93], [95, 93, 91, 89, 89, 90, 95, 91, 98, 90, 90, 93, 91, 93, 92, 92, 91, 90, 95, 91], [92, 92, 92, 90, 90, 95, 94, 91, 93, 96, 90, 91, 90, 90, 94, 94, 90, 91, 93, 91], [91, 91, 90, 90, 91, 95, 94, 90, 91, 92, 90, 89, 89, 91, 95, 91, 92, 94, 92, 91], [90, 91, 89, 91, 91, 92, 92, 90, 89, 89, 89, 88, 88, 90, 91, 90, 92, 94, 92, 93], [90, 91, 91, 94, 91, 92, 92, 90, 90, 90, 89, 88, 87, 91, 89, 88, 88, 92, 97, 92]], 'radius': 167.03472722760378}
-    value_list, key_list, key_stack  = flattenDict(ent)
+    #ent = {'actual_deviation_degrees': 0.009614816231951446, 'coords': {'equatorial': {'dec': -81.37185347767333, 'ra': 341.5240561630952}, 'horizontal': {'az': 171.36898381118533, 'el': 37.28865759260427}, 'image': {'x': 780.4, 'y': 450.49}}, 'fits': 'FF_AU0006_20240913_120002_552_0083968.fits', 'photometry': {'FWHM': 3.71, 'amp': 50, 'bg': 361, 'mag': 4.342539211658279, 'p_offset': 10.766061944799436, 'p_vig': 0.0007}, 'pixels': [[90, 93, 92, 94, 95, 92, 92, 91, 91, 91, 90, 89, 90, 92, 91, 91, 90, 92, 93, 93], [90, 91, 91, 95, 96, 92, 91, 90, 92, 95, 90, 90, 90, 92, 92, 91, 90, 92, 92, 92], [91, 91, 91, 94, 94, 90, 90, 89, 91, 94, 90, 90, 90, 92, 92, 91, 92, 94, 92, 92], [95, 91, 90, 90, 90, 88, 88, 89, 91, 91, 90, 91, 92, 92, 91, 90, 94, 96, 90, 90], [93, 92, 89, 92, 91, 90, 89, 93, 97, 93, 89, 91, 95, 95, 91, 91, 96, 96, 89, 89], [91, 91, 91, 91, 89, 89, 89, 92, 93, 90, 90, 91, 92, 93, 92, 93, 96, 94, 92, 90], [92, 89, 90, 90, 91, 89, 90, 92, 92, 92, 91, 91, 90, 91, 91, 92, 93, 94, 94, 90], [93, 95, 93, 92, 93, 91, 92, 93, 90, 90, 92, 93, 90, 90, 93, 93, 93, 95, 94, 93], [92, 96, 93, 96, 92, 92, 90, 97, 92, 91, 95, 97, 96, 94, 98, 98, 96, 92, 91, 91], [91, 94, 96, 95, 92, 90, 92, 97, 95, 97, 98, 104, 98, 99, 94, 93, 92, 92, 90, 90], [92, 94, 99, 97, 90, 88, 91, 90, 90, 97, 137, 151, 109, 98, 95, 93, 92, 91, 89, 89], [92, 94, 100, 100, 91, 89, 95, 92, 94, 106, 152, 169, 142, 111, 95, 94, 93, 93, 93, 90], [91, 93, 98, 94, 91, 91, 93, 99, 94, 107, 130, 139, 126, 112, 95, 95, 98, 94, 90, 91], [91, 92, 93, 92, 90, 90, 89, 94, 94, 99, 104, 103, 99, 93, 95, 94, 94, 93, 90, 90], [91, 92, 91, 89, 89, 89, 91, 92, 91, 94, 91, 94, 92, 92, 92, 91, 91, 90, 88, 93], [95, 93, 91, 89, 89, 90, 95, 91, 98, 90, 90, 93, 91, 93, 92, 92, 91, 90, 95, 91], [92, 92, 92, 90, 90, 95, 94, 91, 93, 96, 90, 91, 90, 90, 94, 94, 90, 91, 93, 91], [91, 91, 90, 90, 91, 95, 94, 90, 91, 92, 90, 89, 89, 91, 95, 91, 92, 94, 92, 91], [90, 91, 89, 91, 91, 92, 92, 90, 89, 89, 89, 88, 88, 90, 91, 90, 92, 94, 92, 93], [90, 91, 91, 94, 91, 92, 92, 90, 90, 90, 89, 88, 87, 91, 89, 88, 88, 92, 97, 92]], 'radius': 167.03472722760378}
+    #value_list, key_list, key_stack  = flattenDictEntry(ent)
 
     # Init the command line arguments parser
 
@@ -1599,12 +1820,12 @@ if __name__ == "__main__":
 
         print("RaDec {},{} jd {} to {}".format(r, d, e_jd, l_jd))
 
-        if False:
-            observation_sequence_dict = jsonMagsRaDec(config, r, d, e_jd=e_jd, l_jd=l_jd)
 
-            observation_sequence_json = json.dumps(observation_sequence_dict, indent=4, sort_keys=True)
-            with open("observation_sequence.json", 'w') as fh_observation_sequence_json:
-                fh_observation_sequence_json.write(observation_sequence_json)
+        observation_sequence_dict = jsonMagsRaDec(config, r, d, e_jd=e_jd, l_jd=l_jd)
+
+        observation_sequence_json = json.dumps(observation_sequence_dict, indent=4, sort_keys=True)
+        with open("observation_sequence.json", 'w') as fh_observation_sequence_json:
+            fh_observation_sequence_json.write(observation_sequence_json)
 
         with open("observation_sequence.json", 'r') as fh_observation_sequence_json:
             observation_sequence_json = json.loads(fh_observation_sequence_json.read())

@@ -1078,7 +1078,7 @@ class EventMonitor(multiprocessing.Process):
             exists: [bool]
 
         """
-
+        event.use_calstar = 1 if event.use_calstar else 0
         sql_statement = ""
         sql_statement += "SELECT COUNT(*) FROM event_monitor \n"
         sql_statement += "WHERE \n"
@@ -1195,11 +1195,12 @@ class EventMonitor(multiprocessing.Process):
 
             try:
                 cursor = self.db_conn.cursor()
+
                 cursor.execute(sql_statement)
                 self.db_conn.commit()
 
             except:
-                print(sql_statement)
+
                 if EM_RAISE:
                     raise
                 log.info("Add event failed")
@@ -1947,7 +1948,7 @@ class EventMonitor(multiprocessing.Process):
             if observed_event.star_ra != 0 and observed_event.star_dec != 0 and observed_event.jd_start != 0 \
                 and observed_event.jd_start < observed_event.jd_end:
                 observed_event.dt = jd2Date(observed_event.jd_end, dt_obj=True).strftime("%Y%m%d_%H%M%S")
-                log.info("Checks on for event at {}".format(observed_event.dt))
+                log.info("Checking for event at {}".format(observed_event.dt))
                 check_time_start = RmsDateTime.utcnow()
                 self.syscon.config = cr.parse(os.path.join(getRmsRootDir(), ".config"))
                 file_list = processStarTrackEvent(log, self.syscon.config, observed_event)
@@ -1960,7 +1961,7 @@ class EventMonitor(multiprocessing.Process):
                         self.markEventAsUploaded(observed_event, file_list)
 
             else:
-                log.info("Checks on for event at {}".format(observed_event.dt))
+                log.info("Checking for event at {}".format(observed_event.dt))
                 check_time_start = RmsDateTime.utcnow()
                 # Iterate through the work
                 # Events can be specified in different ways, make sure converted to LatLon
