@@ -1730,7 +1730,7 @@ class EventMonitor(multiprocessing.Process):
         pts_in_FOV, sta_dist, sta_ang, end_dist, end_ang, fov_RA, fov_DEC = self.trajectoryVisible(rp, event)
         return pts_in_FOV, sta_dist, sta_ang, end_dist, end_ang, fov_RA, fov_DEC
 
-    def doUpload(self, event, evcon, file_list, keep_files=False, no_upload=False, test_mode=False):
+    def doUpload(self, event, evcon, file_list_to_upload, keep_files=False, no_upload=False, test_mode=False):
 
         """Move all the files to a single directory. Make MP4s, stacks and jpgs
            Archive into a bz2 file and upload, using paramiko. Delete all working folders.
@@ -1738,7 +1738,7 @@ class EventMonitor(multiprocessing.Process):
         Args:
             event: [event] the event to be uploaded
             evcon: [path] path to the config file for the event
-            file_list: [list of paths] the files to be uploaded
+            file_list_to_upload: [list of paths] the files to be uploaded
             keep_files: [bool] keep the files after upload
             no_upload: [bool] if True do everything apart from uploading
             test_mode: [bool] if True prevents upload
@@ -1747,6 +1747,15 @@ class EventMonitor(multiprocessing.Process):
             uploadstatus: [bool] status of upload
 
         """
+
+        if file_list_to_upload is None:
+            log.info("No files to upload")
+            return True
+
+        file_list = []
+        for file in file_list_to_upload:
+            if file is not None:
+                file_list.append(file)
 
         if self.eventUploaded(event.uuid):
             log.warning("Call to doUpload for already uploaded event {}".format(event.dt))

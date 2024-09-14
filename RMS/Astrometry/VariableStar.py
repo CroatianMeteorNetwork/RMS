@@ -1214,7 +1214,7 @@ def saveThumbnailsRaDec(config, r, d, e_jd=0, l_jd=np.inf, file_path=None):
     plt, fn = renderContactSheet(config, contact_sheet, headings_list, position_list, r, d, e_jd, l_jd)
     if plt is None:
         print("No transits found - cannot plot")
-        return
+        return None
     else:
         filename = fn if file_path is None else file_path
         plt.savefig(filename)
@@ -1229,7 +1229,7 @@ def jsonToThumbnails(config, observations_json, r, d, e_jd, l_jd,  file_path=Non
         d (float): declination (degrees)
         e_jd (float):
         l_jd (float):
-        file_path (float):
+        file_path (string):
 
     Returns:
         filename (string)
@@ -1247,7 +1247,7 @@ def jsonToThumbnails(config, observations_json, r, d, e_jd, l_jd,  file_path=Non
     plt, fn = renderContactSheet(config, contact_sheet, headings_list, position_list, r, d, e_jd, l_jd)
     if plt is None:
         print("No transits found - cannot plot")
-        return
+        return None
     else:
         filename = fn if file_path is None else os.path.join(file_path, fn)
         plt.savefig(filename)
@@ -1623,7 +1623,11 @@ def processStarTrackEvent(log, config, ev):
     observation_sequence_dict = jsonMagsRaDec(config, ev.star_ra, ev.star_dec,
                                               e_jd=ev.jd_start, l_jd=ev.jd_end,
                                               require_calstar=require_calstar)
-    
+
+    if not len(observation_sequence_dict):
+        log.info("No observations of this event")
+        return None
+
     with open(json_path, 'w') as json_fh:
         json_fh.write(json.dumps(observation_sequence_dict, indent=4, sort_keys=True))
 
