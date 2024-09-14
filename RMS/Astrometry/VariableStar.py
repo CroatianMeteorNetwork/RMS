@@ -44,7 +44,6 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 import RMS.ConfigReader as cr
 import glob as glob
 import sqlite3
-import tqdm
 import datetime
 import json
 
@@ -357,7 +356,7 @@ def readInArchivedCalstars(config, conn):
     # Working with each of the remaining archived directories write into the database
     print("\nIterating through the archived directories starting from {}\n"
                                                         .format(archived_directories_filtered_by_jd[0]))
-    for dir in tqdm.tqdm(archived_directories_filtered_by_jd):
+    for dir in archived_directories_filtered_by_jd:
 
         # Get full paths to critical files
         full_path = os.path.join(archived_directories_path, dir)
@@ -506,7 +505,7 @@ def getFitsPathsAndCoords(config, earliest_jd, latest_jd, r=None, d=None):
     last_pp_path = ""
     fits_paths = []
     print("\nGetting all directories to be searched\n")
-    for directory in tqdm.tqdm(directories_to_search):
+    for directory in directories_to_search:
 
         mask_path = os.path.join(directory, config.mask_file)
         default_mask_path = os.path.join(getRmsRootDir(), config.mask_file)
@@ -667,7 +666,7 @@ def createThumbnails(config, r, d, earliest_jd=0, latest_jd=np.inf):
     # initialise a list to hold the cropped image data
     thumbnail_list = []
     print("Iterating over paths")
-    for fits_path, x, y in tqdm.tqdm(path_coords_list):
+    for fits_path, x, y in path_coords_list:
         thumbnail_list.append([fits_path, readCroppedFF(fits_path, x, y)])
 
     return thumbnail_list
@@ -998,7 +997,7 @@ def catalogueToDB(conn):
     """
     catalogue = loadGaiaCatalog("~/source/RMS/Catalogs", "gaia_dr2_mag_11.5.npy", lim_mag=11)
     print("\nInserting catalgue data\n")
-    for star in tqdm.tqdm(catalogue):
+    for star in catalogue:
         sql_command = "INSERT INTO catalogue (r , d, mag) \n"
         sql_command += "Values ({} , {}, {})".format(star[0], star[1], star[2])
         conn.execute(sql_command)
@@ -1373,7 +1372,7 @@ def calstarRaDecToDict(data_dir_path, config, pp, pp_recal_json, r_target, d_tar
     sequence_dict = dict()
 
     # Iterate through the candidate fits files
-    for fits_file, star_list in tqdm.tqdm(candidate_fits):
+    for fits_file, star_list in candidate_fits:
 
         date_time, jd = rmsTimeExtractor(fits_file, asTuple=True)
         if pp_recal_json is not None:
