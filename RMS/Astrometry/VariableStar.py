@@ -1619,13 +1619,13 @@ def processStarTrackEvent(log, config, ev):
     mkdirP(star_track_working_directory)
     json_path = os.path.join(star_track_working_directory, json_name)
 
-    if False:
-        observation_sequence_dict = jsonMagsRaDec(config, ev.star_ra, ev.star_dec,
+
+    observation_sequence_dict = jsonMagsRaDec(config, ev.star_ra, ev.star_dec,
                                               e_jd=ev.jd_start, l_jd=ev.jd_end,
                                               require_calstar=require_calstar)
     
-        with open(json_path, 'w') as json_fh:
-            json_fh.write(json.dumps(observation_sequence_dict, indent=4, sort_keys=True))
+    with open(json_path, 'w') as json_fh:
+        json_fh.write(json.dumps(observation_sequence_dict, indent=4, sort_keys=True))
 
 
 
