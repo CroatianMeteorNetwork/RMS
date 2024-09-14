@@ -36,7 +36,7 @@ class RawFrameSaver(multiprocessing.Process):
 
     running = False
     
-    def __init__(self, saved_frames_dir, array1, startTime1, array2, startTime2, config):
+    def __init__(self, saved_frames_dir, array1, startTime1, array2, startTime2, tsArray1, tsArray2, config):
         """
 
         Arguments:
@@ -45,6 +45,8 @@ class RawFrameSaver(multiprocessing.Process):
             startTime1: float in shared memory that holds time of first raw frame in array1
             array2: second numpy array in shared memory
             startTime1: float in shared memory that holds time of first raw frame in array2
+            tsArray1: first numpy array in shared memory for timestamps
+            tsArray2: second numpy array in shared memory for timestamps
             config: configuration class
 
         """
@@ -56,13 +58,15 @@ class RawFrameSaver(multiprocessing.Process):
         self.startTime1 = startTime1
         self.array2 = array2
         self.startTime2 = startTime2
+        self.timeStamps1 = tsArray1
+        self.timeStamps2 = tsArray2
         self.config = config
 
         self.exit = multiprocessing.Event()
         self.run_exited = multiprocessing.Event()
 
 
-    def saveFrameToDisk(self, frame_array, frames_start_time, block_iteration, json_file_path):
+    def saveFramesToDisk(self, framestamps, frames_start_time, block_iteration, json_file_path):
         """Saves a block of raw image frames to disk with timestamp-based filenames.
 
         This method calculates each filename using station ID, the UTC date
@@ -75,24 +79,25 @@ class RawFrameSaver(multiprocessing.Process):
 
         Arguments
         ---------
-            frame_array : [ndarray] numpy array of saved frames block
+            framestamps : [List] list of (frame, timestamp) pairs of corresponding frames and timestamps
             frames_start_time: [float] time of first frame in frame_array
             block_iteration: [int] number of iteration of calling this function, used to track total frame number
             json_file_path: [str] json file path to write (frame number, timestamp) pairs to
         """
 
-        block_frame_index = 0
         block_json_data = {}
 
-        for frame in frame_array:
+
+        for block_frame_index, (frame, timestamp) in enumerate(framestamps):
+
+            # If timestamp is 0, then we've reached the end and this is the last block 
+            if (timestamp == 0):
+                break
 
             # Generate the name for the file
-            date_string = time.strftime(
-                            "%Y%m%d_%H%M%S", 
-                            time.gmtime(frames_start_time + (block_frame_index * self.config.frame_save_interval * (1 / self.config.fps)))
-                        )
+            date_string = time.strftime("%Y%m%d_%H%M%S", time.gmtime(timestamp))
 
-            # Calculate milliseconds (TEST)
+            # Calculate milliseconds
             millis = int((frames_start_time - floor(frames_start_time))*1000)
 
             # Create the filename
@@ -109,7 +114,7 @@ class RawFrameSaver(multiprocessing.Process):
             )
 
             # write timestamps to temporary dictionary, to be then flushed to json
-            block_json_data[block_iteration * len(frame_array) + block_frame_index] = "{0}_{1:03d}".format(date_string, millis)
+            block_json_data[block_iteration * len(framestamps) + block_frame_index] = "{0}_{1:03d}".format(date_string, millis)
 
             # Define the full path for saving the file
             frame_path = os.path.join(self.saved_frames_dir, self.config.frame_subdir, filename)
@@ -155,6 +160,9 @@ class RawFrameSaver(multiprocessing.Process):
             log.debug('Freeing frame buffers in raw frame saver...')
             del self.array1
             del self.array2
+            del self.timeStamps1
+            del self.timeStamps2
+
         except Exception as e:
             log.debug('Freeing raw frame buffers failed with error:' + repr(e))
             log.debug(repr(traceback.format_exception(*sys.exc_info())))
@@ -204,8 +212,11 @@ class RawFrameSaver(multiprocessing.Process):
                 # Retrieve time of first frame
                 startTime = float(self.startTime1.value)
 
-                # Copy raw frames
-                raw_frames = self.array1
+                # Copy raw (frames, timestamps)
+                # Clear out the timestamp array so it can be used by 
+                # saveFramesToDisk to halt
+                framestamps = list(zip(self.array1, self.timeStamps1))
+                self.timeStamps1.fill(0)
                 raw_buffer_one = True
 
             elif self.startTime2.value > 0:
@@ -213,8 +224,11 @@ class RawFrameSaver(multiprocessing.Process):
                 # Retrieve time of first frame
                 startTime = float(self.startTime2.value)
 
-                # Copy frames
-                raw_frames = self.array2
+                # Copy raw (frames, timestamps)
+                # Clear out the timestamp array so it can be used by 
+                # saveFramesToDisk to halt
+                framestamps = list(zip(self.array2, self.timeStamps2))
+                self.timeStamps2.fill(0)
                 raw_buffer_one = False
 
             else:
@@ -229,7 +243,7 @@ class RawFrameSaver(multiprocessing.Process):
             t = time.time()
 
             # Run the frame block save
-            self.saveFrameToDisk(raw_frames, startTime, block_iteration, json_file_path)
+            self.saveFramesToDisk(framestamps, startTime, block_iteration, json_file_path)
 
             # Once the frame saving is done, tell the capture thread to keep filling the buffer
             if raw_buffer_one:

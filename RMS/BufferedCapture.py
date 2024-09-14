@@ -120,18 +120,33 @@ class BufferedCapture(Process):
             self.num_raw_frames = 10
             self.raw_frame_count = 0
 
-            # Initialize shared memory for raw frame saving
+            # Initialize shared values for frame + timestamp saving
+            self.startRawTime1 = Value('d', 0.0)
+            self.startRawTime2 = Value('d', 0.0)
+
+
+            # Initialize shared memory arrays for raw frame saving
             self.sharedRawArrayBase = Array(ctypes.c_uint8, self.num_raw_frames * config.height * config.width)
             self.sharedRawArray = np.ctypeslib.as_array(self.sharedRawArrayBase.get_obj())
             self.sharedRawArray = self.sharedRawArray.reshape(self.num_raw_frames, config.height, config.width)
-            self.startRawTime1 = Value('d', 0.0)
 
             self.sharedRawArrayBase2 = Array(ctypes.c_uint8, self.num_raw_frames * config.height * config.width)
             self.sharedRawArray2 = np.ctypeslib.as_array(self.sharedRawArrayBase2.get_obj())
             self.sharedRawArray2 = self.sharedRawArray2.reshape(self.num_raw_frames, config.height, config.width)
-            self.startRawTime2 = Value('d', 0.0)
 
-            self.raw_frame_saver = RawFrameSaver(self.frame_save_dir, self.sharedRawArray, self.startRawTime1, self.sharedRawArray2, self.startRawTime2, self.config)
+
+            # Initialize shared memory for timestamp saving
+            self.sharedTimestampsBase = Array(ctypes.c_double, self.num_raw_frames)
+            self.sharedTimestamps = np.ctypeslib.as_array(self.sharedTimestampsBase.get_obj())
+            
+            self.sharedTimestampsBase2 = Array(ctypes.c_double, self.num_raw_frames)
+            self.sharedTimestamps2 = np.ctypeslib.as_array(self.sharedTimestampsBase2.get_obj())
+
+            self.raw_frame_saver = RawFrameSaver(self.frame_save_dir, 
+                                                 self.sharedRawArray, self.startRawTime1, 
+                                                 self.sharedRawArray2, self.startRawTime2, 
+                                                 self.sharedTimestamps, self.sharedTimestamps2,
+                                                 self.config)
 
 
     def startCapture(self, cameraID=0):
@@ -186,11 +201,15 @@ class BufferedCapture(Process):
         # Free shared memory after the raw frame saver is done
         try:
             if self.config.save_frames:
-                log.debug('Freeing raw frame buffers in BufferedCapture...')
+                log.debug('Freeing raw frame and timestamp buffers in BufferedCapture...')
                 del self.sharedRawArrayBase
                 del self.sharedRawArrayBase2
                 del self.sharedRawArray
                 del self.sharedRawArray2
+                del self.sharedTimestampsBase
+                del self.sharedTimestampsBase2
+                del self.sharedTimestamps
+                del self.sharedTimestamps2
 
         except Exception as e:
             log.debug('Freeing raw frame buffers failed with error:' + repr(e))
@@ -966,11 +985,16 @@ class BufferedCapture(Process):
         # Free shared memory after the raw frame saver is done
         try:
             if self.config.save_frames:
-                log.debug('Freeing raw frame buffers in BufferedCapture...')
+                log.debug('Freeing raw frame buffers and timestamps in BufferedCapture...')
                 del self.sharedRawArrayBase
                 del self.sharedRawArrayBase2
                 del self.sharedRawArray
                 del self.sharedRawArray2
+                del self.sharedTimestampsBase
+                del self.sharedTimestampsBase2
+                del self.sharedTimestamps
+                del self.sharedTimestamps2
+
 
         except Exception as e:
             log.debug('Freeing raw frame buffers failed with error:' + repr(e))
@@ -1177,12 +1201,14 @@ class BufferedCapture(Process):
                         first_raw_frame_timestamp = frame_timestamp 
 
 
-                    # Write raw frame to one of the two raw buffers
+                    # Write raw frame and timestamp to one of the two corresponding buffers
                     if raw_buffer_one:
                         self.sharedRawArray[self.raw_frame_count, :, :] = frame
+                        self.sharedTimestamps[self.raw_frame_count] = frame_timestamp
 
                     else:
                         self.sharedRawArray2[self.raw_frame_count, :, :] = frame
+                        self.sharedTimestamps2[self.raw_frame_count] = frame_timestamp
                     
 
                     self.raw_frame_count += 1
