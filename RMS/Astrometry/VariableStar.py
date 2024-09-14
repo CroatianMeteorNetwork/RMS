@@ -1614,7 +1614,9 @@ def processStarTrackEvent(log, config, ev):
     json_name = "r_{}_d_{}_jd_{}_{}_{}.json".format(ev.star_ra, ev.star_dec,
                                                             ev.jd_start, ev.jd_end,
                                                                 config.stationID)
-    ev.suffix = "radec"
+
+    ev.suffix = "radec" if ev.suffix == "evemt" else ev.suffix
+
     star_track_working_directory = os.path.join(config.data_dir, "TrackingFiles")
     mkdirP(star_track_working_directory)
     json_path = os.path.join(star_track_working_directory, json_name)
