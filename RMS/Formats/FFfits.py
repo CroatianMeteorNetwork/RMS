@@ -65,7 +65,7 @@ def filenameToDatetimeStr(file_name, iso8601=False):
 
 
 
-def read(directory, filename, array=False, full_filename=False):
+def read(directory, filename, array=False, full_filename=False, memmap=True):
     """ Read a FF structure from a FITS file. 
     
     Arguments:
@@ -92,7 +92,7 @@ def read(directory, filename, array=False, full_filename=False):
     ff = FFStruct()
 
     # Read in the FITS
-    hdulist = fits.open(fid)
+    hdulist = fits.open(fid, memmap=memmap)
 
     # Read the header
     head = hdulist[0].header

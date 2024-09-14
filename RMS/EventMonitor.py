@@ -57,7 +57,7 @@ import numpy as np
 import RMS.ConfigReader as cr
 
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector
-from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt
+from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt, jd2Date
 from RMS.Math import angularSeparationVect
 from RMS.Formats.FFfile import convertFRNameToFF
 from RMS.Formats.Platepar import Platepar
@@ -66,8 +66,8 @@ from Utils.StackFFs import stackFFs
 from Utils.FRbinViewer import view
 from Utils.BatchFFtoImage import batchFFtoImage
 from RMS.CaptureDuration import captureDuration
-from RMS.Misc import sanitise, RmsDateTime
-
+from RMS.Misc import sanitise, RmsDateTime, getRmsRootDir
+from RMS.Astrometry.VariableStar import processStarTrackEvent
 
 # Import Cython functions
 import pyximport
@@ -111,6 +111,14 @@ EventLat2 (deg +N)       : -31			    #Event end latitude
 EventLon2Std (deg)	     : 1.0			    #Event end longitude standard deviation
 Suffix                   : event            #Free text suffix to the uploaded archive
 
+#Or
+StarRa                   : 310.4            #Rignt ascension (degrees) of star to be tracked
+StarDec                  : 45.3             #Declination (degrees) of star to be tracked
+JDStart                  : 2460568          #JD of tracking start
+JDEnd                    : 2460569          #JD ot tracking end
+UseCalstar               : True             #Optional, default true use Calstar for magnitude information
+Suffix                   : deneb            #Optional free text suffix to the uploaded archive, deafult RaDec
+
 END						                    #Event delimiter - everything after this is associated with a new event
 
 """
@@ -135,6 +143,9 @@ class EventContainer(object):
         self.azim, self.azim_std, self.elev, self.elev_std, self.elev_is_max = 0, 0, 0, 0, False
         self.stations_required = ""
         self.respond_to = ""
+
+        # Or information for star tracking
+        self.star_ra, self.star_dec, self.jd_start, self.jd_end, self.use_calstar = 0, 0, 0, 0, False
 
         # These are internal control properties
         self.uuid = ""
@@ -165,7 +176,7 @@ class EventContainer(object):
         if value == "":
             return
 
-        # Mandatory parameters
+        # Mandatory parameters for meteor tracking
         self.dt = value if "EventTime" == variable_name else self.dt
         self.time_tolerance = value if "TimeTolerance" == variable_name else self.time_tolerance
         self.lat = float(value) if "EventLat" == variable_name else self.lat
@@ -184,6 +195,20 @@ class EventContainer(object):
         # Radii
         self.close_radius = float(value) if "CloseRadius" == variable_name else self.close_radius
         self.far_radius = float(value) if "FarRadius" == variable_name else self.far_radius
+
+        # Optional parameters for star tracking
+
+        self.star_ra = float(value) if "StarRa" == variable_name else self.star_ra
+        self.star_dec = float(value) if "StarDec" == variable_name else self.star_dec
+        self.jd_start = float(value) if "JDStart" == variable_name else self.jd_start
+        self.jd_end = float(value) if "JDEnd" == variable_name else self.jd_end
+
+        if "UseCalstar" == variable_name:
+            if str(value) == "0" :
+                self.use_calstar = 0
+            else:
+                self.use_calstar = 1
+
 
         # Optional parameters, if trajectory is set by a start and an end
         self.lat2 = float(value) if "EventLat2" == variable_name else self.lat2
@@ -285,6 +310,7 @@ class EventContainer(object):
             reasonable: [bool] The event is reasonable
         """
 
+
         reasonable = True
         reasonable = False if self.lat == "" else reasonable
         reasonable = False if self.lat is None else reasonable
@@ -292,6 +318,8 @@ class EventContainer(object):
         reasonable = False if self.lon is None else reasonable
         reasonable = False if 0 < float(self.time_tolerance) > 300 else reasonable
         reasonable = False if self.close_radius > self.far_radius else reasonable
+
+
 
         return reasonable
 
@@ -914,10 +942,29 @@ class EventMonitor(multiprocessing.Process):
             log.info("Missing db column Dec")
             self.addDBcol("Dec","REAL")
 
-
         if not self.checkDBcol(conn,"RequireFR"):
             log.info("Missing db column RequireFR")
             self.addDBcol("RequireFR","bool")
+
+        if not self.checkDBcol(conn, "StarRa"):
+            log.info("Missing db column StarRa")
+            self.addDBcol("StarRa", "REAL")
+
+        if not self.checkDBcol(conn, "StarDec"):
+            log.info("Missing db column StarDec")
+            self.addDBcol("StarDec", "REAL")
+
+        if not self.checkDBcol(conn, "JDStart"):
+            log.info("Missing db column JDStart")
+            self.addDBcol("JDStart", "REAL")
+
+        if not self.checkDBcol(conn, "JDEnd"):
+            log.info("Missing db column JDEnd")
+            self.addDBcol("JDEnd", "REAL")
+
+        if not self.checkDBcol(conn, "UseCalstar"):
+            log.info("Missing db column UseCalstar")
+            self.addDBcol("UseCalstar", "bool")
 
 
     def addDBcol(self, column, coltype):
@@ -1051,6 +1098,11 @@ class EventMonitor(multiprocessing.Process):
         sql_statement += "FarRadius = '{}'              AND \n".format(event.far_radius)
         sql_statement += "CloseRadius = '{}'            AND \n".format(event.close_radius)
         sql_statement += "TimeTolerance = '{}'          AND \n".format(event.time_tolerance)
+        sql_statement += "StarRa           = '{}'       AND \n".format(event.star_ra)
+        sql_statement += "StarDec = '{}'                AND \n".format(event.star_dec)
+        sql_statement += "JDStart = '{}'                AND \n".format(event.jd_start)
+        sql_statement += "JDEnd            = '{}'       AND \n".format(event.jd_end)
+        sql_statement += "UseCalstar            = '{}'       AND \n".format(event.use_calstar)
         sql_statement += "StationsRequired = '{}'       AND \n".format(event.stations_required)
         sql_statement += "RespondTo = '{}'                  \n".format(event.respond_to)
 
@@ -1120,6 +1172,7 @@ class EventMonitor(multiprocessing.Process):
             sql_statement += "CloseRadius, FarRadius,                     \n"
             sql_statement += "EventLat2, EventLat2Std, EventLon2, EventLon2Std,EventHt2, EventHt2Std, EventCart2Std,    \n"
             sql_statement += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax,    \n"
+            sql_statement += "StarRa, StarDec, JDStart, JDEnd, UseCalstar,    \n"
             sql_statement += "processedstatus, uploadedstatus, uuid, RespondTo, StationsRequired, RequireFR, timeadded \n"
             sql_statement += ")                                           \n"
 
@@ -1134,6 +1187,9 @@ class EventMonitor(multiprocessing.Process):
             sql_statement += "{},  {}, {}, {}, {} ,        \n".format(event.azim, event.azim_std, event.elev,
                                                                       event.elev_std,
                                                                       qry_elev_is_max)
+            sql_statement += "{},  {}, {}, {}, {} ,        \n".format(event.star_ra, event.star_dec,
+                                                                            event.jd_start, event.jd_end,
+                                                                            event.use_calstar)
             sql_statement += "{},  {}, '{}', '{}', '{}' , '{}', \n".format(0, 0,uuid.uuid4(), event.respond_to, event.stations_required, event.require_FR)
             sql_statement += "CURRENT_TIMESTAMP ) \n"
 
@@ -1149,7 +1205,10 @@ class EventMonitor(multiprocessing.Process):
                 log.info("Add event failed")
                 self.recoverFromDatabaseError()
                 return False
-            log.info("Added event at {} to the database".format(event.dt))
+            if event.jd_start != 0 and event.jd_end != 0:
+                log.info("Added event between jd {} and {} to the database".format(event.jd_start, event.jd_end))
+            else:
+                log.info("Added event at {} to the database".format(event.dt))
             return True
         else:
             return False
@@ -1372,7 +1431,8 @@ class EventMonitor(multiprocessing.Process):
         sql_query_cols += "FarRadius,CloseRadius, uuid,"
         sql_query_cols += "EventLat2, EventLat2Std, EventLon2, EventLon2Std,EventHt2, EventHt2Std, "
         sql_query_cols += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax, RespondTo, StationsRequired,"
-        sql_query_cols += "EventCartStd, EventCart2Std, RequireFR"
+        sql_query_cols += "EventCartStd, EventCart2Std, RequireFR,"
+        sql_query_cols += "StarRa, StarDec, JDStart, JDEnd, UseCalstar"
         sql_statement += sql_query_cols
         sql_statement += " \n"
         sql_statement += "FROM event_monitor "
@@ -1724,7 +1784,8 @@ class EventMonitor(multiprocessing.Process):
         # put all the files from the filelist into the event directory
         pack_size = 0
         for file in file_list:
-            pack_size += os.path.getsize(file)
+            if file is not None:
+                pack_size += os.path.getsize(file)
         log.info("File pack ({:.0f}MB) assembly started".format(pack_size/1024/1024))
 
         # Don't upload things which are too large
@@ -1733,7 +1794,8 @@ class EventMonitor(multiprocessing.Process):
             return False
 
         for file in file_list:
-            shutil.copy(file, this_event_directory)
+            if file is not None:
+                shutil.copy(file, this_event_directory)
         log.info("File pack assembled")
 
         stackFFs(this_event_directory, "jpg", captured_stack=True, print_progress=False)
@@ -1854,6 +1916,11 @@ class EventMonitor(multiprocessing.Process):
             # check to see if the end of this event is in the future, if it is then do not process
             # if the end of the event is before the next scheduled execution of event monitor loop,
             # then set the loop to execute after the event ends
+
+            if observed_event.star_ra != 0 and observed_event.star_dec != 0 and observed_event.jd_start != 0 \
+                    and observed_event.jd_start < observed_event.jd_end:
+                observed_event.dt = jd2Date(observed_event.jd_end, dt_obj=True).strftime("%Y%m%d_%H%M%S")
+
             if convertGMNTimeToPOSIX(observed_event.dt) + \
                     datetime.timedelta(seconds=int(observed_event.time_tolerance)) > RmsDateTime.utcnow():
                 time_until_event_end_seconds = (convertGMNTimeToPOSIX(observed_event.dt) -
@@ -1877,13 +1944,29 @@ class EventMonitor(multiprocessing.Process):
                 continue
 
 
-            log.info("Checks on trajectories for event at {}".format(observed_event.dt))
-            check_time_start = RmsDateTime.utcnow()
-            # Iterate through the work
-            # Events can be specified in different ways, make sure converted to LatLon
-            observed_event.latLonAzElToLatLonLatLon()
-            # Get the files
-            file_list = self.getFileList(observed_event)
+            if observed_event.star_ra != 0 and observed_event.star_dec != 0 and observed_event.jd_start != 0 \
+                and observed_event.jd_start < observed_event.jd_end:
+                observed_event.dt = jd2Date(observed_event.jd_end, dt_obj=True).strftime("%Y%m%d_%H%M%S")
+                log.info("Checks on for event at {}".format(observed_event.dt))
+                check_time_start = RmsDateTime.utcnow()
+                self.syscon.config = cr.parse(os.path.join(getRmsRootDir(), ".config"))
+                file_list = processStarTrackEvent(log, self.syscon.config, observed_event)
+
+                # If doUpload returned True mark the event as processed and uploaded
+                if self.doUpload(observed_event, self.syscon.config, file_list, test_mode):
+                    log.info("Marking radec event at {} as processed".format(observed_event.dt))
+                    self.markEventAsProcessed(observed_event)
+                    if len(file_list) > 0:
+                        self.markEventAsUploaded(observed_event, file_list)
+
+            else:
+                log.info("Checks on for event at {}".format(observed_event.dt))
+                check_time_start = RmsDateTime.utcnow()
+                # Iterate through the work
+                # Events can be specified in different ways, make sure converted to LatLon
+                observed_event.latLonAzElToLatLonLatLon()
+                # Get the files
+                file_list = self.getFileList(observed_event)
 
             # If there are no files based on time, then mark as processed and continue
             if (len(file_list) == 0 or file_list == [None]) and not test_mode:
@@ -2122,7 +2205,7 @@ class EventMonitor(multiprocessing.Process):
         # Delay to allow capture to check existing folders - keep the logs tidy
 
 
-        time.sleep(60)
+        time.sleep(5)
         last_check_start_time = RmsDateTime.utcnow()
         while not self.exit.is_set():
             check_start_time = RmsDateTime.utcnow()
