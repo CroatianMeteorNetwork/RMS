@@ -18,8 +18,8 @@ from __future__ import print_function, division, absolute_import
 
 import os
 import sys
+import ctypes
 import traceback
-import RMS.Reprocess
 
 # Set GStreamer debug level. Use '2' for warnings in production environments.
 os.environ['GST_DEBUG'] = '3'
@@ -29,16 +29,15 @@ import time
 import logging
 import datetime
 import os.path
-from multiprocessing import Process, Event, Value
+from multiprocessing import Process, Event, Value, Array
 
 import cv2
 import numpy as np
-from math import floor
 
 from RMS.Misc import ping
 from RMS.Routines.GstreamerCapture import GstVideoFile
 from RMS.Formats.ObservationSummary import getObsDBConn, addObsParam
-from RMS.QueuedPool import QueuedPool
+from RMS.RawFrameSave import RawFrameSaver
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -116,10 +115,23 @@ class BufferedCapture(Process):
         self.convert_to_gray = False
 
         if self.config.save_frames:
-            # Initialize QueuedPool for image saving
-            self.frame_saver = QueuedPool(self.saveFrameToDisk, cores=1, log=log,
-                                          backup_dir=self.night_data_dir, input_queue_maxsize=None)
-            self.frame_saver.startPool()
+
+            # Params for raw frame saving
+            self.num_raw_frames = 10
+            self.raw_frame_count = 0
+
+            # Initialize shared memory for raw frame saving
+            self.sharedRawArrayBase = Array(ctypes.c_uint8, self.num_raw_frames * config.height * config.width)
+            self.sharedRawArray = np.ctypeslib.as_array(self.sharedRawArrayBase.get_obj())
+            self.sharedRawArray = self.sharedRawArray.reshape(self.num_raw_frames, config.height, config.width)
+            self.startRawTime1 = Value('d', 0.0)
+
+            self.sharedRawArrayBase2 = Array(ctypes.c_uint8, self.num_raw_frames * config.height * config.width)
+            self.sharedRawArray2 = np.ctypeslib.as_array(self.sharedRawArrayBase2.get_obj())
+            self.sharedRawArray2 = self.sharedRawArray2.reshape(self.num_raw_frames, config.height, config.width)
+            self.startRawTime2 = Value('d', 0.0)
+
+            self.raw_frame_saver = RawFrameSaver(self.frame_save_dir, self.sharedRawArray, self.startRawTime1, self.sharedRawArray2, self.startRawTime2, self.config)
 
 
     def startCapture(self, cameraID=0):
@@ -132,6 +144,11 @@ class BufferedCapture(Process):
         
         self.cameraID = cameraID
         self.exit = Event()
+
+        # start the raw frame saver
+        if self.config.save_frames:
+            self.raw_frame_saver.start()
+
         self.start()
     
 
@@ -164,10 +181,23 @@ class BufferedCapture(Process):
         except Exception as e:
             log.debug('Freeing frame buffers failed with error:' + repr(e))
             log.debug(repr(traceback.format_exception(*sys.exc_info())))
-        
-        # Stop the image saver pool
-        if hasattr(self, 'frame_saver') and self.frame_saver is not None:
-            self.frame_saver.closePool()
+
+
+        # Free shared memory after the raw frame saver is done
+        try:
+            if self.config.save_frames:
+                log.debug('Freeing raw frame buffers in BufferedCapture...')
+                del self.sharedRawArrayBase
+                del self.sharedRawArrayBase2
+                del self.sharedRawArray
+                del self.sharedRawArray2
+
+        except Exception as e:
+            log.debug('Freeing raw frame buffers failed with error:' + repr(e))
+            log.debug(repr(traceback.format_exception(*sys.exc_info())))
+
+        # Stop the raw frame saver
+        self.raw_frame_saver.stop()
 
         return self.dropped_frames.value
 
@@ -204,61 +234,6 @@ class BufferedCapture(Process):
         except Exception as e:
             log.error('Error checking device status: {}'.format(e))
             return False
-
-
-    def saveFrameToDisk(self, frame_timestamp, frame):
-        """Saves an image frame to disk with a timestamp-based filename.
-
-        This method generates a filename based on the station ID and the
-        timestamp of the frame, then saves the frame in the specified format
-        to the saved_frames_dir/frame_subdir directory.
-
-        The method calculates the filename using the station ID, the UTC date
-        and time from the timestamp, and the milliseconds part of the timestamp
-        to ensure uniqueness.
-
-        The filename format is 'stationID_YYYYMMDD_HHMMSS_MMM.ttt'.
-
-        Arguments:
-            frame_timestamp: [float] The timestamp of the frame to be saved,
-                              used for generating the filename.
-            frame: [ndarray] The image frame to save.
-
-        """
-
-        # Generate the name for the file
-        date_string = time.strftime("%Y%m%d_%H%M%S", time.gmtime(frame_timestamp))
-
-        # Calculate milliseconds
-        millis = int((frame_timestamp - floor(frame_timestamp))*1000)
-
-        # Create the filename
-        if self.config.frame_file_type == 'png':
-            file_extension = '.png'
-        else:
-            file_extension = '.jpg'
-
-        filename = "{0}_{1}_{2:03d}{3}".format(
-            str(self.config.stationID).zfill(3),
-            date_string,
-            millis,
-            file_extension
-        )
-
-        # Define the full path for saving the file
-        frame_path = os.path.join(self.frame_save_dir, self.config.frame_subdir, filename)
-
-        # Write the image file
-        try:
-            if file_extension == '.png':
-                cv2.imwrite(frame_path, frame, [int(cv2.IMWRITE_PNG_COMPRESSION), self.config.png_compression])
-
-            else:
-                cv2.imwrite(frame_path, frame, [int(cv2.IMWRITE_JPEG_QUALITY), self.config.jpgs_quality])
-
-            log.info("Frame saved: {0}".format(filename))
-        except Exception as e:
-            log.error("Could not save frame to disk: {0}".format(e))
 
 
     def calculatePTSRegressionParams(self, y):
@@ -921,7 +896,7 @@ class BufferedCapture(Process):
 
 
     def releaseResources(self):
-        """Releases resources for GStreamer and OpenCV devices."""
+        """Releases resources for GStreamer/OpenCV devices, and shared memory"""
 
         if self.pipeline:
 
@@ -976,13 +951,34 @@ class BufferedCapture(Process):
                 finally:
                     self.device = None
 
-        # Close the image saver pool
-        if hasattr(self, 'image_saver'):
-            try:
-                self.frame_saver.closePool()
-                log.info('Image saver pool closed.')
-            except Exception as e:
-                log.error(f'Error closing image saver pool: {e}')
+
+        # Free shared memory after the compressor is done
+        try:
+            log.debug('Freeing frame buffers in BufferedCapture...')
+            del self.array1
+            del self.array2
+            
+        except Exception as e:
+            log.debug('Freeing frame buffers failed with error:' + repr(e))
+            log.debug(repr(traceback.format_exception(*sys.exc_info())))
+
+
+        # Free shared memory after the raw frame saver is done
+        try:
+            if self.config.save_frames:
+                log.debug('Freeing raw frame buffers in BufferedCapture...')
+                del self.sharedRawArrayBase
+                del self.sharedRawArrayBase2
+                del self.sharedRawArray
+                del self.sharedRawArray2
+
+        except Exception as e:
+            log.debug('Freeing raw frame buffers failed with error:' + repr(e))
+            log.debug(repr(traceback.format_exception(*sys.exc_info())))
+        
+        # Stop the raw frame saver
+        if not self.raw_frame_saver.exit.is_set():
+            self.raw_frame_saver.stop()
 
 
     def run(self):
@@ -1048,7 +1044,10 @@ class BufferedCapture(Process):
         wait_for_reconnect = False
 
         last_frame_timestamp = False
-        
+
+        if self.config.save_frames:
+            raw_buffer_one = True
+
         # Run until stopped from the outside
         while not self.exit.is_set():
 
@@ -1158,13 +1157,44 @@ class BufferedCapture(Process):
                     # Always set first frame timestamp in the beginning of the block
                     first_frame_timestamp = frame_timestamp
  
- 
-                # If save_frames is set and a video device is used, save a frame every nth frames
-                if (self.config.save_frames
-                        and self.video_file is None
-                        and total_frames%(self.config.frame_save_interval) == 0):
 
-                    self.frame_saver.addJob([frame_timestamp, frame])
+                # If save_frames is set and a video device is used, save a frame every nth frames
+                if (self.config.save_frames and
+                    self.video_file is None and
+                    total_frames % self.config.frame_save_interval == 0):
+
+                    # reset start time values everytime the buffers are switched
+                    if self.raw_frame_count == 0:
+
+                        if raw_buffer_one:
+                            self.startRawTime1.value = 0
+                        else:
+                            self.startRawTime2.value = 0
+
+                        # Always set first raw frame timestamp in the beginning of the block
+                        first_raw_frame_timestamp = frame_timestamp 
+
+
+                    # Write raw frame to one of the two raw buffers
+                    if raw_buffer_one:
+                        self.sharedRawArray[self.raw_frame_count, :, :] = frame
+
+                    else:
+                        self.sharedRawArray2[self.raw_frame_count, :, :] = frame
+                    
+
+                    self.raw_frame_count += 1
+
+                    # switch buffers arrays every (self.num_raw_frames) frames
+                    if self.raw_frame_count == self.num_raw_frames - 1:
+
+                        if raw_buffer_one:
+                            self.startRawTime1.value = first_raw_frame_timestamp
+                        else:
+                            self.startRawTime2.value = first_raw_frame_timestamp
+                        
+                        self.raw_frame_count = 0
+                        raw_buffer_one = not raw_buffer_one
 
 
                 # If the end of the video file was reached, stop the capture
@@ -1282,6 +1312,15 @@ class BufferedCapture(Process):
             if self.exit.is_set():
                 wait_for_reconnect = False
                 log.info('Capture exited!')
+
+                # Save extra raw frames left in either buffer - these will belong to the last 
+                # block of 256 frames, so use the last_frame_timestamp
+                if self.config.save_frames:
+                    if raw_buffer_one:
+                        self.startRawTime1.value = last_frame_timestamp
+                    else:
+                        self.startRawTime2.value = last_frame_timestamp
+
                 break
 
 
