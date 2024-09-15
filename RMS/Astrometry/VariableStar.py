@@ -1683,7 +1683,7 @@ def flattenDict(input_dict, output_path):
 
     # Iterate through entries in input_dict writing out to a list
     for entry_key in sorted(input_dict):
-        value_list, csv_header, key_stack = flattenDictEntry(input_dict[entry], "jd", value_list=entry_key)
+        value_list, csv_header, key_stack = flattenDictEntry(input_dict[entry_key], "jd", value_list=entry_key)
         output_lines_list.append(value_list)
 
     # Put the header at the top of the list by reverse, append, reverse
@@ -1835,6 +1835,9 @@ if __name__ == "__main__":
         observation_sequence_dict = jsonMagsRaDec(config, r, d, e_jd=e_jd, l_jd=l_jd)
 
         observation_sequence_json = json.dumps(observation_sequence_dict, indent=4, sort_keys=True)
+
+
+
         with open("observation_sequence.json", 'w') as fh_observation_sequence_json:
             fh_observation_sequence_json.write(observation_sequence_json)
 
