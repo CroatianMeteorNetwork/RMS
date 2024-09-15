@@ -357,7 +357,7 @@ def readInArchivedCalstars(config, conn):
     print("\nIterating through the archived directories starting from {}\n"
                                                         .format(archived_directories_filtered_by_jd[0]))
     for dir in archived_directories_filtered_by_jd:
-
+        print("Reading in directory {}".format(os.path.basename(dir)))
         # Get full paths to critical files
         full_path = os.path.join(archived_directories_path, dir)
         full_path_calstars = glob.glob(os.path.join(full_path,"*CALSTARS*" ))
