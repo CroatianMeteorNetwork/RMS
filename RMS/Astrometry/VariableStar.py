@@ -1471,8 +1471,9 @@ def dirRaDecToDict(data_dir_path, pp, pp_recal, r_target, d_target, e_jd, l_jd):
           calstar_radec (): list of stellar magnitude data in radec format
       """
 
-
+    log.info("Looking in {} between {} and {}".format(data_dir_path, e_jd, l_jd))
     candidate_fits = filterDirByJD(data_dir_path, e_jd, l_jd)
+    log.info("Found {} candidate fits files".format(candidate_fits))
     mask = loadMask(os.path.join(data_dir_path, "mask.bmp"))
     sequence_dict = dict()
     for fits_file in candidate_fits:
@@ -1486,8 +1487,10 @@ def dirRaDecToDict(data_dir_path, pp, pp_recal, r_target, d_target, e_jd, l_jd):
                                                     check_mask=True, mask=mask)
 
         if not containsRaDec:
+            print("File {} does not contain r, d {},{}".format(fits_file, r_target, d_target))
             continue
 
+        print("File {} does contain r, d {},{}".format(fits_file, r_target, d_target))
         path_to_ff = os.path.join(data_dir_path, fits_file)
 
         if os.path.exists(path_to_ff):
