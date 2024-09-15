@@ -1410,7 +1410,6 @@ def calstarRaDecToDict(data_dir_path, config, pp, pp_recal_json, r_target, d_tar
             actual_deviation_degrees = angularSeparationDeg(r_target, d_target, r, d)
             vignetting, offset = pp.vignetting_coeff, pp.mag_lev
             vignetting_correction = correctVignetting(bg, radius, vignetting)
-            print("Vignetting correction value {}".format(vignetting_correction))
             mag = 0 - 2.5 * np.log10(correctVignetting(bg, radius, vignetting)) + offset
             if mag == np.inf:
                 continue
@@ -1599,15 +1598,17 @@ def processStarTrackEvent(log, config, ev):
 
     require_calstar = True if ev.use_calstar == 1 else False
 
+    log.info("===========================")
     log.info("Processing star track event")
     log.info("===========================")
-    log.info("JD start        : {}".format(ev.jd_start))
-    log.info("JD end          : {}".format(ev.jd_end))
-    log.info("RMS Style time  : {}".format(ev.dt))
-    log.info("RA              : {}".format(ev.star_ra))
-    log.info("Dec             : {}".format(ev.star_dec))
-    log.info("Use Calstar     : {}".format(require_calstar))
-    log.info("Suffix          : {}".format(ev.suffix))
+    log.info("JD start       : {}".format(ev.jd_start))
+    log.info("JD end         : {}".format(ev.jd_end))
+    log.info("RMS Style time : {}".format(ev.dt))
+    log.info("RA             : {}".format(ev.star_ra))
+    log.info("Dec            : {}".format(ev.star_dec))
+    log.info("Use Calstar    : {}".format(require_calstar))
+    log.info("Suffix         : {}".format(ev.suffix))
+    log.info("===========================")
     file_list = []
 
 
