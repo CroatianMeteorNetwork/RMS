@@ -1683,7 +1683,7 @@ def flattenDict(input_dict, output_path):
 
     # Iterate through entries in input_dict writing out to a list
     for entry in input_dict:
-        value_list, csv_header, key_stack = flattenDictEntry(input_dict[entry])
+        value_list, csv_header, key_stack = flattenDictEntry(input_dict[entry], "jd", value_list=entry)
         output_lines_list.append(value_list)
 
     # Reverse the list
