@@ -1629,7 +1629,7 @@ def processStarTrackEvent(log, config, ev):
                                               require_calstar=require_calstar)
 
     if not len(observation_sequence_dict):
-        log.info("No observations of an object this sky region")
+        log.info("No observations of this sky region")
         return []
     else:
         log.info("Found {} observations of this sky region".format(len(observation_sequence_dict)))
