@@ -1236,9 +1236,9 @@ def jsonToThumbnails(config, observations_json, r, d, e_jd, l_jd,  file_path=Non
     """
 
     thumbnail_list = []
-    last_j = 0
+    last_j = 0.0
     for j in observations_json:
-        if j < last_j:
+        if float(j) < last_j:
             print("jd not arriving in time order")
         last_j = j
 
