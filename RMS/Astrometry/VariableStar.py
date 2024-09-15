@@ -1682,15 +1682,13 @@ def flattenDict(input_dict, output_path):
     csv_header = ""
 
     # Iterate through entries in input_dict writing out to a list
-    for entry in input_dict:
-        value_list, csv_header, key_stack = flattenDictEntry(input_dict[entry], "jd", value_list=entry)
+    for entry_key in sorted(input_dict):
+        value_list, csv_header, key_stack = flattenDictEntry(input_dict[entry], "jd", value_list=entry_key)
         output_lines_list.append(value_list)
 
-    # Reverse the list
+    # Put the header at the top of the list by reverse, append, reverse
     output_lines_list.reverse()
-    # Put the csv header at the end
     output_lines_list.append(csv_header)
-    # And reverse again
     output_lines_list.reverse()
 
     # Write to file
@@ -1797,7 +1795,6 @@ if __name__ == "__main__":
 
     arg_parser.add_argument("-n", '--no_read', action="store_true",
                             help="Do not try to populate the database")
-
 
 
 
