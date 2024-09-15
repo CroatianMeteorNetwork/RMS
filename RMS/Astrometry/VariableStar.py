@@ -1576,7 +1576,8 @@ def jsonMagsRaDec(config, r, d, e_jd=0, l_jd=np.inf, require_calstar=True, requi
                 observation_sequence_dict.update(dict_from_calstar)
 
         else:
-            dict_from_dir = dirRaDecToDict(full_path, pp, pp_recal_json, r, d, e_jd, l_jd)
+            # Handle the no calstar required case
+            dict_from_dir = dirRaDecToDict(full_path, pp, None, r, d, e_jd, l_jd)
             if dict_from_dir is not None:
                 observation_sequence_dict.update(dict_from_dir)
 
