@@ -1497,7 +1497,7 @@ def dirRaDecToDict(data_dir_path, pp, pp_recal, r_target, d_target, e_jd, l_jd):
                                 "coords": {
                                     "image": {"x": x, "y": y},
                                     "horizontal": {"az": az, "el": el},
-                                    "equatorial": {"ra": r, "dec": d}
+                                    "equatorial": {"ra": r_target, "dec": d_target}
                                     },
                                 "radius": radius,
                                 "pixels": readCroppedFF(path_to_ff, x, y).tolist()}
