@@ -1520,10 +1520,6 @@ def jsonMagsRaDec(config, log, r, d, e_jd=0, l_jd=np.inf, require_calstar=True, 
     directories_to_search += filterDirectoriesByJD(full_path_to_archived, e_jd, l_jd)
     directories_to_search += filterDirectoriesByJD(full_path_to_captured, e_jd, l_jd)
 
-    log.info("Searching in the following directories:")
-    for directory in directories_to_search:
-        log.info("{}".format(directory))
-
     observation_sequence_dict = {}
     for search_dir in directories_to_search:
 
