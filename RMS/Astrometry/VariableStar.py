@@ -1598,9 +1598,9 @@ def processStarTrackEvent(log, config, ev):
 
     require_calstar = True if ev.use_calstar == 1 else False
 
-    log.info("===========================")
-    log.info("Processing star track event")
-    log.info("===========================")
+    log.info("================================")
+    log.info("     Processing star track event")
+    log.info("================================")
     log.info("JD start       : {}".format(ev.jd_start))
     log.info("JD end         : {}".format(ev.jd_end))
     log.info("RMS Style time : {}".format(ev.dt))
@@ -1608,7 +1608,7 @@ def processStarTrackEvent(log, config, ev):
     log.info("Dec            : {}".format(ev.star_dec))
     log.info("Use Calstar    : {}".format(require_calstar))
     log.info("Suffix         : {}".format(ev.suffix))
-    log.info("===========================")
+    log.info("================================")
     file_list = []
 
 
