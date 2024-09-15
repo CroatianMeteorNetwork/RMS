@@ -1601,6 +1601,7 @@ def processStarTrackEvent(log, config, ev):
     log.info("===========================")
     log.info("JD start        : {}".format(ev.jd_start))
     log.info("JD end          : {}".format(ev.jd_end))
+    log.info("RMS Style time  : {}".format(ev.dt))
     log.info("RA              : {}".format(ev.star_ra))
     log.info("Dec             : {}".format(ev.star_dec))
     log.info("Use Calstar     : {}".format(require_calstar))
@@ -1613,7 +1614,7 @@ def processStarTrackEvent(log, config, ev):
                                                             ev.jd_start, ev.jd_end,
                                                                 config.stationID)
 
-    ev.suffix = "radec" if ev.suffix == "evemt" else ev.suffix
+    ev.suffix = "radec" if ev.suffix == "event" else ev.suffix
 
     star_track_working_directory = os.path.join(config.data_dir, "TrackingFiles")
     mkdirP(star_track_working_directory)
@@ -1625,10 +1626,10 @@ def processStarTrackEvent(log, config, ev):
                                               require_calstar=require_calstar)
 
     if not len(observation_sequence_dict):
-        log.info("No observations of this event")
+        log.info("No observations of this sky region")
         return []
     else:
-        log.info()
+        log.info("Found {} observations of this sky region".format(len(observation_sequence_dict)))
 
     with open(json_path, 'w') as json_fh:
         json_fh.write(json.dumps(observation_sequence_dict, indent=4, sort_keys=True))
