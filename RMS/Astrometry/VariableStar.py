@@ -1594,20 +1594,18 @@ def processStarTrackEvent(log, config, ev):
     Returns:
         list of files to be uploaded
     """
+
+    require_calstar = True if ev.use_calstar == 1 else False
+
     log.info("Processing star track event")
     log.info("===========================")
     log.info("JD start        : {}".format(ev.jd_start))
     log.info("JD end          : {}".format(ev.jd_end))
     log.info("RA              : {}".format(ev.star_ra))
     log.info("Dec             : {}".format(ev.star_dec))
-    log.info("Use Calstar     : {}".format(ev.use_calstar))
+    log.info("Use Calstar     : {}".format(require_calstar))
+    log.info("Suffix          : {}".format(ev.suffix))
     file_list = []
-
-
-
-    require_calstar = True if ev.use_calstar == 1 else False
-
-
 
 
 
@@ -1629,6 +1627,8 @@ def processStarTrackEvent(log, config, ev):
     if not len(observation_sequence_dict):
         log.info("No observations of this event")
         return []
+    else:
+        log.info()
 
     with open(json_path, 'w') as json_fh:
         json_fh.write(json.dumps(observation_sequence_dict, indent=4, sort_keys=True))
@@ -1655,7 +1655,7 @@ def processStarTrackEvent(log, config, ev):
     csv_path = os.path.join(star_track_working_directory, csv_name)
 
     file_list.append(flattenDict(observation_sequence_dict, csv_path))
-    print(file_list)
+
     return file_list
 
 
