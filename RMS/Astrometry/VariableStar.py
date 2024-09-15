@@ -1371,7 +1371,7 @@ def calstarRaDecToDict(data_dir_path, config, pp, pp_recal_json, r_target, d_tar
 
     sequence_dict = dict()
 
-    # Iterate through the candidate fits files
+    # Iterate through the files
     for fits_file, star_list in candidate_fits:
 
         date_time, jd = rmsTimeExtractor(fits_file, asTuple=True)
@@ -1471,9 +1471,8 @@ def dirRaDecToDict(log, data_dir_path, pp, pp_recal, r_target, d_target, e_jd, l
           calstar_radec (): list of stellar magnitude data in radec format
       """
 
-    log.info("Looking in {} between {} and {}".format(data_dir_path, e_jd, l_jd))
+
     candidate_fits = filterDirByJD(data_dir_path, e_jd, l_jd)
-    log.info("Found {} candidate fits files".format(candidate_fits))
     mask = loadMask(os.path.join(data_dir_path, "mask.bmp"))
     sequence_dict = dict()
     for fits_file in candidate_fits:
