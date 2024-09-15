@@ -996,7 +996,7 @@ def catalogueToDB(conn):
         Nothing
     """
     catalogue = loadGaiaCatalog("~/source/RMS/Catalogs", "gaia_dr2_mag_11.5.npy", lim_mag=11)
-    print("\nInserting catalgue data\n")
+    print("\nInserting catalogue data\n")
     for star in catalogue:
         sql_command = "INSERT INTO catalogue (r , d, mag) \n"
         sql_command += "Values ({} , {}, {})".format(star[0], star[1], star[2])
@@ -1818,55 +1818,7 @@ if __name__ == "__main__":
     else:
         plot_format = cml_args.format[0]
 
-    if plot_format not in ['png', 'jpg', 'bmp']:
-        plot_format = 'png'
 
-
-
-
-
-
-        pass
-
-    else:
-
-
-        r, d = cml_args.ra[0], cml_args.dec[0]
-        e_jd, l_jd = cml_args.jd_range[0], cml_args.jd_range[1]
-
-        print("RaDec {},{} jd {} to {}".format(r, d, e_jd, l_jd))
-
-
-        observation_sequence_dict = jsonMagsRaDec(config, r, d, e_jd=e_jd, l_jd=l_jd)
-
-        observation_sequence_json = json.dumps(observation_sequence_dict, indent=4, sort_keys=True)
-
-
-
-        with open("observation_sequence.json", 'w') as fh_observation_sequence_json:
-            fh_observation_sequence_json.write(observation_sequence_json)
-
-        with open("observation_sequence.json", 'r') as fh_observation_sequence_json:
-            observation_sequence_json = json.loads(fh_observation_sequence_json.read())
-
-        jsonToThumbnails(observation_sequence_json, r, d, e_jd, l_jd)
-        jsonToMagnitudePlot(observation_sequence_json, r, d, e_jd, l_jd)
-
-        if cml_args.thumbnails:
-            saveThumbnailsRaDec(config, r, d, e_jd, l_jd)
-
-
-        if cml_args.window is None:
-            w = 0.1
-        else:
-            w = cml_args.window[0]
-
-
-
-
-
-
-    exit()
 
     if cml_args.dbpath is None:
         dbpath = "~/RMS_data/magnitudes.db"
@@ -1884,11 +1836,8 @@ if __name__ == "__main__":
 
 
 
-        print("Producing plot around RaDec {}, {} width {}".format(r, d, w))
-
-        values = retrieveMagnitudesAroundRaDec(conn, r, d, window=w)
-        ax = createPlot(values, r, d, w)
-        ax.plot()
-        plt.savefig("magnitudes_at_Ra_{}_Dec_{}_Window_{}.{}".format(r, d, w, plot_format), format=plot_format)
 
 
+
+
+    exit()
