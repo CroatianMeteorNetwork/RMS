@@ -1487,12 +1487,9 @@ def dirRaDecToDict(log, data_dir_path, pp, pp_recal, r_target, d_target, e_jd, l
                                                     check_mask=True, mask=mask)
 
         if not containsRaDec:
-            log.info("File {} does not contain r, d {},{}".format(fits_file, r_target, d_target))
             continue
 
-        log.info("File {} does contain r, d {},{}".format(fits_file, r_target, d_target))
         path_to_ff = os.path.join(data_dir_path, fits_file)
-
         if os.path.exists(path_to_ff):
             az, el = raDec2AltAz(r_target, d_target, j, pp.lat, pp.lon)
             radius = np.hypot(y - pp.Y_res / 2, x - pp.X_res / 2)
