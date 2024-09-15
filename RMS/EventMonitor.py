@@ -1102,9 +1102,10 @@ class EventMonitor(multiprocessing.Process):
         sql_statement += "StarDec = '{}'                AND \n".format(event.star_dec)
         sql_statement += "JDStart = '{}'                AND \n".format(event.jd_start)
         sql_statement += "JDEnd            = '{}'       AND \n".format(event.jd_end)
-        sql_statement += "UseCalstar            = '{}'       AND \n".format(event.use_calstar)
+        sql_statement += "UseCalstar            = '{}'  AND \n".format(event.use_calstar)
         sql_statement += "StationsRequired = '{}'       AND \n".format(event.stations_required)
-        sql_statement += "RespondTo = '{}'                  \n".format(event.respond_to)
+        sql_statement += "RespondTo = '{}'              AND \n".format(event.respond_to)
+        sql_statement += "Suffix = '{}'                     \n".format(event.suffix)
 
         # does a similar event exist
         # query gets the number of rows matching, not the actual rows
@@ -1172,7 +1173,7 @@ class EventMonitor(multiprocessing.Process):
             sql_statement += "CloseRadius, FarRadius,                     \n"
             sql_statement += "EventLat2, EventLat2Std, EventLon2, EventLon2Std,EventHt2, EventHt2Std, EventCart2Std,    \n"
             sql_statement += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax,    \n"
-            sql_statement += "StarRa, StarDec, JDStart, JDEnd, UseCalstar,    \n"
+            sql_statement += "StarRa, StarDec, JDStart, JDEnd, UseCalstar, Suffix,   \n"
             sql_statement += "processedstatus, uploadedstatus, uuid, RespondTo, StationsRequired, RequireFR, timeadded \n"
             sql_statement += ")                                           \n"
 
@@ -1187,15 +1188,14 @@ class EventMonitor(multiprocessing.Process):
             sql_statement += "{},  {}, {}, {}, {} ,        \n".format(event.azim, event.azim_std, event.elev,
                                                                       event.elev_std,
                                                                       qry_elev_is_max)
-            sql_statement += "{},  {}, {}, {}, {} ,        \n".format(event.star_ra, event.star_dec,
+            sql_statement += "{},  {}, {}, {}, {} , '{}',        \n".format(event.star_ra, event.star_dec,
                                                                             event.jd_start, event.jd_end,
-                                                                            event.use_calstar)
+                                                                            event.use_calstar, event.suffix)
             sql_statement += "{},  {}, '{}', '{}', '{}' , '{}', \n".format(0, 0,uuid.uuid4(), event.respond_to, event.stations_required, event.require_FR)
             sql_statement += "CURRENT_TIMESTAMP ) \n"
 
             try:
                 cursor = self.db_conn.cursor()
-
                 cursor.execute(sql_statement)
                 self.db_conn.commit()
 
@@ -2220,7 +2220,7 @@ class EventMonitor(multiprocessing.Process):
         # Delay to allow capture to check existing folders - keep the logs tidy
 
 
-        time.sleep(60)
+        time.sleep(5)
         last_check_start_time = RmsDateTime.utcnow()
         while not self.exit.is_set():
             check_start_time = RmsDateTime.utcnow()
