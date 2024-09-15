@@ -241,6 +241,7 @@ class EventContainer(object):
         self.stations_required = str(value) if "StationsRequired" == variable_name else self.stations_required
         self.uuid = str(value) if "uuid" == variable_name else self.uuid
         self.respond_to = str(value) if "RespondTo" == variable_name else self.respond_to
+        self.suffix = str(value) if "Suffix" == variable_name else self.suffix
 
     def eventToString(self):
 
@@ -1433,7 +1434,7 @@ class EventMonitor(multiprocessing.Process):
         sql_query_cols += "EventLat2, EventLat2Std, EventLon2, EventLon2Std,EventHt2, EventHt2Std, "
         sql_query_cols += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax, RespondTo, StationsRequired,"
         sql_query_cols += "EventCartStd, EventCart2Std, RequireFR,"
-        sql_query_cols += "StarRa, StarDec, JDStart, JDEnd, UseCalstar"
+        sql_query_cols += "StarRa, StarDec, JDStart, JDEnd, UseCalstar, Suffix"
         sql_statement += sql_query_cols
         sql_statement += " \n"
         sql_statement += "FROM event_monitor "
