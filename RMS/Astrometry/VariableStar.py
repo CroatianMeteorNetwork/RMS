@@ -237,7 +237,7 @@ def plateparContainsRaDec(r, d, source_pp, file_name, mask_dir, check_mask=True,
     _, r_centre_pp, dec_centre_pp, _ = xyToRaDecPP(jd_arr, x_arr, y_arr, level_arr, source_pp, jd_time=True)
 
     # Check the angle, to prevent false positives for objects behind the camera
-    angle_from_centre = angularSeparationDeg(r, d, r_centre_pp, dec_centre_pp)[0]
+    angle_from_centre = angularSeparationDeg(r, d, r_centre_pp[0], dec_centre_pp[0])
 
     # this prevents spurious coordinates being generated for r, d outside fov
     if angle_from_centre > max(source_pp.fov_h, source_pp.fov_v) / 2:
