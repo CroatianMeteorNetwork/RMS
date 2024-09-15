@@ -1410,7 +1410,7 @@ def calstarRaDecToDict(data_dir_path, config, pp, pp_recal_json, r_target, d_tar
             actual_deviation_degrees = angularSeparationDeg(r_target, d_target, r, d)
             vignetting, offset = pp.vignetting_coeff, pp.mag_lev
             vignetting_correction = correctVignetting(bg, radius, vignetting)
-            print("Vignetting correction value {}").format(vignetting_correction)
+            print("Vignetting correction value {}".format(vignetting_correction))
             mag = 0 - 2.5 * np.log10(correctVignetting(bg, radius, vignetting)) + offset
             if mag == np.inf:
                 continue
