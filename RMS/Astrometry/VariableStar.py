@@ -1648,7 +1648,8 @@ def processStarTrackEvent(log, config, ev):
                                       ev.jd_start, ev.jd_end,
                                       file_path=star_track_working_directory))
 
-    file_list.append(jsonToMagnitudePlot(config, observation_sequence_dict,
+    if require_calstar:
+        file_list.append(jsonToMagnitudePlot(config, observation_sequence_dict,
                                          ev.star_ra, ev.star_dec,
                                          ev.jd_start, ev.jd_end,
                                          file_path=star_track_working_directory))
