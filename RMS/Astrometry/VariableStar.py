@@ -1508,7 +1508,7 @@ def dirRaDecToDict(log, data_dir_path, pp, pp_recal, r_target, d_target, e_jd, l
 
     return sequence_dict
 
-def jsonMagsRaDec(config, r, d, e_jd=0, l_jd=np.inf, require_calstar=True, require_recalibrated_platepar=True):
+def jsonMagsRaDec(config, log, r, d, e_jd=0, l_jd=np.inf, require_calstar=True, require_recalibrated_platepar=True):
     """
     Given a radec jd range, search for intensity information.
     Initially search in archived files using calstars, then search latest captured dir using
@@ -1628,7 +1628,7 @@ def processStarTrackEvent(log, config, ev):
     json_path = os.path.join(star_track_working_directory, json_name)
 
 
-    observation_sequence_dict = jsonMagsRaDec(config, ev.star_ra, ev.star_dec,
+    observation_sequence_dict = jsonMagsRaDec(config, log, ev.star_ra, ev.star_dec,
                                               e_jd=ev.jd_start, l_jd=ev.jd_end,
                                               require_calstar=require_calstar)
 
