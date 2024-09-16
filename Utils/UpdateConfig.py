@@ -1,4 +1,4 @@
-# RPi Meteor Station
+
 # Copyright (C) 2024
 #
 # This program is free software: you can redistribute it and/or modify
@@ -316,7 +316,7 @@ def populateTemplateConfig(config_template_file_path, config_file_path,
 
     """
 
-
+    interactive = True
     # Create paths for reuse later
     config_template_file_path = os.path.expanduser(config_template_file_path)
     config_file_path = os.path.expanduser(config_file_path)
@@ -371,7 +371,7 @@ def populateTemplateConfig(config_template_file_path, config_file_path,
 
         if not len(line.strip()):
             blank_line = True
-
+            output_line += ""
 
         # Detect a comment line, or a comment line that should be uncommented
         elif line.strip()[0] == ";" or line.strip()[0] == "#":
@@ -380,19 +380,22 @@ def populateTemplateConfig(config_template_file_path, config_file_path,
             # Could this be an option that is commented out
             # Check to see if it is an option in the current section
             if ":" in comment:
+
                 if current_section in sections_list:
                     option = comment[:comment.index(":")]
-                    if option in options_list_of_lists[sections_list.index(current_section)]:
-                        uncomment_line = True
-                        # This option is required in the station configuration file.
-                        # Does it exist elsewhere uncommented - even in the wrong section
-                        # This will be overly cautious when the same option name occurs in
-                        # multiple sections.
-                        for line2 in lines_list:
-                            if option in line2:
-                                if option == line2[:len(option)]:
-                                    # It exists elsewhere uncommented, do not uncomment this line
-                                    uncomment_line = False
+
+                    if sections_list.index(current_section) < len(options_list_of_lists):
+                        if option in options_list_of_lists[sections_list.index(current_section)]:
+                            uncomment_line = True
+                            # This option is required in the station configuration file.
+                            # Does it exist elsewhere uncommented - even in the wrong section
+                            # This will be overly cautious when the same option name occurs in
+                            # multiple sections.
+                            for line2 in lines_list:
+                                if option in line2:
+                                    if option == line2[:len(option)]:
+                                        # It exists elsewhere uncommented, do not uncomment this line
+                                        uncomment_line = False
             else:
                 comment_line = True
 
@@ -411,7 +414,6 @@ def populateTemplateConfig(config_template_file_path, config_file_path,
                 # This is the last line of this section, so insert any missing options
                 # that were passed in as parameters
                 output_line += insert(current_section, insert_options_list, interactive=interactive)
-
             # Set the current section
             current_section = getSectionHeaderFromLine(line)
         # If this was a line that should be uncommented
@@ -425,10 +427,10 @@ def populateTemplateConfig(config_template_file_path, config_file_path,
         # If not any of these, then it must be a line with an option and value
         if not blank_line and not comment_line and not section_header_line and not uncomment_line:
             option = getOption(line)
-            if current_section in sections_list:
-                section_number = sections_list.index(current_section)
+            #if current_section in sections_list:
+            section_number = sections_list.index(current_section)
 
-            # If this section number is going to return a an option then it must have
+            # If this section number is going to return an option then it must have
             # been in the station .config file
             if section_number < len(options_list_of_lists):
                 if option.lower() in options_list_of_lists[section_number]:
@@ -440,15 +442,14 @@ def populateTemplateConfig(config_template_file_path, config_file_path,
                     if interactive:
                         print("Option:{} from Section:{} was not found in station .config, set to {}"
                                                 .format(option, current_section, getValue(line)))
-                    output_line = line
+                    output_line = "{}\n".format(line)
             else:
                 if interactive:
-                    print("From new section {} adding new line {}".format(template_sections_list[-1],line))
-                output_line = line
+                    print("From new section {} adding new line {}".format(current_section,line))
+                output_line = "{}\n".format(line)
 
         else:
             output_line += "{}\n".format(line)
-
         output_file_handle.write(output_line)
 
     # Close the files
