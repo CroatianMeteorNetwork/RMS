@@ -316,7 +316,7 @@ def populateTemplateConfig(config_template_file_path, config_file_path,
 
     """
 
-    interactive = True
+    # interactive = True
     # Create paths for reuse later
     config_template_file_path = os.path.expanduser(config_template_file_path)
     config_file_path = os.path.expanduser(config_file_path)
