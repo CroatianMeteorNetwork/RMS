@@ -1323,8 +1323,6 @@ def parseFireballDetection(config, parser):
     if parser.has_option(section, "max_lines"):
         config.max_lines = parser.getint(section, "max_lines")
     
-    if parser.has_option(section, "min_lines"):
-        config.max_lines = parser.getint(section, "max_lines")
 
 
 
