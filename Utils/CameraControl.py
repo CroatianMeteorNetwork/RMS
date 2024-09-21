@@ -119,60 +119,67 @@ def iptoString(s):
     return ipaddr
 
 
-def saveToFile(nc, dh, cs, vs, gp, cp, rb):
-    """Save the camera config to JSON files 
-
+def saveToFile(nt, cs, vs, gu, cp, gp):
+    """Save the camera config to pretty-printed JSON files
     Args:
-        nc : network config
-        dh : dhcp config
-        cs : camera config
-        vs : video encoding config
-        gp : gui display params
-        cp : color settings dialog
+    nt : network config
+    cs : camera config
+    vs : video encoding config
+    gu : gui display params
+    cp : color settings dialog
+    gp : general params
     """
     if not os.path.exists('./camerasettings/'):
         os.makedirs('./camerasettings/')
-    with open('./camerasettings/net1.json','w') as f:
-        json.dump(nc,f)
-    with open('./camerasettings/net2.json','w') as f:
-        json.dump(dh,f)
-    with open('./camerasettings/cam.json','w') as f:
-        json.dump(cs,f)
-    with open('./camerasettings/vid.json','w') as f:
-        json.dump(vs,f)
-    with open('./camerasettings/gui.json','w') as f:
-        json.dump(gp,f)
-    with open('./camerasettings/color.json','w') as f:
-        json.dump(cp,f)
-    with open('./camerasettings/autoreboot.json','w') as f:
-        json.dump(rb,f)
+
+    configs = {
+        'net.json': nt,
+        'cam.json': cs,
+        'vid.json': vs,
+        'gui.json': gu,
+        'color.json': cp,
+        'general.json': gp
+    }
+
+    for filename, config in configs.items():
+        with open(os.path.join('./camerasettings/', filename), 'w') as f:
+            json.dump(config, f, indent=4, sort_keys=True)
+
     print('Settings saved to ./camerasettings/')
 
 
 def loadFromFile():
-    """Load the camera config from JSON files saved earlier
-
-    """
+    """Load the camera config from JSON files saved earlier"""
     if not os.path.exists('./camerasettings/'):
         print('Settings files not found in ./camerasettings/')
-        return 
+        return None
+
     print('Loading settings....')
-    with open('./camerasettings/net1.json','r') as f:
-        nc = json.load(f)
-    with open('./camerasettings/net2.json','r') as f:
-        dh = json.load(f)
-    with open('./camerasettings/cam.json','r') as f:
-        cs = json.load(f)
-    with open('./camerasettings/vid.json','r') as f:
-        vs = json.load(f)
-    with open('./camerasettings/gui.json','r') as f:
-        gp = json.load(f)
-    with open('./camerasettings/color.json','r') as f:
-        cp = json.load(f)
-    with open('./camerasettings/autoreboot.json','r') as f:
-        rb = json.load(f)
+
+    config_files = {
+        'net.json': 'nt',
+        'cam.json': 'cs',
+        'vid.json': 'vs',
+        'gui.json': 'gu',
+        'color.json': 'cp',
+        'general.json': 'gp'
+    }
+
+    configs = {}
+
+    for filename, config_name in config_files.items():
+        file_path = os.path.join('./camerasettings/', filename)
+        if not os.path.exists(file_path):
+            print(f'Warning: {filename} not found. Skipping.')
+            configs[config_name] = None
+            continue
+
+        with open(file_path, 'r') as f:
+            configs[config_name] = json.load(f)
+
     print('Loaded')
-    return nc, dh, cs, vs, gp, cp, rb
+    return (configs['nt'], configs['cs'], configs['vs'],
+            configs['gu'], configs['cp'], configs['gp'])
 
 
 def getNetworkParams(cam, showit=True):
@@ -185,19 +192,14 @@ def getNetworkParams(cam, showit=True):
     Returns:
         json block containing the config
     """
-    nc = cam.get_info("NetWork.NetCommon")
-    dh = cam.get_info("NetWork.NetDHCP")
-    nt = cam.get_info("NetWork.NetNTP")
+    nt = cam.get_info("NetWork")
 
     if showit is True:
         print('IP Address  : ', iptoString(nc['HostIP']))
         print('---------')
-        pprint.pprint(nc)
-        print('---------')
-        pprint.pprint(dh)
-        print('---------')
         pprint.pprint(nt)
-    return nc, dh, nt
+        print('---------')
+    return nt
 
 
 def getIP(cam):
@@ -257,7 +259,7 @@ def getGuiParams(cam, showit=True):
     return caminfo
 
 
-def getAutoRebootParams(cam, showit=True):
+def getGeneralParams(cam, showit=True):
     """ display or retrieve the Autoreboot Params 
 
     Args:
@@ -267,7 +269,7 @@ def getAutoRebootParams(cam, showit=True):
     Returns:
         json block containing the config
     """
-    info = cam.get_info("General.AutoMaintain") 
+    info = cam.get_info("General")
     if showit is True:
         pprint.pprint(info)
     return info
@@ -393,6 +395,28 @@ def setNetworkParam(cam, opts):
         print('EnableNTP followed by a dotted IP address to enable or 0 to disable')
 
 
+def setGeneralParam(cam, opts):
+    """ Set a parameter in the General section of the camera config
+
+    Args:
+        cam - the camera 
+        opts - array of fields, subfields and the value to set
+    """
+
+    fld = opts[1]
+    if fld == 'VideoFormat':
+        val = opts[2]
+        if val != 'PAL' and val != 'NTSC':
+            print('VideoFormat must be PAL or NTSC')
+            return
+        cam.set_info("General.Location.VideoFormat", val)
+        print("Video Format set to {}".format(val))
+
+    else:
+        print('usage: SetParam General VideoFormat PAL')
+
+
+
 def setCameraParam(cam, opts):
     """ Set a parameter in the Camera section of the camera config
         Individual parameters can be set and the change will take effect immediately 
@@ -407,8 +431,26 @@ def setCameraParam(cam, opts):
 
     # top level field name
     fld=opts[1]
+
+    if fld == 'ClearFog':
+        subfld = opts[2].lower()
+        val = opts[3]
+        if subfld == 'enable':
+            val = val.lower() == 'true'
+        elif subfld == 'level':
+            val = int(val)
+        else:
+            print('Invalid ClearFog subfield. Use "enable" or "level".')
+            return
+
+        new_settings = [{"enable": val if subfld == 'enable' else True, 
+                         "level": val if subfld == 'level' else 50}]
+
+        print('Set Camera.ClearFog[0].{} to {}'.format(subfld, val))
+        cam.set_info("Camera.ClearFog", new_settings)
+
     # these fields are stored in the ParamEx.[0] block
-    if fld == 'Style':
+    elif fld == 'Style':
         val = opts[2]
         if val not in styleFlds:
             print('style must be one of ', styleFlds)
@@ -574,6 +616,9 @@ def setParameter(cam, opts):
         setEncodeParam(cam, opts)
     elif opts[0] == 'Network':
         setNetworkParam(cam, opts)
+    elif opts[0] == 'General':
+        setGeneralParam(cam, opts)
+
     else:
         print('Setting not currently supported for', opts)
 
@@ -587,8 +632,8 @@ def dvripCall(cam, cmd, opts):
         opts - optional list of parameters to be passed to SetParam
     """
     if cmd == 'GetHostname':
-        nc,_=getNetworkParams(cam, False)
-        print(nc['HostName'])
+        nt = getNetworkParams(cam, False)
+        print(nt['HostName'])
 
     elif cmd == 'GetNetConfig':
         getNetworkParams(cam, True)
@@ -600,7 +645,7 @@ def dvripCall(cam, cmd, opts):
         getIP(cam)
 
     elif cmd == 'GetAutoReboot':
-        getAutoRebootParams(cam, True)
+        getGeneralParams(cam, True)
 
     elif cmd == 'CloudConnection':
         manageCloudConnection(cam, opts)
@@ -617,26 +662,25 @@ def dvripCall(cam, cmd, opts):
         getEncodeParams(cam, True)
         getGuiParams(cam, True)
         getColorParams(cam, True)
-        getAutoRebootParams(cam, True)
+        getGeneralParams(cam, True)
 
-    elif cmd =='SaveSettings':
-        nc, dh, nt = getNetworkParams(cam, False)
+    elif cmd == 'SaveSettings':
+        nt = getNetworkParams(cam, False)
         cs = getCameraParams(cam, False)
         vs = getEncodeParams(cam, False)
-        gp = getGuiParams(cam, False)
+        gu = getGuiParams(cam, False)
         cp = getColorParams(cam, False)
-        rb = getAutoRebootParams(cam, False)
-        saveToFile(nc, dh, cs, vs, gp, cp, rb)
+        gp = getGeneralParams(cam, False)
+        saveToFile(nt, cs, vs, gu, cp, gp)
 
     elif cmd == 'LoadSettings':
-        nc, dh, cs, vs, gp, cp, rb = loadFromFile()
-        cam.set_info("NetWork.NetCommon", nc)
-        cam.set_info("NetWork.NetDHCP", dh)
-        cam.set_info("Camera",cs)
+        nt, cs, vs, gu, cp, gp = loadFromFile()
+        cam.set_info("NetWork", nt)
+        cam.set_info("Camera", cs)
         cam.set_info("Simplify.Encode", vs)
-        cam.set_info("AVEnc.VideoWidget", gp)
+        cam.set_info("AVEnc.VideoWidget", gu)
         cam.set_info("AVEnc.VideoColor.[0]", cp)
-        cam.set_info("General.AutoMaintain", rb)
+        cam.set_info("General", gp)
         rebootCamera(cam)
 
     elif cmd == 'SetParam':
@@ -687,8 +731,9 @@ def cameraControl(camera_ip, cmd, opts=''):
     if cam.login():
         try:
             dvripCall(cam, cmd, opts)
-        except:
-            print('error executing command - probably not supported')
+        except Exception as e:
+            print("Error executing command: {}".format(e))
+            print("This command may not be supported.")
     else:
         print("Failure. Could not connect.")
     cam.close()
