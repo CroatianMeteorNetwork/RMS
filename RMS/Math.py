@@ -35,7 +35,7 @@ def logLineFunc(x, m, k):
 
 
 def angularSeparation(ra1, dec1, ra2, dec2):
-    """ Calculates the angle between two points on a sphere. 
+    """ Calculates the angle between two points on a sphere. Inputs in radians.
     
     Arguments:
         ra1: [float] Right ascension 1 (radians).
@@ -59,6 +59,25 @@ def angularSeparation(ra1, dec1, ra2, dec2):
     # dis = 2.0*np.arcsin(sindis) 
 
     # return dis
+
+def angularSeparationDeg(ra1, dec1, ra2, dec2):
+    """ Calculates the angle between two points on a sphere in degrees.
+
+    Arguments:
+        ra1: [float] Right ascension 1 (degrees).
+        dec1: [float] Declination 1 (degrees).
+        ra2: [float] Right ascension 2 (degress).
+        dec2: [float] Declination 2 (degrees).
+
+    Return:
+        [float] Angle between two coordinates (degrees).
+    """
+
+    ra1_rad, dec1_rad = np.radians(ra1), np.radians(dec1)
+    ra2_rad, dec2_rad = np.radians(ra2), np.radians(dec2)
+
+
+    return np.degrees(angularSeparation(ra1_rad, dec1_rad, ra2_rad, dec2_rad))
 
 
 def angularSeparationVect(vect1, vect2):
@@ -341,3 +360,101 @@ def rollingAverage2d(x, y, x_window):
                 break
 
     return output_x, output_y
+
+
+
+def dimHypot(t1, t2):
+    """ 
+    Compute the cartesian difference between vectors in an arbitrary number of dimensions
+
+    Arguments:
+        t1: [tuple] of a vector
+        t2: [tuple] of a vector
+
+    Returns:
+        [float] Euclidean difference between vectors or scalars
+
+    """
+
+    t1 = (t1, 0) if type(t1) == int else t1
+    t2 = (t2, 0) if type(t2) == int else t2
+
+    if len(t1) != len(t2):
+        raise ValueError("Unable to compute cartesian difference between vectors with different dimensions")
+        return None
+
+    a = 0
+    for c1, c2 in zip(t1, t2):
+        a += (c1 - c2) ** 2
+
+    return np.sqrt(a)
+
+
+
+##############################################################################################################
+# TESTS
+# (work in progress)
+##############################################################################################################
+
+def testDimHypot():
+
+
+    test_list = [[1, 2,
+                                        1.0],
+                 [(1, 1), (4, 5),
+                                            5],
+                 [(1, 2, 3, 4), (5, 6, 7, 8),
+                                            8],
+                 [(-1, -2, -3, -4), (-5, -6, -7, -8),
+                                            8],
+                 [(-1, -2, -3), (-5, -6, -7, -8),
+                    "ValueError('Unable to compute cartesian difference between vectors with different dimensions')"]]
+
+    for t1, t2, res in test_list:
+        try:
+            test_res = dimHypot(t1, t2)
+        except Exception as e:
+            test_res = repr(e)
+        if test_res != res:
+            print("Test failure: t1:{}, t2:{}, did not give {}, returned {}"
+                                                    .format(t1, t2, res, test_res))
+
+
+            return False
+
+    return True
+
+def testAngSeparationDeg():
+
+
+    test_list =     [[[45, 45], [45, 45], 0 ],
+                     [[0,  90], [0,   0], 90],
+                     [[45, 45], [0,   0], 60],
+                     [[30, -30], [-30, 30], 82.8192]]
+
+    for a1, a2, res in test_list:
+        if round(angularSeparationDeg(a1[0], a1[1], a2[0], a2[1]), 4) != round(res,4):
+            print("Test failure: ra1:{}, dec1:{}, ra2:{}, dec2:{} did not give {}, returned {}"
+                            .format(a1[0], a1[1], a2[0], a2[1], res, angularSeparationDeg(a1[0], a1[1], a2[0], a2[1])))
+            return False
+
+    return True
+
+
+def tests():
+
+    function_to_test = [["dimHypot", testDimHypot()],
+                         ["angSeparationDeg", testAngSeparationDeg()]]
+
+    for func_name, func in function_to_test:
+        if func:
+            print("Test of {} successful".format(func_name))
+        else:
+            print("Test failed")
+
+
+
+if __name__ == "__main__":
+
+    # Run the tests
+    tests()
