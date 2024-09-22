@@ -23,10 +23,6 @@ import logging.handlers
 
 from RMS.Misc import mkdirP, RmsDateTime
 
-# Initialize variables for GStreamer import status
-GST_IMPORTED = False
-GST_IMPORT_ERROR = None
-
 # Attempt to import GStreamer
 try:
     import gi
@@ -34,11 +30,8 @@ try:
     from gi.repository import Gst
     GST_IMPORTED = True
 
-except ImportError as e:
-    GST_IMPORT_ERROR = f"Could not import gi: {e}"
-
-except ValueError as e:
-    GST_IMPORT_ERROR = f"Could not import Gst: {e}"
+except:
+    GST_IMPORTED = False
 
 
 class LoggerWriter:
@@ -86,7 +79,7 @@ def gstDebugLogger(category, level, file, function, line, object, message, user_
     py_level = level_map.get(level, logging.DEBUG)
 
     # Log the message with the appropriate level
-    logger.log(py_level, f"GStreamer: {category.get_name()}: {message.get()}")
+    logger.log(py_level, "GStreamer: {}: {}".format(category.get_name(), message.get()))
 
 
 def initLogging(config, log_file_prefix="", safedir=None):
@@ -152,12 +145,6 @@ def initLogging(config, log_file_prefix="", safedir=None):
 
     # Redirect stderr to the logger
     sys.stderr = LoggerWriter(log, logging.INFO)
-
-    # Log GStreamer import status
-    if GST_IMPORTED:
-        log.info("GStreamer successfully imported")
-    else:
-        log.warning(f"GStreamer import failed: {GST_IMPORT_ERROR}. GStreamer-specific logging is disabled.")
 
     # Set up GStreamer logging
     if GST_IMPORTED:
