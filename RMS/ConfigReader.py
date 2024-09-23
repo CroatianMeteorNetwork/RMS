@@ -1135,7 +1135,7 @@ def parseCapture(config, parser):
 
     # Enable/disable saving video frames
     if parser.has_option(section, "save_frames"):
-        config.save_frames = parser.getboolean(section, "save_frames")
+        config.save_frames = True   # parser.getboolean(section, "save_frames")
 
     if parser.has_option(section, "frame_file_type"):
         config.frame_file_type = parser.get(section, "frame_file_type")
