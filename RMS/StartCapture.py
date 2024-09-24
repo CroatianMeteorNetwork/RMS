@@ -1184,7 +1184,7 @@ if __name__ == "__main__":
 
         if config.continuous_capture:
             # Setup camera mode switcher on another thread
-            cam_switcher = threading.Thread(target=cameraModeSwitcher, args=(config.latitude, config.longitude, config.elevation, config, log))
+            cam_switcher = threading.Thread(target=cameraModeSwitcher, args=(config))
             cam_switcher.daemon = True # To make sure switcher thread exits automatically at the end
             cam_switcher.start()
 

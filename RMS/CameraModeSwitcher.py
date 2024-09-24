@@ -5,22 +5,19 @@ from RMS.Misc import RmsDateTime
 
 
 # Function to switch between day and night modes
-def cameraModeSwitcher(lat, lon, elevation, config):
-    """ Continuously switch between day and night camera modes based on current time.
+def cameraModeSwitcher(config):
+    """ Wait and switch between day and night camera modes based on current time.
     
     Arguments:
-        lat: [float] latitude +N in degrees
-        lon: [float] longitude +E in degrees
-        elevation: [float] elevation above sea level in meters
-        config: [Config] config object for determining camera control
+        config: [Config] config object for determining location and camera
     """
 
     while True:
         # Initialize observer
         o = ephem.Observer()  
-        o.lat = str(lat)
-        o.long = str(lon)
-        o.elevation = elevation
+        o.lat = str(config.latitude)
+        o.long = str(config.longitude)
+        o.elevation = config.elevation
 
         # The Sun should be about 10 degrees below the horizon when the camera modes switch
         o.horizon = '-10'
@@ -36,14 +33,14 @@ def cameraModeSwitcher(lat, lon, elevation, config):
         next_rise = o.next_rising(s).datetime()
         next_set = o.next_setting(s).datetime()
 
-        if current_time < next_set:
-            # Daytime mode
-            cc.CameraControlV2(config, 'SwitchDayTime')
+        if next_set < next_rise:
+            # Next event is a sunset, switch to daytime mode
+            cc.cameraControlV2(config, 'SwitchDayTime')
             time_to_wait = (next_set - current_time).total_seconds()
 
         else:
-            # Nighttime mode
-            cc.CameraControlV2(config, 'SwitchNightTime')
+            # Next event is a sunrise, switch to nighttime mode
+            cc.cameraControlV2(config, 'SwitchNightTime')
             time_to_wait = (next_rise - current_time).total_seconds()
 
         # Sleep until the next switch time
@@ -53,6 +50,15 @@ def cameraModeSwitcher(lat, lon, elevation, config):
 
 if __name__ == "__main__":
     
+    import RMS.ConfigReader as cr
+    import os
+
+    config = cr.loadConfigFromDirectory('.', os.path.abspath('.'))
+
+    config.latitude = 15.9
+    config.longitude = 102.12
+    config.elevation = 327
+
     # Test the time now
-    cameraModeSwitcher(43, -81, 265)
+    cameraModeSwitcher(config)
     
