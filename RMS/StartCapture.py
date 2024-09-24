@@ -27,6 +27,7 @@ import signal
 import shutil
 import ctypes
 import logging
+import threading
 import multiprocessing
 import traceback
 import git
@@ -41,6 +42,7 @@ import RMS.ConfigReader as cr
 from RMS.Logger import initLogging
 from RMS.BufferedCapture import BufferedCapture
 from RMS.CaptureDuration import captureDuration
+from RMS.CameraModeSwitcher import cameraModeSwitcher
 from RMS.Compression import Compressor
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
@@ -919,10 +921,15 @@ if __name__ == "__main__":
     slideshow_view = None
     while True:
 
-        # Calculate when and how should the capture run
-        start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation)
-
-        log.info('Next start time: ' + str(start_time) + ' UTC')
+        if config.continuous_capture:
+            # In case of continuous capture, start immediately
+            start_time, duration = True, None
+            log.info('Starting continuous capture')
+            
+        else:
+            # Calculate when and how should the capture run
+            start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation)
+            log.info('Next start time: ' + str(start_time) + ' UTC')
 
         # Reboot the computer after processing is done for the previous night
         if ran_once and config.reboot_after_processing:
@@ -984,7 +991,7 @@ if __name__ == "__main__":
 
 
         # Don't start the capture if there's less than 15 minutes left
-        if duration < 15*60:
+        if (not config.continuous_capture) and duration < 15*60:
 
             log.debug('Less than 15 minutes left to record, waiting for a new recording session tonight...')
 
@@ -1175,7 +1182,15 @@ if __name__ == "__main__":
             break
 
 
-        log.info('Starting capture for {:.2f} hours'.format(duration/60/60))
+        if config.continuous_capture:
+            # Setup camera mode switcher on another thread
+            cam_switcher = threading.Thread(target=cameraModeSwitcher, args=(config.latitude, config.longitude, config.elevation, config, log))
+            cam_switcher.daemon = True # To make sure switcher thread exits automatically at the end
+            cam_switcher.start()
+
+        else:
+            log.info('Starting capture for {:.2f} hours'.format(duration/60/60))
+
 
         # Run capture and compression
         night_archive_dir = runCapture(config, duration=duration, nodetect=cml_args.nodetect, \

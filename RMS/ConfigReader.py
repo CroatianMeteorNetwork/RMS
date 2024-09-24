@@ -409,6 +409,9 @@ class Config:
         #   will occur after the capture ends
         self.postprocess_delay = 0
 
+        # Run capture continuously, during the day or night
+        self.continuous_capture = False
+
         ##### Upload
 
         # Flag determining if uploading is enabled or not
@@ -1151,6 +1154,9 @@ def parseCapture(config, parser):
     if parser.has_option(section, "postprocess_delay"):
         config.postprocess_delay = parser.getint(section, "postprocess_delay")
 
+    # Load option to run capture continuously, during the day or night
+    if parser.has_option(section, "continuous_capture"):
+        config.continuous_capture = parser.getint(section, "continuous_capture")
 
 
 def parseUpload(config, parser):
