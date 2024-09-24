@@ -55,16 +55,18 @@ def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
 
     # Load the mask if given
     if mask_path:
+        
         mask = MaskImage.loadMask(mask_path)
 
         # If the mask is all white, set it to None
-        if np.all(mask.img == 255):
+        if (mask is not None) and np.all(mask.img == 255):
             print('Mask is all white, setting it to None.')
             mask = None
 
     if mask is not None:
         print('Loaded mask:', mask_path)
         log.info('Loaded mask: {:s}'.format(mask_path))
+
     else:
         log.info('No mask file has been found.')
 
@@ -283,12 +285,12 @@ def checkCentroidBounds(model_pos, img_w, img_h):
     """ Checks if the given position is within the image. 
     
     Arguments:
-        moodel_pos: [array like] (X, Y) coordinate to check.
+        model_pos: [array like] (X, Y) coordinate to check.
         img_w: [int] Image width.
         img_h: [int] Image height.
 
     Return:
-        [bool] True if witing image, False otherwise.
+        [bool] True if within image, False otherwise.
 
     """
 
@@ -320,7 +322,7 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
         dark: [ndarray] Dark frame.
 
     Keyword arguments:
-        stripe_width_factor: [float] Multipler by which the default stripe width will be multiplied. Default
+        stripe_width_factor: [float] Multiplier by which the default stripe width will be multiplied. Default
             is 1.0
         centroiding: [bool] If True, the indices will be returned in the centroiding mode, which means
             that point1 and point2 arguments must be given.

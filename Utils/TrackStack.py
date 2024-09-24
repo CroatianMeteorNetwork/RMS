@@ -29,12 +29,13 @@ import datetime
 
 def trackStack(dir_paths, config, border=5, background_compensation=True, 
         hide_plot=False, showers=None, darkbackground=False, out_dir=None,
-        scalefactor=None, draw_constellations=False, one_core_free=False):
+        scalefactor=None, draw_constellations=False, one_core_free=False,
+        textoption=0):
     """ Generate a stack with aligned stars, so the sky appears static. The folder should have a
         platepars_all_recalibrated.json file.
 
     Arguments:
-        dir_path: [str] Path to the directory with image files.
+        dir_paths: [str] Path to the directory with image files.
         config: [Config instance]
 
     Keyword arguments:
@@ -47,11 +48,22 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
         darkbackground: [bool] force the sky background to be dark
         out_dir: target folder to save into
         scalefactor: factor to scale the canvas by; default 1, increase if image cropped
+        draw_constellations: [bool] Show constellation lines on stacked image
+        one_core_free: [bool] leave one core free whilst processing
+        textoption: [int] 0 - no text, 1 - filename, 2 - stationID, date, meteor count overlayed
     """
     start_time = time.time()
     # normalise the path in a platform neutral way
     # done here so that trackStack() can be called from other modules
     dir_paths = [os.path.normpath(dir_path) for dir_path in dir_paths]
+
+    # Make sure the paths are directories and not files
+    # If a file is given, take the directory of the file. If the directory is given, take the directory.
+    dir_paths = [os.path.dirname(dir_path) if os.path.isfile(dir_path) else dir_path for dir_path in dir_paths]
+
+    print('Stacking images from the following directories:')
+    for dir_path in dir_paths:
+        print(dir_path)
 
     # Find recalibrated platepars file per FF file
     recalibrated_platepars = {}
@@ -59,6 +71,7 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
         platepars_recalibrated_file = glob(os.path.join(dir_path, config.platepars_recalibrated_name))
         if len(platepars_recalibrated_file) != 1:
             print('unable to find a unique platepars file in {}'.format(dir_path))
+            print('found: {}'.format(platepars_recalibrated_file))
             return False
         print('loading {}'.format(platepars_recalibrated_file[0]))
         with open(platepars_recalibrated_file[0]) as f:
@@ -334,6 +347,22 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
         filenam = os.path.join(out_dir, os.path.basename(dir_path) + "_track_stack.jpg")
     else:
         filenam = os.path.join(dir_path, os.path.basename(dir_path) + "_track_stack.jpg")
+
+    # Overlay the filename on the image\
+    bf = os.path.basename(filenam)
+
+    # Overlay filename only
+    if textoption is not None:
+        if textoption == 1:
+            ax.text(10, stack_img.shape[0] + 30, bf, color='grey', fontsize=6, fontname='Source Sans Pro',
+                    weight='ultralight')
+
+    # Overlay stationID, YYYY-MM-DD Meteor count
+        if textoption == 2:
+            annotation = "{}  {}-{}-{}      Meteors: {}".format(bf[0:6],bf[7:11],bf[11:13],bf[13:15],num_plotted)
+            ax.text(10, stack_img.shape[0] + 30, annotation, color='grey', fontsize=6, fontname='Source Sans Pro',
+                weight='ultralight')
+
     plt.savefig(filenam, bbox_inches='tight', pad_inches=0, dpi=dpi, facecolor='k', edgecolor='k')
     print('saved to {}'.format(filenam))
     #
@@ -391,7 +420,7 @@ def stackFrame(ff_name, recalibrated_platepars, mask, border, pp_ref, img_size, 
     # Compute deaveraged maxpixel image
     max_deavg = maxpixel - avepixel
 
-    # Normalize the backgroud brightness by applying a large-kernel median filter to avepixel
+    # Normalize the background brightness by applying a large-kernel median filter to avepixel
     if background_compensation:
 
         # # Apply a median filter to the avepixel to get an estimate of the background brightness
@@ -476,6 +505,12 @@ if __name__ == "__main__":
     arg_parser.add_argument('-o', '--output', type=str,
         help="""folder to save the image in.""")
 
+    arg_parser.add_argument('-t', '--textoption', nargs=1, type=int,
+                            help="""Add text beneath image. 
+                                        0 - No text
+                                        1 - Filename 
+                                        2 - Station id, date, meteor count""")
+
     arg_parser.add_argument('-f', '--scalefactor', type=int,
         help="""scale factor to apply. Increase if image is cropped""")
 
@@ -504,8 +539,13 @@ if __name__ == "__main__":
         showers = showers.split(",")
         showers = [s.upper() for s in showers]
 
+    text_option = 0
+    if cml_args.textoption:
+        text_option = cml_args.textoption[0]
+
     dir_paths = [os.path.normpath(dir_path) for dir_path in cml_args.dir_paths]
     trackStack(dir_paths, config, background_compensation=(not cml_args.bkgnormoff),
         hide_plot=cml_args.hideplot, showers=showers,
         darkbackground=cml_args.darkbackground, out_dir=cml_args.output, scalefactor=cml_args.scalefactor,
-        draw_constellations=cml_args.constellations, one_core_free=cml_args.freecore)
+        draw_constellations=cml_args.constellations, one_core_free=cml_args.freecore,
+        textoption = text_option)

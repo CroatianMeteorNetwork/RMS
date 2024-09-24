@@ -19,21 +19,19 @@ from __future__ import absolute_import, division, print_function
 import math
 import os
 import sys
+from RMS.Misc import getRmsRootDir
 
-import RMS
-
-try:
-    # Python 3
-    from configparser import NoOptionError, RawConfigParser 
-
-except:
-    # Python 2
+# Consolidated version-specific imports and definitions
+if sys.version_info[0] == 3:
+    from configparser import NoOptionError, RawConfigParser
+else:
     from ConfigParser import NoOptionError, RawConfigParser
-
+    FileNotFoundError = IOError  # Map FileNotFoundError to IOError in Python 2
 
 # Used to determine if ML filtering is available
 TFLITE_AVAILABLE = False
 
+# Used to determine detection parameters which will change in ML filtering is available
 try:
     from tflite_runtime.interpreter import Interpreter
     TFLITE_AVAILABLE = True
@@ -153,7 +151,7 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
         file to load. 
 
     Arguments:
-        cml_args_confg: [None/str/list] Input from cml_args.confg from argparse.
+        cml_args_config: [None/str/list] Input from cml_args.config from argparse.
         dir_path: [list or str] Path to the working directory, or multiple paths.
 
     Return:
@@ -236,8 +234,8 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
 class Config:
     def __init__(self):
 
-        # Get the package root directory
-        self.rms_root_dir = os.path.abspath(os.path.join(os.path.dirname(RMS.__file__), os.pardir))
+        # Get the path to the RMS root directory
+        self.rms_root_dir = getRmsRootDir()
 
         # default config file absolute path
         self.config_file_name = os.path.join(self.rms_root_dir, '.config')
@@ -347,11 +345,38 @@ class Config:
         # days of logfiles to keep
         self.logdays_to_keep = 30
 
+        # Toggle logging stdout messages
+        self.log_stdout = False
+
         # ArchDirs and bzs to keep
         # keep this many ArchDirs. Zero means keep them all
         self.arch_dirs_to_keep = 20
         # keep this many compressed ArchDirs. Zero means keep them all
         self.bz2_files_to_keep = 20
+
+        # CaptDirs to keep
+        # keep this many CapDirs. Zero means keep them all
+        self.capt_dirs_to_keep = 8
+
+        # Space quotas in GB
+
+
+
+        # Space allocation for all of rms_data
+
+        # Disable the deletion by quota management for testing purposes
+        self.quota_management_disabled = False
+
+
+        # Space allocation for all of rms_data
+        self.rms_data_quota = None
+
+        # Of that allocation for all of rms_data, this is set aside for archived directories
+        self.arch_dir_quota = None
+
+        # Of that allocation for all of rms_data, this is set aside for bz2 files
+        self.bz2_files_quota = None
+
 
         # Extra space to leave on disk for the archive (in GB) after the captured files have been taken
         #   into account
@@ -368,6 +393,8 @@ class Config:
 
         # Automatically reprocess broken capture directories
         self.auto_reprocess = True
+
+        # Prioritize capture over reprocessing - do not start reprocessing a new directory if should be capturing
         self.prioritize_capture_over_reprocess = False
 
         # Flag file which indicates that the previously processed files are loaded during capture resume
@@ -393,7 +420,7 @@ class Config:
         # Flag determining if uploading is enabled or not
         self.upload_enabled = True
 
-        # Delay upload after files are added to the queue by the given number of minues
+        # Delay upload after files are added to the queue by the given number of minutes
         self.upload_delay = 0
 
         # Address of the upload server
@@ -484,7 +511,7 @@ class Config:
         self.kht_binary_extension = 'so'
 
         # 3D line finding for meteor detection
-        self.max_points_det = 600 # maximumum number of points during 3D line search in faint meteor detection (used to minimize runtime)
+        self.max_points_det = 600 # maximum number of points during 3D line search in faint meteor detection (used to minimize runtime)
         self.distance_threshold_det = 50**2 # maximum distance between the line and the point to be takes as a part of the same line
         self.gap_threshold_det = 500**2 # maximum allowed gap between points
         self.min_pixels_det = 10 # minimum number of pixels in a strip
@@ -500,7 +527,7 @@ class Config:
         self.centroids_max_deviation = 2 # maximum deviation of a centroid point from a LSQ fitted line (if above max, it will be rejected)
         self.centroids_max_distance =  30 # maximum distance in pixels between centroids (used for filtering spurious centroids)
 
-        # Angular veloicty filtering parameter - detections slower or faster than these angular velocities
+        # Angular velocity filtering parameter - detections slower or faster than these angular velocities
         # will be rejected (deg/s)
         self.ang_vel_min = 0.5
         self.ang_vel_max = 35.0
@@ -520,7 +547,7 @@ class Config:
         ##### StarExtraction
 
         # Extraction parameters
-        self.max_global_intensity = 150 # maximum mean intensity of an image before it is discared as too bright
+        self.max_global_intensity = 150 # maximum mean intensity of an image before it is discarded as too bright
         self.border = 10 #  apply a mask on the detections by removing all that are too close to the given image border (in pixels)
         self.neighborhood_size = 10 # size of the neighbourhood for the maximum search (in pixels)
         self.intensity_threshold = 5 # a threshold for cutting the detections which are too faint (0-255)
@@ -834,10 +861,6 @@ def parseSystem(config, parser):
         config.auto_reprocess_external_script_run = parser.getboolean(section, \
             "auto_reprocess_external_script_run")
 
-    if parser.has_option(section, "prioritize_capture_over_reprocess"):
-        config.prioritize_capture_over_reprocess = parser.getboolean(section, \
-            "prioritize_capture_over_reprocess")
-
     if parser.has_option(section, "external_script_path"):
         config.external_script_path = parser.get(section, "external_script_path")
 
@@ -894,11 +917,31 @@ def parseCapture(config, parser):
     if parser.has_option(section, "logdays_to_keep"):
         config.logdays_to_keep = int(parser.get(section, "logdays_to_keep"))
 
+    if parser.has_option(section, "log_stdout"):
+        config.log_stdout = parser.getboolean(section, "log_stdout")
+
     if parser.has_option(section, "arch_dirs_to_keep"):
         config.arch_dirs_to_keep = int(parser.get(section, "arch_dirs_to_keep"))
 
     if parser.has_option(section, "bz2_files_to_keep"):
         config.bz2_files_to_keep = int(parser.get(section, "bz2_files_to_keep"))
+
+    if parser.has_option(section, "capt_dirs_to_keep"):
+        config.capt_dirs_to_keep = int(parser.get(section, "capt_dirs_to_keep"))
+
+    if parser.has_option(section, "quota_management_disabled"):
+        config.quota_management_disabled = parser.getboolean(section, "quota_management_disabled")
+
+
+
+    if parser.has_option(section, "rms_data_quota"):
+        config.rms_data_quota = int(parser.get(section, "rms_data_quota"))
+
+    if parser.has_option(section, "arch_dir_quota"):
+        config.arch_dir_quota = int(parser.get(section, "arch_dir_quota"))
+
+    if parser.has_option(section, "bz2_files_quota"):
+        config.bz2_files_quota = int(parser.get(section, "bz2_files_quota"))
 
     if parser.has_option(section, "captured_dir"):
         config.captured_dir = parser.get(section, "captured_dir")
@@ -1292,8 +1335,6 @@ def parseFireballDetection(config, parser):
     if parser.has_option(section, "max_lines"):
         config.max_lines = parser.getint(section, "max_lines")
     
-    if parser.has_option(section, "min_lines"):
-        config.max_lines = parser.getint(section, "max_lines")
 
 
 

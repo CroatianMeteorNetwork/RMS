@@ -34,6 +34,7 @@ from RMS.Formats import CALSTARS, FFfile, FTPdetectinfo, Platepar, StarCatalog
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile
 from RMS.Math import angularSeparation
 from RMS.Logger import initLogging
+from RMS.Misc import RmsDateTime
 
 # Neighbourhood size around individual FFs with detections which will be takes for recalibration
 #   A size of e.g. 3 means that an FF before, the FF with the detection, an an FF after will be taken
@@ -45,7 +46,7 @@ log.setLevel(logging.INFO)
 
 def loadRecalibratedPlatepar(dir_path, config, file_list=None, type='meteor'):
     """
-    Gets recalibrated platpars. If they were already computed, load them, otherwise compute them and save
+    Gets recalibrated platepars. If they were already computed, load them, otherwise compute them and save
 
     Arguments:
         dir_path: [str] Path to the directory which contains the platepar and recalibrated platepars
@@ -113,7 +114,7 @@ def recalibrateFF(
         star_dict_ff: [dict] A dictionary with only one entry, where the key is 'jd' and the value is the
             list of star coordinates.
         catalog_stars: [ndarray] A numpy array of catalog stars which should be on the image.
-    Keyword argumnets:
+    Keyword arguments:
         max_match_radius: [float] Maximum radius used for star matching. None by default, which uses all 
             hardcoded values.
         force_platepar_save: [bool] Skip the goodness of fit check and save the platepar.
@@ -123,7 +124,7 @@ def recalibrateFF(
 
     Return:
         result: [?] A Platepar instance if refinement is successful, None if it failed.
-        min_match_radius: [float] Minimum radius that successfuly matched the stars (pixels).
+        min_match_radius: [float] Minimum radius that successfully matched the stars (pixels).
     """
 
     working_platepar = copy.deepcopy(working_platepar)
@@ -155,7 +156,7 @@ def recalibrateFF(
     # in the same regard as the cost function)
     fatol, xatol_ang = CheckFit.computeMinimizationTolerances(config, working_platepar, len(star_dict_ff))
 
-    ### If the initial match is good enough, do only quick recalibratoin ###
+    ### If the initial match is good enough, do only quick recalibration ###
 
     # Match the stars and calculate the residuals
     n_matched, avg_dist, cost, _ = CheckFit.matchStarsResiduals(
@@ -163,7 +164,7 @@ def recalibrateFF(
     )
 
     log.info(
-        'Initally match stars with {:.1f} px: {:d}/{:d}'.format(min_radius, n_matched, len(star_dict_ff[jd]))
+        'Initially match stars with {:.1f} px: {:d}/{:d}'.format(min_radius, n_matched, len(star_dict_ff[jd]))
     )
 
     # If at least half the stars are matched with the smallest radius
@@ -176,7 +177,7 @@ def recalibrateFF(
 
     ##########
 
-    # Go through all radiia and match the stars
+    # Go through all radii and match the stars
     min_match_radius = None
     for match_radius in radius_list:
 
@@ -291,14 +292,14 @@ def recalibrateFF(
 
     # Choose which radius will be chosen for the goodness of fit check
     if max_match_radius is None:
-        goodnes_check_radius = match_radius
+        goodness_check_radius = match_radius
 
     else:
-        goodnes_check_radius = max_match_radius
+        goodness_check_radius = max_match_radius
 
     # If the platepar is good, store it
     if (
-        CheckFit.checkFitGoodness(config, working_platepar, catalog_stars, star_dict_ff, goodnes_check_radius)
+        CheckFit.checkFitGoodness(config, working_platepar, catalog_stars, star_dict_ff, goodness_check_radius)
         or force_platepar_save
     ):
 
@@ -340,7 +341,7 @@ def recalibrateFF(
 
         log.info(
             "Platepar minimum error of {:.2f} with radius {:.1f} px PASSED!".format(
-                config.dist_check_threshold, goodnes_check_radius
+                config.dist_check_threshold, goodness_check_radius
             )
         )
 
@@ -420,7 +421,7 @@ def recalibratePlateparsForFF(
             log.info('Skipped because it was not in CALSTARS: {}'.format(ff_name))
             continue
 
-        # Get stars detected on this FF file (create a dictionaly with only one entry, the residuals function
+        # Get stars detected on this FF file (create a dictionary with only one entry, the residuals function
         #   needs this format)
         calstars_time = FFfile.getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True)
         jd = date2JD(*calstars_time)
@@ -620,6 +621,9 @@ def recalibrateIndividualFFsAndApplyAstrometry(
     # Use a copy of the config file
     config = copy.deepcopy(config)
 
+    # Use a copy of the platepar
+    platepar = copy.deepcopy(platepar)
+
     # If the given file does not exits, return nothing
     if not os.path.isfile(ftpdetectinfo_path):
         log.info('ERROR! The FTPdetectinfo file does not exist: {:s}'.format(ftpdetectinfo_path))
@@ -705,7 +709,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
 
         ff_name = meteor_entry[0]
 
-        # Make sure the FF was successfuly recalibrated
+        # Make sure the FF was successfully recalibrated
         if ff_name in recalibrated_platepars:
 
             # Find the index of the given FF file in the list of calstars
@@ -725,7 +729,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
                     # Get the name of the FF file
                     ff_name_tmp = calstars_ffs[k_indx]
 
-                    # Check that the neighboring FF was successfuly recalibrated
+                    # Check that the neighboring FF was successfully recalibrated
                     if ff_name_tmp in recalibrated_platepars:
 
                         # Get the computed photometric offset and stddev
@@ -930,7 +934,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
         meteor_output_list.append([ff_name, meteor_No, rho, phi, meteor_picks])
 
     # Calibration string to be written to the FTPdetectinfo file
-    calib_str = 'Recalibrated with RMS on: ' + str(datetime.datetime.utcnow()) + ' UTC'
+    calib_str = 'Recalibrated with RMS on: ' + str(RmsDateTime.utcnow()) + ' UTC'
 
     # If no meteors were detected, set dummpy parameters
     if len(meteor_list) == 0:
@@ -942,7 +946,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
         shutil.copy(
             ftpdetectinfo_path,
             ftpdetectinfo_path.strip('.txt')
-            + '_backup_{:s}.txt'.format(datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S.%f')),
+            + '_backup_{:s}.txt'.format(RmsDateTime.utcnow().strftime('%Y%m%d_%H%M%S.%f')),
         )
     except:
         log.info('ERROR! The FTPdetectinfo file could not be backed up: {:s}'.format(ftpdetectinfo_path))

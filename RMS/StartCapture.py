@@ -30,6 +30,7 @@ import logging
 import multiprocessing
 import traceback
 import git
+from RMS.Formats.ObservationSummary import getObsDBConn, addObsParam
 
 import numpy as np
 
@@ -44,13 +45,15 @@ from RMS.Compression import Compressor
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
 from RMS.Formats.FFfile import validFFName
-from RMS.Misc import mkdirP
+from RMS.Misc import mkdirP, RmsDateTime
 from RMS.QueuedPool import QueuedPool
 from RMS.Reprocess import getPlatepar, processNight
 from RMS.RunExternalScript import runExternalScript
 from RMS.UploadManager import UploadManager
 from RMS.EventMonitor import EventMonitor
 from RMS.DownloadMask import downloadNewMask
+from RMS.Formats.ObservationSummary import startObservationSummaryReport
+from Utils.AuditConfig import compareConfigs
 
 # Flag indicating that capturing should be stopped
 STOP_CAPTURE = False
@@ -97,7 +100,7 @@ def wait(duration, compressor, buffered_capture, video_file):
     log.info('Press Ctrl+C to stop capturing...')
 
     # Get the time of capture start
-    time_start = datetime.datetime.utcnow()
+    time_start = RmsDateTime.utcnow()
 
 
     while True:
@@ -115,7 +118,7 @@ def wait(duration, compressor, buffered_capture, video_file):
         # If some wait time was given, check if it passed
         if duration is not None:
 
-            time_elapsed = (datetime.datetime.utcnow() - time_start).total_seconds()
+            time_elapsed = (RmsDateTime.utcnow() - time_start).total_seconds()
 
             # If the total time is elapsed, break the wait
             if time_elapsed >= duration:
@@ -143,7 +146,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     Keyword arguments:
         duration: [float] Time in seconds to capture. None by default.
         video_file: [str] Path to the video file, if it was given as the video source. None by default.
-        nodetect: [bool] If True, detection will not be performed. False by defualt.
+        nodetect: [bool] If True, detection will not be performed. False by default.
         detect_end: [bool] If True, detection will be performed at the end of the night, when capture
             finishes. False by default.
         upload_manager: [UploadManager object] A handle to the UploadManager, which handles uploading files to
@@ -203,7 +206,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         # Create a directory for captured files based on the current time
         if video_file is None:
             night_data_dir_name = str(config.stationID) + '_' \
-                + datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')
+                + RmsDateTime.utcnow().strftime('%Y%m%d_%H%M%S_%f')
 
         # If a video file is given, take the folder name from the video file
         else:
@@ -246,6 +249,14 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         except:
             log.error("Cannot copy the config file to the capture directory!")
 
+    # Audit config file
+    try:
+        log.info(compareConfigs(config.config_file_name,
+                                os.path.join(config.rms_root_dir, ".configTemplate"),
+                                os.path.join(config.rms_root_dir, "RMS/ConfigReader.py")))
+    except Exception as e:
+        log.debug('Could not generate config audit report:' + repr(e))
+
     # Check for and get an updated mask
     if config.mask_download_permissive:
         downloadNewMask(config)
@@ -260,7 +271,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         
 
     log.info('Initializing frame buffers...')
-    ### For some reason, the RPi 3 does not like memory chunks which size is the multipier of its L2
+    ### For some reason, the RPi 3 does not like memory chunks which size is the multiplier of its L2
     ### cache size (512 kB). When such a memory chunk is provided, the compression becomes 10x slower
     ### then usual. We are applying a dirty fix here where we just add an extra image row and column
     ### if such a memory chunk will be created. The compression is performed, and the image is cropped
@@ -320,7 +331,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         # If the capture is being resumed into the directory, load all previously saved FF files
         if resume_capture:
 
-            # Load all preocessed FF files
+            # Load all processed FF files
             for i, ff_name in enumerate(sorted(os.listdir(night_data_dir))):
 
                 # Every 50 files loaded, update the flag file
@@ -371,6 +382,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, config,
         detector=detector)
 
+    # Open the observation summary report
+    if video_file is None:
+        log.info(startObservationSummaryReport(config, duration, force_delete=False))
 
     # Start buffered capture
     bc.startCapture()
@@ -393,7 +407,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     log.debug('Capture stopped')
 
     log.info('Total number of late or dropped frames: ' + str(dropped_frames))
-
+    obs_db_conn = getObsDBConn(config)
+    addObsParam(obs_db_conn, "dropped_frames", dropped_frames)
+    obs_db_conn.close()
 
     # Stop the compressor
     log.debug('Stopping compression...')
@@ -537,7 +553,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         detector.deleteBackupFiles()
 
 
-    # !!! Currenty under testing
+    # !!! Currently under testing
     # # If the capture was run for a limited time, run the upload right away
     # if fixed_duration and (upload_manager is not None):
 
@@ -551,9 +567,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
                 # Wait for the upload delay to pass
                 sleep_time = None
-                while (datetime.datetime.utcnow() - upload_manager.next_runtime).total_seconds() < 0:
+                while (RmsDateTime.utcnow() - upload_manager.next_runtime).total_seconds() < 0:
                     
-                    wait_time = (datetime.datetime.utcnow() - upload_manager.next_runtime).total_seconds()
+                    wait_time = (RmsDateTime.utcnow() - upload_manager.next_runtime).total_seconds()
                     log.info("Waiting for upload delay to pass: {:.1f} seconds...".format(abs(wait_time)))
 
                     # Sleep for a short interval between 1 and 30 seconds
@@ -652,7 +668,7 @@ def processIncompleteCaptures(config, upload_manager):
             any_ftpdetectinfo_files = True
 
             # Is the platepar in the captured_dir_path newer than latest FTP file?
-            # i.e. has the operator replaced the platepar because of bad calibraton?
+            # i.e. has the operator replaced the platepar because of bad calibration?
             newest_FTPfile_older_than_platepar = True
             for FTPfile in FTPdetectinfo_files:
                 capture_platepar = os.path.join(captured_dir_path,config.platepar_name)
@@ -939,7 +955,7 @@ if __name__ == "__main__":
 
                     log.info('Rebooting now!')
 
-                    # Reboot the computer (script needs sudo priviledges, works only on Linux)
+                    # Reboot the computer (script needs sudo privileges, works only on Linux)
                     try:
                         os.system('sudo shutdown -r now')
 
@@ -958,7 +974,7 @@ if __name__ == "__main__":
                     if start_time:
                         break
 
-                time_now = datetime.datetime.utcnow()
+                time_now = RmsDateTime.utcnow()
                 waiting_time = start_time - time_now
                 if waiting_time.total_seconds() <= 0:
                     break
@@ -1067,7 +1083,7 @@ if __name__ == "__main__":
             if not isinstance(start_time, bool):
 
                 # Calculate how many seconds to wait until capture starts, and with for that time
-                time_now = datetime.datetime.utcnow()
+                time_now = RmsDateTime.utcnow()
                 waiting_time = start_time - time_now
 
                 log.info('Waiting {:s} to start recording for {:.3f} hrs'.format(str(waiting_time), \

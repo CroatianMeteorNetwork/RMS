@@ -3,11 +3,10 @@ import os
 import sys
 import traceback
 import subprocess
-import datetime
 import logging
 from RMS.CaptureDuration import captureDuration
 from RMS.Logger import initLogging
-from RMS.Misc import isRaspberryPi
+from RMS.Misc import isRaspberryPi, RmsDateTime
 
 
 def rmsExternal(captured_night_dir, archived_night_dir, config):
@@ -34,7 +33,7 @@ def rmsExternal(captured_night_dir, archived_night_dir, config):
     # Compute the capture duration from now
     start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation)
 
-    timenow = datetime.datetime.utcnow()
+    timenow = RmsDateTime.utcnow()
     remaining_seconds = 0
 
     # Compute how long to wait before capture
@@ -72,13 +71,13 @@ def rmsExternal(captured_night_dir, archived_night_dir, config):
     log.info('Exit status: {}'.format(exit_code))
     log.info('iStream external script finished')
 
-    # Relase lock file so RMS is authorized to reboot, if needed
+    # Release lock file so RMS is authorized to reboot, if needed
     os.remove(lockfile)
 
     # Only reboot RPis, don't reboot Linux machines
     if isRaspberryPi():
 
-        # Reboot the computer (script needs sudo priviledges, works only on Pis)
+        # Reboot the computer (script needs sudo privileges, works only on Pis)
         try:
             log.info("Rebooting system...")
             os.system('sudo shutdown -r now')

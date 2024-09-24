@@ -61,7 +61,7 @@ def simulateSaturation(app_mag, mag_app_saturated_input, photom_offset, bg_val, 
     # Compute the Gaussian amplitude
     A = intens_sum/(2*np.pi*gauss_sigma**2)
 
-    # Normalize the ampllitude to the number of steps
+    # Normalize the amplitude to the number of steps
     A /= steps
 
 
@@ -113,7 +113,7 @@ def findUnsaturatedMagnitude(app_mag, photom_offset, bg_val, fps, ang_vel, gauss
 
         mag_app = params[0]
 
-        # Compute the unsatured magnitude
+        # Compute the unsaturated magnitude
         _, mag_app_saturated = simulateSaturation(mag_app_unsaturated, *params)
 
         # Compute the residuals

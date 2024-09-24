@@ -104,8 +104,18 @@ cython_modules = [
 
 # Get all data files
 dir_path = os.path.split(os.path.abspath(__file__))[0]
-catalog_files = [os.path.join('Catalogs', file_name) for file_name in os.listdir(os.path.join(dir_path, 'Catalogs'))]
-share_files = [os.path.join('share', file_name) for file_name in os.listdir(os.path.join(dir_path, 'share'))]
+catalog_files = [
+    os.path.join('Catalogs', file_name) for file_name in os.listdir(os.path.join(dir_path, 'Catalogs'))
+    ]
+share_files = [
+    os.path.join('share', file_name) for file_name in os.listdir(os.path.join(dir_path, 'share')) 
+        if os.path.isfile(os.path.join(dir_path, 'share', file_name))
+        ]
+platepar_templates = [
+    os.path.join('share', 'platepar_templates', file_name) 
+        for file_name in os.listdir(os.path.join(dir_path, 'share', 'platepar_templates')) 
+        if os.path.isfile(os.path.join(dir_path, 'share', 'platepar_templates', file_name))
+        ]
 
 setup (name = "RMS",
         version = "0.1",
@@ -115,7 +125,7 @@ setup (name = "RMS",
             'setuptools>=18.0',
             'cython'],
         install_requires=requirements,
-        data_files=[('Catalogs', catalog_files), ('share', share_files)],
+        data_files=[('Catalogs', catalog_files), ('share', share_files), ('share/platepar_templates', platepar_templates)],
         ext_modules = [kht_module] + cythonize(cython_modules),
         packages=find_packages_func(),
         include_package_data=True,

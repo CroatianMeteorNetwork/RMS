@@ -61,7 +61,7 @@ Preferably an IMX291 IP camera. Contact us for more details!
 ---------
 
 1. **Security camera housing.**
-The best place to mount a meteor camera is on the outside wall of your house. As this means that the camera will be exposed to the elements, you need a good camera housing. We recommend that you get a housing with a heater and a fan, which will keep it warm in the winter and cool in the summer. Also, be sure to buy a housing large enough to accomodate your camera. There is one **important thing to note** - security camera housings **are not** designed to look up at the sky. Most of them are designed to be under a roof and looking down. As your camera will be looking up, and most likely be without the protection of a roof, you will have to properly insulate it. Buy some silicone sealant and (after you fully assemble your camera and properly test everything), apply the sealant along all openings and joints, and most importantly, along the edges of the glass at the front. You want to keep the camera dry and prevent humidity from getting inside. If you have some humidity inside the camera, when the temperature hits the dew point, everything inside the housing will be wet. People have also found that putting alumininum foil on the glass, from the inside of the housing, prevents the humidity from forming (just be careful not to obstruct the view of your camera). A good idea is also to put some silica gels or dessicant inside the housing.
+The best place to mount a meteor camera is on the outside wall of your house. As this means that the camera will be exposed to the elements, you need a good camera housing. We recommend that you get a housing with a heater and a fan, which will keep it warm in the winter and cool in the summer. Also, be sure to buy a housing large enough to accommodate your camera. There is one **important thing to note** - security camera housings **are not** designed to look up at the sky. Most of them are designed to be under a roof and looking down. As your camera will be looking up, and most likely be without the protection of a roof, you will have to properly insulate it. Buy some silicone sealant and (after you fully assemble your camera and properly test everything), apply the sealant along all openings and joints, and most importantly, along the edges of the glass at the front. You want to keep the camera dry and prevent humidity from getting inside. If you have some humidity inside the camera, when the temperature hits the dew point, everything inside the housing will be wet. People have also found that putting aluminium foil on the glass, from the inside of the housing, prevents the humidity from forming (just be careful not to obstruct the view of your camera). A good idea is also to put some silica gels or desiccant inside the housing.
 
 1. **Wiring**
 You will probably need some cables and connectors to connect your camera to the digitizer, and to bring power to you camera. We recommend using a shielded coaxial cable for the video signal, and a simple copper pair wire for the power (although you might want to get a shielded cable for power if there's a lot of interference in the video signal).
@@ -90,12 +90,13 @@ conda install -y -c conda-forge numpy'<2.0' scipy gitpython cython matplotlib pa
 conda install -y -c conda-forge numba
 conda install -y pyqt==5.15.10
 conda install -y -c conda-forge Pillow pyqtgraph==0.12.3
-conda install -y -c conda-forge ephem astrometry
+conda install -y -c conda-forge ephem
 conda install -y -c conda-forge imageio pandas
 conda install -y -c conda-forge pygobject
 conda install -y -c astropy astropy
 pip install rawpy'<0.22'
 pip install git+https://github.com/matejak/imreg_dft@master#egg=imreg_dft'>2.0.0'
+pip install astrometry
 ```
 
 If you want to use the machine for capture using OpenCV, you need to install it using the ```opencv4_install.sh``` script. This will build OpenCV with gstreamer and ffmpeg support. If you are not planning to run the capture but you are planning to use other RMS tool, you can install opencv using conda:
@@ -121,7 +122,7 @@ The RMS code runs on Windows with the exception of meteor detection (I guess the
 Nevertheless, other RMS tools work well under Windows and you can follow [these instructions](https://globalmeteornetwork.org/wiki/index.php?title=Windows_Installation) to install it.
 
 ### Setting the timezone to UTC
-It is always a good idea to set the timezone to UTC when recording any data. This provides a common time reference among observatons, and more than once there have been issues when people were using different time zones. So, use your favorite search engine to find how to change the timezone on your RPi to UTC.
+It is always a good idea to set the timezone to UTC when recording any data. This provides a common time reference among observations, and more than once there have been issues when people were using different time zones. So, use your favorite search engine to find how to change the timezone on your RPi to UTC.
 
 
 ### Enabling the watchdog service
