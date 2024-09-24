@@ -7,7 +7,7 @@
     supported. This is a limitation of the camera control library
 
     usage 1: 
-    Python -m Utils.CameraControl command {opts}
+    python -m Utils.CameraControl command {opts}
     call with -h to get a list of supported commands
 
     Usage 2:
@@ -233,9 +233,11 @@ def getCameraParams(cam, showit=True):
         json block containing the config
     """
     caminfo = cam.get_info("Camera")
+    fog = caminfo["ClearFog"][0]
     p1 = caminfo['Param'][0]
     p2 = caminfo['ParamEx'][0]
     if showit is True:
+        pprint.pprint(fog)
         pprint.pprint(p1)
         pprint.pprint(p2)
     return caminfo
@@ -407,15 +409,28 @@ def setCameraParam(cam, opts):
 
     # top level field name
     fld=opts[1]
+
+    # ClearFog lies outside of Param or ParamEx blocks
+    if fld == 'ClearFog':
+
+        subfld=opts[2].lower() # subfields of ClearFog have lowecase titles
+        val = int(opts[3])
+        fldToSet='Camera.ClearFog.[0]'
+        print('Set {}.{} to {}'.format(fldToSet, subfld, val))
+        cam.set_info(fldToSet,{subfld:val})
+
     # these fields are stored in the ParamEx.[0] block
     if fld == 'Style':
+
         val = opts[2]
         if val not in styleFlds:
             print('style must be one of ', styleFlds)
             return
         print('Set Camera.ParamEx.[0].{} to {}'.format(fld, val))
         cam.set_info("Camera.ParamEx.[0]",{fld:val})
-    elif fld == 'BroadTrends': 
+
+    elif fld == 'BroadTrends':
+
         subfld=opts[2]
         val = int(opts[3])
         fldToSet='Camera.ParamEx.[0].' + fld
@@ -424,6 +439,7 @@ def setCameraParam(cam, opts):
                 
     # Exposuretime and gainparam have subfields
     elif fld == 'ExposureParam' or fld == 'GainParam':
+
         subfld=opts[2]
         val = int(opts[3])
         if subfld not in intfields:
@@ -436,6 +452,7 @@ def setCameraParam(cam, opts):
         fldToSet='Camera.Param.[0].' + fld 
         print('Set {}.{} to {}'.format(fldToSet, subfld, val))
         cam.set_info(fldToSet,{subfld:val})
+
     else:
         # other fields do not have subfields
         val = int(opts[2])
@@ -578,6 +595,32 @@ def setParameter(cam, opts):
         print('Setting not currently supported for', opts)
 
 
+def switchDayTime(cam):
+    """ Switches the camera to daytime mode. Reboots camera. """
+
+    setCameraParam(cam, 'Camera ExposureParam LeastTime 100'.split()) # 100 microseconds = 0.1ms
+    setCameraParam(cam, 'Camera DayNightColor 1'.split()) # Color mode
+    setCameraParam(cam, 'Camera BLCMode 1'.split())
+    setCameraParam(cam, 'Camera ElecLevel 50'.split())
+    setCameraParam(cam, 'Camera GainParam Gain 10'.split())
+    setCameraParam(cam, 'Camera BroadTrends AutoGain 1'.split())
+    rebootCamera(cam)
+
+
+def switchNightTime(cam):
+    """ Switches the camera to nighttime mode. Resets settings done by switchDayTime above.
+        Reboots camera.
+    """
+
+    setCameraParam(cam, 'Camera ExposureParam LeastTime 40000'.split()) # 40000 microseconds = 40ms
+    setCameraParam(cam, 'Camera DayNightColor 2'.split()) # Black and white mode
+    setCameraParam(cam, 'Camera BLCMode 0'.split())
+    setCameraParam(cam, 'Camera ElecLevel 100'.split())
+    setCameraParam(cam, 'Camera GainParam Gain 60'.split())
+    setCameraParam(cam, 'Camera BroadTrends AutoGain 0'.split())
+    rebootCamera(cam)
+
+
 def dvripCall(cam, cmd, opts):
     """ retrieve or display the camera network settings
 
@@ -668,6 +711,12 @@ def dvripCall(cam, cmd, opts):
     elif cmd == 'SetAutoReboot':
         setAutoReboot(cam, opts)
 
+    elif cmd == 'SwitchNightTime':
+        switchNightTime(cam)
+    
+    elif cmd == 'SwitchDayTime':
+        switchDayTime(cam)
+    
     else:
         print('System Info')
         ugi=cam.get_upgrade_info()
@@ -714,7 +763,8 @@ if __name__ == '__main__':
     # list of supported commands
     cmd_list = ['reboot', 'GetHostname', 'GetSettings','GetDeviceInformation', 'GetNetConfig',
         'GetCameraParams', 'GetEncodeParams', 'SetParam', 'SaveSettings', 'LoadSettings',
-        'SetColor', 'SetOSD', 'SetAutoReboot', 'GetIP', 'GetAutoReboot', 'CloudConnection', 'CameraTime']
+        'SetColor', 'SetOSD', 'SetAutoReboot', 'GetIP', 'GetAutoReboot', 'CloudConnection', 'CameraTime',
+        'SwitchDayTime', 'SwitchNightTime']
     opthelp='optional parameters for SetParam for example Camera ElecLevel 70 \n' \
         'will set the AE Ref to 70.\n To see possibilities, execute GetSettings first. ' \
         'Call a function with no parameters to see the possibilities'
