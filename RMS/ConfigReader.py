@@ -385,7 +385,7 @@ class Config:
         self.save_frames = False
 
         # The file extension for saved frames ('jpg' or 'png')
-        frame_file_type = 'jpg'
+        self.frame_file_type = 'jpg'
 
         # Set JPEG quality for the saved frames for jpg file type
         self.jpgs_quality = 90
@@ -393,8 +393,11 @@ class Config:
         # Set PNG compression for the saved frames for png file type
         self.png_compression = 3
 
-        # Set the interval for saving video frames to JPEG
-        self.frame_save_interval: 256
+        # Set the time interval for saving video frames
+        self.frame_save_interval: 10
+
+        # Set the frame count interval for saving video frames (calculated from the time interval)
+        self.frame_save_interval_count: 256
 
         # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
         self.slideshow_enable = False
@@ -1165,11 +1168,14 @@ def parseCapture(config, parser):
     if parser.has_option(section, "frame_save_interval"):
         config.frame_save_interval = parser.getint(section, "frame_save_interval")
 
+        # Calculate the interval frame count
+        config.frame_save_interval_count = int(round(float(config.frame_save_interval)*float(config.fps)))
+
         # Must be greater than 5
-        if config.frame_save_interval < 5:
-            config.frame_save_interval = 256
+        if config.frame_save_interval_count < 5:
+            config.frame_save_interval_count = 256
             print()
-            print("WARNING! The frame_save_interval must be greater than 5. It has been reset to 256!")
+            print("WARNING! The frame_save_interval must result in more than 5 frames interval. It has been reset to 256 frames!")
 
     # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
     if parser.has_option(section, "slideshow_enable"):

@@ -1162,7 +1162,7 @@ class BufferedCapture(Process):
                 # If save_frames is set and a video device is used, save a frame every nth frames
                 if (self.config.save_frames
                         and self.video_file is None
-                        and total_frames%(self.config.frame_save_interval) == 0):
+                        and total_frames%(self.config.frame_save_interval_count) == 0):
 
                     self.frame_saver.addJob([frame_timestamp, frame])
 
