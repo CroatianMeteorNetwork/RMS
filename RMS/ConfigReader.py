@@ -1156,7 +1156,7 @@ def parseCapture(config, parser):
 
     # Load option to run capture continuously, during the day or night
     if parser.has_option(section, "continuous_capture"):
-        config.continuous_capture = parser.getint(section, "continuous_capture")
+        config.continuous_capture = True  # parser.getint(section, "continuous_capture")
 
 
 def parseUpload(config, parser):
