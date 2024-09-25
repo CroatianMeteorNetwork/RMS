@@ -106,6 +106,26 @@ def getPlatepar(config, night_data_dir):
                 platepar.lon = config.longitude
                 platepar.elev = config.elevation
 
+        
+        # Make sure the config and the platepar FOV are within a factor of two
+        if (platepar.fov_h is not None) and (platepar.fov_v is not None):
+            
+            # Calculate the diagonal FOV for both the platepar and the config
+            pp_fov_diag = (platepar.fov_h**2 + platepar.fov_v**2)**0.5
+            config_fov_diag = (config.fov_w**2 + config.fov_h**2)**0.5
+
+            # Compute the ratio of the FOVs
+            fov_ratio = pp_fov_diag/config_fov_diag
+
+            # If the ratio is smaller than 0.5 or greater than 2, don't use this platepar
+            if (fov_ratio < 0.5) or (fov_ratio > 2):
+                    
+                # If they don't match, don't use this platepar
+                log.info("The FOV in the platepar is not within a factor of 2 of the FOV in the config file! Not using the platepar...")
+
+                platepar = None
+                platepar_fmt = None
+
 
     # Make sure the image resolution matches
     if platepar is not None:
