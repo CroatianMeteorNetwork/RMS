@@ -240,7 +240,7 @@ def timeSyncStatus(config):
         time_error_seconds = "Unknown"
 
     result_list = subprocess.run(['timedatectl','status'], capture_output = True).stdout.splitlines()
-    print(result_list)
+    #print(result_list)
     for raw_result in result_list:
         result = raw_result.decode('ascii')
         if "synchronized" in result:
