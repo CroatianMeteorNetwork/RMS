@@ -89,11 +89,18 @@ def resetSIGINT():
 
 
 
-def wait(duration, compressor, buffered_capture, video_file):
+def wait(duration, compressor, buffered_capture, video_file, camera_mode=None):
     """ The function will wait for the specified time, or it will stop when Enter is pressed. If no time was
-        given (in seconds), it will wait until Enter is pressed. 
+        given (in seconds), it will wait until Enter is pressed. Additionally, it will also stop when the camera mode 
+        (day/night) changes, in case of continuous capture mode.
+
     Arguments:
         duration: [float] Time in seconds to wait
+        compressor: [Compressor] compressor process object
+        buffered_capture: [BufferedCapture] buffered capture process object
+        video_file: [str] Path to the video file, if it was given as the video source.
+        daytime_mode: [bool] shared boolean variable to that indicates 
+        camera_mode: [bool] shared boolean variable to keep track of camera day/night mode switching. None by default.
     """
 
     global STOP_CAPTURE
@@ -104,6 +111,11 @@ def wait(duration, compressor, buffered_capture, video_file):
     # Get the time of capture start
     time_start = RmsDateTime.utcnow()
 
+    # Remember the initial camera mode value
+    if camera_mode is not None:
+        camera_mode_pre = camera_mode.value
+    else:
+        camera_mode_pre = None
 
     while True:
 
@@ -111,8 +123,14 @@ def wait(duration, compressor, buffered_capture, video_file):
         time.sleep(1)
 
 
+        # Break in case camera modes switched
+        if (camera_mode is not None) and (camera_mode_pre != camera_mode.value):
+            break
+
+
         # If the compressor has died, restart capture
-        if not compressor.is_alive():
+        # In case the camera mode is in daytime capture, then the compressor must remain stopped 
+        if (not camera_mode_pre) and (not compressor.is_alive()):
             log.info('The compressor has died, restarting the capture!')
             break
 
@@ -139,7 +157,7 @@ def wait(duration, compressor, buffered_capture, video_file):
 
 
 def runCapture(config, duration=None, video_file=None, nodetect=False, detect_end=False, \
-    upload_manager=None, resume_capture=False, fixed_duration=False):
+    upload_manager=None, resume_capture=False, fixed_duration=False, camera_mode=None):
     """ Run capture and compression for the given time.given
     
     Arguments:
@@ -153,9 +171,10 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             finishes. False by default.
         upload_manager: [UploadManager object] A handle to the UploadManager, which handles uploading files to
             the central server. None by default.
-        resume_capture: [bool] Resume capture in the last data directory in CapturedFiles.
+        resume_capture: [bool] Resume capture in the last data directory in CapturedFiles. False by default.
         fixed_duration: [bool] The capture is run with a given fixed duration and not automatically 
-            determined.
+            determined. False by default.
+        camera_mode: [bool] shared boolean variable to keep track of camera day/night mode switching. None by default.
 
     Return:
         night_archive_dir: [str] Path to the archive folder of the processed night.
@@ -328,7 +347,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         detector = QueuedPool(detectStarsAndMeteors, cores=1, log=log, delay_start=delay_detection, \
             backup_dir=night_data_dir, input_queue_maxsize=None)
         detector.startPool()
-
+        detector_started = True
 
         # If the capture is being resumed into the directory, load all previously saved FF files
         if resume_capture:
@@ -391,17 +410,207 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Start buffered capture
     bc.startCapture()
 
-    # Init and start the compression
-    compressor.start()
+
+    # Loop to handle both continuous and standard capture modes
+    while True:
+
+        # If continuous capture is enabled and we need to operate in daytime settings
+        if config.continuous_capture and camera_mode.value:
+            
+            log.info('Capturing in daytime mode...')
 
 
-    # Capture until Ctrl+C is pressed
-    wait(duration, compressor, bc, video_file)
+            #  bc.switchDaytimeCapture() 
 
-    # If capture was manually stopped, end capture
-    if STOP_CAPTURE:
-        log.info('Ending capture...')
 
+            # Capture until Ctrl+C is pressed / camera switches modes
+            wait(duration, compressor, bc, video_file, camera_mode)
+
+            # If capture was manually stopped, end capture
+            if STOP_CAPTURE:
+                log.info('Ending capture...')
+                break
+
+
+        # Standard capture procedure OR when nighttime mode sets it
+        else:
+    
+            # Start the detector/compression
+            if not detector_started:
+                detector.startPool()
+
+            compressor.start()
+
+            log.info('Capturing in nighttime mode...')
+
+
+            # bc.switchNighttimeCapture()
+
+
+            # Capture until Ctrl+C is pressed / camera switches modes
+            wait(duration, compressor, bc, video_file, camera_mode)
+
+            # If capture was manually stopped, end capture
+            if STOP_CAPTURE:
+                log.info('Ending capture...')
+
+            # Stop the compressor
+            log.debug('Stopping compression...')
+            detector = compressor.stop()
+            log.debug('Compression stopped')
+
+            # If detection should be performed
+            if not nodetect:
+
+                try:
+                    log.info('Finishing up the detection, ' + str(detector.input_queue.qsize()) \
+                        + ' files to process...')
+                except:
+                    print('Finishing up the detection... error when getting input queue size!')
+
+
+                # Reset the Ctrl+C to KeyboardInterrupt
+                resetSIGINT()
+
+
+                try:
+
+                    # If there are some more files to process, process them on more cores
+                    if detector.input_queue.qsize() > 0:
+
+                        # If a fixed number of cores is not set, use all but 2 cores
+                        if config.num_cores <= 0:
+                            available_cores = multiprocessing.cpu_count() - 2
+
+                        else:
+                            available_cores = config.num_cores
+
+
+                        if available_cores > 1:
+
+                            log.info('Running the detection on {:d} cores...'.format(available_cores))
+
+                            # Start the detector
+                            detector.updateCoreNumber(cores=available_cores)
+
+
+                    log.info('Waiting for the detection to finish...')
+
+                    # Wait for the detector to finish and close it
+                    detector.closePool()
+                    detector_started = False
+
+                    log.info('Detection finished!')
+
+
+                except KeyboardInterrupt:
+
+                    log.info('Ctrl + C pressed, exiting...')
+
+                    if upload_manager is not None:
+
+                        # Stop the upload manager
+                        if upload_manager.is_alive():
+                            log.debug('Closing upload manager...')
+                            upload_manager.stop()
+                            del upload_manager
+
+                    if eventmonitor is not None:
+
+                        # Stop the eventmonitor manager
+                        if eventmonitor.is_alive():
+                            log.debug('Closing eventmonitor...')
+                            eventmonitor.stop()
+                            del eventmonitor
+
+
+                    # Terminate the detector
+                    if detector is not None:
+                        del detector
+
+                    sys.exit()
+
+
+                # Set the Ctrl+C back to 'soft' program kill
+                setSIGINT()
+
+                ### SAVE DETECTIONS TO FILE
+
+
+                log.info('Collecting results...')
+
+                # Get the detection results from the queue
+                detection_results = detector.getResults()
+
+            else:
+                detection_results = []
+
+            # Save detection to disk and archive detection
+            night_archive_dir, archive_name, _ = processNight(night_data_dir, config, \
+                detection_results=detection_results, nodetect=nodetect)
+
+
+            # Put the archive up for upload
+            if upload_manager is not None:
+                log.info('Adding file to upload list: ' + archive_name)
+                upload_manager.addFiles([archive_name])
+                log.info('File added...')
+
+                # Delay the upload, if the delay is given
+                upload_manager.delayNextUpload(delay=60*config.upload_delay)
+
+
+            # Delete detector backup files
+            if detector is not None:
+                detector.deleteBackupFiles()
+
+
+            # !!! Currently under testing
+            # # If the capture was run for a limited time, run the upload right away
+            # if fixed_duration and (upload_manager is not None):
+
+            if upload_manager is not None: # temporary code, will make the script upload after each capture
+
+                # Check if the upload delay is set
+                with upload_manager.next_runtime_lock:
+
+                    # Check if the upload delay is up
+                    if upload_manager.next_runtime is not None:
+
+                        # Wait for the upload delay to pass
+                        sleep_time = None
+                        while (RmsDateTime.utcnow() - upload_manager.next_runtime).total_seconds() < 0:
+                            
+                            wait_time = (RmsDateTime.utcnow() - upload_manager.next_runtime).total_seconds()
+                            log.info("Waiting for upload delay to pass: {:.1f} seconds...".format(abs(wait_time)))
+
+                            # Sleep for a short interval between 1 and 30 seconds
+                            if sleep_time is None:
+
+                                sleep_time = wait_time/10
+
+                                if sleep_time < 1:
+                                    sleep_time = 1
+                                elif sleep_time > 30:
+                                    sleep_time = 30
+
+                            time.sleep(sleep_time)
+
+                log.info('Uploading data before exiting...')
+                upload_manager.uploadData()
+
+
+            # Run the external script
+            runExternalScript(night_data_dir, night_archive_dir, config)
+
+            # Exit in case of standard capture mode 
+            if not config.continuous_capture:
+                break
+
+
+    # If detector is not closed during exit from daytime mode
+    if not detector_started:
+        detector.closePool()
 
     # Stop the capture
     log.debug('Stopping capture...')
@@ -412,10 +621,6 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     obs_db_conn = getObsDBConn(config)
     addObsParam(obs_db_conn, "dropped_frames", dropped_frames)
     obs_db_conn.close()
-
-    # Stop the compressor
-    log.debug('Stopping compression...')
-    detector = compressor.stop()
 
     # Free shared memory after the compressor is done
     try:
@@ -429,8 +634,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         log.debug('Freeing frame buffers failed with error:' + repr(e))
         log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
-    log.debug('Compression stopped')
-
+    log.debug('Compression buffers freed')
 
     if live_view is not None:
 
@@ -443,155 +647,6 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         live_view = None
 
         log.debug('Live view stopped')
-
-
-
-    # If detection should be performed
-    if not nodetect:
-
-        try:
-            log.info('Finishing up the detection, ' + str(detector.input_queue.qsize()) \
-                + ' files to process...')
-        except:
-            print('Finishing up the detection... error when getting input queue size!')
-
-
-        # Reset the Ctrl+C to KeyboardInterrupt
-        resetSIGINT()
-
-
-        try:
-
-            # If there are some more files to process, process them on more cores
-            if detector.input_queue.qsize() > 0:
-
-                # If a fixed number of cores is not set, use all but 2 cores
-                if config.num_cores <= 0:
-                    available_cores = multiprocessing.cpu_count() - 2
-
-                else:
-                    available_cores = config.num_cores
-
-
-                if available_cores > 1:
-
-                    log.info('Running the detection on {:d} cores...'.format(available_cores))
-
-                    # Start the detector
-                    detector.updateCoreNumber(cores=available_cores)
-
-
-            log.info('Waiting for the detection to finish...')
-
-            # Wait for the detector to finish and close it
-            detector.closePool()
-
-            log.info('Detection finished!')
-
-
-        except KeyboardInterrupt:
-
-            log.info('Ctrl + C pressed, exiting...')
-
-            if upload_manager is not None:
-
-                # Stop the upload manager
-                if upload_manager.is_alive():
-                    log.debug('Closing upload manager...')
-                    upload_manager.stop()
-                    del upload_manager
-
-            if eventmonitor is not None:
-
-                # Stop the eventmonitor manager
-                if eventmonitor.is_alive():
-                    log.debug('Closing eventmonitor...')
-                    eventmonitor.stop()
-                    del eventmonitor
-
-
-            # Terminate the detector
-            if detector is not None:
-                del detector
-
-            sys.exit()
-
-
-        # Set the Ctrl+C back to 'soft' program kill
-        setSIGINT()
-
-        ### SAVE DETECTIONS TO FILE
-
-
-        log.info('Collecting results...')
-
-        # Get the detection results from the queue
-        detection_results = detector.getResults()
-
-    else:
-
-        detection_results = []
-
-
-
-
-    # Save detection to disk and archive detection
-    night_archive_dir, archive_name, _ = processNight(night_data_dir, config, \
-        detection_results=detection_results, nodetect=nodetect)
-
-
-    # Put the archive up for upload
-    if upload_manager is not None:
-        log.info('Adding file to upload list: ' + archive_name)
-        upload_manager.addFiles([archive_name])
-        log.info('File added...')
-
-        # Delay the upload, if the delay is given
-        upload_manager.delayNextUpload(delay=60*config.upload_delay)
-
-
-    # Delete detector backup files
-    if detector is not None:
-        detector.deleteBackupFiles()
-
-
-    # !!! Currently under testing
-    # # If the capture was run for a limited time, run the upload right away
-    # if fixed_duration and (upload_manager is not None):
-
-    if upload_manager is not None: # temporary code, will make the script upload after each capture
-
-        # Check if the upload delay is set
-        with upload_manager.next_runtime_lock:
-
-            # Check if the upload delay is up
-            if upload_manager.next_runtime is not None:
-
-                # Wait for the upload delay to pass
-                sleep_time = None
-                while (RmsDateTime.utcnow() - upload_manager.next_runtime).total_seconds() < 0:
-                    
-                    wait_time = (RmsDateTime.utcnow() - upload_manager.next_runtime).total_seconds()
-                    log.info("Waiting for upload delay to pass: {:.1f} seconds...".format(abs(wait_time)))
-
-                    # Sleep for a short interval between 1 and 30 seconds
-                    if sleep_time is None:
-
-                        sleep_time = wait_time/10
-
-                        if sleep_time < 1:
-                            sleep_time = 1
-                        elif sleep_time > 30:
-                            sleep_time = 30
-
-                    time.sleep(sleep_time)
-
-        log.info('Uploading data before exiting...')
-        upload_manager.uploadData()
-
-
-    # Run the external script
-    runExternalScript(night_data_dir, night_archive_dir, config)
 
 
     # If capture was manually stopped, end program
@@ -924,7 +979,7 @@ if __name__ == "__main__":
         if config.continuous_capture:
             # In case of continuous capture, start immediately
             start_time, duration = True, None
-            log.info('Starting continuous capture')
+            log.info('Starting continuous capture...')
             
         else:
             # Calculate when and how should the capture run
@@ -1183,10 +1238,14 @@ if __name__ == "__main__":
 
 
         if config.continuous_capture:
+            # Setup shared value to communicate day/night switch between processes.
+            camera_mode = multiprocessing.Value(ctypes.c_bool, False)
+
             # Setup camera mode switcher on another thread
-            cam_switcher = threading.Thread(target=cameraModeSwitcher, args=(config))
+            cam_switcher = threading.Thread(target=cameraModeSwitcher, args=(config, camera_mode))
             cam_switcher.daemon = True # To make sure switcher thread exits automatically at the end
             cam_switcher.start()
+            log.info('Started camera mode switcher on separate thread')
 
         else:
             log.info('Starting capture for {:.2f} hours'.format(duration/60/60))
@@ -1195,7 +1254,7 @@ if __name__ == "__main__":
         # Run capture and compression
         night_archive_dir = runCapture(config, duration=duration, nodetect=cml_args.nodetect, \
             upload_manager=upload_manager, detect_end=(cml_args.detectend or config.postprocess_at_end), \
-            resume_capture=cml_args.resume)
+            resume_capture=cml_args.resume, camera_mode=camera_mode)
 
         # Indicate that the capture was done once
         ran_once = True

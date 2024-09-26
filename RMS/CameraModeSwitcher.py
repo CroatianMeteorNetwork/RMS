@@ -5,11 +5,13 @@ from RMS.Misc import RmsDateTime
 
 
 # Function to switch between day and night modes
-def cameraModeSwitcher(config):
+def cameraModeSwitcher(config, mode_switch):
     """ Wait and switch between day and night camera modes based on current time.
     
     Arguments:
         config: [Config] config object for determining location and camera
+        mode_switch: [bool] shared boolean variable to communicate mode switch with other processes
+                            True = Day time, False = Night time
     """
 
     while True:
@@ -35,11 +37,13 @@ def cameraModeSwitcher(config):
 
         if next_set < next_rise:
             # Next event is a sunset, switch to daytime mode
+            mode_switch.value = True
             cc.cameraControlV2(config, 'SwitchDayTime')
             time_to_wait = (next_set - current_time).total_seconds()
 
         else:
             # Next event is a sunrise, switch to nighttime mode
+            mode_switch.value = False
             cc.cameraControlV2(config, 'SwitchNightTime')
             time_to_wait = (next_rise - current_time).total_seconds()
 
@@ -59,6 +63,6 @@ if __name__ == "__main__":
     config.longitude = 102.12
     config.elevation = 327
 
-    # Test the time now
-    cameraModeSwitcher(config)
+    # Test the time now - remove mode_switch
+    # cameraModeSwitcher(config)
     
