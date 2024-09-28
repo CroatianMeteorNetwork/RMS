@@ -173,11 +173,14 @@ def startObservationSummaryReport(config, duration, force_delete=False):
         addObsParam(conn, "commit_hash", repo.head.object.hexsha)
     else:
         print("RMS Git repository not found. Skipping Git-related information.")
-
-    storage_total, storage_used, storage_free = shutil.disk_usage("/")
-    addObsParam(conn, "storage_total_gb", round(storage_total / (1024 ** 3), 2))
-    addObsParam(conn, "storage_used_gb", round(storage_used / (1024 ** 3), 2))
-    addObsParam(conn, "storage_free_gb", round(storage_free / (1024 ** 3), 2))
+    
+    # Get the disk usage info (only in Python 3.3+)
+    if (sys.version_info.major > 2) and (sys.version_info.minor > 2):
+        
+        storage_total, storage_used, storage_free = shutil.disk_usage("/")
+        addObsParam(conn, "storage_total_gb", round(storage_total/(1024**3), 2))
+        addObsParam(conn, "storage_used_gb", round(storage_used/(1024**3), 2))
+        addObsParam(conn, "storage_free_gb", round(storage_free/(1024**3), 2))
 
     captured_directories = captureDirectories(os.path.join(config.data_dir, config.captured_dir), config.stationID)
     addObsParam(conn, "captured_directories", captured_directories)
@@ -185,11 +188,18 @@ def startObservationSummaryReport(config, duration, force_delete=False):
         addObsParam(conn, "camera_information", gatherCameraInformation(config))
     except:
         addObsParam(conn, "camera_information", "Unavailable")
+
+    # Hardcoded for now, but should be calculated based on the config value
     no_of_frames_per_fits_file = 256
+
+    # Calculate the number of fits files expected for the duration
     fps = config.fps
-    fits_files_from_duration = duration * fps / no_of_frames_per_fits_file
+    fits_files_from_duration = duration*fps/no_of_frames_per_fits_file
+
     addObsParam(conn, "fits_files_from_duration", fits_files_from_duration)
+
     conn.close()
+
     return "Opening a new observations summary for duration {} seconds".format(duration)
 
 def timestampFromNTP(addr='0.us.pool.ntp.org'):
