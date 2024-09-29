@@ -23,12 +23,6 @@ import datetime
 import logging
 import multiprocessing
 from math import floor
-
-try:
-    import pytz
-except ImportError:
-    pass
-
 import numpy as np
 import cv2
 
@@ -148,7 +142,7 @@ class Compressor(multiprocessing.Process):
 
         if sys.version_info[0] == 2:
             # Python 2 code
-            dt = datetime.datetime.fromtimestamp(startTime, tz=pytz.UTC)
+            dt = datetime.datetime.utcfromtimestamp(startTime)
             ff.starttime = dt.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
 
         else:
