@@ -329,6 +329,10 @@ class Config:
         self.fov_w = 64.0
         self.fov_h = 35.0
         self.deinterlace_order = -2
+
+        # Rolling shutter scan rate: Time to scan the entire sensor, in seconds.
+        self.scan_rate = 1/30.0
+
         self.mask_file = "mask.bmp"
 
         self.data_dir = "~/RMS_data"
@@ -1098,6 +1102,15 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "deinterlace_order"):
         config.deinterlace_order = parser.getint(section, "deinterlace_order")
+
+    if parser.has_option(section, "scan_rate"):
+        scan_rate_str = parser.get(section, "scan_rate")
+        # Convert fraction to float if needed. (e.g. 1/30 = 0.0333333)
+        if '/' in scan_rate_str:
+            numerator, denominator = map(float, scan_rate_str.split('/'))
+            config.scan_rate = numerator/denominator
+        else:
+            config.scan_rate = float(scan_rate_str)
 
     if parser.has_option(section, "mask"):
         config.mask_file = os.path.basename(parser.get(section, "mask"))
