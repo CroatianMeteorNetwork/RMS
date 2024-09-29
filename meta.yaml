@@ -32,6 +32,6 @@ requirements:
     - opencv
 
 about:
-  home: https://gmn.duckdns.org/
+  home: https://globalmeteornetwork.org/
   license: MIT
   license_file: LICENSE

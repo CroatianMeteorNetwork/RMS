@@ -12,11 +12,14 @@ import datetime
 
 
 
-def filenameToDatetimeStr(file_name):
+def filenameToDatetimeStr(file_name, iso8601=False):
     """ Converts FS and FF bin file name to a datetime object.
 
     Arguments:
         file_name: [str] Name of a FF or FS file.
+
+    Keyword arguments:
+        iso8601: [bool] True if the output should be in ISO 8601 format. False by default.
 
     Return:
         [datetime object] Date and time of the first frame in the FS or FF file.
@@ -52,7 +55,13 @@ def filenameToDatetimeStr(file_name):
         microseconds = int(time_fraction_str)
 
 
-    return datetime.datetime(year, month, day, hour, minute, seconds, microseconds).strftime("%Y-%m-%d %H:%M:%S.%f")
+    if iso8601:
+        dt_str = datetime.datetime(year, month, day, hour, minute, seconds, microseconds).isoformat(timespec='microseconds')
+
+    else:
+        dt_str = datetime.datetime(year, month, day, hour, minute, seconds, microseconds).strftime("%Y-%m-%d %H:%M:%S.%f")
+
+    return dt_str
 
 
 
@@ -97,11 +106,11 @@ def read(directory, filename, array=False, full_filename=False):
     ff.camno = head['CAMNO']
     ff.fps = head['FPS']
 
-    # Check for the EXPSTART field and read datetime from filename it if it doesn't exist
-    if 'EXPSTART' in head:
-        ff.starttime = head['EXPSTART']
+    # Check for the DATE-OBS field and read datetime from filename it if it doesn't exist
+    if 'DATE-OBS' in head:
+        ff.starttime = head['DATE-OBS']
     else:
-        ff.starttime = filenameToDatetimeStr(filename)
+        ff.starttime = filenameToDatetimeStr(filename, iso8601=True)
 
     # Read in the image data
     ff.maxpixel = hdulist[1].data
@@ -153,7 +162,7 @@ def write(ff, directory, filename):
     head['FIRST'] = ff.first
     head['CAMNO'] = ff.camno
     head['FPS'] = ff.fps
-    head['EXPSTART'] = ff.starttime
+    head['DATE-OBS'] = ff.starttime
 
     # Deconstruct the 3D array into individual images
     if ff.array is not None:
@@ -163,7 +172,7 @@ def write(ff, directory, filename):
         ff.avepixel = ff.avepixel[0]
         ff.stdpixel = ff.stdpixel[0]
 
-    # Add the maxpixle to the list
+    # Add the maxpixel to the list
     maxpixel_hdu = fits.ImageHDU(ff.maxpixel, name='MAXPIXEL')
     maxframe_hdu = fits.ImageHDU(ff.maxframe, name='MAXFRAME')
     avepixel_hdu = fits.ImageHDU(ff.avepixel, name='AVEPIXEL')

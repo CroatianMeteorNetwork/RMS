@@ -1,5 +1,5 @@
 """ The script will open all FF files in the given folder and plot color-coded images where the color
-    represents the threshold needed to detect individual feacutres on the image.
+    represents the threshold needed to detect individual features on the image.
 """
 
 from __future__ import print_function, division, absolute_import
@@ -61,7 +61,7 @@ if __name__ == "__main__":
             # Read the FF file
             ff = readFF(cml_args.dir_path, file_name)
 
-            # Skip the file if it is corruped
+            # Skip the file if it is corrupted
             if ff is None:
                 continue
 

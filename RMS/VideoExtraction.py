@@ -78,7 +78,7 @@ class Extractor(Process):
             return []
 
         
-        # Return list with the number of occurence of each frame number (Z axis)
+        # Return list with the number of occurrence of each frame number (Z axis)
         freq = np.array(np.unique(z, return_counts=True)).T
         
 

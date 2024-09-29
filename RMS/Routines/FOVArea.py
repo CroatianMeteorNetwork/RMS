@@ -13,13 +13,13 @@ from RMS.Routines.MaskImage import loadMask, MaskStructure
 
 
 def xyHt2Geo(platepar, x, y, area_ht, indicate_limit=False, elev_limit=5):
-    """ Given pixel coordiantes on the image and a height above sea level, compute geo coordiantes of the
+    """ Given pixel coordinates on the image and a height above sea level, compute geo coordinates of the
         point. The elevation is limited to 5 deg above horizon.
 
     Arguments:
         platepar: [Platepar object]
         x: [float] Image X coordinate.
-        y: [float] Image Y coordiante.
+        y: [float] Image Y coordinate.
         area_ht: [float] Height above sea level (meters).
 
     Keyword arguments:
@@ -70,7 +70,7 @@ def fovArea(platepar, mask=None, area_ht=100000, side_points=10, elev_limit=5):
     Keyword arguments:
         mask: [Mask object] Mask object, None by default.
         area_ht: [float] Height in meters of the computed area.
-        side_points: [int] How many points to use to evaluate the FOV on seach side of the image. Normalized
+        side_points: [int] How many points to use to evaluate the FOV on each side of the image. Normalized
             to the longest side.
         elev_limit: [float] Limit of elevation above horizon (deg). 5 degrees by default.
 

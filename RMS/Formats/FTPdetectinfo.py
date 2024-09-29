@@ -18,13 +18,18 @@ from __future__ import absolute_import, division, print_function
 
 import datetime
 import os
-
+import sys
 import git
 import numpy as np
+from RMS.Misc import RmsDateTime
+
+# Map FileNotFoundError to IOError in Python 2 as it does not exist
+if sys.version_info[0] < 3:
+    FileNotFoundError = IOError
 
 
 def validDefaultFTPdetectinfo(file_name):
-    """ Given a name of a file, check if it's the defualt FTPdetectinfo file (without any extensions). 
+    """ Given a name of a file, check if it's the default FTPdetectinfo file (without any extensions). 
     """
 
     if file_name.startswith("FTPdetectinfo") and file_name.endswith('.txt') and \
@@ -80,7 +85,7 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
         ftpdetect_file.write("Meteor Count = " + str(total_meteors).zfill(6) + "\n")
         ftpdetect_file.write("-----------------------------------------------------\n")
         ftpdetect_file.write("Processed with RMS 1.0 " + commit_time + " " + str(sha) + " on " \
-            + str(datetime.datetime.utcnow()) + " UTC\n")
+            + str(RmsDateTime.utcnow()) + " UTC\n")
         ftpdetect_file.write("-----------------------------------------------------\n")
         ftpdetect_file.write("FF  folder = " + ff_directory + "\n")
         ftpdetect_file.write("CAL folder = " + cal_directory + "\n")
@@ -146,10 +151,10 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
                     if mag is None:
                         mag = 10.0
 
-                    detection_line_str = "{:06.4f} {:07.2f} {:07.2f} {:08.4f} {:+08.4f} {:08.4f} {:+08.4f} {:06d} {:.2f}"
+                    detection_line_str = "{:09.4f} {:07.2f} {:07.2f} {:10.6f} {:+10.6f} {:10.6f} {:+10.6f} {:06d} {:+6.2f}"
 
                     ftpdetect_file.write(detection_line_str.format(round(frame, 4), round(x, 2), \
-                        round(y, 2), round(ra, 4), round(dec, 4), round(azim, 4), round(elev, 4), \
+                        round(y, 2), round(ra, 6), round(dec, 6), round(azim, 6), round(elev, 6), \
                         int(level), round(mag, 2)) + "\n")
 
                 else:
@@ -171,8 +176,8 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
                     if level is None:
                         level = 1
 
-                    ftpdetect_file.write("{:06.4f} {:07.2f} {:07.2f}".format(round(frame, 4), round(x, 2), \
-                        round(y, 2)) + " 000.00 000.00 000.00 000.00 " + "{:06d}".format(int(level)) \
+                    ftpdetect_file.write("{:09.4f} {:07.2f} {:07.2f}".format(round(frame, 4), round(x, 2), \
+                        round(y, 2)) + " 000.000000  00.000000 000.000000  00.000000 " + "{:06d}".format(int(level)) \
                         + " 0.00\n")
 
 
@@ -223,8 +228,8 @@ def readFTPdetectinfo(ff_directory, file_name, ret_input_format=False):
 
     Keyword arguments:
         ret_input_format: [bool] If True, the list that can be written back using writeFTPdetectinfo is 
-            returned. False returnes the expanded list containing everyting that was read from the file (this
-            is the default behavious, thus it's False by default)
+            returned. False returns the expanded list containing everything that was read from the file (this
+            is the default behavior, thus it's False by default)
 
     Return:
         [tuple]: Two options, see ret_input_format.

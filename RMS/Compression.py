@@ -16,11 +16,13 @@
 
 
 import os
+import sys
+import traceback
 import time
+import datetime
 import logging
 import multiprocessing
 from math import floor
-
 import numpy as np
 import cv2
 
@@ -137,7 +139,16 @@ class Compressor(multiprocessing.Process):
         ff.first = N + 256
         ff.camno = self.config.stationID
         ff.fps = self.config.fps
-        ff.starttime = date_string + "_" + str(micros).zfill(6)
+
+        if sys.version_info[0] == 2:
+            # Python 2 code
+            dt = datetime.datetime.utcfromtimestamp(startTime)
+            ff.starttime = dt.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+
+        else:
+            # Python 3 code
+            dt = datetime.datetime.fromtimestamp(startTime, tz=datetime.timezone.utc)
+            ff.starttime = dt.isoformat(timespec='microseconds')
         
         # Write the FF file
         FFfile.write(ff, self.data_dir, filename_millis, fmt=self.config.ff_format)
@@ -197,11 +208,19 @@ class Compressor(multiprocessing.Process):
                 log.debug('Waited more than 60 seconds for compression to end, killing it...')
                 break
 
-
         log.debug('Compression joined!')
 
         self.terminate()
         self.join()
+
+        # Free shared memory after the compressor is done
+        try:
+            log.debug('Freeing frame buffers in Compressor...')
+            del self.array1
+            del self.array2
+        except Exception as e:
+            log.debug('Freeing frame buffers failed with error:' + repr(e))
+            log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
         # Return the detector and live viewer objects because they were updated in this namespace
         return self.detector

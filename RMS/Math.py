@@ -8,7 +8,7 @@ def lineFunc(x, m, k):
     """ Linear function.
     
     Arguments:
-        x: [float or ndarray] Independant variable.
+        x: [float or ndarray] Independent variable.
         m: [float] Slope.
         k: [float] Y-intercept.
 
@@ -23,7 +23,7 @@ def logLineFunc(x, m, k):
     """ Logarithmic linear function.
 
     Arguments:
-        x: [float or ndarray] Independant variable.
+        x: [float or ndarray] Independent variable.
         m: [float] Slope.
         k: [float] Y-intercept.
 
@@ -161,7 +161,7 @@ def polarToCartesian(theta, phi):
         phi: [float] Latitude in radians.
 
     Return:
-        (x, y, z): [tuple of floats] Coordinates of the point in 3D cartiesian coordinates.
+        (x, y, z): [tuple of floats] Coordinates of the point in 3D cartesian coordinates.
     """
 
 
@@ -264,7 +264,7 @@ def sphericalToCartesian(r, theta, phi):
         phi: [float] Azimuth angle in radians.
 
     Return:
-        (x, y, z): [tuple of floats] Coordinates of the point in 3D cartiesian coordinates.
+        (x, y, z): [tuple of floats] Coordinates of the point in 3D cartesian coordinates.
     """
 
     x = r*np.sin(theta)*np.cos(phi)
