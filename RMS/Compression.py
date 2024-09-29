@@ -20,10 +20,14 @@ import sys
 import traceback
 import time
 import datetime
-import pytz
 import logging
 import multiprocessing
 from math import floor
+
+try:
+    import pytz
+except ImportError:
+    pass
 
 import numpy as np
 import cv2
