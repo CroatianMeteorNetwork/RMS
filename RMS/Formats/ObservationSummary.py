@@ -166,13 +166,13 @@ def startObservationSummaryReport(config, duration, force_delete=False):
 
     addObsParam(conn, "hardware_version", hardware_version)
 
-    repo = git.Repo(search_parent_directories=True)
-    if repo:
-        addObsParam(conn, "commit_date",
-                    datetime.datetime.fromtimestamp(repo.head.object.committed_date).strftime('%Y%m%d_%H%M%S'))
-        addObsParam(conn, "commit_hash", repo.head.object.hexsha)
-    else:
-        print("RMS Git repository not found. Skipping Git-related information.")
+    #repo = git.Repo(search_parent_directories=True)
+    #if repo:
+    #    addObsParam(conn, "commit_date",
+    #                datetime.datetime.fromtimestamp(repo.head.object.committed_date).strftime('%Y%m%d_%H%M%S'))
+    #    addObsParam(conn, "commit_hash", repo.head.object.hexsha)
+    #else:
+    #    print("RMS Git repository not found. Skipping Git-related information.")
     
     # Get the disk usage info (only in Python 3.3+)
     if (sys.version_info.major > 2) and (sys.version_info.minor > 2):
