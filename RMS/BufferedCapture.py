@@ -551,22 +551,23 @@ class BufferedCapture(Process):
             protocol_str = "protocols=udp retry=5"
             # rtspsrc_params = ("rtspsrc buffer-mode=1 protocols=udp retry=5")
 
-        else:  
+        else:
             # Default to TCP
             protocol_str = "protocols=tcp tcp-timeout=5000000 retry=5"
-            #rtspsrc_params = ("rtspsrc buffer-mode=1 protocols=tcp tcp-timeout=5000000 retry=5")
-            
+
         # Define the source up to the point where we want to branch off
         source_to_tee = (
             "rtspsrc buffer-mode=1 {:s} "
             "location=\"{:s}\" ! "
-            "rtph264depay ! tee name=t"
+            "rtph264depay ! h264parse ! tee name=t"
             ).format(protocol_str, device_url)
 
         # Branch for processing
         processing_branch = (
-            "t. ! queue ! h264parse ! {:s} ! videoconvert ! video/x-raw,format={:s} ! "
+            "t. ! queue ! {:s} ! "
             "queue leaky=downstream max-size-buffers=100 max-size-bytes=0 max-size-time=0 ! "
+            "videoconvert ! video/x-raw,format={:s} ! "
+            "queue max-size-buffers=100 max-size-bytes=0 max-size-time=0 ! "
             "appsink max-buffers=100 drop=true sync=0 name=appsink"
             ).format(gst_decoder, video_format)
         
@@ -575,7 +576,7 @@ class BufferedCapture(Process):
 
             video_location = os.path.join(video_file_dir, "video_%05d.mkv")
             storage_branch = (
-                "t. ! queue ! h264parse ! "
+                "t. ! queue max-size-buffers=0 max-size-bytes=0 max-size-time=0 ! "
                 "splitmuxsink location={:s} max-size-time={:d} muxer-factory=matroskamux"
                 ).format(video_location, int(segment_duration_sec*1e9))
 
