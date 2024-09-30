@@ -226,10 +226,10 @@ def timestampFromNTP(addr='0.us.pool.ntp.org'):
         client.sendto(data, (addr, 123))
         data, address = client.recvfrom(1024)
     except socket.timeout:
-        logging.error("NTP request timed out")
+        print("NTP request timed out")
         return None
     except Exception as e:
-        logging.error("NTP request failed: %s", e)
+        print("NTP request failed: {}".format(e))
         return None
     if data:
         t = struct.unpack('!12I', data)[10]
