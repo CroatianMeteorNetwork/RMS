@@ -5983,7 +5983,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Get the rolling shutter corrected (or not, depending on the config) frame number
             if self.config.deinterlace_order == -1:
-                frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick)
+                frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick, fps=self.config.fps, scan_rate=self.config.scan_rate)
 
             # If the global shutter is used, the frame number can only be an integer
             if self.config.deinterlace_order == -2:
@@ -6172,7 +6172,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Get the rolling shutter corrected (or not, depending on the config) frame number
             if self.config.deinterlace_order == -1:
-                frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick)
+                frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick, fps=self.config.fps, scan_rate=self.config.scan_rate)
 
             # If the global shutter is used, the frame number can only be an integer
             if self.config.deinterlace_order == -2:
@@ -6226,7 +6226,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
 
-    def getRollingShutterCorrectedFrameNo(self, frame, pick):
+    def getRollingShutterCorrectedFrameNo(self, frame, pick, fps=25.0, scan_rate=1/30.0):
         """ Given a pick object, return rolling shutter corrected (or not, depending on the config) frame
             number.
         """
@@ -6242,7 +6242,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 img_h = self.img.data.shape[1]
 
             # Compute the corrected frame time
-            frame_no = RollingShutterCorrection.correctRollingShutterTemporal(frame, pick['y_centroid'], img_h)
+            frame_no = RollingShutterCorrection.correctRollingShutterTemporal(frame, pick['y_centroid'], img_h, fps=fps, scan_rate=scan_rate)
 
         # If global shutter, do no correction
         else:

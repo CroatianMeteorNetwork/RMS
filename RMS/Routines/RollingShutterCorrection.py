@@ -3,7 +3,7 @@
 from __future__ import print_function, division, absolute_import
 
 
-def correctRollingShutterTemporal(frame, y_centr, n_rows):
+def correctRollingShutterTemporal(frame, y_centr, n_rows, fps=25.0, scan_rate=1/30.0):
     """ Given the frame index, height of the meteor on the image, total height of the image, correct
         frame timestamps to compensate for the rolling shutter effect.
 
@@ -13,10 +13,12 @@ def correctRollingShutterTemporal(frame, y_centr, n_rows):
         frame: [list] Frame on which the meteor was recorded.
         y_centr: [list] Y coordinate of the meteor centroid.
         n_rows: [float] Vertical size of the image in pixels.
+        fps: [float] Frame per second
+        scan_rate: [float] The time taken to scan the entire sensor, in seconds.
     """
 
     # Compute the time offset in fractional frames
-    delta_t = y_centr/n_rows
+    delta_t = (fps*scan_rate)*(y_centr/n_rows)
 
     # Compute the corrected timestamp
     fr_corrected = frame + delta_t
@@ -27,7 +29,7 @@ def correctRollingShutterTemporal(frame, y_centr, n_rows):
 
 
 
-def correctRollingShutterTemporalList(frames_list, height_list, n_rows):
+def correctRollingShutterTemporalList(frames_list, height_list, n_rows, fps=25.0, scan_rate=1/30.0):
     """ Given the list of frame indices, height of the meteor on the image, total height of the image, correct
         frame timestamps to compensate for the rolling shutter effect.
 
@@ -51,7 +53,7 @@ def correctRollingShutterTemporalList(frames_list, height_list, n_rows):
     # Compute the corrected timestamp for every centroid
     for fr, y_centr in zip(frames_list, height_list):
 
-        fr_corrected = correctRollingShutterTemporal(fr, y_centr, n_rows)
+        fr_corrected = correctRollingShutterTemporal(fr, y_centr, n_rows, fps=fps, scan_rate=scan_rate)
 
         corrected_frame_times.append(fr_corrected)
 
