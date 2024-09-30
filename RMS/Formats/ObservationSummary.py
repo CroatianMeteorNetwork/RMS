@@ -220,16 +220,23 @@ def timestampFromNTP(addr='0.us.pool.ntp.org'):
 
     REF_TIME_1970 = 2208988800  # Reference time
     client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    client.settimeout(5)
     data = b'\x1b' + 47 * b'\0'
-    client.sendto(data, (addr, 123))
-    data, address = client.recvfrom(1024)
+    try:
+        client.sendto(data, (addr, 123))
+        data, address = client.recvfrom(1024)
+    except socket.timeout:
+        logging.error("NTP request timed out")
+        return None
+    except Exception as e:
+        logging.error("NTP request failed: %s", e)
+        return None
     if data:
         t = struct.unpack('!12I', data)[10]
         t -= REF_TIME_1970
         return t
     else:
         return None
-
 
 def timeSyncStatus(config):
 
