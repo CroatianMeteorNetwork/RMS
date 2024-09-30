@@ -5,9 +5,13 @@ def make_ext(modname, pyxfilename):
     # Use extra compile arguments for this Cython
     import RMS.ConfigReader as cr
     from distutils.extension import Extension
+    from RMS.Misc import getRmsRootDir
+    import os
 
     # Load the configuration file
-    config = cr.parse(".config")
+    config_filename = '.config'
+    config_path = os.path.join(getRmsRootDir(), config_filename)
+    config = cr.parse(config_path)
 
     # Use additional compile arguments
     ext = Extension(name = modname,
