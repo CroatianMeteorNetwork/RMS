@@ -341,6 +341,139 @@ def extractStarsFF(
     return ff_name, x_arr, y_arr, amplitude, intensity, fwhm
 
 
+def extractStarsImgHandle(img_handle,
+        flat_struct=None, dark=None, mask=None,
+        config=None, 
+        border=10,
+        max_global_intensity=150, 
+        neighborhood_size=10, intensity_threshold=18, 
+        segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8
+    ):
+
+    """ Extracts stars on a given image handle by searching for local maxima and applying PSF fit for star 
+        confirmation.
+
+    Arguments:
+        img_handle: [FrameInterface instance] Image data handle.
+
+    Keyword arguments:
+        flat_struct: [Flat struct] Structure containing the flat field. None by default.
+        dark: [ndarray] Dark frame. None by default.
+        mask: [ndarray] Mask image. None by default.
+        config: [config object] configuration object (loaded from the .config file)
+        max_global_intensity: [int] maximum mean intensity of an image before it is discarded as too bright
+        border: [int] apply a mask on the detections by removing all that are too close to the given image 
+            border (in pixels)
+        neighborhood_size: [int] size of the neighbourhood for the maximum search (in pixels)
+        intensity_threshold: [float] a threshold for cutting the detections which are too faint (0-255)
+        segment_radius: [int] Radius (in pixels) of image segment around the detected star on which to 
+            perform the fit.
+        roundness_threshold: [float] Minimum ratio of 2D Gaussian sigma X and sigma Y to be taken as a stars
+            (hot pixels are narrow, while stars are round).
+        max_feature_ratio: [float] Maximum ratio between 2 sigma of the star and the image segment area.
+
+    Return:
+        x2, y2, background, intensity, fwhm: [list of ndarrays]
+            - x2: X axis coordinates of the star
+            - y2: Y axis coordinates of the star
+            - background: background intensity
+            - intensity: intensity of the star
+            - Gaussian Full width at half maximum (FWHM) of fitted stars
+    """
+
+    # This will be returned if there was an error
+    error_return = [[], [], [], [], [], []]
+
+    # Load parameters from config if given
+    if config is not None:
+        max_global_intensity = config.max_global_intensity
+        border = config.border
+        neighborhood_size = config.neighborhood_size
+        intensity_threshold = config.intensity_threshold
+        segment_radius = config.segment_radius
+        roundness_threshold = config.roundness_threshold
+        max_feature_ratio = config.max_feature_ratio
+
+
+    star_list = []
+
+
+    # Set the reference frame to 0
+    img_handle.setFrame(0)
+
+    # Go through all the chunks in the image handle
+    for chunk_no in range(img_handle.total_fr_chunks):
+
+        # Load one video frame chunk
+        ff_tmp = img_handle.loadChunk()
+
+        # Extract the image to work on
+        avepixel = ff_tmp.avepixel
+
+
+        # Apply the dark frame
+        if dark is not None:
+            avepixel = Image.applyDark(avepixel, dark)
+
+        # Apply the flat
+        if flat_struct is not None:
+            avepixel = Image.applyFlat(avepixel, flat_struct)
+
+        # Mask the FF file
+        if mask is not None:
+            avepixel = MaskImage.applyMask(avepixel, mask, ff_flag=False)
+
+
+        # Calculate image mean and stddev
+        img_median = np.median(avepixel)
+
+        # Check if the image is too bright and skip the image
+        if img_median > max_global_intensity:
+            return error_return
+
+        # Get the image data from the average pixel image
+        img = avepixel.astype(np.float32)
+
+        # Extract stars from the average pixel image
+        status = extractStars(
+            img, img_median=img_median, 
+            mask=mask, gamma=config.gamma,
+            max_star_candidates=config.max_stars, border=border,
+            neighborhood_size=neighborhood_size, intensity_threshold=intensity_threshold, 
+            segment_radius=segment_radius, roundness_threshold=roundness_threshold, 
+            max_feature_ratio=max_feature_ratio
+        )
+
+        # If the star extraction failed, return an empty list
+        if status is False:
+            return error_return
+        
+        # Unpack the star data
+        x_arr, y_arr, amplitude, intensity, fwhm = status
+
+        # Print the results
+        print()
+        print("Chunk time:", img_handle.currentTime(dt_obj=True))
+        print("Number of stars:", len(x_arr))
+        for x, y, a, i, f in zip(x_arr, y_arr, amplitude, intensity, fwhm):
+            print("{:10.2f} {:10.2f} {:10.2f} {:10.2f} {:10.2f}".format(x, y, a, i, f))
+
+
+
+        # # Get the time of the current chunk
+        # current_dt = img_handle.currentTime(dt_obj=True)
+
+        # # Construct an FF file name
+
+        # star_list.append([ [y_arr, x_arr, amplitude, intensity, fwhm]])
+
+        # Go to the next chunk
+        img_handle.nextChunk()
+
+    
+
+
+
 
 def twoDGaussian(params, amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
     """ Defines a 2D Gaussian distribution. 

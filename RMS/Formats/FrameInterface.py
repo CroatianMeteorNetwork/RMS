@@ -245,6 +245,9 @@ class InputTypeFRFF(InputType):
         # Number for frames to read by default
         self.total_frames = 256
 
+        # Total chunks (i.e. FF files)
+        self.total_fr_chunks = len(self.ff_list)
+
         # Cahcne for whole FF files
         self.cache = {}
 
