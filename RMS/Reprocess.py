@@ -203,11 +203,11 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         if (platepar is not None) and (calstars_name is not None):
 
             # Read in the CALSTARS file
-            calstars_list = CALSTARS.readCALSTARS(night_data_dir, calstars_name)
+            calstars_data = CALSTARS.readCALSTARS(night_data_dir, calstars_name)
 
 
             # Run astrometry check and refinement
-            platepar, fit_status = autoCheckFit(config, platepar, calstars_list)
+            platepar, fit_status = autoCheckFit(config, platepar, calstars_data)
 
             obs_db_conn = getObsDBConn(config)
             # If the fit was successful, apply the astrometry to detected meteors

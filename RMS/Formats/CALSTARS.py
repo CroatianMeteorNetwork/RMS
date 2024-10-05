@@ -18,21 +18,25 @@
 import os
 
 
-def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols):
+def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols, chunk_frames=256):
     """ Writes the star list into the CAMS CALSTARS format. 
 
-    @param star_list: [list] a list of star data, entries:
-        ff_name, star_data
-        star_data entries:
-            x, y, bg_level, level
+    Arguments:
+        star_list: [list] a list of star data, entries:
+            ff_name, star_data
+            star_data entries:
+                x, y, bg_level, level
+        ff_directory: [str] path to the directory in which the file will be written
+        file_name: [str] file name in which the data will be written
+        cam_code: [str] camera code
+        nrows: [int] number of rows in the image
+        ncols: [int] number of columns in the image
 
-    @param ff_directory: [str] path to the directory in which the file will be written
-    @param file_name: [str] file name in which the data will be written
-    @param cam_code: [str] camera code
-    @param nrows: [int] number of rows in the image
-    @param ncols: [int] number of columns in the image
+    Keyword arguments:
+        chunk_frames: [int] Number of frames in the FF file or frame chunk. Default is 256.
 
-    @return None
+    Return:
+        None
     """
 
     with open(os.path.join(ff_directory, file_name), 'w') as star_file:
@@ -44,10 +48,11 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols):
         star_file.write("Row  Column  Intensity-Backgnd  Amplitude  (integrated values) FWHM" + "\n")
         star_file.write("==========================================================================\n")
         star_file.write("FF folder = " + ff_directory + "\n")
-        star_file.write("Cam #  = " + str(cam_code) + "\n")
-        star_file.write("Nrows  = " + str(nrows) + "\n")
-        star_file.write("Ncols  = " + str(ncols) + "\n")
-        star_file.write("Nstars = -1" + "\n")
+        star_file.write("Cam #   = " + str(cam_code) + "\n")
+        star_file.write("Nrows   = " + str(nrows) + "\n")
+        star_file.write("Ncols   = " + str(ncols) + "\n")
+        star_file.write("Nframes = " + str(chunk_frames) + "\n")
+        star_file.write("Nstars  = -1" + "\n")
 
         # Write all stars in the CALSTARS file
         for star in star_list:
@@ -71,16 +76,22 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols):
 
 
 
-def readCALSTARS(file_path, file_name):
+def readCALSTARS(file_path, file_name, chunk_frames=256):
     """ Reads a list of detected stars from a CAMS CALSTARS format. 
 
-    @param file_path: [string] path to the directory where the CALSTARS file is located
-    @param file_name: [string] name of the CALSTARS file
+    Arguments:
+        file_path: [str] Path to the directory where the CALSTARS file is located.
+        file_name: [str] Name of the CALSTARS file.
 
-    @return star_list: [list] a list of star data, entries:
-        ff_name, star_data
-        star_data entries:
-            x, y, bg_level, level, fwhm
+    Keyword arguments:
+        chunk_frames: [int] Number of frames in the FF file or frame chunk. Default is 256.
+            Will be overwritten by a number in the CALSTARS file if present.
+
+    Return:
+        star_list: [list] a list of star data, entries:
+            ff_name, star_data
+            star_data entries:
+                x, y, bg_level, level, fwhm
     """
 
     
@@ -104,6 +115,11 @@ def readCALSTARS(file_path, file_name):
             # Skip lines if necessary
             if skip_lines > 0:
                 skip_lines -= 1
+                continue
+
+            # Read the number of frames if given (Nframes = ...)
+            if "Nframes" in line:
+                chunk_frames = int(line.split('=')[-1])
                 continue
 
             # Check for end of star entry
@@ -150,4 +166,4 @@ def readCALSTARS(file_path, file_name):
             star_data.append([float(line[0]), float(line[1]), int(line[2]), int(line[3]), fwhm])
 
     
-    return calibrationstars_list
+    return calibrationstars_list, chunk_frames

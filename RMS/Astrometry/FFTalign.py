@@ -406,7 +406,8 @@ if __name__ == "__main__":
         sys.exit()
 
     # Load the calstars file
-    calstars_list = CALSTARS.readCALSTARS(dir_path, calstars_file)
+    calstars_data = CALSTARS.readCALSTARS(dir_path, calstars_file)
+    calstars_list, ff_frames = calstars_data
     calstars_dict = {ff_file: star_data for ff_file, star_data in calstars_list}
 
     log.info('CALSTARS file: ' + calstars_file + ' loaded!')
@@ -419,7 +420,7 @@ if __name__ == "__main__":
     calstars_coords[:, [0, 1]] = calstars_coords[:, [1, 0]]
 
     # Get the time of the FF file
-    calstars_time = getMiddleTimeFF(max_len_ff, config.fps, ret_milliseconds=True)
+    calstars_time = getMiddleTimeFF(max_len_ff, config.fps, ret_milliseconds=True, ff_frames=ff_frames)
 
 
 

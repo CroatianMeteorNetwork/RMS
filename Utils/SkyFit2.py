@@ -4457,7 +4457,7 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
 
             # Load the calstars file
-            calstars_list = CALSTARS.readCALSTARS(self.dir_path, calstars_file)
+            calstars_list, _ = CALSTARS.readCALSTARS(self.dir_path, calstars_file)
 
             print('CALSTARS file: ' + calstars_file + ' loaded!')
 

@@ -381,6 +381,7 @@ def recalibratePlateparsForFF(
     lim_mag=None,
     ignore_distance_threshold=False,
     ignore_max_stars=False,
+    ff_frames=256
 ):
     """
     Recalibrate platepars corresponding to ff files based on the stars.
@@ -398,6 +399,7 @@ def recalibratePlateparsForFF(
         ignore_distance_threshold: [bool] Don't consider the recalib as failed if the median distance
             is larger than the threshold.
         ignore_max_stars: [bool] Ignore the maximum number of image stars for recalibration.
+        ff_frames: [int] Number of frames in the FF file or frame chunk. Default is 256.
 
     Returns:
         recalibrated_platepars: [dict] A dictionary where one key is ff file name and the value is
@@ -423,7 +425,8 @@ def recalibratePlateparsForFF(
 
         # Get stars detected on this FF file (create a dictionary with only one entry, the residuals function
         #   needs this format)
-        calstars_time = FFfile.getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True)
+        calstars_time = FFfile.getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True, 
+                                               ff_frames=ff_frames)
         jd = date2JD(*calstars_time)
         star_dict_ff = {jd: calstars[ff_name]}
 
@@ -528,14 +531,16 @@ def recalibratePlateparsForFF(
     return recalibrated_platepars
 
 
-def recalibrateSelectedFF(dir_path, ff_file_names, calstars_list, config, lim_mag, \
+def recalibrateSelectedFF(dir_path, ff_file_names, calstars_data, config, lim_mag, \
     pp_recalib_name, ignore_distance_threshold=False, ignore_max_stars=False):
     """Recalibrate FF files, ignoring whether there are detections.
 
     Arguments:
         dir_path: [str] Path where the FF files are.
         ff_file_names: [str] List of ff files to recalibrate platepars to
-        calstars_list: [list] A list of entries [[ff_name, star_coordinates], ...].
+        calstars_data: [tuple] (list, int)
+            - A list of entries [[ff_name, star_coordinates], ...].
+            - The number of frames in the FF file or frame chunk.
         config: [Config instance]
         lim_mag: [float] Limiting magnitude for the catalog.
         pp_recalib_name: [str] Name for the file where the recalibrated platepars will be stored as JSON.
@@ -550,6 +555,9 @@ def recalibrateSelectedFF(dir_path, ff_file_names, calstars_list, config, lim_ma
             recalibrated platepar instances for every FF file.
     """
     config = copy.deepcopy(config)
+
+    calstars_list, ff_frames = calstars_data
+
     calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
 
     # load star catalog with increased catalog limiting magnitude
@@ -584,6 +592,7 @@ def recalibrateSelectedFF(dir_path, ff_file_names, calstars_list, config, lim_ma
         lim_mag=lim_mag,
         ignore_distance_threshold=ignore_distance_threshold,
         ignore_max_stars=ignore_max_stars,
+        ff_frames=ff_frames
     )
 
     # Store recalibrated platepars in json
@@ -602,17 +611,22 @@ def recalibrateSelectedFF(dir_path, ff_file_names, calstars_list, config, lim_ma
 
 
 def recalibrateIndividualFFsAndApplyAstrometry(
-    dir_path, ftpdetectinfo_path, calstars_list, config, platepar, generate_plot=True
+    dir_path, ftpdetectinfo_path, calstars_data, config, platepar, generate_plot=True
 ):
     """Recalibrate FF files with detections and apply the recalibrated platepar to those detections.
+    
     Arguments:
         dir_path: [str] Path where the FTPdetectinfo file is.
         ftpdetectinfo_path: [str] Name of the FTPdetectinfo file.
-        calstars_list: [list] A list of entries [[ff_name, star_coordinates], ...].
+        calstars_data: [tuple] (list, int)
+            - A list of entries [[ff_name, star_coordinates], ...].
+            - The number of frames in the FF file or frame chunk.
         config: [Config instance]
         platepar: [Platepar instance] Initial platepar.
+        
     Keyword arguments:
         generate_plot: [bool] Generate the calibration variation plot. True by default.
+
     Return:
         recalibrated_platepars: [dict] A dictionary where the keys are FF file names and values are
             recalibrated platepar instances for every FF file.
@@ -1007,13 +1021,13 @@ def applyRecalibrate(ftpdetectinfo_path, config, generate_plot=True):
         sys.exit()
 
     # Load the calstars file
-    calstars_list = CALSTARS.readCALSTARS(dir_path, calstars_file)
+    calstars_data = CALSTARS.readCALSTARS(dir_path, calstars_file)
 
     log.info('CALSTARS file: ' + calstars_file + ' loaded!')
 
     # Recalibrate and apply astrometry on every FF file with detections individually
     recalibrated_platepars = recalibrateIndividualFFsAndApplyAstrometry(
-        dir_path, ftpdetectinfo_path, calstars_list, config, platepar, generate_plot=generate_plot
+        dir_path, ftpdetectinfo_path, calstars_data, config, platepar, generate_plot=generate_plot
     )
 
     ### Generate the updated UFOorbit file ###

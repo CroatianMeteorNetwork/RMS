@@ -451,25 +451,28 @@ def extractStarsImgHandle(img_handle,
         # Unpack the star data
         x_arr, y_arr, amplitude, intensity, fwhm = status
 
+
+        # Construct an FF name from the chunk time
+        ff_name = FFfile.constructFFName(
+            config.stationID, img_handle.currentTime(dt_obj=True, beginning=True)
+            )
+
         # Print the results
         print()
-        print("Chunk time:", img_handle.currentTime(dt_obj=True))
+        print("FF name:", ff_name)
+        print("Num frames:", img_handle.chunk_frames)
         print("Number of stars:", len(x_arr))
         for x, y, a, i, f in zip(x_arr, y_arr, amplitude, intensity, fwhm):
             print("{:10.2f} {:10.2f} {:10.2f} {:10.2f} {:10.2f}".format(x, y, a, i, f))
 
 
-
-        # # Get the time of the current chunk
-        # current_dt = img_handle.currentTime(dt_obj=True)
-
-        # # Construct an FF file name
-
-        # star_list.append([ [y_arr, x_arr, amplitude, intensity, fwhm]])
+        star_list.append([ff_name, list(zip(y_arr, x_arr, amplitude, intensity, fwhm))])
 
         # Go to the next chunk
         img_handle.nextChunk()
+    
 
+    return star_list
     
 
 
