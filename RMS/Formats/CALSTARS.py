@@ -92,10 +92,12 @@ def readCALSTARS(file_path, file_name, chunk_frames=256):
             Will be overwritten by a number in the CALSTARS file if present.
 
     Return:
-        star_list: [list] a list of star data, entries:
-            ff_name, star_data
-            star_data entries:
-                x, y, bg_level, level, fwhm
+        star_list, chunk_frames: 
+            - star_list [list] a list of star data, entries:
+                ff_name, star_data
+                star_data entries:
+                    x, y, bg_level, level, fwhm
+            - chunk_frames [int] Number of frames in the FF file or frame chunk.
     """
 
     
@@ -127,7 +129,7 @@ def readCALSTARS(file_path, file_name, chunk_frames=256):
                 continue
 
             # Check for end of star entry
-            if ("===" in line) or ("###" in line):
+            if (("===" in line) or ("###" in line)) and len(ff_name):
 
                 # Add the star list to the main list
                 calibrationstars_list.append([ff_name, star_data])

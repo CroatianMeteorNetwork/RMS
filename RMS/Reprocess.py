@@ -233,8 +233,11 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             log.info("Recalibrating astrometry on FF files with detections...")
 
             # Recalibrate astrometry on every FF file and apply the calibration to detections
-            recalibrated_platepars = recalibrateIndividualFFsAndApplyAstrometry(night_data_dir, \
-                os.path.join(night_data_dir, ftpdetectinfo_name), calstars_list, config, platepar)
+            (
+                recalibrated_platepars, _
+            ) = recalibrateIndividualFFsAndApplyAstrometry(night_data_dir,
+                os.path.join(night_data_dir, ftpdetectinfo_name), calstars_data, config, platepar
+                )
 
 
 

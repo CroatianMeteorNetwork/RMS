@@ -284,7 +284,7 @@ def filenameToDatetime(file_name, microseconds='auto'):
 
 
 
-def getMiddleTimeFF(ff_name, fps, ret_milliseconds=True, ff_frames=256):
+def getMiddleTimeFF(ff_name, fps, ret_milliseconds=True, ff_frames=256, dt_obj=False):
     """ Converts a CAMS format FF file name to datetime object of its recording time. 
 
     Arguments:
@@ -296,6 +296,7 @@ def getMiddleTimeFF(ff_name, fps, ret_milliseconds=True, ff_frames=256):
             be in microseconds.
         ff_frames: [int] Number of frames that were compressed in the FF file.
         UT_corr: [float] UT correction (hours).
+        dt_obj: [bool] If True, the function will return a datetime object instead of individual values.
     
     Return:
         [tuple] (year, month, day, hour, minute, second, microsecond/millisecond)
@@ -303,22 +304,27 @@ def getMiddleTimeFF(ff_name, fps, ret_milliseconds=True, ff_frames=256):
     """
 
     # Extract date and time of the FF file from its name
-    dt_obj = filenameToDatetime(ff_name)
+    dt = filenameToDatetime(ff_name)
 
     # Time in seconds from the middle of the FF file
     middle_diff = datetime.timedelta(seconds=ff_frames/2.0/fps)
 
     # Add the difference in time
-    dt_obj = dt_obj + middle_diff
+    dt = dt + middle_diff
 
-    # Unpack datetime to individual values
-    year, month, day, hour, minute, second, microsecond = (dt_obj.year, dt_obj.month, dt_obj.day, dt_obj.hour, 
-        dt_obj.minute, dt_obj.second, dt_obj.microsecond)
-
-    if ret_milliseconds:
-        return (year, month, day, hour, minute, second, microsecond/1000)
+    if dt_obj:
+        return dt
+    
     else:
-        return (year, month, day, hour, minute, second, microsecond)
+
+        # Unpack datetime to individual values
+        year, month, day, hour, minute, second, microsecond = (dt.year, dt.month, dt.day, dt.hour, 
+            dt.minute, dt.second, dt.microsecond)
+
+        if ret_milliseconds:
+            return (year, month, day, hour, minute, second, microsecond/1000)
+        else:
+            return (year, month, day, hour, minute, second, microsecond)
 
 
 def constructFFName(station_code, beg_dt, ext='fits'):

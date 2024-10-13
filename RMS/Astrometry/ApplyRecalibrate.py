@@ -636,8 +636,10 @@ def recalibrateIndividualFFsAndApplyAstrometry(
         load_all: [bool] Load all FTPdetectinfo files in the directory and recalibrate them. False by default.
 
     Return:
-        recalibrated_platepars: [dict] A dictionary where the keys are FF file names and values are
-            recalibrated platepar instances for every FF file.
+        (recalibrated_platepars, ftpdetectinfo_file_list): 
+            - recalibrated_platepars: [dict] A dictionary where the keys are FF file names and values are
+                recalibrated platepar instances for every FF file.
+            - ftpdetectinfo_file_list: [list] List of FTPdetectinfo files that were loaded.
     """
 
     # Use a copy of the config file
@@ -650,6 +652,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
     if load_all:
 
         meteor_list = []
+        ftpdetectinfo_file_list = []
 
         # Load all FTPdetectinfo files in the directory
         for ftpdetectinfo_file in sorted(os.listdir(dir_path)):
@@ -660,10 +663,12 @@ def recalibrateIndividualFFsAndApplyAstrometry(
                 # Load the FTPdetectinfo data
                 # NOTE: The assumption is that all files have the same camera code and FPS, as they should
                 cam_code, fps, meteor_list_tmp = FTPdetectinfo.readFTPdetectinfo(
-                    *os.path.split(ftpdetectinfo_file), ret_input_format=True
+                    dir_path, ftpdetectinfo_file, ret_input_format=True
                 )
 
                 meteor_list.extend(meteor_list_tmp)
+
+                ftpdetectinfo_file_list.append(ftpdetectinfo_file)
 
         # If the meteor list is empty, return nothing
         if len(meteor_list) == 0:
@@ -686,8 +691,10 @@ def recalibrateIndividualFFsAndApplyAstrometry(
             *os.path.split(ftpdetectinfo_path), ret_input_format=True
         )
 
+        ftpdetectinfo_file_list = [os.path.filename(ftpdetectinfo_path)]
+
     # Load the list of stars from the CALSTARS file
-    calstars_list, ff_frames = calstars_data
+    calstars_list, calstars_ff_frames = calstars_data
 
     # Convert the list of stars to a per FF name dictionary
     calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
@@ -700,12 +707,13 @@ def recalibrateIndividualFFsAndApplyAstrometry(
     ftp_ff_datetime_dict = OrderedDict()
     for meteor_entry in meteor_list:
         ff_name = meteor_entry[0]
-        ftp_ff_datetime_dict[ff_name] = FFfile.filenameToDatetime(ff_name)
+        ftp_ff_datetime_dict[ff_name] = FFfile.getMiddleTimeFF(ff_name, config.fps, dt_obj=True)
 
     # Create a dictionary mapping FF file names in CALSTARS to datetime objects
     calstars_datetime_dict = OrderedDict()
     for ff_name in calstars:
-        calstars_datetime_dict[ff_name] = FFfile.filenameToDatetime(ff_name)
+        calstars_datetime_dict[ff_name] = FFfile.getMiddleTimeFF(ff_name, config.fps, dt_obj=True, 
+                                                                 ff_frames=calstars_ff_frames)
 
 
     # Go through every FF file entry listed in the FTPdetectinfo and identify three FF entries in the CALSTARS
@@ -804,7 +812,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
 
     # Go through all FF files with detections, recalibrate and apply astrometry
     recalibrated_platepars = recalibratePlateparsForFF(
-        prev_platepar, ff_processing_list, calstars, catalog_stars, config, ff_frames=ff_frames
+        prev_platepar, ff_processing_list, calstars, catalog_stars, config, ff_frames=calstars_ff_frames
     )
 
     ### Average out photometric offsets within the given neighbourhood size ###
@@ -1019,6 +1027,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
     ### Apply platepars to FTPdetectinfo ###
 
     meteor_output_list = []
+    log.info('Applying recalibrated platepars to meteor detections...')
     for meteor_entry in meteor_list:
 
         ff_name, meteor_No, rho, phi, meteor_meas = meteor_entry
@@ -1027,9 +1036,8 @@ def recalibrateIndividualFFsAndApplyAstrometry(
         time_diff_func = lambda x: abs((ftp_ff_datetime_dict[ff_name] - calstars_datetime_dict[x]).total_seconds())
         closest_calstars_ff_name = min(calstars_datetime_dict, key=lambda x: time_diff_func(x))
 
-        # Debug print
         time_diff_s = time_diff_func(closest_calstars_ff_name)
-        log.debug('FTPdetect FF file: {:s}, closest CALSTARS FF file: {:s}, time difference: {:.1f} s'.format(
+        log.info('{:s} -> CALSTARS: {:s}, time diff: {:.1f} s'.format(
             ff_name, closest_calstars_ff_name, time_diff_s
         ))
 
@@ -1079,7 +1087,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
     )
 
     ### ###
-    return recalibrated_platepars
+    return recalibrated_platepars, ftpdetectinfo_file_list
 
 
 def applyRecalibrate(ftpdetectinfo_path, config, generate_plot=True, load_all=False):
@@ -1126,32 +1134,36 @@ def applyRecalibrate(ftpdetectinfo_path, config, generate_plot=True, load_all=Fa
         return {}
 
     # Load all calstars files in the directory
-    calstars_data = {}
+    calstars_list = []
     for calstars_file in calstars_file_list:
 
         # Load the calstars file
-        calstars_data_file = CALSTARS.readCALSTARS(dir_path, calstars_file)
+        calstars_list_file, chunk_frames = CALSTARS.readCALSTARS(dir_path, calstars_file)
 
-        # Merge the previously loaded data with the new one (Python 2 compatible)
-        for key in calstars_data_file:
-            if key in calstars_data:
-                calstars_data[key].extend(calstars_data_file[key])
-            else:
-                calstars_data[key] = calstars_data_file[key]
+        # Merge the previously loaded data with the new one
+        for ff_name, star_data in calstars_list_file:
+
+            # Check that the FF file hasn't been added already
+            if ff_name not in [entry[0] for entry in calstars_list]:
+                calstars_list.append([ff_name, star_data])
 
         log.info('CALSTARS file: ' + calstars_file + ' loaded!')
 
+    # Add the number of frames in the FF stack to the CALSTARS data lislt
+    calstars_data = (calstars_list, chunk_frames)
+
     # Recalibrate and apply astrometry on every FF file with detections individually
-    recalibrated_platepars = recalibrateIndividualFFsAndApplyAstrometry(
+    recalibrated_platepars, ftpdetectinfo_file_list = recalibrateIndividualFFsAndApplyAstrometry(
         dir_path, ftpdetectinfo_path, calstars_data, config, platepar, 
         generate_plot=generate_plot, load_all=load_all
 
     )
 
     ### Generate the updated UFOorbit file ###
-
-    Utils.RMS2UFO.FTPdetectinfo2UFOOrbitInput(
-        dir_path, os.path.basename(ftpdetectinfo_path), None, platepar_dict=recalibrated_platepars
+    log.debug('Generating UFOOrbit file...')
+    for ftpdetectinfo_file in ftpdetectinfo_file_list:
+        Utils.RMS2UFO.FTPdetectinfo2UFOOrbitInput(
+            dir_path, ftpdetectinfo_file, None, platepar_dict=recalibrated_platepars
     )
 
     ### ###
