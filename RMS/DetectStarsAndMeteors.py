@@ -425,7 +425,7 @@ if __name__ == "__main__":
     ### Init the logger
 
     from RMS.Logger import initLogging
-    initLogging(config, 'detection_')
+    initLogging(config, 'detection_', safedir=cml_args.dir_path)
 
     log = logging.getLogger("logger")
 
