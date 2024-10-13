@@ -57,6 +57,10 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols, ch
         # Write all stars in the CALSTARS file
         for star in star_list:
 
+            # Skip empty star lists
+            if len(star) < 2:
+                continue
+
             # Unpack star data
             ff_name, star_data = star
 
