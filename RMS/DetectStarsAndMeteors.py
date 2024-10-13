@@ -31,7 +31,7 @@ from RMS.Formats import CALSTARS
 from RMS.Formats.FFfile import validFFName, constructFFName
 from RMS.Formats.FrameInterface import detectInputType, detectInputTypeFile, checkIfVideoFile
 from RMS.ExtractStars import extractStarsFF
-from RMS.ExtractStarsFrameInterface import extractStarsDetectFrameInterface
+from RMS.ExtractStarsFrameInterface import extractStarsFrameInterface
 from RMS.Detection import detectMeteors
 from RMS.DetectionTools import loadImageCalibration
 from RMS.QueuedPool import QueuedPool
@@ -75,9 +75,8 @@ def detectStarsAndMeteorsFrameInterface(
                                                   byteswap=img_handle.byteswap)
     
     # Run star extraction on the image handle
-    star_list = extractStarsDetectFrameInterface(img_handle, config, chunk_frames=chunk_frames, 
-                                                 flat_struct=flat_struct, dark=dark, mask=mask, 
-                                                 save_calstars=False)
+    star_list = extractStarsFrameInterface(img_handle, config, chunk_frames=chunk_frames, 
+        flat_struct=flat_struct, dark=dark, mask=mask, save_calstars=False)
     
     log.info('Detected stars: ' + str(len(star_list[1])))
 
