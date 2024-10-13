@@ -132,8 +132,13 @@ def recalibrateFF(
     # If there more stars than a set limit, sample them randomly using the same seed for reproducibility
     if not ignore_max_stars and len(star_dict_ff[jd]) > config.recalibration_max_stars:
 
-        # Create a generator with a fixed random seed
-        rng = np.random.default_rng(seed=0)
+        if hasattr(np.random, 'default_rng'):
+            # Use the newer Generator-based RNG
+            rng = np.random.default_rng(seed=0)
+            
+        else:
+            # Use the older RandomState-based RNG
+            rng = np.random.RandomState(seed=0)
 
         # Sample the stars and store them in a copy of the star dictionary
         star_dict_ff = copy.deepcopy(star_dict_ff)
