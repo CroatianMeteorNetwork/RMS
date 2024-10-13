@@ -4,9 +4,13 @@ import RMS.ConfigReader as cr
 from RMS.Formats import CALSTARS
 from RMS.ExtractStars import extractStarsImgHandle
 from RMS.Formats.FrameInterface import detectInputType, detectInputTypeFile, checkIfVideoFile
+from RMS.DetectionTools import loadImageCalibration
 
 
-def extractStarsFrameInterface(img_handle, config, chunk_frames=128):
+def extractStarsFrameInterface(img_handle, config, 
+                               chunk_frames=128, 
+                               flat_struct=None, dark=None, mask=None, 
+                               save_calstars=True):
     """ Given an image handle, extract the stars from the image data.
 
     Arguments:
@@ -15,30 +19,38 @@ def extractStarsFrameInterface(img_handle, config, chunk_frames=128):
 
     Keyword arguments:
         chunk_frames: [int] Number of frames to stacked image on which the stars will be extracted.
+        flat_struct: [np.array] Flat field structure.
+        dark: [np.array] Dark field structure.
+        mask: [np.array] Mask structure.
+        save_calstars: [bool] Flag to indicate if the CALSTARS file should be saved.
 
     Return:
         star_list: [list] List of stars detected in the image.
     """
 
     # Extract the stars on the image handle
-    star_list = extractStarsImgHandle(img_handle, config=config)
-
-    # Construct the name of the CALSTARS file by using the camera code and the time of the first frame
-    timestamp = img_handle.beginning_datetime.strftime("%Y%m%d_%H%M%S_%f")
-    prefix = "{:s}_{:s}".format(config.stationID, timestamp)
-
-    # Generate the name for the CALSTARS file
-    calstars_name = 'CALSTARS_' + prefix + '.txt'
-
-    # Write detected stars to the CALSTARS file
-    CALSTARS.writeCALSTARS(star_list, img_handle.dir_path, calstars_name, 
-                           config.stationID, config.height, config.width, chunk_frames=chunk_frames)
+    star_list = extractStarsImgHandle(img_handle, config=config, 
+                                      flat_struct=flat_struct, dark=dark, mask=mask)
     
-    print("Stars extracted and written to {:s}".format(calstars_name))
+    if save_calstars:
+
+        # Construct the name of the CALSTARS file by using the camera code and the time of the first frame
+        timestamp = img_handle.beginning_datetime.strftime("%Y%m%d_%H%M%S_%f")
+        prefix = "{:s}_{:s}".format(config.stationID, timestamp)
+
+        # Generate the name for the CALSTARS file
+        calstars_name = 'CALSTARS_' + prefix + '.txt'
+
+        # Write detected stars to the CALSTARS file
+        CALSTARS.writeCALSTARS(star_list, img_handle.dir_path, calstars_name, 
+                            config.stationID, config.height, config.width, chunk_frames=chunk_frames)
+        
+        print("Stars extracted and written to {:s}".format(calstars_name))
 
     return star_list
 
-def extractStarsDetectFrameInterface(data_path, config, chunk_frames=128, multivids=False):
+def extractStarsDetectFrameInterface(data_path, config, 
+                                     chunk_frames=128, multivids=False, save_calstars=True):
     """ Extract the stars from the image data.
     
     Arguments:
@@ -48,6 +60,7 @@ def extractStarsDetectFrameInterface(data_path, config, chunk_frames=128, multiv
     Keyword arguments:
         chunk_frames: [int] Number of frames to stacked image on which the stars will be extracted.
         multivids: [bool] Flag to indicate that the data path is a directory containing multiple video files.
+        save_calstars: [bool] Flag to indicate if the CALSTARS file should be saved.
     
     Return:
         star_list: [list] List of stars detected in the image.
@@ -80,8 +93,13 @@ def extractStarsDetectFrameInterface(data_path, config, chunk_frames=128, multiv
             img_handle = detectInputTypeFile(video_file, config, detection=True, chunk_frames=chunk_frames,
                                              preload_video=True)
             
+            # Load mask, dark, flat
+            mask, dark, flat_struct = loadImageCalibration(img_handle.dir_path, config, 
+                dtype=img_handle.ff.dtype, byteswap=img_handle.byteswap)
+            
             # Extract the stars from the image handle
-            star_list = extractStarsFrameInterface(img_handle, config, chunk_frames=chunk_frames)
+            star_list = extractStarsFrameInterface(img_handle, config, chunk_frames=chunk_frames,
+                flat_struct=flat_struct, dark=dark, mask=mask, save_calstars=save_calstars)
 
 
     else:
@@ -90,8 +108,14 @@ def extractStarsDetectFrameInterface(data_path, config, chunk_frames=128, multiv
         #   (take 128 frames for making the FF files, applicable for videos and image sequences)
         img_handle = detectInputType(data_path, config, use_fr_files=False, detection=True, 
                                     chunk_frames=chunk_frames)
+        
+        # Load mask, dark, flat
+        mask, dark, flat_struct = loadImageCalibration(img_handle.dir_path, config, 
+            dtype=img_handle.ff.dtype, byteswap=img_handle.byteswap)
+        
         # Extract the stars from the image handle
-        star_list = extractStarsFrameInterface(img_handle, config, chunk_frames=chunk_frames)
+        star_list = extractStarsFrameInterface(img_handle, config, chunk_frames=chunk_frames,
+            flat_struct=flat_struct, dark=dark, mask=mask, save_calstars=save_calstars)
 
     return star_list
 
@@ -103,7 +127,8 @@ if __name__ == "__main__":
     ### COMMAND LINE ARGUMENTS
 
     arg_parser = argparse.ArgumentParser(
-        description="""Extract the stars from the image.""", formatter_class=argparse.RawTextHelpFormatter
+        description="""Extract stars from the given video or a directory with images.""", 
+        formatter_class=argparse.RawTextHelpFormatter
         )
 
     arg_parser.add_argument("data_path", type=str, 

@@ -28,9 +28,10 @@ import numpy as np
 import RMS.ConfigReader as cr
 from RMS.Formats import FTPdetectinfo
 from RMS.Formats import CALSTARS
-from RMS.Formats.FFfile import validFFName
+from RMS.Formats.FFfile import validFFName, constructFFName
 from RMS.Formats.FrameInterface import detectInputType
 from RMS.ExtractStars import extractStarsFF
+from RMS.ExtractStarsFrameInterface import extractStarsDetectFrameInterface
 from RMS.Detection import detectMeteors
 from RMS.DetectionTools import loadImageCalibration
 from RMS.QueuedPool import QueuedPool
@@ -39,6 +40,105 @@ from RMS.Misc import RmsDateTime
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
+
+
+
+def detectStarsAndMeteorsFrameInterface(
+        img_handle, config, 
+        flat_struct=None, dark=None, mask=None, chunk_frames=128
+        ):
+    """ Extract stars and detect meteors on the given image handle. This is most useful for videos and 
+        directories with images.
+
+    Arguments:
+        img_handle: [ImageHandle] Image handle object.
+        config: [Configuration object] configuration object.
+
+    Keyword arguments:
+        flat_struct: [Flat struct] Structure containing the flat field. None by default.
+        dark: [ndarray]
+        mask: [MaskStruct]
+        chunk_frames: [int] Number of frames to stacked image on which the stars will be extracted.
+
+    Return:
+        [star_list, meteor_list] detected stars and meteors    
+        
+    """
+
+    log.info('Running detection on file: ' + img_handle.file_name)
+
+    # Construct the image handle for the detection
+    img_handle = detectInputType(img_handle, config, skip_ff_dir=True, use_fr_files=False, 
+                                 detection=True, preload_video=True, chunk_frames=chunk_frames)
+    
+    # Load mask, dark, flat
+    mask, dark, flat_struct = loadImageCalibration(img_handle.dir_path, config, dtype=img_handle.dtype, 
+                                                  byteswap=img_handle.byteswap)
+    
+    # Run star extraction on the image handle
+    star_list = extractStarsDetectFrameInterface(img_handle, config, chunk_frames=chunk_frames, 
+                                                 flat_struct=flat_struct, dark=dark, mask=mask, 
+                                                 save_calstars=False)
+    
+    log.info('Detected stars: ' + str(len(star_list[1])))
+
+    # Run meteor detection if there are enough stars on the image
+    if len(star_list[1]) >= config.ff_min_stars:
+            
+        log.debug('At least ' + str(config.ff_min_stars) + ' stars, detecting meteors...')
+        
+        # Run the detection
+        meteor_list = detectMeteors(img_handle, config, flat_struct=flat_struct, dark=dark, mask=mask)
+        
+        log.info(img_handle.file_name + ' detected meteors: ' + str(len(meteor_list)))
+
+    else:
+        meteor_list = []
+
+
+    return star_list, meteor_list
+
+
+def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_frames=128):
+    """ Save detection results to CALSTARS and FTPdetectinfo files."""
+
+     # Construct the name of the CALSTARS file by using the camera code and the time of the first frame
+    timestamp = img_handle.beginning_datetime.strftime("%Y%m%d_%H%M%S_%f")
+    prefix = "{:s}_{:s}".format(config.stationID, timestamp)
+
+    # Generate the name for the CALSTARS file
+    calstars_name = 'CALSTARS_' + prefix + '.txt'
+
+    # Write detected stars to the CALSTARS file
+    CALSTARS.writeCALSTARS(star_list, img_handle.dir_path, calstars_name, 
+                        config.stationID, config.height, config.width, chunk_frames=chunk_frames)
+    
+    log.info("Stars extracted and written to {:s}".format(calstars_name))
+
+    # Generate FTPdetectinfo file name
+    ftpdetectinfo_name = 'FTPdetectinfo_' + prefix + '.txt'
+
+    results_list = []
+    meteor_No = 1
+    for meteor in meteor_list:
+
+        rho, theta, centroids = meteor
+
+        first_pick_time = img_handle.currentFrameTime(frame_no=int(centroids[0][0]), dt_obj=True)
+
+        # Construct FF file name if it's not available
+        if img_handle.input_type == 'ff':
+            ff_file_name = img_handle.name()
+
+        else:
+            ff_file_name = constructFFName(config.stationID, first_pick_time)
+
+        # Append to the results list
+        results_list.append([ff_file_name, meteor_No, rho, theta, centroids])
+
+    # Write FTPdetectinfo file
+    FTPdetectinfo.writeFTPdetectinfo(results_list, img_handle.dir_path, ftpdetectinfo_name, 
+                                     img_handle.dir_path, config.stationID, config.fps)
 
 
 def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None, dark=None, mask=None):
