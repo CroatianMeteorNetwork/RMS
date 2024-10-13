@@ -488,7 +488,7 @@ if __name__ == "__main__":
 
             # Run detection on the image
             star_list, meteor_list = detectStarsAndMeteorsFrameInterface(
-                img_handle, config, flat_struct=flat_struct, dark=dark, mask=mask
+                img_handle, config, flat_struct=flat_struct, dark=dark, mask=mask,
                 chunk_frames=img_handle.chunk_frames
                 )
             
