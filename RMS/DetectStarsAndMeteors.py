@@ -75,7 +75,7 @@ def detectStarsAndMeteorsFrameInterface(
                                  detection=True, preload_video=True, chunk_frames=chunk_frames)
     
     # Load mask, dark, flat
-    mask, dark, flat_struct = loadImageCalibration(img_handle.dir_path, config, dtype=img_handle.dtype, 
+    mask, dark, flat_struct = loadImageCalibration(img_handle.dir_path, config, dtype=img_handle.ff.dtype, 
                                                   byteswap=img_handle.byteswap)
     
     # Run star extraction on the image handle
@@ -452,7 +452,7 @@ if __name__ == "__main__":
 
             # Load the calibration files
             mask, dark, flat_struct = loadImageCalibration(img_handle.dir_path, config, 
-                dtype=img_handle.dtype, byteswap=img_handle.byteswap)
+                dtype=img_handle.ff.dtype, byteswap=img_handle.byteswap)
 
             # Run detection on the video
             star_list, meteor_list = detectStarsAndMeteorsFrameInterface(img_handle, config, 
@@ -484,7 +484,7 @@ if __name__ == "__main__":
 
             # Load the calibration files
             mask, dark, flat_struct = loadImageCalibration(img_handle.dir_path, config, 
-                dtype=img_handle.dtype, byteswap=img_handle.byteswap)
+                dtype=img_handle.ff.dtype, byteswap=img_handle.byteswap)
 
             # Run detection on the image
             star_list, meteor_list = detectStarsAndMeteorsFrameInterface(
