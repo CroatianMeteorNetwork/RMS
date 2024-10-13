@@ -31,7 +31,7 @@ def extractStarsFrameInterface(img_handle, config, chunk_frames=128):
     calstars_name = 'CALSTARS_' + prefix + '.txt'
 
     # Write detected stars to the CALSTARS file
-    CALSTARS.writeCALSTARS(star_list, img_handle.path, calstars_name, 
+    CALSTARS.writeCALSTARS(star_list, img_handle.dir_path, calstars_name, 
                            config.stationID, config.height, config.width, chunk_frames=chunk_frames)
     
     print("Stars extracted and written to {:s}".format(calstars_name))
