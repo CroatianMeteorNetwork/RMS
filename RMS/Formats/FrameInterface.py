@@ -2479,6 +2479,25 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
     return img_handle
 
 
+def checkIfVideoFile(file_name):
+    """ Check if the given file is a supported video file format. 
+
+    Arguments:
+        file_name: [str] File name to check.
+
+    Return:
+        [bool] True if the file is a video file, False otherwise.
+
+    """
+
+    if file_name.lower().endswith('.mp4') or file_name.lower().endswith('.avi') \
+        or file_name.lower().endswith('.mkv') or file_name.lower().endswith('.wmv') \
+        or file_name.lower().endswith('.mov'):
+
+        return True
+    
+    return False
+
 
 def detectInputTypeFile(input_file, config, beginning_time=None, fps=None, detection=False, 
                         preload_video=False, flipud=False, chunk_frames=None):
@@ -2514,9 +2533,7 @@ def detectInputTypeFile(input_file, config, beginning_time=None, fps=None, detec
         img_handle.nrows = config.height
 
     # Check if the given file is a video file
-    elif file_name.lower().endswith('.mp4') or file_name.lower().endswith('.avi') \
-            or file_name.lower().endswith('.mkv') or file_name.lower().endswith('.wmv') \
-            or file_name.lower().endswith('.mov'):
+    elif checkIfVideoFile(file_name):
 
         # Init the image hadle for video files
         img_handle = InputTypeVideo(input_file, config, beginning_time=beginning_time,
