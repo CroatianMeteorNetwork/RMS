@@ -12,6 +12,7 @@ import os
 import shutil
 import sys
 import logging
+from collections import OrderedDict
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
@@ -31,7 +32,7 @@ from RMS.Astrometry.ApplyAstrometry import (
 from RMS.Astrometry.Conversions import date2JD, raDec2AltAz
 from RMS.Astrometry.FFTalign import alignPlatepar
 from RMS.Formats import CALSTARS, FFfile, FTPdetectinfo, Platepar, StarCatalog
-from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile
+from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, validDefaultFTPdetectinfo
 from RMS.Math import angularSeparation
 from RMS.Logger import initLogging
 from RMS.Misc import RmsDateTime
@@ -616,7 +617,8 @@ def recalibrateSelectedFF(dir_path, ff_file_names, calstars_data, config, lim_ma
 
 
 def recalibrateIndividualFFsAndApplyAstrometry(
-    dir_path, ftpdetectinfo_path, calstars_data, config, platepar, generate_plot=True
+    dir_path, ftpdetectinfo_path, calstars_data, config, platepar, 
+    generate_plot=True, load_all=False
 ):
     """Recalibrate FF files with detections and apply the recalibrated platepar to those detections.
     
@@ -631,6 +633,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
         
     Keyword arguments:
         generate_plot: [bool] Generate the calibration variation plot. True by default.
+        load_all: [bool] Load all FTPdetectinfo files in the directory and recalibrate them. False by default.
 
     Return:
         recalibrated_platepars: [dict] A dictionary where the keys are FF file names and values are
@@ -643,55 +646,138 @@ def recalibrateIndividualFFsAndApplyAstrometry(
     # Use a copy of the platepar
     platepar = copy.deepcopy(platepar)
 
-    # If the given file does not exits, return nothing
-    if not os.path.isfile(ftpdetectinfo_path):
-        log.info('ERROR! The FTPdetectinfo file does not exist: {:s}'.format(ftpdetectinfo_path))
-        log.info('    The recalibration on every file was not done!')
+    # Load FTPdetectinfo data
+    if load_all:
 
-        return {}
+        meteor_list = []
 
-    # Read the FTPdetectinfo data
-    cam_code, fps, meteor_list = FTPdetectinfo.readFTPdetectinfo(
-        *os.path.split(ftpdetectinfo_path), ret_input_format=True
-    )
+        # Load all FTPdetectinfo files in the directory
+        for ftpdetectinfo_file in sorted(os.listdir(dir_path)):
+
+            # Check that the file is a valid FTPdetectinfo file
+            if validDefaultFTPdetectinfo(ftpdetectinfo_file):
+
+                # Load the FTPdetectinfo data
+                # NOTE: The assumption is that all files have the same camera code and FPS, as they should
+                cam_code, fps, meteor_list_tmp = FTPdetectinfo.readFTPdetectinfo(
+                    *os.path.split(ftpdetectinfo_file), ret_input_format=True
+                )
+
+                meteor_list.extend(meteor_list_tmp)
+
+        # If the meteor list is empty, return nothing
+        if len(meteor_list) == 0:
+            log.info('ERROR! No FTPdetectinfo files were loaded!')
+            log.info('    The recalibration on every file was not done!')
+
+            return {}
+
+    else:
+
+        # If the given file does not exits, return nothing
+        if not os.path.isfile(ftpdetectinfo_path):
+            log.info('ERROR! The FTPdetectinfo file does not exist: {:s}'.format(ftpdetectinfo_path))
+            log.info('    The recalibration on every file was not done!')
+
+            return {}
+
+        # Read the FTPdetectinfo data from the one file
+        cam_code, fps, meteor_list = FTPdetectinfo.readFTPdetectinfo(
+            *os.path.split(ftpdetectinfo_path), ret_input_format=True
+        )
+
+    # Load the list of stars from the CALSTARS file
+    calstars_list, ff_frames = calstars_data
 
     # Convert the list of stars to a per FF name dictionary
     calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
 
-    ### Add neighboring FF files for more robust photometry estimation ###
-
-    ff_processing_list = []
-
     # Make a list of sorted FF files in CALSTARS
     calstars_ffs = sorted(calstars.keys())
 
-    # Go through the list of FF files with detections and add neighboring FFs
+    
+    # Create a dictionary mapping FF file names in FTPdetectinfo to datetime objects
+    ftp_ff_datetime_dict = OrderedDict()
+    for meteor_entry in meteor_list:
+        ff_name = meteor_entry[0]
+        ftp_ff_datetime_dict[ff_name] = FFfile.filenameToDatetime(ff_name)
+
+    # Create a dictionary mapping FF file names in CALSTARS to datetime objects
+    calstars_datetime_dict = OrderedDict()
+    for ff_name in calstars:
+        calstars_datetime_dict[ff_name] = FFfile.filenameToDatetime(ff_name)
+
+
+    # Go through every FF file entry listed in the FTPdetectinfo and identify three FF entries in the CALSTARS
+    # file - one at the closest time to the FTPdetectinfo FF file, one before, and one after
+    # The three files are add for better photometric offset estimation
+    ff_processing_list = []
+
     for meteor_entry in meteor_list:
 
         ff_name = meteor_entry[0]
 
-        if ff_name in calstars_ffs:
+        # Define a function to compute time difference between FF files in FTPdetectinfo and CALSTARS
+        time_diff_func = lambda x: abs((ftp_ff_datetime_dict[ff_name] - calstars_datetime_dict[x]).total_seconds())
 
-            # Find the index of the given FF file in the list of calstars
-            ff_indx = calstars_ffs.index(ff_name)
+        # Find the closest FF file in CALSTARS
+        closest_ff_name = min(calstars_datetime_dict, key=lambda x: time_diff_func(x))
 
-            # Add neighbours to the processing list
-            for k in range(-(RECALIBRATE_NEIGHBOURHOOD_SIZE // 2), RECALIBRATE_NEIGHBOURHOOD_SIZE // 2 + 1):
+        # Find the index of the given FF file in the list of calstars
+        ff_indx = list(calstars_datetime_dict.keys()).index(closest_ff_name)
 
-                k_indx = ff_indx + k
+        # Add the closest FF file to the processing list
+        ff_processing_list.append(closest_ff_name)
 
-                if (k_indx > 0) and (k_indx < len(calstars_ffs)):
+        # # If the closest CALSTARS FF file is within 30 seconds of the FTPdetectinfo FF file, add the other two
+        # #   FF files to the processing list
+        # if time_diff_func(closest_ff_name) < 30:
 
-                    ff_name_tmp = calstars_ffs[k_indx]
-                    if ff_name_tmp not in ff_processing_list:
-                        ff_processing_list.append(ff_name_tmp)
+        # Add the FF file before to the processing list
+        if ff_indx > 0:
+            ff_processing_list.append(list(calstars_datetime_dict.keys())[ff_indx - 1])
+
+        # Add the FF file after to the processing list
+        if ff_indx < len(calstars_datetime_dict) - 1:
+            ff_processing_list.append(list(calstars_datetime_dict.keys())[ff_indx + 1])
 
     # Sort the processing list of FF files
     ff_processing_list = sorted(ff_processing_list)
 
-    ### ###
+    # ### Add neighboring FF files for more robust photometry estimation ###
 
-    # Globally increase catalog limiting magnitude
+    # ff_processing_list = []
+
+    # # Make a list of sorted FF files in CALSTARS
+    # calstars_ffs = sorted(calstars.keys())
+
+    # # Go through the list of FF files with detections and add neighboring FFs
+    # for meteor_entry in meteor_list:
+
+    #     ff_name = meteor_entry[0]
+
+    #     if ff_name in calstars_ffs:
+
+    #         # Find the index of the given FF file in the list of calstars
+    #         ff_indx = calstars_ffs.index(ff_name)
+
+    #         # Add neighbours to the processing list
+    #         for k in range(-(RECALIBRATE_NEIGHBOURHOOD_SIZE // 2), RECALIBRATE_NEIGHBOURHOOD_SIZE // 2 + 1):
+
+    #             k_indx = ff_indx + k
+
+    #             if (k_indx > 0) and (k_indx < len(calstars_ffs)):
+
+    #                 ff_name_tmp = calstars_ffs[k_indx]
+    #                 if ff_name_tmp not in ff_processing_list:
+    #                     ff_processing_list.append(ff_name_tmp)
+
+    # # Sort the processing list of FF files
+    # ff_processing_list = sorted(ff_processing_list)
+
+    # ### ###
+
+    # Globally increase catalog limiting magnitude by one to get more stars for matching
     config.catalog_mag_limit += 1
 
     # Load catalog stars (overwrite the mag band ratios if specific catalog is used)
@@ -708,7 +794,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
         return {}
 
     catalog_stars, _, config.star_catalog_band_ratios = star_catalog_status
-    log.info('MAX {}'.format(np.mean([np.percentile(data[1], 90) for data in catalog_stars])))
+    
     # Update the platepar coordinates from the config file
     platepar.lat = config.latitude
     platepar.lon = config.longitude
@@ -718,7 +804,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
 
     # Go through all FF files with detections, recalibrate and apply astrometry
     recalibrated_platepars = recalibratePlateparsForFF(
-        prev_platepar, ff_processing_list, calstars, catalog_stars, config
+        prev_platepar, ff_processing_list, calstars, catalog_stars, config, ff_frames=ff_frames
     )
 
     ### Average out photometric offsets within the given neighbourhood size ###
@@ -937,12 +1023,22 @@ def recalibrateIndividualFFsAndApplyAstrometry(
 
         ff_name, meteor_No, rho, phi, meteor_meas = meteor_entry
 
-        # Get the platepar that will be applied to this FF file
-        if ff_name in recalibrated_platepars:
-            working_platepar = recalibrated_platepars[ff_name]
+        # Find the entry in the CALSTARS file that is closest in time to the FTPdetectinfo FF file
+        time_diff_func = lambda x: abs((ftp_ff_datetime_dict[ff_name] - calstars_datetime_dict[x]).total_seconds())
+        closest_calstars_ff_name = min(calstars_datetime_dict, key=lambda x: time_diff_func(x))
 
+        # Debug print
+        time_diff_s = time_diff_func(closest_calstars_ff_name)
+        log.debug('FTPdetect FF file: {:s}, closest CALSTARS FF file: {:s}, time difference: {:.1f} s'.format(
+            ff_name, closest_calstars_ff_name, time_diff_s
+        ))
+
+        # Choose the platepar that will be applied to this FF file
+        if closest_calstars_ff_name in recalibrated_platepars:
+            working_platepar = recalibrated_platepars[closest_calstars_ff_name]
+        
         else:
-            log.info('Using default platepar for: {}'.format(ff_name))
+            log.info('Could not find a recalibrated platepar for: {:s}, using default platepar.'.format(ff_name))
             working_platepar = platepar
 
         # Apply the recalibrated platepar to meteor centroids
@@ -986,16 +1082,20 @@ def recalibrateIndividualFFsAndApplyAstrometry(
     return recalibrated_platepars
 
 
-def applyRecalibrate(ftpdetectinfo_path, config, generate_plot=True):
+def applyRecalibrate(ftpdetectinfo_path, config, generate_plot=True, load_all=False):
     """Recalibrate FF files with detections and apply the recalibrated platepar to those detections.
     Arguments:
-        ftpdetectinfo_path: [str] Name of the FTPdetectinfo file.
+        ftpdetectinfo_path: [str] Path to an FTPdetectinfo file.
         config: [Config instance]
+
     Keyword arguments:
         generate_plot: [bool] Generate the calibration variation plot. True by default.
+        load_all: [bool] Load all FTPdetectinfo files in the directory and recalibrate them.
+
     Return:
         recalibrated_platepars: [dict] A dictionary where the keys are FF file names and values are
             recalibrated platepar instances for every FF file.
+
     """
 
     # Extract parent directory
@@ -1015,24 +1115,37 @@ def applyRecalibrate(ftpdetectinfo_path, config, generate_plot=True):
         log.info('Cannot find the platepar file in the night directory: {}'.format(config.platepar_name))
         sys.exit()
 
-    # Find the CALSTARS file in the given folder
-    calstars_file = None
+    # Find all CALSTARS files in the given folder
+    calstars_file_list = []
     for calstars_file in file_list:
         if ('CALSTARS' in calstars_file) and ('.txt' in calstars_file):
-            break
+            calstars_file_list.append(calstars_file)
 
-    if calstars_file is None:
+    if not len(calstars_file_list):
         log.info('CALSTARS file could not be found in the given directory!')
-        sys.exit()
+        return {}
 
-    # Load the calstars file
-    calstars_data = CALSTARS.readCALSTARS(dir_path, calstars_file)
+    # Load all calstars files in the directory
+    calstars_data = {}
+    for calstars_file in calstars_file_list:
 
-    log.info('CALSTARS file: ' + calstars_file + ' loaded!')
+        # Load the calstars file
+        calstars_data_file = CALSTARS.readCALSTARS(dir_path, calstars_file)
+
+        # Merge the previously loaded data with the new one (Python 2 compatible)
+        for key in calstars_data_file:
+            if key in calstars_data:
+                calstars_data[key].extend(calstars_data_file[key])
+            else:
+                calstars_data[key] = calstars_data_file[key]
+
+        log.info('CALSTARS file: ' + calstars_file + ' loaded!')
 
     # Recalibrate and apply astrometry on every FF file with detections individually
     recalibrated_platepars = recalibrateIndividualFFsAndApplyAstrometry(
-        dir_path, ftpdetectinfo_path, calstars_data, config, platepar, generate_plot=generate_plot
+        dir_path, ftpdetectinfo_path, calstars_data, config, platepar, 
+        generate_plot=generate_plot, load_all=load_all
+
     )
 
     ### Generate the updated UFOorbit file ###
@@ -1055,21 +1168,20 @@ if __name__ == "__main__":
         description="Recalibrate the platepar for every FF with detections and apply it the detections, recompute the FTPdetectinfo and UFOOrbit file."
     )
 
-    arg_parser.add_argument(
-        'ftpdetectinfo_path', nargs=1, metavar='FTPDETECTINFO_PATH', type=str, help='Path to the FF file.'
+    arg_parser.add_argument('ftpdetectinfo_path', metavar='FTPDETECTINFO_PATH', type=str, 
+                            help='Path to the FF file or a directory containing multiple FTPdetectinfo files.'
     )
 
-    arg_parser.add_argument(
-        '-c',
-        '--config',
-        nargs=1,
-        metavar='CONFIG_PATH',
-        type=str,
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
         help="Path to a config file which will be used instead of the default one.",
     )
 
-    arg_parser.add_argument(
-        '-r', '--report', action="store_true", help="""Show the calibration report at the end."""
+    arg_parser.add_argument('-r', '--report', action="store_true", 
+                            help="""Show the calibration report at the end."""
+    )
+
+    arg_parser.add_argument('-a', '--all', action="store_true", 
+        help="""Load all FTPdetectinfo and CALSTARS files in the directory and recalibrate them."""
     )
 
     # Parse the command line arguments
@@ -1077,12 +1189,13 @@ if __name__ == "__main__":
 
     #########################
 
-    ftpdetectinfo_path = cml_args.ftpdetectinfo_path[0]
+    # Find at least one FTPdetectinfo file in the given path (either direct file or a directory)
+    ftpdetectinfo_path = cml_args.ftpdetectinfo_path
     ftpdetectinfo_path = findFTPdetectinfoFile(ftpdetectinfo_path)
 
     # Check if the given FTPdetectinfo file exists
     if not os.path.isfile(ftpdetectinfo_path):
-        print('No such file: {}'.format(ftpdetectinfo_path))
+        print('No FTPdetectinfo file in: {}'.format(ftpdetectinfo_path))
         sys.exit()
 
     # Extract parent directory
@@ -1099,7 +1212,7 @@ if __name__ == "__main__":
     log.setLevel(logging.INFO)
 
     # Run the recalibration and recomputation
-    applyRecalibrate(ftpdetectinfo_path, config)
+    applyRecalibrate(ftpdetectinfo_path, config, load_all=cml_args.all)
 
     # Show the calibration report
     if cml_args.report:
