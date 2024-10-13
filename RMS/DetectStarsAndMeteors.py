@@ -29,7 +29,7 @@ import RMS.ConfigReader as cr
 from RMS.Formats import FTPdetectinfo
 from RMS.Formats import CALSTARS
 from RMS.Formats.FFfile import validFFName, constructFFName
-from RMS.Formats.FrameInterface import detectInputType
+from RMS.Formats.FrameInterface import detectInputType, detectInputTypeFile, checkIfVideoFile
 from RMS.ExtractStars import extractStarsFF
 from RMS.ExtractStarsFrameInterface import extractStarsDetectFrameInterface
 from RMS.Detection import detectMeteors
@@ -61,7 +61,10 @@ def detectStarsAndMeteorsFrameInterface(
         chunk_frames: [int] Number of frames to stacked image on which the stars will be extracted.
 
     Return:
-        [star_list, meteor_list] detected stars and meteors    
+        [img_handle, star_list, meteor_list]:
+            - img_handle: [ImageHandle] Image handle object.
+            - star_list: [list] List of stars detected in the image.
+            - meteor_list: [list] List of detected meteors.
         
     """
 
@@ -81,6 +84,9 @@ def detectStarsAndMeteorsFrameInterface(
                                                  save_calstars=False)
     
     log.info('Detected stars: ' + str(len(star_list[1])))
+
+    # Rewind the video to the beginning
+    img_handle.setFrame(0)
 
     # Run meteor detection if there are enough stars on the image
     if len(star_list[1]) >= config.ff_min_stars:
@@ -394,11 +400,18 @@ if __name__ == "__main__":
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Detect stars and meteors in the given folder.")
 
-    arg_parser.add_argument('dir_path', nargs=1, metavar='DIR_PATH', type=str, \
+    arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str, \
         help='Path to the folder with FF files.')
 
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
         help="Path to a config file which will be used instead of the default one.")
+    
+    arg_parser.add_argument('--multivid', action='store_true', \
+        help="Flag to indicate that the data path is a directory containing multiple video files.")
+    
+    arg_parser.add_argument('--chunk_frames', type=int, default=128, \
+        help="Number of frames to use to stack an image on which the stars will be extracted. Only "
+        "applicable for non-FF files.")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -418,11 +431,67 @@ if __name__ == "__main__":
 
     ######
 
+    if cml_args.multivid:
 
-    # Run detection on the folder
-    _, _, _, detector = detectStarsAndMeteorsDirectory(cml_args.dir_path[0], config)
+        log.info('Running detection on a directory with multiple video files...')
 
-    # Delete backup files
-    detector.deleteBackupFiles()
+        video_paths = []
+        for file_name in sorted(os.listdir(cml_args.dir_path)):
 
-    log.info('Total time taken: {}'.format(RmsDateTime.utcnow() - time_start))
+            file_path = os.path.join(cml_args.dir_path, file_name)
+
+            if checkIfVideoFile(file_path):
+                video_paths.append(file_path)
+
+        # Run the detection on each video file
+        for video_path in video_paths:
+
+            # Load the video file
+            img_handle = detectInputTypeFile(video_path, config, detection=True, preload_video=True, 
+                                             chunk_frames=cml_args.chunk_frames)
+
+            # Load the calibration files
+            mask, dark, flat_struct = loadImageCalibration(img_handle.dir_path, config, 
+                dtype=img_handle.dtype, byteswap=img_handle.byteswap)
+
+            # Run detection on the video
+            star_list, meteor_list = detectStarsAndMeteorsFrameInterface(img_handle, config, 
+                flat_struct=flat_struct, dark=dark, mask=mask, chunk_frames=img_handle.chunk_frames)
+            
+            # Save the results
+            saveResultsFrameInterface(star_list, meteor_list, img_handle, config, 
+                chunk_frames=img_handle.chunk_frames)
+
+    else:
+
+        # Detect the file type
+        img_handle = detectInputType(cml_args.dir_path, config, skip_ff_dir=False, detection=True, 
+                                     chunk_frames=cml_args.chunk_frames)
+
+        # If the directory contains FF files, run detection on them using a pool of workers
+        if img_handle.input_type == 'ff':
+
+            # Run detection on the folder
+            _, _, _, detector = detectStarsAndMeteorsDirectory(cml_args.dir_path, config)
+
+            # Delete backup files
+            detector.deleteBackupFiles()
+
+            log.info('Total time taken: {}'.format(RmsDateTime.utcnow() - time_start))
+
+        # Otherwise, run the detection on the given input type (e.g. directory with images)
+        else:
+
+            # Load the calibration files
+            mask, dark, flat_struct = loadImageCalibration(img_handle.dir_path, config, 
+                dtype=img_handle.dtype, byteswap=img_handle.byteswap)
+
+            # Run detection on the image
+            star_list, meteor_list = detectStarsAndMeteorsFrameInterface(
+                img_handle, config, flat_struct=flat_struct, dark=dark, mask=mask
+                chunk_frames=img_handle.chunk_frames
+                )
+            
+            # Save the results
+            saveResultsFrameInterface(star_list, meteor_list, img_handle, config, 
+                chunk_frames=img_handle.chunk_frames)
