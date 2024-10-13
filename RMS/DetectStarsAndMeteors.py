@@ -78,13 +78,17 @@ def detectStarsAndMeteorsFrameInterface(
     star_list = extractStarsFrameInterface(img_handle, config, chunk_frames=chunk_frames, 
         flat_struct=flat_struct, dark=dark, mask=mask, save_calstars=False)
     
-    log.info('Detected stars: ' + str(len(star_list[1])))
+
+    # Get the maximum number of stars on any chunks
+    max_stars = max([star_entry[1] for star_entry in star_list])
+    
+    log.info('Max. detected stars on all frame chunks: {:d}'.format(max_stars))
 
     # Rewind the video to the beginning
     img_handle.setFrame(0)
 
     # Run meteor detection if there are enough stars on the image
-    if len(star_list[1]) >= config.ff_min_stars:
+    if max_stars >= config.ff_min_stars:
             
         log.debug('At least ' + str(config.ff_min_stars) + ' stars, detecting meteors...')
         
@@ -94,6 +98,7 @@ def detectStarsAndMeteorsFrameInterface(
         log.info(img_handle.file_name + ' detected meteors: ' + str(len(meteor_list)))
 
     else:
+        log.info('Not enough stars for meteor detection: {:d} < {:d}'.format(max_stars, config.ff_min_stars))
         meteor_list = []
 
 
