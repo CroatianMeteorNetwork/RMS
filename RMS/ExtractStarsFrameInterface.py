@@ -77,8 +77,8 @@ def extractStarsDetectFrameInterface(data_path, config, chunk_frames=128, multiv
             print("Processing video file: {:s}".format(video_file))
 
             # Load the video file
-            img_handle = detectInputTypeFile(video_file, config, use_fr_files=False, detection=True, 
-                                             chunk_frames=chunk_frames)
+            img_handle = detectInputTypeFile(video_file, config, detection=True, chunk_frames=chunk_frames,
+                                             preload_video=True)
             
             # Extract the stars from the image handle
             star_list = extractStarsFrameInterface(img_handle, config, chunk_frames=chunk_frames)
