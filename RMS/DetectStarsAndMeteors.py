@@ -69,10 +69,6 @@ def detectStarsAndMeteorsFrameInterface(
     """
 
     log.info('Running detection on file: ' + img_handle.file_name)
-
-    # Construct the image handle for the detection
-    img_handle = detectInputType(img_handle, config, skip_ff_dir=True, use_fr_files=False, 
-                                 detection=True, preload_video=True, chunk_frames=chunk_frames)
     
     # Load mask, dark, flat
     mask, dark, flat_struct = loadImageCalibration(img_handle.dir_path, config, dtype=img_handle.ff.dtype, 
