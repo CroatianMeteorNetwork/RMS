@@ -774,6 +774,7 @@ def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=
     # Calculate time data of every point
     time_data = []
     for frame_n in frames:
+
         t = time_beg + datetime.timedelta(seconds=frame_n/fps)
         time_data.append([t.year, t.month, t.day, t.hour, t.minute, t.second, int(t.microsecond/1000)])
 
