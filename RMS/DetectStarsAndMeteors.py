@@ -127,8 +127,9 @@ def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_
     timestamp = img_handle.beginning_datetime.strftime("%Y%m%d_%H%M%S_%f")
     prefix = "{:s}_{:s}".format(config.stationID, timestamp)
 
+    suffix = ''
     if len(output_suffix):
-        suffix += '_' + output_suffix
+        suffix = '_' + output_suffix
 
     # Generate the name for the CALSTARS file
     calstars_name = 'CALSTARS_' + prefix + suffix + '.txt'
@@ -318,6 +319,7 @@ def saveDetections(detection_results, ff_dir, config, output_suffix=''):
     else:
         prefix = "{:s}_{:s}".format(config.stationID, dir_name)
 
+    suffix = ''
     if len(output_suffix):
         suffix = '_' + output_suffix
 
