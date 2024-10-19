@@ -18,8 +18,8 @@ from __future__ import print_function, division, absolute_import
 
 import os
 import sys
+import ctypes
 import traceback
-import RMS.Reprocess
 
 # Set GStreamer debug level. Use '2' for warnings in production environments.
 os.environ['GST_DEBUG'] = '3'
@@ -29,7 +29,7 @@ import time
 import logging
 import datetime
 import os.path
-from multiprocessing import Process, Event, Value
+from multiprocessing import Process, Event, Value, Array
 
 import cv2
 import numpy as np
@@ -37,6 +37,8 @@ import numpy as np
 from RMS.Misc import ping
 from RMS.Routines.GstreamerCapture import GstVideoFile
 from RMS.Formats.ObservationSummary import getObsDBConn, addObsParam
+from RMS.RawFrameSave import RawFrameSaver
+from RMS.Misc import RmsDateTime, mkdirP
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -61,7 +63,8 @@ class BufferedCapture(Process):
     
     running = False
     
-    def __init__(self, array1, startTime1, array2, startTime2, config, video_file=None, night_data_dir=None):
+    def __init__(self, array1, startTime1, array2, startTime2, config, video_file=None, night_data_dir=None,
+                 saved_frames_dir=None, daytime_mode=None):
         """ Populate arrays with (startTime, frames) after startCapture is called.
         
         Arguments:
@@ -73,7 +76,8 @@ class BufferedCapture(Process):
         Keyword arguments:
             video_file: [str] Path to the video file, if it was given as the video source. None by default.
             night_data_dir: [str] Path to the directory where night data is stored. None by default.
-
+            saved_frames_dir: [str] Path to the directory where saved frames are stored. None by default.
+            daytime_mode: [multiprocessing.Value] shared boolean variable to communicate camera mode switch
         """
         
         super(BufferedCapture, self).__init__()
@@ -92,6 +96,7 @@ class BufferedCapture(Process):
         self.video_file = video_file
 
         self.night_data_dir = night_data_dir
+        self.saved_frames_dir = saved_frames_dir
 
         # A frame will be considered dropped if it was late more then half a frame
         self.time_for_drop = 1.5*(1.0/config.fps)
@@ -110,6 +115,43 @@ class BufferedCapture(Process):
         self.frame_shape = None
         self.convert_to_gray = False
 
+        # Params to help with camera mode switching
+        self.daytime_mode = daytime_mode
+
+        if self.config.save_frames:
+
+            # Params for raw frame saving
+            self.num_raw_frames = 10
+            self.raw_frame_count = 0
+
+            # Initialize shared values for frame + timestamp saving
+            self.startRawTime1 = Value('d', 0.0)
+            self.startRawTime2 = Value('d', 0.0)
+
+
+            # Initialize shared memory arrays for raw frame saving
+            self.sharedRawArrayBase = Array(ctypes.c_uint8, self.num_raw_frames * config.height * config.width)
+            self.sharedRawArray = np.ctypeslib.as_array(self.sharedRawArrayBase.get_obj())
+            self.sharedRawArray = self.sharedRawArray.reshape(self.num_raw_frames, config.height, config.width)
+
+            self.sharedRawArrayBase2 = Array(ctypes.c_uint8, self.num_raw_frames * config.height * config.width)
+            self.sharedRawArray2 = np.ctypeslib.as_array(self.sharedRawArrayBase2.get_obj())
+            self.sharedRawArray2 = self.sharedRawArray2.reshape(self.num_raw_frames, config.height, config.width)
+
+
+            # Initialize shared memory for timestamp saving
+            self.sharedTimestampsBase = Array(ctypes.c_double, self.num_raw_frames)
+            self.sharedTimestamps = np.ctypeslib.as_array(self.sharedTimestampsBase.get_obj())
+            
+            self.sharedTimestampsBase2 = Array(ctypes.c_double, self.num_raw_frames)
+            self.sharedTimestamps2 = np.ctypeslib.as_array(self.sharedTimestampsBase2.get_obj())
+
+            self.raw_frame_saver = RawFrameSaver(self.saved_frames_dir, 
+                                                 self.sharedRawArray, self.startRawTime1, 
+                                                 self.sharedRawArray2, self.startRawTime2, 
+                                                 self.sharedTimestamps, self.sharedTimestamps2,
+                                                 self.config)
+
 
     def startCapture(self, cameraID=0):
         """ Start capture using specified camera.
@@ -121,6 +163,11 @@ class BufferedCapture(Process):
         
         self.cameraID = cameraID
         self.exit = Event()
+
+        # start the raw frame saver
+        if self.config.save_frames:
+            self.raw_frame_saver.start()
+
         self.start()
     
 
@@ -153,6 +200,27 @@ class BufferedCapture(Process):
         except Exception as e:
             log.debug('Freeing frame buffers failed with error:' + repr(e))
             log.debug(repr(traceback.format_exception(*sys.exc_info())))
+
+
+        # Free shared memory after the raw frame saver is done
+        try:
+            if self.config.save_frames:
+                log.debug('Freeing raw frame and timestamp buffers in BufferedCapture...')
+                del self.sharedRawArrayBase
+                del self.sharedRawArrayBase2
+                del self.sharedRawArray
+                del self.sharedRawArray2
+                del self.sharedTimestampsBase
+                del self.sharedTimestampsBase2
+                del self.sharedTimestamps
+                del self.sharedTimestamps2
+
+        except Exception as e:
+            log.debug('Freeing raw frame buffers failed with error:' + repr(e))
+            log.debug(repr(traceback.format_exception(*sys.exc_info())))
+
+        # Stop the raw frame saver
+        self.raw_frame_saver.stop()
 
         return self.dropped_frames.value
 
@@ -519,6 +587,34 @@ class BufferedCapture(Process):
         return gray_frame
 
 
+    def move_segment(self, splitmuxsink, fragment_id):
+        """
+        Custom callback for splitmuxsink's format-location signal to name and move each segment as its
+        created. Generates a timestamp-based folder structure: Year/Day-Of-Year/Hour/ per video segment
+
+        Arguments:
+          splitmuxsink [GstElement]: The splitmuxsink object itself, included in arguments as GStreamer expects it.
+          fragment_id [int]: Fragment / segment number of the new clip
+
+        Returns:
+          full_path [str]: Full path to save this new segment to
+        """
+
+        base_time = RmsDateTime.utcnow()
+
+        # Generate names from current timestamp
+        subpath = os.path.join(self.config.data_dir, self.config.video_dir, base_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
+        filename = base_time.strftime(f"%Y%m%d_%H%M%S_video.mkv")
+
+        # Create full path and directory
+        mkdirP(subpath)
+        full_path = os.path.join(subpath, filename)
+        log.info(f"Created new video segment #{fragment_id} at: {full_path}")
+
+        # Return full path to splitmux's callback
+        return full_path
+
+
     def createGstreamDevice(self, video_format, gst_decoder='decodebin', 
                             video_file_dir=None, segment_duration_sec=30, max_retries=5, retry_interval=1):
         """
@@ -572,12 +668,11 @@ class BufferedCapture(Process):
         
          # Branch for storage - if video_file_dir is not None, save the raw stream to a file
         if video_file_dir is not None:
-
-            video_location = os.path.join(video_file_dir, "video_%05d.mkv")
+            
             storage_branch = (
                 "t. ! queue ! h264parse ! "
-                "splitmuxsink location={:s} max-size-time={:d} muxer-factory=matroskamux"
-                ).format(video_location, int(segment_duration_sec*1e9))
+                "splitmuxsink max-size-time={:d} muxer-factory=matroskamux name=splitmuxsink0 name=splitmuxsink0"
+                ).format(int(segment_duration_sec*1e9))
 
         # Otherwise, skip saving the raw stream to disk
         else:
@@ -605,6 +700,14 @@ class BufferedCapture(Process):
 
             # Parse and create the pipeline
             self.pipeline = Gst.parse_launch(pipeline_str)
+
+            # If raw video saving is enabled, Connect the "format-location" signal to the 
+            # move_segment function
+            if video_file_dir is not None:
+                
+                splitmuxsink = self.pipeline.get_by_name("splitmuxsink0")
+                splitmuxsink.connect("format-location", self.move_segment)
+
 
             # Set the pipeline to PLAYING state
             self.pipeline.set_state(Gst.State.PLAYING)
@@ -745,12 +848,10 @@ class BufferedCapture(Process):
                     Gst.init(None)
 
                     # Determine if which directory to save the raw video, if any
-                    raw_video_dir = None
-                    if self.config.raw_video_dir_night:
-                        raw_video_dir = self.night_data_dir
-
+                    if self.config.raw_video_save:
+                        raw_video_dir = os.path.join(self.config.data_dir, self.config.video_dir)
                     else:
-                        raw_video_dir = self.config.raw_video_dir
+                        raw_video_dir = None
 
                     # Create and start a GStreamer pipeline
                     log.info("Creating GStreamer pipeline...")
@@ -970,7 +1071,12 @@ class BufferedCapture(Process):
         wait_for_reconnect = False
 
         last_frame_timestamp = False
-        
+
+        # Setup additional timing variables for memory share with RawFrameSaver
+        if self.config.save_frames:
+            raw_buffer_one = True
+            first_raw_frame_timestamp = False
+
         # Run until stopped from the outside
         while not self.exit.is_set():
 
@@ -1081,6 +1187,47 @@ class BufferedCapture(Process):
                     first_frame_timestamp = frame_timestamp
 
 
+                # If save_frames is set and a video device is used, save a frame every nth frames
+                if (self.config.save_frames
+                    and self.video_file is None
+                    and total_frames % self.config.frame_save_interval_count == 0):
+
+                    # reset start time values everytime the buffers are switched
+                    if self.raw_frame_count == 0:
+
+                        if raw_buffer_one:
+                            self.startRawTime1.value = 0
+                        else:
+                            self.startRawTime2.value = 0
+
+                        # Always set first raw frame timestamp in the beginning of the block
+                        first_raw_frame_timestamp = frame_timestamp 
+
+
+                    # Write raw frame and timestamp to one of the two corresponding buffers
+                    if raw_buffer_one:
+                        self.sharedRawArray[self.raw_frame_count, :, :] = frame
+                        self.sharedTimestamps[self.raw_frame_count] = frame_timestamp
+
+                    else:
+                        self.sharedRawArray2[self.raw_frame_count, :, :] = frame
+                        self.sharedTimestamps2[self.raw_frame_count] = frame_timestamp
+                    
+
+                    self.raw_frame_count += 1
+
+                    # switch buffers arrays every (self.num_raw_frames) frames
+                    if self.raw_frame_count == self.num_raw_frames:
+
+                        if raw_buffer_one:
+                            self.startRawTime1.value = first_raw_frame_timestamp
+                        else:
+                            self.startRawTime2.value = first_raw_frame_timestamp
+                        
+                        self.raw_frame_count = 0
+                        raw_buffer_one = not raw_buffer_one
+
+
                 # If the end of the video file was reached, stop the capture
                 if self.video_file is not None: 
                     if (frame is None) or (not self.deviceIsOpened()):
@@ -1138,54 +1285,56 @@ class BufferedCapture(Process):
                 last_frame_timestamp = frame_timestamp
                 
 
-                ### Convert the frame to grayscale ###
+                ### Convert the frame to grayscale ###  (Not to be done in case of daytime mode)
+                if not self.daytime_mode.value:
 
-                t1_convert = time.time()
+                    t1_convert = time.time()
 
-                # Convert the frame to grayscale
-                #gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    # Convert the frame to grayscale
+                    #gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-                # Convert the frame to grayscale
-                if len(frame.shape) == 3:
+                    # Convert the frame to grayscale
+                    if len(frame.shape) == 3:
 
-                    # If a color image is given, take the green channel
-                    if frame.shape[2] == 3:
+                        # If a color image is given, take the green channel
+                        if frame.shape[2] == 3:
 
-                        gray = frame[:, :, 1]
+                            gray = frame[:, :, 1]
 
-                    # If UYVY image given, take luma (Y) channel
-                    elif self.config.uyvy_pixelformat and (frame.shape[2] == 2):
-                        gray = frame[:, :, 1]
+                        # If UYVY image given, take luma (Y) channel
+                        elif self.config.uyvy_pixelformat and (frame.shape[2] == 2):
+                            gray = frame[:, :, 1]
 
-                    # Otherwise, take the first available channel
+                        # Otherwise, take the first available channel
+                        else:
+                            gray = frame[:, :, 0]
+
                     else:
-                        gray = frame[:, :, 0]
-
-                else:
-                    gray = frame
+                        gray = frame
 
 
-                # Cut the frame to the region of interest (ROI)
-                gray = gray[self.config.roi_up:self.config.roi_down, \
-                    self.config.roi_left:self.config.roi_right]
+                    # Cut the frame to the region of interest (ROI)
+                    gray = gray[self.config.roi_up:self.config.roi_down, \
+                        self.config.roi_left:self.config.roi_right]
 
-                # Track time for frame conversion
-                t_convert = time.time() - t1_convert
+                    # Track time for frame conversion
+                    t_convert = time.time() - t1_convert
 
 
-                ### ###
+                    ### ###
 
 
 
 
-                # Assign the frame to shared memory (track time to do so)
-                t1_assign = time.time()
-                if buffer_one:
-                    self.array1[i, :gray.shape[0], :gray.shape[1]] = gray
-                else:
-                    self.array2[i, :gray.shape[0], :gray.shape[1]] = gray
+                    # Assign the frame to shared memory (track time to do so)
+  
+                    t1_assign = time.time()
+                    if buffer_one:
+                        self.array1[i, :gray.shape[0], :gray.shape[1]] = gray
+                    else:
+                        self.array2[i, :gray.shape[0], :gray.shape[1]] = gray
 
-                t_assignment = time.time() - t1_assign
+                    t_assignment = time.time() - t1_assign
 
 
 
@@ -1196,10 +1345,18 @@ class BufferedCapture(Process):
             if self.exit.is_set():
                 wait_for_reconnect = False
                 log.info('Capture exited!')
+
+                # Save leftover raw frames from last used buffer
+                if self.config.save_frames:
+                    if raw_buffer_one:
+                        self.startRawTime1.value = first_raw_frame_timestamp
+                    else:
+                        self.startRawTime2.value = first_raw_frame_timestamp
+
                 break
 
 
-            if not wait_for_reconnect:
+            if (not self.daytime_mode.value) and (not wait_for_reconnect):
 
                 # Set the starting value of the frame block, which indicates to the compression that the
                 # block is ready for processing

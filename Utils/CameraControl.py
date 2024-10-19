@@ -656,13 +656,12 @@ def setParameter(cam, opts):
 def switchDayTime(cam):
     """ Switches the camera to daytime mode. Reboots camera. """
 
-    setCameraParam(cam, 'Camera ExposureParam LeastTime 100'.split()) # 100 microseconds = 0.1ms
+    setCameraParam(cam, 'Camera ExposureParam LeastTime 1000'.split()) # 1 millisecond
     setCameraParam(cam, 'Camera DayNightColor 1'.split()) # Color mode
     setCameraParam(cam, 'Camera BLCMode 1'.split())
     setCameraParam(cam, 'Camera ElecLevel 50'.split())
     setCameraParam(cam, 'Camera GainParam Gain 10'.split())
     setCameraParam(cam, 'Camera BroadTrends AutoGain 1'.split())
-    rebootCamera(cam)
 
 
 def switchNightTime(cam):
@@ -676,7 +675,6 @@ def switchNightTime(cam):
     setCameraParam(cam, 'Camera ElecLevel 100'.split())
     setCameraParam(cam, 'Camera GainParam Gain 60'.split())
     setCameraParam(cam, 'Camera BroadTrends AutoGain 0'.split())
-    rebootCamera(cam)
 
 
 def dvripCall(cam, cmd, opts):

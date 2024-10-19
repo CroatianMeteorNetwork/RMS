@@ -11,6 +11,8 @@ import argparse
 import subprocess
 import shutil
 import cv2
+import glob
+import tarfile
 
 from PIL import ImageFont
 
@@ -176,6 +178,95 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
         print("Deleted temporary directory : " + dir_tmp_path)
 		
     print("Total time:", RmsDateTime.utcnow() - t1)
+
+
+def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=20, cleanup_mode='none',
+                              compression='bz2', filelist=None):
+    """
+    Generate a timelapse video from frame images and optionally cleanup the
+    source directory.
+
+    Keyword arguments:
+        day_dir: [str] Directory containing a day of frame image files. day_dir is expected to have
+                       subdirectories by the hour of day "00", "01", ..., "23"
+        video_path: [str] Output path for the generated video.
+        fps: [int] Frames per second for the output video. 30 by default.
+        crf: [int] Constant Rate Factor for video compression. 20 by default.
+        cleanup_mode: [str] Cleanup mode after video creation.
+                      Options: 'none', 'delete', 'tar'. 'none' by default.
+        compression: [str] Compression method for tar.
+                     Options: 'bz2', 'gz'. 'bz2' by default.
+    """
+
+    # Combine all files paths
+    images_files = [img for img in sorted(glob.glob(os.path.join(day_dir, "*/*.jpg")))] + \
+                   [img for img in sorted(glob.glob(os.path.join(day_dir, "*/*.png")))]
+
+    if len(images_files) == 0:
+        print("No images found.")
+        return
+
+    # Create a text file listing all the images
+    list_file_path = os.path.join(day_dir, "filelist.txt")
+    with open(list_file_path, 'w') as f:
+        for img_path in images_files:
+            f.write("file '{0}'\n".format(img_path))
+
+    if platform.system() in ['Linux', 'Darwin']:  # Darwin is macOS
+        software_name = "ffmpeg"
+    elif platform.system() == 'Windows':
+        software_name = os.path.join(os.path.dirname(__file__), "ffmpeg.exe")
+    else:
+        print("Unsupported platform.")
+        return
+
+    # Formulate the ffmpeg command
+    encode_command = [
+        software_name, "-nostdin", "-f", "concat", "-safe", "0", "-v", "quiet",
+        "-r", str(fps), "-y", "-i", list_file_path, "-c:v", "libx264",
+        "-crf", str(crf), "-g", "15", video_path
+    ]
+
+    # Execute the command
+    print("Creating timelapse using ffmpeg...")
+    subprocess.call(encode_command)
+
+    if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
+        print("Video created successfully at {0}".format(video_path))
+
+        # Cleanup based on the specified mode
+        if cleanup_mode == 'delete':
+            try:
+                shutil.rmtree(day_dir)
+                print("Successfully deleted the source directory: {0}".format(day_dir))
+            except Exception as e:
+                print("Error deleting the source directory: {0}".format(e))
+
+        elif cleanup_mode == 'tar':
+            try:
+                ext = '.tar.bz2' if compression == 'bz2' else '.tar.gz'
+
+                # Derive the tar file name from video_path, stripping '_timelapse.mp4'
+                base_name = os.path.basename(video_path).replace('_timelapse.mp4', '')
+
+                # Construct the full path for the tar file
+                tar_path = os.path.join(os.path.dirname(video_path), base_name + ext)
+
+                # Create the tar archive with the correct mode
+                mode = 'w:bz2' if compression == 'bz2' else 'w:gz'
+
+                with tarfile.open(tar_path, mode) as tar:
+                    tar.add(day_dir, arcname=os.path.basename(day_dir))
+
+                # Remove the original directory
+                shutil.rmtree(day_dir)
+                print("Successfully created tar archive at: {0}".format(tar_path))
+
+            except Exception as e:
+                print("Error creating tar archive: {0}".format(e))
+    else:
+        print("Video creation failed or resulted in an empty file.")
+
 
 
 if __name__ == "__main__":

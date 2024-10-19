@@ -284,11 +284,8 @@ class Config:
         # Decoder for the gstreamer media backend (e.g. decodebin, avdec_h264, nvh264dec)
         self.gst_decoder = "avdec_h264"
 
-        # Location of the raw videos to be saved to disk (None means no saving)
-        self.raw_video_dir = None
-
-        # Save the raw video to the night directory
-        self.raw_video_dir_night = False
+        # Toggle raw video saving in data_dir/video_dir.
+        self.raw_video_save = False
 
         # Duration of the raw video segment (seconds)
         self.raw_video_duration = 30
@@ -335,6 +332,8 @@ class Config:
         self.log_dir = "logs"
         self.captured_dir = "CapturedFiles"
         self.archived_dir = "ArchivedFiles"
+        self.frame_dir = "FramesFiles"
+        self.video_dir = "VideoFiles"
 
         # days of logfiles to keep
         self.logdays_to_keep = 30
@@ -352,6 +351,16 @@ class Config:
         # keep this many CapDirs. Zero means keep them all
         self.capt_dirs_to_keep = 8
 
+        # Frame dirs to keep
+        # Keep this many frame dirs (days)
+        # Zero means keep them all
+        self.frame_dirs_to_keep = 8
+
+        # Video dirs to keep
+        # Keep this many video dirs (days)
+        # Zero means keep them all
+        self.video_dirs_to_keep = 2
+        
         # Space quotas in GB
 
 
@@ -381,6 +390,24 @@ class Config:
 
         # Enable/disable saving a live.jpg file in the data directory with the latest image
         self.live_jpg = False
+
+        # Toggle saving video frames at a set interval to the frame_dir
+        self.save_frames = False
+
+        # The file extension for saved frames ('jpg' or 'png')
+        self.frame_file_type = 'jpg'
+
+        # Set JPEG quality for the saved frames for jpg file type
+        self.jpgs_quality = 90
+
+        # Set PNG compression for the saved frames for png file type
+        self.png_compression = 3
+
+        # Set the time interval for saving video frames
+        self.frame_save_interval: 10
+
+        # Set the frame count interval for saving video frames (calculated from the time interval)
+        self.frame_save_interval_count: 256
 
         # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
         self.slideshow_enable = False
@@ -615,6 +642,7 @@ class Config:
 
         ##### Timelapse
         self.timelapse_generate_captured = True
+        self.timelapse_generate_from_frames = True
 
 
         #### Shower association
@@ -926,6 +954,12 @@ def parseCapture(config, parser):
     if parser.has_option(section, "capt_dirs_to_keep"):
         config.capt_dirs_to_keep = int(parser.get(section, "capt_dirs_to_keep"))
 
+    if parser.has_option(section, "frame_dirs_to_keep"):
+        config.bz2_files_to_keep = int(parser.get(section, "frame_dirs_to_keep"))
+
+    if parser.has_option(section, "video_dirs_to_keep"):
+        config.capt_dirs_to_keep = int(parser.get(section, "video_dirs_to_keep"))
+
     if parser.has_option(section, "quota_management_disabled"):
         config.quota_management_disabled = parser.getboolean(section, "quota_management_disabled")
 
@@ -945,7 +979,13 @@ def parseCapture(config, parser):
     
     if parser.has_option(section, "archived_dir"):
         config.archived_dir = parser.get(section, "archived_dir")
-    
+
+    if parser.has_option(section, "frame_dir"):
+        config.frame_dir = parser.get(section, "frame_dir")
+
+    if parser.has_option(section, "video_dir"):
+        config.video_dir = parser.get(section, "video_dir")
+
     if parser.has_option(section, "width"):
         config.width = parser.getint(section, "width")
 
@@ -1039,17 +1079,8 @@ def parseCapture(config, parser):
     if parser.has_option(section, "gst_decoder"):
         config.gst_decoder = parser.get(section, "gst_decoder")
 
-    if parser.has_option(section, "raw_video_dir"):
-        config.raw_video_dir = parser.get(section, "raw_video_dir")
-
-        # If the raw video directory is set to 'None', disable saving raw videos
-        if config.raw_video_dir.strip().lower() == "none":
-            config.raw_video_dir = None
-
-
-    if parser.has_option(section, "raw_video_dir_night"):
-        config.raw_video_dir_night = parser.getboolean(section, "raw_video_dir_night")
-        
+    if parser.has_option(section, "raw_video_save"):
+        config.raw_video_save = parser.getboolean(section, "raw_video_save")
 
     if parser.has_option(section, "raw_video_duration"):
         config.raw_video_duration = parser.getfloat(section, "raw_video_duration")
@@ -1118,6 +1149,47 @@ def parseCapture(config, parser):
     if parser.has_option(section, "live_jpg"):
         config.live_jpg = parser.getboolean(section, "live_jpg")
 
+    # Enable/disable saving video frames
+    if parser.has_option(section, "save_frames"):
+        config.save_frames = parser.getboolean(section, "save_frames")
+
+    if parser.has_option(section, "frame_file_type"):
+        config.frame_file_type = parser.get(section, "frame_file_type")
+
+    # Load the JPEG quality
+    if parser.has_option(section, "jpgs_quality"):
+        config.jpgs_quality = parser.getint(section, "jpgs_quality")
+
+        # Must be an integer between 0 and 100
+        if not 0 <= config.jpgs_quality <= 100:
+            config.jpgs_quality = 90
+            print()
+            print("WARNING! The jpgs_quality must be between 0 and 100. It has been reset to 90!")
+
+    # Load the PNG compression
+    if parser.has_option(section, "png_compression"):
+        config.png_compression = parser.getint(section, "png_compression")
+
+        # Must be an integer between 0 and 9
+        if not 0 <= config.png_compression <= 9:
+            config.png_compression = 3
+            print()
+            print("WARNING! The png_compression must be between 0 and 9. It has been reset to 3!")
+
+
+    # Load the interval for saving video frame
+    if parser.has_option(section, "frame_save_interval"):
+        config.frame_save_interval = parser.getint(section, "frame_save_interval")
+
+        # Calculate the interval frame count
+        config.frame_save_interval_count = int(round(float(config.frame_save_interval)*float(config.fps)))
+
+        # Must be greater than 5
+        if config.frame_save_interval_count < 5:
+            config.frame_save_interval_count = 256
+            print()
+            print("WARNING! The frame_save_interval must result in more than 5 frames interval. It has been reset to 256 frames!")
+
     # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
     if parser.has_option(section, "slideshow_enable"):
         config.slideshow_enable = parser.getboolean(section, "slideshow_enable")
@@ -1156,7 +1228,7 @@ def parseCapture(config, parser):
 
     # Load option to run capture continuously, during the day or night
     if parser.has_option(section, "continuous_capture"):
-        config.continuous_capture = True  # parser.getint(section, "continuous_capture")
+        config.continuous_capture = parser.getboolean(section, "continuous_capture")
 
 
 def parseUpload(config, parser):
@@ -1670,6 +1742,9 @@ def parseTimelapse(config, parser):
     
     if parser.has_option(section, "timelapse_generate_captured"):
         config.timelapse_generate_captured = parser.getboolean(section, "timelapse_generate_captured")
+
+    if parser.has_option(section, "timelapse_generate_from_frames"):
+        config.timelapse_generate_from_frames = parser.getboolean(section, "timelapse_generate_from_frames")
 
 
 def parseColors(config, parser):

@@ -89,7 +89,7 @@ def resetSIGINT():
 
 
 
-def wait(duration, compressor, buffered_capture, video_file, camera_mode=None):
+def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
     """ The function will wait for the specified time, or it will stop when Enter is pressed. If no time was
         given (in seconds), it will wait until Enter is pressed. Additionally, it will also stop when the camera mode 
         (day/night) changes, in case of continuous capture mode.
@@ -100,7 +100,7 @@ def wait(duration, compressor, buffered_capture, video_file, camera_mode=None):
         buffered_capture: [BufferedCapture] buffered capture process object
         video_file: [str] Path to the video file, if it was given as the video source.
         daytime_mode: [bool] shared boolean variable to that indicates 
-        camera_mode: [bool] shared boolean variable to keep track of camera day/night mode switching. None by default.
+        daytime_mode: [bool] shared boolean variable to keep track of camera day/night mode switching. None by default.
     """
 
     global STOP_CAPTURE
@@ -112,10 +112,10 @@ def wait(duration, compressor, buffered_capture, video_file, camera_mode=None):
     time_start = RmsDateTime.utcnow()
 
     # Remember the initial camera mode value
-    if camera_mode is not None:
-        camera_mode_pre = camera_mode.value
+    if daytime_mode is not None:
+        daytime_mode_prev = daytime_mode.value
     else:
-        camera_mode_pre = None
+        daytime_mode_prev = None
 
     while True:
 
@@ -124,13 +124,13 @@ def wait(duration, compressor, buffered_capture, video_file, camera_mode=None):
 
 
         # Break in case camera modes switched
-        if (camera_mode is not None) and (camera_mode_pre != camera_mode.value):
+        if (daytime_mode is not None) and (daytime_mode_prev != daytime_mode.value):
             break
 
 
         # If the compressor has died, restart capture
-        # In case the camera mode is in daytime capture, then the compressor must remain stopped 
-        if (not camera_mode_pre) and (not compressor.is_alive()):
+        # This will not be checked during daytime
+        if (not daytime_mode_prev) and (not compressor.is_alive()):
             log.info('The compressor has died, restarting the capture!')
             break
 
@@ -157,7 +157,7 @@ def wait(duration, compressor, buffered_capture, video_file, camera_mode=None):
 
 
 def runCapture(config, duration=None, video_file=None, nodetect=False, detect_end=False, \
-    upload_manager=None, resume_capture=False, fixed_duration=False, camera_mode=None):
+    upload_manager=None, eventmonitor=None, resume_capture=False, fixed_duration=False, daytime_mode=None):
     """ Run capture and compression for the given time.given
     
     Arguments:
@@ -171,10 +171,11 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             finishes. False by default.
         upload_manager: [UploadManager object] A handle to the UploadManager, which handles uploading files to
             the central server. None by default.
+        eventmonitor: [EventMonitor object]. Event monitor object. None by default.
         resume_capture: [bool] Resume capture in the last data directory in CapturedFiles. False by default.
         fixed_duration: [bool] The capture is run with a given fixed duration and not automatically 
             determined. False by default.
-        camera_mode: [bool] shared boolean variable to keep track of camera day/night mode switching. None by default.
+        daytime_mode: [multiprocessing.Value] shared boolean variable to keep track of camera day/night mode switching. None by default.
 
     Return:
         night_archive_dir: [str] Path to the archive folder of the processed night.
@@ -237,6 +238,18 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         night_data_dir = os.path.join(os.path.abspath(config.data_dir), config.captured_dir, \
             night_data_dir_name)
 
+        # Full path to the saved frames directory
+        if config.save_frames:
+            saved_frames_dir = os.path.join(os.path.abspath(config.data_dir), config.frame_dir)
+        else:
+            saved_frames_dir = None
+
+        # Full path to the video files directory
+        if config.raw_video_save:
+            saved_video_dir = os.path.join(os.path.abspath(config.data_dir), config.video_dir)
+        else:
+            saved_video_dir = None
+
 
 
     # Add a note about Patreon supporters
@@ -262,6 +275,16 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     mkdirP(night_data_dir)
 
     log.info('Data directory: ' + night_data_dir)
+
+    # Make a directory for the saved frames
+    if saved_frames_dir is not None:
+        mkdirP(saved_frames_dir)
+        log.info('Saved frames directory: {}'.format(saved_frames_dir))
+
+    # Make a directory for the saved videos
+    if saved_video_dir is not None:
+        mkdirP(saved_video_dir)
+        log.info('Saved videos directory: {}'.format(saved_video_dir))
 
     # Copy the used config file to the capture directory
     if os.path.isfile(config.config_file_name):
@@ -318,146 +341,197 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     log.info('Initializing frame buffers done!')
 
 
-    # Check if the detection should be performed or not
-    if nodetect:
-        detector = None
-
-    else:
-
-        if detect_end:
-
-            # Delay detection until the end of the night
-            delay_detection = duration
-
-        else:
-            # Delay the detection for 2 minutes after capture start (helps stability)
-            delay_detection = 120
-
-
-        # Add an additional postprocessing delay
-        delay_detection += config.postprocess_delay
-
-
-        # Set a flag file to indicate that previous files are being loaded (if any)
-        capture_resume_file_path = os.path.join(config.data_dir, config.capture_resume_flag_file)
-        with open(capture_resume_file_path, 'w') as f:
-            pass
-
-        # Initialize the detector
-        detector = QueuedPool(detectStarsAndMeteors, cores=1, log=log, delay_start=delay_detection, \
-            backup_dir=night_data_dir, input_queue_maxsize=None)
-        detector.startPool()
-        detector_started = True
-
-        # If the capture is being resumed into the directory, load all previously saved FF files
-        if resume_capture:
-
-            # Load all processed FF files
-            for i, ff_name in enumerate(sorted(os.listdir(night_data_dir))):
-
-                # Every 50 files loaded, update the flag file
-                if i%50 == 0:
-                    with open(capture_resume_file_path, 'a') as f:
-                        f.write("{:d}\n".format(i))
-                        
-
-                # Check if the file is a valid FF files
-                ff_path = os.path.join(night_data_dir, ff_name)
-                if os.path.isfile(ff_path) and (str(config.stationID) in ff_name) and validFFName(ff_name):
-
-                    # Add the FF file to the detector
-                    detector.addJob([night_data_dir, ff_name, config], wait_time=0.005)
-                    log.info("Added existing FF files for detection: {:s}".format(ff_name))
-
-
-        # Remove the flag file
-        if os.path.isfile(capture_resume_file_path):
-            try:
-                os.remove(capture_resume_file_path)
-            except:
-                log.error("There was an error during removing the capture resume flag file: " \
-                    + capture_resume_file_path)
-
-
     # Initialize buffered capture
     bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config, video_file=video_file,
-                         night_data_dir=night_data_dir)
-
-
-    # Initialize the live image viewer
-    if config.live_maxpixel_enable:
-
-        # Enable showing the live JPG
-        config.live_jpg = True
-
-        live_jpg_path = os.path.join(config.data_dir, 'live.jpg')
-
-        live_view = LiveViewer(live_jpg_path, image=True, slideshow=False, banner_text="Live")
-        live_view.start()
-
-    else:
-        live_view = None
-
-
-    # Initialize compression
-    compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, config,
-        detector=detector)
-
-    # Open the observation summary report
-    if video_file is None:
-        log.info(startObservationSummaryReport(config, duration, force_delete=False))
-
-    # Start buffered capture
+                         night_data_dir=night_data_dir, saved_frames_dir=saved_frames_dir, daytime_mode=daytime_mode)
     bc.startCapture()
 
+    # To track and make new directories every iteration
+    ran_once = False
 
     # Loop to handle both continuous and standard capture modes
     while True:
 
-        # If continuous capture is enabled and we need to operate in daytime settings
-        if config.continuous_capture and camera_mode.value:
-            
+        # Continuous mode only: Setup new directories for a new night capture
+        if config.continuous_capture and (not daytime_mode.value) and ran_once:
+
+            # Create a new directory for captured files based on the current time
+            night_data_dir_name = str(config.stationID) + '_' + RmsDateTime.utcnow().strftime('%Y%m%d_%H%M%S_%f')
+
+            # Full path to the new data directory
+            night_data_dir = os.path.join(os.path.abspath(config.data_dir), config.captured_dir, \
+                night_data_dir_name)
+
+            # Make a directory for the next capture
+            mkdirP(night_data_dir)
+
+            log.info('New data directory: ' + night_data_dir)
+
+            # Copy the used config file to the capture directory
+            if os.path.isfile(config.config_file_name):
+                try:
+                    shutil.copy2(config.config_file_name, os.path.join(night_data_dir, ".config"))
+                except:
+                    log.error("Cannot copy the config file to the capture directory!")
+
+
+        # Continuous mode only: Daytime capture
+        if config.continuous_capture and daytime_mode.value:
+                        
             log.info('Capturing in daytime mode...')
 
-
-            #  bc.switchDaytimeCapture() 
-
-
             # Capture until Ctrl+C is pressed / camera switches modes
-            wait(duration, compressor, bc, video_file, camera_mode)
-
-            # If capture was manually stopped, end capture
-            if STOP_CAPTURE:
-                log.info('Ending capture...')
-                break
+            daytime_mode_prev = daytime_mode.value
+            wait(duration, None, bc, video_file, daytime_mode)
 
 
-        # Standard capture procedure OR when nighttime mode sets it
+        # Continuous OR standard mode: Nighttime capture
         else:
-    
-            # Start the detector/compression
-            if not detector_started:
-                detector.startPool()
-
-            compressor.start()
-
+        
             log.info('Capturing in nighttime mode...')
 
+            # Check if the detection should be performed or not
+            if nodetect:
+                detector = None
 
-            # bc.switchNighttimeCapture()
+            else:
 
+                if detect_end:
+
+                    # Delay detection until the end of the night
+                    delay_detection = duration
+
+                else:
+                    # Delay the detection for 2 minutes after capture start (helps stability)
+                    delay_detection = 120
+
+
+                # Add an additional postprocessing delay
+                delay_detection += config.postprocess_delay
+
+
+                # Set a flag file to indicate that previous files are being loaded (if any)
+                capture_resume_file_path = os.path.join(config.data_dir, config.capture_resume_flag_file)
+                with open(capture_resume_file_path, 'w') as f:
+                    pass
+
+                # Initialize the detector
+                detector = QueuedPool(detectStarsAndMeteors, cores=1, log=log, delay_start=delay_detection, \
+                    backup_dir=night_data_dir, input_queue_maxsize=None)
+                detector.startPool()
+
+
+                # If the capture is being resumed into the directory, load all previously saved FF files
+                if resume_capture:
+
+                    # Load all processed FF files
+                    for i, ff_name in enumerate(sorted(os.listdir(night_data_dir))):
+
+                        # Every 50 files loaded, update the flag file
+                        if i%50 == 0:
+                            with open(capture_resume_file_path, 'a') as f:
+                                f.write("{:d}\n".format(i))
+                                
+
+                        # Check if the file is a valid FF files
+                        ff_path = os.path.join(night_data_dir, ff_name)
+                        if os.path.isfile(ff_path) and (str(config.stationID) in ff_name) and validFFName(ff_name):
+
+                            # Add the FF file to the detector
+                            detector.addJob([night_data_dir, ff_name, config], wait_time=0.005)
+                            log.info("Added existing FF files for detection: {:s}".format(ff_name))
+
+
+                # Remove the flag file
+                if os.path.isfile(capture_resume_file_path):
+                    try:
+                        os.remove(capture_resume_file_path)
+                    except:
+                        log.error("There was an error during removing the capture resume flag file: " \
+                            + capture_resume_file_path)
+
+
+            # Initialize the live image viewer
+            if config.live_maxpixel_enable:
+
+                # Enable showing the live JPG
+                config.live_jpg = True
+
+                live_jpg_path = os.path.join(config.data_dir, 'live.jpg')
+
+                live_view = LiveViewer(live_jpg_path, image=True, slideshow=False, banner_text="Live")
+                live_view.start()
+
+            else:
+                live_view = None
+
+
+            # Initialize compression
+            compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, config,
+                detector=detector)
+
+            # Open the observation summary report
+            if video_file is None:
+                log.info(startObservationSummaryReport(config, duration, force_delete=False))
+
+            # Start the compressor
+            compressor.start()
 
             # Capture until Ctrl+C is pressed / camera switches modes
-            wait(duration, compressor, bc, video_file, camera_mode)
-
-            # If capture was manually stopped, end capture
-            if STOP_CAPTURE:
-                log.info('Ending capture...')
+            daytime_mode_prev = daytime_mode.value
+            wait(duration, compressor, bc, video_file, daytime_mode)
 
             # Stop the compressor
             log.debug('Stopping compression...')
             detector = compressor.stop()
             log.debug('Compression stopped')
+
+            if live_view is not None:
+
+                # Stop the live viewer
+                log.debug('Stopping live viewer...')
+
+                live_view.stop()
+                live_view.join()
+                del live_view
+                live_view = None
+
+                log.debug('Live view stopped')
+
+
+        # Continuous mode: stops BufferedCapture when capture is terminated manually
+        # Standard mode: stops BufferedCapture when night is done
+        if STOP_CAPTURE or (not config.continuous_capture):
+
+            log.info('Ending capture...')
+
+            # Stop the capture
+            log.debug('Stopping capture...')
+            dropped_frames = bc.stopCapture()
+            log.debug('Capture stopped')
+
+            log.info('Total number of late or dropped frames: ' + str(dropped_frames))
+            obs_db_conn = getObsDBConn(config)
+            addObsParam(obs_db_conn, "dropped_frames", dropped_frames)
+            obs_db_conn.close()
+
+            # Free shared memory after the compressor is done
+            try:
+                log.debug('Freeing frame buffers in StartCapture...')
+                del sharedArrayBase
+                del sharedArray
+                del sharedArrayBase2
+                del sharedArray2
+
+            except Exception as e:
+                log.debug('Freeing frame buffers failed with error:' + repr(e))
+                log.debug(repr(traceback.format_exception(*sys.exc_info())))
+
+            log.debug('Compression buffers freed')
+
+
+        # Continuous OR standard mode: uploading and post-processing after night capture
+        if (not config.continuous_capture) or (not daytime_mode_prev):
 
             # If detection should be performed
             if not nodetect:
@@ -498,7 +572,6 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
                     # Wait for the detector to finish and close it
                     detector.closePool()
-                    detector_started = False
 
                     log.info('Detection finished!')
 
@@ -543,6 +616,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 detection_results = detector.getResults()
 
             else:
+
                 detection_results = []
 
             # Save detection to disk and archive detection
@@ -603,72 +677,31 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             # Run the external script
             runExternalScript(night_data_dir, night_archive_dir, config)
 
-            # Exit in case of standard capture mode 
-            if not config.continuous_capture:
-                break
+
+        # Continuous OR standard mode: exit when capture is terminated manually
+        if STOP_CAPTURE:
+
+            # Stop the upload manager
+            if upload_manager is not None:
+                if upload_manager.is_alive():
+                    upload_manager.stop()
+                    log.info('Closing upload manager...')
+
+            if eventmonitor is not None:
+                # Stop the eventmonitor
+                if eventmonitor.is_alive():
+                    log.debug('Closing eventmonitor...')
+                    eventmonitor.stop()
+                    del eventmonitor
+
+            sys.exit()
 
 
-    # If detector is not closed during exit from daytime mode
-    if not detector_started:
-        detector.closePool()
+        # Standard mode: need to run it all just once
+        if (not config.continuous_capture):
+            break 
 
-    # Stop the capture
-    log.debug('Stopping capture...')
-    dropped_frames = bc.stopCapture()
-    log.debug('Capture stopped')
-
-    log.info('Total number of late or dropped frames: ' + str(dropped_frames))
-    obs_db_conn = getObsDBConn(config)
-    addObsParam(obs_db_conn, "dropped_frames", dropped_frames)
-    obs_db_conn.close()
-
-    # Free shared memory after the compressor is done
-    try:
-        log.debug('Freeing frame buffers in StartCapture...')
-        del sharedArrayBase
-        del sharedArray
-        del sharedArrayBase2
-        del sharedArray2
-
-    except Exception as e:
-        log.debug('Freeing frame buffers failed with error:' + repr(e))
-        log.debug(repr(traceback.format_exception(*sys.exc_info())))
-
-    log.debug('Compression buffers freed')
-
-    if live_view is not None:
-
-        # Stop the live viewer
-        log.debug('Stopping live viewer...')
-
-        live_view.stop()
-        live_view.join()
-        del live_view
-        live_view = None
-
-        log.debug('Live view stopped')
-
-
-    # If capture was manually stopped, end program
-    if STOP_CAPTURE:
-
-        log.info('Ending program')
-
-        # Stop the upload manager
-        if upload_manager is not None:
-            if upload_manager.is_alive():
-                upload_manager.stop()
-                log.info('Closing upload manager...')
-
-        if 'eventmonitor' in locals():
-         if eventmonitor is not None:
-            # Stop the eventmonitor
-            if eventmonitor.is_alive():
-                log.debug('Closing eventmonitor...')
-                eventmonitor.stop()
-                del eventmonitor
-
-        sys.exit()
+        ran_once = True
 
 
     return night_archive_dir
@@ -977,14 +1010,18 @@ if __name__ == "__main__":
     while True:
 
         if config.continuous_capture:
-            # In case of continuous capture, start immediately
-            start_time, duration = True, None
-            log.info('Starting continuous capture...')
-            
+
+            # Start immediately in case of continuous capture mode
+            start_time = True
+            duration = None
+            log.info('Starting continuous capture now...')
+        
         else:
+
             # Calculate when and how should the capture run
             start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation)
             log.info('Next start time: ' + str(start_time) + ' UTC')
+
 
         # Reboot the computer after processing is done for the previous night
         if ran_once and config.reboot_after_processing:
@@ -1087,7 +1124,7 @@ if __name__ == "__main__":
             continue
 
 
-        # Wait to start capturing
+        # Wait to start capturing and initialize last night's slideshow
         if not isinstance(start_time, bool):
 
             # Run auto-reprocessing
@@ -1238,12 +1275,16 @@ if __name__ == "__main__":
 
 
         if config.continuous_capture:
+            
             # Setup shared value to communicate day/night switch between processes.
-            camera_mode = multiprocessing.Value(ctypes.c_bool, False)
+            daytime_mode = multiprocessing.Value(ctypes.c_bool, False)
 
             # Setup camera mode switcher on another thread
-            cam_switcher = threading.Thread(target=cameraModeSwitcher, args=(config, camera_mode))
-            cam_switcher.daemon = True # To make sure switcher thread exits automatically at the end
+            cam_switcher = threading.Thread(target=cameraModeSwitcher, args=(config, daytime_mode))
+            
+            # To make sure switcher thread exits automatically at the end
+            cam_switcher.daemon = True
+            
             cam_switcher.start()
             log.info('Started camera mode switcher on separate thread')
 
@@ -1253,8 +1294,8 @@ if __name__ == "__main__":
 
         # Run capture and compression
         night_archive_dir = runCapture(config, duration=duration, nodetect=cml_args.nodetect, \
-            upload_manager=upload_manager, detect_end=(cml_args.detectend or config.postprocess_at_end), \
-            resume_capture=cml_args.resume, camera_mode=camera_mode)
+            upload_manager=upload_manager, eventmonitor=eventmonitor, detect_end=(cml_args.detectend or config.postprocess_at_end), \
+            resume_capture=cml_args.resume, daytime_mode=daytime_mode)
 
         # Indicate that the capture was done once
         ran_once = True
