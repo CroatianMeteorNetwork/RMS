@@ -186,7 +186,12 @@ def startObservationSummaryReport(config, duration, force_delete=False):
         addObsParam(conn, "camera_information", "Unavailable")
     no_of_frames_per_fits_file = 256
     fps = config.fps
-    fits_files_from_duration = duration * fps / no_of_frames_per_fits_file
+
+    if duration is None:
+        fits_files_from_duration = "None (Continuous Capture)"
+    else:
+        fits_files_from_duration = duration * fps / no_of_frames_per_fits_file
+    
     addObsParam(conn, "fits_files_from_duration", fits_files_from_duration)
     conn.close()
     return "Opening a new observations summary for duration {} seconds".format(duration)
