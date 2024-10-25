@@ -145,7 +145,7 @@ class RawFrameSaver(multiprocessing.Process):
             timed_dir_string = time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H", time.gmtime(timestamp))
 
             # Calculate milliseconds
-            millis = int((block_start_time - floor(block_start_time))*1000)
+            millis = int((timestamp - floor(timestamp))*1000)
 
             # Create the filename
             if self.config.frame_file_type == 'png':
