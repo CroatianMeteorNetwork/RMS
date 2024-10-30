@@ -404,10 +404,10 @@ class Config:
         self.png_compression = 3
 
         # Set the time interval for saving video frames
-        self.frame_save_interval: 10
+        self.frame_save_interval = 10
 
         # Set the frame count interval for saving video frames (calculated from the time interval)
-        self.frame_save_interval_count: 256
+        self.frame_save_interval_count = 256
 
         # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
         self.slideshow_enable = False
