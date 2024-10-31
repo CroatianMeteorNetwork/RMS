@@ -271,10 +271,10 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         + "_|____    /__.-'|_|--|_|          ______|__\n")
     print("################################################################")
 
-    # Make a directory for the night
-    mkdirP(night_data_dir)
-
-    log.info('Data directory: ' + night_data_dir)
+    # Make a directory for the night - if currently in night capture mode
+    if (not config.continuous_capture) or (not daytime_mode.value):
+        mkdirP(night_data_dir)
+        log.info('Data directory: ' + night_data_dir)
 
     # Make a directory for the saved frames
     if saved_frames_dir is not None:
@@ -349,6 +349,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # To track and make new directories every iteration
     ran_once = False
 
+    # To handle control flow in case of disk space issues
+    disk_full = False
+
     # Loop to handle both continuous and standard capture modes
     while True:
 
@@ -375,6 +378,15 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                     log.error("Cannot copy the config file to the capture directory!")
 
 
+            # Free up disk space for new capture
+            log.info('Freeing up disk space...')
+
+            if not deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config, duration=duration):
+
+                log.error('No more disk space can be freed up! Stopping capture...')
+                disk_full = True
+
+
         # Continuous mode only: Daytime capture
         if config.continuous_capture and daytime_mode.value:
                         
@@ -386,7 +398,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
         # Continuous OR standard mode: Nighttime capture
-        else:
+        elif (not disk_full):
         
             log.info('Capturing in nighttime mode...')
 
@@ -501,7 +513,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
         # Continuous mode: stops BufferedCapture when capture is terminated manually
         # Standard mode: stops BufferedCapture when night is done
-        if STOP_CAPTURE or (not config.continuous_capture):
+        if STOP_CAPTURE or (not config.continuous_capture) or (disk_full):
 
             log.info('Ending capture...')
 
@@ -531,7 +543,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
         # Continuous OR standard mode: uploading and post-processing after night capture
-        if (not config.continuous_capture) or (not daytime_mode_prev):
+        if (not config.continuous_capture) or (not daytime_mode_prev) and (not disk_full):
 
             # If detection should be performed
             if not nodetect:
@@ -679,7 +691,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
         # Continuous OR standard mode: exit when capture is terminated manually
-        if STOP_CAPTURE:
+        if STOP_CAPTURE or (disk_full):
 
             # Stop the upload manager
             if upload_manager is not None:

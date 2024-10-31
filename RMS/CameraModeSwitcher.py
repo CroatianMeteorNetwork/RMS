@@ -25,8 +25,8 @@ def cameraModeSwitcher(config, daytime_mode):
         o.long = str(config.longitude)
         o.elevation = config.elevation
 
-        # The Sun should be about 10 degrees below the horizon when the camera modes switch
-        o.horizon = '-10'
+        # The Sun should be about 8 degrees below the horizon when the camera modes switch
+        o.horizon = '-8'
 
         # Set the current time
         current_time = RmsDateTime.utcnow()

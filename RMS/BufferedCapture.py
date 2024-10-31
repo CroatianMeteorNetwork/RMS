@@ -1087,16 +1087,8 @@ class BufferedCapture(Process):
             if self.config.save_frames and self.frame_shape is not None:
                 try:
                     log.debug("Initializing raw frame arrays with shape: {}".format(self.frame_shape))
-                    
-                    # Get initial frame to determine actual dimensions
-                    ret, frame, _ = self.read()
-                    if not ret:
-                        raise ValueError("Could not read initial frame for array initialization")
 
-                    actual_shape = frame.shape
-                    log.debug("Actual frame shape: {}".format(actual_shape))
-
-                    self.initRawFrameArrays(actual_shape)
+                    self.initRawFrameArrays(self.frame_shape)
 
                     # Initialize and start frame saver
                     log.debug("Creating and starting RawFrameSaver...")
