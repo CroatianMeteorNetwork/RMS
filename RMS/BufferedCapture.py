@@ -595,10 +595,17 @@ class BufferedCapture(Process):
 
             # Reset pipeline if one already exists
             if self.pipeline:
-                self.pipeline.set_state(Gst.State.NULL)
-
-                # Waiting to ensure the pipeline is fully cleaned up
-                time.sleep(retry_interval)
+                # Get current state first to understand what we're dealing with
+                state_return, current_state, pending_state = self.pipeline.get_state(0)
+                log.debug("Current pipeline state before cleanup: {}".format(current_state))
+                
+                # Set to NULL state and wait for completion
+                state_return = self.pipeline.set_state(Gst.State.NULL)
+                if state_return == Gst.StateChangeReturn.ASYNC:
+                    # Wait for state change to complete with timeout
+                    state_return, state, pending = self.pipeline.get_state(Gst.SECOND * 5)
+                    if state_return != Gst.StateChangeReturn.SUCCESS:
+                        log.warning("Pipeline didn't reach NULL state cleanly")
 
                 # Clear the pipeline reference to avoid using a stale or invalid pipeline object
                 self.pipeline = None
@@ -690,7 +697,7 @@ class BufferedCapture(Process):
 
                     for i in range(500):
 
-                        print('Trying to ping the IP camera...')
+                        print('Trying to ping the {} camera...'.format(ip))
                         ping_success = ping(ip)
 
                         if ping_success:
@@ -720,7 +727,7 @@ class BufferedCapture(Process):
                 log.info("GStreamer is not available. Switching to alternative.")
                 self.media_backend_override = True
 
-            if (self.config.media_backend == 'gst') and GST_IMPORTED:
+            if (self.config.media_backend == 'gst') and GST_IMPORTED and (self.media_backend_override == False):
                 
                 log.info("Initialize GStreamer Standalone Device.")
                 
@@ -759,6 +766,9 @@ class BufferedCapture(Process):
                         video_file_dir=raw_video_dir, segment_duration_sec=self.config.raw_video_duration,
                         max_retries=5, retry_interval=1
                         )
+
+                    if not self.device:
+                        raise ValueError("Could not create GStreamer pipeline.")
                     
                     log.info("GStreamer pipeline created!")   
                     
