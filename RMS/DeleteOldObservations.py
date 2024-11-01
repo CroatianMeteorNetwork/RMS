@@ -593,24 +593,13 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     free_space_status = False
     while True:
 
-        # Delete one captured directory
-        captured_dirs_remaining = deleteNightFolders(captured_dir, config)
+        # Delete one video directory
+        video_dirs_remaining = deleteRawFolders(video_dir)
 
-        log.info("Deleted dir captured directory: {:s}".format(captured_dir))
+        log.info("Deleted dir captured directory: {:s}".format(video_dir))
         log.info("Free space: {:.2f} GB".format(availableSpace(data_dir)/1024/1024/1024))
 
         # Break the there's enough space
-        if availableSpace(data_dir) > next_night_bytes:
-            free_space_status = True
-            break
-
-        # Delete one archived directory
-        archived_dirs_remaining = deleteNightFolders(archived_dir, config)
-
-        log.info("Deleted dir in archived directory: {:s}".format(archived_dir))
-        log.info("Free space: {:.2f} GB".format(availableSpace(data_dir)/1024/1024/1024))
-
-        # Break if there's enough space
         if availableSpace(data_dir) > next_night_bytes:
             free_space_status = True
             break
@@ -628,16 +617,29 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
             break
 
 
-        # Delete one video directory
-        video_dirs_remaining = deleteRawFolders(video_dir)
+        # Delete one captured directory
+        captured_dirs_remaining = deleteNightFolders(captured_dir, config)
 
-        log.info("Deleted dir captured directory: {:s}".format(video_dir))
+        log.info("Deleted dir captured directory: {:s}".format(captured_dir))
         log.info("Free space: {:.2f} GB".format(availableSpace(data_dir)/1024/1024/1024))
 
         # Break the there's enough space
         if availableSpace(data_dir) > next_night_bytes:
             free_space_status = True
             break
+
+
+        # Delete one archived directory
+        archived_dirs_remaining = deleteNightFolders(archived_dir, config)
+
+        log.info("Deleted dir in archived directory: {:s}".format(archived_dir))
+        log.info("Free space: {:.2f} GB".format(availableSpace(data_dir)/1024/1024/1024))
+
+        # Break if there's enough space
+        if availableSpace(data_dir) > next_night_bytes:
+            free_space_status = True
+            break
+
 
         # Wait 10 seconds between deletes. This helps to balance out the space distribution if multiple
         #   instances of RMS are running on the same system
