@@ -718,6 +718,10 @@ def applyDark(img, dark_img):
     # Check that the image sizes are the same
     if img.shape != dark_img.shape:
         return img
+    
+    # Make sure that the dark is the same dtype as the input image
+    if dark_img.dtype != img.dtype:
+        dark_img = dark_img.astype(img.dtype)
 
     # Use cv2.subtract to subtract the images and ensure no negative values
     img = cv2.subtract(img, dark_img)
