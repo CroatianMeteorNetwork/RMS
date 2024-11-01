@@ -41,6 +41,7 @@ from RMS.Misc import decimalDegreesToSexHours
 from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
 from RMS.Routines.CustomPyqtgraphClasses import *
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle, greatCirclePhase
+from RMS.Routines.Image import signalToNoise
 from RMS.Routines.MaskImage import getMaskFile
 from RMS.Routines import RollingShutterCorrection
 from RMS.Routines.MaskImage import loadMask, MaskStructure, getMaskFile
@@ -3111,11 +3112,15 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Apply the dark to the flat
             if self.flat_struct is not None:
+                
                 self.flat_struct.applyDark(self.dark)
 
+                self.img.flat_struct = self.flat_struct
+                self.img_zoom.flat_struct = self.flat_struct
+
             self.img.dark = self.dark
-            self.img_zoom.flat_struct = self.flat_struct
-            self.img.flat_struct = self.flat_struct
+            self.img_zoom.dark = self.dark
+
             self.img_zoom.reloadImage()
             self.img.reloadImage()
 
@@ -5004,7 +5009,7 @@ class PlateTool(QtWidgets.QMainWindow):
         ######################################################################################################
 
         # Compute the SNR using the "CCD equation" (Howell et al., 1989)
-        snr = source_intens/(math.sqrt(source_intens + source_px_count*(bg_median + bg_std**2)))
+        snr = signalToNoise(source_intens, source_px_count, bg_median, bg_std)
 
         # Debug print
         print('Centroid at ({:.2f}, {:.2f}) with intensity {:.2f} and SNR {:.2f}, saturated: {}'.format(
@@ -5679,6 +5684,24 @@ class PlateTool(QtWidgets.QMainWindow):
             pick['intensity_sum'] = intensity_sum
 
 
+            ### Measure the SNR of the pick ###
+
+            # Compute the standard deviation of the background
+            background_stddev = np.ma.std(crop_bg)
+
+            # Count the number of pixels in the photometric area
+            source_px_count = np.ma.sum(~crop_img.mask)
+
+            # Compute the signal to noise ratio using the CCD equation
+            snr = signalToNoise(intensity_sum, source_px_count, background_lvl, background_stddev)
+
+            # Set the SNR to the pick
+            pick['snr'] = snr
+
+            # Debug print
+            print("SNR update: intensity sum = {:d}, source px count = {:d}, background lvl = {:.2f}, background stddev = {:.2f}, SNR = {:.2f}".format(
+                intensity_sum, source_px_count, background_lvl, background_stddev, snr))
+
             ### Determine if there is any saturation in the measured photometric area
 
             # Compute the saturation threshold
@@ -5847,6 +5870,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     'y_centroid': None,
                     'mode': None,
                     'intensity_sum': None,
+                    'snr': 1.0,
                     'photometry_pixels': photometry_pixels}
 
             self.pick_list[frame] = pick
