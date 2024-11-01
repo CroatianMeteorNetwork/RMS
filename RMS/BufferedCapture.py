@@ -1082,30 +1082,6 @@ class BufferedCapture(Process):
                 self.exit.set()
                 return False
 
-            # If we get here, we have a valid device and frame_shape
-            # Initialize raw frame arrays and saver if enabled
-            if self.config.save_frames and self.frame_shape is not None:
-                try:
-                    log.debug("Initializing raw frame arrays with shape: {}".format(self.frame_shape))
-
-                    self.initRawFrameArrays(self.frame_shape)
-
-                    # Initialize and start frame saver
-                    log.debug("Creating and starting RawFrameSaver...")
-                    self.raw_frame_saver = RawFrameSaver(self.saved_frames_dir, 
-                                                    self.sharedRawArray, self.startRawTime1, 
-                                                    self.sharedRawArray2, self.startRawTime2, 
-                                                    self.sharedTimestamps, self.sharedTimestamps2,
-                                                    self.config)
-                    self.raw_frame_saver.start()
-                    log.debug("Raw frame handling initialization complete")
-                    
-                except Exception as e:
-                    log.error("Failed to initialize raw frame handling: {}".format(e))
-                    log.debug(repr(traceback.format_exception(*sys.exc_info())))
-                    self.raw_frame_saver = None
-                    raise
-
             # Continue with main capture loop
             self.captureFrames()
 
