@@ -837,12 +837,9 @@ def XyHt2Geo(platepar, x, y, h):
     
     az, elev = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr), np.radians(dec_arr), jd_arr, \
         np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction)
-    print(f"np.array([x]): {np.array([x])}, np.array([y]): {np.array([y])}")
-    print(f"az: {az}, elev: {elev}")
+    
     lat, lon = AEGeoidH2LatLonAlt(np.degrees(az), np.degrees(elev), h, platepar.lat, platepar.lon, platepar.elev)
-    print(f"lat: {lat}, lon: {lon}")
-    print(f"az: {az}, elev: {elev}")
-    print(f"x: {x}, y: {y}, h: {h}")
+    
     return lat, lon
 
 
