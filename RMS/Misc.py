@@ -9,6 +9,7 @@ import errno
 import logging
 import subprocess
 import random
+import re
 import string
 import inspect
 import datetime
@@ -743,3 +744,32 @@ def getRmsRootDir():
 
         # Get the absolute path to the RMS root directory
         return os.path.abspath(os.path.dirname(os.path.dirname(rms_file)))
+
+
+def obfuscatePassword(url):
+    """
+    Obfuscate the password in a given URL string if it's not empty or the default.
+
+    This function attempts to find the password in RTSP URLs or in URL parameters. 
+    If a non-empty and non-default password is found, it is replaced with '****'.
+
+    Arguments:
+        url: [str] The URL string that may contain a password.
+
+    Returns:
+        str: The URL with the password obfuscated, if present and not empty or default.
+             If the password is empty or 'password', the original URL is returned.
+             If an error occurs during obfuscation, returns "[URL_REDACTED_DUE_TO_ERROR]".
+    """
+    try:
+        pattern = r'(rtsp://.*?:.*?@|user=.*?&password=)(.*?)(&|$)'
+        match = re.search(pattern, url)
+        if match:
+            password = match.group(2)
+            if password and password != 'password':
+                return re.sub(pattern, r'\1****\3', url)
+        return url
+    except Exception as e:
+        logging.error("Error in obfuscate_password: %s", str(e))
+        return "[URL_REDACTED_DUE_TO_ERROR]"
+    
