@@ -81,7 +81,7 @@ class RawFrameSaver(multiprocessing.Process):
         """
 
         # Sidecar json file to write to (frame, timestamp) pairs to year's directory
-        json_subpath = time.strftime("%Y/%Y%m%d-%j", time.gmtime(block_timestamp)) + "_framestamps.json"
+        json_subpath = time.strftime(f"%Y/{self.config.stationID}-%Y%m%d-%j", time.gmtime(block_timestamp)) + "_framestamps.json"
         json_file_path = os.path.join(self.saved_frames_dir, json_subpath)
 
         # Create JSON on path if not present, else update file

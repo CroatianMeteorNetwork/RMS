@@ -517,7 +517,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
                         # Make the name of the timelapse file from day directory
                         # The day's timelapse is stored in its corresponding year's directory
-                        frames_timelapse_path = os.path.join(year_dir, day + "_frames_timelapse.mp4")
+                        frames_timelapse_path = os.path.join(year_dir, f"{config.stationID}-{day}_frames_timelapse.mp4")
 
                         # Generate the timelapse and cleanup
                         generateTimelapseFromFrames(day_dir, frames_timelapse_path, fps=30, crf=20,
@@ -527,7 +527,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                         extra_files.append(frames_timelapse_path)
 
                         # Add the day's frame/timestaps json file to extra files if available
-                        timelapse_json_path = os.path.join(year_dir, day + "_framestamps.json")
+                        timelapse_json_path = os.path.join(year_dir, f"{config.stationID}-{day}_framestamps.json")
+
                         extra_files.append(timelapse_json_path)
 
 
