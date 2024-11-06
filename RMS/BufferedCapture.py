@@ -33,13 +33,22 @@ from multiprocessing import Process, Event, Value
 
 import cv2
 import numpy as np
+import socket
+import errno
 
-from RMS.Misc import ping
 from RMS.Routines.GstreamerCapture import GstVideoFile
 from RMS.Formats.ObservationSummary import getObsDBConn, addObsParam
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
+
+try:
+    # py3
+    from urllib.parse import urlparse
+except ImportError:
+    # py2
+    from urlparse import urlparse
+
 
 GST_IMPORTED = False
 try:
@@ -53,6 +62,28 @@ except ImportError as e:
 
 except ValueError as e:
     log.info('Could not import Gst: {}. Using OpenCV.'.format(e))
+
+
+# Define probe result constants
+class RtspProbeResult:
+    """
+    Constants representing possible RTSP probe results.
+    
+    SUCCESS: Connection successful
+    NETWORK_DOWN: Local network interface is down or unreachable
+    HOST_UNREACHABLE: Network up but target host cannot be reached
+    CONNECTION_REFUSED: Host is up but actively refusing RTSP connections
+    TIMEOUT: Connection attempt exceeded specified timeout
+    DNS_ERROR: Unable to resolve hostname to IP address
+    UNKNOWN_ERROR: Other unspecified connection errors
+    """
+    SUCCESS = "SUCCESS"
+    NETWORK_DOWN = "NETWORK_DOWN"          # No network connectivity
+    HOST_UNREACHABLE = "HOST_UNREACHABLE"  # Can't reach the host  
+    CONNECTION_REFUSED = "CONNECTION_REFUSED" # Host reachable but RTSP port closed
+    TIMEOUT = "TIMEOUT"                    # Connection attempt timed out
+    DNS_ERROR = "DNS_ERROR"                # Can't resolve hostname
+    UNKNOWN_ERROR = "UNKNOWN_ERROR"        # Other connection errors
 
 
 class BufferedCapture(Process):
@@ -484,7 +515,116 @@ class BufferedCapture(Process):
         else:
             log.error("No RTSP URL found in the input string: {}".format(input_string))
             raise ValueError("No RTSP URL found in the input string: {}".format(input_string))
+    
+
+    def probeRtspService(self, max_attempts=720, probe_interval=10, timeout=1):
+        """
+        Test RTSP service availability by attempting TCP connection to the service port.
+        Uses TCP connection only - does not validate RTSP protocol
+        
+        Performs a thorough connection test by:
+        1. Resolving hostname via DNS
+        2. Creating a TCP socket connection to the RTSP port
+        3. Analyzing any connection failures
+        4. Retrying with backoff if connection fails
+        
+        Args:
+            max_attempts (int, optional): Maximum number of connection attempts before giving up.
+                Defaults to 720.
+            probe_interval (int, optional): Time in seconds between connection attempts.
+                Defaults to 10 seconds.
+            timeout (int, optional): Socket connection timeout in seconds.
+                Defaults to 1 second.
+        
+        Returns:
+            tuple: A pair (success, status) where:
+                - success (bool): True if connection was successful, False otherwise
+                - status (str): One of the RtspProbeResult status strings:
+                    - SUCCESS: Connection successful
+                    - NETWORK_DOWN: Local network interface is down
+                    - HOST_UNREACHABLE: Cannot reach the target host
+                    - CONNECTION_REFUSED: Host up but RTSP port is closed
+                    - TIMEOUT: Connection attempt timed out
+                    - DNS_ERROR: Cannot resolve hostname
+                    - UNKNOWN_ERROR: Other connection failures
+                
+        """
+        try:
+            # Parse RTSP URL to get host and port
+            device_url = self.extractRtspUrl(self.config.deviceID)
+            parsed = urlparse(device_url)
+            host = parsed.hostname
+            port = parsed.port or 554
+
+            last_error = None
             
+            for attempt in range(max_attempts):
+                try:
+                    # Try to resolve hostname first
+                    try:
+                        socket.gethostbyname(host)
+                    except socket.gaierror:
+                        last_error = RtspProbeResult.DNS_ERROR
+                        raise
+
+                    # Create socket with timeout
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(timeout)
+                    
+                    # Try to connect
+                    result = sock.connect_ex((host, port))
+                    sock.close()
+                    
+                    if result == 0:
+                        log.info("RTSP service ready after {} attempts".format(attempt + 1))
+                        return True, RtspProbeResult.SUCCESS
+                    
+                    # Analyze specific connection errors
+                    if result in (errno.ENETUNREACH, errno.ENETDOWN):
+                        last_error = RtspProbeResult.NETWORK_DOWN
+                    elif result in (errno.EHOSTUNREACH, errno.EHOSTDOWN):
+                        last_error = RtspProbeResult.HOST_UNREACHABLE
+                    elif result == errno.ECONNREFUSED:
+                        last_error = RtspProbeResult.CONNECTION_REFUSED
+                    elif result == errno.ETIMEDOUT:
+                        last_error = RtspProbeResult.TIMEOUT
+                    else:
+                        last_error = RtspProbeResult.UNKNOWN_ERROR
+                        
+                except socket.gaierror:
+                    last_error = RtspProbeResult.DNS_ERROR
+                except socket.timeout:
+                    last_error = RtspProbeResult.TIMEOUT
+                except socket.error as e:
+                    if e.errno in (errno.ENETUNREACH, errno.ENETDOWN):
+                        last_error = RtspProbeResult.NETWORK_DOWN
+                    elif e.errno in (errno.EHOSTUNREACH, errno.EHOSTDOWN):
+                        last_error = RtspProbeResult.HOST_UNREACHABLE
+                    else:
+                        last_error = RtspProbeResult.UNKNOWN_ERROR
+                    log.debug("RTSP probe attempt {} failed: {}".format(attempt + 1, e))
+                
+                error_messages = {
+                    RtspProbeResult.NETWORK_DOWN: "Network appears to be down",
+                    RtspProbeResult.HOST_UNREACHABLE: "Camera is unreachable",
+                    RtspProbeResult.CONNECTION_REFUSED: "RTSP service not accepting connections",
+                    RtspProbeResult.TIMEOUT: "Connection attempt timed out",
+                    RtspProbeResult.DNS_ERROR: "Cannot resolve camera hostname",
+                    RtspProbeResult.UNKNOWN_ERROR: "Unknown connection error"
+                }
+                
+                print('Trying to connect to camera RTSP service... (attempt {}) - {}'.format(
+                    attempt + 1, error_messages[last_error]))
+                time.sleep(probe_interval)
+                
+            log.error("RTSP service not responding after all attempts. Last error: {}".format(
+                error_messages[last_error]))
+            return False, last_error
+            
+        except Exception as e:
+            log.error("Error probing RTSP service: {}".format(e))
+            return False, RtspProbeResult.UNKNOWN_ERROR
+                
 
     def isGrayscale(self, frame):
         """
@@ -675,48 +815,26 @@ class BufferedCapture(Process):
         # Use a device as the video source
         else:
 
-            # If an analog camera is used, skip the ping
-            ip_cam = False
+            # If an analog camera is used, skip the probe
             if "rtsp" in str(self.config.deviceID):
-                ip_cam = True
-
-
-            if ip_cam:
-
-                ### If the IP camera is used, check first if it can be pinged
-
-                # Extract the IP address
-                ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", self.config.deviceID)
-
-                # Check if the IP address was found
-                if ip:
-                    ip = ip[0]
-
-                    # Try pinging 500 times
-                    ping_success = False
-
-                    for i in range(500):
-
-                        print('Trying to ping the {} camera...'.format(ip))
-                        ping_success = ping(ip)
-
-                        if ping_success:
-                            log.info("Camera IP ping successful! Waiting 5 seconds. ")
-
-                            # Wait for camera to finish booting up
-                            time.sleep(5)
-                            break
-
-                        time.sleep(1)
-
-                    if not ping_success:
-                        log.error("Can't ping the camera IP!")
-                        return False
-
-                else:
-                    log.error("Can't find the camera IP!")
+                success, probe_result = self.probeRtspService()
+                if not success:
+                    error_messages = {
+                        RtspProbeResult.NETWORK_DOWN: 
+                            "Cannot connect to camera - Please check your network connection",
+                        RtspProbeResult.HOST_UNREACHABLE: 
+                            "Cannot reach camera - Please check if camera is powered on and connected to network",
+                        RtspProbeResult.CONNECTION_REFUSED: 
+                            "Camera is reachable but RTSP service is not responding - Camera might still be booting",
+                        RtspProbeResult.TIMEOUT: 
+                            "Connection timeout - Network might be slow or unstable",
+                        RtspProbeResult.DNS_ERROR: 
+                            "Cannot resolve camera hostname - Please check network DNS settings",
+                        RtspProbeResult.UNKNOWN_ERROR: 
+                            "Unknown connection error - Please check logs for details"
+                    }
+                    log.error(f"Camera connection failed: {error_messages[probe_result]}")
                     return False
-
 
             # Init the video device
             log.info("Initializing the video device...")
