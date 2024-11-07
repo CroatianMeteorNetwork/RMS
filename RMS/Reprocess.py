@@ -529,15 +529,15 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                         continue
 
                     # Search for current day's timelapse in the corresponding year's directory
-                    found_files = glob.glob(os.path.join(year_dir, f'{day}_frames_timelapse.mp4'))
+                    found_files = glob.glob(os.path.join(year_dir, "{}_frames_timelapse.mp4".format(day)))
 
                     # If not found, generate timelapse for the current day
                     if not found_files:
-                        log.info(f"No frames timelapse for {day} found in {year_dir}, generating new timelapse...")
+                        log.info("No frames timelapse for {} found in {}, generating new timelapse...".format(day, year_dir))
 
                         # Make the name of the timelapse file from day directory
                         # The day's timelapse is stored in its corresponding year's directory
-                        frames_timelapse_path = os.path.join(year_dir, f"{config.stationID}-{day}_frames_timelapse.mp4")
+                        frames_timelapse_path = os.path.join(year_dir, "{}_{}_frames_timelapse.mp4".format(config.stationID, day))
 
                         # Generate the timelapse and cleanup
                         generateTimelapseFromFrames(day_dir, frames_timelapse_path, fps=30, crf=20,
@@ -547,7 +547,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                         extra_files.append(frames_timelapse_path)
 
                         # Add the day's frame/timestaps json file to extra files if available
-                        timelapse_json_path = os.path.join(year_dir, f"{config.stationID}-{day}_framestamps.json")
+                        timelapse_json_path = os.path.join(year_dir, "{}_{}_framestamps.json".format(config.stationID, day))
 
                         extra_files.append(timelapse_json_path)
 

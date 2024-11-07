@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 import time
 import ephem
 import logging
@@ -40,13 +42,13 @@ def cameraModeSwitcher(config, daytime_mode):
         next_set = o.next_setting(s).datetime()
 
         if next_set < next_rise:
-            log.info(f'Next event is a sunset ({next_set}), switching to daytime mode')
+            log.info("Next event is a sunset ({}), switching to daytime mode".format(next_set))
             daytime_mode.value = True
             cc.cameraControlV2(config, 'SwitchDayTime')
             time_to_wait = (next_set - current_time).total_seconds()
 
         else:
-            log.info(f'Next event is a sunrise ({next_rise}), switching to nighttime mode')
+            log.info("Next event is a sunrise ({}), switching to nighttime mode".format(next_rise))
             daytime_mode.value = False
             cc.cameraControlV2(config, 'SwitchNightTime')
             time_to_wait = (next_rise - current_time).total_seconds()

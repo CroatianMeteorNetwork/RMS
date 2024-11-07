@@ -701,12 +701,12 @@ class BufferedCapture(Process):
 
         # Generate names from current timestamp
         subpath = os.path.join(self.config.data_dir, self.config.video_dir, base_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
-        filename = base_time.strftime(f"%Y%m%d_%H%M%S_video.mkv")
+        filename = base_time.strftime("{}_%Y%m%d_%H%M%S_video.mkv".format(self.config.stationID))
 
         # Create full path and directory
         mkdirP(subpath)
         full_path = os.path.join(subpath, filename)
-        log.info(f"Created new video segment #{fragment_id} at: {full_path}")
+        log.info("Created new video segment #{} at: {}".format(fragment_id, full_path))
 
         # Return full path to splitmux's callback
         return full_path
@@ -954,7 +954,7 @@ class BufferedCapture(Process):
                         RtspProbeResult.UNKNOWN_ERROR: 
                             "Unknown connection error - Please check logs for details"
                     }
-                    log.error(f"Camera connection failed: {error_messages[probe_result]}")
+                    log.error("Camera connection failed: {}".format(error_messages[probe_result]))
                     return False
 
             # Init the video device

@@ -179,7 +179,7 @@ def loadFromFile():
     for filename, config_name in config_files.items():
         file_path = os.path.join('./camerasettings/', filename)
         if not os.path.exists(file_path):
-            print(f'Warning: {filename} not found. Skipping.')
+            print("Warning: {} not found. Skipping.".format(filename))
             configs[config_name] = None
             continue
 

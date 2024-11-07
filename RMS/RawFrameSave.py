@@ -14,6 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import print_function, division, absolute_import
 
 import os
 import sys
@@ -81,13 +82,13 @@ class RawFrameSaver(multiprocessing.Process):
         """
 
         # Sidecar json file to write to (frame, timestamp) pairs to year's directory
-        json_subpath = time.strftime(f"%Y/{self.config.stationID}-%Y%m%d-%j", time.gmtime(block_timestamp)) + "_framestamps.json"
+        json_subpath = time.strftime("%Y/{}_%Y%m%d-%j".format(self.config.stationID), time.gmtime(block_timestamp)) + "_framestamps.json"
         json_file_path = os.path.join(self.saved_frames_dir, json_subpath)
 
         # Create JSON on path if not present, else update file
         if not os.path.exists(json_file_path):
             present_json_data = block_json_data
-            log.info(f"Initialized new json at {json_file_path}.") 
+            log.info("Initialized new json at {}.".format(json_file_path)) 
 
         else:
             with open(json_file_path, 'r') as json_file:
@@ -97,7 +98,7 @@ class RawFrameSaver(multiprocessing.Process):
         with open(json_file_path, 'w') as json_file:
             json.dump(present_json_data, json_file, indent=4)
 
-        log.info(f"Updated {json_file_path} with {len(block_json_data)} new frame timestamps") 
+        log.info("Updated {} with {} new frame timestamps".format(json_file_path, len(block_json_data))) 
 
 
 
