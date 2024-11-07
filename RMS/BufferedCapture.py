@@ -36,6 +36,8 @@ import numpy as np
 import socket
 import errno
 
+
+from RMS.Misc import obfuscatePassword
 from RMS.Routines.GstreamerCapture import GstVideoFile
 from RMS.Formats.ObservationSummary import getObsDBConn, addObsParam
 
@@ -726,7 +728,10 @@ class BufferedCapture(Process):
          # Combine all parts of the pipeline
         pipeline_str = "{:s} {:s} {:s}".format(source_to_tee, processing_branch, storage_branch)
 
-        log.debug("GStreamer pipeline string: {:s}".format(pipeline_str))
+        # Obfuscate the password in the pipeline string before logging
+        obfuscated_pipeline_str = obfuscatePassword(pipeline_str)
+
+        log.debug("GStreamer pipeline string: {:s}".format(obfuscated_pipeline_str))
 
         # Set the pipeline to PLAYING state with retries
         for attempt in range(max_retries):
