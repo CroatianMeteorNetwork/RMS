@@ -26,6 +26,7 @@ try:
     TFLITE_AVAILABLE = True
 except ImportError:
     try:
+        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
         from tensorflow.lite.python.interpreter import Interpreter
         TFLITE_AVAILABLE = True
         USING_FULL_TF = True
