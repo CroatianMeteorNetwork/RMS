@@ -23,6 +23,7 @@
 """ Summary text and json files for station and observation session
 """
 
+from __future__ import print_function, division, absolute_import
 
 
 import sys
@@ -30,7 +31,7 @@ import os
 import subprocess
 
 
-from RMS.Misc import niceFormat, isRaspberryPi, sanitise, getRMSStyleFileName
+from RMS.Misc import niceFormat, isRaspberryPi, sanitise, getRMSStyleFileName, getRmsRootDir
 import re
 import sqlite3
 from RMS.ConfigReader import parse
@@ -165,18 +166,25 @@ def startObservationSummaryReport(config, duration, force_delete=False):
 
     addObsParam(conn, "hardware_version", hardware_version)
 
-    repo = git.Repo(search_parent_directories=True)
-    if repo:
-        addObsParam(conn, "commit_date",
-                    datetime.datetime.fromtimestamp(repo.head.object.committed_date).strftime('%Y%m%d_%H%M%S'))
-        addObsParam(conn, "commit_hash", repo.head.object.hexsha)
-    else:
-        print("RMS Git repository not found. Skipping Git-related information.")
+    try:
+        repo_path = getRmsRootDir()
+        repo = git.Repo(repo_path)
+        if repo:
+            addObsParam(conn, "commit_date",
+                        datetime.datetime.fromtimestamp(repo.head.object.committed_date).strftime('%Y%m%d_%H%M%S'))
+            addObsParam(conn, "commit_hash", repo.head.object.hexsha)
+        else:
+            print("RMS Git repository not found. Skipping Git-related information.")
+    except:
+        print("Error getting Git information. Skipping Git-related information.")
+    
+    # Get the disk usage info (only in Python 3.3+)
+    if (sys.version_info.major > 2) and (sys.version_info.minor > 2):
 
-    storage_total, storage_used, storage_free = shutil.disk_usage("/")
-    addObsParam(conn, "storage_total_gb", round(storage_total / (1024 ** 3), 2))
-    addObsParam(conn, "storage_used_gb", round(storage_used / (1024 ** 3), 2))
-    addObsParam(conn, "storage_free_gb", round(storage_free / (1024 ** 3), 2))
+        storage_total, storage_used, storage_free = shutil.disk_usage("/")
+        addObsParam(conn, "storage_total_gb", round(storage_total/(1024**3), 2))
+        addObsParam(conn, "storage_used_gb", round(storage_used/(1024**3), 2))
+        addObsParam(conn, "storage_free_gb", round(storage_free/(1024**3), 2))
 
     captured_directories = captureDirectories(os.path.join(config.data_dir, config.captured_dir), config.stationID)
     addObsParam(conn, "captured_directories", captured_directories)
@@ -184,16 +192,22 @@ def startObservationSummaryReport(config, duration, force_delete=False):
         addObsParam(conn, "camera_information", gatherCameraInformation(config))
     except:
         addObsParam(conn, "camera_information", "Unavailable")
+
+    # Hardcoded for now, but should be calculated based on the config value
     no_of_frames_per_fits_file = 256
+
+    # Calculate the number of fits files expected for the duration
     fps = config.fps
 
     if duration is None:
         fits_files_from_duration = "None (Continuous Capture)"
     else:
-        fits_files_from_duration = duration * fps / no_of_frames_per_fits_file
+        fits_files_from_duration = duration*fps/no_of_frames_per_fits_file
     
     addObsParam(conn, "fits_files_from_duration", fits_files_from_duration)
+
     conn.close()
+
     return "Opening a new observations summary for duration {} seconds".format(duration)
 
 def timestampFromNTP(addr='0.us.pool.ntp.org'):
@@ -211,16 +225,23 @@ def timestampFromNTP(addr='0.us.pool.ntp.org'):
 
     REF_TIME_1970 = 2208988800  # Reference time
     client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    client.settimeout(5)
     data = b'\x1b' + 47 * b'\0'
-    client.sendto(data, (addr, 123))
-    data, address = client.recvfrom(1024)
+    try:
+        client.sendto(data, (addr, 123))
+        data, address = client.recvfrom(1024)
+    except socket.timeout:
+        print("NTP request timed out")
+        return None
+    except Exception as e:
+        print("NTP request failed: {}".format(e))
+        return None
     if data:
         t = struct.unpack('!12I', data)[10]
         t -= REF_TIME_1970
         return t
     else:
         return None
-
 
 def timeSyncStatus(config):
 
@@ -245,7 +266,7 @@ def timeSyncStatus(config):
         time_error_seconds = "Unknown"
 
     result_list = subprocess.run(['timedatectl','status'], capture_output = True).stdout.splitlines()
-    print(result_list)
+    #print(result_list)
     for raw_result in result_list:
         result = raw_result.decode('ascii')
         if "synchronized" in result:

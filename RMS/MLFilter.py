@@ -18,11 +18,21 @@ import logging
 import datetime
 import shutil
 
+TFLITE_AVAILABLE = False
+USING_FULL_TF = False
+
 try:
     from tflite_runtime.interpreter import Interpreter
     TFLITE_AVAILABLE = True
 except ImportError:
-    TFLITE_AVAILABLE = False
+    try:
+        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+        from tensorflow.lite.python.interpreter import Interpreter
+        TFLITE_AVAILABLE = True
+        USING_FULL_TF = True
+    except ImportError:
+        TFLITE_AVAILABLE = False
+
 
 from RMS.Formats import FFfile
 from RMS.Formats import FTPdetectinfo
@@ -427,7 +437,13 @@ def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=
 
 
     # Check if tflite is available
-    if not TFLITE_AVAILABLE:
+    if TFLITE_AVAILABLE:
+        log.info("TensorFlow Lite is available.")
+        if USING_FULL_TF:
+            log.info("Using TensorFlow Lite from full TensorFlow package.")
+        else:
+            log.info("Using standalone tflite_runtime package.")
+    else:
         log.warning("The package tflite_runtime is not installed! This package is not available on Python 2.")
         log.warning("ML filtering skipped...")
 

@@ -113,6 +113,26 @@ def getPlatepar(config, night_data_dir):
                 platepar.lon = config.longitude
                 platepar.elev = config.elevation
 
+        
+        # Make sure the config and the platepar FOV are within a factor of two
+        if (platepar.fov_h is not None) and (platepar.fov_v is not None):
+            
+            # Calculate the diagonal FOV for both the platepar and the config
+            pp_fov_diag = (platepar.fov_h**2 + platepar.fov_v**2)**0.5
+            config_fov_diag = (config.fov_w**2 + config.fov_h**2)**0.5
+
+            # Compute the ratio of the FOVs
+            fov_ratio = pp_fov_diag/config_fov_diag
+
+            # If the ratio is smaller than 0.5 or greater than 2, don't use this platepar
+            if (fov_ratio < 0.5) or (fov_ratio > 2):
+                    
+                # If they don't match, don't use this platepar
+                log.info("The FOV in the platepar is not within a factor of 2 of the FOV in the config file! Not using the platepar...")
+
+                platepar = None
+                platepar_fmt = None
+
 
     # Make sure the image resolution matches
     if platepar is not None:
@@ -654,10 +674,11 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     try:
         observation_summary_path_file_name, observation_summary_json_path_file_name = (
                 finalizeObservationSummary(config, night_data_dir))
-    except:
-        pass
+        log.info("\n\nObservation Summary\n===================\n\n" + serialize(config) + "\n\n")
 
-    log.info("\n\nObservation Summary\n===================\n\n" + serialize(config) + "\n\n")
+    except Exception as e:
+        log.debug('Generating Observation Summary failed with message:\n' + repr(e))
+        log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
 
     extra_files.append(observation_summary_path_file_name)

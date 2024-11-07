@@ -41,6 +41,7 @@ from RMS.Misc import decimalDegreesToSexHours
 from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
 from RMS.Routines.CustomPyqtgraphClasses import *
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle, greatCirclePhase
+from RMS.Routines.Image import signalToNoise
 from RMS.Routines.MaskImage import getMaskFile
 from RMS.Routines import RollingShutterCorrection
 from RMS.Routines.MaskImage import loadMask, MaskStructure, getMaskFile
@@ -441,7 +442,7 @@ class PairedStars(object):
 
 class PlateTool(QtWidgets.QMainWindow):
     def __init__(self, input_path, config, beginning_time=None, fps=None, gamma=None, use_fr_files=False, \
-        geo_points_input=None, startUI=True, mask=None, nobg=False, flipud=False):
+        geo_points_input=None, startUI=True, mask=None, nobg=False, flipud=False, flatbiassub=False):
         """ SkyFit interactive window.
 
         Arguments:
@@ -461,6 +462,7 @@ class PlateTool(QtWidgets.QMainWindow):
             startUI: [bool] Start the GUI. True by default.
             nobg: [bool] Do not subtract the background for photometry. False by default.
             flipud: [bool] Flip the image upside down. False by default.
+            flatbiassub: [bool] Subtract flat and bias frames. False by default.
         """
 
         super(PlateTool, self).__init__()
@@ -488,6 +490,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Store the flip upside down flag
         self.flipud = flipud
+
+        # Store the flat and bias subtraction flag
+        self.flatbiassub = flatbiassub
 
         # Extract the directory path if a file was given
         if os.path.isfile(self.dir_path):
@@ -2761,6 +2766,10 @@ class PlateTool(QtWidgets.QMainWindow):
         if not hasattr(self, "flipud"):
             self.flipud = False
 
+        # Update the possibly missing flag for subtracting the bias from the flat
+        if not hasattr(self, "flatbiassub"):
+            self.flatbiassub = False
+
         # If the paired stars are a list (old version), reset it to a new version where it's an object
         if isinstance(self.paired_stars, list):
 
@@ -3109,13 +3118,17 @@ class PlateTool(QtWidgets.QMainWindow):
             # Set focus back on the SkyFit window
             self.activateWindow()
 
-            # Apply the dark to the flat
-            if self.flat_struct is not None:
+            # Apply the dark to the flat if the flatbiassub flag is set
+            if self.flatbiassub and (self.flat_struct is not None):
+                
                 self.flat_struct.applyDark(self.dark)
 
+                self.img.flat_struct = self.flat_struct
+                self.img_zoom.flat_struct = self.flat_struct
+
             self.img.dark = self.dark
-            self.img_zoom.flat_struct = self.flat_struct
-            self.img.flat_struct = self.flat_struct
+            self.img_zoom.dark = self.dark
+
             self.img_zoom.reloadImage()
             self.img.reloadImage()
 
@@ -5004,7 +5017,7 @@ class PlateTool(QtWidgets.QMainWindow):
         ######################################################################################################
 
         # Compute the SNR using the "CCD equation" (Howell et al., 1989)
-        snr = source_intens/(math.sqrt(source_intens + source_px_count*(bg_median + bg_std**2)))
+        snr = signalToNoise(source_intens, source_px_count, bg_median, bg_std)
 
         # Debug print
         print('Centroid at ({:.2f}, {:.2f}) with intensity {:.2f} and SNR {:.2f}, saturated: {}'.format(
@@ -5679,6 +5692,24 @@ class PlateTool(QtWidgets.QMainWindow):
             pick['intensity_sum'] = intensity_sum
 
 
+            ### Measure the SNR of the pick ###
+
+            # Compute the standard deviation of the background
+            background_stddev = np.ma.std(crop_bg)
+
+            # Count the number of pixels in the photometric area
+            source_px_count = np.ma.sum(~crop_img.mask)
+
+            # Compute the signal to noise ratio using the CCD equation
+            snr = signalToNoise(intensity_sum, source_px_count, background_lvl, background_stddev)
+
+            # Set the SNR to the pick
+            pick['snr'] = snr
+
+            # Debug print
+            print("SNR update: intensity sum = {:d}, source px count = {:d}, background lvl = {:.2f}, background stddev = {:.2f}, SNR = {:.2f}".format(
+                intensity_sum, source_px_count, background_lvl, background_stddev, snr))
+
             ### Determine if there is any saturation in the measured photometric area
 
             # Compute the saturation threshold
@@ -5847,6 +5878,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     'y_centroid': None,
                     'mode': None,
                     'intensity_sum': None,
+                    'snr': 1.0,
                     'photometry_pixels': photometry_pixels}
 
             self.pick_list[frame] = pick
@@ -6500,6 +6532,9 @@ if __name__ == '__main__':
 
     arg_parser.add_argument('-m', '--mask', metavar='MASK_PATH', type=str,
                             help="Path to a mask file which will be applied to the star catalog")
+    
+    arg_parser.add_argument('--flatbiassub', action="store_true", \
+        help="Subtract the bias from the flat. False by default.")
 
 
 
@@ -6600,7 +6635,7 @@ if __name__ == '__main__':
         # Init SkyFit
         plate_tool = PlateTool(input_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
             gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints,
-            mask=mask, nobg=cml_args.nobg, flipud=cml_args.flipud)
+            mask=mask, nobg=cml_args.nobg, flipud=cml_args.flipud, flatbiassub=cml_args.flatbiassub)
 
 
     # Run the GUI app
