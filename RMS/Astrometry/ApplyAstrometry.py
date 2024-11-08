@@ -40,7 +40,7 @@ import RMS.Formats.Platepar
 import scipy.optimize
 from RMS.Astrometry.AtmosphericExtinction import \
     atmosphericExtinctionCorrection
-from RMS.Astrometry.Conversions import J2000_JD, date2JD, jd2Date, raDec2AltAz
+from RMS.Astrometry.Conversions import J2000_JD, date2JD, jd2Date, raDec2AltAz, AEGeoidH2LatLonAlt
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Formats.FTPdetectinfo import (findFTPdetectinfoFile,
                                        readFTPdetectinfo, writeFTPdetectinfo)
@@ -818,8 +818,29 @@ def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=
     return meteor_picks
 
 
+def XyHt2Geo(platepar, x, y, h):
+    """ Given pixel coordinates on the image and a height of the target above sea level,
+        compute geo coordinates of the point.
 
+    Arguments:
+        platepar: [Platepar object]
+        x: [float] Image X coordinate
+        y: [float] Image Y coordinate
+        h: [float] elevation of the target in meters (WGS84)
 
+    Return:
+        (lat, lon): [tuple of floats] latitude in degrees (+north), longitude in degrees (+east), 
+
+    """
+    jd_arr, ra_arr, dec_arr, _ = xyToRaDecPP([jd2Date(platepar.JD)], np.array([x]), \
+        np.array([y]), [1], platepar, extinction_correction=False, precompute_pointing_corr=True)
+    
+    az, elev = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr), np.radians(dec_arr), jd_arr, \
+        np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction)
+    
+    lat, lon = AEGeoidH2LatLonAlt(np.degrees(az), np.degrees(elev), h, platepar.lat, platepar.lon, platepar.elev)
+    
+    return lat, lon
 
 
 def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, UT_corr=0, platepar=None):
