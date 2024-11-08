@@ -18,8 +18,8 @@ from __future__ import print_function, division, absolute_import
 
 import os
 import sys
+import ctypes
 import traceback
-import RMS.Reprocess
 
 # Set GStreamer debug level. Use '2' for warnings in production environments.
 os.environ['GST_DEBUG'] = '3'
@@ -29,7 +29,7 @@ import time
 import logging
 import datetime
 import os.path
-from multiprocessing import Process, Event, Value
+from multiprocessing import Process, Event, Value, Array
 
 import cv2
 import numpy as np
@@ -40,6 +40,8 @@ import errno
 from RMS.Misc import obfuscatePassword
 from RMS.Routines.GstreamerCapture import GstVideoFile
 from RMS.Formats.ObservationSummary import getObsDBConn, addObsParam
+from RMS.RawFrameSave import RawFrameSaver
+from RMS.Misc import RmsDateTime, mkdirP
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -96,7 +98,8 @@ class BufferedCapture(Process):
     
     running = False
     
-    def __init__(self, array1, startTime1, array2, startTime2, config, video_file=None, night_data_dir=None):
+    def __init__(self, array1, startTime1, array2, startTime2, config, video_file=None, night_data_dir=None,
+                 saved_frames_dir=None, daytime_mode=None):
         """ Populate arrays with (startTime, frames) after startCapture is called.
         
         Arguments:
@@ -108,42 +111,43 @@ class BufferedCapture(Process):
         Keyword arguments:
             video_file: [str] Path to the video file, if it was given as the video source. None by default.
             night_data_dir: [str] Path to the directory where night data is stored. None by default.
-
+            saved_frames_dir: [str] Path to the directory where saved frames are stored. None by default.
+            daytime_mode: [multiprocessing.Value] shared boolean variable to communicate camera mode switch
         """
         
         super(BufferedCapture, self).__init__()
+        
+        # Store configuration and paths (immutable data is safe to pass to child process)
+        self.config = config
+        self.video_file = video_file
+        self.night_data_dir = night_data_dir
+        self.saved_frames_dir = saved_frames_dir
+        self.daytime_mode = daytime_mode
+
+        # Store shared memory arrays and values for compressor (these are designed for multiprocessing)
         self.array1 = array1
         self.startTime1 = startTime1
         self.array2 = array2
         self.startTime2 = startTime2
-        
         self.startTime1.value = 0
         self.startTime2.value = 0
-        
-        self.config = config
-        self.media_backend_override = False
-        self.video_device_type = "cv2"
 
-        self.video_file = video_file
+        # Initialize shared values for raw frame saving (these are designed for multiprocessing)
+        if self.config.save_frames:
 
-        self.night_data_dir = night_data_dir
+            # Frame saving block size - these many raw frames are written to buffer before saving to disk
+            self.num_raw_frames = 10
 
-        # A frame will be considered dropped if it was late more then half a frame
-        self.time_for_drop = 1.5*(1.0/config.fps)
+            self.startRawTime1 = Value('d', 0.0)
+            self.startRawTime2 = Value('d', 0.0)
+            self.sharedTimestampsBase = Array(ctypes.c_double, self.num_raw_frames)
+            self.sharedTimestampsBase2 = Array(ctypes.c_double, self.num_raw_frames)
 
-        # Initialize Smoothing variables
-        self.startup_flag = True
-        self.last_calculated_fps = 0
-        self.last_calculated_fps_n = 0
-        self.expected_m = 1e9/self.config.fps
-        self.reset_count = -1
-
+        # Initialize shared counter for dropped frames
         self.dropped_frames = Value('i', 0)
-        self.device = None
-        self.pipeline = None
-        self.start_timestamp = 0
-        self.frame_shape = None
-        self.convert_to_gray = False
+
+        # Flag for process control
+        self.exit = Event()
 
 
     def startCapture(self, cameraID=0):
@@ -156,6 +160,7 @@ class BufferedCapture(Process):
         
         self.cameraID = cameraID
         self.exit = Event()
+
         self.start()
     
 
@@ -179,14 +184,29 @@ class BufferedCapture(Process):
         if self.is_alive():
             log.info('Terminating capture...')
             self.terminate()
-        
-        # Free shared memory after the compressor is done
+
+        # Clean up shared memory resources
         try:
-            log.debug('Freeing frame buffers in BufferedCapture...')
+            log.debug('Freeing shared memory resources...')
+            # Frame buffers
             del self.array1
             del self.array2
+
+            # Raw frame and timestamp buffers if they exist
+            if self.config.save_frames:
+                del self.sharedTimestampsBase
+                del self.sharedTimestampsBase2
+
+                if hasattr(self, 'sharedRawArrayBase'):
+                    del self.sharedRawArrayBase
+                    del self.sharedRawArrayBase2
+                    del self.sharedRawArray
+                    del self.sharedRawArray2
+
+            log.debug('Shared memory resources freed successfully')
+
         except Exception as e:
-            log.debug('Freeing frame buffers failed with error:' + repr(e))
+            log.error('Error freeing shared memory: {}'.format(e))
             log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
         return self.dropped_frames.value
@@ -654,7 +674,7 @@ class BufferedCapture(Process):
         if len(self.frame_shape) == 2:
             return np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
 
-        if not self.convert_to_gray:
+        if self.daytime_mode.value:
             return np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
 
         # Convert to grayscale by selecting a specific channel
@@ -663,6 +683,35 @@ class BufferedCapture(Process):
         return gray_frame
 
 
+
+    def moveSegment(self, splitmuxsink, fragment_id):
+        """
+        Custom callback for splitmuxsink's format-location signal to name and move each segment as its
+        created. Generates a timestamp-based folder structure: Year/Day-Of-Year/Hour/ per video segment
+
+        Arguments:
+          splitmuxsink [GstElement]: The splitmuxsink object itself, included in arguments as GStreamer expects it.
+          fragment_id [int]: Fragment / segment number of the new clip
+
+        Returns:
+          full_path [str]: Full path to save this new segment to
+        """
+
+        base_time = RmsDateTime.utcnow()
+
+        # Generate names from current timestamp
+        subpath = os.path.join(self.config.data_dir, self.config.video_dir, base_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
+        filename = base_time.strftime("{}_%Y%m%d_%H%M%S_video.mkv".format(self.config.stationID))
+
+        # Create full path and directory
+        mkdirP(subpath)
+        full_path = os.path.join(subpath, filename)
+        log.info("Created new video segment #{} at: {}".format(fragment_id, full_path))
+
+        # Return full path to splitmux's callback
+        return full_path
+
+      
     def handleStateChange(self, pipeline, target_state, timeout=60):
         """Handle GStreamer pipeline state changes with proper synchronization.
         
@@ -733,6 +782,7 @@ class BufferedCapture(Process):
             return False, None
 
 
+
     def createGstreamDevice(self, video_format, gst_decoder='decodebin', 
                             video_file_dir=None, segment_duration_sec=30, max_retries=5, retry_interval=1):
         """
@@ -787,12 +837,11 @@ class BufferedCapture(Process):
         
          # Branch for storage - if video_file_dir is not None, save the raw stream to a file
         if video_file_dir is not None:
-
-            video_location = os.path.join(video_file_dir, "video_%05d.mkv")
+            
             storage_branch = (
                 "t. ! queue max-size-buffers=0 max-size-bytes=0 max-size-time=0 ! "
-                "splitmuxsink location={:s} max-size-time={:d} muxer-factory=matroskamux"
-                ).format(video_location, int(segment_duration_sec*1e9))
+                "splitmuxsink name=splitmuxsink0 max-size-time={:d} muxer-factory=matroskamux"
+                ).format(int(segment_duration_sec*1e9))
 
         # Otherwise, skip saving the raw stream to disk
         else:
@@ -810,7 +859,7 @@ class BufferedCapture(Process):
         for attempt in range(max_retries):
             try:
                 log.info("Attempt {}: transitioning Pipeline to PLAYING state.".format(attempt + 1))
-
+                
                 # Make sure any previous pipeline is cleaned up
                 if hasattr(self, 'pipeline') and self.pipeline:
                     self.releaseResources()
@@ -905,7 +954,7 @@ class BufferedCapture(Process):
                         RtspProbeResult.UNKNOWN_ERROR: 
                             "Unknown connection error - Please check logs for details"
                     }
-                    log.error(f"Camera connection failed: {error_messages[probe_result]}")
+                    log.error("Camera connection failed: {}".format(error_messages[probe_result]))
                     return False
 
             # Init the video device
@@ -942,12 +991,10 @@ class BufferedCapture(Process):
                     Gst.init(None)
 
                     # Determine if which directory to save the raw video, if any
-                    raw_video_dir = None
-                    if self.config.raw_video_dir_night:
-                        raw_video_dir = self.night_data_dir
-
+                    if self.config.raw_video_save:
+                        raw_video_dir = os.path.join(self.config.data_dir, self.config.video_dir)
                     else:
-                        raw_video_dir = self.config.raw_video_dir
+                        raw_video_dir = None
 
                     # Create and start a GStreamer pipeline
                     log.info("Creating GStreamer pipeline...")
@@ -1156,40 +1203,160 @@ class BufferedCapture(Process):
                 conn.close()
             finally:
                 self.device = None  # Reset device to None after releasing
+
+
+        # Release the video device if running Gstreamer
+        if self.video_file is not None:
+
+            if GST_IMPORTED and (self.config.media_backend == 'gst'):
+
+                try:
+                    self.device.release()
+                    log.info('GStreamer Video device released!')
+
+                except Exception as e:
+                    log.error('Error releasing GStreamer device: {}'.format(e))
+
+                finally:
+                    self.device = None
+
+
+    def releaseRawArrays(self):
+        """Clean up raw frame arrays and saver."""
+        if self.raw_frame_saver is not None:
+            self.raw_frame_saver.stop()
             
+            # Give it time to stop
+            time.sleep(0.1)  
+            
+            self.raw_frame_saver = None
+
+        # Clean up array resources
+        del self.sharedRawArrayBase
+        del self.sharedRawArray
+        del self.sharedRawArrayBase2
+        del self.sharedRawArray2
+
+
+    def initRawFrameArrays(self, frame_shape):
+        """Initialize raw frame arrays based on current frame shape.
+        
+        Arguments:
+            frame_shape: tuple of frame dimensions
+        """
+        try:
+            # Clean up any existing arrays first
+            self.releaseRawArrays()
+
+            # Calculate buffer size based on actual dimensions
+            if len(frame_shape) == 3:
+                buffer_size = self.num_raw_frames * frame_shape[0] * frame_shape[1] * frame_shape[2]
+                array_shape = (self.num_raw_frames, frame_shape[0], frame_shape[1], frame_shape[2])
+            else:
+                buffer_size = self.num_raw_frames * frame_shape[0] * frame_shape[1]
+                array_shape = (self.num_raw_frames, frame_shape[0], frame_shape[1])
+
+            log.debug("Creating shared arrays with shape: {}".format(array_shape))
+
+            # Initialize shared memory arrays
+            self.sharedRawArrayBase = Array(ctypes.c_uint8, buffer_size)
+            self.sharedRawArray = np.ctypeslib.as_array(self.sharedRawArrayBase.get_obj())
+            self.sharedRawArray = self.sharedRawArray.reshape(array_shape)
+
+            self.sharedRawArrayBase2 = Array(ctypes.c_uint8, buffer_size)
+            self.sharedRawArray2 = np.ctypeslib.as_array(self.sharedRawArrayBase2.get_obj())
+            self.sharedRawArray2 = self.sharedRawArray2.reshape(array_shape)
+
+            # Store current array configuration
+            self.current_raw_frame_shape = frame_shape
+            
+            return True
+
+        except Exception as e:
+            log.error("Failed to initialize raw frame arrays: {}".format(e))
+            log.debug(repr(traceback.format_exception(*sys.exc_info())))
+            return False
+
 
     def run(self):
-        """ Capture frames.
+        """ Main process function - initializes all process-specific resources and runs capture loop.
         """
-        
-        # Init the video device
-        while not self.exit.is_set() and not self.initVideoDevice():
-            log.info('Waiting for the video device to be connect...')
-            time.sleep(5)
+        try:
+            log.debug("Initializing process-specific resources...")
+            
+            # Initialize process-specific variables
+            self.media_backend_override = False
+            self.video_device_type = "cv2"
+            self.time_for_drop = 1.5*(1.0/self.config.fps)
+            self.device = None
+            self.pipeline = None
+            self.start_timestamp = 0
+            self.frame_shape = None
+            self.convert_to_gray = False
 
-        if self.device is None:
+            # Initialize smoothing variables
+            self.startup_flag = True
+            self.last_calculated_fps = 0
+            self.last_calculated_fps_n = 0
+            self.expected_m = 1e9/self.config.fps
+            self.reset_count = -1
+            self.n = 0
+            self.sum_x = 0
+            self.sum_y = 0
+            self.sum_xx = 0
+            self.sum_xy = 0
+            self.startup_frames = 25*60*10  # 10 minutes
+            self.b = 0
+            self.b_error_debt = 0
+            self.m_jump_error = 0
+            self.last_m_err = float('inf')
+            self.last_m_err_n = 0
 
-            log.info('The video source could not be opened!')
+            # Initialize mode tracking
+            self.last_daytime_mode = self.daytime_mode.value
+            self.current_raw_frame_shape = None
+
+            # Initialize raw frame handling if enabled
+            if self.config.save_frames:
+                self.raw_frame_count = 0
+                
+                # Convert shared timestamp arrays to numpy arrays
+                self.sharedTimestamps = np.ctypeslib.as_array(self.sharedTimestampsBase.get_obj())
+                self.sharedTimestamps2 = np.ctypeslib.as_array(self.sharedTimestampsBase2.get_obj())
+
+                # Raw frame arrays will be initialized after we know the frame shape
+                self.sharedRawArrayBase = None
+                self.sharedRawArray = None
+                self.sharedRawArrayBase2 = None
+                self.sharedRawArray2 = None
+                self.raw_frame_saver = None
+
+            log.debug("Process-specific initialization complete")
+
+            # Main capture loop
+            while not self.exit.is_set() and not self.initVideoDevice():
+                log.info('Waiting for the video device to be connected...')
+                time.sleep(5)
+
+            if self.device is None:
+                log.info('The video source could not be opened!')
+                self.exit.set()
+                return False
+
+            # Continue with main capture loop
+            self.captureFrames()
+
+        except Exception as e:
+            log.error("Error in capture process: {}".format(e))
+            log.debug(repr(traceback.format_exception(*sys.exc_info())))
             self.exit.set()
-            return False
+        finally:
+            self.releaseResources()
 
-        # Wait until the device is opened
-        device_opened = False
-        for i in range(20):
-            time.sleep(1)
-            if self.deviceIsOpened():
-                device_opened = True
-                break
 
-        # If the device could not be opened, stop capturing
-        if not device_opened:
-            log.info('The video source could not be opened!')
-            self.exit.set()
-            return False
 
-        else:
-            log.info('Video device opened!')
-
+    def captureFrames(self):
+        """ Main frame capture loop - moved from run() for clarity """
 
         # Keep track of the total number of frames
         total_frames = 0
@@ -1221,7 +1388,12 @@ class BufferedCapture(Process):
         wait_for_reconnect = False
 
         last_frame_timestamp = False
-        
+
+        # Setup additional timing variables for memory share with RawFrameSaver
+        if self.config.save_frames:
+            raw_buffer_one = True
+            first_raw_frame_timestamp = False
+
         # Run until stopped from the outside
         while not self.exit.is_set():
 
@@ -1332,6 +1504,83 @@ class BufferedCapture(Process):
                     first_frame_timestamp = frame_timestamp
 
 
+                # If save_frames is set and a video device is used, save a frame every nth frames
+                if (self.config.save_frames
+                    and self.video_file is None
+                    and total_frames % self.config.frame_save_interval_count == 0):
+
+                    # In case of a mode switch, the frame shape might change (color or grayscale)
+                    if frame.shape != self.current_raw_frame_shape:
+                        log.info("Frame shape changed, reinitializing arrays...")
+
+                        # First signal the raw frame saver to finish saving current block
+                        if raw_buffer_one:
+                            self.startRawTime1.value = first_raw_frame_timestamp
+                        else:
+                            self.startRawTime2.value = first_raw_frame_timestamp
+
+                        if not self.initRawFrameArrays(frame.shape):
+                            log.error("Failed to reinitialize arrays after mode change")
+
+                        else:
+                            # Initialize new frame saver
+                            self.raw_frame_saver = RawFrameSaver(
+                                self.saved_frames_dir,
+                                self.sharedRawArray, self.startRawTime1,
+                                self.sharedRawArray2, self.startRawTime2,
+                                self.sharedTimestamps, self.sharedTimestamps2,
+                                self.config
+                            )
+                            self.raw_frame_saver.start()
+                            self.raw_frame_count = 0
+                            log.info("Successfully reinitialized raw frame handling")
+
+
+                    # reset start time values everytime the buffers are switched
+                    if self.raw_frame_count == 0:
+
+                        if raw_buffer_one:
+                            self.startRawTime1.value = 0
+                        else:
+                            self.startRawTime2.value = 0
+
+                        # Always set first raw frame timestamp in the beginning of the block
+                        first_raw_frame_timestamp = frame_timestamp 
+
+
+                    # Write raw frame and timestamp to one of the two corresponding buffers
+                    # Use appropriate indexing based on frame dimensions
+                    if len(frame.shape) == 3:
+                        # Color frame - use 4D indexing
+                        if raw_buffer_one:
+                            self.sharedRawArray[self.raw_frame_count, :, :, :] = frame
+                            self.sharedTimestamps[self.raw_frame_count] = frame_timestamp
+                        else:
+                            self.sharedRawArray2[self.raw_frame_count, :, :, :] = frame
+                            self.sharedTimestamps2[self.raw_frame_count] = frame_timestamp
+                    else:
+                        # Grayscale frame - use 3D indexing
+                        if raw_buffer_one:
+                            self.sharedRawArray[self.raw_frame_count, :, :] = frame
+                            self.sharedTimestamps[self.raw_frame_count] = frame_timestamp
+                        else:
+                            self.sharedRawArray2[self.raw_frame_count, :, :] = frame
+                            self.sharedTimestamps2[self.raw_frame_count] = frame_timestamp
+
+                    self.raw_frame_count += 1
+
+                    # switch buffers arrays every (self.num_raw_frames) frames
+                    if self.raw_frame_count == self.num_raw_frames:
+
+                        if raw_buffer_one:
+                            self.startRawTime1.value = first_raw_frame_timestamp
+                        else:
+                            self.startRawTime2.value = first_raw_frame_timestamp
+                        
+                        self.raw_frame_count = 0
+                        raw_buffer_one = not raw_buffer_one
+
+
                 # If the end of the video file was reached, stop the capture
                 if self.video_file is not None: 
                     if (frame is None) or (not self.deviceIsOpened()):
@@ -1389,54 +1638,56 @@ class BufferedCapture(Process):
                 last_frame_timestamp = frame_timestamp
                 
 
-                ### Convert the frame to grayscale ###
+                ### Convert the frame to grayscale ###  (Not to be done in case of daytime mode)
+                if not self.daytime_mode.value:
 
-                t1_convert = time.time()
+                    t1_convert = time.time()
 
-                # Convert the frame to grayscale
-                #gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    # Convert the frame to grayscale
+                    #gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-                # Convert the frame to grayscale
-                if len(frame.shape) == 3:
+                    # Convert the frame to grayscale
+                    if len(frame.shape) == 3:
 
-                    # If a color image is given, take the green channel
-                    if frame.shape[2] == 3:
+                        # If a color image is given, take the green channel
+                        if frame.shape[2] == 3:
 
-                        gray = frame[:, :, 1]
+                            gray = frame[:, :, 1]
 
-                    # If UYVY image given, take luma (Y) channel
-                    elif self.config.uyvy_pixelformat and (frame.shape[2] == 2):
-                        gray = frame[:, :, 1]
+                        # If UYVY image given, take luma (Y) channel
+                        elif self.config.uyvy_pixelformat and (frame.shape[2] == 2):
+                            gray = frame[:, :, 1]
 
-                    # Otherwise, take the first available channel
+                        # Otherwise, take the first available channel
+                        else:
+                            gray = frame[:, :, 0]
+
                     else:
-                        gray = frame[:, :, 0]
-
-                else:
-                    gray = frame
+                        gray = frame
 
 
-                # Cut the frame to the region of interest (ROI)
-                gray = gray[self.config.roi_up:self.config.roi_down, \
-                    self.config.roi_left:self.config.roi_right]
+                    # Cut the frame to the region of interest (ROI)
+                    gray = gray[self.config.roi_up:self.config.roi_down, \
+                        self.config.roi_left:self.config.roi_right]
 
-                # Track time for frame conversion
-                t_convert = time.time() - t1_convert
+                    # Track time for frame conversion
+                    t_convert = time.time() - t1_convert
 
 
-                ### ###
+                    ### ###
 
 
 
 
-                # Assign the frame to shared memory (track time to do so)
-                t1_assign = time.time()
-                if buffer_one:
-                    self.array1[i, :gray.shape[0], :gray.shape[1]] = gray
-                else:
-                    self.array2[i, :gray.shape[0], :gray.shape[1]] = gray
+                    # Assign the frame to shared memory (track time to do so)
+  
+                    t1_assign = time.time()
+                    if buffer_one:
+                        self.array1[i, :gray.shape[0], :gray.shape[1]] = gray
+                    else:
+                        self.array2[i, :gray.shape[0], :gray.shape[1]] = gray
 
-                t_assignment = time.time() - t1_assign
+                    t_assignment = time.time() - t1_assign
 
 
 
@@ -1447,10 +1698,18 @@ class BufferedCapture(Process):
             if self.exit.is_set():
                 wait_for_reconnect = False
                 log.info('Capture exited!')
+
+                # Save leftover raw frames from last used buffer
+                if self.config.save_frames:
+                    if raw_buffer_one:
+                        self.startRawTime1.value = first_raw_frame_timestamp
+                    else:
+                        self.startRawTime2.value = first_raw_frame_timestamp
+
                 break
 
 
-            if not wait_for_reconnect:
+            if (not self.daytime_mode.value) and (not wait_for_reconnect):
 
                 # Set the starting value of the frame block, which indicates to the compression that the
                 # block is ready for processing

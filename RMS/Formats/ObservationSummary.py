@@ -198,8 +198,12 @@ def startObservationSummaryReport(config, duration, force_delete=False):
 
     # Calculate the number of fits files expected for the duration
     fps = config.fps
-    fits_files_from_duration = duration*fps/no_of_frames_per_fits_file
 
+    if duration is None:
+        fits_files_from_duration = "None (Continuous Capture)"
+    else:
+        fits_files_from_duration = duration*fps/no_of_frames_per_fits_file
+    
     addObsParam(conn, "fits_files_from_duration", fits_files_from_duration)
 
     conn.close()
