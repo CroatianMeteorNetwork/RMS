@@ -238,17 +238,17 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         night_data_dir = os.path.join(os.path.abspath(config.data_dir), config.captured_dir, \
             night_data_dir_name)
 
-        # Full path to the saved frames directory
-        if config.save_frames:
-            saved_frames_dir = os.path.join(os.path.abspath(config.data_dir), config.frame_dir)
-        else:
-            saved_frames_dir = None
+    # Full path to the saved frames directory
+    if config.save_frames:
+        saved_frames_dir = os.path.join(os.path.abspath(config.data_dir), config.frame_dir)
+    else:
+        saved_frames_dir = None
 
-        # Full path to the video files directory
-        if config.raw_video_save:
-            saved_video_dir = os.path.join(os.path.abspath(config.data_dir), config.video_dir)
-        else:
-            saved_video_dir = None
+    # Full path to the video files directory
+    if config.raw_video_save:
+        saved_video_dir = os.path.join(os.path.abspath(config.data_dir), config.video_dir)
+    else:
+        saved_video_dir = None
 
 
 
