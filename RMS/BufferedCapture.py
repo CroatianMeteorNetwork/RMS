@@ -684,7 +684,7 @@ class BufferedCapture(Process):
 
 
 
-    def moveSegment(self, splitmuxsink, fragment_id):
+    def move_segment(self, splitmuxsink, fragment_id):
         """
         Custom callback for splitmuxsink's format-location signal to name and move each segment as its
         created. Generates a timestamp-based folder structure: Year/Day-Of-Year/Hour/ per video segment
@@ -874,7 +874,7 @@ class BufferedCapture(Process):
                 if video_file_dir is not None:
                     
                     splitmuxsink = self.pipeline.get_by_name("splitmuxsink0")
-                    splitmuxsink.connect("format-location", self.moveSegment)
+                    splitmuxsink.connect("format-location", self.move_segment)
 
                 # Transition through states
                 log.info("Starting pipeline state transitions...")
