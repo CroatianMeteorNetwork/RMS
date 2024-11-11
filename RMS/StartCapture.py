@@ -1301,6 +1301,7 @@ if __name__ == "__main__":
             log.info('Started camera mode switcher on separate thread')
 
         else:
+            daytime_mode = None
             log.info('Starting capture for {:.2f} hours'.format(duration/60/60))
 
 
