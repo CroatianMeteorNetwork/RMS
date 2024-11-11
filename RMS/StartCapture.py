@@ -99,8 +99,7 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
         compressor: [Compressor] compressor process object
         buffered_capture: [BufferedCapture] buffered capture process object
         video_file: [str] Path to the video file, if it was given as the video source.
-        daytime_mode: [bool] shared boolean variable to that indicates 
-        daytime_mode: [bool] shared boolean variable to keep track of camera day/night mode switching. None by default.
+        daytime_mode: [multiprocessing.Value] shared boolean variable to keep track of camera day/night mode switching. None by default.
     """
 
     global STOP_CAPTURE
@@ -115,7 +114,7 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
     if daytime_mode is not None:
         daytime_mode_prev = daytime_mode.value
     else:
-        daytime_mode_prev = None
+        daytime_mode_prev = False
 
     while True:
 
@@ -490,7 +489,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             compressor.start()
 
             # Capture until Ctrl+C is pressed / camera switches modes
-            daytime_mode_prev = daytime_mode.value
+            if (daytime_mode is not None):
+                daytime_mode_prev = daytime_mode.value
+                
             wait(duration, compressor, bc, video_file, daytime_mode)
 
             # Stop the compressor
