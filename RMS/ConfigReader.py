@@ -965,7 +965,7 @@ def parseCapture(config, parser):
         config.bz2_files_to_keep = int(parser.get(section, "frame_dirs_to_keep"))
 
     if parser.has_option(section, "video_dirs_to_keep"):
-        config.capt_dirs_to_keep = int(parser.get(section, "video_dirs_to_keep"))
+        config.video_dirs_to_keep = int(parser.get(section, "video_dirs_to_keep"))
 
     if parser.has_option(section, "quota_management_disabled"):
         config.quota_management_disabled = parser.getboolean(section, "quota_management_disabled")
