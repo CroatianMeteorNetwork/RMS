@@ -674,7 +674,7 @@ class BufferedCapture(Process):
         if len(self.frame_shape) == 2:
             return np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
 
-        if self.daytime_mode.value:
+        if (self.daytime_mode is not None) and (self.daytime_mode.value):
             return np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
 
         # Convert to grayscale by selecting a specific channel
@@ -1311,9 +1311,6 @@ class BufferedCapture(Process):
             self.m_jump_error = 0
             self.last_m_err = float('inf')
             self.last_m_err_n = 0
-
-            # Initialize mode tracking
-            self.last_daytime_mode = self.daytime_mode.value
             self.current_raw_frame_shape = None
 
             # Initialize raw frame handling if enabled
@@ -1639,7 +1636,7 @@ class BufferedCapture(Process):
                 
 
                 ### Convert the frame to grayscale ###  (Not to be done in case of daytime mode)
-                if not self.daytime_mode.value:
+                if (self.daytime_mode is None) or (not self.daytime_mode.value):
 
                     t1_convert = time.time()
 
@@ -1709,7 +1706,7 @@ class BufferedCapture(Process):
                 break
 
 
-            if (not self.daytime_mode.value) and (not wait_for_reconnect):
+            if (not wait_for_reconnect) and ((self.daytime_mode is None) or (not self.daytime_mode.value)):
 
                 # Set the starting value of the frame block, which indicates to the compression that the
                 # block is ready for processing
