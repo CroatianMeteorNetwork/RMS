@@ -503,6 +503,13 @@ if __name__ == "__main__":
             saveResultsFrameInterface(star_list, meteor_list, img_handle, config, 
                 chunk_frames=img_handle.chunk_frames, output_suffix=cml_args.suffix)
             
+            # Release the video handle
+            if img_handle.input_type == 'video':
+
+                print("Releasing video handle... ", end="")
+                img_handle.cap.release()
+                print("Done!")
+            
             # Delete the image handle to free up memory
             del img_handle
 
