@@ -80,7 +80,7 @@ def detectStarsAndMeteorsFrameInterface(
     
 
     # Get the maximum number of stars on any chunks
-    max_stars = max([len(star_entry[1]) for star_entry in star_list])
+    max_stars = max([len(star_entry[1]) for star_entry in star_list]) if star_list else 0
     
     log.info('Max. detected stars on all frame chunks: {:d}'.format(max_stars))
 
