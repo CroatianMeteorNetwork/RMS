@@ -17,6 +17,7 @@
 from __future__ import print_function, division, absolute_import
 
 import sys
+import gc
 import os
 import time
 import logging
@@ -501,6 +502,12 @@ if __name__ == "__main__":
             # Save the results
             saveResultsFrameInterface(star_list, meteor_list, img_handle, config, 
                 chunk_frames=img_handle.chunk_frames, output_suffix=cml_args.suffix)
+            
+            # Delete the image handle to free up memory
+            del img_handle
+
+            # Collect garbage
+            gc.collect()
 
     else:
 
