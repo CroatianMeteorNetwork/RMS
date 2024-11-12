@@ -934,7 +934,7 @@ class InputTypeVideo(InputType):
             print('There are no frames to read!')
             return ff_struct_fake
 
-        print('Frames to read: ' + str(frames_to_read))
+        print('Frames to read: ' + str(frames_to_read), end='')
 
         # Load the chunk of frames
         for i in range(frames_to_read):
@@ -953,6 +953,10 @@ class InputTypeVideo(InputType):
 
             # Add frame for FF processing
             ff_struct_fake.addFrame(frame.astype(np.uint16))
+
+        
+        # Print the total number of read frames in the same line
+        print(' - loaded: {:d}'.format(ff_struct_fake.nframes), flush=True)
 
         self.current_fr_chunk_size = i + 1
 
