@@ -472,6 +472,10 @@ def extractStarsImgHandle(img_handle,
         img_handle.nextChunk()
     
 
+    # If the star list is empty, return the error return
+    if not star_list:
+        return error_return
+
     return star_list
     
 
