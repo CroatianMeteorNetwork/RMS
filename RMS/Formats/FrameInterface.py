@@ -958,6 +958,10 @@ class InputTypeVideo(InputType):
         # Print the total number of read frames in the same line
         print(' - loaded: {:d}'.format(ff_struct_fake.nframes), flush=True)
 
+        # If no frames have been read, return an empty structure
+        if ff_struct_fake.nframes == 0:
+            return ff_struct_fake
+
         self.current_fr_chunk_size = i + 1
 
         # Finish making the fake FF file
