@@ -284,8 +284,8 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
                 indicesx.append(x + hw)
 
     # Convert indices to integer
-    indicesx = np.array(indicesx, dtype=np.int)
-    indicesy = np.array(indicesy, dtype=np.int)
+    indicesx = np.array(indicesx, dtype=np.uint16)
+    indicesy = np.array(indicesy, dtype=np.uint16)
 
     return (indicesy, indicesx)
 
