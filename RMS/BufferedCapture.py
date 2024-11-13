@@ -870,7 +870,7 @@ class BufferedCapture(Process):
                     raise ValueError("Could not create pipeline")
                 
                 # If raw video saving is enabled, Connect the "format-location" signal to the 
-                # move_segment function
+                # moveSegment function
                 if video_file_dir is not None:
                     
                     splitmuxsink = self.pipeline.get_by_name("splitmuxsink0")

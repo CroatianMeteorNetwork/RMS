@@ -71,6 +71,24 @@ class RawFrameSaver(multiprocessing.Process):
         self.run_exited = multiprocessing.Event()
 
 
+    def initRawFrameCount(self):        
+        """Initiates frame counter for the JSON file with (frame, timestamp) pairs, so that the frame count is
+        consistent after a reboot
+        """
+
+        # Find sidecar json file for current day in year's directory
+        json_subpath = time.strftime("%Y/{}_%Y%m%d-%j".format(self.config.stationID)) + "_framestamps.json"
+        json_file_path = os.path.join(self.saved_frames_dir, json_subpath)
+
+
+        # Get latest frame count in case file exists
+        if os.path.exists(json_file_path):
+            with open(json_file_path, 'r') as json_file:
+                json_data = json.load(json_file)
+            self.total_saved_frames = max(map(int, json_data.keys())) + 1
+            log.info("Continuing raw frame saving for today from frame #{}".format(self.total_saved_frames))
+
+
     def saveJsonTimestamps(self, block_timestamp, block_json_data) :
         """Produces/Updates a JSON file with (frame, timestamp) pairs
 
@@ -219,6 +237,8 @@ class RawFrameSaver(multiprocessing.Process):
     def run(self):
         """ Retrieve raw frames from shared array and save them.
         """
+
+        self.initRawFrameCount()
 
         # Repeat until the raw frame saver is killed from the outside
         while not self.exit.is_set():
