@@ -1342,7 +1342,13 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 logDebug('Too small frame range! {:d} < {:d}'.format(frame_range, \
                     config.line_minimum_frame_range_det))
                 continue
-
+            
+            
+            avepixel_img = img_handle.ff.avepixel
+            
+            # Apply the gamma correction to the average pixel image if needed
+            if config.gamma != 1.0:
+                avepixel_img = Image.gammaCorrectionImage(avepixel_img, config.gamma)
 
             # Calculate centroids
             centroids = []
@@ -1443,13 +1449,12 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                         if mask is not None:
                             fr_img = MaskImage.applyMask(fr_img, mask)
 
-
                         # Apply gamma correction
                         if config.gamma != 1.0:
                             fr_img = Image.gammaCorrectionImage(fr_img, config.gamma)
 
                         # Subtract average
-                        max_avg_corrected = Image.applyDark(fr_img, img_handle.ff.avepixel)
+                        max_avg_corrected = Image.applyDark(fr_img, avepixel_img)
 
                     else:
 
