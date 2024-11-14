@@ -1407,12 +1407,19 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                     # Get maxpixel-avepixel values of given pixel indices (this will be used as weights)
                     max_weights = flattened_weights[half_frame_pixels[:,1], half_frame_pixels[:,0]]
 
+                    # Compute the sum of the weights on the given frame
+                    max_weights_sum = np.sum(max_weights)
+
+                    # If the sum of the weights is zero, skip the frame
+                    if max_weights_sum == 0:
+                        continue
+
                     # Calculate weighted centroids
                     x_weighted = half_frame_pixels[:,0]*np.transpose(max_weights)
-                    x_centroid = np.sum(x_weighted.astype(np.float64))/float(np.sum(max_weights))
+                    x_centroid = np.sum(x_weighted.astype(np.float64))/float(max_weights_sum)
 
                     y_weighted = half_frame_pixels[:,1]*np.transpose(max_weights)
-                    y_centroid = np.sum(y_weighted.astype(np.float64))/float(np.sum(max_weights))
+                    y_centroid = np.sum(y_weighted.astype(np.float64))/float(max_weights_sum)
 
 
                     # Correct the rolling shutter effect
