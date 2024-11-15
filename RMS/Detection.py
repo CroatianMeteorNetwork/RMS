@@ -530,7 +530,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         w, h = img.shape[1], img.shape[0]
 
         # Convert the image to feed it into the KHT
-        img_flatten = (img.flatten().astype(np.byte)*255).astype(np.byte)
+        img_flatten = (img.flatten().astype(np.byte).astype(np.int16)*255).astype(np.byte)
         
         # Predefine the line output
         lines = np.empty((max_lines, 2), np.double)
