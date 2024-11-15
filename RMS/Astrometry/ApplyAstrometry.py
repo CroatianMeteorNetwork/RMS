@@ -44,6 +44,7 @@ from RMS.Astrometry.Conversions import J2000_JD, date2JD, jd2Date, raDec2AltAz, 
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Formats.FTPdetectinfo import (findFTPdetectinfoFile,
                                        readFTPdetectinfo, writeFTPdetectinfo)
+from RMS.GeoidHeightEGM96 import mslToWGS84Height
 from RMS.Math import angularSeparation, cartesianToPolar, polarToCartesian
 
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
@@ -838,7 +839,23 @@ def XyHt2Geo(platepar, x, y, h):
     az, elev = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr), np.radians(dec_arr), jd_arr, \
         np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction)
     
-    lat, lon = AEGeoidH2LatLonAlt(np.degrees(az), np.degrees(elev), h, platepar.lat, platepar.lon, platepar.elev)
+    # TODO: precompute height
+    
+    # Calculate WGS84 height
+    wgs84_height = mslToWGS84Height(
+        np.radians(platepar.lat),
+        np.radians(platepar.lon),
+        platepar.elev
+    )
+    
+    lat, lon = AEGeoidH2LatLonAlt(
+        np.degrees(az),
+        np.degrees(elev),
+        h,
+        platepar.lat,
+        platepar.lon,
+        wgs84_height
+    )
     
     return lat, lon
 
