@@ -669,9 +669,12 @@ def extractStarsAndSave(config, ff_dir):
         extraction_list.append(ff_name)
 
 
+    # The number of workers should be the minimum of cores and the number of tasks, so we don't have too many
+    # workers waiting for the tasks to finish
+    num_cores = min(config.num_cores, len(extraction_list))
 
     # Run the QueuedPool for detection
-    workpool = QueuedPool(extractStarsFF, cores=config.num_cores, backup_dir=ff_dir, input_queue_maxsize=None)
+    workpool = QueuedPool(extractStarsFF, cores=num_cores, backup_dir=ff_dir, input_queue_maxsize=None)
 
 
     # Add jobs for the pool
