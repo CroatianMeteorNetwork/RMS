@@ -13,6 +13,7 @@ import scipy.interpolate
 
 import RMS.ConfigReader as cr
 from RMS.Misc import getRmsRootDir
+from RMS.Decorators import memoizeSingle
 
 
 def loadEGM96Data(dir_path, file_name):
@@ -72,7 +73,7 @@ def interpolateEGM96Data(geoid_heights):
 
     return geoid_model
 
-
+@memoizeSingle
 def mslToWGS84Height(lat, lon, msl_height, config=None):
     """ Given the height above sea level (using the EGM96 model), compute the height above the WGS84
         ellipsoid.
@@ -106,7 +107,7 @@ def mslToWGS84Height(lat, lon, msl_height, config=None):
     return wgs84_height
 
 
-
+@memoizeSingle
 def wgs84toMSLHeight(lat, lon, wgs84_height, config=None):
     """ Given the height above the WGS84 ellipsoid compute the height above sea level (using the EGM96 model).
 
