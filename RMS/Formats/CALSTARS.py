@@ -41,7 +41,7 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols):
         star_file.write("==========================================================================\n")
         star_file.write("RMS star extractor" + "\n")
         star_file.write("Cal time = FF header time plus 255/(2*framerate_Hz) seconds" + "\n")
-        star_file.write("Row  Column  Intensity-Backgnd  Amplitude  (integrated values) FWHM" + "\n")
+        star_file.write("Row  Column  Intensity-Bg  Amplitude FWHM BgLvl SNR NumSaturatedPixels" + "\n")
         star_file.write("==========================================================================\n")
         star_file.write("FF folder = " + ff_directory + "\n")
         star_file.write("Cam #  = " + str(cam_code) + "\n")
@@ -62,9 +62,19 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols):
             star_file.write("Integ pixels  = -1" + "\n")
 
             # Write every star to file
-            for y, x, amplitude, level, fwhm in list(star_data):
-                star_file.write("{:7.2f} {:7.2f} {:6d} {:6d} {:5.2f}".format(round(y, 2), round(x, 2), 
-                    int(level), int(amplitude), fwhm) + "\n")
+            for y, x, amplitude, level, fwhm, background, snr, saturated_count in list(star_data):
+
+                # Limit the saturation count to 999999
+                if saturated_count > 999999:
+                    saturated_count = 999999
+
+                # Limit the SNR to 99.99
+                if snr > 99.99:
+                    snr = 99.99
+
+                star_file.write("{:7.2f} {:7.2f} {:6d} {:6d} {:5.2f} {:6d} {:5.2f} {:6d}".format(
+                    round(y, 2), round(x, 2), 
+                    int(level), int(amplitude), fwhm, int(background), snr, int(saturated_count)) + "\n")
 
         # Write the end separator
         star_file.write("##########################################################################\n")
@@ -140,14 +150,35 @@ def readCALSTARS(file_path, file_name):
             except:
                 continue
 
+            # Read the star data
+            y, x, level, amplitude = float(line[0]), float(line[1]), int(line[2]), int(line[3])
+
             # Read FWHM if given
             if len(line) == 5:
                 fwhm = float(line[4])
             else:
                 fwhm = -1.0
 
+            # Read the background level
+            if len(line) == 6:
+                background = int(line[5])
+            else:
+                background = -1
+
+            # Read the SNR
+            if len(line) == 7:
+                snr = float(line[6])
+            else:
+                snr = -1.0
+
+            # Read the number of saturated pixels
+            if len(line) == 8:
+                saturated_count = int(line[7])
+            else:
+                saturated_count = -1
+
             # Save star data
-            star_data.append([float(line[0]), float(line[1]), int(line[2]), int(line[3]), fwhm])
+            star_data.append([y, x, level, amplitude, fwhm, background, snr, saturated_count])
 
     
     return calibrationstars_list
