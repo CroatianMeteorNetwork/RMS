@@ -512,37 +512,6 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 log.debug('Live view stopped')
 
 
-        # Continuous mode: stops BufferedCapture when capture is terminated manually
-        # Standard mode: stops BufferedCapture when night is done
-        if STOP_CAPTURE or (not config.continuous_capture) or (disk_full):
-
-            log.info('Ending capture...')
-
-            # Stop the capture
-            log.debug('Stopping capture...')
-            dropped_frames = bc.stopCapture()
-            log.debug('Capture stopped')
-
-            log.info('Total number of late or dropped frames: ' + str(dropped_frames))
-            obs_db_conn = getObsDBConn(config)
-            addObsParam(obs_db_conn, "dropped_frames", dropped_frames)
-            obs_db_conn.close()
-
-            # Free shared memory after the compressor is done
-            try:
-                log.debug('Freeing frame buffers in StartCapture...')
-                del sharedArrayBase
-                del sharedArray
-                del sharedArrayBase2
-                del sharedArray2
-
-            except Exception as e:
-                log.debug('Freeing frame buffers failed with error:' + repr(e))
-                log.debug(repr(traceback.format_exception(*sys.exc_info())))
-
-            log.debug('Compression buffers freed')
-
-
         # Continuous OR standard mode: uploading and post-processing after night capture
         if (not config.continuous_capture) or (not daytime_mode_prev) and (not disk_full):
 
@@ -691,28 +660,63 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             runExternalScript(night_data_dir, night_archive_dir, config)
 
 
-        # Continuous OR standard mode: exit when capture is terminated manually
-        if STOP_CAPTURE or (disk_full):
+        # Exit block:
+        # stops BufferedCapture when capture is terminated manually (Continuous Mode)
+        # stops BufferedCapture when night is done (Standard mode)
+        # stops if disk is full (Either mode)
+        # stops capture if it's night and the Pi is set to reboot (Either mode)
+        if STOP_CAPTURE or (disk_full) or (not config.continuous_capture) or (not daytime_mode_prev and config.reboot_after_processing):
 
-            # Stop the upload manager
-            if upload_manager is not None:
-                if upload_manager.is_alive():
-                    upload_manager.stop()
-                    log.info('Closing upload manager...')
+            log.info('Ending capture...')
 
-            if eventmonitor is not None:
-                # Stop the eventmonitor
-                if eventmonitor.is_alive():
-                    log.debug('Closing eventmonitor...')
-                    eventmonitor.stop()
-                    del eventmonitor
+            # Stop the capture
+            log.debug('Stopping capture...')
+            dropped_frames = bc.stopCapture()
+            log.debug('Capture stopped')
 
-            sys.exit()
+            log.info('Total number of late or dropped frames: ' + str(dropped_frames))
+            obs_db_conn = getObsDBConn(config)
+            addObsParam(obs_db_conn, "dropped_frames", dropped_frames)
+            obs_db_conn.close()
+
+            # Free shared memory after the compressor is done
+            try:
+                log.debug('Freeing frame buffers in StartCapture...')
+                del sharedArrayBase
+                del sharedArray
+                del sharedArrayBase2
+                del sharedArray2
+
+            except Exception as e:
+                log.debug('Freeing frame buffers failed with error:' + repr(e))
+                log.debug(repr(traceback.format_exception(*sys.exc_info())))
+
+            log.debug('Compression buffers freed')
 
 
-        # Standard mode: need to run it all just once
-        if (not config.continuous_capture):
-            break 
+            # If capture is terminated manually, or the disk is full, exit program
+            if STOP_CAPTURE or (disk_full):
+
+                # Stop the upload manager
+                if upload_manager is not None:
+                    if upload_manager.is_alive():
+                        upload_manager.stop()
+                        log.info('Closing upload manager...')
+
+                if eventmonitor is not None:
+                    # Stop the eventmonitor
+                    if eventmonitor.is_alive():
+                        log.debug('Closing eventmonitor...')
+                        eventmonitor.stop()
+                        del eventmonitor
+
+                sys.exit()
+
+
+            # Standard mode: need to run it all just once
+            # Continuous mode: if the program just got done with nighttime processing and needs to reboot
+            elif (not config.continuous_capture) or (not daytime_mode_prev and config.reboot_after_processing):
+                break 
 
         ran_once = True
 
