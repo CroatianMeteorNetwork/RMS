@@ -867,19 +867,19 @@ def parseSystem(config, parser):
     if parser.has_option(section, "elevation"):
         config.elevation = parser.getfloat(section, "elevation")
     
-    if parser.has_option(section, "wgs84_height"):
-        config.wgs84_height = parser.getfloat(section, "wgs84_height")
+    if parser.has_option(section, "height_wgs84"):
+        config.height_wgs84 = parser.getfloat(section, "height_wgs84")
     else:
         try:
             # Calculate WGS84 height if not provided
-            config.wgs84_height = mslToWGS84Height(
+            config.height_wgs84 = mslToWGS84Height(
                 np.radians(config.latitude),
                 np.radians(config.longitude),
                 config.elevation,
                 config
             )
         except Exception as e:
-            config.wgs84_height = config.elevation
+            config.height_wgs84 = config.elevation
             print("Warning: Calculating WGS84 height failed {}. Using Geoid height instead.".format(str(e)))
         
 
