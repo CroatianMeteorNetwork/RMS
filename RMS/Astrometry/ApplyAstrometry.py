@@ -838,9 +838,7 @@ def XyHt2Geo(platepar, x, y, h):
     
     az, elev = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr), np.radians(dec_arr), jd_arr, \
         np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction)
-    
-    # TODO: precompute height
-    
+        
     # Calculate WGS84 height
     wgs84_height = mslToWGS84Height(
         np.radians(platepar.lat),
