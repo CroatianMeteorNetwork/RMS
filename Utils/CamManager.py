@@ -16,6 +16,7 @@ copies or substantial portions of the Software.
 # based on https://github.com/OpenIPC/python-dvr/blob/master/DeviceManager.py
 """
 
+from __future__ import print_function, unicode_literals, division, absolute_import
 import os, sys, struct, fcntl, json
 from locale import getlocale
 from subprocess import check_output
@@ -23,7 +24,13 @@ from socket import *
 import platform
 from datetime import *
 import hashlib, base64
-from dvrip import DVRIPCam
+
+try:
+    from dvrip import DVRIPCam
+
+except ImportError:
+    print("Exiting: dvrip module not found. This script cannot run on Python 2.")
+    sys.exit(1)
 
 try:
     try:
