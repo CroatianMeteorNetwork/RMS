@@ -362,7 +362,7 @@ def estimateMeteorHeight(config, meteor_obj, shower):
     earth_radius = EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*np.sin(np.radians(config.latitude))**2)
 
     # Compute the distance from Earth's centre to the station (including the sea level height of the station)
-    re_dist = earth_radius + config.wgs84_height
+    re_dist = earth_radius + config.height_wgs84
 
     ### ###
 
@@ -496,7 +496,8 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
 
         # Init container for meteor observation
-        meteor_obj = MeteorSingleStation(cam_code, config.latitude, config.longitude, config.wgs84_height, 
+        meteor_obj = MeteorSingleStation(cam_code, config.latitude, config.longitude, config.height_wgs84
+, 
                                          ff_name)
 
         # Infill the meteor structure
