@@ -49,7 +49,7 @@ from RMS.Routines.CompareLines import compareLines
 from RMS.Routines import MaskImage
 from RMS.Routines import Image
 from RMS.Routines import RollingShutterCorrection
-from RMS.Routines.Image import thresholdFF
+from RMS.Routines.Image import thresholdFF, signalToNoise
 
 # Morphology - Cython init
 import pyximport
@@ -832,8 +832,8 @@ def checkAngularVelocity(centroids, config):
     first_centroid = centroids[0]
     last_centroid = centroids[-1]
     
-    frame1, _, x1, y1, _ = first_centroid
-    frame2, _, x2, y2, _ = last_centroid
+    frame1, _, x1, y1 = first_centroid[:4]
+    frame2, _, x2, y2 = last_centroid[:4]
 
     ang_vel = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)/float(frame2 - frame1 + 1)
 
@@ -1084,6 +1084,10 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
     t1 = time()
     t_all = time()
+
+
+    # Threshold for the reported numbers of saturated pixels (98% of the dynamic range)
+    saturation_threshold_report = int(round(0.98*(2**config.bit_depth - 1)))
 
 
     # Bin the mask, dark and flat, only when not running on FF files
@@ -1476,6 +1480,34 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                     intensity = int(np.sum(intensity_values))
 
 
+                    # Calculate the background intensity as the media of the pixel values on the avepixel
+                    #   in the same area as the meteor
+                    background_intensity = np.median(avepixel_img[half_frame_pixels_stripe[:,1], 
+                            half_frame_pixels_stripe[:,0]])
+                    
+                    
+                    #### Compute the signal-to-noise ratio
+
+                    # Count the number of threshold passer pixels in the stripe
+                    source_px_count = np.sum(intensity_values > 0)
+
+                    # Compute the standard deviation of the background
+                    background_std = np.std(avepixel_img[half_frame_pixels_stripe[:,1],
+                        half_frame_pixels_stripe[:,0]])
+
+                    # Compute the SNR
+                    snr = signalToNoise(intensity, source_px_count, background_intensity, background_std)
+
+                    ###
+
+
+                    # Count the number of saturated pixels (on original, non-gamma corrected image)
+                    saturated_count = np.sum(
+                        fr_img[half_frame_pixels_stripe[:,1], half_frame_pixels_stripe[:,0]]
+                            >= saturation_threshold_report
+                        )
+
+
                     # Rescale the centroid position and intensity back to the pre-binned size
                     if (img_handle.input_type != 'ff') and (config.detection_binning_factor > 1):
                         x_centroid *= config.detection_binning_factor
@@ -1489,7 +1521,11 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                         x_centroid, y_centroid, intensity, time() - t_centroid))
 
                     # Add computed centroid to the centroid list
-                    centroids.append([frame_no, seq_num, x_centroid, y_centroid, intensity])
+                    centroids.append([
+                        frame_no, seq_num, 
+                        x_centroid, y_centroid, 
+                        intensity, background_intensity, snr, saturated_count
+                        ])
 
 
             # Filter centroids
@@ -1839,7 +1875,7 @@ if __name__ == "__main__":
 
 
                 # Extract centroid columns
-                frame_array, seq_array, x_array, y_array, intensity_array = centroids.T
+                frame_array, seq_array, x_array, y_array, intensity_array, _, _, _ = centroids.T
 
 
                 # Compute frame time for every centroid

@@ -94,7 +94,7 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
         ftpdetect_file.write("CAL file processed\n")
         ftpdetect_file.write("Cam# Meteor# #Segments fps hnr mle bin Pix/fm Rho Phi\n")
         
-        ftpdetect_file.write("Per segment:  Frame# Col Row RA Dec Azim Elev Inten Mag\n")
+        ftpdetect_file.write("Per segment:  Frame# Col Row RA Dec Azim Elev Inten Mag Bcknd SNR NSatPx\n")
 
         # Write info for all meteors
         for meteor in meteor_list:
@@ -139,7 +139,7 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
 
                 if celestial_coords_given:
 
-                    frame, x, y, ra, dec, azim, elev, level, mag = line
+                    frame, x, y, ra, dec, azim, elev, level, mag, background, snr, saturated_count = line
 
                     # If the coordinates or the magnitude are NaN, skip this centroid
                     if np.isnan(x) or np.isnan(y) or np.isnan(mag):
@@ -148,24 +148,38 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
                     # Check that level and magnitude are numbers
                     if level is None:
                         level = 1
+
                     if mag is None:
-                        mag = 10.0
+                        mag = 999.0
 
-                    detection_line_str = "{:09.4f} {:07.2f} {:07.2f} {:10.6f} {:+10.6f} {:10.6f} {:+10.6f} {:06d} {:+6.2f}"
+                    # Limit the SNR to 99.99
+                    if snr > 99.99:
+                        snr = 99.99
 
-                    ftpdetect_file.write(detection_line_str.format(round(frame, 4), round(x, 2), \
-                        round(y, 2), round(ra, 6), round(dec, 6), round(azim, 6), round(elev, 6), \
-                        int(level), round(mag, 2)) + "\n")
+                    # Limit the saturation count to 999999
+                    if saturated_count > 999999:
+                        saturated_count = 999999
+
+                    detection_line_str = "{:09.4f} {:07.2f} {:07.2f} {:10.6f} {:+10.6f} {:10.6f} {:+10.6f} {:09d} {:+06.2f} {:06d} {:05.2f} {:06d}"
+
+                    ftpdetect_file.write(
+                        detection_line_str.format(
+                            round(frame, 4), 
+                            round(x, 2), round(y, 2), 
+                            round(ra, 6), round(dec, 6), round(azim, 6), round(elev, 6),
+                            int(level), round(mag, 2), int(background), round(snr, 2), int(saturated_count)) 
+                            + "\n"
+                            )
 
                 else:
-                    if len(line) == 9:
-                        frame, x, y, ra, dec, azim, elev, level, mag = line
+                    if len(line) == 12:
+                        frame, x, y, ra, dec, azim, elev, level, mag, background, snr, saturated_count = line
 
                         if mag is None:
-                            mag = 10.0
+                            mag = 999.0
 
                     else:
-                        frame, x, y, level = line
+                        frame, x, y, level, background, snr, saturated_count = line
 
                     # If the coordinates are NaN, skip this centroid
                     if np.isnan(x) or np.isnan(y):
@@ -176,9 +190,22 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
                     if level is None:
                         level = 1
 
-                    ftpdetect_file.write("{:09.4f} {:07.2f} {:07.2f}".format(round(frame, 4), round(x, 2), \
-                        round(y, 2)) + " 000.000000  00.000000 000.000000  00.000000 " + "{:06d}".format(int(level)) \
-                        + " 0.00\n")
+                    # Limit the SNR to 99.99
+                    if snr > 99.99:
+                        snr = 99.99
+
+                    # Limit the saturation count to 999999
+                    if saturated_count > 999999:
+                        saturated_count = 999999
+
+                    ftpdetect_file.write(
+                        "{:09.4f} {:07.2f} {:07.2f}".format(
+                            round(frame, 4), 
+                            round(x, 2), round(y, 2)) 
+                        + " 000.000000  00.000000 000.000000  00.000000 " 
+                        + "{:09d}".format(int(level)) + " 0.00" 
+                        + " {:06d} {:05.2f} {:06d}".format(int(background), round(snr, 2), int(saturated_count))
+                        + "\n")
 
 
 def findFTPdetectinfoFile(path):
@@ -245,6 +272,7 @@ def readFTPdetectinfo(ff_directory, file_name, ret_input_format=False):
         meteor_list = []
         meteor_meas = []
         cam_code = meteor_No = n_segments = fps = hnr = mle = binn = px_fm = rho = phi = None
+        background = snr = saturated_count = None
         calib_status = 0
 
         # Skip the header
@@ -298,6 +326,9 @@ def readFTPdetectinfo(ff_directory, file_name, ret_input_format=False):
                     continue
 
                 mag = np.nan
+                background = np.nan
+                snr = np.nan
+                saturated_count = np.nan
 
                 # Read magnitude if it is in the file
                 if len(line.split()) > 8:
@@ -306,10 +337,23 @@ def readFTPdetectinfo(ff_directory, file_name, ret_input_format=False):
 
                     mag = float(line_sp[8])
 
+                # Read additional parameters if they are in the file
+                if len(line.split()) > 9:
+
+                    background = float(line_sp[9])
+                    snr = float(line_sp[10])
+                    saturated_count = float(line_sp[11])
+
                 # Read meteor frame-by-frame measurements
                 frame_n, x, y, ra, dec, azim, elev, inten = list(map(float, line.split()[:8]))
 
-                meteor_meas.append([calib_status, frame_n, x, y, ra, dec, azim, elev, inten, mag])
+                meteor_meas.append([
+                    calib_status, 
+                    frame_n, 
+                    x, y, 
+                    ra, dec, azim, elev, 
+                    inten, mag, background, snr, saturated_count
+                    ])
 
 
             entry_counter += 1

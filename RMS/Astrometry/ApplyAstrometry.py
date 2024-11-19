@@ -762,11 +762,14 @@ def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=
     if np.any(level_data):
         meteor_meas = meteor_meas[level_data > 0, :]
 
-    # Extract frame number, x, y, intensity
+    # Extract frame number, x, y, intensity, background, SNR, and saturated count
     frames = meteor_meas[:, 1]
     X_data = meteor_meas[:, 2]
     Y_data = meteor_meas[:, 3]
     level_data = meteor_meas[:, 8]
+    background_data = meteor_meas[:, 10]
+    snr_data = meteor_meas[:, 11]
+    saturated_data = meteor_meas[:, 12]
 
     # Get the beginning time of the FF file
     time_beg = filenameToDatetime(ff_name)
@@ -813,7 +816,7 @@ def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=
 
     # Construct the meteor measurements array
     meteor_picks = np.c_[frames, X_data, Y_data, RA_data, dec_data, az_data, alt_data, level_data, \
-        magnitudes]
+        magnitudes, background_data, snr_data, saturated_data]
 
 
     return meteor_picks
