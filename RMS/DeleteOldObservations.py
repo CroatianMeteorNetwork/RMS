@@ -308,6 +308,30 @@ def getNightDirs(dir_path, stationID):
     return dir_list
 
 
+def getRawDirs(dir_path):
+    """ Returns a sorted list of directories in the given directory which conform to the raw frames/video directory
+        naming standard
+
+    Arguments:
+        dir_path: [str] Path to the raw frames/video directory.
+
+    Return:
+        dir_list: [list] A list of directories in the raw frame/video directory, each corresponding to one day of data
+
+    """
+
+    # Get a list of directories in the given directory
+    if not os.path.exists(dir_path):
+        return []
+    
+    dir_list = []
+    
+    for year in os.listdir(dir_path):
+        year_path = os.path.join(dir_path, year)
+        dir_list += [os.path.join(year_path, day_dir) for day_dir in os.listdir(year_path) if os.path.isdir(os.path.join(year_path, day_dir))]
+
+    return sorted(dir_list)
+
 
 def getBz2Files(dir_path, stationID):
     """ Returns a sorted list of bz2 files in the given directory which conform to the RMS compress archdir names. 
@@ -357,7 +381,7 @@ def deleteNightFolders(dir_path, config, delete_all=False):
     # Delete the night directories
     for dir_name in dir_list:
         
-        # Delete the next directory in the list, i.e. the oldes one
+        # Delete the next directory in the list, i.e. the oldest one
         try:
             shutil.rmtree(os.path.join(dir_path, dir_name))
         except OSError:
@@ -370,6 +394,51 @@ def deleteNightFolders(dir_path, config, delete_all=False):
 
     # Return the list of remaining night directories
     return getNightDirs(dir_path, config.stationID)
+
+
+def deleteRawFolders(dir_path, delete_all=False):
+    """ Deletes raw frame/video data directories to free up disk space. Either only one directory will be deleted
+        (the oldest one), or all directories will be deleted (if delete_all = True).
+
+    Arguments:
+        dir_path: [str] Path to the data directory
+
+    Keyword arguments:
+        delete_all: [bool] If True, all raw video/frame folders will be deleted. False by default.
+
+    Return:
+        dir_list: [list] A list of remaining raw video/frame directories in the data directory.
+
+    """
+
+    # Get the list of night directories
+    dir_list = getRawDirs(dir_path)
+
+    # Delete the night directories
+    for dir_name in dir_list:
+        
+        # Delete the next directory in the list, i.e. the oldest one
+        try:
+            shutil.rmtree(dir_name)
+        except OSError:
+            continue
+
+        dir_name = dir_name.rstrip('/')
+
+        # Delete the oldest data (timelapses/json/archive) files in case of the raw frame directory
+        for suffix in ['_framestamps.json', '_frames_timelapse.mp4', '_frames.tar.gz', '_frames.tar.bz2']:
+            try:
+                os.remove(dir_name + suffix)
+            except OSError:
+                continue
+
+        # If only one (first) directory should be deleted, break the loop
+        if not delete_all:
+            break
+
+
+    # Return the list of remaining night directories
+    return getRawDirs(dir_path)
 
 
 
@@ -451,6 +520,8 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
 
     captured_dir = os.path.join(data_dir, captured_dir)
     archived_dir = os.path.join(data_dir, archived_dir)
+    frame_dir = os.path.join(data_dir, config.frame_dir)
+    video_dir = os.path.join(data_dir, config.video_dir)
 
     # clear down logs first
     log.info('clearing down log files')
@@ -499,7 +570,7 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
             current_time=noon_time)
 
 
-    # Calculate the approx. size for the night night
+    # Calculate the approx. size for the next night
     next_night_bytes = (duration*config.fps)/256*config.width*config.height*4
 
     # Always leave at least 2 GB free for archive
@@ -522,6 +593,30 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     free_space_status = False
     while True:
 
+        # Delete one video directory
+        video_dirs_remaining = deleteRawFolders(video_dir)
+
+        log.info("Deleted dir captured directory: {:s}".format(video_dir))
+        log.info("Free space: {:.2f} GB".format(availableSpace(data_dir)/1024/1024/1024))
+
+        # Break the there's enough space
+        if availableSpace(data_dir) > next_night_bytes:
+            free_space_status = True
+            break
+
+
+        # Delete one frame directory
+        frame_dirs_remaining = deleteRawFolders(frame_dir)
+
+        log.info("Deleted dir captured directory: {:s}".format(frame_dir))
+        log.info("Free space: {:.2f} GB".format(availableSpace(data_dir)/1024/1024/1024))
+
+        # Break the there's enough space
+        if availableSpace(data_dir) > next_night_bytes:
+            free_space_status = True
+            break
+
+
         # Delete one captured directory
         captured_dirs_remaining = deleteNightFolders(captured_dir, config)
 
@@ -533,17 +628,18 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
             free_space_status = True
             break
 
+
         # Delete one archived directory
         archived_dirs_remaining = deleteNightFolders(archived_dir, config)
 
         log.info("Deleted dir in archived directory: {:s}".format(archived_dir))
         log.info("Free space: {:.2f} GB".format(availableSpace(data_dir)/1024/1024/1024))
 
-
         # Break if there's enough space
         if availableSpace(data_dir) > next_night_bytes:
             free_space_status = True
             break
+
 
         # Wait 10 seconds between deletes. This helps to balance out the space distribution if multiple
         #   instances of RMS are running on the same system
@@ -551,9 +647,10 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
         time.sleep(10)
 
         # If no folders left to delete, try to delete archived files
-        if (len(captured_dirs_remaining) == 0) and (len(archived_dirs_remaining) == 0):
+        if (len(captured_dirs_remaining) + len(archived_dirs_remaining) + 
+            len(frame_dirs_remaining) + len(video_dirs_remaining) == 0):
 
-            log.info("Deleted all Capture and Archived directories, deleting archived bz2 files...")
+            log.info("Deleted all Capture, Archived, Frame and Video directories, deleting archived bz2 files...")
 
             archived_files_remaining = deleteFiles(archived_dir, config)
 
@@ -631,6 +728,7 @@ def deleteByQuota(archived_dir, capt_dir_quota, captured_dir, config):
 
 def deleteOldDirs(data_dir, config):
 
+    # Deleting old archived dirs
     archived_dir = os.path.join(data_dir, config.archived_dir)
     orig_count = 0
     final_count = 0
@@ -642,6 +740,8 @@ def deleteOldDirs(data_dir, config):
         final_count = len(archdir_list)
     log.info('Purged {} older folders from ArchivedFiles'.format(orig_count - final_count))
 
+
+    # Deleting old captured dirs
     orig_count = 0
     final_count = 0
     captured_dir = os.path.join(data_dir, config.captured_dir)
@@ -652,6 +752,33 @@ def deleteOldDirs(data_dir, config):
             captdir_list = deleteNightFolders(captured_dir, config)
         final_count = len(captdir_list)
     log.info('Purged {} older folders from Captured Files'.format(orig_count - final_count))
+
+
+    # Deleting old frame dirs
+    orig_count = 0
+    final_count = 0
+    frame_dir = os.path.join(data_dir, config.frame_dir)
+    if config.frame_dirs_to_keep > 0:
+        framedir_list = getRawDirs(frame_dir)
+        orig_count = len(framedir_list)
+        while len(framedir_list) > config.frame_dirs_to_keep:
+            framedir_list = deleteRawFolders(frame_dir)
+        final_count = len(framedir_list)
+    log.info('Purged {} older folders (days) from Frame Files'.format(orig_count - final_count))
+
+
+    # Deleting old video dirs
+    orig_count = 0
+    final_count = 0
+    video_dir = os.path.join(data_dir, config.video_dir)
+    if config.video_dirs_to_keep > 0:
+        videodir_list = getRawDirs(video_dir)
+        orig_count = len(videodir_list)
+        while len(videodir_list) > config.video_dirs_to_keep:
+            videodir_list = deleteRawFolders(video_dir)
+        final_count = len(videodir_list)
+    log.info('Purged {} older folders (days) from Video Files'.format(orig_count - final_count))
+
 
     orig_count = 0
     final_count = 0
