@@ -736,7 +736,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
             return {}
 
         # If it exists, use it as the only file to load
-        ftpdetectinfo_file_list = [os.path.filename(ftpdetectinfo_path)]
+        ftpdetectinfo_file_list = [os.path.basename(ftpdetectinfo_path)]
 
 
     recalibrated_platepars_all = {}
