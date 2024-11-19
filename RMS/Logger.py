@@ -119,6 +119,9 @@ def initLogging(config, log_file_prefix="", safedir=None):
     log.setLevel(logging.INFO)
     log.setLevel(logging.DEBUG)
 
+    # Prevent log propagation
+    log.propagate = False
+
     # Make a new log file each day
     handler = logging.handlers.TimedRotatingFileHandler(os.path.join(log_path, log_file_name), when='D', \
         interval=1, utc=True)
@@ -152,4 +155,8 @@ def initLogging(config, log_file_prefix="", safedir=None):
         Gst.debug_remove_log_function(None)
         Gst.debug_add_log_function(gstDebugLogger, None)
         Gst.debug_set_default_threshold(Gst.DebugLevel.WARNING)
+
+        # Prevent GStreamer log propagation
+        gstreamer_log = logging.getLogger('gstreamer')
+        gstreamer_log.propagate = False
         log.info("GStreamer logging successfully initialized")

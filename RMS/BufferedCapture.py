@@ -45,8 +45,6 @@ from RMS.Misc import RmsDateTime, mkdirP
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
-# Prevent infinite GStreamer logging propagation
-log.propagate = False
 
 try:
     # py3
@@ -809,22 +807,26 @@ class BufferedCapture(Process):
                 which can be used for further processing of the captured video frames.
         """
 
-        device_url = self.extractRtspUrl(self.config.deviceID)
-
-        if self.config.protocol == 'udp':
-            protocol_str = "protocols=udp retry=5"
-            # rtspsrc_params = ("rtspsrc buffer-mode=1 protocols=udp retry=5")
-
+        # Detect MIPI configuration
+        # e.g: '/dev/video0 ! video/x-raw,format=UYVY,width=1920,height=1080,framerate=25/1'
+        if self.config.device.startswith('/dev/video'):  # MIPI camera
+            # Use the complete MIPI configuration from device string, then scale
+            source_to_tee = (
+                f"v4l2src name=src {self.config.device} ! "
+                f"videoscale ! video/x-raw,width={self.config.width},height={self.config.height} ! "
+                "tee name=t"
+            )
         else:
-            # Default to TCP
-            protocol_str = "protocols=tcp tcp-timeout=5000000 retry=5"
+            # For RTSP:
+            # e.g: 'rtsp://192.168.42.10:554/user=admin&password=&channel=1&stream=0.sdp'
+            device_url = self.extractRtspUrl(self.config.device)
+            protocol_str = "protocols=udp retry=5" if self.config.protocol == 'udp' else "protocols=tcp tcp-timeout=5000000 retry=5"
 
-        # Define the source up to the point where we want to branch off
-        source_to_tee = (
-            "rtspsrc name=src buffer-mode=1 {:s} "
-            "location=\"{:s}\" ! "
-            "rtph264depay ! h264parse ! tee name=t"
-            ).format(protocol_str, device_url)
+            source_to_tee = (
+                f"rtspsrc name=src buffer-mode=1 {protocol_str} "
+                f"location=\"{device_url}\" ! "
+                "rtph264depay ! h264parse ! tee name=t"
+            )
 
         # Branch for processing
         processing_branch = (
