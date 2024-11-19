@@ -1488,15 +1488,20 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                     
                     #### Compute the signal-to-noise ratio
 
-                    # Count the number of threshold passer pixels in the stripe
-                    source_px_count = np.sum(intensity_values > 0)
+                    if intensity > 0:
 
-                    # Compute the standard deviation of the background
-                    background_std = np.std(avepixel_img[half_frame_pixels_stripe[:,1],
-                        half_frame_pixels_stripe[:,0]])
+                        # Count the number of threshold passer pixels in the stripe
+                        source_px_count = np.sum(intensity_values > 0)
 
-                    # Compute the SNR
-                    snr = signalToNoise(intensity, source_px_count, background_intensity, background_std)
+                        # Compute the standard deviation of the background
+                        background_std = np.std(avepixel_img[half_frame_pixels_stripe[:,1],
+                            half_frame_pixels_stripe[:,0]])
+
+                        # Compute the SNR
+                        snr = signalToNoise(intensity, source_px_count, background_intensity, background_std)
+
+                    else:
+                        snr = 0
 
                     ###
 
