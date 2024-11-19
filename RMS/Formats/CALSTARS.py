@@ -41,7 +41,7 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols):
         star_file.write("==========================================================================\n")
         star_file.write("RMS star extractor" + "\n")
         star_file.write("Cal time = FF header time plus 255/(2*framerate_Hz) seconds" + "\n")
-        star_file.write("Row  Column  Intensity-Bg  Amplitude FWHM BgLvl SNR NumSaturatedPixels" + "\n")
+        star_file.write("      Y       X IntensSum Ampltd  FWHM  BgLvl   SNR NSatPx" + "\n")
         star_file.write("==========================================================================\n")
         star_file.write("FF folder = " + ff_directory + "\n")
         star_file.write("Cam #  = " + str(cam_code) + "\n")
@@ -72,7 +72,7 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols):
                 if snr > 99.99:
                     snr = 99.99
 
-                star_file.write("{:7.2f} {:7.2f} {:6d} {:6d} {:5.2f} {:6d} {:5.2f} {:6d}".format(
+                star_file.write("{:7.2f} {:7.2f} {:9d} {:6d} {:5.2f} {:6d} {:5.2f} {:6d}".format(
                     round(y, 2), round(x, 2), 
                     int(level), int(amplitude), fwhm, int(background), snr, int(saturated_count)) + "\n")
 
