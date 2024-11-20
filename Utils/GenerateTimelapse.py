@@ -143,7 +143,7 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
         com = "cd " + dir_path + ";" \
             + software_name + nostdin + " -v quiet -r "+ str(fps) +" -y -i " + temp_img_path \
             + " -vcodec libx264 -pix_fmt yuv420p -crf " + str(crf) \
-            + " -movflags faststart -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)\" " \
+            + " -movflags faststart -threads 2 -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)\" " \
             + mp4_path
 
         print("Creating timelapse using {:s}...".format(software_name))
@@ -180,7 +180,7 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
     print("Total time:", RmsDateTime.utcnow() - t1)
 
 
-def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=20, cleanup_mode='none',
+def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=26, cleanup_mode='none',
                               compression='bz2', filelist=None):
     """
     Generate a timelapse video from frame images and optionally cleanup the
@@ -191,7 +191,7 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=20, cleanup_mod
                        subdirectories by the hour of day "00", "01", ..., "23"
         video_path: [str] Output path for the generated video.
         fps: [int] Frames per second for the output video. 30 by default.
-        crf: [int] Constant Rate Factor for video compression. 20 by default.
+        crf: [int] Constant Rate Factor for video compression. 26 by default.
         cleanup_mode: [str] Cleanup mode after video creation.
                       Options: 'none', 'delete', 'tar'. 'none' by default.
         compression: [str] Compression method for tar.
@@ -224,7 +224,7 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=20, cleanup_mod
     encode_command = [
         software_name, "-nostdin", "-f", "concat", "-safe", "0", "-v", "quiet",
         "-r", str(fps), "-y", "-i", list_file_path, "-c:v", "libx264",
-        "-crf", str(crf), "-g", "15", video_path
+        "-crf", str(crf), "-threads", "2", "-g", "15", video_path
     ]
 
     # Execute the command
