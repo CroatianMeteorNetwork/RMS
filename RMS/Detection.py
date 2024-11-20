@@ -36,7 +36,8 @@ from mpl_toolkits.mplot3d import Axes3D
 # RMS imports
 from RMS.Astrometry.Conversions import jd2Date, raDec2AltAz
 import RMS.ConfigReader as cr
-from RMS.DetectionTools import getThresholdedStripe3DPoints, loadImageCalibration, binImageCalibration
+from RMS.DetectionTools import getThresholdedStripe3DPoints, loadImageCalibration, binImageCalibration, \
+    dilateCoordinates
 from RMS.Formats.AsgardEv import writeEv
 from RMS.Formats.AST import xyToRaDecAST
 from RMS.Formats import FFfile
@@ -1374,6 +1375,10 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 # Skip if there are no pixels in the frame
                 if not len(frame_pixels):
                     continue
+
+                # Dilate the coordinates to encompass more pixels for photometry and centroiding
+                frame_pixels_stripe = dilateCoordinates(frame_pixels_stripe, config.height, config.width, \
+                                                        width=config.centroid_dilation)
 
                 # Calculate centroids by half-frame
                 for half_frame in range(2):

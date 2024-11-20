@@ -554,6 +554,9 @@ class Config:
         self.vect_angle_thresh = 20 # angle similarity between 2 lines in a stripe to be merged
         self.frame_extension = 3 # how many frames to check during centroiding before and after the initially determined frame range
 
+        # Number of pixels to dilate the centroid mask beyond the thresholded image
+        self.centroid_dilation = 2
+
         # Centroid filtering parameters
         self.centroids_max_deviation = 2 # maximum deviation of a centroid point from a LSQ fitted line (if above max, it will be rejected)
         self.centroids_max_distance =  30 # maximum distance in pixels between centroids (used for filtering spurious centroids)
@@ -1550,6 +1553,9 @@ def parseMeteorDetection(config, parser):
 
     if parser.has_option(section, "frame_extension"):
         config.frame_extension = parser.getint(section, "frame_extension")
+
+    if parser.has_option(section, "centroid_dilation"):
+        config.centroid_dilation = parser.getint(section, "centroid_dilation")
 
 
     if parser.has_option(section, "centroids_max_deviation"):

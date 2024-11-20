@@ -290,6 +290,59 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
     return (indicesy, indicesx)
 
 
+def dilateCoordinates(coords, img_h, img_w, width=1):
+    """
+    Dilate the given coordinates by adding neighboring coordinates.
+
+    Arguments:
+        coords: [np.ndarray] An (N, 3) array where each row is [x, y, frame_no].
+        img_h: [int] Height of the image (px).
+        img_w: [int] Width of the image (px).
+
+    Keyword arguments:
+        width: [int] The dilation width (number of steps). Default is 1.
+
+    Returns:
+        np.ndarray: A (M, 3) array of dilated coordinates.
+
+    """
+
+        # If the width is 0, return the original coordinates
+    if width == 0:
+        return coords
+
+    # Ensure width is at least 1
+    width = max(1, int(width))
+    
+    # Generate shifts for dilation
+    shift_range = np.arange(-width, width + 1)
+    dx, dy = np.meshgrid(shift_range, shift_range)
+    shifts = np.column_stack((dx.ravel(), dy.ravel()))
+    
+    # Generate all shifted coordinates
+    coords_xy = coords[:, :2][:, np.newaxis, :]  # Shape: (N, 1, 2)
+    shifted_coords = coords_xy + shifts[np.newaxis, :, :]  # Shape: (N, S, 2)
+    shifted_coords = shifted_coords.reshape(-1, 2)  # Shape: (N*S, 2)
+    
+    # Repeat frame_no for each shifted coordinate
+    frame_no = coords[:, 2]
+    frame_no_repeated = np.repeat(frame_no, shifts.shape[0])
+    
+    # Combine x, y, and frame_no
+    dilated_coords = np.column_stack((shifted_coords, frame_no_repeated))
+    
+    # Remove duplicate coordinates
+    dilated_coords_unique = np.unique(dilated_coords, axis=0)
+    
+    # Ensure the coordinates are within image boundaries
+    x_within_bounds = (dilated_coords_unique[:, 0] >= 0) & (dilated_coords_unique[:, 0] < img_w)
+    y_within_bounds = (dilated_coords_unique[:, 1] >= 0) & (dilated_coords_unique[:, 1] < img_h)
+    within_bounds = x_within_bounds & y_within_bounds
+    dilated_coords_within_bounds = dilated_coords_unique[within_bounds]
+    
+    return dilated_coords_within_bounds
+
+
 
 def checkCentroidBounds(model_pos, img_w, img_h):
     """ Checks if the given position is within the image. 
