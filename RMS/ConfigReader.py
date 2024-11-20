@@ -572,6 +572,9 @@ class Config:
         # Path to the ML model
         self.ml_model_path = os.path.join(self.rms_root_dir, "share", "meteorml32.tflite")
 
+        # Detection border (in pixels) - detections too close to the border of the mask will be rejected
+        self.detection_border = 5
+
         # Number of CPU cores to use for detection. 0 means all available cores, -1 all but one core (default)
         self.num_cores = -1
 
@@ -1572,6 +1575,11 @@ def parseMeteorDetection(config, parser):
         # Disable the min_patch_intensity filter if the ML filter is used and the ML library is available
         if TFLITE_AVAILABLE and (config.ml_filter > 0):
             config.min_patch_intensity_multiplier = 0
+
+
+    if parser.has_option(section, "detection_border"):
+        config.detection_border = parser.getint(section, "detection_border")
+
 
     if parser.has_option(section, "num_cores"):
         config.num_cores = parser.getint(section, "num_cores")

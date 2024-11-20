@@ -49,7 +49,7 @@ from RMS.Routines.CompareLines import compareLines
 from RMS.Routines import MaskImage
 from RMS.Routines import Image
 from RMS.Routines import RollingShutterCorrection
-from RMS.Routines.Image import thresholdFF, signalToNoise
+from RMS.Routines.Image import thresholdFF, signalToNoise, CoordinateFilter
 
 # Morphology - Cython init
 import pyximport
@@ -1089,6 +1089,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
     # Threshold for the reported numbers of saturated pixels (98% of the dynamic range)
     saturation_threshold_report = int(round(0.98*(2**config.bit_depth - 1)))
 
+    # Set up an object for filtering centroids too close to the edge or the mask
+    edge_filter = CoordinateFilter((config.height, config.width), mask, config.detection_border)
 
     # Bin the mask, dark and flat, only when not running on FF files
     if (img_handle.input_type != 'ff') and (config.detection_binning_factor > 1):
@@ -1533,12 +1535,22 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                         ])
 
 
-            # Filter centroids
+            # Filter centroids (confirm propagation)
             centroids = filterCentroids(centroids, config.centroids_max_deviation, 
                 config.centroids_max_distance)
 
             # Convert to numpy array for easy slicing
             centroids = np.array(centroids)
+
+
+            logDebug('Filtering centroids close to the edge or the mask...')
+
+            # Extract x and y coordinates
+            centroid_xy = centroids[:, 2:4]
+
+            # Filter out centroids that are too close to the edge or the mask
+            _, valid_flags = edge_filter.filterCoordinates(centroid_xy)
+            centroids = centroids[valid_flags]
 
             # Reject the solution if there are too few centroids
             if len(centroids) < config.line_minimum_frame_range_det:
