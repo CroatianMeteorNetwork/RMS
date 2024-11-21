@@ -576,6 +576,31 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     # Always leave at least 2 GB free for archive
     next_night_bytes += config.extra_space_gb*(1024**3)
 
+
+    # Calculating space for raw frames and videos.
+    # In case of continuous capture, frames and videos will be captured throughout the day (86400 seconds).
+    # Else, they will happen as long as nighttime capture is runnning
+
+    if config.continuous_capture:
+        duration = 86400
+
+    if config.raw_video_save:
+
+        # Taking a ~0.25 Mbps average video bitrate (default 720p capture @ 25 fps)
+        raw_video_bytes = duration*0.25*(1024**2)
+
+        # Roughly scaling for higher resolutions
+        raw_video_bytes *= (config.width*config.height)/(1280*720)
+
+        # Roughly scaling for fps
+        raw_video_bytes *= (config.fps)/(25)
+
+        next_night_bytes += raw_video_bytes
+
+
+    if config.save_frames: # (estimated value of 3GB maximum for 24 hours)
+        next_night_bytes += 3*(1024**3)
+
     ######
 
     log.info("Need {:.2f} GB for next night".format(next_night_bytes/1024/1024/1024))

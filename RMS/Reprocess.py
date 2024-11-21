@@ -540,8 +540,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                         frames_timelapse_path = os.path.join(year_dir, "{}_{}_frames_timelapse.mp4".format(config.stationID, day))
 
                         # Generate the timelapse and cleanup
-                        generateTimelapseFromFrames(day_dir, frames_timelapse_path, fps=30, crf=20,
-                                                    cleanup_mode='tar', compression='bz2')
+                        generateTimelapseFromFrames(day_dir, frames_timelapse_path)
 
                         # Add the timelapse to the extra files
                         extra_files.append(frames_timelapse_path)
