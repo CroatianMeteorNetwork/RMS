@@ -586,11 +586,14 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
 
     if config.raw_video_save:
 
-        # (for 720p capture) Taking a ~0.25 Mbps average video bitrate
+        # Taking a ~0.25 Mbps average video bitrate (default 720p capture @ 25 fps)
         raw_video_bytes = duration*0.25*(1024**2)
 
         # Roughly scaling for higher resolutions
         raw_video_bytes *= (config.width*config.height)/(1280*720)
+
+        # Roughly scaling for fps
+        raw_video_bytes *= (config.fps)/(25)
 
         next_night_bytes += raw_video_bytes
 
