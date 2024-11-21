@@ -1501,7 +1501,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                         source_px_count = np.sum(intensity_values > 0)
 
                         # Compute the standard deviation of the background
-                        background_std = np.std(avepixel_img[half_frame_pixels_stripe[:,1],
+                        background_std = np.mean(img_handle.ff.stdpixel[half_frame_pixels_stripe[:,1],
                             half_frame_pixels_stripe[:,0]])
 
                         # Compute the SNR
