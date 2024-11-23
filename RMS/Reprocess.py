@@ -541,7 +541,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                         timelapse_json_path = os.path.join(year_dir, "{}_{}_framestamps.json".format(config.stationID, day))
 
                         # Generate the timelapse and cleanup
-                        generateTimelapseFromFrames(day_dir, frames_timelapse_path, timelapse_json_path, cleanup_mode='tar')
+                        generateTimelapseFromFrames(day_dir, frames_timelapse_path, cleanup_mode='tar')
 
                         # Add the timelapse and its framestamps.json to the extra files
                         extra_files.append(frames_timelapse_path)

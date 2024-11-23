@@ -13,7 +13,7 @@ import shutil
 import cv2
 import glob
 import tarfile
-import json
+from datetime import datetime
 
 from PIL import ImageFont
 
@@ -181,19 +181,15 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
     print("Total time:", RmsDateTime.utcnow() - t1)
 
 
-def generateTimelapseFromFrames(day_dir, video_path, framestamps_path, fps=30, crf=26, cleanup_mode='none',
-                              compression='bz2', filelist=None):
+def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=26, cleanup_mode='none', compression='bz2'):
     """
     Generate a timelapse video from frame images and optionally cleanup the
-    source directory. The function requires a corresponding "framestamps.json" file to be present
-    in day_dir's parent directory (This would be produced by RawFrameSave.py during capture) for
-    adding timestamps to the video.
+    source directory.
 
     Keyword arguments:
         day_dir: [str] Directory containing a day of frame image files. day_dir is expected to have
                        subdirectories by the hour of day "00", "01", ..., "23"
         video_path: [str] Output path for the generated video.
-        framestamps_path: [str] Path to framestamps.json file for the day the timelapse is produced for.
         fps: [int] Frames per second for the output video. 30 by default.
         crf: [int] Constant Rate Factor for video compression. 26 by default.
         cleanup_mode: [str] Cleanup mode after video creation.
@@ -210,43 +206,38 @@ def generateTimelapseFromFrames(day_dir, video_path, framestamps_path, fps=30, c
         print("No images found.")
         return
 
-    raw_dir_tmp_path = ""
+    # Create temporary directory for timestamped images
+    raw_dir_tmp_path = os.path.join(day_dir, "temp_raw_img_dir")
 
-    # Add timestamp to frames based on the day's corresponding framestamps.json if present 
-    if os.path.exists(framestamps_path):
+    if os.path.exists(raw_dir_tmp_path):
+        shutil.rmtree(raw_dir_tmp_path)
+        print("Deleted directory : " + raw_dir_tmp_path)
 
-        # Load up the framestamps
-        framestamps = {}
-        with open(framestamps_path, 'r') as fs:
-            framestamps = json.load(fs)
+    mkdirP(raw_dir_tmp_path)
+    print("Created directory : " + raw_dir_tmp_path)
+    print("Preparing files for the timelapse...")
 
-        # Create temporary directory
-        raw_dir_tmp_path = os.path.join(day_dir, "temp_raw_img_dir")
+    # Start timestamping overlay on images
+    for index, img_path in enumerate(image_files):
 
-        if os.path.exists(raw_dir_tmp_path):
-            shutil.rmtree(raw_dir_tmp_path)
-            print("Deleted directory : " + raw_dir_tmp_path)
+        # Setup timestamp text from filename (img_path example : 'XX0001_20241123_100015_442')
+        image_name_parts = os.path.basename(img_path).split('_')
+        station_id = image_name_parts[0]
+        extracted_time = datetime.strptime(image_name_parts[1] + image_name_parts[2], "%Y%m%d%H%M%S")
+        
+        # Draw timestamp to image
+        image = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
+        text = station_id + " " + extracted_time.strftime("%Y-%m-%d %H:%M:%S") + " UTC"
+        position = (10, image.shape[0] - 10)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        cv2.putText(image, text, position, font, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
 
-        mkdirP(raw_dir_tmp_path)
-        print("Created directory : " + raw_dir_tmp_path)
-        print("Preparing files for the timelapse...")
+        # Save the labelled image to disk
+        timestamped_img_path = os.path.join(raw_dir_tmp_path, 'temp_{:05d}.jpg'.format(index))
+        cv2.imwrite(timestamped_img_path, image, [cv2.IMWRITE_JPEG_QUALITY, 100])
 
-        # image_files and framestamp indices are both sorted by name 
-        for index, img_path in enumerate(image_files):
-
-            # Draw text to image
-            image = cv2.imread(img_path)
-            cv2.putText(image, framestamps[str(index)], (10, image.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
-
-            # Save the labelled image to disk
-            timestamped_img_path = os.path.join(raw_dir_tmp_path, 'temp_{:05d}.jpg'.format(index))
-            cv2.imwrite(timestamped_img_path, image, [cv2.IMWRITE_JPEG_QUALITY, 100])
-
-            # Update the new frame path in the image_file list
-            image_files[index] = timestamped_img_path
-
-    else:
-        print("Path to framestamps.json file not found; continuing without placing timestamps on frames")
+        # Update the new frame path in the image_file list
+        image_files[index] = timestamped_img_path
 
 
     # Create a text file listing all the images
@@ -276,12 +267,6 @@ def generateTimelapseFromFrames(day_dir, video_path, framestamps_path, fps=30, c
 
     if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
         print("Video created successfully at {0}".format(video_path))
-
-        # Delete temporary directory and files inside
-        if os.path.exists(raw_dir_tmp_path):
-            shutil.rmtree(raw_dir_tmp_path)
-            print("Deleted temporary directory : " + raw_dir_tmp_path)
-            
         # Cleanup based on the specified mode
         if cleanup_mode == 'delete':
             try:
