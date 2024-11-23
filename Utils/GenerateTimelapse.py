@@ -13,6 +13,7 @@ import shutil
 import cv2
 import glob
 import tarfile
+import json
 
 from PIL import ImageFont
 
@@ -180,16 +181,19 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
     print("Total time:", RmsDateTime.utcnow() - t1)
 
 
-def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=26, cleanup_mode='none',
+def generateTimelapseFromFrames(day_dir, video_path, framestamps_path, fps=30, crf=26, cleanup_mode='none',
                               compression='bz2', filelist=None):
     """
     Generate a timelapse video from frame images and optionally cleanup the
-    source directory.
+    source directory. The function requires a corresponding "framestamps.json" file to be present
+    in day_dir's parent directory (This would be produced by RawFrameSave.py during capture) for
+    adding timestamps to the video.
 
     Keyword arguments:
         day_dir: [str] Directory containing a day of frame image files. day_dir is expected to have
                        subdirectories by the hour of day "00", "01", ..., "23"
         video_path: [str] Output path for the generated video.
+        framestamps_path: [str] Path to framestamps.json file for the day the timelapse is produced for.
         fps: [int] Frames per second for the output video. 30 by default.
         crf: [int] Constant Rate Factor for video compression. 26 by default.
         cleanup_mode: [str] Cleanup mode after video creation.
@@ -199,17 +203,56 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=26, cleanup_mod
     """
 
     # Combine all files paths
-    images_files = [img for img in sorted(glob.glob(os.path.join(day_dir, "*/*.jpg")))] + \
-                   [img for img in sorted(glob.glob(os.path.join(day_dir, "*/*.png")))]
+    image_files = [img for img in sorted(glob.glob(os.path.join(day_dir, "*/*.jpg")))] + \
+                  [img for img in sorted(glob.glob(os.path.join(day_dir, "*/*.png")))]
 
-    if len(images_files) == 0:
+    if len(image_files) == 0:
         print("No images found.")
         return
+
+    raw_dir_tmp_path = ""
+
+    # Add timestamp to frames based on the day's corresponding framestamps.json if present 
+    if os.path.exists(framestamps_path):
+
+        # Load up the framestamps
+        framestamps = {}
+        with open(framestamps_path, 'r') as fs:
+            framestamps = json.load(fs)
+
+        # Create temporary directory
+        raw_dir_tmp_path = os.path.join(day_dir, "temp_raw_img_dir")
+
+        if os.path.exists(raw_dir_tmp_path):
+            shutil.rmtree(raw_dir_tmp_path)
+            print("Deleted directory : " + raw_dir_tmp_path)
+
+        mkdirP(raw_dir_tmp_path)
+        print("Created directory : " + raw_dir_tmp_path)
+        print("Preparing files for the timelapse...")
+
+        # image_files and framestamp indices are both sorted by name 
+        for index, img_path in enumerate(image_files):
+
+            # Draw text to image
+            image = cv2.imread(img_path)
+            cv2.putText(image, framestamps[str(index)], (10, image.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
+
+            # Save the labelled image to disk
+            timestamped_img_path = os.path.join(raw_dir_tmp_path, 'temp_{:05d}.jpg'.format(index))
+            cv2.imwrite(timestamped_img_path, image, [cv2.IMWRITE_JPEG_QUALITY, 100])
+
+            # Update the new frame path in the image_file list
+            image_files[index] = timestamped_img_path
+
+    else:
+        print("Path to framestamps.json file not found; continuing without placing timestamps on frames")
+
 
     # Create a text file listing all the images
     list_file_path = os.path.join(day_dir, "filelist.txt")
     with open(list_file_path, 'w') as f:
-        for img_path in images_files:
+        for img_path in image_files:
             f.write("file '{0}'\n".format(img_path))
 
     if platform.system() in ['Linux', 'Darwin']:  # Darwin is macOS
@@ -234,6 +277,11 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=26, cleanup_mod
     if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
         print("Video created successfully at {0}".format(video_path))
 
+        # Delete temporary directory and files inside
+        if os.path.exists(raw_dir_tmp_path):
+            shutil.rmtree(raw_dir_tmp_path)
+            print("Deleted temporary directory : " + raw_dir_tmp_path)
+            
         # Cleanup based on the specified mode
         if cleanup_mode == 'delete':
             try:

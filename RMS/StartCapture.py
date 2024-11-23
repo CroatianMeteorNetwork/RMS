@@ -42,7 +42,7 @@ import RMS.ConfigReader as cr
 from RMS.Logger import initLogging
 from RMS.BufferedCapture import BufferedCapture
 from RMS.CaptureDuration import captureDuration
-from RMS.CameraModeSwitcher import cameraModeSwitcher
+from RMS.CaptureModeSwitcher import captureModeSwitcher
 from RMS.Compression import Compressor
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
@@ -1296,14 +1296,14 @@ if __name__ == "__main__":
             # Setup shared value to communicate day/night switch between processes.
             daytime_mode = multiprocessing.Value(ctypes.c_bool, False)
 
-            # Setup camera mode switcher on another thread
-            cam_switcher = threading.Thread(target=cameraModeSwitcher, args=(config, daytime_mode))
+            # Setup the capture mode switcher on another thread
+            capture_switcher = threading.Thread(target=captureModeSwitcher, args=(config, daytime_mode))
             
-            # To make sure switcher thread exits automatically at the end
-            cam_switcher.daemon = True
+            # To make sure the capture switcher thread exits automatically at the end
+            capture_switcher.daemon = True
             
-            cam_switcher.start()
-            log.info('Started camera mode switcher on separate thread')
+            capture_switcher.start()
+            log.info('Started capture mode switcher on a separate thread')
 
         else:
             daytime_mode = None
