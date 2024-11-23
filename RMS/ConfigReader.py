@@ -446,6 +446,9 @@ class Config:
         # Run capture continuously, during the day or night
         self.continuous_capture = False
 
+        # Switch camera settings between day/night modes, for when continuous_capture is enabled
+        self.switch_camera_modes = False
+
         ##### Upload
 
         # Flag determining if uploading is enabled or not
@@ -1237,6 +1240,9 @@ def parseCapture(config, parser):
     if parser.has_option(section, "continuous_capture"):
         config.continuous_capture = parser.getboolean(section, "continuous_capture")
 
+    # Load option to switch camera settings between day/night modes, for when continuous_capture is enabled
+    if parser.has_option(section, "switch_camera_modes"):
+        config.switch_camera_modes = parser.getboolean(section, "switch_camera_modes")
 
 def parseUpload(config, parser):
     section = "Upload"
