@@ -319,37 +319,33 @@ def generateTimelapseFromFrames(day_dir, video_path, framestamps_path, fps=30, c
 
 if __name__ == "__main__":
 
-    # ### COMMAND LINE ARGUMENTS
+    ### COMMAND LINE ARGUMENTS
 
-    # # Init the command line arguments parser
-    # arg_parser = argparse.ArgumentParser(description="Convert all FF files in a folder to a movie")
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Convert all FF files in a folder to a movie")
 
-    # arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str, \
-    #     help='Path to directory with FF files.')
+    arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str, \
+        help='Path to directory with FF files.')
 
-    # arg_parser.add_argument('-fps', '--fps', metavar='FPS', type=int, \
-    #     help='FPS to use for video.')
+    arg_parser.add_argument('-fps', '--fps', metavar='FPS', type=int, \
+        help='FPS to use for video.')
 
-    # arg_parser.add_argument('-x', '--nodel', action="store_true", \
-    #     help="""Do not delete generated JPG file.""")
+    arg_parser.add_argument('-x', '--nodel', action="store_true", \
+        help="""Do not delete generated JPG file.""")
     
-    # arg_parser.add_argument('-o', '--output', metavar='OUTPUT', type=str, \
-    #     help='Output video file name.')
+    arg_parser.add_argument('-o', '--output', metavar='OUTPUT', type=str, \
+        help='Output video file name.')
     
-    # arg_parser.add_argument('--hires', action="store_true", \
-    #                         help='Make a higher resolution timelapse. The video file will be larger.')
+    arg_parser.add_argument('--hires', action="store_true", \
+                            help='Make a higher resolution timelapse. The video file will be larger.')
 
-    # # Parse the command line arguments
-    # cml_args = arg_parser.parse_args()
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
 
-    # #########################
+    #########################
 
 
-    # dir_path = os.path.normpath(cml_args.dir_path)
+    dir_path = os.path.normpath(cml_args.dir_path)
 
-    # # Generate the timelapse
-    # generateTimelapse(dir_path, keep_images=cml_args.nodel, fps=cml_args.fps, output_file=cml_args.output, hires=cml_args.hires)
-
-    generateTimelapseFromFrames("/home/rms/Desktop/RMS_data/FramesFiles/2024/20241123-328", \
-                                "/home/rms/Desktop/RMS_data/FramesFiles/2024/US000F_20241123-328_frames_timelapse.mp4", \
-                                "/home/rms/Desktop/RMS_data/FramesFiles/2024/US000F_20241123-328_framestamps.json")
+    # Generate the timelapse
+    generateTimelapse(dir_path, keep_images=cml_args.nodel, fps=cml_args.fps, output_file=cml_args.output, hires=cml_args.hires)
