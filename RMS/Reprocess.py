@@ -436,9 +436,11 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         # Make the name of the audit file
         audit_file_name = night_data_dir_name.replace("_detected", "") + "_config_audit_report.txt"
 
+        config_file_name = os.path.basename(config.config_file_name)
+
         # Construct the full path for files
         audit_file_path = os.path.join(night_data_dir, audit_file_name)
-        config_file_path = os.path.join(night_data_dir, ".config")
+        config_file_path = os.path.join(night_data_dir, config_file_name)
 
         with open(audit_file_path, 'w') as f:
             f.write(compareConfigs(config_file_path,
