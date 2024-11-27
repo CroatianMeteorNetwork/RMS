@@ -2736,6 +2736,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # If SNR and saturation flags are missing in the pick list, add them
         for _, pick in self.pick_list.items():
+            if 'background_intensity' not in pick:
+                pick['background_intensity'] = 0.0
             if 'snr' not in pick:
                 pick['snr'] = 1.0
             if 'saturated' not in pick:
@@ -4825,7 +4827,8 @@ class PlateTool(QtWidgets.QMainWindow):
         return dark_file, dark
 
 
-    def addCentroid(self, frame, x_centroid, y_centroid, mode=1, snr=0, saturated=False):
+    def addCentroid(self, frame, x_centroid, y_centroid, mode=1, 
+                    background_intensity=0, snr=0, saturated=False):
         """
         Adds or modifies a pick marker at given frame to self.pick_list with given information
 
@@ -4836,6 +4839,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         Keyword arguments:
             mode: [0 or 1] The mode of the pick, 0 is yellow, 1 is red.
+            background_intensity: [float] Background intensity of the pick.
             snr: [float] Signal to noise ratio of the pick.
             saturated: [bool] Whether the pick is saturated.
 
@@ -4854,6 +4858,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     'mode': mode,
                     'intensity_sum': 1,
                     'photometry_pixels': None,
+                    'background_intensity': background_intensity,
                     'snr': snr,
                     'saturated': saturated}
             self.pick_list[frame] = pick
@@ -5665,6 +5670,9 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute the median background
             background_lvl = np.ma.median(crop_bg)
 
+            # Store the background intensity in the pick
+            pick['background_intensity'] = background_lvl
+
 
             # If the DFN image is used and a dark has been applied (i.e. the previous image is subtracted),
             #   assume that the background is zero
@@ -5878,7 +5886,9 @@ class PlateTool(QtWidgets.QMainWindow):
                     'y_centroid': None,
                     'mode': None,
                     'intensity_sum': None,
+                    'background_intensity': None,
                     'snr': 1.0,
+                    'saturated': False,
                     'photometry_pixels': photometry_pixels}
 
             self.pick_list[frame] = pick
@@ -6025,7 +6035,11 @@ class PlateTool(QtWidgets.QMainWindow):
             if np.ma.is_masked(pick['intensity_sum']):
                 pick['intensity_sum'] = 1
 
-            centroids.append([frame_no, pick['x_centroid'], pick['y_centroid'], pick['intensity_sum']])
+            centroids.append([
+                frame_no, 
+                pick['x_centroid'], pick['y_centroid'], 
+                pick['intensity_sum'], pick['background_intensity'], pick['snr'], pick['saturated']
+                ])
 
         # If there are no centroids, don't save anything
         if len(centroids) == 0:
@@ -6141,10 +6155,12 @@ class PlateTool(QtWidgets.QMainWindow):
 # - {name: x_image, unit: pix, datatype: float64}
 # - {name: y_image, unit: pix, datatype: float64}
 # - {name: integrated_pixel_value, datatype: int64}
+# - {name: background_pixel_value, datatype: int64}
 # - {name: saturated_pixels, datatype: bool}
 # - {name: mag_data, datatype: float64}
 # - {name: err_minus_mag, datatype: float64}
 # - {name: err_plus_mag, datatype: float64}
+# - {name: snr, datatype: float64}
 # delimiter: ','
 # meta: !!omap
 """
@@ -6162,7 +6178,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         out_str += "# schema: astropy-2.0\n"
-        out_str += "datetime,ra,dec,azimuth,altitude,x_image,y_image,integrated_pixel_value,saturated_pixels,mag_data,err_minus_mag,err_plus_mag\n"
+        out_str += "datetime,ra,dec,azimuth,altitude,x_image,y_image,integrated_pixel_value,background_pixel_value,saturated_pixels,mag_data,err_minus_mag,err_plus_mag,snr\n"
 
         # Add the data (sort by frame)
         for frame, pick in sorted(self.pick_list.items(), key=lambda x: x[0]):
@@ -6238,8 +6254,10 @@ class PlateTool(QtWidgets.QMainWindow):
                 "{:10.6f}".format(azim), "{:+10.6f}".format(alt),
                 "{:9.3f}".format(pick['x_centroid']), "{:9.3f}".format(pick['y_centroid']), 
                 "{:10d}".format(int(pick['intensity_sum'])),
+                "{:10d}".format(int(pick['background_intensity'])),
                 "{:5s}".format(str(pick['saturated'])),
-                "{:+7.2f}".format(mag), "{:+6.2f}".format(-mag_err_total), "{:+6.2f}".format(mag_err_total)
+                "{:+7.2f}".format(mag), "{:+6.2f}".format(-mag_err_total), "{:+6.2f}".format(mag_err_total),
+                "{:10.2f}".format(pick['snr'])
                 ]
 
             out_str += ",".join(entry) + "\n"
