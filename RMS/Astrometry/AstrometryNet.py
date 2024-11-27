@@ -71,7 +71,7 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
         if x_data is None or y_data is None:
             
             # Automatically extract stars from the image
-            x_data, y_data, _, _, _  = extractStarsAuto(img, mask=mask, max_star_candidates=1500, 
+            x_data, y_data, _, _, _, _, _, _  = extractStarsAuto(img, mask=mask, max_star_candidates=1500, 
                 segment_radius=8, min_stars_detect=50, max_stars_detect=150, bit_depth=bit_depth, 
                 verbose=verbose
             )
