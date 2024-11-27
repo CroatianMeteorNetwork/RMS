@@ -19,17 +19,14 @@ from __future__ import absolute_import, division, print_function
 import math
 import os
 import sys
+from RMS.Misc import getRmsRootDir
 
-import RMS
-
-try:
-    # Python 3
-    from configparser import NoOptionError, RawConfigParser 
-
-except:
-    # Python 2
+# Consolidated version-specific imports and definitions
+if sys.version_info[0] == 3:
+    from configparser import NoOptionError, RawConfigParser
+else:
     from ConfigParser import NoOptionError, RawConfigParser
-
+    FileNotFoundError = IOError  # Map FileNotFoundError to IOError in Python 2
 
 # Used to determine detection parameters which will change in ML filtering is available
 try:
@@ -231,8 +228,8 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
 class Config:
     def __init__(self):
 
-        # Get the package root directory
-        self.rms_root_dir = os.path.abspath(os.path.join(os.path.dirname(RMS.__file__), os.pardir))
+        # Get the path to the RMS root directory
+        self.rms_root_dir = getRmsRootDir()
 
         # default config file absolute path
         self.config_file_name = os.path.join(self.rms_root_dir, '.config')
@@ -341,6 +338,9 @@ class Config:
 
         # days of logfiles to keep
         self.logdays_to_keep = 30
+
+        # Toggle logging stdout messages
+        self.log_stdout = False
 
         # ArchDirs and bzs to keep
         # keep this many ArchDirs. Zero means keep them all
@@ -911,6 +911,9 @@ def parseCapture(config, parser):
     if parser.has_option(section, "logdays_to_keep"):
         config.logdays_to_keep = int(parser.get(section, "logdays_to_keep"))
 
+    if parser.has_option(section, "log_stdout"):
+        config.log_stdout = parser.getboolean(section, "log_stdout")
+
     if parser.has_option(section, "arch_dirs_to_keep"):
         config.arch_dirs_to_keep = int(parser.get(section, "arch_dirs_to_keep"))
 
@@ -1326,8 +1329,6 @@ def parseFireballDetection(config, parser):
     if parser.has_option(section, "max_lines"):
         config.max_lines = parser.getint(section, "max_lines")
     
-    if parser.has_option(section, "min_lines"):
-        config.max_lines = parser.getint(section, "max_lines")
 
 
 

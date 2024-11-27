@@ -19,6 +19,8 @@ from __future__ import print_function, division, absolute_import
 import os
 import sys
 import traceback
+import RMS.Reprocess
+
 # Set GStreamer debug level. Use '2' for warnings in production environments.
 os.environ['GST_DEBUG'] = '3'
 
@@ -34,6 +36,7 @@ import numpy as np
 
 from RMS.Misc import ping
 from RMS.Routines.GstreamerCapture import GstVideoFile
+from RMS.Formats.ObservationSummary import getObsDBConn, addObsParam
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -548,22 +551,23 @@ class BufferedCapture(Process):
             protocol_str = "protocols=udp retry=5"
             # rtspsrc_params = ("rtspsrc buffer-mode=1 protocols=udp retry=5")
 
-        else:  
+        else:
             # Default to TCP
             protocol_str = "protocols=tcp tcp-timeout=5000000 retry=5"
-            #rtspsrc_params = ("rtspsrc buffer-mode=1 protocols=tcp tcp-timeout=5000000 retry=5")
-            
+
         # Define the source up to the point where we want to branch off
         source_to_tee = (
             "rtspsrc buffer-mode=1 {:s} "
             "location=\"{:s}\" ! "
-            "rtph264depay ! tee name=t"
+            "rtph264depay ! h264parse ! tee name=t"
             ).format(protocol_str, device_url)
 
         # Branch for processing
         processing_branch = (
-            "t. ! queue ! h264parse ! {:s} ! videoconvert ! video/x-raw,format={:s} ! "
+            "t. ! queue ! {:s} ! "
             "queue leaky=downstream max-size-buffers=100 max-size-bytes=0 max-size-time=0 ! "
+            "videoconvert ! video/x-raw,format={:s} ! "
+            "queue max-size-buffers=100 max-size-bytes=0 max-size-time=0 ! "
             "appsink max-buffers=100 drop=true sync=0 name=appsink"
             ).format(gst_decoder, video_format)
         
@@ -572,7 +576,7 @@ class BufferedCapture(Process):
 
             video_location = os.path.join(video_file_dir, "video_%05d.mkv")
             storage_branch = (
-                "t. ! queue ! h264parse ! "
+                "t. ! queue max-size-buffers=0 max-size-bytes=0 max-size-time=0 ! "
                 "splitmuxsink location={:s} max-size-time={:d} muxer-factory=matroskamux"
                 ).format(video_location, int(segment_duration_sec*1e9))
 
@@ -803,6 +807,10 @@ class BufferedCapture(Process):
                     # Set the video device type
                     self.video_device_type = "gst"
 
+                    conn = getObsDBConn(self.config)
+                    addObsParam(conn, "media_backend", self.video_device_type)
+                    conn.close()
+
                     return True
 
                 except Exception as e:
@@ -810,6 +818,9 @@ class BufferedCapture(Process):
                     self.media_backend_override = True
                     self.releaseResources()
 
+                    conn = getObsDBConn(self.config)
+                    addObsParam(conn, "media_backend", self.video_device_type)
+                    conn.close()
 
             if self.config.media_backend == 'v4l2':
                 try:
@@ -855,10 +866,15 @@ class BufferedCapture(Process):
 
                 time.sleep(5)
                 log.info('GStreamer Video device released!')
-
+                conn = getObsDBConn(self.config)
+                addObsParam(conn, "media_backend", self.video_device_type)
+                conn.close()
             except Exception as e:
                 log.error('Error releasing GStreamer pipeline: {}'.format(e))
-                
+                conn = getObsDBConn(self.config)
+                addObsParam(conn, "media_backend", "gst not successfully released")
+                conn.close()
+
         if self.device:
 
             try:
@@ -869,7 +885,9 @@ class BufferedCapture(Process):
 
             except Exception as e:
                 log.error('Error releasing OpenCV device: {}'.format(e))
-
+                conn = getObsDBConn(self.config)
+                addObsParam(conn, "media_backend", "OpenCV not successfully released")
+                conn.close()
             finally:
                 self.device = None  # Reset device to None after releasing
 

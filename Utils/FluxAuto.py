@@ -17,9 +17,11 @@ from RMS.Astrometry.Conversions import datetime2JD
 from RMS.Formats.Showers import FluxShowers
 from RMS.Math import isAngleBetween
 from RMS.Routines.SolarLongitude import jd2SolLonSteyaert
+from RMS.Misc import mkdirP, walkDirsToDepth
+from Utils.Flux import calculateMassIndex
 from Utils.FluxBatch import fluxBatch, plotBatchFlux, FluxBatchBinningParams, saveBatchFluxCSV, \
     reportCameraTally
-from RMS.Misc import mkdirP, walkDirsToDepth
+from RMS.Misc import mkdirP, walkDirsToDepth, RmsDateTime
 from Utils.FluxFitActivityCurve import computeCurrentPeakZHR, loadFluxActivity, plotYearlyZHR
 
 
@@ -452,10 +454,10 @@ def loadExcludedStations(dir_path, excluded_stations_file="excluded_stations.txt
         return excluded_stations
 
 
-def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_year_limit=3, \
+def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_year_limit=3,
     metadata_dir=None, output_dir=None, csv_dir=None, index_dir=None, generate_website=False, 
-    website_plot_url=None, shower_code=None, shower_suffix_filename=None, custom_binning_dict=None,
-    cpu_cores=1, excluded_stations_file="excluded_stations.txt",
+    website_plot_url=None, shower_code=None, forced_mass_index=None, shower_suffix_filename=None, 
+    custom_binning_dict=None, cpu_cores=1, excluded_stations_file="excluded_stations.txt",
     skip_allyear=False, publication_quality=False):
     """ Given the reference time, automatically identify active showers and produce the flux graphs and
         CSV files.
@@ -480,6 +482,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
         website_plot_url: [str] Public URL to the plots, so they can be accessed online.
         shower_code: [str] Force a specific shower. None by default, in which case active showers will be
             automatically determined.
+        forced_mass_index: [float] Force a specific mass index for all showers. None by default.
         shower_suffix_filename: [str] Suffix to add to the shower code in the file name.
         custom_binning_dict: [str] Custom binning parameters to be used instead of those given in the
             flux showers files. Needs to be a dictionary in the same format as in that file.
@@ -568,6 +571,16 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
         # Add the shower to active showers
         active_showers = [shower]
 
+        print()
+        print("Using the given shower {:s}:".format(shower.name))
+        print("  Solar longitude at the reference time: {:.4f}".format(sol_ref_time))
+        print("  Activity range: {:.4f} - {:.4f} - {:.4f}".format(sol_diff_beg, sol_diff_max, sol_diff_end))
+        print("  Reference year activity: {:s} - {:s}".format(
+            shower.dt_beg_ref_year.strftime("%Y-%m-%d %H:%M:%S"), 
+            shower.dt_end_ref_year.strftime("%Y-%m-%d %H:%M:%S")
+            ))
+        
+
 
     else:
 
@@ -605,6 +618,8 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
 
 
     ### Load all data folders ###
+
+    print("Loading data folders...")
 
     # Determine which data folders should be used for each shower (don't search deeper than a depth of 2)
     shower_dirs = {}
@@ -803,8 +818,14 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
             # Construct the dir input list
             dir_params = [(night_dir_path, None, None, None, None, None) for night_dir_path, _ in dir_list]
 
+            # Determine which mass index to use if the forced one is given (otherwise use the one from the 
+            #   shower table)
+            mass_index = shower.mass_index
+            if forced_mass_index is not None:
+                mass_index = forced_mass_index
+
             # Compute the batch flux
-            fbr = fluxBatch(config, shower_code, shower.mass_index, dir_params, ref_ht=ref_height, 
+            fbr = fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=ref_height, 
                 min_meteors=fb_bin_params.min_meteors, 
                 min_tap=fb_bin_params.min_tap, 
                 min_bin_duration=fb_bin_params.min_bin_duration, 
@@ -950,6 +971,13 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-s', '--shower', metavar='SHOWER', type=str,
         help="Force a specific shower. 3-letter IAU shower code is expected.")
+    
+    group = arg_parser.add_mutually_exclusive_group()
+    group.add_argument('--massindex', metavar='MASS_INDEX', type=float,
+        help="Force a specific mass index for the shower. If not given, the mass index from the flux showers file will be used. Can't be used with --popindex.")
+    
+    group.add_argument('--popindex', metavar='POPULATION_INDEX', type=float,
+        help="Force a specific population index for the shower. If not given, the population index from the flux showers file will be used. Can't be used with --massindex.")
 
     arg_parser.add_argument('--suffix', metavar='SUFFIX', type=str,
         help="Add a suffix to the shower name to differentiate the flux run it in case something special was done.")
@@ -999,12 +1027,27 @@ if __name__ == "__main__":
         custom_binning_dict = json.loads(binning_formatted)
 
 
+    # Only if a specific shower was given, load the mass index or population index from the command line
+    forced_mass_index = None
+    if cml_args.shower is not None:
+        
+        # Set the mass index if given
+        if cml_args.massindex is not None:
+            forced_mass_index = cml_args.massindex
+
+        # Set the population index if given
+        if cml_args.popindex is not None:
+            forced_mass_index = calculateMassIndex(cml_args.popindex)
+
+        if forced_mass_index is not None:
+            print("Forcing mass index: {:.2f} for shower {:s}".format(forced_mass_index, cml_args.shower))
+
 
     previous_start_time = None
     while True:
 
         # Clock for measuring script time
-        t1 = datetime.datetime.utcnow()
+        t1 = RmsDateTime.utcnow()
 
 
         if cml_args.time is not None:
@@ -1012,7 +1055,7 @@ if __name__ == "__main__":
 
         # If no manual time was given, use current time.
         else:
-            ref_dt = datetime.datetime.utcnow()
+            ref_dt = RmsDateTime.utcnow()
 
 
         print("Computing flux using reference time:", ref_dt)
@@ -1022,6 +1065,7 @@ if __name__ == "__main__":
             output_dir=cml_args.outdir, csv_dir=cml_args.csvdir, 
             generate_website=(cml_args.weburl is not None), index_dir=cml_args.indexdir, 
             website_plot_url=cml_args.weburl, shower_code=cml_args.shower, \
+            forced_mass_index=forced_mass_index,
             shower_suffix_filename=cml_args.suffix, custom_binning_dict=custom_binning_dict,
             cpu_cores=cml_args.cpucores,
             skip_allyear=cml_args.skipallyear,
@@ -1042,7 +1086,7 @@ if __name__ == "__main__":
 
             # Otherwise wait to run
             wait_time = (datetime.timedelta(hours=cml_args.auto) \
-                - (datetime.datetime.utcnow() - t1)).total_seconds()
+                - (RmsDateTime.utcnow() - t1)).total_seconds()
 
             # Run immediately if the wait time has elapsed
             if wait_time < 0:

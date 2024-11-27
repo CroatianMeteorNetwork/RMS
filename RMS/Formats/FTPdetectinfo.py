@@ -18,9 +18,14 @@ from __future__ import absolute_import, division, print_function
 
 import datetime
 import os
-
+import sys
 import git
 import numpy as np
+from RMS.Misc import RmsDateTime
+
+# Map FileNotFoundError to IOError in Python 2 as it does not exist
+if sys.version_info[0] < 3:
+    FileNotFoundError = IOError
 
 
 def validDefaultFTPdetectinfo(file_name):
@@ -80,7 +85,7 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
         ftpdetect_file.write("Meteor Count = " + str(total_meteors).zfill(6) + "\n")
         ftpdetect_file.write("-----------------------------------------------------\n")
         ftpdetect_file.write("Processed with RMS 1.0 " + commit_time + " " + str(sha) + " on " \
-            + str(datetime.datetime.utcnow()) + " UTC\n")
+            + str(RmsDateTime.utcnow()) + " UTC\n")
         ftpdetect_file.write("-----------------------------------------------------\n")
         ftpdetect_file.write("FF  folder = " + ff_directory + "\n")
         ftpdetect_file.write("CAL folder = " + cal_directory + "\n")
@@ -182,17 +187,14 @@ def findFTPdetectinfoFile(path):
     if os.path.isfile(path):
         return path
 
-    ftpdetectinfo_files = [filename for filename in os.listdir(path) if 'FTPdetectinfo_' in filename]
-
+    ftpdetectinfo_files = [filename for filename in sorted(os.listdir(path)) if 'FTPdetectinfo_' in filename]
 
     # Remove backup files from list
     filtered_ftpdetectinfo_files = []
     for filename in ftpdetectinfo_files:
-
-        if validDefaultFTPdetectinfo(filename) and (os.path.basename(path).split('_')[0] in filename):
+        if validDefaultFTPdetectinfo(filename):
             filtered_ftpdetectinfo_files.append(filename)
 
-    
     ftpdetectinfo_files = list(filtered_ftpdetectinfo_files)
 
     # If there are CAMS-style FTPdetectinfo files, skip them
@@ -204,7 +206,13 @@ def findFTPdetectinfoFile(path):
             except:
                 return os.path.join(path, filename)
 
+    # If there are still multiple files, remove all that do not have the same name as the directory
+    if len(ftpdetectinfo_files) > 1:
+        for filename in ftpdetectinfo_files:
+            if os.path.basename(path).split('_')[0] not in filename:
+                ftpdetectinfo_files.remove(filename)
 
+    # Finally, return the first file in the list (even if there are multiple files)
     if len(ftpdetectinfo_files):
         return os.path.join(path, ftpdetectinfo_files[0])
 

@@ -3,6 +3,7 @@ from __future__ import absolute_import, print_function
 import datetime
 
 import ephem
+from RMS.Misc import RmsDateTime
 
 
 def captureDuration(lat, lon, elevation, current_time=None, max_hours=23):
@@ -38,7 +39,7 @@ def captureDuration(lat, lon, elevation, current_time=None, max_hours=23):
 
     # If the current time is not given, use the current time
     if current_time is None:
-        current_time = datetime.datetime.utcnow()
+        current_time = RmsDateTime.utcnow()
 
     # Set the current time
     o.date = current_time

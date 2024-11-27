@@ -1,5 +1,7 @@
 """ Take videos collected with RMS (gstreamer) and change their names to include the timestamp of the first frame. """
 
+from __future__ import print_function, division, absolute_import
+
 import os
 import sys
 import datetime
@@ -12,7 +14,9 @@ import numpy as np
 
 from RMS.Formats.FFfile import filenameToDatetime
 
-
+# Map FileNotFoundError to IOError in Python 2 as it does not exist
+if sys.version_info[0] < 3:
+    FileNotFoundError = IOError
 
 
 class FrameTime:

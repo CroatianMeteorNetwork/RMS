@@ -55,16 +55,18 @@ def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
 
     # Load the mask if given
     if mask_path:
+        
         mask = MaskImage.loadMask(mask_path)
 
         # If the mask is all white, set it to None
-        if np.all(mask.img == 255):
+        if (mask is not None) and np.all(mask.img == 255):
             print('Mask is all white, setting it to None.')
             mask = None
 
     if mask is not None:
         print('Loaded mask:', mask_path)
         log.info('Loaded mask: {:s}'.format(mask_path))
+
     else:
         log.info('No mask file has been found.')
 

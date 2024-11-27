@@ -18,6 +18,7 @@ import ephem
 from RMS.CaptureDuration import captureDuration
 from RMS.ConfigReader import loadConfigFromDirectory
 from RMS.Logger import initLogging
+from RMS.Misc import RmsDateTime
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -37,6 +38,15 @@ else:
 
 
 def quotaReport(capt_dir_quota, config, after=False):
+    """
+    Args:
+        capt_dir_quota : GB allowance for captured directories
+        config : station configuration file
+        after : optional, default false, selects an appropriate report header
+
+    Returns:
+        str : \n delimited report suitable for printing or logging
+    """
 
     captured_dir = os.path.join(config.data_dir, config.captured_dir)
     archived_dir = os.path.join(config.data_dir, config.archived_dir)
@@ -89,8 +99,8 @@ def availableSpace(dirname):
 
 
 def usedSpaceRecursive(obj_path):
-
     """
+    Calculates space used by recursion
 
     Args:
         obj_path : path from which to start searching
@@ -116,8 +126,8 @@ def usedSpaceRecursive(obj_path):
     return n
 
 def usedSpaceFromOS(obj_path):
-
     """
+    Calculates used space by a call to du
 
     Args:
         obj_path : path from which to start searching
@@ -135,12 +145,13 @@ def usedSpaceFromOS(obj_path):
 
 def usedSpaceNoRecursion(obj_path):
     """
+    Calculates used space using os.walk()
 
-        Args:
-            obj_path : path from which to start searching
+    Args:
+        obj_path : path from which to start searching
 
-        Returns:
-            GB file size of files found in directory path
+    Returns:
+        GB file size of files found in directory path
         """
 
     obj_path = os.path.expanduser(obj_path)
@@ -153,15 +164,20 @@ def usedSpaceNoRecursion(obj_path):
     return n
 
 def usedSpace(obj):
+    """
+    Args:
+        obj (): file system object from where to start searching
+
+    Returns:
+        size beneath this object in GB (bytes / 1024 **3 )
+    """
 
     obj = os.path.expanduser((obj))
     return usedSpaceNoRecursion(obj)
 
 
 def objectsToDelete(object_path, stationID, quota_gb=0, bz2=False):
-
     """
-
     Args:
         object_path: path to directory to be checked
         quota_gb: target size of objects in directory
@@ -200,6 +216,14 @@ def objectsToDelete(object_path, stationID, quota_gb=0, bz2=False):
     return objects_to_delete
 
 def rmList(delete_list, dummy_run=True):
+    """
+    Args:
+        delete_list (): list of full paths to objects to be deleted
+        dummy_run (): optional, default True, conducts a dummy run with no deletions
+
+    Returns:
+        None
+    """
 
     for full_path in delete_list:
         full_path = os.path.expanduser(full_path)
@@ -218,10 +242,13 @@ def rmList(delete_list, dummy_run=True):
 
 def sizeArchivedDirs(config):
     """
+    Args:
+        config (): Station config file
 
     Returns:
-        size: byte size of all archived directories and subdirectories
+        size in bytes of the archived directories
     """
+
     archived_path = os.path.join(config.data_dir, config.archived_dir)
     directory_list = getNightDirs(os.path.join(config.data_dir, config.archived_dir), config.stationID)
     directory_list.reverse()
@@ -232,18 +259,15 @@ def sizeArchivedDirs(config):
         n += dir_size
     return n
 
+
 def sizeBz2Files(config):
-
-
     """
-
     Args:
-        target_size: target total size of bz2 files
+        config ():Station config file
 
     Returns:
-        list of files to delete
+        size in GB of all the .bz2 files in the archived directory
     """
-
 
     file_list = getBz2Files(os.path.join(config.data_dir, config.archived_dir), config.stationID)
     file_list.reverse()
@@ -256,9 +280,6 @@ def sizeBz2Files(config):
         n += file_size / (1024 ** 3)
 
     return n
-
-
-
 
 
 def getNightDirs(dir_path, stationID):
@@ -456,7 +477,7 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     if duration is None:
 
         # Time of next local noon
-        #ct = datetime.datetime.utcnow()
+        #ct = RmsDateTime.utcnow()
         #noon_time = datetime.datetime(ct.year, ct.month, ct.date, 12)
 
         # Initialize the observer and find the time of next noon
@@ -580,9 +601,21 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
 
 
 def deleteByQuota(archived_dir, capt_dir_quota, captured_dir, config):
+    """
+    By quotas deletes the oldest files in each section. This method does
+    not delete log files.
+
+    Args:
+        archived_dir (): Full path to the archive directory
+        capt_dir_quota (): Quota for captured directories
+        captured_dir (): Path to the captured directoreis
+        config (): Station config
+
+    Returns:
+        None
+    """
 
     log.info(quotaReport(capt_dir_quota, config, after=False))
-
 
     delete_list = objectsToDelete(captured_dir, config.stationID, capt_dir_quota, bz2=False)
     rmList(delete_list, dummy_run=config.quota_management_disabled)
@@ -639,7 +672,7 @@ def deleteOldLogfiles(data_dir, config, days_to_keep=None):
     Arguments:
         data_dir: [str] Path to the RMS data directory which contains the Captured and Archived directories
         config: [Configuration object]
-        duration: [int] number of days to retain, default None means read from config file
+        days_to_keep: [int] number of days to retain, default None means read from config file
     """
     log_dir = os.path.join(data_dir, config.log_dir)
     

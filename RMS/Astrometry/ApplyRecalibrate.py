@@ -34,6 +34,7 @@ from RMS.Formats import CALSTARS, FFfile, FTPdetectinfo, Platepar, StarCatalog
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile
 from RMS.Math import angularSeparation
 from RMS.Logger import initLogging
+from RMS.Misc import RmsDateTime
 
 # Neighbourhood size around individual FFs with detections which will be takes for recalibration
 #   A size of e.g. 3 means that an FF before, the FF with the detection, an an FF after will be taken
@@ -131,12 +132,33 @@ def recalibrateFF(
     # If there more stars than a set limit, sample them randomly using the same seed for reproducibility
     if not ignore_max_stars and len(star_dict_ff[jd]) > config.recalibration_max_stars:
 
-        # Create a generator with a fixed random seed
-        rng = np.random.default_rng(seed=0)
-
-        # Sample the stars and store them in a copy of the star dictionary
+        # Make a copy so that the original star dictionary is not modified
         star_dict_ff = copy.deepcopy(star_dict_ff)
-        star_dict_ff = {jd: rng.choice(star_dict_ff[jd], config.recalibration_max_stars, replace=False)}
+
+        # Python 3+
+        if hasattr(np.random, 'default_rng'):
+
+            # Use the newer Generator-based RNG
+            rng = np.random.default_rng(seed=0)
+
+            # Sample the stars and store them in a copy of the star dictionary
+            star_dict_ff = {jd: rng.choice(star_dict_ff[jd], config.recalibration_max_stars, replace=False)}
+        
+        # Python 2
+        else:
+
+            # Use the older RandomState-based RNG
+            rng = np.random.RandomState(seed=0)
+
+            # RandomState.choice requires indices for complex data types
+            indices = rng.choice(
+                len(star_dict_ff[jd]),
+                config.recalibration_max_stars,
+                replace=False
+            )
+
+            # Use the indices to select the stars
+            star_dict_ff[jd] = [star_dict_ff[jd][i] for i in indices]
 
 
     # A list of matching radiuses to try
@@ -620,6 +642,9 @@ def recalibrateIndividualFFsAndApplyAstrometry(
     # Use a copy of the config file
     config = copy.deepcopy(config)
 
+    # Use a copy of the platepar
+    platepar = copy.deepcopy(platepar)
+
     # If the given file does not exits, return nothing
     if not os.path.isfile(ftpdetectinfo_path):
         log.info('ERROR! The FTPdetectinfo file does not exist: {:s}'.format(ftpdetectinfo_path))
@@ -930,7 +955,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
         meteor_output_list.append([ff_name, meteor_No, rho, phi, meteor_picks])
 
     # Calibration string to be written to the FTPdetectinfo file
-    calib_str = 'Recalibrated with RMS on: ' + str(datetime.datetime.utcnow()) + ' UTC'
+    calib_str = 'Recalibrated with RMS on: ' + str(RmsDateTime.utcnow()) + ' UTC'
 
     # If no meteors were detected, set dummpy parameters
     if len(meteor_list) == 0:
@@ -942,7 +967,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
         shutil.copy(
             ftpdetectinfo_path,
             ftpdetectinfo_path.strip('.txt')
-            + '_backup_{:s}.txt'.format(datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S.%f')),
+            + '_backup_{:s}.txt'.format(RmsDateTime.utcnow().strftime('%Y%m%d_%H%M%S.%f')),
         )
     except:
         log.info('ERROR! The FTPdetectinfo file could not be backed up: {:s}'.format(ftpdetectinfo_path))
