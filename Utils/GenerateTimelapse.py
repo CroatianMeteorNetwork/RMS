@@ -198,15 +198,8 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=26, cleanup_mod
                      Options: 'bz2', 'gz'. 'bz2' by default.
     """
 
-    # Combine all files paths
-    image_files = [img for img in sorted(glob.glob(os.path.join(day_dir, "*/*.jpg")))] + \
-                  [img for img in sorted(glob.glob(os.path.join(day_dir, "*/*.png")))]
-
-    if len(image_files) == 0:
-        print("No images found.")
-        return
-
     # Create temporary directory for timestamped images
+    # Remove any existing such directory so they don't get listed in image_files
     raw_dir_tmp_path = os.path.join(day_dir, "temp_raw_img_dir")
 
     if os.path.exists(raw_dir_tmp_path):
@@ -216,6 +209,14 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=26, cleanup_mod
     mkdirP(raw_dir_tmp_path)
     print("Created directory : " + raw_dir_tmp_path)
     print("Preparing files for the timelapse...")
+
+    # Combine all required files paths
+    image_files = [img for img in sorted(glob.glob(os.path.join(day_dir, "*/*.jpg")))] + \
+                  [img for img in sorted(glob.glob(os.path.join(day_dir, "*/*.png")))]
+
+    if len(image_files) == 0:
+        print("No images found.")
+        return
 
     # Start timestamping overlay on images
     for index, img_path in enumerate(image_files):
@@ -265,6 +266,12 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=26, cleanup_mod
     print("Creating timelapse using ffmpeg...")
     subprocess.call(encode_command)
 
+    # Avoid archiving raw frame temp directory
+    if os.path.exists(raw_dir_tmp_path):
+        shutil.rmtree(raw_dir_tmp_path)
+        print("Deleted directory : " + raw_dir_tmp_path)
+
+    # Cleanup process
     if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
         print("Video created successfully at {0}".format(video_path))
         # Cleanup based on the specified mode

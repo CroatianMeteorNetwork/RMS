@@ -399,7 +399,7 @@ class Config:
         self.live_jpg = False
 
         # Toggle saving video frames at a set interval to the frame_dir
-        self.save_frames = False
+        self.save_frames = True
 
         # The file extension for saved frames ('jpg' or 'png')
         self.frame_file_type = 'jpg'
