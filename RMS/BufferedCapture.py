@@ -559,12 +559,12 @@ class BufferedCapture(Process):
         source_to_tee = (
             "rtspsrc buffer-mode=1 {:s} "
             "location=\"{:s}\" ! "
-            "rtph264depay ! h264parse ! tee name=t"
+            "rtph264depay ! tee name=t"
             ).format(protocol_str, device_url)
 
         # Branch for processing
         processing_branch = (
-            "t. ! queue ! {:s} ! "
+            "t. ! queue ! h264parse ! {:s} ! "
             "queue leaky=downstream max-size-buffers=100 max-size-bytes=0 max-size-time=0 ! "
             "videoconvert ! video/x-raw,format={:s} ! "
             "queue max-size-buffers=100 max-size-bytes=0 max-size-time=0 ! "
@@ -576,7 +576,7 @@ class BufferedCapture(Process):
 
             video_location = os.path.join(video_file_dir, "video_%05d.mkv")
             storage_branch = (
-                "t. ! queue max-size-buffers=0 max-size-bytes=0 max-size-time=0 ! "
+                "t. ! queue max-size-buffers=0 max-size-bytes=0 max-size-time=0 ! h264parse ! "
                 "splitmuxsink location={:s} max-size-time={:d} muxer-factory=matroskamux"
                 ).format(video_location, int(segment_duration_sec*1e9))
 
