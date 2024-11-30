@@ -91,10 +91,8 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
             background = ff_file.maxpixel
         if append_ff_to_video:
             meteor_image = np.copy(ff_file.maxpixel)
-        timestampTitle = ""
         if add_timestamp:
-            timestampTitle = getTimestampTitle(ff_path)
-
+            station_name, file_timestamp = getStationNameAndTimestampfromFile(ff_path)
 
     print("Number of lines:", fr.lines)
     
@@ -197,15 +195,15 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
 
             # Add timestamp
             if add_timestamp:
-                addTimestampToImage(img, timestampTitle)
+                addTimestampToImage(img, getTimestampTitle(station_name, file_timestamp, t, config.fps))
             # Add meteor shower name
             if add_shower_name:
-                addShowerNameToImage(img, showerNameTitle)
+                addShowerNameToImage(add_timestamp, img, showerNameTitle)
 
             # Save frame to disk
             if save_frames or makevideo:
                 frame_file_name = fr_path.replace('.bin', '') \
-                    + "_line_{:02d}_frame_{:03d}.{:s}".format(video_num, t, extract_format)
+                    + "_line_{:02d}_frame_{:03d}.{:s}".format(video_num, frame_num, extract_format)
                 cv2.imwrite(os.path.join(dir_path, frame_file_name), img)
                 framefiles.append(frame_file_name)
                 img_patt = os.path.join(dir_path, fr_path.replace('.bin', '')
@@ -261,8 +259,11 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
             if append_ff_to_video and ff_path is not None:
                 # add duration of 1.5 sec
                 frameCount = int(config.fps * 1.5)
-                saveFramesForMeteorImage(meteor_image, fr_path, add_timestamp, t, frameCount, video_num,
-                                         extract_format, framefiles, dir_path, add_shower_name, timestampTitle, showerNameTitle)
+                timestamp_title = ""
+                if add_timestamp:
+                    timestamp_title = getTimestampTitle(station_name, file_timestamp, 0, config.fps)
+                saveFramesForMeteorImage(meteor_image, fr_path, add_timestamp, frame_num - 1, frameCount, video_num,
+                                         extract_format, framefiles, dir_path, add_shower_name, timestamp_title, showerNameTitle)
 
             root = os.path.dirname(__file__)
             ffmpeg_path = os.path.join(root, "ffmpeg.exe")
@@ -271,7 +272,7 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
 
             # If running on Windows, use ffmpeg.exe
             if platform.system() == 'Windows':
-                com = ffmpeg_path + " -y -f image2 -pattern_type sequence -framerate " + str(config.fps) + " -start_number " + str(first_frame) + " -i " + img_patt +" " + mp4_path
+                com = ffmpeg_path + " -y -f image2 -pattern_type sequence -framerate " + str(config.fps) + " -start_number " + str(0) + " -i " + img_patt +" " + mp4_path
                 
 
             else:
@@ -279,10 +280,10 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
                 if os.system(software_name + " --help > /dev/null"):
                     software_name = "ffmpeg"
                     # Construct the ecommand for ffmpeg           
-                    com = software_name + " -y -f image2 -pattern_type sequence -framerate " + str(config.fps) + " -start_number " + str(first_frame) + " -i " + img_patt +" -pix_fmt yuv420p " + mp4_path
+                    com = software_name + " -y -f image2 -pattern_type sequence -framerate " + str(config.fps) + " -start_number " + str(0) + " -i " + img_patt +" -pix_fmt yuv420p " + mp4_path
                 else:
                     com = "cd " + dir_path + ";" \
-                        + software_name + " -v quiet -r 30 -y -start_number " + str(first_frame) + " -i " + img_patt \
+                        + software_name + " -v quiet -r 30 -y -start_number " + str(0) + " -i " + img_patt \
                         + " -vcodec libx264 -pix_fmt yuv420p -crf 25 -movflags faststart -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.97)\" " \
                         + mp4_path
             
@@ -312,7 +313,7 @@ def saveFramesForMeteorImage(meteorImage, frPath, addTimestamp, lastFrameNumber,
         addTimestampToImage(meteorImage, timestampTitle)
     # Add meteor shower name
     if addShowerName:
-        addShowerNameToImage(meteorImage, showerNameTitle)
+        addShowerNameToImage(addTimestamp, meteorImage, showerNameTitle)
     # append frames for 1.5 second
     for frameNumber in range(frameCount):
         frameFileName = frPath.replace('.bin', '') \
@@ -327,9 +328,13 @@ def addTimestampToImage(image, title):
     addTextToImage(image, title, 15, height - 20)
 
 
-def addShowerNameToImage(image, title):
+def addShowerNameToImage(withTimestamp, image, title):
     height = image.shape[0]
-    addTextToImage(image, title, 320, height - 20)
+    # if no timestamp - move to the left
+    if withTimestamp:
+        addTextToImage(image, title, 340, height - 20)
+    else:
+        addTextToImage(image, title, 15, height - 20)
 
 
 def getMeteorShowerTitle(video, frFile, ffPath, associations, fps):
@@ -396,11 +401,14 @@ def resizeImageIfNeed(image, width=1280):
         return image
 
 
-def getTimestampTitle(ff_path):
+def getTimestampTitle(stationName, startDate, frameNumber, fps):
+    timestamp = startDate + datetime.timedelta(seconds=(frameNumber/fps))
+    return stationName + ' ' + (timestamp.strftime('%Y-%m-%d %H:%M:%S.%f')[:-5]) + ' UTC'
+
+def getStationNameAndTimestampfromFile(ff_path):
     fileName = os.path.basename(ff_path)
     stationName = fileName.split('_')[1]
-    timestampt = FFfile.filenameToDatetime(fileName)
-    return stationName + ' ' + timestampt.strftime('%Y-%m-%d %H:%M:%S UTC')
+    return stationName, FFfile.filenameToDatetime(fileName)
 
 
 def loadShowerAssociations(folder, configuration):
