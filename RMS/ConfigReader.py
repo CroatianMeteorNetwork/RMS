@@ -361,7 +361,7 @@ class Config:
         # Frame dirs to keep
         # Keep this many frame dirs (days)
         # Zero means keep them all
-        self.frame_dirs_to_keep = 8
+        self.frame_dirs_to_keep = 4
 
         # Video dirs to keep
         # Keep this many video dirs (days)
