@@ -1141,16 +1141,16 @@ if __name__ == "__main__":
             continue
 
 
+        # Run auto-reprocessing
+        if config.auto_reprocess:
+
+            # Check if there's a folder containing unprocessed data.
+            # This may happen if the system crashed during processing.
+            processIncompleteCaptures(config, upload_manager)
+
+
         # Wait to start capturing and initialize last night's slideshow
         if not isinstance(start_time, bool):
-
-            # Run auto-reprocessing
-            if config.auto_reprocess:
-
-                # Check if there's a folder containing unprocessed data.
-                # This may happen if the system crashed during processing.
-                processIncompleteCaptures(config, upload_manager)
-
 
             # Initialize the slideshow of last night's detections
             if config.slideshow_enable:
