@@ -375,14 +375,14 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
     # If videos were saved, rename them with the timestamp of the first frame
     # This command requires the FS archive to be present
-    if config.raw_video_save:
+    # if config.raw_video_save:
 
-        try:
-            timestampRMSVideos(config.video_dir, rename=True)
+    #     try:
+    #         timestampRMSVideos(config.video_dir, rename=True)
 
-        except Exception as e:
-            log.debug('Renaming videos failed with the message:\n' + repr(e))
-            log.debug(repr(traceback.format_exception(*sys.exc_info())))
+    #     except Exception as e:
+    #         log.debug('Renaming videos failed with the message:\n' + repr(e))
+    #         log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
 
     # List for any extra files which will be copied to the night archive directory. Full paths have to be 
