@@ -1303,7 +1303,19 @@ if __name__ == "__main__":
             capture_switcher.daemon = True
             
             capture_switcher.start()
-            log.info('Started capture mode switcher on a separate thread')
+
+            # Wait for the switcher to complete calculation and switch to correct camera mode
+            time.sleep(3)
+
+            # Capture the health of the thread. If dead, then restart capture with
+            # continuous_capture disabled
+            if capture_switcher.is_alive():
+                log.info('Started capture mode switcher on a separate thread')
+
+            else:
+                log.error('Capture mode switcher thread failed. Restarting capture with continuous capture off')
+                config.continuous_capture = False
+                continue
 
         else:
             daytime_mode = None

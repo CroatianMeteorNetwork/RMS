@@ -19,49 +19,57 @@ def captureModeSwitcher(config, daytime_mode):
                             True = Day time, False = Night time
     """
 
-    while True:
+    try:
+        while True:
 
-        # Initialize observer
-        o = ephem.Observer()  
-        o.lat = str(config.latitude)
-        o.long = str(config.longitude)
-        o.elevation = config.elevation
+            # Initialize observer
+            o = ephem.Observer()  
+            o.lat = str(config.latitude)
+            o.long = str(config.longitude)
+            o.elevation = config.elevation
 
-        # The Sun should be about 9 degrees below the horizon when the capture modes switch
-        o.horizon = '-9'
+            # The Sun should be about 9 degrees below the horizon when the capture modes switch
+            o.horizon = '-9'
 
-        # Set the current time
-        current_time = RmsDateTime.utcnow()
-        o.date = current_time
+            # Set the current time
+            current_time = RmsDateTime.utcnow()
+            o.date = current_time
 
-        # Calculate sun positions
-        s = ephem.Sun()
-        s.compute()
+            # Calculate sun positions
+            s = ephem.Sun()
+            s.compute()
 
-        # Based on whether next event is a sunrise or sunset, set the value for daytime_mode
-        next_rise = o.next_rising(s).datetime()
-        next_set = o.next_setting(s).datetime()
+            # Based on whether next event is a sunrise or sunset, set the value for daytime_mode
+            next_rise = o.next_rising(s).datetime()
+            next_set = o.next_setting(s).datetime()
 
-        if next_set < next_rise:
-            log.info("Next event is a sunset ({}), switching to daytime mode".format(next_set))
-            daytime_mode.value = True
+            if next_set < next_rise:
+                log.info("Next event is a sunset ({}), switching to daytime mode".format(next_set))
 
-            if config.switch_camera_modes:
-                cc.cameraControlV2(config, 'SwitchDayTime')
+                if config.switch_camera_modes:
+                    cc.cameraControlV2(config, 'SwitchDayTime')
 
-            time_to_wait = (next_set - current_time).total_seconds()
+                daytime_mode.value = True
 
-        else:
-            log.info("Next event is a sunrise ({}), switching to nighttime mode".format(next_rise))
-            daytime_mode.value = False
+                time_to_wait = (next_set - current_time).total_seconds()
 
-            if config.switch_camera_modes:
-                cc.cameraControlV2(config, 'SwitchNightTime')
-            
-            time_to_wait = (next_rise - current_time).total_seconds()
+            else:
+                log.info("Next event is a sunrise ({}), switching to nighttime mode".format(next_rise))
 
-        # Sleep until the next switch time
-        time.sleep(time_to_wait)
+                if config.switch_camera_modes:
+                    cc.cameraControlV2(config, 'SwitchNightTime')
+
+                daytime_mode.value = False
+                
+                time_to_wait = (next_rise - current_time).total_seconds()
+
+            # Sleep until the next switch time
+            time.sleep(time_to_wait)
+
+
+    except Exception as e:
+
+        log.error('CaptureModeSwitcher thread failed with following error: ' + repr(e))
 
 
     ### For testing ###
