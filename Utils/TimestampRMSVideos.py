@@ -1,5 +1,7 @@
 """ Take videos collected with RMS (gstreamer) and change their names to include the timestamp of the first frame. """
 
+from __future__ import print_function, division, absolute_import
+
 import os
 import sys
 import datetime

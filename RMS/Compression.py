@@ -23,7 +23,6 @@ import datetime
 import logging
 import multiprocessing
 from math import floor
-
 import numpy as np
 import cv2
 
@@ -140,9 +139,16 @@ class Compressor(multiprocessing.Process):
         ff.first = N + 256
         ff.camno = self.config.stationID
         ff.fps = self.config.fps
-        
-        # Format the time using datetime .isoformat() method
-        ff.starttime = datetime.datetime.fromtimestamp(startTime, tz=datetime.timezone.utc).isoformat(timespec='microseconds')
+
+        if sys.version_info[0] == 2:
+            # Python 2 code
+            dt = datetime.datetime.utcfromtimestamp(startTime)
+            ff.starttime = dt.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+
+        else:
+            # Python 3 code
+            dt = datetime.datetime.fromtimestamp(startTime, tz=datetime.timezone.utc)
+            ff.starttime = dt.isoformat(timespec='microseconds')
         
         # Write the FF file
         FFfile.write(ff, self.data_dir, filename_millis, fmt=self.config.ff_format)

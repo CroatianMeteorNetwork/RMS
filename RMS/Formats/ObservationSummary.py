@@ -23,11 +23,15 @@
 """ Summary text and json files for station and observation session
 """
 
+from __future__ import print_function, division, absolute_import
 
 
 import sys
 import os
-from RMS.Misc import niceFormat, isRaspberryPi, sanitise, getRMSStyleFileName
+import subprocess
+
+
+from RMS.Misc import niceFormat, isRaspberryPi, sanitise, getRMSStyleFileName, getRmsRootDir
 import re
 import sqlite3
 from RMS.ConfigReader import parse
@@ -51,7 +55,10 @@ else:
 
 EM_RAISE = True
 
-
+import socket
+import struct
+import sys
+import time
 
 
 def getObsDBConn(config, force_delete=False):
@@ -159,18 +166,25 @@ def startObservationSummaryReport(config, duration, force_delete=False):
 
     addObsParam(conn, "hardware_version", hardware_version)
 
-    repo = git.Repo(search_parent_directories=True)
-    if repo:
-        addObsParam(conn, "commit_date",
-                    datetime.datetime.fromtimestamp(repo.head.object.committed_date).strftime('%Y%m%d_%H%M%S'))
-        addObsParam(conn, "commit_hash", repo.head.object.hexsha)
-    else:
-        print("RMS Git repository not found. Skipping Git-related information.")
+    try:
+        repo_path = getRmsRootDir()
+        repo = git.Repo(repo_path)
+        if repo:
+            addObsParam(conn, "commit_date",
+                        datetime.datetime.fromtimestamp(repo.head.object.committed_date).strftime('%Y%m%d_%H%M%S'))
+            addObsParam(conn, "commit_hash", repo.head.object.hexsha)
+        else:
+            print("RMS Git repository not found. Skipping Git-related information.")
+    except:
+        print("Error getting Git information. Skipping Git-related information.")
+    
+    # Get the disk usage info (only in Python 3.3+)
+    if (sys.version_info.major > 2) and (sys.version_info.minor > 2):
 
-    storage_total, storage_used, storage_free = shutil.disk_usage("/")
-    addObsParam(conn, "storage_total_gb", round(storage_total / (1024 ** 3), 2))
-    addObsParam(conn, "storage_used_gb", round(storage_used / (1024 ** 3), 2))
-    addObsParam(conn, "storage_free_gb", round(storage_free / (1024 ** 3), 2))
+        storage_total, storage_used, storage_free = shutil.disk_usage("/")
+        addObsParam(conn, "storage_total_gb", round(storage_total/(1024**3), 2))
+        addObsParam(conn, "storage_used_gb", round(storage_used/(1024**3), 2))
+        addObsParam(conn, "storage_free_gb", round(storage_free/(1024**3), 2))
 
     captured_directories = captureDirectories(os.path.join(config.data_dir, config.captured_dir), config.stationID)
     addObsParam(conn, "captured_directories", captured_directories)
@@ -178,12 +192,86 @@ def startObservationSummaryReport(config, duration, force_delete=False):
         addObsParam(conn, "camera_information", gatherCameraInformation(config))
     except:
         addObsParam(conn, "camera_information", "Unavailable")
+
+    # Hardcoded for now, but should be calculated based on the config value
     no_of_frames_per_fits_file = 256
+
+    # Calculate the number of fits files expected for the duration
     fps = config.fps
-    fits_files_from_duration = duration * fps / no_of_frames_per_fits_file
+    fits_files_from_duration = duration*fps/no_of_frames_per_fits_file
+
     addObsParam(conn, "fits_files_from_duration", fits_files_from_duration)
+
     conn.close()
+
     return "Opening a new observations summary for duration {} seconds".format(duration)
+
+def timestampFromNTP(addr='0.us.pool.ntp.org'):
+
+    """
+    refer https://stackoverflow.com/questions/36500197/how-to-get-time-from-an-ntp-server
+
+    Args:
+        addr: optional, address of ntp server to use
+
+    Returns:
+        [int]: time in seconds since epoch
+    """
+
+
+    REF_TIME_1970 = 2208988800  # Reference time
+    client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    client.settimeout(5)
+    data = b'\x1b' + 47 * b'\0'
+    try:
+        client.sendto(data, (addr, 123))
+        data, address = client.recvfrom(1024)
+    except socket.timeout:
+        print("NTP request timed out")
+        return None
+    except Exception as e:
+        print("NTP request failed: {}".format(e))
+        return None
+    if data:
+        t = struct.unpack('!12I', data)[10]
+        t -= REF_TIME_1970
+        return t
+    else:
+        return None
+
+def timeSyncStatus(config):
+
+    """
+
+    Determine approximate time sync error and report on status. Any error of fewer than ten seconds
+    may be caused by imprecision in the remote time query
+
+    Args:
+        config: configuration object
+
+    Returns:
+        Approximate time error in seconds
+    """
+
+    remote_time_query = timestampFromNTP()
+    if remote_time_query is not None:
+        local_time_query = (datetime.datetime.utcnow() - datetime.datetime(1970, 1, 1)).total_seconds()
+        time_error_seconds = round(abs(local_time_query - remote_time_query),1)
+        print("Approximate time error is {}".format(time_error_seconds))
+    else:
+        time_error_seconds = "Unknown"
+
+    result_list = subprocess.run(['timedatectl','status'], capture_output = True).stdout.splitlines()
+    #print(result_list)
+    for raw_result in result_list:
+        result = raw_result.decode('ascii')
+        if "synchronized" in result:
+            conn = getObsDBConn(config)
+            addObsParam(conn, "clock_synchronized", result.split(":")[1].strip())
+            addObsParam(conn, "clock_error_seconds", time_error_seconds)
+            conn.close()
+
+    return time_error_seconds
 
 def finalizeObservationSummary(config, night_data_dir, platepar=None):
 
@@ -202,6 +290,10 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
     capture_duration_from_fits, fits_count, fits_file_shortfall, fits_file_shortfall_as_time, time_first_fits_file, \
         time_last_fits_file, total_expected_fits = nightSummaryData(config, night_data_dir)
 
+    try:
+        timeSyncStatus(config)
+    except Exception as e:
+        print(repr(e))
 
     obs_db_conn = getObsDBConn(config)
     platepar_path = os.path.join(config.config_file_path, config.platepar_name)
@@ -480,7 +572,7 @@ if __name__ == "__main__":
 
     config = parse(os.path.expanduser("~/source/RMS/.config"))
 
-
+    timeSyncStatus(config)
     obs_db_conn = getObsDBConn(config)
     startObservationSummaryReport(config, 100, force_delete=False)
     pp = Platepar()
