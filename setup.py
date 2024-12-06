@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 import os
 import sys
 import subprocess
@@ -31,25 +33,26 @@ kht_module = Extension("kht_module",
 def isPackageInstalled(package_name):
     """Check if a package is installed."""
     try:
-        print(f"Checking if {package_name} is installed...")
-        subprocess.check_call([sys.executable, '-c', f'import {package_name}'])
-        print(f"{package_name} is already installed.")
+        print("Checking if {:s} is installed...".format(package_name))
+        subprocess.check_call([sys.executable, '-c', 'import {:s}'.format(package_name)])
+        print("{:s} is already installed.".format(package_name))
         return True
     except subprocess.CalledProcessError:
-        print(f"{package_name} is not installed.")
+        print("{:s} is not installed.".format(package_name))
         return False
 
 
 def attemptInstall(package):
     """Attempt to install a package using pip."""
     try:
-        print(f"Attempting to install {package}...")
+        print("Attempting to install {:s}...".format(package))
         subprocess.check_call([sys.executable, '-m', 'pip', 'install', package])
-        print(f"Successfully installed {package}.")
+        print("Successfully installed {:s}.".format(package))
         return True
     except subprocess.CalledProcessError:
-        print(f"Failed to install {package}.")
+        print("Failed to install {:s}.".format(package))
         return False
+
 
 
 # Check if TensorFlow is already installed
