@@ -690,31 +690,31 @@ def AEGeoidH2LatLonAlt(azim, elev, h, lat, lon, alt):
 
     # Calculate line-of-sight unit vector in ENU coordinates
     los_vector_enu = np.array([
-        np.cos(elev) * np.sin(azim),  # East component
-        np.cos(elev) * np.cos(azim),  # North component
+        np.cos(elev)*np.sin(azim),  # East component
+        np.cos(elev)*np.cos(azim),  # North component
         np.sin(elev)                 # Up component
     ])
 
     # Transform ENU to ECEF coordinates
     R_enu2ecef = np.array([
-        [-np.sin(lon),  -np.sin(lat) * np.cos(lon),  np.cos(lat) * np.cos(lon)],
-        [np.cos(lon), -np.sin(lat) * np.sin(lon),  np.cos(lat) * np.sin(lon)],
+        [-np.sin(lon),  -np.sin(lat)*np.cos(lon),  np.cos(lat)*np.cos(lon)],
+        [np.cos(lon), -np.sin(lat)*np.sin(lon),  np.cos(lat)*np.sin(lon)],
         [0, np.cos(lat), np.sin(lat)]
     ])
 
-    los_vector = R_enu2ecef @ los_vector_enu
+    los_vector = np.dot(R_enu2ecef, los_vector_enu)
 
     # Initial guess for the range
-    r0 = (h - alt) / np.sin(elev)
+    r0 = (h - alt)/np.sin(elev)
     
     # Initial guess for the range
-    r0 = (h-alt) / np.sin(elev)
+    r0 = (h-alt)/np.sin(elev)
     r = r0
     
     # Find the target ECEF coordinates using the optimized range
-    target_x = obs_x + r * los_vector[0]
-    target_y = obs_y + r * los_vector[1]
-    target_z = obs_z + r * los_vector[2]
+    target_x = obs_x + r*los_vector[0]
+    target_y = obs_y + r*los_vector[1]
+    target_z = obs_z + r*los_vector[2]
       
     # Convert target ECEF coordinates to geodetic coordinates
     target_lat, target_lon, h2 = ecef2LatLonAlt(target_x, target_y, target_z)
