@@ -66,6 +66,7 @@ class RawFrameSaver(multiprocessing.Process):
         self.config = config
 
         self.total_saved_frames = 0
+        self.day_of_year = time.strftime("%j", time.gmtime())
 
         self.exit = multiprocessing.Event()
         self.run_exited = multiprocessing.Event()
@@ -94,7 +95,7 @@ class RawFrameSaver(multiprocessing.Process):
 
         Arguments
         ---------
-            block_timestamp : [List] list of (frame, timestamp) pairs of corresponding frames and timestamps
+            block_timestamp : [float] time of first frame in block
             block_json_data: [Dict] (frame, timestamp) mappings
 
         """
@@ -148,7 +149,7 @@ class RawFrameSaver(multiprocessing.Process):
                 break
 
             # In case the timestamp day changes mid-block
-            if time.strftime("%j", time.gmtime(block_start_time)) != time.strftime("%j", time.gmtime(timestamp)):
+            if self.day_of_year != time.strftime("%j", time.gmtime(timestamp)):
                 
                 # Save block data from previous day
                 self.saveJsonTimestamps(block_start_time, block_json_data)
@@ -157,6 +158,7 @@ class RawFrameSaver(multiprocessing.Process):
                 block_json_data = {}
                 block_start_time = timestamp
                 self.total_saved_frames = 0
+                self.day_of_year = time.strftime("%j", time.gmtime(timestamp))
 
 
             # Generate names for the file and path
