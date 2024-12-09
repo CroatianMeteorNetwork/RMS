@@ -845,7 +845,14 @@ def extractStarsAndSave(config, ff_dir):
     star_list = []
     for result in workpool.getResults():
 
-        ff_name, x2, y2, amplitude, intensity, fwhm_data, background, snr, saturated_count = result
+        try:
+            ff_name, x2, y2, amplitude, intensity, fwhm_data, background, snr, saturated_count = result
+            
+        except ValueError:
+            ff_name, x2, y2, amplitude, intensity, fwhm_data = result
+            background = np.zeros_like(x2)
+            snr = np.zeros_like(x2)
+            saturated_count = np.zeros_like(x2)
 
         # Skip if no stars were found
         if not x2:
