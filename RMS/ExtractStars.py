@@ -277,7 +277,7 @@ def extractStarsFF(
     """
 
     # This will be returned if there was an error
-    error_return = [[], [], [], [], [], []]
+    error_return = [[], [], [], [], [], [], [], [], []]
 
     # Load parameters from config if given
     if config is not None:
@@ -385,7 +385,7 @@ def extractStarsImgHandle(img_handle,
     """
 
     # This will be returned if there was an error
-    error_return = [[], [], [], [], [], []]
+    error_return = [[], [], [], [], [], [], [], [], []]
 
     # Load parameters from config if given
     if config is not None:
