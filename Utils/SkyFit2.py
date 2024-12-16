@@ -4825,7 +4825,7 @@ class PlateTool(QtWidgets.QMainWindow):
         return dark_file, dark
 
 
-    def addCentroid(self, frame, x_centroid, y_centroid, mode=1, snr=0, saturated=False):
+    def addCentroid(self, frame, x_centroid, y_centroid, mode=1, snr=1, saturated=False):
         """
         Adds or modifies a pick marker at given frame to self.pick_list with given information
 
@@ -6175,8 +6175,15 @@ class PlateTool(QtWidgets.QMainWindow):
             if pick['mode'] == 0:
                 continue
 
+
+            # If SNR is None, then set the random error to 0
+            if pick['snr'] is None:
+                mag_err_random = 0
+
+            else:
+                mag_err_random = 2.5*np.log10(1 + 1/pick['snr'])
+
             # Compute the magnitude errors
-            mag_err_random = 2.5*np.log10(1 + 1/pick['snr'])
             mag_err_total = np.sqrt(mag_err_random**2 + self.platepar.mag_lev_stddev**2)
 
             # Use a modified platepar if ground points are being picked
