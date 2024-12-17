@@ -156,7 +156,7 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
 
 
 def runCapture(config, duration=None, video_file=None, nodetect=False, detect_end=False, \
-    upload_manager=None, eventmonitor=None, resume_capture=False, fixed_duration=False, daytime_mode=None):
+    upload_manager=None, eventmonitor=None, resume_capture=False, daytime_mode=None):
     """ Run capture and compression for the given time.given
     
     Arguments:
@@ -172,8 +172,6 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             the central server. None by default.
         eventmonitor: [EventMonitor object]. Event monitor object. None by default.
         resume_capture: [bool] Resume capture in the last data directory in CapturedFiles. False by default.
-        fixed_duration: [bool] The capture is run with a given fixed duration and not automatically 
-            determined. False by default.
         daytime_mode: [multiprocessing.Value] shared boolean variable to keep track of camera day/night mode switching. None by default.
 
     Return:
@@ -977,9 +975,12 @@ if __name__ == "__main__":
 
         log.info("Running for " + str(duration/60/60) + ' hours...')
 
+        # Disable continuous capture for fixed duration capture
+        config.continuous_capture = False
+
         # Run the capture for the given number of hours
         runCapture(config, duration=duration, nodetect=cml_args.nodetect, upload_manager=upload_manager, \
-            detect_end=cml_args.detectend, resume_capture=cml_args.resume, fixed_duration=True)
+            detect_end=cml_args.detectend, resume_capture=cml_args.resume)
 
         if upload_manager is not None:
             # Stop the upload manager
@@ -999,6 +1000,9 @@ if __name__ == "__main__":
 
         log.info('Video source: ' + cml_args.input)
 
+        # Disable continuous capture for video file capture
+        config.continuous_capture = False
+        
         # Capture the video frames from the video file
         runCapture(config, duration=None, video_file=video_file, nodetect=cml_args.nodetect,
             resume_capture=cml_args.resume)
