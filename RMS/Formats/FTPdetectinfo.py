@@ -189,12 +189,27 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
                 if mag is not None and np.isnan(mag):
                     continue
 
-                # Set default values if necessary and limit the values to the allowed range
-                level = int(level) if level is not None else 1
-                background = int(background) if (background is not None) and (not np.isnan(background)) else 0
-                snr = min(float(snr), 99.99) if snr is not None else 0.0
-                saturated_count = min(int(saturated_count), 999999) if saturated_count is not None else 0
 
+                ### Set default values if necessary and limit the values to the allowed range ###
+                level = int(level) \
+                    if (level is not None) and (not np.isnan(level)) \
+                    else 1
+                
+                background = int(background) \
+                    if (background is not None) and (not np.isnan(background)) \
+                    else 0
+                
+                snr = min(float(snr), 99.99) \
+                    if (snr is not None) and (not np.isnan(snr)) \
+                    else 0.0
+
+                saturated_count = min(int(saturated_count), 999999) \
+                    if (saturated_count is not None) and (not np.isnan(saturated_count)) \
+                    else 0
+                
+                ### 
+
+                # Round the values to the required precision
                 frame = round(frame, 4)
                 x = round(x, 2)
                 y = round(y, 2)
