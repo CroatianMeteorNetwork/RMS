@@ -1205,7 +1205,12 @@ if __name__ == "__main__":
 
     # Find at least one FTPdetectinfo file in the given path (either direct file or a directory)
     ftpdetectinfo_path = cml_args.ftpdetectinfo_path
-    ftpdetectinfo_path = findFTPdetectinfoFile(ftpdetectinfo_path)
+
+    try:
+        ftpdetectinfo_path = findFTPdetectinfoFile(ftpdetectinfo_path)
+    except FileNotFoundError:
+        print('No FTPdetectinfo file found in the given path: {}'.format(cml_args.ftpdetectinfo_path))
+        sys.exit()
 
     # Check if the given FTPdetectinfo file exists
     if not os.path.isfile(ftpdetectinfo_path):
