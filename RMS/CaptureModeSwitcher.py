@@ -137,6 +137,7 @@ if __name__ == "__main__":
 
     config.latitude = -80.833763
     config.longitude = -44.674523
+    config.longitude =  -44.674523
     config.elevation = -20
     config.switch_camera_modes = False
 

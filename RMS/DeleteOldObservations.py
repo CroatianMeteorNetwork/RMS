@@ -324,7 +324,7 @@ def getRawDirs(dir_path, in_frame_dir=False):
 
     # Helper function to check file conditions
     def isProcessedFrameFile(path):
-        suffix = ['_framestamps.json', '_frames_timelapse.mp4', '_frames.tar.gz', '_frames.tar.bz2']
+        suffix = ['_frametimes.json', '_frames_timelapse.mp4', '_frames.tar.gz', '_frames.tar.bz2']
         return (os.path.isfile(path) and any(path.endswith(end) for end in suffix))
 
     # Get a list of directories in the given directory
@@ -777,7 +777,11 @@ def deleteOldDirs(data_dir, config):
         archdir_list = getNightDirs(archived_dir, config.stationID)
         orig_count = len(archdir_list)
         while len(archdir_list) > config.arch_dirs_to_keep:
+            prev_length = len(archdir_list)
             archdir_list = deleteNightFolders(archived_dir, config)
+            if len(archdir_list) == prev_length:
+                log.error("Failed to delete folder from ArchivedFiles. Exiting loop.")
+                break
         final_count = len(archdir_list)
     log.info('Purged {} older folders from ArchivedFiles'.format(orig_count - final_count))
 
@@ -790,9 +794,13 @@ def deleteOldDirs(data_dir, config):
         captdir_list = getNightDirs(captured_dir, config.stationID)
         orig_count = len(captdir_list)
         while len(captdir_list) > config.capt_dirs_to_keep:
+            prev_length = len(captdir_list)
             captdir_list = deleteNightFolders(captured_dir, config)
+            if len(captdir_list) == prev_length:
+                log.error("Failed to delete folder from CapturedFiles. Exiting loop.")
+                break
         final_count = len(captdir_list)
-    log.info('Purged {} older folders from Captured Files'.format(orig_count - final_count))
+    log.info('Purged {} older folders from CapturedFiles'.format(orig_count - final_count))
 
 
     # Deleting old frame dir files
@@ -803,9 +811,13 @@ def deleteOldDirs(data_dir, config):
         framedir_list = getRawDirs(frame_dir)
         orig_count = len(framedir_list)
         while len(framedir_list) > config.frame_dirs_to_keep:
+            prev_length = len(framedir_list)
             framedir_list = deleteRawFolders(frame_dir, in_frame_dir=True)
+            if len(framedir_list) == prev_length:
+                log.error("Failed to delete folder from FrameFiles. Exiting loop.")
+                break
         final_count = len(framedir_list)
-    log.info('Purged {} old files from Frame Files'.format(orig_count - final_count))
+    log.info('Purged {} old files from FrameFiles'.format(orig_count - final_count))
 
 
     # Deleting old video dirs
@@ -816,19 +828,27 @@ def deleteOldDirs(data_dir, config):
         videodir_list = getRawDirs(video_dir)
         orig_count = len(videodir_list)
         while len(videodir_list) > config.video_dirs_to_keep:
+            prev_length = len(videodir_list)
             videodir_list = deleteRawFolders(video_dir)
+            if len(videodir_list) == prev_length:
+                log.error("Failed to delete folder from VideoFiles. Exiting loop.")
+                break
         final_count = len(videodir_list)
-    log.info('Purged {} days of old folders from Video Files'.format(orig_count - final_count))
+    log.info('Purged {} days of old folders from VideoFiles'.format(orig_count - final_count))
 
-
+    # Deleting old bz2 files
     orig_count = 0
     final_count = 0
     if config.bz2_files_to_keep > 0:
         bz2_list = getBz2Files(archived_dir, config.stationID)
         orig_count = len(bz2_list)
         while len(bz2_list) > config.bz2_files_to_keep:
-            os.remove(os.path.join(archived_dir, bz2_list[0]))
-            bz2_list.pop(0)
+            try:
+                os.remove(os.path.join(archived_dir, bz2_list[0]))
+                bz2_list.pop(0)
+            except OSError as e:
+                log.error(f"Failed to delete file {bz2_list[0]}: {e}. Exiting loop.")
+                break
         final_count = len(bz2_list)
     log.info('Purged {} older bz2 files from ArchivedFiles'.format(orig_count - final_count))
     return
