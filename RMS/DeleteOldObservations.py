@@ -324,7 +324,7 @@ def getRawDirs(dir_path, in_frame_dir=False):
 
     # Helper function to check file conditions
     def isProcessedFrameFile(path):
-        suffix = ['_framestamps.json', '_frames_timelapse.mp4', '_frames.tar.gz', '_frames.tar.bz2']
+        suffix = ['_frametimes.json', '_frames_timelapse.mp4', '_frames.tar.gz', '_frames.tar.bz2']
         return (os.path.isfile(path) and any(path.endswith(end) for end in suffix))
 
     # Get a list of directories in the given directory
