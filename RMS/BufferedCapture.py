@@ -838,8 +838,13 @@ class BufferedCapture(Process):
          # Branch for storage - if video_file_dir is not None, save the raw stream to a file
         if video_file_dir is not None:
             
+            # The video will be split into segments of segment_duration_sec seconds
+            # The splitmuxsink will save the segments to video_file_dir
+            # The splitmuxsink will use the matroskamux muxer
+            # The splitmuxsink will use the format-location signal to name and move each segment
+            # The data chuncks are limited with queue2 (50 frames, 2MB, 2 seconds, whichever comes first)
             storage_branch = (
-                "t. ! queue2 max-size-buffers=0 max-size-bytes=2097152 max-size-time=0 ! "
+                "t. ! queue2 max-size-buffers=50 max-size-bytes=2097152 max-size-time=2 ! "
                 "splitmuxsink name=splitmuxsink0 max-size-time={:d} muxer-factory=matroskamux"
                 ).format(int(segment_duration_sec*1e9))
 
