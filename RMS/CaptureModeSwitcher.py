@@ -18,12 +18,13 @@ def captureModeSwitcher(config, daytime_mode):
         daytime_mode: [multiprocessing.Value] shared boolean variable to communicate the mode switch with other processes
                             True = Day time, False = Night time
     """
+    is_first_switch = True  # Track whether it's the initial switch
 
     try:
         while True:
 
             # Initialize observer
-            o = ephem.Observer()  
+            o = ephem.Observer()
             o.lat = str(config.latitude)
             o.long = str(config.longitude)
             o.elevation = config.elevation
@@ -40,6 +41,8 @@ def captureModeSwitcher(config, daytime_mode):
             s.compute()
 
             # Based on whether next event is a sunrise or sunset, set the value for daytime_mode
+            # Except on initial run, apply the capture_wait_seconds from the config to stagger the mode
+            # switching. This can help prevent disconnects in multi-camera setups
             try:
                 next_rise = o.next_rising(s).datetime()
                 next_set = o.next_setting(s).datetime()
@@ -48,6 +51,8 @@ def captureModeSwitcher(config, daytime_mode):
                     log.info("Next event is a sunset ({}), switching to daytime mode".format(next_set))
 
                     if config.switch_camera_modes:
+                        if not is_first_switch:
+                            time.sleep(config.capture_wait_seconds)
                         cc.cameraControlV2(config, 'SwitchDayTime')
 
                     daytime_mode.value = True
@@ -57,6 +62,8 @@ def captureModeSwitcher(config, daytime_mode):
                     log.info("Next event is a sunrise ({}), switching to nighttime mode".format(next_rise))
 
                     if config.switch_camera_modes:
+                        if not is_first_switch:
+                            time.sleep(config.capture_wait_seconds)
                         cc.cameraControlV2(config, 'SwitchNightTime')
 
                     daytime_mode.value = False
@@ -67,6 +74,8 @@ def captureModeSwitcher(config, daytime_mode):
             except ephem.AlwaysUpError:
 
                 if config.switch_camera_modes:
+                    if not is_first_switch:
+                        time.sleep(config.capture_wait_seconds)
                     cc.cameraControlV2(config, 'SwitchDayTime')
 
                 daytime_mode.value = True
@@ -77,11 +86,15 @@ def captureModeSwitcher(config, daytime_mode):
             except ephem.NeverUpError:
 
                 if config.switch_camera_modes:
+                    if not is_first_switch:
+                        time.sleep(config.capture_wait_seconds)
                     cc.cameraControlV2(config, 'SwitchNightTime')
 
                 daytime_mode.value = False
                 time_to_wait = 86400
 
+            # Mark that the first switch has occurred
+            is_first_switch = False
 
             # Sleep until the next switch time
             time.sleep(time_to_wait)
@@ -123,7 +136,7 @@ if __name__ == "__main__":
     config = cr.loadConfigFromDirectory('.', os.path.abspath('.'))
 
     config.latitude = -80.833763
-    config.longitude =  -44.674523
+    config.longitude = -44.674523
     config.elevation = -20
     config.switch_camera_modes = False
 
