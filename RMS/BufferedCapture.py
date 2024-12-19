@@ -839,7 +839,7 @@ class BufferedCapture(Process):
         if video_file_dir is not None:
             
             storage_branch = (
-                "t. ! queue max-size-buffers=0 max-size-bytes=0 max-size-time=0 ! "
+                "t. ! queue2 max-size-buffers=0 max-size-bytes=2097152 max-size-time=0 ! "
                 "splitmuxsink name=splitmuxsink0 max-size-time={:d} muxer-factory=matroskamux"
                 ).format(int(segment_duration_sec*1e9))
 
