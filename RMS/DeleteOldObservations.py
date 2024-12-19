@@ -780,7 +780,7 @@ def deleteOldDirs(data_dir, config):
             prev_length = len(archdir_list)
             archdir_list = deleteNightFolders(archived_dir, config)
             if len(archdir_list) == prev_length:
-                log.error("Failed to delete any folder from ArchivedFiles. Exiting loop.")
+                log.error("Failed to delete folder from ArchivedFiles. Exiting loop.")
                 break
         final_count = len(archdir_list)
     log.info('Purged {} older folders from ArchivedFiles'.format(orig_count - final_count))
@@ -797,10 +797,10 @@ def deleteOldDirs(data_dir, config):
             prev_length = len(captdir_list)
             captdir_list = deleteNightFolders(captured_dir, config)
             if len(captdir_list) == prev_length:
-                log.error("Failed to delete any folder from Captured Files. Exiting loop.")
+                log.error("Failed to delete folder from CapturedFiles. Exiting loop.")
                 break
         final_count = len(captdir_list)
-    log.info('Purged {} older folders from Captured Files'.format(orig_count - final_count))
+    log.info('Purged {} older folders from CapturedFiles'.format(orig_count - final_count))
 
 
     # Deleting old frame dir files
@@ -814,10 +814,10 @@ def deleteOldDirs(data_dir, config):
             prev_length = len(framedir_list)
             framedir_list = deleteRawFolders(frame_dir, in_frame_dir=True)
             if len(framedir_list) == prev_length:
-                log.error("Failed to delete any files from Frame Files. Exiting loop.")
+                log.error("Failed to delete folder from FrameFiles. Exiting loop.")
                 break
         final_count = len(framedir_list)
-    log.info('Purged {} old files from Frame Files'.format(orig_count - final_count))
+    log.info('Purged {} old files from FrameFiles'.format(orig_count - final_count))
 
 
     # Deleting old video dirs
@@ -831,10 +831,10 @@ def deleteOldDirs(data_dir, config):
             prev_length = len(videodir_list)
             videodir_list = deleteRawFolders(video_dir)
             if len(videodir_list) == prev_length:
-                log.error("Failed to delete any folder from Video Files. Exiting loop.")
+                log.error("Failed to delete folder from VideoFiles. Exiting loop.")
                 break
         final_count = len(videodir_list)
-    log.info('Purged {} days of old folders from Video Files'.format(orig_count - final_count))
+    log.info('Purged {} days of old folders from VideoFiles'.format(orig_count - final_count))
 
     # Deleting old bz2 files
     orig_count = 0
