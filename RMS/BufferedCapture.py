@@ -842,9 +842,9 @@ class BufferedCapture(Process):
             # The splitmuxsink will save the segments to video_file_dir
             # The splitmuxsink will use the matroskamux muxer
             # The splitmuxsink will use the format-location signal to name and move each segment
-            # The data chuncks are limited with queue2 (50 frames, 2MB, 2 seconds, whichever comes first)
+            # The data chuncks are limited with queue2 (150 frames, 2MB, 5 seconds, whichever comes first)
             storage_branch = (
-                "t. ! queue2 max-size-buffers=50 max-size-bytes=2097152 max-size-time=2 ! "
+                "t. ! queue2 max-size-buffers=150 max-size-bytes=2097152 max-size-time=5 ! "
                 "splitmuxsink name=splitmuxsink0 max-size-time={:d} muxer-factory=matroskamux"
                 ).format(int(segment_duration_sec*1e9))
 
