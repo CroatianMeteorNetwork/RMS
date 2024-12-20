@@ -68,6 +68,8 @@ def breakHandler(signum, frame):
     # Set the flag to stop capturing video
     STOP_CAPTURE = True
 
+    # This log entry is an adhoc fix to prevents Ctrl+C failure until the root cause is identified
+    log.info("Ctrl+C pressed. Setting STOP_CAPTURE to True")
 
 # Save the original event for the Ctrl+C
 ORIGINAL_BREAK_HANDLE = signal.getsignal(signal.SIGINT)
