@@ -4,7 +4,7 @@ paramiko==2.4.0; python_version=='2.7'
 paramiko>=2.9.0; python_version>='3.6'
 numpy>=1.13.3,<1.22.0 ; python_version=='2.7'
 numpy>=1.21.0,<1.24.0 ; python_version>='3.6' and python_version<='3.9.2'
-numpy>=1.26.0 ; python_version>'3.9.2'
+numpy>=1.26.0,<2.0.0 ; python_version>'3.9.2'
 matplotlib>=2.1.1
 pyephem>=3.7.6.0
 cython>=0.27.3
@@ -18,8 +18,9 @@ python-dvr>=0.0.1 ; python_version >='3.6'
 pyqtgraph @ git+https://github.com/pyqtgraph/pyqtgraph@develop#egg=pyqtgraph ; python_version=='2.7'
 pyqtgraph>=0.12,<0.13 ; python_version >='3.6'
 pyyaml; python_version>='3.6'
-tflite-runtime; python_version>='3.6'
+tflite-runtime; python_version >= '3.6' and python_version < '3.12' and sys_platform != 'darwin'
+tensorflow; python_version >= '3.12' and platform_machine != "armv6l" and platform_machine != "armv7l" and platform_machine != "aarch64" and platform_machine != "arm64"
 PyGObject; python_version >= '3.6'
 astrometry; python_version >= "3.8" and sys_platform != 'win32'
 astrometry==3.0.0; python_version >= "3.5" and python_version < "3.8" and sys_platform != 'win32'
-pyclean>=2.7.6
+pyclean>=2.7.6; python_version >= "3.5"

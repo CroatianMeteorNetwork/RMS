@@ -110,6 +110,7 @@ If you want full gstreamer support, you need to install the additional gstreamer
 ```
 conda install -y -c conda-forge gstreamer==1.22.3
 conda install -y -c conda-forge gobject-introspection
+conda install -y -c conda-forge gst-libav
 conda install -y -c conda-forge gst-plugins-bad gst-plugins-base gst-plugins-good gst-plugins-ugly
 ```
 

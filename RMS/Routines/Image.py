@@ -718,6 +718,10 @@ def applyDark(img, dark_img):
     # Check that the image sizes are the same
     if img.shape != dark_img.shape:
         return img
+    
+    # Make sure that the dark is the same dtype as the input image
+    if dark_img.dtype != img.dtype:
+        dark_img = dark_img.astype(img.dtype)
 
     # Use cv2.subtract to subtract the images and ensure no negative values
     img = cv2.subtract(img, dark_img)
@@ -885,7 +889,23 @@ def thickLine(img_h, img_w, x_cent, y_cent, length, rotation, radius):
     return photom_mask
 
 
+def signalToNoise(source_intens, source_px_count, bg_median, bg_std):
+    """ Compute the signal to noise ratio using the "CCD equation" (Howell et al., 1989).
 
+    Arguments:
+        source_intens: [float] Source intensity.
+        source_px_count: [int] Number of source pixels.
+        bg_median: [float] Background median.
+        bg_std: [float] Background standard deviation.
+
+    Return:
+        [float] Signal to noise ratio.
+    """
+    
+    # Compute the SNR using the "CCD equation" (Howell et al., 1989)
+    snr = source_intens/(math.sqrt(source_intens + source_px_count*(bg_median + bg_std**2)))
+
+    return snr
 
 
 
