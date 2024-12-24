@@ -410,7 +410,7 @@ class Config:
         # Set PNG compression for the saved frames for png file type
         self.png_compression = 3
 
-        # Set the time interval for saving video frames
+        # Set the time interval in seconds for saving video frames
         self.frame_save_interval = 10
 
         # Set the frame count interval for saving video frames (calculated from the time interval)
@@ -965,7 +965,7 @@ def parseCapture(config, parser):
         config.capt_dirs_to_keep = int(parser.get(section, "capt_dirs_to_keep"))
 
     if parser.has_option(section, "frame_dirs_to_keep"):
-        config.bz2_files_to_keep = int(parser.get(section, "frame_dirs_to_keep"))
+        config.frame_dirs_to_keep = int(parser.get(section, "frame_dirs_to_keep"))
 
     if parser.has_option(section, "video_dirs_to_keep"):
         config.video_dirs_to_keep = int(parser.get(section, "video_dirs_to_keep"))
