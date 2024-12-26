@@ -4966,7 +4966,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # If 10 or more pixels are saturated (within 2% of the maximum value), mark the pick as saturated
 
         # Compute the saturation threshold
-        saturation_threshold = int(0.98*(2**self.config.bit_depth))
+        saturation_threshold = int(round(0.98*(2**self.config.bit_depth - 1)))
 
         # Count the number of pixels above the saturation threshold (original non-gramma corrected image)
         # Apply the mask to only include the pixels within the star aperture radius
