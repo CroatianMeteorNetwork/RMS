@@ -181,7 +181,7 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
     print("Total time:", RmsDateTime.utcnow() - t1)
 
 
-def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=26, cleanup_mode='none', compression='bz2'):
+def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=27, cleanup_mode='none', compression='bz2'):
     """
     Generate a timelapse video from frame images and optionally cleanup the
     source directory.
