@@ -361,12 +361,12 @@ class Config:
         # Frame dirs to keep
         # Keep this many frame dirs (days)
         # Zero means keep them all
-        self.frame_dirs_to_keep = 4
+        self.frame_days_to_keep = 4
 
         # Video dirs to keep
         # Keep this many video dirs (days)
         # Zero means keep them all
-        self.video_dirs_to_keep = 2
+        self.video_days_to_keep = 2
         
         # Space quotas in GB
 
@@ -964,11 +964,11 @@ def parseCapture(config, parser):
     if parser.has_option(section, "capt_dirs_to_keep"):
         config.capt_dirs_to_keep = int(parser.get(section, "capt_dirs_to_keep"))
 
-    if parser.has_option(section, "frame_dirs_to_keep"):
-        config.bz2_files_to_keep = int(parser.get(section, "frame_dirs_to_keep"))
+    if parser.has_option(section, "frame_days_to_keep"):
+        config.frame_days_to_keep = int(parser.get(section, "frame_days_to_keep"))
 
-    if parser.has_option(section, "video_dirs_to_keep"):
-        config.video_dirs_to_keep = int(parser.get(section, "video_dirs_to_keep"))
+    if parser.has_option(section, "video_days_to_keep"):
+        config.video_days_to_keep = int(parser.get(section, "video_days_to_keep"))
 
     if parser.has_option(section, "quota_management_disabled"):
         config.quota_management_disabled = parser.getboolean(section, "quota_management_disabled")

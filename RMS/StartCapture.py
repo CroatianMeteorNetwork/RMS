@@ -217,9 +217,6 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         else:
             log.info("Previous capture directory found: {:s}".format(night_data_dir))
 
-        # Resume run is finished now, reset resume flag
-        cml_args.resume = False
-
 
     # Make a name for the capture data directory
     if night_data_dir_name is None:
@@ -983,6 +980,7 @@ if __name__ == "__main__":
         # Run the capture for the given number of hours
         runCapture(config, duration=duration, nodetect=cml_args.nodetect, upload_manager=upload_manager, \
             detect_end=cml_args.detectend, resume_capture=cml_args.resume)
+        cml_args.resume = False
 
         if upload_manager is not None:
             # Stop the upload manager
@@ -1008,6 +1006,7 @@ if __name__ == "__main__":
         # Capture the video frames from the video file
         runCapture(config, duration=None, video_file=video_file, nodetect=cml_args.nodetect,
             resume_capture=cml_args.resume)
+        cml_args.resume = False
 
         sys.exit()
 
@@ -1332,6 +1331,7 @@ if __name__ == "__main__":
         night_archive_dir = runCapture(config, duration=duration, nodetect=cml_args.nodetect, \
             upload_manager=upload_manager, eventmonitor=eventmonitor, detect_end=(cml_args.detectend or config.postprocess_at_end), \
             resume_capture=cml_args.resume, daytime_mode=daytime_mode)
+        cml_args.resume = False
 
         # Indicate that the capture was done once
         ran_once = True
