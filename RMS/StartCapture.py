@@ -496,6 +496,37 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             detector = compressor.stop()
             log.debug('Compression stopped')
 
+            
+            # In standard mode, stop capture here before post-process 
+            if (not config.continuous_capture):
+
+                log.info('Ending capture...')
+
+                # Stop the capture
+                log.debug('Stopping capture...')
+                dropped_frames = bc.stopCapture()
+                log.debug('Capture stopped')
+
+                log.info('Total number of late or dropped frames: ' + str(dropped_frames))
+                obs_db_conn = getObsDBConn(config)
+                addObsParam(obs_db_conn, "dropped_frames", dropped_frames)
+                obs_db_conn.close()
+
+                # Free shared memory after the compressor is done
+                try:
+                    log.debug('Freeing frame buffers in StartCapture...')
+                    del sharedArrayBase
+                    del sharedArray
+                    del sharedArrayBase2
+                    del sharedArray2
+
+                except Exception as e:
+                    log.debug('Freeing frame buffers failed with error:' + repr(e))
+                    log.debug(repr(traceback.format_exception(*sys.exc_info())))
+
+                log.debug('Compression buffers freed')
+
+
             if live_view is not None:
 
                 # Stop the live viewer
@@ -664,31 +695,34 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         # stops capture if it's night and the Pi is set to reboot (Either mode)
         if STOP_CAPTURE or (disk_full) or (not config.continuous_capture) or (not daytime_mode_prev and config.reboot_after_processing):
 
-            log.info('Ending capture...')
+            # In continuous mode, stop capture here instead
+            if config.continuous_capture:
 
-            # Stop the capture
-            log.debug('Stopping capture...')
-            dropped_frames = bc.stopCapture()
-            log.debug('Capture stopped')
+                log.info('Ending capture...')
 
-            log.info('Total number of late or dropped frames: ' + str(dropped_frames))
-            obs_db_conn = getObsDBConn(config)
-            addObsParam(obs_db_conn, "dropped_frames", dropped_frames)
-            obs_db_conn.close()
+                # Stop the capture
+                log.debug('Stopping capture...')
+                dropped_frames = bc.stopCapture()
+                log.debug('Capture stopped')
 
-            # Free shared memory after the compressor is done
-            try:
-                log.debug('Freeing frame buffers in StartCapture...')
-                del sharedArrayBase
-                del sharedArray
-                del sharedArrayBase2
-                del sharedArray2
+                log.info('Total number of late or dropped frames: ' + str(dropped_frames))
+                obs_db_conn = getObsDBConn(config)
+                addObsParam(obs_db_conn, "dropped_frames", dropped_frames)
+                obs_db_conn.close()
 
-            except Exception as e:
-                log.debug('Freeing frame buffers failed with error:' + repr(e))
-                log.debug(repr(traceback.format_exception(*sys.exc_info())))
+                # Free shared memory after the compressor is done
+                try:
+                    log.debug('Freeing frame buffers in StartCapture...')
+                    del sharedArrayBase
+                    del sharedArray
+                    del sharedArrayBase2
+                    del sharedArray2
 
-            log.debug('Compression buffers freed')
+                except Exception as e:
+                    log.debug('Freeing frame buffers failed with error:' + repr(e))
+                    log.debug(repr(traceback.format_exception(*sys.exc_info())))
+
+                log.debug('Compression buffers freed')
 
 
             # If capture is terminated manually, or the disk is full, exit program
