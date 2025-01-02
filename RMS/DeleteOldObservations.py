@@ -864,7 +864,7 @@ def deleteOldDirs(data_dir, config):
                 os.remove(os.path.join(archived_dir, bz2_list[0]))
                 bz2_list.pop(0)
             except OSError as e:
-                log.error(f"Failed to delete file {bz2_list[0]}: {e}. Exiting loop.")
+                log.error("Failed to delete file {}: {}. Exiting loop.".format(bz2_list[0], e))
                 break
         final_count = len(bz2_list)
     log.info('Purged {} older bz2 files from ArchivedFiles'.format(orig_count - final_count))
