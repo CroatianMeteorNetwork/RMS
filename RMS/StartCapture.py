@@ -240,11 +240,13 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     else:
         saved_frames_dir = None
 
-    # Full path to the video files directory
+    # Full path to the video files + corresponding time files directories 
     if config.raw_video_save:
         saved_video_dir = os.path.join(os.path.abspath(config.data_dir), config.video_dir)
+        ft_file_dir = os.path.join(os.path.abspath(config.data_dir), config.times_dir)
     else:
         saved_video_dir = None
+        ft_file_dir = None
 
 
 
@@ -277,10 +279,12 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         mkdirP(saved_frames_dir)
         log.info('Saved frames directory: {}'.format(saved_frames_dir))
 
-    # Make a directory for the saved videos
+    # Make a directory for the saved videos + corresponding time files
     if saved_video_dir is not None:
         mkdirP(saved_video_dir)
+        mkdirP(ft_file_dir)
         log.info('Saved videos directory: {}'.format(saved_video_dir))
+        log.info('Saved FT files directory: {}'.format(ft_file_dir))
 
     # Copy the used config file to the capture directory
     if os.path.isfile(config.config_file_name):

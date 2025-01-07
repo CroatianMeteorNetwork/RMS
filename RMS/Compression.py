@@ -59,7 +59,7 @@ class Compressor(multiprocessing.Process):
             array1: first numpy array in shared memory of grayscale video frames
             startTime1: float in shared memory that holds time of first frame in array1
             array2: second numpy array in shared memory
-            startTime1: float in shared memory that holds time of first frame in array2
+            startTime2: float in shared memory that holds time of first frame in array2
             config: configuration class
 
         Keyword arguments:

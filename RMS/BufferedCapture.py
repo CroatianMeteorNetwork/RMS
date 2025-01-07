@@ -42,6 +42,7 @@ from RMS.Routines.GstreamerCapture import GstVideoFile
 from RMS.Formats.ObservationSummary import getObsDBConn, addObsParam
 from RMS.RawFrameSave import RawFrameSaver
 from RMS.Misc import RmsDateTime, mkdirP
+from RMS.Formats import FTfile, FTStruct
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -142,6 +143,10 @@ class BufferedCapture(Process):
             self.startRawTime2 = Value('d', 0.0)
             self.sharedTimestampsBase = Array(ctypes.c_double, self.num_raw_frames)
             self.sharedTimestampsBase2 = Array(ctypes.c_double, self.num_raw_frames)
+
+        # Initialize timestamp array for raw videos
+        if self.config.raw_video_save:
+            self.current_timestamps = []
 
         # Initialize shared counter for dropped frames
         self.dropped_frames = Value('i', 0)
@@ -510,6 +515,11 @@ class BufferedCapture(Process):
                 if ret:
                     timestamp = time.time()
 
+        # Save timestamp for current frame for raw video timestamping
+        if self.config.raw_video_save and ret:            
+            frame_number = len(self.current_timestamps) + 1
+            self.current_timestamps.append((frame_number, timestamp))
+
         return ret, frame, timestamp
 
 
@@ -687,29 +697,51 @@ class BufferedCapture(Process):
     def moveSegment(self, splitmuxsink, fragment_id):
         """
         Custom callback for splitmuxsink's format-location signal to name and move each segment as its
-        created. Generates a timestamp-based folder structure: Year/Day-Of-Year/Hour/ per video segment
+        created. Generates a timestamp-based folder structure: Year/Day-Of-Year/Hour/ per video segment.
+        A corresponding FT file (timestamps) is created for the frames in the segment under the configured
+        directory.
 
         Arguments:
           splitmuxsink [GstElement]: The splitmuxsink object itself, included in arguments as GStreamer expects it.
           fragment_id [int]: Fragment / segment number of the new clip
 
         Returns:
-          full_path [str]: Full path to save this new segment to
+          full_path [str]: Full path to save this new video segment to
         """
 
-        base_time = RmsDateTime.utcnow()
+        # Discard first segment as timestamping isn't ready
+        if fragment_id == 0:
+            return "/dev/null"
 
-        # Generate names from current timestamp
-        subpath = os.path.join(self.config.data_dir, self.config.video_dir, base_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
-        filename = base_time.strftime("{}_%Y%m%d_%H%M%S_video.mkv".format(self.config.stationID))
+        base_time = datetime.datetime.fromtimestamp(self.current_timestamps[0][1])
+        
+        # Prepare filenames: both FT File and segment name are based on first timestamp in the segment
+        ft_filename = base_time.strftime("FT_{}_%Y%m%d_%H%M%S.bin".format(self.config.stationID))
+        segment_filename = base_time.strftime("{}_%Y%m%d_%H%M%S_video.mkv".format(self.config.stationID))
 
-        # Create full path and directory
-        mkdirP(subpath)
-        full_path = os.path.join(subpath, filename)
-        log.info("Created new video segment #{} at: {}".format(fragment_id, full_path))
+        # Prepare subpaths
+        ft_subpath = os.path.join(self.config.data_dir, self.config.times_dir, base_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
+        segment_subpath = os.path.join(self.config.data_dir, self.config.video_dir, base_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
+
+        # Create full path for the segment
+        mkdirP(segment_subpath)
+        segment_full_path = os.path.join(segment_subpath, segment_filename)
+        log.info("Created new video segment #{} at: {}".format(fragment_id, segment_full_path))
+
+        # Construct FTStruct and save, and reset the timestamp array in memory
+        ft = FTStruct.FTStruct()
+        ft.timestamps = self.current_timestamps
+        
+        # print("FTs:", ft.timestamps[:11], ft.timestamps[-10:], len(ft.timestamps), end="\n")
+
+        mkdirP(ft_subpath)
+        FTfile.write(ft, ft_subpath, ft_filename)
+        self.current_timestamps.clear()
+        log.info("Created FT file for video segment #{} at {}".format(fragment_id, os.path.join(ft_subpath, ft_filename)))
+        
 
         # Return full path to splitmux's callback
-        return full_path
+        return segment_full_path
 
       
     def handleStateChange(self, pipeline, target_state, timeout=60):
