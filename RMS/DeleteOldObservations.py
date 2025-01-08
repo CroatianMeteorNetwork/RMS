@@ -310,7 +310,7 @@ def getNightDirs(dir_path, stationID):
 
 
 def getRawItems(dir_path, in_frame_dir=False, unique=False):
-    """ Returns a sorted list of video directories / frame files from within the raw video / frames directories respectively.
+    """ Returns a sorted list of video/time directories or frame files.
         In case of frames directory, only adds to the list the processed frames-(archive, timelapse, json) files and
         not directories as they may be unprocessed.
 
@@ -424,7 +424,7 @@ def deleteNightFolders(dir_path, config, delete_all=False):
 
 
 def deleteRawItems(dir_path, delete_all=False, in_frame_dir=False, unique=False):
-    """ Deletes raw video / frames data directories / files respectively, to free up disk space. In case of frames directory,
+    """ Deletes raw video/time directories or frames data files, to free up disk space. In case of frames directory,
         it only will check for and delete old processed files (timelapses, archives, and json files) per day
         and not directories as they may be unprocessed.
 
@@ -555,6 +555,7 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     archived_dir = os.path.join(data_dir, archived_dir)
     frame_dir = os.path.join(data_dir, config.frame_dir)
     video_dir = os.path.join(data_dir, config.video_dir)
+    times_dir = os.path.join(data_dir, config.times_dir)
 
     # clear down logs first
     log.info('clearing down log files')
@@ -651,10 +652,11 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     free_space_status = False
     while True:
 
-        # Delete one day of video directory data
+        # Delete one day of video directory data + corresponding time
         video_dirs_remaining = deleteRawItems(video_dir)
+        times_dirs_remaining = deleteRawItems(times_dir)
 
-        log.info("Deleted dir in video directory: {:s}".format(video_dir))
+        log.info("Deleted dir(s) in video / ft files directory: {:s}".format(video_dir))
         log.info("Free space: {:.2f} GB".format(availableSpace(data_dir)/1024/1024/1024))
 
         # Break the there's enough space
@@ -706,9 +708,9 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
 
         # If no folders left to delete, try to delete archived files
         if (len(captured_dirs_remaining) + len(archived_dirs_remaining) + 
-            len(frame_dirs_remaining) + len(video_dirs_remaining) == 0):
+            len(frame_dirs_remaining) + len(video_dirs_remaining) + len(times_dirs_remaining)== 0):
 
-            log.info("Deleted all Capture, Archived, Frame and Video directories, deleting archived bz2 files...")
+            log.info("Deleted all Capture, Archived, Frame, Video and Time directories, deleting archived bz2 files...")
 
             archived_files_remaining = deleteFiles(archived_dir, config)
 
@@ -852,6 +854,26 @@ def deleteOldDirs(data_dir, config):
                 break
         final_count = len(videodir_list)
     log.info('Purged {} days of old folders from VideoFiles'.format(orig_count - final_count))
+
+
+    # Deleting old video timestamp (ft file) dirs.
+    orig_count = 0
+    final_count = 0
+    times_dir = os.path.join(data_dir, config.times_dir)
+    
+    # Keep the same number of these dirs as the videos
+    if config.video_days_to_keep > 0:
+        timesdir_list = getRawItems(times_dir)
+        orig_count = len(timesdir_list)
+        while len(timesdir_list) > config.video_days_to_keep:
+            prev_length = len(timesdir_list)
+            timesdir_list = deleteRawItems(times_dir)
+            if len(timesdir_list) == prev_length:
+                log.error("Failed to delete folder from TimeFiles. Exiting loop.")
+                break
+        final_count = len(timesdir_list)
+    log.info('Purged {} days of old folders from TimeFiles'.format(orig_count - final_count))
+
 
     # Deleting old bz2 files
     orig_count = 0
