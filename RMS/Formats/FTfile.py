@@ -63,41 +63,31 @@ def write(ft, directory, filename):
 
 
 if __name__ == '__main__':
-    pass
 
-    # ### TEST ###
+    import tempfile
+    
+    # Temporary directory for test files
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_filename = "FT_test.bin"
+        test_filepath = os.path.join(temp_dir, test_filename)
 
-    # # Load a .bin file
-    # dir_path = "D:/Dropbox/RPi_Meteor_Station/samples/sample_bins"
+        # Create a sample FTStruct object
+        original_ft = FTStruct()
+        original_ft.timestamps = [
+            (1, 0.033),
+            (2, 0.066),
+            (3, 0.099),
+            (4, 0.132),
+        ]
 
-    # file_name = 'FF453_20150620_201239_920_0058880.bin'
+        # Write the FTStruct to a file
+        print("Writing FT file to {}".format(test_filepath))
+        write(original_ft, temp_dir, test_filename)
 
-    # # Read the FF file
-    # ff = read(dir_path, file_name)
+        # Read the FTStruct back from the file
+        print("Reading FT file from {}".format(test_filepath))
+        loaded_ft = read(temp_dir, test_filename)
 
-    # print(ff)
-
-    # # file_name_fits = file_name.replace('.bin', '.fits')
-
-    # # # Write the read FF file as FITS
-    # # write(ff, dir_path, file_name_fits, fmt='fits')
-
-    # # # Read the FFfits
-    # # ff = read(dir_path, file_name_fits)
-
-
-    # # Save as new CAMS format
-    # file_name_new_bin = file_name[:-5] + '_new.bin'
-
-    # write(ff, dir_path, file_name_new_bin, fmt='bin')
-
-    # # Read the newly written file
-    # ff = read(dir_path, file_name_new_bin)
-
-
-    # import matplotlib.pyplot as plt
-
-    # plt.imshow(ff.maxpixel, cmap='gray', vmin=0, vmax=255)
-    # plt.show()
-
-    # print(ff)
+        # Verify the content matches
+        assert original_ft.timestamps == loaded_ft.timestamps, "Timestamps do not match!"
+        print("Test passed: Written and read timestamps match.")
