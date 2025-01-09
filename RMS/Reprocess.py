@@ -94,9 +94,8 @@ def getPlatepar(config, night_data_dir):
         log.info('No platepar file found!')
 
 
+    # Make sure that the station code from the config and the platepar match
     if platepar is not None:
-        
-        # Make sure that the station code from the config and the platepar match
         if platepar.station_code is not None:
             if config.stationID != platepar.station_code:
 
@@ -114,7 +113,8 @@ def getPlatepar(config, night_data_dir):
                 platepar.elev = config.elevation
 
         
-        # Make sure the config and the platepar FOV are within a factor of two
+    # Make sure the config and the platepar FOV are within a factor of two
+    if platepar is not None:
         if (platepar.fov_h is not None) and (platepar.fov_v is not None):
             
             # Calculate the diagonal FOV for both the platepar and the config
