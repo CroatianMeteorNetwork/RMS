@@ -1125,14 +1125,16 @@ if __name__ == "__main__":
 
 
                 ### Stop reboot tries if it's time to capture ###
-                if isinstance(start_time, bool):
-                    if start_time:
-                        break
+                if (not config.continuous_capture):
+                    
+                    if isinstance(start_time, bool):
+                        if start_time:
+                            break
 
-                time_now = RmsDateTime.utcnow()
-                waiting_time = start_time - time_now
-                if waiting_time.total_seconds() <= 0:
-                    break
+                    time_now = RmsDateTime.utcnow()
+                    waiting_time = start_time - time_now
+                    if waiting_time.total_seconds() <= 0:
+                        break
 
                 ### ###
 
