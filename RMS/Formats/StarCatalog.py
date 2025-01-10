@@ -3,6 +3,8 @@
 from __future__ import print_function, division, absolute_import
 
 import os
+import zlib
+
 import numpy as np
 
 from RMS.Decorators import memoizeSingle
@@ -134,7 +136,109 @@ def loadGaiaCatalog(dir_path, file_name, lim_mag=None):
 
 
 
-def readStarCatalog(dir_path, file_name, lim_mag=None, mag_band_ratios=None):
+def loadGMNStarCatalog(file_path, years_from_J2000=0, lim_mag=None, mag_band_ratios=None):
+    """
+    Reads in the GMN Star Catalog from a compressed binary file, applying proper motion correction,
+    magnitude limiting, and synthetic magnitude computation. Adjusts the RA/Dec positions to the J2000 epoch.
+
+    Arguments:
+        file_path: [str] Path to the binary file.
+
+    Keyword arguments:
+        years_from_J2000: [float] Years elapsed since J2000 for proper motion correction (default: No correction added).
+        lim_mag: [float] Limiting magnitude for filtering stars (default: None).
+        mag_band_ratios: [list] Relative contributions of photometric bands [B, V, R, I]
+            to compute synthetic magnitudes (default: None).
+
+    Returns:
+        filtered_data: [ndarray] A filtered and corrected catalog contained as a structured NumPy array 
+            (currently outputs only: ra, dec, mag)
+        mag_band_string: [str] A string describing the magnitude band of the catalog.
+        mag_band_ratios: [list] A list of BVRI magnitude band ratios for the given catalog.
+    """
+
+    # Define data types for binary storage
+    data_types = [
+        ('designation', 'S30'),
+        ('ra', 'f8'),
+        ('dec', 'f8'),
+        ('pmra', 'f8'),
+        ('pmdec', 'f8'),
+        ('phot_g_mean_mag', 'f4'),
+        ('phot_bp_mean_mag', 'f4'),
+        ('phot_rp_mean_mag', 'f4'),
+        ('classprob_dsc_specmod_star', 'f4'),
+        ('classprob_dsc_specmod_binarystar', 'f4'),
+        ('spectraltype_esphs', 'S8'),
+        ('B', 'f4'),
+        ('V', 'f4'),
+        ('R', 'f4'),
+        ('Ic', 'f4'),
+        ('oid', 'i4'),
+        ('preferred_name', 'S30'),
+        ('Simbad_OType', 'S30')
+    ]
+
+    with open(file_path, 'rb') as fid:
+
+        # Step 1: Read the header
+        declared_header_size = int(np.fromfile(fid, dtype=np.uint32, count=1)[0])
+        num_rows = int(np.fromfile(fid, dtype=np.uint32, count=1)[0])
+        num_columns = int(np.fromfile(fid, dtype=np.uint32, count=1)[0])
+        fid.read(declared_header_size - 12)  # Skip column names
+
+        # Step 2: Read and decompress the data
+        compressed_data = fid.read()
+        decompressed_data = zlib.decompress(compressed_data)
+        catalog_data = np.frombuffer(decompressed_data, dtype=data_types, count=num_rows)
+
+    # Step 3: Apply proper motion correction
+    
+    # First convert to deg since our proper motions are in mas/yr
+    mas_to_deg = 1/(3.6e6) # Conversion factor for mas/yr to degrees/year
+    
+    # GMN catalog is relative to the J2015.5 epoch (from GAIA DR3)
+    time_elapsed = years_from_J2000 - 15.5
+
+    # If years_from_j2000 = 0 then no correction is applied
+    corrected_ra  = catalog_data['ra']  + catalog_data['pmra']*time_elapsed*mas_to_deg
+    corrected_dec = catalog_data['dec'] + catalog_data['pmdec']*time_elapsed*mas_to_deg  
+
+    # Step 4: Compute synthetic magnitudes if mag_band_ratios are provided
+    if mag_band_ratios is not None:
+        if len(mag_band_ratios) != 4:
+            raise ValueError("mag_band_ratios must be a list of four values [B, V, R, I].")
+        
+        total_ratio = sum(mag_band_ratios)
+        rb, rv, rr, ri = [x/total_ratio for x in mag_band_ratios]
+        synthetic_mag = (
+            rb*catalog_data['B'] +
+            rv*catalog_data['V'] +
+            rr*catalog_data['R'] +
+            ri*catalog_data['Ic']
+        )
+        mask = synthetic_mag <= lim_mag if lim_mag is not None else np.ones(len(catalog_data), dtype=bool)
+    else:
+        mask = catalog_data['V'] <= lim_mag if lim_mag is not None else np.ones(len(catalog_data), dtype=bool)
+
+    # Step 5: Filter and combine the data into the output format
+    filtered_data = np.zeros((np.sum(mask), 3), dtype=np.float64)
+    filtered_data[:, 0] = corrected_ra[mask]
+    filtered_data[:, 1] = corrected_dec[mask]
+    filtered_data[:, 2] = synthetic_mag[mask] if mag_band_ratios is not None else catalog_data['V'][mask]
+
+    # Step 6: Sort by descending declination
+    filtered_data = filtered_data[np.argsort(filtered_data[:, 1])[::-1]]
+
+    # Step 7: Generate the magnitude band string
+    mag_band_string = "GMN {:.2f}B + {:.2f}V + {:.2f}R + {:.2f}I".format(*mag_band_ratios)
+
+    return filtered_data, mag_band_string, tuple(mag_band_ratios)
+
+
+
+
+def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None, mag_band_ratios=None):
     """ Import the star catalog into a numpy array.
     
     Arguments:
@@ -142,6 +246,8 @@ def readStarCatalog(dir_path, file_name, lim_mag=None, mag_band_ratios=None):
         file_name: [str] Name of the catalog file.
 
     Keyword arguments:
+        years_from_J2000: [float] Decimal years elapsed from the J2000 epoch. Used for proper motion 
+            correction.
         lim_mag: [float] Limiting magnitude. Stars fainter than this magnitude will be filtered out. None by
             default.
         mag_band_ratios: [list] A list of relative contributions of every photometric band (BVRI) to the 
@@ -159,7 +265,7 @@ def readStarCatalog(dir_path, file_name, lim_mag=None, mag_band_ratios=None):
     if 'BSC' in file_name:
 
         # Load all BSC stars
-        BSC_data = readBSC(dir_path, file_name)
+        BSC_data = readBSC(dir_path, file_name, years_from_J2000=years_from_J2000)
 
         # Filter out stars fainter than the limiting magnitude, if it was given
         if lim_mag is not None:
@@ -172,6 +278,12 @@ def readStarCatalog(dir_path, file_name, lim_mag=None, mag_band_ratios=None):
     if 'gaia' in file_name.lower():
         return loadGaiaCatalog(dir_path, file_name, lim_mag=lim_mag), 'GAIA G band', [0.45, 0.70, 0.72, 0.50]
 
+    # Load the GMN start catalog
+    if "GMN_StarCatalog".lower() in file_name.lower():
+        return loadGMNStarCatalog(
+            os.path.join(dir_path, file_name), 
+            years_from_J2000=years_from_J2000, lim_mag=lim_mag, mag_band_ratios=mag_band_ratios
+            )
 
 
     ### Load the SKY2000 catalog ###
