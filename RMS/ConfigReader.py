@@ -291,7 +291,7 @@ class Config:
         # Decoder for the gstreamer media backend (e.g. decodebin, avdec_h264, nvh264dec)
         self.gst_decoder = "avdec_h264"
 
-        # Toggle raw video saving + FT file saving in data_dir/video_dir + data_dir/times_dir.
+        # Toggle raw video saving in data_dir/video_dir
         self.raw_video_save = False
 
         # Duration of the raw video segment (seconds)
@@ -364,11 +364,16 @@ class Config:
         # Zero means keep them all
         self.frame_days_to_keep = 4
 
-        # Video dirs + corresponding Time dirs to keep
-        # Keep this many video dirs (days) + corresponding FT file dirs
+        # Video dirs to keep
+        # Keep this many video dirs (days)
         # Zero means keep them all
         self.video_days_to_keep = 2
-        
+
+        # Timestamp dirs to keep
+        # Keep this many ft file (timestamp) folders (days)
+        # Zero means keep them all
+        self.times_days_to_keep = 8
+
         # Space quotas in GB
 
 
@@ -970,6 +975,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "video_days_to_keep"):
         config.video_days_to_keep = int(parser.get(section, "video_days_to_keep"))
+
+    if parser.has_option(section, "times_days_to_keep"):
+        config.times_days_to_keep = int(parser.get(section, "times_days_to_keep"))
 
     if parser.has_option(section, "quota_management_disabled"):
         config.quota_management_disabled = parser.getboolean(section, "quota_management_disabled")

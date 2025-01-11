@@ -112,14 +112,14 @@ def captureModeSwitcher(config, daytime_mode):
     # while True:
 
     #     if not daytime_mode.value:
-    #         log.info(f'Switching to day time mode')
+    #         log.info('Switching to day time mode')
     #         daytime_mode.value = True
 
     #         if config.switch_camera_modes:
     #             cc.cameraControlV2(config, 'SwitchDayTime')
 
     #     else:
-    #         log.info(f'Switching to night time mode')
+    #         log.info('Switching to night time mode')
     #         daytime_mode.value = False
     
     #         if config.switch_camera_modes:

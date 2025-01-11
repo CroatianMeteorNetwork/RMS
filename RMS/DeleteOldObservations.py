@@ -344,7 +344,8 @@ def getRawItems(dir_path, in_frame_dir=False, unique=False):
             raw_list += [os.path.join(year_path, day_dir) for day_dir in os.listdir(year_path) if os.path.isdir(os.path.join(year_path, day_dir))]
 
 
-    # Output files with unique dates
+    # Output files with unique dates - used for counting frame files (in days) in the main function deleteOldObservations
+    # The local function above isProcessedFrameFiles lists the multiple frames data files suffixes for a single day
     if unique:
         unique_dates = []
         temp_path_list = []
@@ -652,11 +653,10 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     free_space_status = False
     while True:
 
-        # Delete one day of video directory data + corresponding time
+        # Delete one day of video directory data
         video_dirs_remaining = deleteRawItems(video_dir)
-        times_dirs_remaining = deleteRawItems(times_dir)
 
-        log.info("Deleted dir(s) in video / ft files directory: {:s}".format(video_dir))
+        log.info("Deleted dir(s) in video files directory: {:s}".format(video_dir))
         log.info("Free space: {:.2f} GB".format(availableSpace(data_dir)/1024/1024/1024))
 
         # Break the there's enough space
@@ -696,6 +696,18 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
         log.info("Free space: {:.2f} GB".format(availableSpace(data_dir)/1024/1024/1024))
 
         # Break if there's enough space
+        if availableSpace(data_dir) > next_night_bytes:
+            free_space_status = True
+            break
+
+
+        # Delete one day of times directory data
+        times_dirs_remaining = deleteRawItems(times_dir)
+
+        log.info("Deleted dir(s) in ft files directory: {:s}".format(times_dir))
+        log.info("Free space: {:.2f} GB".format(availableSpace(data_dir)/1024/1024/1024))
+
+        # Break the there's enough space
         if availableSpace(data_dir) > next_night_bytes:
             free_space_status = True
             break
@@ -860,12 +872,11 @@ def deleteOldDirs(data_dir, config):
     orig_count = 0
     final_count = 0
     times_dir = os.path.join(data_dir, config.times_dir)
-    
-    # Keep the same number of these dirs as the videos
-    if config.video_days_to_keep > 0:
+
+    if config.times_days_to_keep > 0:
         timesdir_list = getRawItems(times_dir)
         orig_count = len(timesdir_list)
-        while len(timesdir_list) > config.video_days_to_keep:
+        while len(timesdir_list) > config.times_days_to_keep:
             prev_length = len(timesdir_list)
             timesdir_list = deleteRawItems(times_dir)
             if len(timesdir_list) == prev_length:

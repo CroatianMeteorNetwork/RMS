@@ -145,13 +145,6 @@ class BufferedCapture(Process):
             self.sharedTimestampsBase = Array(ctypes.c_double, self.num_raw_frames)
             self.sharedTimestampsBase2 = Array(ctypes.c_double, self.num_raw_frames)
 
-        # Initialize timestamp array for raw videos
-        if self.config.raw_video_save:
-            self.current_timestamps = []
-
-            # For Testing
-            # self.last_segment_ending = 0
-
         # Initialize shared counter for dropped frames
         self.dropped_frames = Value('i', 0)
 
@@ -519,11 +512,6 @@ class BufferedCapture(Process):
                 if ret:
                     timestamp = time.time()
 
-        # Save timestamp for current frame for raw video timestamping
-        if self.config.raw_video_save and ret:            
-            frame_number = len(self.current_timestamps) + 1
-            self.current_timestamps.append((frame_number, timestamp))
-
         return ret, frame, timestamp
 
 
@@ -702,8 +690,6 @@ class BufferedCapture(Process):
         """
         Custom callback for splitmuxsink's format-location signal to name and move each segment as its
         created. Generates a timestamp-based folder structure: Year/Day-Of-Year/Hour/ per video segment.
-        A corresponding FT file (timestamps) is created for the frames in the segment under the configured
-        directory.
 
         Arguments:
           splitmuxsink [GstElement]: The splitmuxsink object itself, included in arguments as GStreamer expects it.
@@ -713,47 +699,16 @@ class BufferedCapture(Process):
           full_path [str]: Full path to save this new video segment to
         """
 
-        # Discard first segment as timestamping isn't ready
-        if fragment_id == 0:
-            return "/dev/null"
-
-        # Construct FTStruct, record timestamps, and reset the timestamp array in memory
-        ft = FTStruct.FTStruct()
-        ft.timestamps = copy.copy(self.current_timestamps)
-        self.current_timestamps.clear()
-
-        # For Testing: 
-        # Print first and last 10 timestamps, array length, average time difference and time difference from last block
-        # Enable self.last_segment_ending in __init__
-        # print("\n\n --- FT file data --- \nFirst 10 timestamps: {}\n\nLast 10 timestamps: {}\n\nArray length: {}\n\n".format(
-        #       ft.timestamps[:11], 
-        #       ft.timestamps[-10:],
-        #       len(ft.timestamps),
-        # ),
-        #       "Average per-frame time difference: {}\n\nLast segment time difference: {}\n\n ---------------- \n\n".format(
-        #       sum(ft.timestamps[i+1][1] - ft.timestamps[i][1] for i in range(len(ft.timestamps) - 1)) / (len(ft.timestamps) - 1),
-        #       ft.timestamps[0][1] - self.last_segment_ending
-        # ), end='')
-        # self.last_segment_ending = ft.timestamps[-1][1]
-
-
-        # Prepare filenames: both FT File and segment name are based on first timestamp in the segment
-        base_time = datetime.datetime.fromtimestamp(ft.timestamps[0][1])
-        ft_filename = base_time.strftime("FT_{}_%Y%m%d_%H%M%S.bin".format(self.config.stationID))
-        segment_filename = base_time.strftime("{}_%Y%m%d_%H%M%S_video.mkv".format(self.config.stationID))
-
-        # Prepare subpaths
-        ft_subpath = os.path.join(self.config.data_dir, self.config.times_dir, base_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
-        segment_subpath = os.path.join(self.config.data_dir, self.config.video_dir, base_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
+        # Segment name is based on timestamp recorded during last segment save
+        segment_time = datetime.datetime.fromtimestamp(self.last_segment_savetime)
+        self.last_segment_savetime = time.time()
+        segment_filename = segment_time.strftime("{}_%Y%m%d_%H%M%S_video.mkv".format(self.config.stationID))
+        segment_subpath = os.path.join(self.config.data_dir, self.config.video_dir, segment_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
 
         # Create full path for the segment
         mkdirP(segment_subpath)
         segment_full_path = os.path.join(segment_subpath, segment_filename)
         log.info("Created new video segment #{} at: {}".format(fragment_id, segment_full_path))
-
-        mkdirP(ft_subpath)
-        FTfile.write(ft, ft_subpath, ft_filename)
-        log.info("Created FT file for video segment #{} at {}".format(fragment_id, os.path.join(ft_subpath, ft_filename)))
 
         # Return full path to splitmux's callback
         return segment_full_path
@@ -1380,6 +1335,14 @@ class BufferedCapture(Process):
                 self.sharedRawArray2 = None
                 self.raw_frame_saver = None
 
+            # Initialize timestamp array for ft file buffer
+            self.timestamp_buffer = []
+            # For testing ft files
+            # self.ft_test_time = time.time()
+
+            if self.config.raw_video_save:
+                self.last_segment_savetime = time.time()
+
             log.debug("Process-specific initialization complete")
 
             # Main capture loop
@@ -1552,6 +1515,8 @@ class BufferedCapture(Process):
                     # Always set first frame timestamp in the beginning of the block
                     first_frame_timestamp = frame_timestamp
 
+                # Append current timestamp to ft file buffer
+                self.timestamp_buffer.append((len(self.timestamp_buffer) + 1, frame_timestamp))
 
                 # If save_frames is set and a video device is used, save a frame every nth frames
                 if (self.config.save_frames
@@ -1777,6 +1742,35 @@ class BufferedCapture(Process):
             if self.config.report_dropped_frames:
                 log.info('Estimated FPS: {:.3f}'.format(block_frames/(time.time() - t_block)))
         
+
+            # Save current timestamp buffer to ft file
+            # Construct FTStruct, record timestamps, and reset the timestamp array in memory
+            ft = FTStruct.FTStruct()
+            ft.timestamps = copy.copy(self.timestamp_buffer)
+            self.timestamp_buffer.clear()
+
+            base_time = datetime.datetime.fromtimestamp(first_frame_timestamp)
+            ft_filename = base_time.strftime("FT_{}_%Y%m%d_%H%M%S.bin".format(self.config.stationID))
+            ft_subpath = os.path.join(self.config.data_dir, self.config.times_dir, base_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
+
+            mkdirP(ft_subpath)
+            FTfile.write(ft, ft_subpath, ft_filename)
+            log.info("Created FT file {} for block starting at {}".format(os.path.join(ft_subpath, ft_filename), first_frame_timestamp))
+
+            # For Testing: 
+            # Print first and last 10 timestamps, array length, average time difference and time difference from last block
+            # Enable self.ft_test_time in __init__
+            # print("\n\n --- FT file data --- \nFirst 10 timestamps: {}\n\nLast 10 timestamps: {}\n\nArray length: {}\n\n".format(
+            #       ft.timestamps[:11], 
+            #       ft.timestamps[-10:],
+            #       len(ft.timestamps),
+            # ),
+            #       "Average per-frame time difference: {}\n\nLast segment time difference: {}\n\n ---------------- \n\n".format(
+            #       sum(ft.timestamps[i+1][1] - ft.timestamps[i][1] for i in range(len(ft.timestamps) - 1)) / (len(ft.timestamps) - 1),
+            #       ft.timestamps[0][1] - self.ft_test_time
+            # ), end='')
+            # self.ft_test_time = ft.timestamps[-1][1]
+
 
         log.info('Releasing video device...')
         self.releaseResources()

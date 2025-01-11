@@ -234,20 +234,20 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         night_data_dir = os.path.join(os.path.abspath(config.data_dir), config.captured_dir, \
             night_data_dir_name)
 
+    # Full path to the time files directories
+    ft_file_dir = os.path.join(os.path.abspath(config.data_dir), config.times_dir)
+
     # Full path to the saved frames directory
     if config.save_frames:
         saved_frames_dir = os.path.join(os.path.abspath(config.data_dir), config.frame_dir)
     else:
         saved_frames_dir = None
 
-    # Full path to the video files + corresponding time files directories 
+    # Full path to the video files
     if config.raw_video_save:
         saved_video_dir = os.path.join(os.path.abspath(config.data_dir), config.video_dir)
-        ft_file_dir = os.path.join(os.path.abspath(config.data_dir), config.times_dir)
     else:
         saved_video_dir = None
-        ft_file_dir = None
-
 
 
     # Add a note about Patreon supporters
@@ -274,17 +274,19 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         mkdirP(night_data_dir)
         log.info('Data directory: ' + night_data_dir)
 
+    # Make a directory for the time files
+    mkdirP(ft_file_dir)
+    log.info('Saved FT files directory: {}'.format(ft_file_dir))
+
     # Make a directory for the saved frames
     if saved_frames_dir is not None:
         mkdirP(saved_frames_dir)
         log.info('Saved frames directory: {}'.format(saved_frames_dir))
 
-    # Make a directory for the saved videos + corresponding time files
+    # Make a directory for the saved videos
     if saved_video_dir is not None:
         mkdirP(saved_video_dir)
-        mkdirP(ft_file_dir)
         log.info('Saved videos directory: {}'.format(saved_video_dir))
-        log.info('Saved FT files directory: {}'.format(ft_file_dir))
 
     # Copy the used config file to the capture directory
     if os.path.isfile(config.config_file_name):
