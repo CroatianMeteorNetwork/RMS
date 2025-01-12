@@ -14,6 +14,11 @@ import atexit
 # GLOBALS
 ##############################################################################
 
+# Set GStreamer debug level. Use '2' for warnings in production environments.
+# Level 4 and above are overwhelming the log
+# If higher verbosity is needed, disable in client scripts
+os.environ['GST_DEBUG'] = '2'
+
 logging_queue = None
 listener_process = None
 init_lock = threading.Lock()

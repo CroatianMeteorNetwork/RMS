@@ -1291,12 +1291,11 @@ class BufferedCapture(Process):
                     Gst.debug_set_active(True)
 
                     # Set debug level from environment or default given value
-                    # Set to 2 for production, Level 4 and above are overwhelming the log
-                    # If higher verbosity is needed, disable writing to the log below.
+                    # The Gst debug level is set in Logger.py
                     debug_env = os.environ.get("GST_DEBUG", "2")
                     Gst.debug_set_default_threshold(int(debug_env))
 
-                    # Comment out if higher thanlogging level 3 is needed
+                    # Comment out if higher than logging level 3 is needed
                     Gst.debug_add_log_function(gstDebugLogger, None)
 
                     log.info("GStreamer logging initialized at level: {}".format(debug_env))
