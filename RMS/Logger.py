@@ -101,8 +101,8 @@ def gstDebugLogger(category, level, file, function, line, obj, message, user_dat
 class CustomHandler(logging.handlers.TimedRotatingFileHandler):
     """ Custom handler for rotating log files.
     
-    The live file: log_US005A_2024-12-29_112347.log
-    On rollover: log_US005A_2024-12-29_112347-[29_1123-to-30_1123].log
+    The live file: log_XX0000_2024-12-29_112347.log
+    On rollover: log_XX0000_2024-12-29_112347-[29_1123-to-30_1123].log
     """
     def __init__(self, station_id, start_time_str, *args, **kwargs):
         self.station_id = station_id
@@ -178,7 +178,7 @@ def _listener_configurer(config, log_file_prefix, safedir):
         start_time_str=start_time_str,
         filename=full_path,
         when='H',
-        interval=12,
+        interval=24,
         utc=True
     )
     console = logging.StreamHandler(sys.stdout)
