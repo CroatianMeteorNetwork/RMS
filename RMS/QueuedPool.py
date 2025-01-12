@@ -2,7 +2,6 @@ from __future__ import print_function
 
 import os
 import sys
-import logging
 import traceback
 import time
 import functools
@@ -10,6 +9,7 @@ import multiprocessing
 import multiprocessing.dummy
 
 from RMS.Pickling import savePickle, loadPickle
+from RMS.Logger import getLogger
 from RMS.Misc import randomCharacters, isListKeyInDict, listToTupleRecursive
 
 
@@ -679,9 +679,8 @@ if __name__ == "__main__":
 
     # # Init logging
     # logging.basicConfig()
-    # log = logging.getLogger('logger')
-    # log.setLevel(logging.INFO)
-    # log.setLevel(logging.DEBUG)
+    # log = getLogger('logger', level="INFO")
+     # log = getLogger('logger', level="DEBUG")
 
     log = None
 

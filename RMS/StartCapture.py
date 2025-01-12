@@ -26,7 +26,6 @@ import random
 import signal
 import shutil
 import ctypes
-import logging
 import threading
 import multiprocessing
 import traceback
@@ -39,7 +38,7 @@ import numpy as np
 from Utils.LiveViewer import LiveViewer
 
 import RMS.ConfigReader as cr
-from RMS.Logger import initLogging
+from RMS.Logger import initLogging, getLogger
 from RMS.BufferedCapture import BufferedCapture
 from RMS.CaptureDuration import captureDuration
 from RMS.CaptureModeSwitcher import captureModeSwitcher
@@ -929,7 +928,7 @@ if __name__ == "__main__":
     initLogging(config)
 
     # Get the logger handle
-    log = logging.getLogger("logger")
+    log = getLogger("logger")
 
 
     log.info("Program start")

@@ -1,155 +1,324 @@
-""" Setting up the logger. """
-
-# RPi Meteor Station
-# Copyright (C) 2017 Denis Vida
-# 
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-# 
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-# 
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
 import os
 import sys
+import errno
 import logging
 import logging.handlers
+import multiprocessing
+import datetime
+import time
+import threading
+import atexit
 
-from RMS.Misc import mkdirP, RmsDateTime
 
-# Attempt to import GStreamer
-try:
-    import gi
-    gi.require_version('Gst', '1.0')
-    from gi.repository import Gst
-    GST_IMPORTED = True
+##############################################################################
+# GLOBALS
+##############################################################################
 
-except:
-    GST_IMPORTED = False
+logging_queue = None
+listener_process = None
+init_lock = threading.Lock()
+logger_initialized = False
 
+
+##############################################################################
+# HELPERS
+##############################################################################
 
 class LoggerWriter:
+    """ Used to redirect stdout/stderr to the log.
+    """
     def __init__(self, logger, level):
         self.logger = logger
         self.level = level
 
     def write(self, message):
-        if message.strip():  # Avoid logging empty lines
+        if message.strip():
             self.logger.log(self.level, message.strip())
 
     def flush(self):
-        pass  # No need to flush anything for logging
+        pass
 
 
-def gstDebugLogger(category, level, file, function, line, object, message, user_data):
-    """
-    The function maps GStreamer debug levels to Python logging levels and logs
-    the message using the 'gstreamer' logger. If a GStreamer debug level
-    doesn't have a direct mapping, it defaults to the Python DEBUG level.
-
-    Args:
-        category (Gst.DebugCategory): The debug category of the message.
-        level (Gst.DebugLevel): The debug level of the message.
-        file (str): The file where the message originated.
-        function (str): The function where the message originated.
-        line (int): The line number where the message originated.
-        object (GObject.Object): The object that emitted the message, or None.
-        message (Gst.DebugMessage): The debug message.
-        user_data: User data passed to the log function.
-    """
-
-    # Get or create a logger specifically for GStreamer messages
-    logger = logging.getLogger('gstreamer')
-
-    # Map GStreamer debug levels to Python logging levels
-    level_map = {
-        Gst.DebugLevel.ERROR: logging.ERROR,
-        Gst.DebugLevel.WARNING: logging.WARNING,
-        Gst.DebugLevel.INFO: logging.INFO,
-        Gst.DebugLevel.DEBUG: logging.DEBUG
-    }
-
-    # Convert GStreamer level to Python logging level, defaulting to DEBUG
-    py_level = level_map.get(level, logging.DEBUG)
-
-    # Log the message with the appropriate level
-    logger.log(py_level, "GStreamer: {}: {}".format(category.get_name(), message.get()))
-
-
-def initLogging(config, log_file_prefix="", safedir=None):
-    """ Initializes the logger. 
+# Reproduced from RMS.Misc due to circular import issue
+def mkdirP(path):
+    """ Makes a directory and handles all errors.
     
     Arguments:
-        config: [Config] Config object.
-    
-    Keyword arguments:
-        log_file_prefix: [str] String which will be prefixed to the log file. Empty string by default.
-        safedir: [str] Path to the directory where the log files will always be able to be written to. It will
-            be used if the default log directory is not writable. None by default.
-    """
-
-    # Path to the directory with log files
-    log_path = os.path.join(config.data_dir, config.log_dir)
-
-    # Make directories
-    print("Creating directory: " + config.data_dir)
-    data_dir_status = mkdirP(config.data_dir)
-    print("   Success: {}".format(data_dir_status))
-    print("Creating directory: " + log_path)
-    log_path_status = mkdirP(log_path)
-    print("   Sucess: {}".format(log_path_status))
-
-    # If the log directory doesn't exist or is not writable, use the safe directory
-    if safedir is not None:
-        if not os.path.exists(log_path) or not os.access(log_path, os.W_OK):
-            print("Log directory not writable, using safe directory: " + safedir)
-            log_path = safedir
-
-    # Generate a file name for the log file
-    log_file_name = log_file_prefix + "log_" + str(config.stationID) + "_" + RmsDateTime.utcnow().strftime('%Y%m%d_%H%M%S.%f') + ".log"
+        path: [str] Directory path to create
         
-    # Init logging
-    log = logging.getLogger('logger')
-    log.setLevel(logging.INFO)
-    log.setLevel(logging.DEBUG)
+    Return:
+        [bool] True if successful, False otherwise
+    """
+    try:
+        os.makedirs(path)
+        return True
+    except OSError as exc:
+        if exc.errno == errno.EEXIST:
+            return True
+        else:
+            print("Error creating directory: " + str(exc))
+            return False
+    except Exception as e:
+        print("Error creating directory: " + str(e))
+        return False
 
-    # Make a new log file each day
-    handler = logging.handlers.TimedRotatingFileHandler(os.path.join(log_path, log_file_name), when='D', \
-        interval=1, utc=True)
-    handler.setLevel(logging.INFO)
-    handler.setLevel(logging.DEBUG)
 
-    # Set the log formatting
-    formatter = logging.Formatter(fmt='%(asctime)s-%(levelname)s-%(module)s-line:%(lineno)d - %(message)s', 
-        datefmt='%Y/%m/%d %H:%M:%S')
+# Reproduced from RMS.Misc due to circular import issue
+class RmsDateTime:
+    """ Use Python-version-specific UTC retrieval.
+    """
+    if sys.version_info[0] < 3:
+        @staticmethod
+        def utcnow():
+            return datetime.datetime.utcnow()
+    else:
+        @staticmethod
+        def utcnow():
+            return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
+
+def gstDebugLogger(category, level, file, function, line, obj, message, user_data):
+    """ Maps GStreamer debug levels to Python logging levels and logs
+        the message directly through the logging system.
+    """
+    # Get the main logger instance
+    logger = logging.getLogger("Logger") 
+    
+    # Extract message information safely
+    cat_name = category.get_name() if category else "Unknown"
+    msg_str = message.get() if message else "No message"
+    
+    # Format and log the message
+    log_msg = "{} {}:{:d}:{}: {}".format(cat_name, file, line, function, msg_str)
+    logger.info(log_msg)
+    return True
+
+
+##############################################################################
+# CUSTOM HANDLER
+##############################################################################
+
+class CustomHandler(logging.handlers.TimedRotatingFileHandler):
+    """ Custom handler for rotating log files.
+    
+    The live file: log_US005A_2024-12-29_112347.log
+    On rollover: log_US005A_2024-12-29_112347-[29_1123-to-30_1123].log
+    """
+    def __init__(self, station_id, start_time_str, *args, **kwargs):
+        self.station_id = station_id
+        self.start_time_str = start_time_str
+        super(CustomHandler, self).__init__(*args, **kwargs)
+        self.suffix = "%Y-%m-%d_%H%M%S"
+        self.namer = self._rename_on_rollover
+
+    def _rename_on_rollover(self, default_name):
+        # Parse the default filename
+        base_dir, base_file = os.path.split(default_name)
+        base_noext, dot, start_time_str = base_file.rpartition('.')
+        
+        if base_noext.endswith('.log'):
+            base_noext = base_noext[:-4]
+        
+        # Calculate time range for the log file
+        start_time = datetime.datetime.strptime(start_time_str, "%Y-%m-%d_%H%M%S")
+        end_time = datetime.datetime.fromtimestamp(self.rolloverAt)
+        
+        # Format the new filename with time range
+        start_str = start_time.strftime("%d_%H%M")
+        end_str = end_time.strftime("%d_%H%M")
+        new_name = "{}-[{}-to-{}].log".format(base_noext, start_str, end_str)
+        
+        return os.path.join(base_dir, new_name)
+
+
+##############################################################################
+# LISTENER SIDE
+##############################################################################
+
+class NoiseFilter(logging.Filter):
+    """ Filter out noisy messages from specific modules.
+    """
+    def __init__(self):
+        super(NoiseFilter, self).__init__()
+        self.noisy_modules = {'font_manager', 'ticker', 'transport', 'sftp', 'dvrip', 'channel', 'cmd'}
+
+    def filter(self, record):
+        if record.levelno in (logging.DEBUG, logging.INFO) and record.module in self.noisy_modules:
+            return False
+        return True
+
+
+def _listener_configurer(config, log_file_prefix, safedir):
+    """ Set up the root logger with a TimedRotatingFileHandler. 
+    This runs in the separate listener process.
+    """
+    # Set DEBUG on root logger - this is the master filter for all handlers
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)
+
+    # Set up log directory
+    log_path = os.path.join(config.data_dir, config.log_dir)
+    mkdirP(log_path)
+
+    # Use safedir if main path isn't writable
+    if safedir:
+        if not os.path.exists(log_path) or not os.access(log_path, os.W_OK):
+            root_logger.debug("Log directory not writable, using safedir: %s", safedir)
+            log_path = safedir
+            mkdirP(log_path)
+
+    # Generate log filename with timestamp
+    start_time_str = RmsDateTime.utcnow().strftime("%Y-%m-%d_%H%M%S")
+    logfile_name = "{}log_{}_{}.log".format(log_file_prefix, config.stationID, start_time_str)
+    full_path = os.path.join(log_path, logfile_name)
+
+    # Initialize file and console handlers
+    handler = CustomHandler(
+        station_id=config.stationID,
+        start_time_str=start_time_str,
+        filename=full_path,
+        when='H',
+        interval=12,
+        utc=True
+    )
+    console = logging.StreamHandler(sys.stdout)
+
+    # Add noise filters to both handlers
+    handler.addFilter(NoiseFilter())
+    console.addFilter(NoiseFilter())
+
+    # Set common formatter for both handlers
+    formatter = logging.Formatter(
+        fmt='%(asctime)s-%(levelname)s-%(module)s-line: %(message)s',
+        datefmt='%Y/%m/%d %H:%M:%S'
+    )
     handler.setFormatter(formatter)
-    log.addHandler(handler)
+    console.setFormatter(formatter)
 
-    # Stream all logs to stdout as well
-    ch = logging.StreamHandler(sys.stdout)
-    ch.setLevel(logging.DEBUG)
-    formatter = logging.Formatter(fmt='%(asctime)s-%(levelname)s-%(module)s-line:%(lineno)d - %(message)s', 
-        datefmt='%Y/%m/%d %H:%M:%S')
-    ch.setFormatter(formatter)
-    log.addHandler(ch)
+    # Configure root logger with both handlers
+    root_logger.handlers = []
+    root_logger.addHandler(handler)
+    root_logger.addHandler(console)
+    root_logger.propagate = False
+    root_logger.debug("Log listener configured. Current file: %s", full_path)
 
-    # Optionally redirect stdout to the logger
+
+def _listener_process(queue, config, log_file_prefix, safedir):
+    """ Target function for the logging listener process.
+    Ignores SIGINT and runs QueueListener for async logging.
+    """
+    import signal
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+    # Configure the listener process
+    _listener_configurer(config, log_file_prefix, safedir)
+
+    # Start queue listener
+    root_logger = logging.getLogger()
+    queue_listener = logging.handlers.QueueListener(queue, *root_logger.handlers)
+    queue_listener.start()
+
+    # Keep the process alive
+    while True:
+        time.sleep(60)
+
+
+##############################################################################
+# PUBLIC ENTRY POINT
+##############################################################################
+
+def initLogging(config, log_file_prefix="", safedir=None, level=logging.DEBUG):
+    """ Called once in the MAIN process (e.g. StartCapture.py). 
+    Spawns the listener process and configures logging.
+
+    Arguments:
+        config: [object] RMS config object
+        log_file_prefix: [str] Optional prefix for log filenames
+        safedir: [str] Fallback directory if normal log_path is unwritable
+        level: [int] Logging level for the main logger (defaults to DEBUG)
+    """
+    global logging_queue, listener_process, logger_initialized
+    with init_lock:
+        if logger_initialized:
+            return
+
+    # Create logging infrastructure
+    logging_queue = multiprocessing.Queue(-1)
+    listener_process = multiprocessing.Process(
+        target=_listener_process,
+        args=(logging_queue, config, log_file_prefix, safedir),
+        daemon=True
+    )
+    listener_process.start()
+
+    # Set DEBUG on root logger in main process
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG) # Keep root permissive
+
+    # Configure queue handler for main process
+    qh = logging.handlers.QueueHandler(logging_queue)
+    qh.setFormatter(logging.Formatter('%(message)s'))
+    
+    # Set up root logger with queue handler
+    root.handlers = []
+    root.addHandler(qh)
+
+    # Redirect standard streams
+    sys.stderr = LoggerWriter(root, logging.WARNING)
     if config.log_stdout:
-        sys.stdout = LoggerWriter(log, logging.INFO)
+        sys.stdout = LoggerWriter(root, logging.INFO)
 
-    # Redirect stderr to the logger
-    sys.stderr = LoggerWriter(log, logging.INFO)
+    root.propagate = False
+    logger_initialized = True
+    root.debug("initLogging completed; queue listener started.")
+    atexit.register(shutdownLogging)
 
-    # Set up GStreamer logging
-    if GST_IMPORTED:
-        Gst.init(None)
-        Gst.debug_remove_log_function(None)
-        Gst.debug_add_log_function(gstDebugLogger, None)
-        Gst.debug_set_default_threshold(Gst.DebugLevel.WARNING)
-        log.info("GStreamer logging successfully initialized")
+
+def shutdownLogging():
+    """ Handles cleanup of logging resources.
+    Stops the listener process and resets the logging state.
+    """
+    global logging_queue, listener_process, logger_initialized
+    with init_lock:
+        if not logger_initialized:
+            return
+        
+        # Stop the listener process
+        if listener_process and listener_process.is_alive():
+            logging_queue.put(None)  # Sentinel
+            listener_process.join(timeout=5)
+            if listener_process.is_alive():
+                listener_process.terminate()
+        
+        logger_initialized = False
+
+
+def getLogger(name=None, level=None, stdout=False):
+    """ Get a logger instance.
+    
+    Arguments:
+        name: [str] Logger name. If None, returns "logger"
+        level: [str] Logging level to set ("DEBUG","INFO","WARNING","ERROR","CRITICAL")
+        stdout: [bool] If True, adds a StreamHandler to stdout
+        
+    Return:
+        [Logger] Logger instance
+    """
+    logger = logging.getLogger(name if name else "logger")
+    
+    if level is not None:
+        level_map = {
+            "DEBUG": logging.DEBUG,
+            "INFO": logging.INFO,
+            "WARNING": logging.WARNING,
+            "ERROR": logging.ERROR,
+            "CRITICAL": logging.CRITICAL
+        }
+        logger.setLevel(level_map[level.upper()])
+
+    # Add stdout handler if requested
+    if stdout:
+        out_hdlr = logging.StreamHandler(sys.stdout)
+        logger.addHandler(out_hdlr)
+
+    return logger

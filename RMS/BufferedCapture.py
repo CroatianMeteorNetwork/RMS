@@ -21,12 +21,8 @@ import sys
 import ctypes
 import traceback
 
-# Set GStreamer debug level. Use '2' for warnings in production environments.
-os.environ['GST_DEBUG'] = '3'
-
 import re
 import time
-import logging
 import datetime
 import os.path
 from multiprocessing import Process, Event, Value, Array
@@ -42,11 +38,10 @@ from RMS.Routines.GstreamerCapture import GstVideoFile
 from RMS.Formats.ObservationSummary import getObsDBConn, addObsParam
 from RMS.RawFrameSave import RawFrameSaver
 from RMS.Misc import RmsDateTime, mkdirP
+from RMS.Logger import getLogger, gstDebugLogger
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
-# Prevent infinite GStreamer logging propagation
-log.propagate = False
+log = getLogger("logger")
 
 try:
     # py3
@@ -1288,7 +1283,27 @@ class BufferedCapture(Process):
         """
         try:
             log.debug("Initializing process-specific resources...")
-            
+
+            # GStreamer debug setup
+            if GST_IMPORTED:
+                try:
+                    # Activate debug system
+                    Gst.debug_set_active(True)
+
+                    # Set debug level from environment or default given value
+                    # Set to 2 for production, Level 4 and above are overwhelming the log
+                    # If higher verbosity is needed, disable writing to the log below.
+                    debug_env = os.environ.get("GST_DEBUG", "2")
+                    Gst.debug_set_default_threshold(int(debug_env))
+
+                    # Comment out if higher thanlogging level 3 is needed
+                    Gst.debug_add_log_function(gstDebugLogger, None)
+
+                    log.info("GStreamer logging initialized at level: {}".format(debug_env))
+
+                except Exception as e:
+                    log.error("Failed to initialize GStreamer logging: {}".format(e))
+
             # Initialize process-specific variables
             self.media_backend_override = False
             self.video_device_type = "cv2"
@@ -1768,7 +1783,7 @@ if __name__ == "__main__":
     initLogging(config)
 
     # Get the logger handle
-    log = logging.getLogger("logger")
+    log = getLogger("logger")
 
     # Print the kind of media backend
     print("Station code: {}".format(config.stationID))

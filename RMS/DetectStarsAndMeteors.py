@@ -19,7 +19,6 @@ from __future__ import print_function, division, absolute_import
 import sys
 import os
 import time
-import logging
 import argparse
 
 import numpy as np
@@ -34,11 +33,12 @@ from RMS.ExtractStars import extractStarsFF
 from RMS.Detection import detectMeteors
 from RMS.DetectionTools import loadImageCalibration
 from RMS.QueuedPool import QueuedPool
+from RMS.Logger import getLogger
 from RMS.Misc import RmsDateTime
 
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None, dark=None, mask=None):
@@ -314,7 +314,7 @@ if __name__ == "__main__":
     from RMS.Logger import initLogging
     initLogging(config, 'detection_')
 
-    log = logging.getLogger("logger")
+    log = getLogger("logger")
 
     ######
 

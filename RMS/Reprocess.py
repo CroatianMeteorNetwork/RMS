@@ -8,7 +8,6 @@ import os
 import sys
 import traceback
 import argparse
-import logging
 import random
 import glob
 
@@ -24,6 +23,7 @@ from RMS.Formats.FFfile import validFFName
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
 from RMS.Formats.Platepar import Platepar
 from RMS.Formats import CALSTARS
+from RMS.Logger import getLogger
 from RMS.MLFilter import filterFTPdetectinfoML
 from RMS.UploadManager import UploadManager
 from RMS.Routines.Image import saveImage
@@ -45,7 +45,7 @@ from RMS.Misc import RmsDateTime
 
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 
@@ -728,7 +728,7 @@ if __name__ == "__main__":
     from RMS.Logger import initLogging
     initLogging(config, 'reprocess_')
 
-    log = logging.getLogger("logger")
+    log = getLogger("logger")
 
     ######
 

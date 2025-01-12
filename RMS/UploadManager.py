@@ -8,7 +8,6 @@ import ctypes
 import multiprocessing
 import time
 import datetime
-import logging
 
 import binascii
 import paramiko
@@ -22,7 +21,7 @@ except:
     import queue as Queue
 
 
-
+from RMS.Logger import getLogger
 from RMS.Misc import mkdirP, RmsDateTime
 
 # Map FileNotFoundError to IOError in Python 2 as it does not exist
@@ -30,7 +29,7 @@ if sys.version_info[0] < 3:
     FileNotFoundError = IOError
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 def _agentAuth(transport, username, rsa_private_key):

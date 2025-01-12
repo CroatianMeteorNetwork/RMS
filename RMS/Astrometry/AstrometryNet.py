@@ -2,7 +2,6 @@
 from __future__ import print_function, division, absolute_import
 
 import os
-import logging
 import inspect
 
 import numpy as np
@@ -12,6 +11,7 @@ from astropy.wcs import WCS
 from RMS.ExtractStars import extractStarsAuto
 from RMS.Formats.FFfile import read as readFF
 from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
+from RMS.Logger import getLogger
 
 try:
     import astrometry
@@ -144,7 +144,7 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
 
     # Print progress info
     if verbose:
-        logging.getLogger().setLevel(logging.INFO)
+        getLogger(level="INFO")
 
     # Init solution parameters
     solution_parameters = astrometry.SolutionParameters(

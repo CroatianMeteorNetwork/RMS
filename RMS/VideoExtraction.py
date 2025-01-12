@@ -18,19 +18,19 @@
 
 import math
 import time
-import logging
 from multiprocessing import Process, Event
 
 import numpy as np
 
 from RMS.DetectionTools import loadImageCalibration, binImageCalibration
+from RMS.Logger import getLogger
 from RMS.Routines import Grouping3D
 from RMS.Routines.MaskImage import maskImage
 from RMS.Formats import FRbin
 
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 class Extractor(Process):

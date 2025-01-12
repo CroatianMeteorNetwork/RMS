@@ -2,12 +2,12 @@ from __future__ import print_function, division, absolute_import
 
 import time
 import ephem
-import logging
 import Utils.CameraControl as cc
+from RMS.Logger import getLogger
 from RMS.Misc import RmsDateTime
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 # Function to switch capture between day and night modes
 def captureModeSwitcher(config, daytime_mode):

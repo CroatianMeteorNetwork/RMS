@@ -6,7 +6,6 @@ import os
 import sys
 import shutil
 import errno
-import logging
 import subprocess
 import random
 import re
@@ -32,12 +31,14 @@ from matplotlib import scale as mscale
 from matplotlib import transforms as mtransforms
 from matplotlib.ticker import FixedLocator
 
+from RMS.Logger import getLogger
+
 # Map FileNotFoundError to IOError in Python 2 as it does not exist
 if sys.version_info[0] < 3:
     FileNotFoundError = IOError
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 def mkdirP(path):
