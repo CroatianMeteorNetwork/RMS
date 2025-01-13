@@ -3,6 +3,7 @@
 from __future__ import print_function, division, absolute_import
 
 import os
+
 import zlib
 
 import numpy as np
@@ -135,7 +136,7 @@ def loadGaiaCatalog(dir_path, file_name, lim_mag=None):
     return results
 
 
-
+@memoizeSingle
 def loadGMNStarCatalog(file_path, years_from_J2000=0, lim_mag=None, mag_band_ratios=None):
     """
     Reads in the GMN Star Catalog from a compressed binary file, applying proper motion correction,
@@ -156,86 +157,102 @@ def loadGMNStarCatalog(file_path, years_from_J2000=0, lim_mag=None, mag_band_rat
         mag_band_string: [str] A string describing the magnitude band of the catalog.
         mag_band_ratios: [list] A list of BVRI magnitude band ratios for the given catalog.
     """
+    # Step 1: Cache the catalog data to avoid repeated decompression
+    if not hasattr(loadGMNStarCatalog, "_catalog_data"):
+        # Define the data structure for the catalog
+        data_types = [
+            ('designation', 'S30'),
+            ('ra', 'f8'),
+            ('dec', 'f8'),
+            ('pmra', 'f8'),
+            ('pmdec', 'f8'),
+            ('phot_g_mean_mag', 'f4'),
+            ('phot_bp_mean_mag', 'f4'),
+            ('phot_rp_mean_mag', 'f4'),
+            ('classprob_dsc_specmod_star', 'f4'),
+            ('classprob_dsc_specmod_binarystar', 'f4'),
+            ('spectraltype_esphs', 'S8'),
+            ('B', 'f4'),
+            ('V', 'f4'),
+            ('R', 'f4'),
+            ('Ic', 'f4'),
+            ('oid', 'i4'),
+            ('preferred_name', 'S30'),
+            ('Simbad_OType', 'S30')
+        ]
 
-    # Define data types for binary storage
-    data_types = [
-        ('designation', 'S30'),
-        ('ra', 'f8'),
-        ('dec', 'f8'),
-        ('pmra', 'f8'),
-        ('pmdec', 'f8'),
-        ('phot_g_mean_mag', 'f4'),
-        ('phot_bp_mean_mag', 'f4'),
-        ('phot_rp_mean_mag', 'f4'),
-        ('classprob_dsc_specmod_star', 'f4'),
-        ('classprob_dsc_specmod_binarystar', 'f4'),
-        ('spectraltype_esphs', 'S8'),
-        ('B', 'f4'),
-        ('V', 'f4'),
-        ('R', 'f4'),
-        ('Ic', 'f4'),
-        ('oid', 'i4'),
-        ('preferred_name', 'S30'),
-        ('Simbad_OType', 'S30')
-    ]
+        with open(file_path, 'rb') as fid:
+            # Read the catalog header
+            declared_header_size = int(np.fromfile(fid, dtype=np.uint32, count=1)[0])
+            num_rows = int(np.fromfile(fid, dtype=np.uint32, count=1)[0])
+            num_columns = int(np.fromfile(fid, dtype=np.uint32, count=1)[0])
+            fid.read(declared_header_size - 12)  # Skip column names
 
-    with open(file_path, 'rb') as fid:
+            # Read and decompress the catalog data
+            compressed_data = fid.read()
+            decompressed_data = zlib.decompress(compressed_data)
+            catalog_data = np.frombuffer(decompressed_data, dtype=data_types, count=num_rows)
 
-        # Step 1: Read the header
-        declared_header_size = int(np.fromfile(fid, dtype=np.uint32, count=1)[0])
-        num_rows = int(np.fromfile(fid, dtype=np.uint32, count=1)[0])
-        num_columns = int(np.fromfile(fid, dtype=np.uint32, count=1)[0])
-        fid.read(declared_header_size - 12)  # Skip column names
+        # Cache the catalog data for future use
+        loadGMNStarCatalog._catalog_data = catalog_data
+    else:
+        catalog_data = loadGMNStarCatalog._catalog_data
 
-        # Step 2: Read and decompress the data
-        compressed_data = fid.read()
-        decompressed_data = zlib.decompress(compressed_data)
-        catalog_data = np.frombuffer(decompressed_data, dtype=data_types, count=num_rows)
+    # Step 2: Filter stars based on limiting magnitude
+    if lim_mag is not None:
+        if mag_band_ratios is not None:
+            # Compute synthetic magnitudes if band ratios are provided
+            total_ratio = sum(mag_band_ratios)
+            rb, rv, rr, ri = [x / total_ratio for x in mag_band_ratios]
+            synthetic_mag = (
+                rb * catalog_data['B'] +
+                rv * catalog_data['V'] +
+                rr * catalog_data['R'] +
+                ri * catalog_data['Ic']
+            )
+            mag_mask = synthetic_mag <= lim_mag
+        else:
+            # Use V band magnitude if no band ratios are provided
+            mag_mask = catalog_data['V'] <= lim_mag
+
+        # Apply the magnitude filter
+        catalog_data = catalog_data[mag_mask]
 
     # Step 3: Apply proper motion correction
+    mas_to_deg = 1 / (3.6e6)  # Conversion factor for mas/yr to degrees/year
     
-    # First convert to deg since our proper motions are in mas/yr
-    mas_to_deg = 1/(3.6e6) # Conversion factor for mas/yr to degrees/year
-    
-    # GMN catalog is relative to the J2015.5 epoch (from GAIA DR3)
-    time_elapsed = years_from_J2000 - 15.5
+    # GMN catalog is relative to the J2016 epoch (from GAIA DR3)
+    time_elapsed = years_from_J2000 - 16
 
-    # If years_from_j2000 = 0 then no correction is applied
-    corrected_ra  = catalog_data['ra']  + catalog_data['pmra']*time_elapsed*mas_to_deg
-    corrected_dec = catalog_data['dec'] + catalog_data['pmdec']*time_elapsed*mas_to_deg  
+    # Correct the RA and Dec relative to the years_from_J2000 argument
+    corrected_ra = catalog_data['ra'] + catalog_data['pmra'] * time_elapsed * mas_to_deg
+    corrected_dec = catalog_data['dec'] + catalog_data['pmdec'] * time_elapsed * mas_to_deg
 
-    # Step 4: Compute synthetic magnitudes if mag_band_ratios are provided
+    # Step 4: Compute synthetic magnitudes if required
     if mag_band_ratios is not None:
-        if len(mag_band_ratios) != 4:
-            raise ValueError("mag_band_ratios must be a list of four values [B, V, R, I].")
-        
-        total_ratio = sum(mag_band_ratios)
-        rb, rv, rr, ri = [x/total_ratio for x in mag_band_ratios]
         synthetic_mag = (
-            rb*catalog_data['B'] +
-            rv*catalog_data['V'] +
-            rr*catalog_data['R'] +
-            ri*catalog_data['Ic']
+            rb * catalog_data['B'] +
+            rv * catalog_data['V'] +
+            rr * catalog_data['R'] +
+            ri * catalog_data['Ic']
         )
-        mask = synthetic_mag <= lim_mag if lim_mag is not None else np.ones(len(catalog_data), dtype=bool)
     else:
-        mask = catalog_data['V'] <= lim_mag if lim_mag is not None else np.ones(len(catalog_data), dtype=bool)
+        synthetic_mag = catalog_data['V']
 
-    # Step 5: Filter and combine the data into the output format
-    filtered_data = np.zeros((np.sum(mask), 3), dtype=np.float64)
-    filtered_data[:, 0] = corrected_ra[mask]
-    filtered_data[:, 1] = corrected_dec[mask]
-    filtered_data[:, 2] = synthetic_mag[mask] if mag_band_ratios is not None else catalog_data['V'][mask]
+    # Step 5: Prepare the filtered data for output
+    filtered_data = np.zeros((len(catalog_data), 3), dtype=np.float64)
+    filtered_data[:, 0] = corrected_ra  # RA
+    filtered_data[:, 1] = corrected_dec  # Dec
+    filtered_data[:, 2] = synthetic_mag  # Magnitude
 
-    # Step 6: Sort by descending declination
+    # Step 6: Sort the filtered data by descending declination
     filtered_data = filtered_data[np.argsort(filtered_data[:, 1])[::-1]]
 
     # Step 7: Generate the magnitude band string
-    mag_band_string = "GMN {:.2f}B + {:.2f}V + {:.2f}R + {:.2f}I".format(*mag_band_ratios)
+    mag_band_string = "GMN {:.2f}B + {:.2f}V + {:.2f}R + {:.2f}I".format(*(mag_band_ratios or [0.0, 1.0, 0.0, 0.0]))
 
-    return filtered_data, mag_band_string, tuple(mag_band_ratios)
-
-
+    # Step 8: Return the filtered data, magnitude band string, and band ratios
+    return filtered_data, mag_band_string, tuple(mag_band_ratios or [0.0, 1.0, 0.0, 0.0])
 
 
 def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None, mag_band_ratios=None):
@@ -278,12 +295,16 @@ def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None, mag_b
     if 'gaia' in file_name.lower():
         return loadGaiaCatalog(dir_path, file_name, lim_mag=lim_mag), 'GAIA G band', [0.45, 0.70, 0.72, 0.50]
 
-    # Load the GMN start catalog
+    # Use the GMN star catalog
     if "GMN_StarCatalog".lower() in file_name.lower():
+        # Ensure mag_band_ratios is a tuple for caching
+        if mag_band_ratios is not None and isinstance(mag_band_ratios, list):
+            mag_band_ratios = tuple(mag_band_ratios)
+
         return loadGMNStarCatalog(
             os.path.join(dir_path, file_name), 
             years_from_J2000=years_from_J2000, lim_mag=lim_mag, mag_band_ratios=mag_band_ratios
-            )
+        )
 
 
     ### Load the SKY2000 catalog ###
