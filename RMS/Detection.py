@@ -1868,12 +1868,22 @@ if __name__ == "__main__":
             if cml_args.debug:
                 results_file.write(str(np.array(res_centroids)) + '\n')
 
-            # Construct FF file name if it's not available
+            # For FF files, take the existing FF name, encoding the time as FF + pick_frame
             if img_handle.input_type == 'ff':
                 ff_file_name = img_handle.name()
 
+            # For non-FF inputs, construct the FF name from the station ID and the first pick time
+            # To keep an accurate time, reset the frames so that the first pick is at frame 0
             else:
+
+                # Construct the FF file name from the time of the first pick
                 ff_file_name = FFfile.constructFFName(config.stationID, first_pick_time)
+
+                # Reset the frame numbers so that the first pick is at frame 0 
+                # frame[i] - int(frame[0]) to preserve the rolling shutter correction encoded as the 
+                #   fractional part of the frame number
+                centroids[:,0] -= int(centroids[0,0])
+
 
             # Append to the results list
             results_list.append([ff_file_name, meteor_No, rho, theta, centroids])
