@@ -21,7 +21,6 @@ import time
 import sys
 import os
 import argparse
-import logging
 
 import cv2
 import matplotlib.pyplot as plt
@@ -35,6 +34,7 @@ import RMS.ConfigReader as cr
 from RMS.Formats import FFfile
 from RMS.Formats import CALSTARS
 from RMS.DetectionTools import loadImageCalibration
+from RMS.Logger import getLogger
 from RMS.Routines import MaskImage
 from RMS.Routines import Image
 from RMS.QueuedPool import QueuedPool
@@ -46,7 +46,7 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 

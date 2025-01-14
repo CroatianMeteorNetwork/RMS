@@ -8,7 +8,6 @@ import os
 import sys
 import traceback
 import argparse
-import logging
 import random
 import glob
 
@@ -24,6 +23,7 @@ from RMS.Formats.FFfile import validFFName
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
 from RMS.Formats.Platepar import Platepar
 from RMS.Formats import CALSTARS
+from RMS.Logger import getLogger
 from RMS.MLFilter import filterFTPdetectinfoML
 from RMS.UploadManager import UploadManager
 from RMS.Routines.Image import saveImage
@@ -45,7 +45,7 @@ from RMS.Misc import RmsDateTime
 
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 
@@ -94,9 +94,8 @@ def getPlatepar(config, night_data_dir):
         log.info('No platepar file found!')
 
 
+    # Make sure that the station code from the config and the platepar match
     if platepar is not None:
-        
-        # Make sure that the station code from the config and the platepar match
         if platepar.station_code is not None:
             if config.stationID != platepar.station_code:
 
@@ -114,7 +113,8 @@ def getPlatepar(config, night_data_dir):
                 platepar.elev = config.elevation
 
         
-        # Make sure the config and the platepar FOV are within a factor of two
+    # Make sure the config and the platepar FOV are within a factor of two
+    if platepar is not None:
         if (platepar.fov_h is not None) and (platepar.fov_v is not None):
             
             # Calculate the diagonal FOV for both the platepar and the config
@@ -728,7 +728,7 @@ if __name__ == "__main__":
     from RMS.Logger import initLogging
     initLogging(config, 'reprocess_')
 
-    log = logging.getLogger("logger")
+    log = getLogger("logger")
 
     ######
 

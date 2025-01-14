@@ -21,12 +21,8 @@ import sys
 import ctypes
 import traceback
 
-# Set GStreamer debug level. Use '2' for warnings in production environments.
-os.environ['GST_DEBUG'] = '3'
-
 import re
 import time
-import logging
 import datetime
 import copy
 import os.path
@@ -44,11 +40,10 @@ from RMS.Formats.ObservationSummary import getObsDBConn, addObsParam
 from RMS.RawFrameSave import RawFrameSaver
 from RMS.Misc import RmsDateTime, mkdirP
 from RMS.Formats import FTfile, FTStruct
+from RMS.Logger import getLogger, gstDebugLogger
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
-# Prevent infinite GStreamer logging propagation
-log.propagate = False
+log = getLogger("logger")
 
 try:
     # py3
@@ -844,7 +839,7 @@ class BufferedCapture(Process):
             # The splitmuxsink will save the segments to video_file_dir
             # The splitmuxsink will use the matroskamux muxer
             # The splitmuxsink will use the format-location signal to name and move each segment
-            # The data chuncks are limited with queue2 (150 frames, 2MB, 5 seconds, whichever comes first)
+            # queue2 smooths out the writes, but doesn't wait until the buffers fill up for writing
             storage_branch = (
                 "t. ! queue2 max-size-buffers=150 max-size-bytes=2097152 max-size-time=5000000000 ! "
                 "splitmuxsink name=splitmuxsink0 max-size-time={:d} muxer-factory=matroskamux"
@@ -1290,7 +1285,26 @@ class BufferedCapture(Process):
         """
         try:
             log.debug("Initializing process-specific resources...")
-            
+
+            # GStreamer debug setup
+            if GST_IMPORTED:
+                try:
+                    # Activate debug system
+                    Gst.debug_set_active(True)
+
+                    # Set debug level from environment or default given value
+                    # The Gst debug level is set in Logger.py
+                    debug_env = os.environ.get("GST_DEBUG", "2")
+                    Gst.debug_set_default_threshold(int(debug_env))
+
+                    # Comment out if higher than logging level 3 is needed
+                    Gst.debug_add_log_function(gstDebugLogger, None)
+
+                    log.info("GStreamer logging initialized at level: {}".format(debug_env))
+
+                except Exception as e:
+                    log.error("Failed to initialize GStreamer logging: {}".format(e))
+
             # Initialize process-specific variables
             self.media_backend_override = False
             self.video_device_type = "cv2"
@@ -1809,7 +1823,7 @@ if __name__ == "__main__":
     initLogging(config)
 
     # Get the logger handle
-    log = logging.getLogger("logger")
+    log = getLogger("logger")
 
     # Print the kind of media backend
     print("Station code: {}".format(config.stationID))

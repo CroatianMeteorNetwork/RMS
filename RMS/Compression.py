@@ -20,7 +20,6 @@ import sys
 import traceback
 import time
 import datetime
-import logging
 import multiprocessing
 from math import floor
 import numpy as np
@@ -30,6 +29,7 @@ import cv2
 from RMS.VideoExtraction import Extractor
 from RMS.Formats import FFfile, FFStruct
 from RMS.Formats import FieldIntensities
+from RMS.Logger import getLogger
 from RMS.Routines.Image import saveImage
 
 # Import Cython functions
@@ -39,7 +39,7 @@ from RMS.CompressionCy import compressFrames
 
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 class Compressor(multiprocessing.Process):

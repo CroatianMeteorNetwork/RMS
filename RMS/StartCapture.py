@@ -26,7 +26,6 @@ import random
 import signal
 import shutil
 import ctypes
-import logging
 import threading
 import multiprocessing
 import traceback
@@ -39,7 +38,7 @@ import numpy as np
 from Utils.LiveViewer import LiveViewer
 
 import RMS.ConfigReader as cr
-from RMS.Logger import initLogging
+from RMS.Logger import initLogging, getLogger
 from RMS.BufferedCapture import BufferedCapture
 from RMS.CaptureDuration import captureDuration
 from RMS.CaptureModeSwitcher import captureModeSwitcher
@@ -935,7 +934,7 @@ if __name__ == "__main__":
     initLogging(config)
 
     # Get the logger handle
-    log = logging.getLogger("logger")
+    log = getLogger("logger")
 
 
     log.info("Program start")
@@ -1131,14 +1130,16 @@ if __name__ == "__main__":
 
 
                 ### Stop reboot tries if it's time to capture ###
-                if isinstance(start_time, bool):
-                    if start_time:
-                        break
+                if (not config.continuous_capture):
+                    
+                    if isinstance(start_time, bool):
+                        if start_time:
+                            break
 
-                time_now = RmsDateTime.utcnow()
-                waiting_time = start_time - time_now
-                if waiting_time.total_seconds() <= 0:
-                    break
+                    time_now = RmsDateTime.utcnow()
+                    waiting_time = start_time - time_now
+                    if waiting_time.total_seconds() <= 0:
+                        break
 
                 ### ###
 
