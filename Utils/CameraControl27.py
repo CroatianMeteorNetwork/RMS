@@ -14,7 +14,6 @@
 
 from __future__ import print_function
 
-import logging
 import threading
 from socket import socket, AF_INET, SOCK_STREAM, SOCK_DGRAM
 import json
@@ -22,6 +21,9 @@ import time
 import sys 
 import hashlib
 import struct
+
+from RMS.Logger import getLogger
+
 
 if sys.version_info.major > 2:
     print('use Utils.CameraControl with Python3')
@@ -37,7 +39,7 @@ class DVRIPCam(object):
     }
 
     def __init__(self, ip, **kwargs):
-        self.logger = logging.getLogger(__name__)
+        self.logger = getLogger(__name__)
         self.ip = ip
         self.user = kwargs.get("user", "admin")
         hash_pass = kwargs.get("hash_pass")

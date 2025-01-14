@@ -19,20 +19,19 @@ These are the default settings hard coded into ConfigReader.py
 
 from __future__ import print_function, division, absolute_import
 
-import logging
 import os
 from os.path import exists as file_exists
 
 import paramiko
 
-
+from RMS.Logger import getLogger
 from RMS.UploadManager import _agentAuth, existsRemoteDirectory, createRemoteDirectory
 from RMS.Misc import RmsDateTime
 
 
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 

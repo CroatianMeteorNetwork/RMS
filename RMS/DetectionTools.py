@@ -4,13 +4,13 @@ from __future__ import print_function, division, absolute_import
 
 from time import time
 import os
-import logging
 
 import numpy as np
 import matplotlib.pyplot as plt
 
 
 from RMS.Formats.FFfile import selectFFFrames
+from RMS.Logger import getLogger
 from RMS.Routines import Image
 from RMS.Routines import MaskImage
 from RMS.Math import vectNorm
@@ -22,7 +22,7 @@ import RMS.Routines.MorphCy as morph
 
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):

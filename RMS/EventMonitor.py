@@ -27,7 +27,6 @@ import dateutil
 import glob
 import sqlite3
 import multiprocessing
-import logging
 import copy
 import uuid
 import random
@@ -58,6 +57,7 @@ import RMS.ConfigReader as cr
 
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector
 from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt
+from RMS.Logger import getLogger
 from RMS.Math import angularSeparationVect
 from RMS.Formats.FFfile import convertFRNameToFF
 from RMS.Formats.Platepar import Platepar
@@ -74,7 +74,7 @@ import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz
 
-log = logging.getLogger("logger")
+log = getLogger("logger")
 EM_RAISE = False
 
 """
