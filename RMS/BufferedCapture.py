@@ -1517,8 +1517,8 @@ class BufferedCapture(Process):
                     and self.video_file is None
                     and total_frames % self.config.frame_save_interval_count == 0):
 
-                    # ensure only one channel when in nightmode
-                    if (self.daytime_mode is None) or (not self.daytime_mode.value):
+                    # avoid storing duplicate data
+                    if self.convert_to_gray:
                         frame = convertToGrayscale(frame)
 
                     # In case of a mode switch, the frame shape might change (color or grayscale)
