@@ -304,7 +304,7 @@ def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None, mag_b
     if "GMN_StarCatalog".lower() in file_name.lower():
 
         # Define catalog names for the bright and faint stars
-        gmn_starcat_lm8 = "GMN_StarCatalog_LM8.0.bin"
+        gmn_starcat_lm9 = "GMN_StarCatalog_LM9.0.bin"
         gmn_starcat_lm12 = "GMN_StarCatalog_LM12.5.bin"
 
         # Check the existence of the LM 12.5 catalog file
@@ -315,12 +315,12 @@ def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None, mag_b
             mag_band_ratios = tuple(mag_band_ratios)
 
         # Determine which catalog file to use based on the limiting magnitude
-        if (lim_mag is not None) and (lim_mag <= 8.0):
-            catalog_to_load = gmn_starcat_lm8
+        if (lim_mag is not None) and (lim_mag <= 9.0):
+            catalog_to_load = gmn_starcat_lm9
 
         else:
 
-            # If the full catalog is missing, post a notification and load the LM8.0 catalog
+            # If the full catalog is missing, post a notification and load the LM9.0 catalog
             if gmn_starcat_lm12_exists:
 
                 catalog_to_load = gmn_starcat_lm12
@@ -354,9 +354,9 @@ def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None, mag_b
 
                     print(
                         "Error downloading the full catalog: ", e, "\n"
-                        "Loading the LM+8.0 catalog instead. "
+                        "Loading the LM+9.0 catalog instead. "
                     )
-                    catalog_to_load = gmn_starcat_lm8
+                    catalog_to_load = gmn_starcat_lm9
 
 
         file_path = os.path.join(dir_path, catalog_to_load)
