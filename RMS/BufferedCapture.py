@@ -495,8 +495,8 @@ class BufferedCapture(Process):
                     log.info("GStreamer Buffer did not contain a frame.")
                     return False, None, None
 
-                # Handling for grayscale conversion
-                frame = self.handleGrayscaleConversion(map_info)
+                # Cast to uint8 if necessary
+                frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
 
                 # Smooth raw pts and calculate actual timestamp
                 smoothed_pts = self.smoothPTS(gst_timestamp_ns)
@@ -665,23 +665,6 @@ class BufferedCapture(Process):
             return True
         
         return False
-
-    
-    def handleGrayscaleConversion(self, map_info):
-        """Handle conversion of frame to grayscale if necessary."""
-
-        # If the frame is already grayscale, return it as is
-        if len(self.frame_shape) == 2:
-            return np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
-
-        if (self.daytime_mode is not None) and (self.daytime_mode.value):
-            return np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
-
-        # Convert to grayscale by selecting a specific channel
-        bgr_frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
-        gray_frame = bgr_frame[:, :, 0]  # Assuming the blue channel for grayscale
-        return gray_frame
-
 
 
     def moveSegment(self, splitmuxsink, fragment_id):
