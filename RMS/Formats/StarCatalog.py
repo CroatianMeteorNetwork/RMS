@@ -337,7 +337,7 @@ def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None, mag_b
                 try:
                     response = requests.get(gmn_starcat_lm12_url, stream=True)
                     total_size = int(response.headers.get('content-length', 0))
-                    block_size = 1024  # 1 Kilobyte
+                    block_size = 1024*1024  # 1 MB
                     downloaded_size = 0
 
                     with open(os.path.join(dir_path, gmn_starcat_lm12), 'wb') as f:
