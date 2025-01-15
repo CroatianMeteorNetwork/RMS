@@ -255,6 +255,11 @@ def loadGMNStarCatalog(file_path, years_from_J2000=0, lim_mag=None, mag_band_rat
     return filtered_data, mag_band_string, tuple(mag_band_ratios or [0.0, 1.0, 0.0, 0.0])
 
 
+
+# Global variables to track the loaded GMN catalog state 
+previous_catalog_loaded = None
+full_catalog_checked = False
+
 def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None, mag_band_ratios=None):
     """ Import the star catalog into a numpy array.
     
@@ -297,15 +302,53 @@ def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None, mag_b
 
     # Use the GMN star catalog
     if "GMN_StarCatalog".lower() in file_name.lower():
+        # Only load the global variables if we're using the GMN Star Catalog.
+        global previous_catalog_loaded, full_catalog_checked
+
         # Ensure mag_band_ratios is a tuple for caching
         if mag_band_ratios is not None and isinstance(mag_band_ratios, list):
             mag_band_ratios = tuple(mag_band_ratios)
 
-        return loadGMNStarCatalog(
-            os.path.join(dir_path, file_name), 
-            years_from_J2000=years_from_J2000, lim_mag=lim_mag, mag_band_ratios=mag_band_ratios
-        )
+        # Determine which catalog file to use based on the limiting magnitude
+        if lim_mag is not None and lim_mag <= 8.0:
+            catalog_to_load = "GMN_StarCatalog_LM+8.bin"
+        else:
+            catalog_to_load = "GMN_StarCatalog_LM+12.5.bin"
 
+        file_path = os.path.join(dir_path, catalog_to_load)
+
+        try:
+            # Only check for the full catalog if lim_mag > 8.0+ss
+            if lim_mag is not None and lim_mag > 8.0 and not full_catalog_checked:
+                if not os.path.exists(file_path):
+                    raise FileNotFoundError(
+                        f"The full catalog (LM+12.5) is missing. Please download it from the GMN server "
+                        f"and place it into the 'RMS\\Catalogs' directory."
+                    )
+                full_catalog_checked = True  # Mark the full catalog as checked
+
+            # Checks and displays when the catalog has switched
+            if previous_catalog_loaded != catalog_to_load:
+                print(f"Switching limiting magnitude star catalog: {catalog_to_load}")
+                previous_catalog_loaded = catalog_to_load  # Update the loaded catalog tracker
+
+            return loadGMNStarCatalog(
+                file_path, 
+                years_from_J2000=years_from_J2000, 
+                lim_mag=lim_mag, 
+                mag_band_ratios=mag_band_ratios
+            )
+
+        except FileNotFoundError as e:
+            if "LM+12.5" in catalog_to_load:
+                print(
+                    "The full catalog (LM+12.5) needs to be downloaded separately. "
+                    "Please download it from the GMN server and place it into the 'RMS\\Catalogs' directory."
+                )
+            else:
+                print("There was an error loading the catalog, confirm that the star catalog listed in the .config "
+                    "file exists in 'RMS\Catalogs'")
+            raise
 
     ### Load the SKY2000 catalog ###
 
