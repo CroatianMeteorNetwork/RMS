@@ -3,8 +3,8 @@
 from __future__ import print_function, division, absolute_import
 
 import os
-
 import zlib
+import requests
 
 import numpy as np
 
@@ -204,6 +204,7 @@ def loadGMNStarCatalog(file_path, years_from_J2000=0, lim_mag=None, mag_band_rat
     # Step 2: Filter stars based on limiting magnitude
     if lim_mag is not None:
         if mag_band_ratios is not None:
+
             # Compute synthetic magnitudes if band ratios are provided
             total_ratio = sum(mag_band_ratios)
             rb, rv, rr, ri = [x / total_ratio for x in mag_band_ratios]
@@ -326,13 +327,36 @@ def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None, mag_b
 
             else:
 
-                print(
-                    "The full catalog (LM+12.5) is missing. Loading the LM+8.0 catalog instead. "
-                    "Please download the full catalog from the GMN server and place it into the 'RMS\\Catalogs' directory."
-                )
-                catalog_to_load = gmn_starcat_lm8
+                # URL to the LM+12.5 catalog
+                gmn_starcat_lm12_url = "https://globalmeteornetwork.org/projects/gmn_star_catalog/GMN_StarCatalog_LM12.5.bin"
 
-                # TODO - Add automatically downloading the full catalog from the GMN server
+                # Display a warning message that the catalog will be downloaded
+                print("The full catalog (LM+12.5) is beind downloaded from the GMN server... ")
+
+                # Download the full catalog from the GMN server
+                try:
+                    response = requests.get(gmn_starcat_lm12_url, stream=True)
+                    total_size = int(response.headers.get('content-length', 0))
+                    block_size = 1024  # 1 Kilobyte
+                    downloaded_size = 0
+
+                    with open(os.path.join(dir_path, gmn_starcat_lm12), 'wb') as f:
+                        for data in response.iter_content(block_size):
+                            downloaded_size += len(data)
+                            f.write(data)
+                            print(f"\rDownloading: {downloaded_size / total_size:.2%}", end='')
+
+                    print("Done!")  # Move to the next line after download completes
+
+                    catalog_to_load = gmn_starcat_lm12
+
+                except Exception as e:
+
+                    print(
+                        "Error downloading the full catalog: ", e, "\n"
+                        "Loading the LM+8.0 catalog instead. "
+                    )
+                    catalog_to_load = gmn_starcat_lm8
 
 
         file_path = os.path.join(dir_path, catalog_to_load)
