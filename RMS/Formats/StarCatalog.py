@@ -206,29 +206,39 @@ def loadGMNStarCatalog(file_path, years_from_J2000=0, lim_mag=None, mag_band_rat
     else:
         catalog_data = getattr(loadGMNStarCatalog, cache_name)
 
-    # Step 2: Filter stars based on limiting magnitude
+
+    # Step 2: Compute synthetic magnitudes if required
+    if mag_band_ratios is not None:
+        
+        # Compute synthetic magnitudes if band ratios are provided
+        total_ratio = sum(mag_band_ratios)
+        rb, rv, rr, ri, rg, rbp, rrp = [x/total_ratio for x in mag_band_ratios]
+        synthetic_mag = (
+            rb*catalog_data['B'] +
+            rv*catalog_data['V'] +
+            rr*catalog_data['R'] +
+            ri*catalog_data['Ic'] +
+            rg*catalog_data['phot_g_mean_mag'] +
+            rbp*catalog_data['phot_bp_mean_mag'] +
+            rrp*catalog_data['phot_rp_mean_mag']
+        )
+        mag_mask = synthetic_mag <= lim_mag
+
+    else:
+        synthetic_mag = catalog_data['V']
+
+    # Step 3: Filter stars based on limiting magnitude
     if lim_mag is not None:
-        if mag_band_ratios is not None:
-
-            # Compute synthetic magnitudes if band ratios are provided
-            total_ratio = sum(mag_band_ratios)
-            rb, rv, rr, ri = [x / total_ratio for x in mag_band_ratios]
-            synthetic_mag = (
-                rb*catalog_data['B'] +
-                rv*catalog_data['V'] +
-                rr*catalog_data['R'] +
-                ri*catalog_data['Ic']
-            )
-            mag_mask = synthetic_mag <= lim_mag
-
-        else:
-            # Use V band magnitude if no band ratios are provided
-            mag_mask = catalog_data['V'] <= lim_mag
+        
+        # Generate a mask for stars fainter than the limiting magnitude
+        mag_mask = synthetic_mag <= lim_mag
 
         # Apply the magnitude filter
         catalog_data = catalog_data[mag_mask]
+        synthetic_mag = synthetic_mag[mag_mask]
+        
 
-    # Step 3: Apply proper motion correction
+    # Step 4: Apply proper motion correction
     mas_to_deg = 1/(3.6e6)  # Conversion factor for mas/yr to degrees/year
     
     # GMN catalog is relative to the J2016 epoch (from GAIA DR3)
@@ -237,17 +247,6 @@ def loadGMNStarCatalog(file_path, years_from_J2000=0, lim_mag=None, mag_band_rat
     # Correct the RA and Dec relative to the years_from_J2000 argument
     corrected_ra = catalog_data['ra'] + catalog_data['pmra']*time_elapsed*mas_to_deg
     corrected_dec = catalog_data['dec'] + catalog_data['pmdec']*time_elapsed*mas_to_deg
-
-    # Step 4: Compute synthetic magnitudes if required
-    if mag_band_ratios is not None:
-        synthetic_mag = (
-            rb*catalog_data['B'] +
-            rv*catalog_data['V'] +
-            rr*catalog_data['R'] +
-            ri*catalog_data['Ic']
-        )
-    else:
-        synthetic_mag = catalog_data['V']
 
     # Step 5: Prepare the filtered data for output
     filtered_data = np.zeros((len(catalog_data), 3), dtype=np.float64)
@@ -259,7 +258,25 @@ def loadGMNStarCatalog(file_path, years_from_J2000=0, lim_mag=None, mag_band_rat
     filtered_data = filtered_data[np.argsort(filtered_data[:, 1])[::-1]]
 
     # Step 7: Generate the magnitude band string
-    mag_band_string = "GMN {:.2f}B + {:.2f}V + {:.2f}R + {:.2f}I".format(*(mag_band_ratios or [0.0, 1.0, 0.0, 0.0]))
+    if mag_band_ratios is None:
+        mag_band_string = "GMN V band"
+
+    else:
+
+        # Generate the magnitude band string
+        bands = ['B', 'V', 'R', 'I', 'G', 'BP', 'RP']
+        mag_band_string = "GMN "
+        count = 0
+        for i, band in enumerate(bands):
+            if mag_band_ratios[i] > 0:
+                if count > 0:
+                    mag_band_string += "+ "
+                mag_band_string += "{:.2f}{} ".format(mag_band_ratios[i], band)
+                count += 1
+
+        mag_band_string = mag_band_string.strip()
+
+        #mag_band_string = "GMN {:.2f}B + {:.2f}V + {:.2f}R + {:.2f}I".format(*(mag_band_ratios or [0.0, 1.0, 0.0, 0.0]))
 
     # Step 8: Return the filtered data, magnitude band string, and band ratios
     return filtered_data, mag_band_string, tuple(mag_band_ratios or [0.0, 1.0, 0.0, 0.0])
@@ -413,7 +430,16 @@ def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None, mag_b
             # Calculate the camera-bandpass magnitude if given
             if mag_band_ratios is not None:
 
+                # Only take the first 4 ratios
+                if len(mag_band_ratios) > 4:
+                    mag_band_ratios = mag_band_ratios[:4]
+
+
                 if len(mag_band_ratios) == 4:
+
+                    # If all ratios are zero, use the visual magnitude
+                    if sum(mag_band_ratios) == 0:
+                        mag_band_ratios = [0, 1.0, 0, 0]
                     
                     # Calculate the B band magnitude
                     mag_b = mag_v + mag_bv
