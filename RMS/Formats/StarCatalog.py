@@ -137,7 +137,7 @@ def loadGaiaCatalog(dir_path, file_name, lim_mag=None):
 
 
 @memoizeSingle
-def loadGMNStarCatalog(file_path, years_from_J2000=0, lim_mag=None, mag_band_ratios=None):
+def loadGMNStarCatalog(file_path, years_from_J2000=0, lim_mag=None, mag_band_ratios=None, catalog_file=''):
     """
     Reads in the GMN Star Catalog from a compressed binary file, applying proper motion correction,
     magnitude limiting, and synthetic magnitude computation. Adjusts the RA/Dec positions to the J2000 epoch.
@@ -150,6 +150,7 @@ def loadGMNStarCatalog(file_path, years_from_J2000=0, lim_mag=None, mag_band_rat
         lim_mag: [float] Limiting magnitude for filtering stars (default: None).
         mag_band_ratios: [list] Relative contributions of photometric bands [B, V, R, I]
             to compute synthetic magnitudes (default: None).
+        catalog_file: [str] Name of the catalog file (default: ''). Used for caching purposes.
 
     Returns:
         filtered_data: [ndarray] A filtered and corrected catalog contained as a structured NumPy array 
@@ -157,8 +158,12 @@ def loadGMNStarCatalog(file_path, years_from_J2000=0, lim_mag=None, mag_band_rat
         mag_band_string: [str] A string describing the magnitude band of the catalog.
         mag_band_ratios: [list] A list of BVRI magnitude band ratios for the given catalog.
     """
+
+    # Catalog data used for caching
+    cache_name = "_catalog_data_{:s}".format(catalog_file.replace(".", "_"))
+
     # Step 1: Cache the catalog data to avoid repeated decompression
-    if not hasattr(loadGMNStarCatalog, "_catalog_data"):
+    if not hasattr(loadGMNStarCatalog, cache_name):
 
         # Define the data structure for the catalog
         data_types = [
@@ -196,10 +201,10 @@ def loadGMNStarCatalog(file_path, years_from_J2000=0, lim_mag=None, mag_band_rat
             catalog_data = np.frombuffer(decompressed_data, dtype=data_types, count=num_rows)
 
         # Cache the catalog data for future use
-        loadGMNStarCatalog._catalog_data = catalog_data
+        setattr(loadGMNStarCatalog, cache_name, catalog_data)
     
     else:
-        catalog_data = loadGMNStarCatalog._catalog_data
+        catalog_data = getattr(loadGMNStarCatalog, cache_name)
 
     # Step 2: Filter stars based on limiting magnitude
     if lim_mag is not None:
@@ -365,7 +370,8 @@ def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None, mag_b
             file_path, 
             years_from_J2000=years_from_J2000, 
             lim_mag=lim_mag, 
-            mag_band_ratios=mag_band_ratios
+            mag_band_ratios=mag_band_ratios,
+            catalog_file=catalog_to_load
         )
 
 
