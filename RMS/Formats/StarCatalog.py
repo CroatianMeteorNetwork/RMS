@@ -276,8 +276,6 @@ def loadGMNStarCatalog(file_path, years_from_J2000=0, lim_mag=None, mag_band_rat
 
         mag_band_string = mag_band_string.strip()
 
-        #mag_band_string = "GMN {:.2f}B + {:.2f}V + {:.2f}R + {:.2f}I".format(*(mag_band_ratios or [0.0, 1.0, 0.0, 0.0]))
-
     # Step 8: Return the filtered data, magnitude band string, and band ratios
     return filtered_data, mag_band_string, tuple(mag_band_ratios or [0.0, 1.0, 0.0, 0.0])
 
