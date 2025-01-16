@@ -490,8 +490,8 @@ class BufferedCapture(Process):
                     log.info("GStreamer Buffer did not contain a frame.")
                     return False, None, None
 
-                # Handling for grayscale conversion
-                frame = self.handleGrayscaleConversion(map_info)
+                # Convert to np.ndarray
+                frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
 
                 # Smooth raw pts and calculate actual timestamp
                 smoothed_pts = self.smoothPTS(gst_timestamp_ns)
@@ -504,6 +504,9 @@ class BufferedCapture(Process):
                 ret, frame = self.device.read()
                 if ret:
                     timestamp = time.time()
+
+            # Handling for grayscale conversion
+            frame = self.handleGrayscaleConversion(frame)
 
         return ret, frame, timestamp
 
@@ -530,7 +533,7 @@ class BufferedCapture(Process):
 
             return rtsp_url
 
-        # If no match is found, return None or handle as appropriate        
+        # If no match is found, return None or handle as appropriate
         else:
             log.error("No RTSP URL found in the input string: {}".format(input_string))
             raise ValueError("No RTSP URL found in the input string: {}".format(input_string))
@@ -645,38 +648,71 @@ class BufferedCapture(Process):
             return False, RtspProbeResult.UNKNOWN_ERROR
                 
 
-    def isGrayscale(self, frame):
+    def isGrayscale(self, frame, stride=64):
         """
-        Return True if all color channels contain identical data.
+        Quickly check if a frame is grayscale by sampling pixels along the diagonal.
+        If all three channels match on those diagonal samples, return True.
+        If an IndexError is raised (i.e., frame is single-channel), also return True.
+        This trades completeness for speed, as only the diagonal is checked.
+
+        Args:
+            frame (numpy.ndarray): The image frame to check (usually BGR or GRAY).
+            stride (int): Spacing for diagonal sampling, skipping many pixels for efficiency.
+
+        Returns:
+            bool: True if all sampled channels match (or frame is single-channel), otherwise False.
         """
 
-        # If the frame is one-dimensional, it is grayscale
-        if len(frame.shape) == 2:
+        # We don't explicitly check frame.shape first; instead we rely on an IndexError
+        # if 'frame' is single-channel (which is inherently grayscale).
+        # This is faster than an extra dimension check for most BGR GMN stations 
+
+        try:
+            # If diagonal samples are not identical, frame is color
+            if not np.all(frame[::stride, ::stride, 0] == frame[::stride, ::stride, 1]) or \
+               not np.all(frame[::stride, ::stride, 1] == frame[::stride, ::stride, 2]):
+                return False
+
+            # Otherwise all channels are identical.
             return True
 
-        # Check if the R, G, and B channels are equal
-        b, g, r = cv2.split(frame)
-        if np.array_equal(r, g) and np.array_equal(g, b):
+        # If IndexError, frame is grayscale
+        except IndexError:
             return True
+
+
+    def handleGrayscaleConversion(self, frame):
+        """Handle conversion of frame to grayscale if necessary.
+
+            Camera outputs BGR (3 channels) even in night mode. For efficiency, we save raw frames in:
+            - Grayscale (1 channel) when all channels are identical
+            - Full BGR (3 channels) when they differ
+
+            Note: While raw frames are saved in color when available, frames are converted
+            to grayscale before compression in the processing pipeline
+
+        Args:
+            frame: a numpy.ndarray frame
+
+        Returns:
+            numpy.ndarray: Frame data either as grayscale (2D) or BGR (3D) array
+        """
+
+        # We don't explicitly check frame.shape first; instead we rely on an IndexError
+        # if 'frame' is single-channel (which is inherently grayscale).
+        # This is faster than an extra dimension check for most BGR GMN stations 
+
+        try:
+            # If frame channels are not identical (color), return all 3 channels
+            if not self.convert_to_gray:
+                return frame
+
+            # If frame channels are identical (gray), extract green channel for grayscale
+            return frame[:, :, 1]
         
-        return False
-
-    
-    def handleGrayscaleConversion(self, map_info):
-        """Handle conversion of frame to grayscale if necessary."""
-
-        # If the frame is already grayscale, return it as is
-        if len(self.frame_shape) == 2:
-            return np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
-
-        if (self.daytime_mode is not None) and (self.daytime_mode.value):
-            return np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
-
-        # Convert to grayscale by selecting a specific channel
-        bgr_frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
-        gray_frame = bgr_frame[:, :, 0]  # Assuming the blue channel for grayscale
-        return gray_frame
-
+        # If IndexError, frame is grayscale
+        except IndexError:
+            return frame
 
 
     def moveSegment(self, splitmuxsink, fragment_id):
@@ -1491,7 +1527,6 @@ class BufferedCapture(Process):
                 ret, frame, frame_timestamp = self.read()
                 t_frame = time.time() - t1_frame
 
-
                 # If the video device was disconnected, wait for reconnection
                 if (self.video_file is None) and (not ret):
 
@@ -1525,7 +1560,10 @@ class BufferedCapture(Process):
                     and self.video_file is None
                     and total_frames % self.config.frame_save_interval_count == 0):
 
-                    # In case of a mode switch, the frame shape might change (color or grayscale)
+                    # Check if RGB channels contain color information
+                    self.convert_to_gray = self.isGrayscale(frame)
+
+                    # Check if frame shape changed (color or grayscale)
                     if frame.shape != self.current_raw_frame_shape:
                         log.info("Frame shape changed, reinitializing arrays...")
 
