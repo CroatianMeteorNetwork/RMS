@@ -364,9 +364,9 @@ def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None, mag_b
                         for data in response.iter_content(block_size):
                             downloaded_size += len(data)
                             f.write(data)
-                            print(f"\rDownloading: {downloaded_size / total_size:.2%}", end='')
+                            print("\rDownloading: {:.2f}%".format(100*float(downloaded_size)/total_size), end='')
 
-                    print("Done!")  # Move to the next line after download completes
+                    print(" - Done!")  # Move to the next line after download completes
 
                     catalog_to_load = gmn_starcat_lm12
 
