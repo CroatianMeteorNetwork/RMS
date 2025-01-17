@@ -669,16 +669,17 @@ class BufferedCapture(Process):
 
         try:
             # If diagonal samples are not identical, frame is color
-            if not np.all(frame[::stride, ::stride, 0] == frame[::stride, ::stride, 1]) or \
-               not np.all(frame[::stride, ::stride, 1] == frame[::stride, ::stride, 2]):
-                return False
-
-            # Otherwise all channels are identical.
-            return True
-
-        # If IndexError, frame is grayscale
+            is_gray = np.all(frame[::stride, ::stride, 0] == frame[::stride, ::stride, 1]) and \
+                      np.all(frame[::stride, ::stride, 1] == frame[::stride, ::stride, 2])
         except IndexError:
-            return True
+             # If IndexError, frame is grayscale
+            is_gray = True
+
+        if getattr(self, '_previous_grayscale_state', is_gray) != is_gray:
+            log.info("Frame grayscale state changed: {} -> {}".format(not is_gray, is_gray))
+            self._previous_grayscale_state = is_gray
+
+        return is_gray
 
 
     def handleGrayscaleConversion(self, frame):
