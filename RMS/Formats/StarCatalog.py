@@ -325,9 +325,9 @@ def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None, mag_b
 
         # Define catalog names for the bright and faint stars
         gmn_starcat_lm9 = "GMN_StarCatalog_LM9.0.bin"
-        gmn_starcat_lm12 = "GMN_StarCatalog_LM12.5.bin"
+        gmn_starcat_lm12 = "GMN_StarCatalog_LM12.0.bin"
 
-        # Check the existence of the LM 12.5 catalog file
+        # Check the existence of the LM 12.0 catalog file
         gmn_starcat_lm12_exists = os.path.exists(os.path.join(dir_path, gmn_starcat_lm12))
 
         # Ensure mag_band_ratios is a tuple for caching
@@ -347,11 +347,11 @@ def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None, mag_b
 
             else:
 
-                # URL to the LM+12.5 catalog
-                gmn_starcat_lm12_url = "https://globalmeteornetwork.org/projects/gmn_star_catalog/GMN_StarCatalog_LM12.5.bin"
+                # URL to the LM+12.0 catalog
+                gmn_starcat_lm12_url = "https://globalmeteornetwork.org/projects/gmn_star_catalog/GMN_StarCatalog_LM12.0.bin"
 
                 # Display a warning message that the catalog will be downloaded
-                print("The full catalog (LM+12.5) is beind downloaded from the GMN server... ")
+                print("The full catalog (LM+12.0) is beind downloaded from the GMN server... ")
 
                 # Download the full catalog from the GMN server
                 try:
