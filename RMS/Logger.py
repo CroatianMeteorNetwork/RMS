@@ -25,6 +25,48 @@ init_lock = threading.Lock()
 logger_initialized = False
 
 
+class PreInitNoiseFilter(logging.Filter):
+    """ Filter out noisy messages from specific patterns before logger initialization.
+        C/C++ level libraries messages cannot be removed.
+        These filters will be removed when proper logging is initialized
+    """
+    def __init__(self):
+        super(PreInitNoiseFilter, self).__init__()
+
+        self.noisy_patterns = [
+            "Unable to register",
+            "Creating converter",
+            "CACHEDIR",
+            "No `name` configuration",
+            "running build_ext",
+            "skipping 'RMS",
+            "extension (up-to-date)"
+        ]
+
+    def filter(self, record):
+        # Check if message contains any noisy pattern
+        try:
+            message = record.getMessage()
+            if any(pattern in message for pattern in self.noisy_patterns):
+                return False
+        except:
+            pass  # If getMessage() fails, continue with module check
+
+        return True
+
+
+# Add a default stderr handler for pre-initialization log messages
+_default_handler = logging.StreamHandler(sys.stderr)
+_default_formatter = logging.Formatter('%(message)s')
+_default_handler.setFormatter(_default_formatter)
+_default_handler.addFilter(PreInitNoiseFilter())
+root = logging.getLogger()
+root.addHandler(_default_handler)
+root.setLevel(logging.DEBUG)
+
+# This handler will be removed when proper logging is initialized
+
+
 ##############################################################################
 # HELPERS
 ##############################################################################
@@ -194,7 +236,7 @@ def _listener_configurer(config, log_file_prefix, safedir):
 
     # Set common formatter for both handlers
     formatter = logging.Formatter(
-        fmt='%(asctime)s-%(levelname)s-%(module)s-line: %(message)s',
+        fmt='%(asctime)s-%(levelname)s-%(module)s-line:%(lineno)d - %(message)s',
         datefmt='%Y/%m/%d %H:%M:%S'
     )
     handler.setFormatter(formatter)
@@ -247,6 +289,11 @@ def initLogging(config, log_file_prefix="", safedir=None, level=logging.DEBUG):
         if logger_initialized:
             return
 
+    # Remove the default handler if it exists
+    root = logging.getLogger()
+    for handler in root.handlers[:]:  # [:] makes a copy of the list
+        root.removeHandler(handler)
+            
     # Create logging infrastructure
     logging_queue = multiprocessing.Queue(-1)
     listener_process = multiprocessing.Process(
@@ -298,7 +345,7 @@ def shutdownLogging():
         logger_initialized = False
 
 
-def getLogger(name=None, level=None, stdout=False):
+def getLogger(name=None, level="DEBUG", stdout=False):
     """ Get a logger instance.
     
     Arguments:
@@ -310,16 +357,15 @@ def getLogger(name=None, level=None, stdout=False):
         [Logger] Logger instance
     """
     logger = logging.getLogger(name if name else "logger")
-    
-    if level is not None:
-        level_map = {
-            "DEBUG": logging.DEBUG,
-            "INFO": logging.INFO,
-            "WARNING": logging.WARNING,
-            "ERROR": logging.ERROR,
-            "CRITICAL": logging.CRITICAL
-        }
-        logger.setLevel(level_map[level.upper()])
+
+    level_map = {
+        "DEBUG": logging.DEBUG,
+        "INFO": logging.INFO,
+        "WARNING": logging.WARNING,
+        "ERROR": logging.ERROR,
+        "CRITICAL": logging.CRITICAL
+    }
+    logger.setLevel(level_map[level.upper()])
 
     # Add stdout handler if requested
     if stdout:
