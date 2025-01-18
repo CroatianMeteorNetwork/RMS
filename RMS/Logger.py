@@ -19,10 +19,10 @@ import atexit
 # If higher verbosity is needed, disable in client scripts
 os.environ['GST_DEBUG'] = '2'
 
-logging_queue = None
-listener_process = None
-init_lock = threading.Lock()
-logger_initialized = False
+_rms_logging_queue = None
+_rms_listener_process = None
+_rms_init_lock = threading.Lock()
+_rms_logger_initialized = False
 
 
 class PreInitNoiseFilter(logging.Filter):
@@ -60,9 +60,9 @@ _default_handler = logging.StreamHandler(sys.stderr)
 _default_formatter = logging.Formatter('%(message)s')
 _default_handler.setFormatter(_default_formatter)
 _default_handler.addFilter(PreInitNoiseFilter())
-root = logging.getLogger()
-root.addHandler(_default_handler)
-root.setLevel(logging.DEBUG)
+_pre_init_logger = logging.getLogger()
+_pre_init_logger.addHandler(_default_handler)
+_pre_init_logger.setLevel(logging.DEBUG)
 
 # This handler will be removed when proper logging is initialized
 
@@ -261,13 +261,22 @@ def _listener_process(queue, config, log_file_prefix, safedir):
     _listener_configurer(config, log_file_prefix, safedir)
 
     # Start queue listener
-    root_logger = logging.getLogger()
-    queue_listener = logging.handlers.QueueListener(queue, *root_logger.handlers)
+    main_logger = logging.getLogger()
+    queue_listener = logging.handlers.QueueListener(queue, *main_logger.handlers)
     queue_listener.start()
 
     # Keep the process alive
     while True:
-        time.sleep(60)
+        try:
+            record = queue.get()
+            if record is None:  # Shutdown sentinel
+                break
+            queue_listener.handle(record)
+        except Exception as e:
+            print("Error in listener process: {}".format(e))
+            continue
+
+    queue_listener.stop()
 
 
 ##############################################################################
@@ -284,45 +293,45 @@ def initLogging(config, log_file_prefix="", safedir=None, level=logging.DEBUG):
         safedir: [str] Fallback directory if normal log_path is unwritable
         level: [int] Logging level for the main logger (defaults to DEBUG)
     """
-    global logging_queue, listener_process, logger_initialized
-    with init_lock:
-        if logger_initialized:
+    global _rms_logging_queue, _rms_listener_process, _rms_logger_initialized
+    with _rms_init_lock:
+        if _rms_logger_initialized:
             return
 
     # Remove the default handler if it exists
-    root = logging.getLogger()
-    for handler in root.handlers[:]:  # [:] makes a copy of the list
-        root.removeHandler(handler)
+    main_logger = logging.getLogger()
+    for handler in main_logger.handlers[:]:  # [:] makes a copy of the list
+        main_logger.removeHandler(handler)
             
     # Create logging infrastructure
-    logging_queue = multiprocessing.Queue(-1)
-    listener_process = multiprocessing.Process(
+    _rms_logging_queue = multiprocessing.Queue(-1)
+    _rms_listener_process = multiprocessing.Process(
         target=_listener_process,
-        args=(logging_queue, config, log_file_prefix, safedir),
+        args=(_rms_logging_queue, config, log_file_prefix, safedir),
         daemon=True
     )
-    listener_process.start()
+    _rms_listener_process.start()
 
     # Set DEBUG on root logger in main process
-    root = logging.getLogger()
-    root.setLevel(logging.DEBUG) # Keep root permissive
+    main_logger = logging.getLogger()
+    main_logger.setLevel(logging.DEBUG) # Keep root permissive
 
     # Configure queue handler for main process
-    qh = logging.handlers.QueueHandler(logging_queue)
+    qh = logging.handlers.QueueHandler(_rms_logging_queue)
     qh.setFormatter(logging.Formatter('%(message)s'))
     
     # Set up root logger with queue handler
-    root.handlers = []
-    root.addHandler(qh)
+    main_logger.handlers = []
+    main_logger.addHandler(qh)
 
     # Redirect standard streams
-    sys.stderr = LoggerWriter(root, logging.WARNING)
+    sys.stderr = LoggerWriter(main_logger, logging.WARNING)
     if config.log_stdout:
-        sys.stdout = LoggerWriter(root, logging.INFO)
+        sys.stdout = LoggerWriter(main_logger, logging.INFO)
 
-    root.propagate = False
-    logger_initialized = True
-    root.debug("initLogging completed; queue listener started.")
+    main_logger.propagate = False
+    _rms_logger_initialized = True
+    main_logger.debug("initLogging completed; queue listener started.")
     atexit.register(shutdownLogging)
 
 
@@ -330,19 +339,19 @@ def shutdownLogging():
     """ Handles cleanup of logging resources.
     Stops the listener process and resets the logging state.
     """
-    global logging_queue, listener_process, logger_initialized
-    with init_lock:
-        if not logger_initialized:
+    global _rms_logging_queue, _rms_listener_process, _rms_logger_initialized
+    with _rms_init_lock:
+        if not _rms_logger_initialized:
             return
         
         # Stop the listener process
-        if listener_process and listener_process.is_alive():
-            logging_queue.put(None)  # Sentinel
-            listener_process.join(timeout=5)
-            if listener_process.is_alive():
-                listener_process.terminate()
+        if _rms_listener_process and _rms_listener_process.is_alive():
+            _rms_logging_queue.put(None)  # Sentinel
+            _rms_listener_process.join(timeout=5)
+            if _rms_listener_process.is_alive():
+                _rms_listener_process.terminate()
         
-        logger_initialized = False
+        _rms_logger_initialized = False
 
 
 def getLogger(name=None, level="DEBUG", stdout=False):
