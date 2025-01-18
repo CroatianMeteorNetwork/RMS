@@ -4,11 +4,51 @@ from __future__ import print_function, division, absolute_import
 
 import os
 import zlib
-import requests
+import sys
+
+# Import the requests library for downloading the GMN star catalog
+try:
+    from urllib.request import urlopen  # Python 3
+    from urllib.error import URLError, HTTPError
+except ImportError:
+    from urllib2 import urlopen  # Python 2
+    from urllib2 import URLError, HTTPError
 
 import numpy as np
 
 from RMS.Decorators import memoizeSingle
+
+
+def downloadCatalog(url, dir_path, file_name):
+    """ Download a catalog file from a given URL and save it to the specified directory. """
+
+    try:
+        response = urlopen(url)
+        total_size = int(response.info().get('Content-Length', 0))
+        block_size = 1024 * 1024  # 1 MB
+        downloaded_size = 0
+
+        with open(os.path.join(dir_path, file_name), 'wb') as f:
+            while True:
+                data = response.read(block_size)
+                if not data:
+                    break
+                downloaded_size += len(data)
+                f.write(data)
+                print("\rDownloading: {:.2f}%".format(100 * float(downloaded_size) / total_size), end='')
+                sys.stdout.flush()
+
+        print(" - Done!")  # Move to the next line after download completes
+
+        return True
+    
+    except HTTPError as e:
+        print("HTTP Error: ", e.code, url)
+        return False
+    
+    except URLError as e:
+        print("URL Error: ", e.reason, url)
+        return False
 
 @memoizeSingle
 def readBSC(file_path, file_name, years_from_J2000=0):
@@ -354,28 +394,13 @@ def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None, mag_b
                 print("The full catalog (LM+12.0) is beind downloaded from the GMN server... ")
 
                 # Download the full catalog from the GMN server
-                try:
-                    response = requests.get(gmn_starcat_lm12_url, stream=True)
-                    total_size = int(response.headers.get('content-length', 0))
-                    block_size = 1024*1024  # 1 MB
-                    downloaded_size = 0
+                download_status = downloadCatalog(gmn_starcat_lm12_url, dir_path, gmn_starcat_lm12)
 
-                    with open(os.path.join(dir_path, gmn_starcat_lm12), 'wb') as f:
-                        for data in response.iter_content(block_size):
-                            downloaded_size += len(data)
-                            f.write(data)
-                            print("\rDownloading: {:.2f}%".format(100*float(downloaded_size)/total_size), end='')
-
-                    print(" - Done!")  # Move to the next line after download completes
-
+                if download_status:
                     catalog_to_load = gmn_starcat_lm12
 
-                except Exception as e:
-
-                    print(
-                        "Error downloading the full catalog: ", e, "\n"
-                        "Loading the LM+9.0 catalog instead. "
-                    )
+                else:
+                    print("Error downloading the full catalog, loading the LM+9.0 catalog instead. ")
                     catalog_to_load = gmn_starcat_lm9
 
 
