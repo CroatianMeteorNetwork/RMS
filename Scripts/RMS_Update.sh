@@ -32,7 +32,7 @@ check_disk_space() {
 
 # Run space check before anything else
 echo "Checking available disk space..."
-check_total_space || exit 1
+check_disk_space || exit 1
 
 # Function to clean up and release the lock on exit
 cleanup() {
