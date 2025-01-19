@@ -12,7 +12,7 @@ BACKUP_CONFIG="$RMSBACKUPDIR/.config"
 BACKUP_MASK="$RMSBACKUPDIR/mask.bmp"
 UPDATEINPROGRESSFILE=$RMSBACKUPDIR/update_in_progress
 LOCKFILE="/tmp/update.lock"
-MIN_SPACE_MB=100  # Minimum required space in MB
+MIN_SPACE_MB=200  # Minimum required space in MB
 RETRY_LIMIT=3
 
 # Function to check available disk space
