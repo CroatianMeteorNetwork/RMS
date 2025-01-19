@@ -10,6 +10,7 @@ CURRENT_CONFIG="$RMSSOURCEDIR/.config"
 CURRENT_MASK="$RMSSOURCEDIR/mask.bmp"
 BACKUP_CONFIG="$RMSBACKUPDIR/.config"
 BACKUP_MASK="$RMSBACKUPDIR/mask.bmp"
+SYSTEM_PACKAGES="$RMSSOURCEDIR/system_packages.txt"
 UPDATEINPROGRESSFILE=$RMSBACKUPDIR/update_in_progress
 LOCKFILE="/tmp/update.lock"
 MIN_SPACE_MB=200  # Minimum required space in MB
@@ -32,7 +33,7 @@ check_disk_space() {
 
 # Run space check before anything else
 echo "Checking available disk space..."
-check_disk_space || exit 1
+check_disk_space "$RMSSOURCEDIR" "$MIN_SPACE_MB" || exit 1
 
 # Function to clean up and release the lock on exit
 cleanup() {
@@ -190,11 +191,17 @@ echo "1" > "$UPDATEINPROGRESSFILE"
 
 # Stash any local changes
 echo "Stashing local changes..."
-git stash
+if ! git stash; then
+    echo "Error: git stash failed. Aborting update."
+    exit 1
+fi
 
 # Pull the latest code from GitHub
 echo "Pulling latest code from GitHub..."
-git pull
+if ! git pull; then
+    echo "Error: git pull failed. Aborting update."
+    exit 1
+fi
 
 # Create template from the current default config file
 if [ -f "$CURRENT_CONFIG" ]; then
@@ -211,20 +218,32 @@ fi
 
 # Install missing dependencies
 install_missing_dependencies() {
-    local packages=(
-        "gobject-introspection"
-        "libgirepository1.0-dev"
-        "gstreamer1.0-libav"
-        "gstreamer1.0-plugins-bad"
-    )
+
+    if [ ! -f "$SYSTEM_PACKAGES" ]; then
+        echo "Warning: System packages file not found: $SYSTEM_PACKAGES"
+        return
+    fi
+
     local missing_packages=()
 
+    # -----------------------------------------------------------------------------
+    # We store system-level dependencies in a separate file (system_packages.txt)
+    # so that when RMS_Update pulls new code (including a potentially updated list of packages),
+    # we can read those new dependencies during the same run — no need to run the update
+    # script twice. Because the main script is loaded into memory, changing it mid-run
+    # won't reload it. But updating this separate file allows us to immediately pick
+    # up any added or changed packages without requiring a second pass.
+    # -----------------------------------------------------------------------------
+
     # Identify missing packages
-    for package in "${packages[@]}"; do
-        if ! dpkg -s "$package" >/dev/null 2>&1; then
-            missing_packages+=("$package")
+    while read -r pkg; do
+        # Skip blank lines or commented lines
+        [[ -z "$pkg" || "$pkg" =~ ^# ]] && continue
+        
+        if ! dpkg -s "$pkg" &>/dev/null; then
+            missing_packages+=("$pkg")
         fi
-    done
+    done < $SYSTEM_PACKAGES
 
     # If no missing packages, inform and return
     if [ ${#missing_packages[@]} -eq 0 ]; then
