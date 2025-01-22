@@ -52,8 +52,6 @@ def downloadNewMask(config, port=22):
         log.debug("Can't contact the server: RSA private key file not found.")
         return False
 
-    log.debug('Establishing SSH connection to: ' + config.hostname + ':' + str(port) + '...')
-
     ssh = None
     sftp = None
 
