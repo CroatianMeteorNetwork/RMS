@@ -85,10 +85,12 @@ def downloadNewPlatepar(config):
 
     finally:
         if sftp:
+            log.debug("Closing SFTP channel")
             sftp.close()
         if ssh:
+            log.debug("Closing SSH client connection")
             ssh.close()
-
+            
     return True
 
 
