@@ -37,7 +37,7 @@ log = logging.getLogger("logger")
 
 
 
-def downloadNewMask(config, port=22):
+def downloadNewMask(config):
     """ Connect to the central server and download a new mask file, if available. """
 
     if config.mask_download_permissive:
@@ -60,7 +60,7 @@ def downloadNewMask(config, port=22):
         # Connect with timeouts
         ssh, sftp = getSSHClientAndSFTP(
             config.hostname,
-            port=port,
+            port=config.host_port,
             username=config.stationID.lower(),
             key_filename=config.rsa_private_key,
             timeout=60,
@@ -167,7 +167,7 @@ def downloadNewMask(config, port=22):
         if ssh:
             log.debug("Closing SSH client connection")
             ssh.close()
-            
+
     return True
 
 
@@ -197,4 +197,4 @@ if __name__ == "__main__":
 
 
     # Test mask downloading
-    downloadNewMask(config, port=22)
+    downloadNewMask(config)

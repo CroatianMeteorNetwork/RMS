@@ -34,7 +34,7 @@ def downloadNewPlatepar(config):
         # Connect with timeouts
         ssh, sftp = getSSHClientAndSFTP(
             config.hostname,
-            port=22,
+            port=config.host_port,
             username=config.stationID.lower(),
             key_filename=config.rsa_private_key,
             timeout=60,
@@ -90,7 +90,7 @@ def downloadNewPlatepar(config):
         if ssh:
             log.debug("Closing SSH client connection")
             ssh.close()
-            
+
     return True
 
 
