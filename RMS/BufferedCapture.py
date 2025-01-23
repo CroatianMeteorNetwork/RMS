@@ -1350,10 +1350,12 @@ class BufferedCapture(Process):
                 self.raw_frame_saver = None
 
             # Initialize timestamp array for ft file buffer
-            self.timestamp_buffer = []
-            # For testing ft files
-            # self.ft_test_time = time.time()
+            if self.config.save_frame_times:
+                self.timestamp_buffer = []
+                # For testing ft files
+                # self.ft_test_time = time.time()
 
+            # Initialize segment saving time for raw video saving
             if self.config.raw_video_save:
                 self.last_segment_savetime = time.time()
 
@@ -1530,7 +1532,8 @@ class BufferedCapture(Process):
                     first_frame_timestamp = frame_timestamp
 
                 # Append current timestamp to ft file buffer
-                self.timestamp_buffer.append((len(self.timestamp_buffer) + 1, frame_timestamp))
+                if self.config.save_frame_times:
+                    self.timestamp_buffer.append((total_frames, frame_timestamp))
 
                 # If save_frames is set and a video device is used, save a frame every nth frames
                 if (self.config.save_frames
@@ -1759,31 +1762,33 @@ class BufferedCapture(Process):
 
             # Save current timestamp buffer to ft file
             # Construct FTStruct, record timestamps, and reset the timestamp array in memory
-            ft = FTStruct.FTStruct()
-            ft.timestamps = copy.copy(self.timestamp_buffer)
-            self.timestamp_buffer.clear()
+            if self.config.save_frame_times:
+                ft = FTStruct.FTStruct()
+                ft.timestamps = copy.copy(self.timestamp_buffer)
+                self.timestamp_buffer.clear()
 
-            base_time = datetime.datetime.fromtimestamp(first_frame_timestamp)
-            ft_filename = base_time.strftime("FT_{}_%Y%m%d_%H%M%S.bin".format(self.config.stationID))
-            ft_subpath = os.path.join(self.config.data_dir, self.config.times_dir, base_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
+                base_time = datetime.datetime.fromtimestamp(first_frame_timestamp)
+                ft_filename = base_time.strftime("FT_{}_%Y%m%d_%H%M%S.bin".format(self.config.stationID))
+                ft_subpath = os.path.join(self.config.data_dir, self.config.times_dir, base_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
 
-            mkdirP(ft_subpath)
-            FTfile.write(ft, ft_subpath, ft_filename)
-            log.info("Created FT file {} for block starting at {}".format(os.path.join(ft_subpath, ft_filename), first_frame_timestamp))
+                mkdirP(ft_subpath)
+                FTfile.write(ft, ft_subpath, ft_filename)
+                log.info("Created FT file {} for block starting at {}".format(os.path.join(ft_subpath, ft_filename), first_frame_timestamp))
 
-            # For Testing: 
-            # Print first and last 10 timestamps, array length, average time difference and time difference from last block
-            # Enable self.ft_test_time in __init__
-            # print("\n\n --- FT file data --- \nFirst 10 timestamps: {}\n\nLast 10 timestamps: {}\n\nArray length: {}\n\n".format(
-            #       ft.timestamps[:11], 
-            #       ft.timestamps[-10:],
-            #       len(ft.timestamps),
-            # ),
-            #       "Average per-frame time difference: {}\n\nLast segment time difference: {}\n\n ---------------- \n\n".format(
-            #       sum(ft.timestamps[i+1][1] - ft.timestamps[i][1] for i in range(len(ft.timestamps) - 1)) / (len(ft.timestamps) - 1),
-            #       ft.timestamps[0][1] - self.ft_test_time
-            # ), end='')
-            # self.ft_test_time = ft.timestamps[-1][1]
+                # For Testing: 
+                # Print first and last 10 timestamps, array length, average time difference and time difference from last block
+                # Enable self.ft_test_time in __init__
+                
+                # print("\n\n --- FT file data --- \nFirst 10 timestamps: {}\n\nLast 10 timestamps: {}\n\nArray length: {}\n\n".format(
+                #       ft.timestamps[:11], 
+                #       ft.timestamps[-10:],
+                #       len(ft.timestamps),
+                # ),
+                #       "Average per-frame time difference: {}\n\nLast segment time difference: {}\n\n ---------------- \n\n".format(
+                #       sum(ft.timestamps[i+1][1] - ft.timestamps[i][1] for i in range(len(ft.timestamps) - 1)) / (len(ft.timestamps) - 1),
+                #       ft.timestamps[0][1] - self.ft_test_time
+                # ), end='')
+                # self.ft_test_time = ft.timestamps[-1][1]
 
 
         log.info('Releasing video device...')
