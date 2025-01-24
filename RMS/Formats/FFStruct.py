@@ -3,7 +3,7 @@
 from __future__ import print_function, division, absolute_import
 
 class FFStruct:
-    """ Default structure for a FF file.
+    """ Default structure for an FF file.
     """
     
     def __init__(self):

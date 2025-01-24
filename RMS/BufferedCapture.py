@@ -24,6 +24,7 @@ import traceback
 import re
 import time
 import datetime
+import copy
 import os.path
 from multiprocessing import Process, Event, Value, Array
 
@@ -38,6 +39,7 @@ from RMS.Routines.GstreamerCapture import GstVideoFile
 from RMS.Formats.ObservationSummary import getObsDBConn, addObsParam
 from RMS.RawFrameSave import RawFrameSaver
 from RMS.Misc import RmsDateTime, mkdirP
+from RMS.Formats import FTfile, FTStruct
 from RMS.Logger import getLogger, gstDebugLogger
 
 # Get the logger from the main module
@@ -719,29 +721,29 @@ class BufferedCapture(Process):
     def moveSegment(self, splitmuxsink, fragment_id):
         """
         Custom callback for splitmuxsink's format-location signal to name and move each segment as its
-        created. Generates a timestamp-based folder structure: Year/Day-Of-Year/Hour/ per video segment
+        created. Generates a timestamp-based folder structure: Year/Day-Of-Year/Hour/ per video segment.
 
         Arguments:
           splitmuxsink [GstElement]: The splitmuxsink object itself, included in arguments as GStreamer expects it.
           fragment_id [int]: Fragment / segment number of the new clip
 
         Returns:
-          full_path [str]: Full path to save this new segment to
+          full_path [str]: Full path to save this new video segment to
         """
 
-        base_time = RmsDateTime.utcnow()
+        # Segment name is based on timestamp recorded during last segment save
+        segment_time = datetime.datetime.fromtimestamp(self.last_segment_savetime)
+        self.last_segment_savetime = time.time()
+        segment_filename = segment_time.strftime("{}_%Y%m%d_%H%M%S_video.mkv".format(self.config.stationID))
+        segment_subpath = os.path.join(self.config.data_dir, self.config.video_dir, segment_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
 
-        # Generate names from current timestamp
-        subpath = os.path.join(self.config.data_dir, self.config.video_dir, base_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
-        filename = base_time.strftime("{}_%Y%m%d_%H%M%S_video.mkv".format(self.config.stationID))
-
-        # Create full path and directory
-        mkdirP(subpath)
-        full_path = os.path.join(subpath, filename)
-        log.info("Created new video segment #{} at: {}".format(fragment_id, full_path))
+        # Create full path for the segment
+        mkdirP(segment_subpath)
+        segment_full_path = os.path.join(segment_subpath, segment_filename)
+        log.info("Created new video segment #{} at: {}".format(fragment_id, segment_full_path))
 
         # Return full path to splitmux's callback
-        return full_path
+        return segment_full_path
 
       
     def handleStateChange(self, pipeline, target_state, timeout=60):
@@ -1384,6 +1386,16 @@ class BufferedCapture(Process):
                 self.sharedRawArray2 = None
                 self.raw_frame_saver = None
 
+            # Initialize timestamp array for ft file buffer
+            if self.config.save_frame_times:
+                self.timestamp_buffer = []
+                # For testing ft files
+                # self.ft_test_time = time.time()
+
+            # Initialize segment saving time for raw video saving
+            if self.config.raw_video_save:
+                self.last_segment_savetime = time.time()
+
             log.debug("Process-specific initialization complete")
 
             # Main capture loop
@@ -1555,6 +1567,9 @@ class BufferedCapture(Process):
                     # Always set first frame timestamp in the beginning of the block
                     first_frame_timestamp = frame_timestamp
 
+                # Append current timestamp to ft file buffer
+                if self.config.save_frame_times:
+                    self.timestamp_buffer.append((total_frames, frame_timestamp))
 
                 # If save_frames is set and a video device is used, save a frame every nth frames
                 if (self.config.save_frames
@@ -1783,6 +1798,37 @@ class BufferedCapture(Process):
             if self.config.report_dropped_frames:
                 log.info('Estimated FPS: {:.3f}'.format(block_frames/(time.time() - t_block)))
         
+
+            # Save current timestamp buffer to ft file
+            # Construct FTStruct, record timestamps, and reset the timestamp array in memory
+            if self.config.save_frame_times:
+                ft = FTStruct.FTStruct()
+                ft.timestamps = copy.copy(self.timestamp_buffer)
+                self.timestamp_buffer.clear()
+
+                base_time = datetime.datetime.fromtimestamp(first_frame_timestamp)
+                ft_filename = base_time.strftime("FT_{}_%Y%m%d_%H%M%S.bin".format(self.config.stationID))
+                ft_subpath = os.path.join(self.config.data_dir, self.config.times_dir, base_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
+
+                mkdirP(ft_subpath)
+                FTfile.write(ft, ft_subpath, ft_filename)
+                log.info("Created FT file {} for block starting at {}".format(os.path.join(ft_subpath, ft_filename), first_frame_timestamp))
+
+                # For Testing: 
+                # Print first and last 10 timestamps, array length, average time difference and time difference from last block
+                # Enable self.ft_test_time in __init__
+                
+                # print("\n\n --- FT file data --- \nFirst 10 timestamps: {}\n\nLast 10 timestamps: {}\n\nArray length: {}\n\n".format(
+                #       ft.timestamps[:11], 
+                #       ft.timestamps[-10:],
+                #       len(ft.timestamps),
+                # ),
+                #       "Average per-frame time difference: {}\n\nLast segment time difference: {}\n\n ---------------- \n\n".format(
+                #       sum(ft.timestamps[i+1][1] - ft.timestamps[i][1] for i in range(len(ft.timestamps) - 1)) / (len(ft.timestamps) - 1),
+                #       ft.timestamps[0][1] - self.ft_test_time
+                # ), end='')
+                # self.ft_test_time = ft.timestamps[-1][1]
+
 
         log.info('Releasing video device...')
         self.releaseResources()

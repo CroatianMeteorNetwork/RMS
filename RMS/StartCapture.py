@@ -233,18 +233,21 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         night_data_dir = os.path.join(os.path.abspath(config.data_dir), config.captured_dir, \
             night_data_dir_name)
 
+    # Full path to the time files directories
+    if config.save_frame_times:
+        ft_file_dir = os.path.join(os.path.abspath(config.data_dir), config.times_dir)
+
     # Full path to the saved frames directory
     if config.save_frames:
         saved_frames_dir = os.path.join(os.path.abspath(config.data_dir), config.frame_dir)
     else:
         saved_frames_dir = None
 
-    # Full path to the video files directory
+    # Full path to the video files
     if config.raw_video_save:
         saved_video_dir = os.path.join(os.path.abspath(config.data_dir), config.video_dir)
     else:
         saved_video_dir = None
-
 
 
     # Add a note about Patreon supporters
@@ -270,6 +273,11 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     if (not config.continuous_capture) or (not daytime_mode.value):
         mkdirP(night_data_dir)
         log.info('Data directory: ' + night_data_dir)
+
+    # Make a directory for the time files if configured
+    if config.save_frame_times:
+        mkdirP(ft_file_dir)
+        log.info('Saved FT files directory: {}'.format(ft_file_dir))
 
     # Make a directory for the saved frames
     if saved_frames_dir is not None:

@@ -291,7 +291,7 @@ class Config:
         # Decoder for the gstreamer media backend (e.g. decodebin, avdec_h264, nvh264dec)
         self.gst_decoder = "avdec_h264"
 
-        # Toggle raw video saving in data_dir/video_dir.
+        # Toggle raw video saving in data_dir/video_dir
         self.raw_video_save = False
 
         # Duration of the raw video segment (seconds)
@@ -341,6 +341,7 @@ class Config:
         self.archived_dir = "ArchivedFiles"
         self.frame_dir = "FramesFiles"
         self.video_dir = "VideoFiles"
+        self.times_dir = "TimeFiles"
 
         # days of logfiles to keep
         self.logdays_to_keep = 30
@@ -367,7 +368,12 @@ class Config:
         # Keep this many video dirs (days)
         # Zero means keep them all
         self.video_days_to_keep = 2
-        
+
+        # Timestamp dirs to keep
+        # Keep this many ft file (timestamp) folders (days)
+        # Zero means keep them all
+        self.times_days_to_keep = 8
+
         # Space quotas in GB
 
 
@@ -397,6 +403,9 @@ class Config:
 
         # Enable/disable saving a live.jpg file in the data directory with the latest image
         self.live_jpg = False
+
+        # Toggle saving of frame time files (FT files) to times_dir
+        self.save_frame_times = True
 
         # Toggle saving video frames at a set interval to the frame_dir
         self.save_frames = True
@@ -970,6 +979,9 @@ def parseCapture(config, parser):
     if parser.has_option(section, "video_days_to_keep"):
         config.video_days_to_keep = int(parser.get(section, "video_days_to_keep"))
 
+    if parser.has_option(section, "times_days_to_keep"):
+        config.times_days_to_keep = int(parser.get(section, "times_days_to_keep"))
+
     if parser.has_option(section, "quota_management_disabled"):
         config.quota_management_disabled = parser.getboolean(section, "quota_management_disabled")
 
@@ -995,6 +1007,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "video_dir"):
         config.video_dir = parser.get(section, "video_dir")
+
+    if parser.has_option(section, "times_dir"):
+        config.times_dir = parser.get(section, "times_dir")
 
     if parser.has_option(section, "width"):
         config.width = parser.getint(section, "width")
@@ -1158,6 +1173,10 @@ def parseCapture(config, parser):
     # Enable/disable showing maxpixel on the screen
     if parser.has_option(section, "live_jpg"):
         config.live_jpg = parser.getboolean(section, "live_jpg")
+
+    # Toggle saving of frame time files (FT files) to times_dir
+    if parser.has_option(section, "save_frame_times"):
+        config.save_frame_times = parser.getboolean(section, "save_frame_times")
 
     # Enable/disable saving video frames
     if parser.has_option(section, "save_frames"):

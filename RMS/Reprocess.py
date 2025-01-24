@@ -10,6 +10,8 @@ import traceback
 import argparse
 import random
 import glob
+import tarfile
+import shutil
 
 from RMS.ArchiveDetections import archiveDetections, archiveFieldsums
 # from RMS.Astrometry.ApplyAstrometry import applyAstrometryFTPdetectinfo
@@ -372,14 +374,10 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     # Archive all fieldsums to one archive
     archiveFieldsums(night_data_dir)
 
-
-    # If videos were saved, rename them with the timestamp of the first frame
-    # This command requires the FS archive to be present
+    # Timestamp RMS videos if configured
     # if config.raw_video_save:
-
     #     try:
     #         timestampRMSVideos(config.video_dir, rename=True)
-
     #     except Exception as e:
     #         log.debug('Renaming videos failed with the message:\n' + repr(e))
     #         log.debug(repr(traceback.format_exception(*sys.exc_info())))
@@ -388,6 +386,52 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     # List for any extra files which will be copied to the night archive directory. Full paths have to be 
     #   given
     extra_files = []
+
+
+    # Add relevant FT files the upload archive.
+    if config.save_frame_times:
+
+        log.info('Archiving new frame time (FT) files...')
+
+        # Archive unprocessed FT files, one day at a time 
+        try:
+            ft_file_dir = os.path.join(config.data_dir, config.times_dir)
+
+            for year in os.listdir(ft_file_dir):
+                # Each 'year' is 2024, 2025, ...
+                year_dir = os.path.join(ft_file_dir, year)
+
+                # FT file directory at this level will only consist of unprocessed days (directories) or
+                # processed days (bz2 archives)
+
+                for day in os.listdir(year_dir):
+                    # Each 'day' is 20240923-267, 20240924-268, ...
+                    day_dir = os.path.join(year_dir, day)
+                    
+                    # Skip if not directory (eg. bz2 archive) or if inside today's directory
+                    if (not os.path.isdir(day_dir)) or (day == RmsDateTime.utcnow().strftime("%Y%m%d-%j")):
+                        continue
+
+                    try:
+                        # Archive directory for this day of ft files
+                        tar_path = os.path.join(year_dir, '{}_{}_frametimes.tar.bz2'.format(config.stationID, day))
+
+                        with tarfile.open(tar_path, 'w:bz2') as tar:
+                            tar.add(day_dir, arcname=os.path.basename(day_dir))
+
+                        # Delete directory for this day of ft files
+                        shutil.rmtree(day_dir)
+                        print("Successfully created tar archive at: {}".format(tar_path))
+
+                        # Add to extra files for upload
+                        extra_files.append(tar_path)
+
+                    except Exception as e:
+                        print("Error creating tar archive: {}".format(e))
+
+        except Exception as e:
+            log.debug('Archiving FT files failed with message:\n' + repr(e))
+            log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
 
     log.info('Making a flat...')
