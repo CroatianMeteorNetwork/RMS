@@ -424,6 +424,7 @@ def gatherCameraInformation(config):
         cam = dvr.DVRIPCam(re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0])
         if cam.login():
             sensor_type = cam.get_upgrade_info()['Hardware']
+            cam.close()
         else:
             sensor_type = "Unable to login"
     except:

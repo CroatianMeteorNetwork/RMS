@@ -361,12 +361,12 @@ class Config:
         # Frame dirs to keep
         # Keep this many frame dirs (days)
         # Zero means keep them all
-        self.frame_dirs_to_keep = 4
+        self.frame_days_to_keep = 4
 
         # Video dirs to keep
         # Keep this many video dirs (days)
         # Zero means keep them all
-        self.video_dirs_to_keep = 2
+        self.video_days_to_keep = 2
         
         # Space quotas in GB
 
@@ -604,8 +604,9 @@ class Config:
         self.star_catalog_path = os.path.join(self.rms_root_dir, 'Catalogs')
         self.star_catalog_file = 'gaia_dr2_mag_11.5.npy'
 
-        # BVRI band ratios for GAIA G band and Sony CMOS cameras
-        self.star_catalog_band_ratios = [0.45, 0.70, 0.72, 0.50]
+        # Catalog band ratios for Sony CMOS cameras
+        #                                   B     V     R     I   (G    BR    BR)
+        self.star_catalog_band_ratios = [0.15, 0.30, 0.25, 0.30, 0.00, 0.0, 0.00]
 
         self.platepar_name = 'platepar_cmn2010.cal'
         self.platepars_flux_recalibrated_name = 'platepars_flux_recalibrated.json'
@@ -964,11 +965,11 @@ def parseCapture(config, parser):
     if parser.has_option(section, "capt_dirs_to_keep"):
         config.capt_dirs_to_keep = int(parser.get(section, "capt_dirs_to_keep"))
 
-    if parser.has_option(section, "frame_dirs_to_keep"):
-        config.bz2_files_to_keep = int(parser.get(section, "frame_dirs_to_keep"))
+    if parser.has_option(section, "frame_days_to_keep"):
+        config.frame_days_to_keep = int(parser.get(section, "frame_days_to_keep"))
 
-    if parser.has_option(section, "video_dirs_to_keep"):
-        config.video_dirs_to_keep = int(parser.get(section, "video_dirs_to_keep"))
+    if parser.has_option(section, "video_days_to_keep"):
+        config.video_days_to_keep = int(parser.get(section, "video_days_to_keep"))
 
     if parser.has_option(section, "quota_management_disabled"):
         config.quota_management_disabled = parser.getboolean(section, "quota_management_disabled")
@@ -1663,6 +1664,15 @@ def parseCalibration(config, parser):
 
         # Parse the ratios as a list of floats
         config.star_catalog_band_ratios = list(map(float, ratios_str.split(',')))
+
+        # Add zeros to the end of the list if it is too short (need 7 numbers)
+        while len(config.star_catalog_band_ratios) < 7:
+            config.star_catalog_band_ratios.append(0.0)
+
+        # If they're all zero, use the V band
+        if all([x == 0 for x in config.star_catalog_band_ratios]):
+            config.star_catalog_band_ratios[1] = 1.0
+            print('Warning! All band ratios are zero! Using the V band as the default band ratio...')
 
 
     if parser.has_option(section, "platepar_name"):
