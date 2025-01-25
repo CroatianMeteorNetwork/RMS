@@ -8,6 +8,7 @@ import ctypes
 import multiprocessing
 import time
 import datetime
+import logging
 
 import binascii
 import paramiko
@@ -21,7 +22,7 @@ except:
     import queue as Queue
 
 
-from RMS.Logger import getLogger
+
 from RMS.Misc import mkdirP, RmsDateTime
 
 # Map FileNotFoundError to IOError in Python 2 as it does not exist
@@ -29,61 +30,7 @@ if sys.version_info[0] < 3:
     FileNotFoundError = IOError
 
 # Get the logger from the main module
-log = getLogger("logger")
-
-
-def _agentAuth(transport, username, rsa_private_key):
-    """ Attempt to authenticate to the given transport using any of the private keys available from an SSH 
-        agent or from a local private RSA key file (assumes no pass phrase).
-
-    Arguments:
-        transport: [paramiko.Transport object] Connection handle.
-        username: [str] Username which will be used to connect to the host.
-        rsa_private_key: [str] Path to the RSA private key on the system.
-
-    Return:
-        [bool] True if successful, False otherwise.
-    """
-
-    # Try loading the private key
-    ki = None
-    try:
-        ki = paramiko.RSAKey.from_private_key_file(rsa_private_key)
-
-    except Exception as e:
-        log.error('Failed loading SSH key given in the config ' + rsa_private_key + str(e))
-
-
-    # Find all available keys if the private key was not found
-    if ki is None:
-        log.info("Loading all available keys from the SSH agent...")
-        agent = paramiko.Agent()
-        agent_keys = agent.get_keys()
-
-    else:
-        agent_keys = (ki,)
-
-
-    if len(agent_keys) == 0:
-        log.warning('No keys found, cannot authenticate!')
-        return False
-
-    # Try a key until finding the one which works
-    for key in agent_keys:
-
-        if key is not None:
-            log.info('Trying ssh-agent key {}'.format(binascii.hexlify(key.get_fingerprint())))
-
-            # Try the key to authenticate
-            try:
-                transport.auth_publickey(username, key)
-                log.info('... success!')
-                return True
-
-            except paramiko.SSHException as e:
-                log.warning('... failed! - %s', e)
-
-    return False
+log = logging.getLogger("logger")
 
 
 def existsRemoteDirectory(sftp,path):
@@ -181,8 +128,89 @@ def createRemoteDirectory(sftp, path):
         return False
 
 
-def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22, 
-        rsa_private_key=os.path.expanduser('~/.ssh/id_rsa'), allow_dir_creation=False):
+def getSSHClientAndSFTP(hostname,
+                        port=22,
+                        username=None,
+                        key_filename=None,
+                        timeout=300,
+                        banner_timeout=300,
+                        auth_timeout=300,
+                        keepalive_interval=30
+                        ):
+    """
+    Return (ssh, sftp) after authenticating via key or agent fallback, 
+    and optionally setting timeouts/keepalive.
+    """
+    log.info("Paramiko version: {}".format(paramiko.__version__))
+    log.info("Establishing SSH connection to: {}:{}...".format(hostname, port))
+
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+    # Try key_filename first
+    try:
+        ssh.connect(
+            hostname,
+            port=port,
+            username=username,
+            key_filename=key_filename,
+            timeout=timeout,
+            banner_timeout=banner_timeout,
+            auth_timeout=auth_timeout
+        )
+        log.info("SSHClient connected successfully (key file).")
+
+    except paramiko.AuthenticationException:
+        log.warning("Key-file auth failed. Trying agent fallback...")
+        ssh.connect(
+            hostname,
+            port=port,
+            username=username,
+            look_for_keys=True,
+            timeout=timeout,
+            banner_timeout=banner_timeout,
+            auth_timeout=auth_timeout
+        )
+        log.info("SSHClient connected via agent fallback.")
+
+    except Exception as e:
+        log.error("SSH connection failed: %s" % str(e))
+        raise
+
+    # Optionally set keepalive
+    transport = ssh.get_transport()
+    if transport and keepalive_interval > 0:
+        transport.set_keepalive(keepalive_interval)
+        log.info("Keepalive set to {} seconds".format(keepalive_interval))
+
+    # Open SFTP connection
+    log.debug("Attempting to open SFTP connection...")
+    try:
+        # TODO: consider using asyncio when Python 2 support is dropped
+        # as ssh.open_sftp() has the potential to hang indefinitely
+        # import asyncio
+        # async def open_sftp_async(ssh):
+        #     return await asyncio.get_event_loop().run_in_executor(None, ssh.open_sftp)
+
+        # # Usage
+        # sftp = await asyncio.wait_for(open_sftp_async(ssh), timeout=30)
+        sftp = ssh.open_sftp()
+        log.info("SFTP connection established.")
+    except Exception as e:
+        log.error("Failed to open SFTP connection: %s" % str(e))
+        ssh.close()
+        raise
+
+    return ssh, sftp
+
+
+def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
+               rsa_private_key=os.path.expanduser('~/.ssh/id_rsa'),
+               allow_dir_creation=False,
+               connect_timeout=300,         # 5 minutes for socket connect
+               banner_timeout=300,  # 5 minutes to receive SSH banner
+               auth_timeout=300,     # 5 minutes for auth
+               keepalive_interval=30):
     """ Upload the given list of files using SFTP. The upload only supports uploading files from one local
         directory to one remote directory. The files are uploaded only if they do not already exist on the 
         server, or if they are of different size than the local files.
@@ -214,35 +242,35 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
         log.info('No files to upload!')
         return True
 
-    # Connect and use paramiko Transport to negotiate SSH2 across the connection
+    # Connect and use paramiko SFTP to negotiate SSH2 across the connection
     # The whole thing is in a try block because if an error occurs, the connection will be closed at the end
+
+    ssh = None
+    sftp = None
+
     try:
+        # Connect with timeouts
+        ssh, sftp = getSSHClientAndSFTP(
+            hostname,
+            port=port,
+            username=username,
+            key_filename=rsa_private_key,
+            timeout=connect_timeout,
+            banner_timeout=banner_timeout,
+            auth_timeout=auth_timeout
+        )
 
-        log.info('Establishing SSH connection to: ' + hostname + ':' + str(port) + '...')
-
-        # Connect to host
-        t = paramiko.Transport((hostname, port))
-        t.start_client()
-
-        # Authenticate the connection
-        auth_status = _agentAuth(t, username, rsa_private_key)
-        if not auth_status:
-            return False
-
-        # Open new SFTP connection
-        sftp = paramiko.SFTPClient.from_transport(t)
-
-        # If permitted, check if directory exists and create
+        # Optionally ensure remote directory exists
         if allow_dir_creation:
+            log.info("Checking/creating remote dir '{}'".format(dir_remote))
             if not existsRemoteDirectory(sftp, dir_remote):
                 createRemoteDirectory(sftp, dir_remote)
 
-        # Check that the remote directory exists
+        # Verify remote dir
         try:
             sftp.stat(dir_remote)
-
         except Exception as e:
-            log.error("Remote directory '" + dir_remote + "' does not exist!")
+            log.error("Remote directory '{}' does not exist or is not accessible: {}".format(dir_remote, e))
             return False
 
         # Go through all files
@@ -263,10 +291,11 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                 
                 # If the remote and the local file are of the same size, skip it
                 if local_file_size == remote_info.st_size:
-                    log.info('The file already exists on the server!')
+                    log.info("The file '{}' already exists on the server and is the same size. Skipping.".format(remote_file))
                     continue
             
             except IOError as e:
+                # Means remote file doesn't exist yet, so proceed
                 pass
                 
 
@@ -274,38 +303,34 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
             # Upload the file to the server if it isn't already there
             log.info('Copying ' + local_file + ' ({:3.2f}MB) to '.format(int(local_file_size)/ (1024*1024)) + remote_file)
             sftp.put(local_file, remote_file)
+            log.info("Upload completed, verifying...")
 
 
             # Check that the size of the remote file is correct, indicating a successful upload
-            try:
-                remote_info = sftp.lstat(remote_file)
-                
-                # If the remote and the local file are of the same size, skip it
-                if local_file_size != remote_info.st_size:
-                    log.info('The file upload did not finish, aborting and trying again...')
-                    return False
-
-                else:
-                    log.info("File upload verified: {:s}".format(remote_file))
+            remote_info = sftp.lstat(remote_file)
             
-
-            except IOError as e:
+            # If the remote and the local file are of the same size, skip it
+            if local_file_size != remote_info.st_size:
+                log.info('The file upload did not finish, aborting and trying again...')
                 return False
 
-
-
-        t.close()
-
+            log.info("File upload verified: {:s}".format(remote_file))
+            
         return True
 
     except Exception as e:
-        log.error(e, exc_info=True)
-        try:
-            t.close()
-        except:
-            pass
-
+        log.error("Exception during SFTP upload: {}".format(e), exc_info=True)
         return False
+
+    finally:
+        # Close SFTP and SSH if open
+        if sftp is not None:
+            log.info("Closing SFTP channel")
+            sftp.close()
+        if ssh is not None:
+            log.info("Closing SSH client connection")
+            ssh.close()
+
 
 
 
@@ -503,7 +528,8 @@ class UploadManager(multiprocessing.Process):
                 tries += 1 
                 self.file_queue.put(file_name)
 
-                time.sleep(2)
+                # Given the network a moment to recover between attempts
+                time.sleep(10)
 
             # Check if the upload was tried too many times
             if tries >= retries:
