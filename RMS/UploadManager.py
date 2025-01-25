@@ -141,8 +141,8 @@ def getSSHClientAndSFTP(hostname,
     Return (ssh, sftp) after authenticating via key or agent fallback, 
     and optionally setting timeouts/keepalive.
     """
-    log.info(f"Paramiko version: {paramiko.__version__}")
-    log.info(f"Establishing SSH connection to: {hostname}:{port}...")
+    log.info("Paramiko version: {}".format(paramiko.__version__))
+    log.info("Establishing SSH connection to: {}:{}...".format(hostname, port))
 
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -160,8 +160,8 @@ def getSSHClientAndSFTP(hostname,
         )
         log.info("SSHClient connected successfully (key file).")
 
-    except paramiko.AuthenticationException as e:
-        log.warning("Key-file auth failed: %s. Trying agent fallback...", e)
+    except paramiko.AuthenticationException:
+        log.warning("Key-file auth failed. Trying agent fallback...")
         ssh.connect(
             hostname,
             port=port,
@@ -173,20 +173,33 @@ def getSSHClientAndSFTP(hostname,
         )
         log.info("SSHClient connected via agent fallback.")
 
-    except paramiko.SSHException as e:
-        log.error(f"SSH error: {e}")
+    except Exception as e:
+        log.error("SSH connection failed: %s" % str(e))
         raise
 
     # Optionally set keepalive
     transport = ssh.get_transport()
     if transport and keepalive_interval > 0:
         transport.set_keepalive(keepalive_interval)
-        log.info(f"Keepalive set to {keepalive_interval} seconds")
+        log.info("Keepalive set to {} seconds".format(keepalive_interval))
 
-    # Open SFTP
-    log.info("Opening SFTP channel...")
-    sftp = ssh.open_sftp()
-    log.info("SFTP channel opened.")
+    # Open SFTP connection
+    log.debug("Attempting to open SFTP connection...")
+    try:
+        # TODO: consider using asyncio when Python 2 support is dropped
+        # as ssh.open_sftp() has the potential to hang indefinitely
+        # import asyncio
+        # async def open_sftp_async(ssh):
+        #     return await asyncio.get_event_loop().run_in_executor(None, ssh.open_sftp)
+
+        # # Usage
+        # sftp = await asyncio.wait_for(open_sftp_async(ssh), timeout=30)
+        sftp = ssh.open_sftp()
+        log.info("SFTP connection established.")
+    except Exception as e:
+        log.error("Failed to open SFTP connection: %s" % str(e))
+        ssh.close()
+        raise
 
     return ssh, sftp
 
