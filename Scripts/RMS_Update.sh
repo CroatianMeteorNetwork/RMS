@@ -22,7 +22,7 @@ check_disk_space() {
     local required_mb=$2
     
     # Get available space in KB and convert to MB
-    local available_mb=$(df -P "$dir" | awk 'NR==2 {print $4/1024}' | cut -d. -f1)
+    local available_mb=$(df -m "$dir" | awk 'NR==2 {print $4}')
     
     if [ "$available_mb" -lt "$required_mb" ]; then
         echo "Error: Insufficient disk space in $dir. Need ${required_mb}MB, have ${available_mb}MB"
