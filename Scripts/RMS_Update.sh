@@ -21,7 +21,7 @@ check_disk_space() {
     local dir=$1
     local required_mb=$2
     
-    # Get available space in KB and convert to MB
+    # Get available space in MB
     local available_mb=$(df -m "$dir" | awk 'NR==2 {print $4}')
     
     if [ "$available_mb" -lt "$required_mb" ]; then
