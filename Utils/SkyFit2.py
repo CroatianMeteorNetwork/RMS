@@ -4505,9 +4505,16 @@ class PlateTool(QtWidgets.QMainWindow):
             self.config.star_catalog_path = os.path.join(self.config.rms_root_dir, 'Catalogs')
             print("Updated catalog path to: ", self.config.star_catalog_path)
 
+        # Compute the number of years from J2000
+        years_from_J2000 = (
+            self.img_handle.beginning_datetime - datetime.datetime(2000, 1, 1, 12, 0, 0)
+                ).days/365.25
+    
         # Load catalog stars
         catalog_stars, self.mag_band_string, self.config.star_catalog_band_ratios = StarCatalog.readStarCatalog(
-            self.config.star_catalog_path, self.config.star_catalog_file, lim_mag=lim_mag,
+            self.config.star_catalog_path, self.config.star_catalog_file, 
+            years_from_J2000=years_from_J2000,
+            lim_mag=lim_mag,
             mag_band_ratios=self.config.star_catalog_band_ratios)
 
         return catalog_stars

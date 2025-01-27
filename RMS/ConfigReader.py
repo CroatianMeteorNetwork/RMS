@@ -613,8 +613,9 @@ class Config:
         self.star_catalog_path = os.path.join(self.rms_root_dir, 'Catalogs')
         self.star_catalog_file = 'gaia_dr2_mag_11.5.npy'
 
-        # BVRI band ratios for GAIA G band and Sony CMOS cameras
-        self.star_catalog_band_ratios = [0.45, 0.70, 0.72, 0.50]
+        # Catalog band ratios for Sony CMOS cameras
+        #                                   B     V     R     I   (G    BR    BR)
+        self.star_catalog_band_ratios = [0.15, 0.30, 0.25, 0.30, 0.00, 0.0, 0.00]
 
         self.platepar_name = 'platepar_cmn2010.cal'
         self.platepars_flux_recalibrated_name = 'platepars_flux_recalibrated.json'
@@ -1682,6 +1683,15 @@ def parseCalibration(config, parser):
 
         # Parse the ratios as a list of floats
         config.star_catalog_band_ratios = list(map(float, ratios_str.split(',')))
+
+        # Add zeros to the end of the list if it is too short (need 7 numbers)
+        while len(config.star_catalog_band_ratios) < 7:
+            config.star_catalog_band_ratios.append(0.0)
+
+        # If they're all zero, use the V band
+        if all([x == 0 for x in config.star_catalog_band_ratios]):
+            config.star_catalog_band_ratios[1] = 1.0
+            print('Warning! All band ratios are zero! Using the V band as the default band ratio...')
 
 
     if parser.has_option(section, "platepar_name"):
