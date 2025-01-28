@@ -1558,75 +1558,65 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
             star_mag[ff_file] = mag_filtered
 
 
-            # # Plot one example of matched and predicted stars
-            # if show_plot and (i == int(len(ff_files)//2)):
+            # Plot one example of matched and predicted stars
+            if show_plot and (i == int(len(ff_files)//2)):
                 
+                print("Predicted number of stars in {:s}: {:d}".format(ff_file, pred_star_count[ff_file]))
 
-            #     #### Plot in the Celestial coordinates on a polar plot
+                #### Plot in the Celestial coordinates on a polar plot
 
-            #     fig = plt.figure()
-            #     ax = fig.add_subplot(111, projection='polar')
+                fig = plt.figure()
+                ax = fig.add_subplot(111, projection='polar')
 
-            #     # Plot the perimeter of the FOV
-            #     ax.plot(np.radians(ra_vertices), 90 - dec_vertices, 'k-')
+                # Plot the perimeter of the FOV
+                ax.plot(np.radians(ra_vertices), 90 - dec_vertices, 'k-')
 
-            #     # Plot the locations of all stars queried from the catalog
-            #     ax.scatter(np.radians(ra_catalog), 90 - dec_catalog, c='r', s=20, label='all stars', marker='o')
+                # Plot the locations of all stars queried from the catalog
+                ax.scatter(np.radians(ra_catalog), 90 - dec_catalog, c='r', s=20, label='all stars', marker='o')
 
-            #     # Plot the stars inside the perimeter
-            #     ax.scatter(np.radians(ra_catalog[inside]), 90 - dec_catalog[inside], c='b', s=20, label='inside', marker='x')
+                # Plot the stars inside the perimeter
+                ax.scatter(np.radians(ra_catalog[inside]), 90 - dec_catalog[inside], c='b', s=20, label='inside', marker='x')
 
-            #     plt.show()
+                plt.show()
 
 
-            #     #### Plot in the image coordinates ####
+                #### Plot in the image coordinates ####
 
-            #     plt.title("{:s}\nLM = {:.2f}, faintest predicted = {:.2f}".format(ff_file, lim_mag, np.max(mag_filtered)))
+                plt.title("{:s}\nLM = {:.2f}, faintest predicted = {:.2f}".format(ff_file, lim_mag, np.max(mag_filtered)))
 
-            #     # Plot matched stars
-            #     plt.scatter(
-            #         *np.array(recalibrated_platepars[ff_file].star_list)[:, 1:3].T[::-1], label='matched',
-            #         marker='+', c='b', s=20, alpha=0.5
-            #     )
+                # Plot matched stars
+                plt.scatter(
+                    *np.array(recalibrated_platepars[ff_file].star_list)[:, 1:3].T[::-1], label='matched',
+                    marker='+', c='r', s=60, alpha=1.0
+                )
 
-            #     # Plot the locations of all stars queried from the catalog (small circles that are within the mask)
-            #     mask_filter_all = np.take(
-            #     np.floor(mask.img/255),
-            #     np.ravel_multi_index(
-            #         np.floor(np.array([y, x])).astype(int), (platepar.Y_res, platepar.X_res)
-            #     ),
-            #     ).astype(bool)
+                # Plot all stars inside the FOV
+                plt.scatter(x, y, c='r', s=5, label='all stars', marker='o')
 
-            #     # Plot all stars
-            #     plt.scatter(x, y, c='r', s=5, label='all stars', marker='o')
+                # Plot all stars witin the mask (empty circles)
+                plt.scatter(x_filtered[mask_filter], y_filtered[mask_filter], 
+                            s=40, label='within mask', marker='o', facecolors='none', edgecolors='k')
 
-            #     # # Plot all stars, without the FOV filtering
-            #     # x_all, y_all = raDecToXYPP(ra_catalog, dec_catalog, jd, platepar)
-            #     # plt.scatter(x_all, y_all, c='r', s=20, label='stars nofilter', marker='o', alpha=0.5)
+                # Plot the effects of extinction and vignetting on the catalog stars by color coding (at the back)
+                plt.scatter(x, y, c=mag_diff, label='extinction/vignetting', alpha=0.5, marker='o', s=100, zorder=0)
 
-            #     # Plot all stars witin the mask (empty circles)
-            #     plt.scatter(x[mask_filter_all], y[mask_filter_all], s=40, label='within mask', marker='o', facecolors='none', edgecolors='k')
+                # Plot the locations stars passing the magnitude filter
+                plt.scatter(x_filtered[mask_filter], y_filtered[mask_filter], c='g', label='filtered', marker='x', s=50)
 
-            #     # Plot the effects of extinction and vignetting on the catalog stars by color coding (at the back)
-            #     plt.scatter(x, y, c=mag_diff, label='extinction/vignetting', alpha=0.5, marker='o', s=100, zorder=0)
+                plt.colorbar()
 
-            #     # Plot the locations stars passing the magnitude filter
-            #     plt.scatter(x_filtered[mask_filter], y_filtered[mask_filter], c='g', label='filtered', marker='x', s=50)
+                # Set limits to 20 px outside the image
+                plt.xlim(-20, platepar.X_res + 20)
+                plt.ylim(platepar.Y_res + 20, -20)
 
-            #     plt.colorbar()
-
-            #     # Set limits to 20 px outside the image
-            #     plt.xlim(-20, platepar.X_res + 20)
-            #     plt.ylim(platepar.Y_res + 20, -20)
-
-            #     # Draw a rectangle around the FOV defined by the image resolution
-            #     plt.gca().add_patch(
-            #         plt.Rectangle((0, 0), platepar.X_res, platepar.Y_res, fill=None, edgecolor='k')
-            #         )
+                # Draw a rectangle around the FOV defined by the image resolution
+                plt.gca().add_patch(
+                    plt.Rectangle((0, 0), platepar.X_res, platepar.Y_res, fill=None, edgecolor='k')
+                    )
 
                 
-            #     plt.legend()
-            #     plt.show()
+                plt.legend()
+                plt.show()
 
 
     return pred_star_count
