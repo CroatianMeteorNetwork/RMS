@@ -93,6 +93,35 @@ def rayTracing(x, y, poly):
     return inside
 
 
+def fitPlane(points):
+    """
+    Fits a plane to a set of 3D points using SVD.
+
+    Parameters:
+        points (np.ndarray): Nx3 array of 3D points.
+
+    Returns:
+        normal (np.ndarray): Normal vector of the plane [a, b, c].
+        d (float): The d coefficient in the plane equation ax + by + cz + d = 0.
+    """
+    # Step 1: Compute the centroid
+    centroid = np.mean(points, axis=0)
+    
+    # Step 2: Center the points
+    centered_points = points - centroid
+    
+    # Step 3: Perform SVD
+    _, _, vh = np.linalg.svd(centered_points)
+    
+    # Step 4: Extract the normal vector (last row of V^T)
+    normal = vh[-1, :]
+    
+    # Step 5: Compute d
+    d = -np.dot(normal, centroid)
+    
+    return normal, d
+
+
 def sphericalPolygonCheck(polygon, test_points, show_plot=False):
     """ Check if a set of points in spherical coordinates are inside a polygon.
     
@@ -117,20 +146,12 @@ def sphericalPolygonCheck(polygon, test_points, show_plot=False):
     # Convert polygon vertices to Cartesian
     cartesian_polygon = np.array([raDecToXYZ(ra, dec) for ra, dec in polygon])
 
-    # Use three vertices to define a plane
-    first_index = 0
-    second_index = len(polygon)//3
-    third_index = 2*len(polygon)//3
-    v0 = cartesian_polygon[first_index]
-    v1 = cartesian_polygon[second_index]
-    v2 = cartesian_polygon[third_index]
-
-    # Normal vector to the plane
-    normal = np.cross(v1 - v0, v2 - v0)
-    normal /= np.linalg.norm(normal)
+    # Fit a plane to the polygon vertices
+    normal, _ = fitPlane(cartesian_polygon)
 
     # Determine the direction of the polygon (not necessarily aligned with the normal)
     # Store the direction vector which is the same as the normal, but it points towards the polygon
+    v0 = cartesian_polygon[0]
     if np.dot(v0, normal) > 0:
         polygon_direction = normal
     else:
@@ -216,47 +237,47 @@ def testSphericalPolygonCheck():
     #     [245.85, 61.53], [319.86, 56.92], [326.00, 70.64], [0.00, 77.71]
     # ]
 
-    # # US0020
-    # polygon = [
-    #     (0.55, 36.68),
-    #     (347.46, 43.15),
-    #     (331.99, 45.77),
-    #     (315.97, 44.23),
-    #     (301.11, 38.12),
-    #     (283.91, 59.51),
-    #     (239.95, 68.72),
-    #     (195.93, 59.46),
-    #     (178.34, 38.02),
-    #     (163.94, 43.93),
-    #     (148.00, 45.49),
-    #     (132.59, 42.86),
-    #     (119.58, 36.30),
-    #     (99.46, 56.19),
-    #     (60.00, 64.18),
-    #     (20.60, 56.25),
-    #     (0.55, 36.68),
-    # ]
-
-    # NZ004U
+    # US0020
     polygon = [
-        (343.73, -28.75),
-        (344.85, -16.60),
-        (343.68, -5.23),
-        (340.54, 5.77),
-        (334.87, 16.67),
-        (0.13, 22.09),
-        (22.40, 26.85),
-        (45.65, 30.93),
-        (73.72, 33.82),
-        (71.39, 21.97),
-        (71.52, 10.64),
-        (73.56, -0.51),
-        (77.77, -11.76),
-        (53.55, -15.24),
-        (32.26, -19.28),
-        (10.41, -23.77),
-        (343.73, -28.75),
+        (0.55, 36.68),
+        (347.46, 43.15),
+        (331.99, 45.77),
+        (315.97, 44.23),
+        (301.11, 38.12),
+        (283.91, 59.51),
+        (239.95, 68.72),
+        (195.93, 59.46),
+        (178.34, 38.02),
+        (163.94, 43.93),
+        (148.00, 45.49),
+        (132.59, 42.86),
+        (119.58, 36.30),
+        (99.46, 56.19),
+        (60.00, 64.18),
+        (20.60, 56.25),
+        (0.55, 36.68),
     ]
+
+    # # NZ004U
+    # polygon = [
+    #     (343.73, -28.75),
+    #     (344.85, -16.60),
+    #     (343.68, -5.23),
+    #     (340.54, 5.77),
+    #     (334.87, 16.67),
+    #     (0.13, 22.09),
+    #     (22.40, 26.85),
+    #     (45.65, 30.93),
+    #     (73.72, 33.82),
+    #     (71.39, 21.97),
+    #     (71.52, 10.64),
+    #     (73.56, -0.51),
+    #     (77.77, -11.76),
+    #     (53.55, -15.24),
+    #     (32.26, -19.28),
+    #     (10.41, -23.77),
+    #     (343.73, -28.75),
+    # ]
 
     # Close the polygon if it is not already closed
     if polygon[0] != polygon[-1]:
