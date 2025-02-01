@@ -15,8 +15,53 @@ copies or substantial portions of the Software.
 
 # based on https://github.com/OpenIPC/python-dvr/blob/master/DeviceManager.py
 """
-
 from __future__ import print_function, unicode_literals, division, absolute_import
+
+import sys
+if sys.version_info[0] < 3:
+    print("This script cannot run on Python 2.")
+    sys.exit(1)
+
+import os
+import struct
+import fcntl
+import json
+from locale import getlocale
+from subprocess import check_output
+from socket import socket, inet_aton, inet_ntoa, if_nameindex
+from socket import SOL_SOCKET, SO_REUSEADDR, SO_BROADCAST, IP_MULTICAST_TTL, SOCK_DGRAM, AF_INET, IPPROTO_UDP, IPPROTO_IP
+import platform
+from datetime import datetime
+import hashlib
+
+try:
+    from dvrip import DVRIPCam
+except ImportError:
+    print("Exiting: dvrip module not found.")
+    sys.exit(1)
+
+try:
+    from tkinter import Tk, PhotoImage, Frame, Scrollbar, Menu, Label, Entry, Button
+    from tkinter import VERTICAL, HORIZONTAL, W, N, END, YES, BOTH
+
+    from tkinter.filedialog import asksaveasfilename
+    from tkinter.messagebox import showerror
+    from tkinter.ttk import Treeview, Style, Combobox
+
+    GUI_TK = True
+except:
+    GUI_TK = False
+
+# set app to None, so we can test later if its been initialised
+app = None
+
+# initialise other globals
+log = "search.log"
+logLevel = 20
+devices = {}
+searchers = {}
+configure = {}
+
 
 CODES = {
     100: "Success",
@@ -133,6 +178,8 @@ def SetIP(ip):
 
 
 def GetAllAddr():
+    # better to do this with something like netifaces-plus. 
+    # will rework it later
     if os.name == "nt":
         return [
             x.split(":")[1].strip()
@@ -149,23 +196,33 @@ def GetAllAddr():
             if "inet " in x and "127.0." not in x
         ]
 
-def GetInterfaces():
-        # pick the first wired interface
+
+def GetInterfaces(checkip=False):
+    # if the GUI is initialised, just read the list of interfaces from the dropdown
+    if app is not None:
+        return [app.intf.get()]
+    
+    # otherwise find the active interfaces. This is linux-specific. 
     det_intfs = list(zip(*if_nameindex()))[1]
     det_intfs = list(det_intfs)
     det_intfs.remove('lo')
     print("detected network interfaces:", det_intfs)
+    if checkip:
+        for intf in det_intfs:
+            try:
+                _ = get_ip_address(intf)
+            except Exception:
+                print('no ip address for ', intf)
+                det_intfs.remove(intf)
+    if len(det_intfs) == 0:
+        return ['None']
     return det_intfs
 
 
-def SearchXM(devices):
+def SearchXM():
 
     server = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
-    try:
-        intf = app.intf.get()
-    except:
-        # no GUI
-        intf = 'eth0'
+    intf = GetInterfaces(checkip=True)[0]
     print("Interface:", intf)
     try:
         ip = get_ip_address(intf)
@@ -192,7 +249,7 @@ def SearchXM(devices):
         )
         if (msg == 1531) and leng > 0:
             answer = json.loads(
-                data[0][20 : 20 + leng].replace(b"\x00", b""))
+                data[0][20: 20 + leng].replace(b"\x00", b""))
             if answer["NetWork.NetCommon"]["MAC"] not in devices.keys():
                 devices[answer["NetWork.NetCommon"]["MAC"]] = answer[
                     "NetWork.NetCommon"
@@ -202,33 +259,51 @@ def SearchXM(devices):
     return devices
 
 
-def ConfigXM(data):
+def ConfigXM(data, debug=False):
+
+    intf = GetInterfaces(checkip=True)[0]
+    print("Interface:", intf)
+    try:
+        ip = get_ip_address(intf)
+    except Exception:
+        ip = ''
+        print("Error during IP estimation, interface up?")
+
+    print("IP:", ip)
+
     config = {}
     #TODO: may be just copy whwole devices[data[1]] to config?
     for k in [u"HostName",u"HttpPort",u"MAC",u"MaxBps",u"MonMode",u"SSLPort",u"TCPMaxConn",u"TCPPort",u"TransferPlan",u"UDPPort","UseHSDownLoad"]:
         if k in devices[data[1]]:
             config[k] = devices[data[1]][k]
-    print(devices[data[1]][u"HostName"])
+    print('Remote host:', devices[data[1]][u"HostName"])
     config[u"DvrMac"] = devices[data[1]][u"MAC"]
     config[u"EncryptType"] = 1
     config[u"GateWay"] = SetIP(data[4])
     config[u"HostIP"] = SetIP(data[2])
     config[u"Submask"] = SetIP(data[3])
     config[u"Username"] = "admin"
-    config[u"Password"] = sofia_hash(data[5])
+    if len(data) > 5:
+        passwd = sofia_hash(data[5])
+    else:
+        passwd = sofia_hash('')
+    config[u"Password"] = passwd
     devices[data[1]][u"GateWay"] = config[u"GateWay"]
     devices[data[1]][u"HostIP"] = config[u"HostIP"]
     devices[data[1]][u"Submask"] = config[u"Submask"]
     config = json.dumps(
         config, ensure_ascii=False, sort_keys=True, separators=(", ", " : ")
     ).encode("utf8")
-    server = socket(AF_INET, SOCK_DGRAM)
+    server = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
     server.bind(("", 34569))
     server.settimeout(1)
     server.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
     server.setsockopt(SOL_SOCKET, SO_BROADCAST, 1)
+    server.setsockopt(SOL_SOCKET, 25, intf.encode('utf-8') + '\0'.encode('utf-8'))
+    server.setsockopt(IPPROTO_IP, IP_MULTICAST_TTL, 1)
     clen = len(config)
-    print(struct.pack(
+    if debug:
+        print(struct.pack(
             "BBHIIHHI%ds2s" % clen,
             255,
             0,
@@ -257,23 +332,23 @@ def ConfigXM(data):
         ),
         ("255.255.255.255", 34569),
     )
-    answer = {"Ret": 203}
+    answer = {"Ret": 101}
     e = 0
     while True:
         try:
             data = server.recvfrom(1024)
-            head, ver, typ, session, packet, info, msg, leng = struct.unpack(
-                "BBHIIHHI", data[0][:20]
-            )
+            _, _, _, _, _, _, msg, leng = struct.unpack("BBHIIHHI", data[0][:20])
+            if debug:
+                print(data)
             if (msg == 1533) and leng > 0:
-                answer = json.loads(
-                    data[0][20 : 20 + leng].replace(b"\x00", b""))
+                answer = json.loads(data[0][20: 20 + leng].replace(b"\x00", b""))
                 break
         except:
             e += 1
             if e > 3:
                 break
     server.close()
+    print(answer)
     return answer
 
 
@@ -298,7 +373,7 @@ def ProcessCMD(cmd):
         tolog("%s" % ("Search"))
         if len(cmd) > 1 and cmd[1].lower() in searchers.keys():
             try:
-                devices = searchers[cmd[1].lower()](devices)
+                devices = searchers[cmd[1].lower()]()
             except Exception as error:
                 print(" ".join([str(x) for x in list(error.args)]))
             print("Searching %s, found %d devices" % (cmd[1], len(devices)))
@@ -306,7 +381,7 @@ def ProcessCMD(cmd):
             for s in searchers:
                 tolog("Search" + " %s\r" % s)
                 try:
-                    devices = searchers[s](devices)
+                    devices = searchers[s]()
                 except Exception as error:
                     print(" ".join([str(x) for x in list(error.args)]))
             tolog("Found %d devices" % len(devices))
@@ -414,11 +489,11 @@ def ProcessCMD(cmd):
             
     if cmd[0].lower() == "config":
         if (
-            len(cmd) > 5
+            len(cmd) > 4
             and cmd[1] in devices.keys()
             and devices[cmd[1]]["Brand"] in configure.keys()
         ):
-            return configure[devices[cmd[1]]["Brand"]](cmd)
+            return configure[devices[cmd[1]]["Brand"]](cmd, logLevel>30)
         else:
             return "config [MAC] [IP] [MASK] [GATE] [Pasword]"
     
@@ -575,10 +650,7 @@ class GUITk:
 
     def search(self):
         self.clear()
-        #if self.ven["values"].index(self.ven.get()) == 0:
         ProcessCMD(["search"])
-        #else:
-        #    ProcessCMD(["search", self.ven.get()])
         self.pop()
 
     def pop(self):
@@ -679,42 +751,17 @@ class GUITk:
 
 if __name__ == "__main__":
 
-    import os, sys, struct, fcntl, json
-    from locale import getlocale
-    from subprocess import check_output
-    from socket import *
-    import platform
-    from datetime import *
-    import hashlib, base64
-
-    try:
-        from dvrip import DVRIPCam
-
-    except ImportError:
-        print("Exiting: dvrip module not found. This script cannot run on Python 2.")
-        sys.exit(1)
-
-    try:
-        try:
-            from tkinter import *
-        except:
-            from Tkinter import *
-        from tkinter.filedialog import asksaveasfilename, askopenfilename
-        from tkinter.messagebox import showinfo, showerror
-        from tkinter.ttk import *
-
-        GUI_TK = True
-    except:
-        GUI_TK = False
 
     logLevel = 30	
-    searchers = { "xm": SearchXM }
-    configure = { "xm": ConfigXM }
+    searchers = {"xm": SearchXM}
+    configure = {"xm": ConfigXM}
+
+    # check if there's a DISPLAY, and use commandline mode if not
+    if os.getenv('DISPLAY', default=None) is None:
+        GUI_TK = False
 
     # list of preferred interfaces - camera is supposed to be connected to a wired interface
     intfs = ['eth', 'eno', 'wlx', 'enx']
-    devices = {}
-    log = "search.log"
     icon = "R0lGODlhIAAgAPcAAAAAAAkFAgwKBwQBABQNBRAQDQQFERAOFA4QFBcWFSAaFCYgGAoUMhwiMSUlJCsrKyooJy8wLjUxLjkzKTY1Mzw7OzY3OEpFPwsaSRsuTRUsWD4+QCo8XQAOch0nYB05biItaj9ARjdHYiRMfEREQ0hIR0xMTEdKSVNOQ0xQT0NEUVFNUkhRXlVVVFdYWFxdXFtZVV9wXGZjXUtbb19fYFRda19gYFZhbF5wfWRkZGVna2xsa2hmaHFtamV0Ynp2aHNzc3x8fHh3coF9dYJ+eH2Fe3K1YoGBfgIgigwrmypajDtXhw9FpxFFpSdVpzlqvFNzj0FvnV9zkENnpUh8sgdcxh1Q2jt3zThi0SJy0Dl81Rhu/g50/xp9/x90/zB35TJv8DJ+/EZqzj2DvlGDrlqEuHqLpHeQp26SuhqN+yiC6imH/zSM/yqa/zeV/zik/1aIwlmP0mmayWSY122h3VWb6kyL/1yP8UGU/UiW/VWd/miW+Eqp/12k/1Co/1yq/2Gs/2qr/WKh/nGv/3er9mK3/3K0/3e4+4ODg4uLi4mHiY+Qj5WTjo+PkJSUlJycnKGem6ShnY2ZrKOjo6urrKqqpLi0prS0tLu8vMO+tb+/wJrE+bzf/sTExMfIx8zMzMjIxtrWyM/Q0NXU1NfY193d3djY1uDf4Mnj+931/OTk5Ozs7O/v8PLy8gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACH5BAEAAAAALAAAAAAgACAAAAj+AAEIHEiwoMGDCBMqXMiwocOHECNKnEixosWLGDNq3Mgx4iVMnTyJInVKlclSpD550nRpUqKGmD59EjWqlMlVOFWdIgWq0iNNoBIhSujokidPn0aNKrmqVStWqjxRumTqyI5KOxI5OpiIkiakNG2yelqK5alKLSAJgbBBB6RIjArmCKLIkV1HjyZNpTTJFKgSQoI4cGBiBxBIR6QM6TGQxooWL3LwMBwkSJEcLUq8YATDAZAdMkKh+GGpAo0cL1wInJuokSNIeqdeCgLBAoVMR2CEMkHDzAcnTCzsCAKERwsXK3wYKYLIdd6pjh4guCGJw5IpT7R8CeNlCwsikx7+JTJ+PAZlRHXxOgqBAQMTLXj0AAKkJw+eJw6CXGqJyAWNyT8QgZ5rsD2igwYEOOEGH38EEoghgcQhQgJAxISJI/8ZNoQUijiX1yM7NIBAFm3wUcghh9yBhQcCFEBDJ6V8MskKhgERxBGMMILXI7AhsoAAGSgRBRlliLHHHlZgMAAJmLByCiUnfGajFEcgotVzjkhggAYjjBHFFISgkoodSDAwAyStqDIJAELs4CYQQxChVSRTQcJCFWmUyAcghmzCCRgdXCEHEU69VJiNdDmnV0s4rNHFGmzgkUcfhgiShAd0nNHDVAc9YIEFFWxAQgkVpKAGF1yw4UYdc6AhhQohJFiwQAIRPQCHFlRAccMJFCRAgAAVJXDBBAsQEEBHDwUEADs="
     help = """
         Usage: %s [-q] [-n] [Command];[Command];...
@@ -743,6 +790,9 @@ if __name__ == "__main__":
             logLevel = 0
         for cmd in cmds.split(";"):
             ProcessCMD(cmd.split(" "))
+    if '-n' in sys.argv:
+        GUI_TK = False
+        
     if GUI_TK and "-n" not in sys.argv:
         root = Tk()
         app = GUITk(root)
@@ -756,7 +806,7 @@ if __name__ == "__main__":
         root.mainloop()
         sys.exit(1)
 
-    # cmdline only, works only for eth0
+    # cmdline only, uses first interface with an IP address
     print("Type help or ? to display help(q or quit to exit)")
     while True:
         data = input("> ").split(";")
@@ -766,5 +816,3 @@ if __name__ == "__main__":
                 print(CODES[result["Ret"]])
             else:
                 print(result)
-    sys.exit(1)
-    
