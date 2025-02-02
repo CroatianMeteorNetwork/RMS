@@ -13,6 +13,10 @@ import logging
 import binascii
 import paramiko
 
+# Suppress Paramiko internal errors before they appear in logs
+logging.getLogger("paramiko.transport").setLevel(logging.CRITICAL)
+logging.getLogger("paramiko.auth_handler").setLevel(logging.CRITICAL)
+
 try:
     # Python 2
     import Queue
@@ -128,18 +132,18 @@ def createRemoteDirectory(sftp, path):
         return False
 
 
-def getSSHClientAndSFTP(hostname,
-                        port=22,
-                        username=None,
-                        key_filename=None,
-                        timeout=300,
-                        banner_timeout=300,
-                        auth_timeout=300,
-                        keepalive_interval=30
-                        ):
+def getSSHClient(hostname,
+                 port=22,
+                 username=None,
+                 key_filename=None,
+                 timeout=300,
+                 banner_timeout=300,
+                 auth_timeout=300,
+                 keepalive_interval=30):
     """
-    Return (ssh, sftp) after authenticating via key or agent fallback, 
-    and optionally setting timeouts/keepalive.
+    Establishes an SSH connection and returns an SSH client.
+    Handles key-based authentication first, then falls back to the SSH agent.
+    Returns an SSH client or None.
     """
     log.info("Paramiko version: {}".format(paramiko.__version__))
     log.info("Establishing SSH connection to: {}:{}...".format(hostname, port))
@@ -147,21 +151,41 @@ def getSSHClientAndSFTP(hostname,
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-    # Try key_filename first
-    try:
-        ssh.connect(
-            hostname,
-            port=port,
-            username=username,
-            key_filename=key_filename,
-            timeout=timeout,
-            banner_timeout=banner_timeout,
-            auth_timeout=auth_timeout
-        )
-        log.info("SSHClient connected successfully (key file).")
+    # Try key_filename first if provided
+    if key_filename:
+        try:
+            ssh.connect(
+                hostname,
+                port=port,
+                username=username,
+                key_filename=key_filename,
+                timeout=timeout,
+                banner_timeout=banner_timeout,
+                auth_timeout=auth_timeout,
+                look_for_keys=False
+            )
+            log.info("SSHClient connected successfully (key file).")
 
-    except paramiko.AuthenticationException:
-        log.warning("Key-file auth failed. Trying agent fallback...")
+            transport = ssh.get_transport()
+            if transport and keepalive_interval > 0:
+                transport.set_keepalive(keepalive_interval)
+                log.info("Keepalive set to {} seconds".format(keepalive_interval))
+
+            return ssh
+
+        except paramiko.SSHException as e:
+            log.warning("SSH error with provided key: {}".format(str(e)))
+        except ValueError:
+            log.warning("Key validation error.")
+        except paramiko.AuthenticationException:
+            log.warning("Server rejected our key - it may not be authorized")
+        except IOError as e:
+            log.warning("IO error with key file: {}".format(str(e)))
+        except Exception as e:
+            log.warning("Unexpected error with key file: {}".format(str(e)))
+
+    # Try agent-based authentication if key auth fails
+    try:
         ssh.connect(
             hostname,
             port=port,
@@ -172,18 +196,24 @@ def getSSHClientAndSFTP(hostname,
             auth_timeout=auth_timeout
         )
         log.info("SSHClient connected via agent fallback.")
+        return ssh
 
+    except paramiko.AuthenticationException:
+        log.warning("Agent authentication failed. No valid authorized keys found.")
     except Exception as e:
-        log.error("SSH connection failed: %s" % str(e))
-        raise
+        log.warning("SSH connection failed during agent fallback: {}".format(str(e)))
+    
+    return None
 
-    # Optionally set keepalive
-    transport = ssh.get_transport()
-    if transport and keepalive_interval > 0:
-        transport.set_keepalive(keepalive_interval)
-        log.info("Keepalive set to {} seconds".format(keepalive_interval))
+def getSFTPClient(ssh):
+    """
+    Opens an SFTP session from an established SSH client.
+    If SFTP fails, logs the error and returns None.
+    """
+    if ssh is None:
+        log.error("Cannot open SFTP session: SSH client is None.")
+        return None
 
-    # Open SFTP connection
     log.debug("Attempting to open SFTP connection...")
     try:
         # TODO: consider using asyncio when Python 2 support is dropped
@@ -194,13 +224,23 @@ def getSSHClientAndSFTP(hostname,
 
         # # Usage
         # sftp = await asyncio.wait_for(open_sftp_async(ssh), timeout=30)
+
         sftp = ssh.open_sftp()
         log.info("SFTP connection established.")
-    except Exception as e:
-        log.error("Failed to open SFTP connection: %s" % str(e))
-        ssh.close()
-        raise
+        return sftp
 
+    except Exception as e:
+        log.error("Failed to open SFTP connection: {}".format(e))
+        return None
+
+
+def getSSHAndSFTP(hostname, **kwargs):
+    """
+    Wrapper function that returns both SSH and SFTP clients.
+    If SSH fails, SFTP is not attempted.
+    """
+    ssh = getSSHClient(hostname, **kwargs)
+    sftp = getSFTPClient(ssh) if ssh else None
     return ssh, sftp
 
 
@@ -250,14 +290,15 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
 
     try:
         # Connect with timeouts
-        ssh, sftp = getSSHClientAndSFTP(
+        ssh, sftp = getSSHAndSFTP(
             hostname,
             port=port,
             username=username,
             key_filename=rsa_private_key,
             timeout=connect_timeout,
             banner_timeout=banner_timeout,
-            auth_timeout=auth_timeout
+            auth_timeout=auth_timeout,
+            keepalive_interval=keepalive_interval
         )
 
         # Optionally ensure remote directory exists
