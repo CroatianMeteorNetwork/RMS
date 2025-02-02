@@ -9,7 +9,7 @@ from os.path import exists as file_exists
 import paramiko
 
 
-from RMS.UploadManager import getSSHClientAndSFTP
+from RMS.UploadManager import getSSHAndSFTP
 from RMS.Misc import RmsDateTime
 
 # Get the logger from the main module
@@ -32,7 +32,7 @@ def downloadNewPlatepar(config):
     try:
         # Connect to host
         # Connect with timeouts
-        ssh, sftp = getSSHClientAndSFTP(
+        ssh, sftp = getSSHAndSFTP(
             config.hostname,
             port=config.host_port,
             username=config.stationID.lower(),

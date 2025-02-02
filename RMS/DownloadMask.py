@@ -26,7 +26,7 @@ from os.path import exists as file_exists
 import paramiko
 
 
-from RMS.UploadManager import getSSHClientAndSFTP, existsRemoteDirectory, createRemoteDirectory
+from RMS.UploadManager import getSSHAndSFTP, existsRemoteDirectory, createRemoteDirectory
 from RMS.Misc import RmsDateTime
 
 
@@ -58,7 +58,7 @@ def downloadNewMask(config):
     try:
         # Connect to host
         # Connect with timeouts
-        ssh, sftp = getSSHClientAndSFTP(
+        ssh, sftp = getSSHAndSFTP(
             config.hostname,
             port=config.host_port,
             username=config.stationID.lower(),
