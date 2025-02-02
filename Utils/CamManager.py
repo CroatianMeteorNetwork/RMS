@@ -695,6 +695,9 @@ class GUITk:
         self.tcp.insert(END, devices[dev]["TCPPort"])
 
     def setconfig(self):
+        if len(self.table.selection()) == 0:
+            showerror("Error", "Select a device first")
+            return
         dev = self.table.item(self.table.selection()[0], option="values")[0]
         devices[dev][u"TCPPort"] = int(self.tcp.get())
         devices[dev][u"HttpPort"] = int(self.http.get())
