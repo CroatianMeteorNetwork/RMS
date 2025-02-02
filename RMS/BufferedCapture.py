@@ -701,6 +701,10 @@ class BufferedCapture(Process):
             numpy.ndarray: Frame data either as grayscale (2D) or BGR (3D) array
         """
 
+        # First check if frame is None to prevent NoneType subscript error
+        if frame is None:
+            return None
+
         # We don't explicitly check frame.shape first; instead we rely on an IndexError
         # if 'frame' is single-channel (which is inherently grayscale).
         # This is faster than an extra dimension check for most BGR GMN stations 
@@ -710,12 +714,18 @@ class BufferedCapture(Process):
             if not self.convert_to_gray:
                 return frame
 
-            # If frame channels are identical (gray), extract green channel for grayscale
-            return frame[:, :, 1]
+            try:
+                # If frame channels are identical (gray), extract green channel for grayscale
+                return frame[:, :, 1]
         
-        # If IndexError, frame is grayscale
-        except IndexError:
-            return frame
+            except IndexError:
+                # If IndexError occurs, frame is already grayscale (single-channel)
+                return frame
+            
+        except Exception as e:
+            log.error('Error in grayscale conversion: {}'.format(e))
+            log.debug('Frame shape: {}'.format(frame.shape if frame is not None else None))
+            return None
 
 
     def moveSegment(self, splitmuxsink, fragment_id):
