@@ -368,8 +368,12 @@ main() {
         print_status "success" "Local repository already up to date with origin/$RMS_BRANCH"
     else
         print_status "info" "Updates available, resetting to remote state..."
-        if ! git_with_retry "reset" "$RMS_BRANCH"; then
-            print_status "error" "Failed to reset to origin/$RMS_BRANCH. Aborting."
+        print_status "info" "Stashing local changes before resetting..."
+        if ! git stash; then
+            print_status "warning" "Git stash failed. Proceeding with reset."
+        fi
+
+        if ! git_with_retry "reset" "$RMS_BRANCH"; then            print_status "error" "Failed to reset to origin/$RMS_BRANCH. Aborting."
             exit 1
         fi
         print_status "success" "Successfully updated to latest version"
