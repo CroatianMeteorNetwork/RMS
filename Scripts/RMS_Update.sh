@@ -21,6 +21,43 @@ RETRY_LIMIT=3
 GIT_RETRY_LIMIT=5
 GIT_RETRY_DELAY=60  # Seconds between git operation retries
 
+# Functions for improved status output
+print_status() {
+    local type=$1
+    local msg=$2
+    case $type in
+        "error")
+            tput bold; tput setaf 1  # Bold red
+            echo "ERROR: $msg"
+            sleep 2  # Longer pause for errors
+            ;;
+        "warning")
+            tput setaf 3  # Yellow
+            echo "WARNING: $msg"
+            sleep 1
+            ;;
+        "success")
+            tput setaf 2  # Green
+            echo "$msg"
+            ;;
+        "info")
+            tput setaf 6  # Cyan - better visibility than blue
+            echo "$msg"
+            ;;
+    esac
+    tput sgr0  # Reset formatting
+}
+
+print_header() {
+    local msg=$1
+    echo -e "\n"
+    tput bold; tput setaf 6  # Bold cyan
+    echo "====== $msg ======"
+    tput sgr0
+    echo -e "\n"
+    sleep 1
+}
+
 # Function to clean up and release the lock on exit
 cleanup() {
     rm -f "$LOCKFILE"
@@ -33,9 +70,11 @@ check_disk_space() {
     
     # Get available space in MB
     local available_mb=$(df -m "$dir" | awk 'NR==2 {print $4}')
+
+    print_status "info" "Available disk space: ${available_mb}MB (need ${required_mb}MB)"
     
     if [ "$available_mb" -lt "$required_mb" ]; then
-        echo "Error: Insufficient disk space in $dir. Need ${required_mb}MB, have ${available_mb}MB"
+        print_status "error" "Insufficient disk space in $dir. Need ${required_mb}MB, have ${available_mb}MB"
         return 1
     fi
     return 0
@@ -55,68 +94,68 @@ retry_cp() {
                 mv "$temp_dest" "$dest"
                 return 0
             else
-                echo "Error: Validation failed. Retrying..."
+                print_status "warning" "Validation failed. Retrying..."
                 rm -f "$temp_dest"
             fi
         else
-            echo "Error: Copy failed. Retrying..."
+            print_status "warning" "Copy failed. Retrying..."
             rm -f "$temp_dest"
         fi
         retries=$((retries + 1))
         sleep 1
     done
 
-    echo "Critical Error: Failed to copy $src to $dest after $RETRY_LIMIT retries."
+    print_status "error" "Failed to copy $src to $dest after $RETRY_LIMIT retries."
     return 1
 }
 
 # Backup files
 backup_files() {
-    echo "Backing up original files..."
+    print_header "Backing Up Original Files"
 
     # Backup .config
     if [ -f "$CURRENT_CONFIG" ]; then
         if ! retry_cp "$CURRENT_CONFIG" "$BACKUP_CONFIG"; then
-            echo "Critical Error: Could not back up .config file. Aborting."
+            print_status "error" "Could not back up .config file. Aborting."
             exit 1
         fi
     else
-        echo "No original .config found. Generic config will be used."
+        print_status "info" "No original .config found. Generic config will be used."
     fi
 
     # Backup mask.bmp
     if [ -f "$CURRENT_MASK" ]; then
         if ! retry_cp "$CURRENT_MASK" "$BACKUP_MASK"; then
-            echo "Critical Error: Could not back up mask.bmp file. Aborting."
+            print_status "error" "Could not back up mask.bmp file. Aborting."
             exit 1
         fi
     else
-        echo "No original mask.bmp found. Blank mask will be used."
+        print_status "info" "No original mask.bmp found. Blank mask will be used."
     fi
 }
 
 # Restore files
 restore_files() {
-    echo "Restoring configuration and mask files..."
+    print_header "Restoring Configuration Files"
 
     # Restore .config
     if [ -f "$BACKUP_CONFIG" ]; then
         if ! retry_cp "$BACKUP_CONFIG" "$CURRENT_CONFIG"; then
-            echo "Critical Error: Failed to restore .config. Aborting."
+            print_status "error" "Failed to restore .config. Aborting."
             exit 1
         fi
     else
-        echo "No backup .config found - a new one will be created by the installation."
+        print_status "info" "No backup .config found - a new one will be created by the installation."
     fi
 
     # Restore mask.bmp
     if [ -f "$BACKUP_MASK" ]; then
         if ! retry_cp "$BACKUP_MASK" "$CURRENT_MASK"; then
-            echo "Critical Error: Failed to restore mask.bmp. Aborting."
+            print_status "error" "Failed to restore mask.bmp. Aborting."
             exit 1
         fi
     else
-        echo "No backup mask.bmp found - a new blank mask will be created by the installation."
+        print_status "info" "No backup mask.bmp found - a new blank mask will be created by the installation."
     fi
 }
 
@@ -127,7 +166,7 @@ git_with_retry() {
     local attempt=1
     
     while [ $attempt -le $GIT_RETRY_LIMIT ]; do
-        echo "Attempting git $cmd (try $attempt of $GIT_RETRY_LIMIT)..."
+        print_status "info" "Attempting git $cmd (try $attempt of $GIT_RETRY_LIMIT)..."
         
         case $cmd in
             "fetch")
@@ -141,26 +180,30 @@ git_with_retry() {
                 fi
                 ;;
             *)
-                echo "Unknown git command: $cmd"
+                print_status "error" "Unknown git command: $cmd"
                 return 1
                 ;;
         esac
         
-        echo "Git $cmd failed, waiting ${GIT_RETRY_DELAY}s before retry..."
+        print_status "warning" "Git $cmd failed, waiting ${GIT_RETRY_DELAY}s before retry..."
         sleep $GIT_RETRY_DELAY
         attempt=$((attempt + 1))
     done
     
-    echo "Error: Git $cmd failed after $GIT_RETRY_LIMIT attempts"
+    print_status "error" "Git $cmd failed after $GIT_RETRY_LIMIT attempts"
     return 1
 }
 
 # Install missing dependencies
 install_missing_dependencies() {
+    print_status "info" "Checking system_packages file: $SYSTEM_PACKAGES"
     if [ ! -f "$SYSTEM_PACKAGES" ]; then
-        echo "Warning: System packages file not found: $SYSTEM_PACKAGES"
+        print_status "warning" "System packages file not found: $SYSTEM_PACKAGES"
         return
     fi
+
+    print_status "info" "Reading packages file..."
+    cat "$SYSTEM_PACKAGES"  # Show content of file
 
     local missing_packages=()
 
@@ -169,56 +212,64 @@ install_missing_dependencies() {
         # Skip blank lines or commented lines
         [[ -z "$pkg" || "$pkg" =~ ^# ]] && continue
         
+        print_status "info" "Checking package: $pkg"
         if ! dpkg -s "$pkg" &>/dev/null; then
+            print_status "info" "Package $pkg is missing"
             missing_packages+=("$pkg")
+        else
+            print_status "info" "Package $pkg is already installed"
         fi
     done < $SYSTEM_PACKAGES
-
+    
     # If no missing packages, inform and return
     if [ ${#missing_packages[@]} -eq 0 ]; then
-        echo "All required packages are already installed."
+        print_status "success" "All required packages are already installed."
         return
     fi
 
-    echo "The following packages are missing and will be installed: ${missing_packages[*]}"
+    print_status "info" "The following packages will be installed: ${missing_packages[*]}"
+    sleep 1
 
     if sudo -n true 2>/dev/null; then
-        echo "Passwordless sudo available. Installing missing packages..."
+        print_status "info" "Passwordless sudo available. Installing missing packages..."
         sudo apt-get update
         for package in "${missing_packages[@]}"; do
             if ! sudo apt-get install -y "$package"; then
-                echo "Failed to install $package. Please install it manually."
+                print_status "error" "Failed to install $package. Please install it manually."
             fi
         done
     else
         # Clear screen and show prominent message for sudo
-        tput clear  # Clear screen
+        # tput clear  # Clear screen
         tput bold; tput setaf 3  # Bold yellow
         echo "
-        ==============================================
-        Sudo access needed for package installation
-        ==============================================
-        "
+==============================================
+  Sudo access needed for package installation
+==============================================
+"
         tput sgr0  # Reset formatting
+        sleep 2
         
         sudo apt-get update
         for package in "${missing_packages[@]}"; do
             if ! sudo apt-get install -y "$package"; then
-                echo "Failed to install $package. Please install it manually."
+                print_status "error" "Failed to install $package. Please install it manually."
             fi
         done
     fi
 }
 
 main() {
+    print_header "Starting RMS Update"
+    
     # Check for running instance FIRST
     if [ -f "$LOCKFILE" ]; then
         LOCK_PID=$(cat "$LOCKFILE")
         if ps -p "$LOCK_PID" > /dev/null 2>&1; then
-            echo "Another instance of the script is already running. Exiting."
+            print_status "error" "Another instance of the script is already running. Exiting."
             exit 1
         else
-            echo "Stale lock file found. Removing it and continuing."
+            print_status "warning" "Stale lock file found. Removing it and continuing."
             rm -f "$LOCKFILE"
         fi
     fi
@@ -228,7 +279,7 @@ main() {
     trap cleanup EXIT
 
     # Run space check before anything else
-    echo "Checking available disk space..."
+    print_status "info" "Checking available disk space..."
     check_disk_space "$RMSSOURCEDIR" "$MIN_SPACE_MB" || exit 1
 
     # Ensure the backup directory exists
@@ -237,83 +288,104 @@ main() {
     # Check if a previous backup/restore cycle was interrupted
     UPDATEINPROGRESS="0"
     if [ -f "$UPDATEINPROGRESSFILE" ]; then
-        echo "Reading custom files protection state..."
+        print_status "info" "Reading custom files protection state..."
         UPDATEINPROGRESS=$(cat "$UPDATEINPROGRESSFILE")
-        echo "Previous backup/restore cycle state: $UPDATEINPROGRESS"
+        print_status "info" "Previous backup/restore cycle state: $UPDATEINPROGRESS"
     fi
 
     # Backup files before any modifications if no interrupted cycle
     if [ "$UPDATEINPROGRESS" = "0" ]; then
         backup_files
     else
-        echo "Skipping backup due to interrupted backup/restore cycle."
+        print_status "warning" "Skipping backup due to interrupted backup/restore cycle."
     fi
 
     # Change to the RMS source directory
-    cd "$RMSSOURCEDIR" || { echo "Error: RMS source directory not found. Exiting."; exit 1; }
+    cd "$RMSSOURCEDIR" || { print_status "error" "RMS source directory not found. Exiting."; exit 1; }
 
     # Get current branch name
     CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-    echo "Current branch: $CURRENT_BRANCH"
+    print_status "info" "Current branch: $CURRENT_BRANCH, target branch: $RMS_BRANCH"
 
     # Activate the virtual environment
     if [ -f ~/vRMS/bin/activate ]; then
         source ~/vRMS/bin/activate
     else
-        echo "Error: Virtual environment not found. Exiting."
+        print_status "error" "Virtual environment not found. Exiting."
         exit 1
     fi
 
     # Perform cleanup operations before updating
-    echo "Removing the build directory..."
+    print_header "Cleaning Build Environment"
+    
+    print_status "info" "Removing build directory..."
     rm -rf build
 
-    echo "Cleaning up Python bytecode files..."
+    # Clean Python bytecode files
+    print_status "info" "Cleaning up Python bytecode files..."
     if command -v pyclean >/dev/null 2>&1; then
-        pyclean . -v --debris all
+        if pyclean --help 2>&1 | grep -q -- "--debris"; then
+            if ! pyclean . -v --debris all; then
+                print_status "warning" "pyclean with debris failed, falling back to basic cleanup..."
+                if ! pyclean .; then
+                    print_status "warning" "pyclean failed, falling back to manual cleanup..."
+                    find . -name "*.pyc" -type f -delete
+                    find . -type d -name "__pycache__" -exec rm -r {} +
+                    find . -name "*.pyo" -type f -delete
+                fi
+            fi
+        else
+            print_status "info" "pyclean basic version detected..."
+            if ! pyclean .; then
+                print_status "warning" "pyclean failed, falling back to manual cleanup..."
+                find . -name "*.pyc" -type f -delete
+                find . -type d -name "__pycache__" -exec rm -r {} +
+                find . -name "*.pyo" -type f -delete
+            fi
+        fi
     else
-        echo "pyclean not found, using basic cleanup..."
+        print_status "info" "pyclean not found, using manual cleanup..."
         find . -name "*.pyc" -type f -delete
         find . -type d -name "__pycache__" -exec rm -r {} +
         find . -name "*.pyo" -type f -delete
     fi
 
-    echo "Cleaning up *.so files in the repository..."
+    print_status "info" "Cleaning up *.so files..."
     find . -name "*.so" -type f -delete
 
     # Mark custom files backup/restore cycle as in progress
     echo "1" > "$UPDATEINPROGRESSFILE"
 
-    # Improved Git update process with retries
-    echo "Fetching updates from remote..."
+    print_header "Updating from Git"
     if ! git_with_retry "fetch"; then
-        echo "Error: Failed to fetch updates. Aborting."
+        print_status "error" "Failed to fetch updates. Aborting."
         exit 1
     fi
 
     # Check if updates are needed
-    echo "Checking for available updates..."
-    if ! git log HEAD.."origin/$CURRENT_BRANCH" --oneline | grep .; then
-        echo "Local repository already up to date with origin/$CURRENT_BRANCH"
+    print_status "info" "Checking for available updates..."
+    if ! git log HEAD.."origin/$RMS_BRANCH" --oneline | grep .; then
+        print_status "success" "Local repository already up to date with origin/$RMS_BRANCH"
     else
-        echo "Updates available, resetting to remote state..."
-        if ! git_with_retry "reset" "$CURRENT_BRANCH"; then
-            echo "Error: Failed to reset to origin/$CURRENT_BRANCH. Aborting."
+        print_status "info" "Updates available, resetting to remote state..."
+        if ! git_with_retry "reset" "$RMS_BRANCH"; then
+            print_status "error" "Failed to reset to origin/$RMS_BRANCH. Aborting."
             exit 1
         fi
-        echo "Successfully updated to latest version"
+        print_status "success" "Successfully updated to latest version"
+        sleep 2
     fi
 
     # Create template from the current default config file
     if [ -f "$CURRENT_CONFIG" ]; then
-        echo "Creating config template..."
+        print_status "info" "Creating config template..."
         mv "$CURRENT_CONFIG" "$RMSSOURCEDIR/.configTemplate"
         
         # Verify the move worked
         if [ ! -f "$RMSSOURCEDIR/.configTemplate" ]; then
-            echo "Warning: Failed to verify config template creation"
+            print_status "warning" "Failed to verify config template creation"
         else
-            echo "Config template created successfully"
+            print_status "success" "Config template created successfully"
         fi
     fi
 
@@ -324,19 +396,21 @@ main() {
     echo "0" > "$UPDATEINPROGRESSFILE"
 
     # Install missing dependencies
+    print_header "Installing Missing Dependencies"
     install_missing_dependencies
 
-    # Install Python requirements
-    echo -e "\n========== Installing Python Requirements =========="
+    print_header "Installing Python Requirements"
+    print_status "info" "This may take a few minutes..."
     pip install -r requirements.txt
-    echo -e "===============================================\n"
+    print_status "success" "Python requirements installed"
 
-    # Run the Python setup and suppress Cython compile noise
+    print_header "Running Setup"
+    print_status "info" "Building RMS (this may take a while)..."
     python setup.py install
-    
+    print_status "success" "Build completed successfully"
 
-    echo "Update process completed successfully! Exiting in 5 seconds..."
-    sleep 5
+    print_status "success" "Update process completed successfully!"
+    sleep 3
 }
 
 # Run the main process
