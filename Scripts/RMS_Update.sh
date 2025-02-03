@@ -3,8 +3,32 @@
 # This script updates the RMS code from GitHub.
 # Includes error handling, retries, and ensures critical files are never lost.
 
-# Initialize branch variable (will be properly set after entering repository)
+# Example Usage, from ~/source/RMS:
+# 1. Run script normally (uses current branch detected by Git):
+#    ./Scripts/RMS_Update.sh
+# 2. List branches and switch interactively:
+#    ./Scripts/RMS_Update.sh --switch
+# 3. Directly switch to a specified branch:
+#    ./Scripts/RMS_Update.sh --switch prerelease
+# 4. Use an environment variable to specify the branch before running:
+#    RMS_BRANCH=prerelease ./Scripts/RMS_Update.sh
+
+# Directories, files, and variables
 RMS_BRANCH="${RMS_BRANCH:-""}"  # Use environment variable if set, otherwise empty
+RMSSOURCEDIR=~/source/RMS
+RMSBACKUPDIR=~/.rms_backup
+CURRENT_CONFIG="$RMSSOURCEDIR/.config"
+CURRENT_MASK="$RMSSOURCEDIR/mask.bmp"
+BACKUP_CONFIG="$RMSBACKUPDIR/.config"
+BACKUP_MASK="$RMSBACKUPDIR/mask.bmp"
+SYSTEM_PACKAGES="$RMSSOURCEDIR/system_packages.txt"
+UPDATEINPROGRESSFILE=$RMSBACKUPDIR/update_in_progress
+LOCKFILE="/tmp/update.lock"
+MIN_SPACE_MB=200  # Minimum required space in MB
+RETRY_LIMIT=3  # Retries for critical file operations
+GIT_RETRY_LIMIT=5
+GIT_RETRY_DELAY=60  # Seconds between git operation retries
+
 
 # Functions for improved status output
 print_status() {
@@ -53,6 +77,10 @@ switch_branch_interactive() {
         exit 1
     fi
     
+    # Grab the *actual* current local branch
+    local current_branch
+    current_branch=$(git rev-parse --abbrev-ref HEAD)
+
     # Get list of remote branches, excluding HEAD
     branches=( $(git branch -r | grep -v HEAD | sed 's/origin\///') )
     
@@ -63,10 +91,15 @@ switch_branch_interactive() {
     
     print_header "Available Branches"
     for i in "${!branches[@]}"; do
-        if [ "${branches[$i]}" = "$RMS_BRANCH" ]; then
-            print_status "info" "$((i+1)). ${branches[$i]} (current)"
+        local branch="${branches[$i]}"
+        # Compare with the actual current local branch
+        if [ "$branch" = "$current_branch" ]; then
+            # Highlight the current branch
+            tput bold; tput setaf 2
+            echo "$((i+1)). ${branch} (current)"
+            tput sgr0
         else
-            echo "$((i+1)). ${branches[$i]}"
+            echo "$((i+1)). ${branch}"
         fi
     done
     
@@ -74,7 +107,8 @@ switch_branch_interactive() {
     
     # Handle empty input (keep current branch)
     if [ -z "$choice" ]; then
-        print_status "info" "Keeping current branch: $RMS_BRANCH"
+        print_status "info" "Keeping current branch: $current_branch"
+        RMS_BRANCH="$current_branch"
         return
     fi
     
@@ -86,33 +120,6 @@ switch_branch_interactive() {
         exit 1
     fi
 }
-
-# Directories, files, and variables
-RMSSOURCEDIR=~/source/RMS
-RMSBACKUPDIR=~/.rms_backup
-CURRENT_CONFIG="$RMSSOURCEDIR/.config"
-CURRENT_MASK="$RMSSOURCEDIR/mask.bmp"
-BACKUP_CONFIG="$RMSBACKUPDIR/.config"
-BACKUP_MASK="$RMSBACKUPDIR/mask.bmp"
-SYSTEM_PACKAGES="$RMSSOURCEDIR/system_packages.txt"
-UPDATEINPROGRESSFILE=$RMSBACKUPDIR/update_in_progress
-LOCKFILE="/tmp/update.lock"
-MIN_SPACE_MB=200  # Minimum required space in MB
-RETRY_LIMIT=3
-GIT_RETRY_LIMIT=5
-GIT_RETRY_DELAY=60  # Seconds between git operation retries
-
-# Example Usage, from ~/source/RMS:
-# 1. Run script normally (uses current branch detected by Git):
-#    ./Scripts/RMS_Update.sh
-# 2. List branches and switch interactively:
-#    ./Scripts/RMS_Update.sh --switch
-# 3. Directly switch to a specified branch:
-#    ./Scripts/RMS_Update.sh --switch prerelease
-# 4. Use an environment variable to specify the branch before running:
-#    RMS_BRANCH=prerelease ./Scripts/RMS_Update.sh
-
-
 
 # Function to clean up and release the lock on exit
 cleanup() {
