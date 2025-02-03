@@ -3,23 +3,8 @@
 # This script updates the RMS code from GitHub.
 # Includes error handling, retries, and ensures critical files are never lost.
 
-# Branch configuration (can be overridden by environment variable)
-: "${RMS_BRANCH:=master}"  # Default to master if not set
-
-# Directories, files, and variables
-RMSSOURCEDIR=~/source/RMS
-RMSBACKUPDIR=~/.rms_backup
-CURRENT_CONFIG="$RMSSOURCEDIR/.config"
-CURRENT_MASK="$RMSSOURCEDIR/mask.bmp"
-BACKUP_CONFIG="$RMSBACKUPDIR/.config"
-BACKUP_MASK="$RMSBACKUPDIR/mask.bmp"
-SYSTEM_PACKAGES="$RMSSOURCEDIR/system_packages.txt"
-UPDATEINPROGRESSFILE=$RMSBACKUPDIR/update_in_progress
-LOCKFILE="/tmp/update.lock"
-MIN_SPACE_MB=200  # Minimum required space in MB
-RETRY_LIMIT=3
-GIT_RETRY_LIMIT=5
-GIT_RETRY_DELAY=60  # Seconds between git operation retries
+# Initialize branch variable (will be properly set after entering repository)
+RMS_BRANCH="${RMS_BRANCH:-""}"  # Use environment variable if set, otherwise empty
 
 # Functions for improved status output
 print_status() {
@@ -41,7 +26,7 @@ print_status() {
             echo "$msg"
             ;;
         "info")
-            tput setaf 6  # Cyan - better visibility than blue
+            tput setaf 6  # Cyan
             echo "$msg"
             ;;
     esac
@@ -57,6 +42,77 @@ print_header() {
     echo -e "\n"
     sleep 1
 }
+
+
+# Function to handle interactive branch selection
+switch_branch_interactive() {
+    print_status "info" "Fetching available branches..."
+    # First ensure we have latest branch info
+    if ! git fetch --all; then
+        print_status "error" "Failed to fetch branch information"
+        exit 1
+    fi
+    
+    # Get list of remote branches, excluding HEAD
+    branches=( $(git branch -r | grep -v HEAD | sed 's/origin\///') )
+    
+    if [ ${#branches[@]} -eq 0 ]; then
+        print_status "error" "No branches found"
+        exit 1
+    fi
+    
+    print_header "Available Branches"
+    for i in "${!branches[@]}"; do
+        if [ "${branches[$i]}" = "$RMS_BRANCH" ]; then
+            print_status "info" "$((i+1)). ${branches[$i]} (current)"
+        else
+            echo "$((i+1)). ${branches[$i]}"
+        fi
+    done
+    
+    read -p "Enter the number of the branch to switch to (press Enter to keep current): " choice
+    
+    # Handle empty input (keep current branch)
+    if [ -z "$choice" ]; then
+        print_status "info" "Keeping current branch: $RMS_BRANCH"
+        return
+    fi
+    
+    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#branches[@]} )); then
+        RMS_BRANCH="${branches[$((choice-1))]}"
+        print_status "success" "Switched to branch: $RMS_BRANCH"
+    else
+        print_status "error" "Invalid selection. Exiting."
+        exit 1
+    fi
+}
+
+# Directories, files, and variables
+RMSSOURCEDIR=~/source/RMS
+RMSBACKUPDIR=~/.rms_backup
+CURRENT_CONFIG="$RMSSOURCEDIR/.config"
+CURRENT_MASK="$RMSSOURCEDIR/mask.bmp"
+BACKUP_CONFIG="$RMSBACKUPDIR/.config"
+BACKUP_MASK="$RMSBACKUPDIR/mask.bmp"
+SYSTEM_PACKAGES="$RMSSOURCEDIR/system_packages.txt"
+UPDATEINPROGRESSFILE=$RMSBACKUPDIR/update_in_progress
+LOCKFILE="/tmp/update.lock"
+MIN_SPACE_MB=200  # Minimum required space in MB
+RETRY_LIMIT=3
+GIT_RETRY_LIMIT=5
+GIT_RETRY_DELAY=60  # Seconds between git operation retries
+
+# Example Usage, from ~/source/RMS:
+# 1. Run script normally (uses current branch detected by Git):
+#    ./Scripts/RMS_Update.sh
+# 2. List branches and switch interactively:
+#    ./Scripts/RMS_Update.sh --switch
+# 3. Directly switch to a specified branch:
+#    ./Scripts/RMS_Update.sh --switch prerelease
+# 4. Use an environment variable to specify the branch before running:
+#    RMS_BRANCH=prerelease ./Scripts/RMS_Update.sh
+
+
 
 # Function to clean up and release the lock on exit
 cleanup() {
@@ -171,6 +227,11 @@ git_with_retry() {
         case $cmd in
             "fetch")
                 if git fetch --all --prune --force --verbose; then
+                    return 0
+                fi
+                ;;
+            "checkout")
+                if git checkout "$branch"; then
                     return 0
                 fi
                 ;;
@@ -303,7 +364,41 @@ main() {
     # Change to the RMS source directory
     cd "$RMSSOURCEDIR" || { print_status "error" "RMS source directory not found. Exiting."; exit 1; }
 
-    # Get current branch name
+     # Stash any local changes first
+    print_status "info" "Stashing any local changes..."
+    if ! git stash; then
+        print_status "warning" "Git stash failed. Proceeding with operations."
+    fi
+
+    # Handle branch setup and switching
+    if [ "$1" = "--switch" ]; then
+        if [ -n "$2" ]; then
+            # Verify the specified branch exists
+            if git fetch origin "$2" 2>/dev/null; then
+                RMS_BRANCH="$2"
+                if ! git_with_retry "checkout" "$RMS_BRANCH"; then
+                    print_status "error" "Failed to switch to branch $RMS_BRANCH"
+                    exit 1
+                fi
+                print_status "success" "Switched to branch: $RMS_BRANCH"
+            else
+                print_status "error" "Branch '$2' not found"
+                exit 1
+            fi
+        else
+            switch_branch_interactive
+            if ! git_with_retry "checkout" "$RMS_BRANCH"; then
+                print_status "error" "Failed to switch to branch $RMS_BRANCH"
+                exit 1
+            fi
+        fi
+    elif [ -z "$RMS_BRANCH" ]; then
+        # If no branch specified (via --switch or environment), use current
+        RMS_BRANCH=$(git rev-parse --abbrev-ref HEAD || echo "master")
+        print_status "info" "Using current branch: $RMS_BRANCH"
+    fi
+
+    # Verify we're on the right branch
     CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
     print_status "info" "Current branch: $CURRENT_BRANCH, target branch: $RMS_BRANCH"
 
@@ -368,12 +463,8 @@ main() {
         print_status "success" "Local repository already up to date with origin/$RMS_BRANCH"
     else
         print_status "info" "Updates available, resetting to remote state..."
-        print_status "info" "Stashing local changes before resetting..."
-        if ! git stash; then
-            print_status "warning" "Git stash failed. Proceeding with reset."
-        fi
-
-        if ! git_with_retry "reset" "$RMS_BRANCH"; then            print_status "error" "Failed to reset to origin/$RMS_BRANCH. Aborting."
+        if ! git_with_retry "reset" "$RMS_BRANCH"; then
+            print_status "error" "Failed to reset to origin/$RMS_BRANCH. Aborting."
             exit 1
         fi
         print_status "success" "Successfully updated to latest version"
@@ -426,4 +517,4 @@ main() {
 }
 
 # Run the main process
-main
+main "$@"
