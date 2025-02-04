@@ -21,7 +21,6 @@ CURRENT_CONFIG="$RMSSOURCEDIR/.config"
 CURRENT_MASK="$RMSSOURCEDIR/mask.bmp"
 BACKUP_CONFIG="$RMSBACKUPDIR/.config"
 BACKUP_MASK="$RMSBACKUPDIR/mask.bmp"
-SYSTEM_PACKAGES="$RMSSOURCEDIR/system_packages.txt"
 UPDATEINPROGRESSFILE=$RMSBACKUPDIR/update_in_progress
 LOCKFILE="/tmp/update.lock"
 MIN_SPACE_MB=200  # Minimum required space in MB
@@ -264,22 +263,18 @@ git_with_retry() {
 
 # Install missing dependencies
 install_missing_dependencies() {
-    print_status "info" "Checking system_packages file: $SYSTEM_PACKAGES"
-    if [ ! -f "$SYSTEM_PACKAGES" ]; then
-        print_status "warning" "System packages file not found: $SYSTEM_PACKAGES"
-        return
-    fi
-
-    print_status "info" "Reading packages file..."
-    cat "$SYSTEM_PACKAGES"  # Show content of file
+    # Hardcoded list of required packages in RMS_Reset only
+    local required_packages=(
+        "gobject-introspection"
+        "libgirepository1.0-dev"
+        "gstreamer1.0-libav"
+        "gstreamer1.0-plugins-bad"
+    )
 
     local missing_packages=()
 
-    # Identify missing packages
-    while read -r pkg; do
-        # Skip blank lines or commented lines
-        [[ -z "$pkg" || "$pkg" =~ ^# ]] && continue
-        
+    # Identify missing packages from the hardcoded list
+    for pkg in "${required_packages[@]}"; do
         print_status "info" "Checking package: $pkg"
         if ! dpkg -s "$pkg" &>/dev/null; then
             print_status "info" "Package $pkg is missing"
@@ -287,8 +282,8 @@ install_missing_dependencies() {
         else
             print_status "info" "Package $pkg is already installed"
         fi
-    done < $SYSTEM_PACKAGES
-    
+    done
+
     # If no missing packages, inform and return
     if [ ${#missing_packages[@]} -eq 0 ]; then
         print_status "success" "All required packages are already installed."
@@ -498,14 +493,6 @@ main() {
     echo "0" > "$UPDATEINPROGRESSFILE"
 
     # Install missing dependencies
-    # -----------------------------------------------------------------------------
-    # We store system-level dependencies in a separate file (system_packages.txt)
-    # so that when RMS_Update pulls new code (including a potentially updated list of packages),
-    # we can read those new dependencies during the same run — no need to run the update
-    # script twice. Because the main script is loaded into memory, changing it mid-run
-    # won't reload it. But updating this separate file allows us to immediately pick
-    # up any added or changed packages without requiring a second pass.
-    # -----------------------------------------------------------------------------
     print_header "Installing Missing Dependencies"
     install_missing_dependencies
 
