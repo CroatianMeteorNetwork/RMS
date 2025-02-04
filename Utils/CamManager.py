@@ -24,15 +24,18 @@ if sys.version_info[0] < 3:
 
 import os
 import struct
-import fcntl
+if sys.platform != 'win32':
+    import fcntl
+else:
+    import ifaddr
+
 import json
 from locale import getlocale
-from subprocess import check_output
 from socket import socket, inet_aton, inet_ntoa, if_nameindex
 from socket import SOL_SOCKET, SO_REUSEADDR, SO_BROADCAST, IP_MULTICAST_TTL, SOCK_DGRAM, AF_INET, IPPROTO_UDP, IPPROTO_IP
-import platform
 from datetime import datetime
 import hashlib
+import argparse
 
 try:
     from dvrip import DVRIPCam
@@ -61,7 +64,7 @@ logLevel = 20
 devices = {}
 searchers = {}
 configure = {}
-
+intf = None
 
 CODES = {
     100: "Success",
@@ -156,11 +159,19 @@ def local_ip():
 
 def get_ip_address(ifname):
     server = socket(AF_INET, SOCK_DGRAM)
-    return inet_ntoa(fcntl.ioctl(
-        server.fileno(),
-        0x8915,  # SIOCGIFADDR
-        struct.pack('256s', bytes(ifname[:15], 'utf-8'))
-    )[20:24])
+    if sys.platform == 'win32':
+        interfaces = ifaddr.get_adapters()
+        for thisintf in interfaces:
+            ips = thisintf.ips
+            for ip in ips:
+                if ip.network_prefix <=32 and ip.nice_name == ifname:
+                    return ip.ip
+    else:
+        return inet_ntoa(fcntl.ioctl(
+            server.fileno(),
+            0x8915,  # SIOCGIFADDR
+            struct.pack('256s', bytes(ifname[:15], 'utf-8'))
+        )[20:24])
 
 
 def sofia_hash(password):
@@ -177,52 +188,44 @@ def SetIP(ip):
     return "0x%08X" % struct.unpack("I", inet_aton(ip))
 
 
-def GetAllAddr():
-    # better to do this with something like netifaces-plus. 
-    # will rework it later
-    if os.name == "nt":
-        return [
-            x.split(":")[1].strip()
-            for x in str(check_output(["ipconfig"]), "866").split("\r\n")
-            if "IPv4" in x
-        ]
-    else:
-        iptool = ["ip", "address"]
-        if platform.system() == "Darwin":
-            iptool = ["ifconfig"]
-        return [
-            x.split("/")[0].strip().split(" ")[1]
-            for x in str(check_output(iptool), "ascii").split("\n")
-            if "inet " in x and "127.0." not in x
-        ]
-
-
 def GetInterfaces(checkip=False):
     # if the GUI is initialised, just read the list of interfaces from the dropdown
     if app is not None:
         return [app.intf.get()]
     
     # otherwise find the active interfaces. This is linux-specific. 
-    det_intfs = list(zip(*if_nameindex()))[1]
-    det_intfs = list(det_intfs)
-    det_intfs.remove('lo')
-    print("detected network interfaces:", det_intfs)
-    if checkip:
-        for intf in det_intfs:
-            try:
-                _ = get_ip_address(intf)
-            except Exception:
-                print('no ip address for ', intf)
-                det_intfs.remove(intf)
-    if len(det_intfs) == 0:
-        return ['None']
+    det_intfs = []
+    if sys.platform == 'win32':
+        interfaces = ifaddr.get_adapters()
+        for thisintf in interfaces:
+            ips = thisintf.ips
+            for ip in ips:
+                if ip.network_prefix >24 or ip.network_prefix < 17:
+                    continue 
+                det_intfs.append(ip.nice_name)
+    else:
+        det_intfs = list(zip(*if_nameindex()))[1]
+        det_intfs = list(det_intfs)
+        if 'lo' in det_intfs:
+            det_intfs.remove('lo')
+        print("detected network interfaces:", det_intfs)
+        if checkip:
+            for intf in det_intfs:
+                try:
+                    _ = get_ip_address(intf)
+                except Exception:
+                    print('no ip address for ', intf)
+                    det_intfs.remove(intf)
+        if len(det_intfs) == 0:
+            det_intfs = ['None']
     return det_intfs
 
 
-def SearchXM():
+def SearchXM(intf=None):
 
     server = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
-    intf = GetInterfaces(checkip=True)[0]
+    if not intf:
+        intf = GetInterfaces(checkip=True)[0]
     print("Interface:", intf)
     try:
         ip = get_ip_address(intf)
@@ -231,13 +234,16 @@ def SearchXM():
         print("Error during IP estimation, interface up?")
 
     print("IP:", ip)
-    server.bind(('', 34569))
+    if sys.platform == 'win32':
+        server.bind((ip, 34569))
+    else:
+        server.bind(('', 34569))
     print("socket bound")
     server.settimeout(3)
     server.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
     server.setsockopt(SOL_SOCKET, SO_BROADCAST, 1)
-    # fix for RMS Buster distro, as UTF-8 support is missing
-    server.setsockopt(SOL_SOCKET, 25, intf.encode('utf-8') + '\0'.encode('utf-8'))
+    if sys.platform != 'win32':
+        server.setsockopt(SOL_SOCKET, 25, intf.encode('utf-8') + '\0'.encode('utf-8'))
     server.setsockopt(IPPROTO_IP, IP_MULTICAST_TTL, 1)
     server.sendto(
         struct.pack("BBHIIHHI", 255, 0, 0, 0, 0, 0, 1530, 0), ("255.255.255.255", 34569)
@@ -259,9 +265,9 @@ def SearchXM():
     return devices
 
 
-def ConfigXM(data, debug=False):
-
-    intf = GetInterfaces(checkip=True)[0]
+def ConfigXM(data, debug=False, intf=None):
+    if not intf:
+        intf = GetInterfaces(checkip=True)[0]
     print("Interface:", intf)
     try:
         ip = get_ip_address(intf)
@@ -295,11 +301,15 @@ def ConfigXM(data, debug=False):
         config, ensure_ascii=False, sort_keys=True, separators=(", ", " : ")
     ).encode("utf8")
     server = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
-    server.bind(("", 34569))
+    if sys.platform == 'win32':
+        server.bind((ip, 34569))
+    else:
+        server.bind(('', 34569))
     server.settimeout(1)
     server.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
     server.setsockopt(SOL_SOCKET, SO_BROADCAST, 1)
-    server.setsockopt(SOL_SOCKET, 25, intf.encode('utf-8') + '\0'.encode('utf-8'))
+    if sys.platform != 'win32':
+        server.setsockopt(SOL_SOCKET, 25, intf.encode('utf-8') + '\0'.encode('utf-8'))
     server.setsockopt(IPPROTO_IP, IP_MULTICAST_TTL, 1)
     clen = len(config)
     if debug:
@@ -362,7 +372,7 @@ def FlashXM(cmd):
 
 
 def ProcessCMD(cmd):
-    global log, logLevel, devices, searchers, configure
+    global log, logLevel, devices, searchers, configure, intf
     if logLevel == 20:
         tolog(datetime.now().strftime("[%Y-%m-%d %H:%M:%S] >") + " ".join(cmd))
     if cmd[0].lower() == "q" or cmd[0].lower() == "quit":
@@ -381,7 +391,7 @@ def ProcessCMD(cmd):
             for s in searchers:
                 tolog("Search" + " %s\r" % s)
                 try:
-                    devices = searchers[s]()
+                    devices = searchers[s](intf=intf)
                 except Exception as error:
                     print(" ".join([str(x) for x in list(error.args)]))
             tolog("Found %d devices" % len(devices))
@@ -486,6 +496,17 @@ def ProcessCMD(cmd):
             return json.dumps(devices[cmd[1]])
         else:
             return "device [MAC]"
+    if "interface" in cmd[0].lower():
+        det_intfs = GetInterfaces(True)
+        if len(cmd) > 1:
+            req_intf = ' '.join(cmd[1:]).replace('"','')
+            if req_intf in det_intfs:
+                intf = req_intf
+                print("Interface set to ", intf)
+            pass
+        else:
+            print(f'available interfaces {det_intfs}')
+            print('nb: enclose in double-quotes if there is a space in the name')
             
     if cmd[0].lower() == "config":
         if (
@@ -493,7 +514,7 @@ def ProcessCMD(cmd):
             and cmd[1] in devices.keys()
             and devices[cmd[1]]["Brand"] in configure.keys()
         ):
-            return configure[devices[cmd[1]]["Brand"]](cmd, logLevel>30)
+            return configure[devices[cmd[1]]["Brand"]](cmd, logLevel>30, intf=intf)
         else:
             return "config [MAC] [IP] [MASK] [GATE] [Pasword]"
     
@@ -760,16 +781,15 @@ if __name__ == "__main__":
     configure = {"xm": ConfigXM}
 
     # check if there's a DISPLAY, and use commandline mode if not
-    if os.getenv('DISPLAY', default=None) is None:
+    if os.getenv('DISPLAY', default=None) is None and sys.platform !='win32':
         GUI_TK = False
 
-    # list of preferred interfaces - camera is supposed to be connected to a wired interface
-    intfs = ['eth', 'eno', 'wlx', 'enx']
     icon = "R0lGODlhIAAgAPcAAAAAAAkFAgwKBwQBABQNBRAQDQQFERAOFA4QFBcWFSAaFCYgGAoUMhwiMSUlJCsrKyooJy8wLjUxLjkzKTY1Mzw7OzY3OEpFPwsaSRsuTRUsWD4+QCo8XQAOch0nYB05biItaj9ARjdHYiRMfEREQ0hIR0xMTEdKSVNOQ0xQT0NEUVFNUkhRXlVVVFdYWFxdXFtZVV9wXGZjXUtbb19fYFRda19gYFZhbF5wfWRkZGVna2xsa2hmaHFtamV0Ynp2aHNzc3x8fHh3coF9dYJ+eH2Fe3K1YoGBfgIgigwrmypajDtXhw9FpxFFpSdVpzlqvFNzj0FvnV9zkENnpUh8sgdcxh1Q2jt3zThi0SJy0Dl81Rhu/g50/xp9/x90/zB35TJv8DJ+/EZqzj2DvlGDrlqEuHqLpHeQp26SuhqN+yiC6imH/zSM/yqa/zeV/zik/1aIwlmP0mmayWSY122h3VWb6kyL/1yP8UGU/UiW/VWd/miW+Eqp/12k/1Co/1yq/2Gs/2qr/WKh/nGv/3er9mK3/3K0/3e4+4ODg4uLi4mHiY+Qj5WTjo+PkJSUlJycnKGem6ShnY2ZrKOjo6urrKqqpLi0prS0tLu8vMO+tb+/wJrE+bzf/sTExMfIx8zMzMjIxtrWyM/Q0NXU1NfY193d3djY1uDf4Mnj+931/OTk5Ozs7O/v8PLy8gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACH5BAEAAAAALAAAAAAgACAAAAj+AAEIHEiwoMGDCBMqXMiwocOHECNKnEixosWLGDNq3Mgx4iVMnTyJInVKlclSpD550nRpUqKGmD59EjWqlMlVOFWdIgWq0iNNoBIhSujokidPn0aNKrmqVStWqjxRumTqyI5KOxI5OpiIkiakNG2yelqK5alKLSAJgbBBB6RIjArmCKLIkV1HjyZNpTTJFKgSQoI4cGBiBxBIR6QM6TGQxooWL3LwMBwkSJEcLUq8YATDAZAdMkKh+GGpAo0cL1wInJuokSNIeqdeCgLBAoVMR2CEMkHDzAcnTCzsCAKERwsXK3wYKYLIdd6pjh4guCGJw5IpT7R8CeNlCwsikx7+JTJ+PAZlRHXxOgqBAQMTLXj0AAKkJw+eJw6CXGqJyAWNyT8QgZ5rsD2igwYEOOEGH38EEoghgcQhQgJAxISJI/8ZNoQUijiX1yM7NIBAFm3wUcghh9yBhQcCFEBDJ6V8MskKhgERxBGMMILXI7AhsoAAGSgRBRlliLHHHlZgMAAJmLByCiUnfGajFEcgotVzjkhggAYjjBHFFISgkoodSDAwAyStqDIJAELs4CYQQxChVSRTQcJCFWmUyAcghmzCCRgdXCEHEU69VJiNdDmnV0s4rNHFGmzgkUcfhgiShAd0nNHDVAc9YIEFFWxAQgkVpKAGF1yw4UYdc6AhhQohJFiwQAIRPQCHFlRAccMJFCRAgAAVJXDBBAsQEEBHDwUEADs="
     help = """
-        Usage: %s [-q] [-n] [Command];[Command];...
+        Usage: %s [-q] [-n] [- i intf] [Command];[Command];...
         -q				No output
         -n				No gui
+        -i xxx          Use interface xxx
         Command			Description
 
         help			This help
@@ -781,41 +801,61 @@ if __name__ == "__main__":
         json			JSON String of devices
         device [MAC]		JSON String of [MAC]
         config [MAC] [IP] [MASK] [GATE] [Pasword]   - Configure searched divice
+        interface [ifname]  view or set the interface to search
         """ % os.path.basename(
         sys.argv[0]
     )
     lang, charset = getlocale()
 
-    if len(sys.argv) > 1:
-        cmds = " ".join(sys.argv[1:])
-        if cmds.find("-q ") != -1:
-            cmds = cmds.replace("-q ", "").replace("-n ", "").strip()
-            logLevel = 0
-        for cmd in cmds.split(";"):
-            ProcessCMD(cmd.split(" "))
-    if '-n' in sys.argv:
+    arg_parser = argparse.ArgumentParser(description="Manage an IMX291 or IMX307 camera")
+
+    arg_parser.add_argument('-q', '--quiet', action="store_true", help='no output')
+    arg_parser.add_argument('-n', '--nogui', action="store_true", help='no GUI')
+    arg_parser.add_argument('-i', '--intf', metavar='INTF', type=str, help='Use interface xxx')
+    arg_parser.add_argument('-t', '--theme', metavar='THEME', type=str, help="""
+                            use specified theme for the UI - options are 
+                            'winnative', 'clam', 'alt', 'default', 'classic', 'vista', 'xpnative'""")
+    arg_parser.add_argument('cmds', nargs='?', metavar='CMDS', type=str, help='optional commands separated by semicolons')
+
+    cml_args = arg_parser.parse_args()
+
+    if cml_args.quiet:
+        logLevel = 0
+
+    if cml_args.nogui:
         GUI_TK = False
+
+    if cml_args.intf:
+        intf = cml_args.intf
+        print(f'using interface {intf}')
+    else:
+        intf = None
+
+    theme = None
+    if cml_args.theme:
+        theme = cml_args.theme
         
-    if GUI_TK and "-n" not in sys.argv:
+    if cml_args.cmds:
+        for cmd in cml_args.cmds.split(";"):
+            ProcessCMD(cmd.split(" "))
+
+    if GUI_TK:
         root = Tk()
         app = GUITk(root)
-        if (
-            "--theme" in sys.argv
-        ):  # ('winnative', 'clam', 'alt', 'default', 'classic', 'vista', 'xpnative')
-            style = Style()
-            theme = [sys.argv.index("--theme") + 1]
-            if theme in style.theme_names():
-                style.theme_use(theme)
+        style = Style()
+        print(f'themse are {style.theme_names()}')
+        if theme and theme in style.theme_names():
+            style.theme_use(theme)
         root.mainloop()
         sys.exit(1)
-
-    # cmdline only, uses first interface with an IP address
-    print("Type help or ? to display help(q or quit to exit)")
-    while True:
-        data = input("> ").split(";")
-        for cmd in data:
-            result = ProcessCMD(cmd.split(" "))
-            if hasattr(result, "keys") and "Ret" in result.keys():
-                print(CODES[result["Ret"]])
-            else:
-                print(result)
+    else:
+        # cmdline only, uses first interface with an IP address
+        print("Type help or ? to display help(q or quit to exit)")
+        while True:
+            data = input("> ").split(";")
+            for cmd in data:
+                result = ProcessCMD(cmd.split(" "))
+                if hasattr(result, "keys") and "Ret" in result.keys():
+                    print(CODES[result["Ret"]])
+                else:
+                    print(result)
