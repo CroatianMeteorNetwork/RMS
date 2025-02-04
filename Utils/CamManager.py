@@ -208,13 +208,13 @@ def GetInterfaces(checkip=False):
         det_intfs = list(det_intfs)
         if 'lo' in det_intfs:
             det_intfs.remove('lo')
-        print("detected network interfaces:", det_intfs)
+        #print("detected network interfaces:", det_intfs)
         if checkip:
             for intf in det_intfs:
                 try:
                     _ = get_ip_address(intf)
                 except Exception:
-                    print('no ip address for ', intf)
+                    #print('no ip address for ', intf)
                     det_intfs.remove(intf)
         if len(det_intfs) == 0:
             det_intfs = ['None']
