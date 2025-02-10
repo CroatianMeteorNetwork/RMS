@@ -17,6 +17,10 @@
 RMS_BRANCH="${RMS_BRANCH:-""}"  # Use environment variable if set, otherwise empty
 RMSSOURCEDIR=~/source/RMS
 RMSBACKUPDIR=~/.rms_backup
+INITIAL_COMMIT=""
+INITIAL_DATE=""
+FINAL_COMMIT=""
+FINAL_DATE=""
 CURRENT_CONFIG="$RMSSOURCEDIR/.config"
 CURRENT_MASK="$RMSSOURCEDIR/mask.bmp"
 BACKUP_CONFIG="$RMSBACKUPDIR/.config"
@@ -28,6 +32,36 @@ RETRY_LIMIT=3  # Retries for critical file operations
 GIT_RETRY_LIMIT=5
 GIT_RETRY_DELAY=60  # Seconds between git operation retries
 
+usage() {
+    echo "Usage: $0 [--switch <branch>] [--help]"
+    echo "  --switch <branch>  Interactively switch or switch to a specific branch"
+    echo "  --help             Show usage info"
+    exit 1
+}
+
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --switch)
+                if [[ -n "$2" && ! "$2" =~ ^-- ]]; then
+                    SWITCH_MODE="direct"
+                    SWITCH_BRANCH="$2"
+                    shift 2
+                else
+                    SWITCH_MODE="interactive"
+                    shift 1
+                fi
+                ;;
+            --help|-h)
+                usage
+                ;;
+            *)
+                echo "Unknown argument: $1"
+                usage
+                ;;
+        esac
+    done
+}
 
 # Functions for improved status output
 print_status() {
@@ -67,22 +101,68 @@ print_header() {
 }
 
 
+check_git_setup() {
+    print_header "Checking Git Configuration"
+    
+    # Check if this is a git repository
+    if ! git rev-parse --git-dir > /dev/null 2>&1; then
+        print_status "error" "Not a git repository. Please run this script from ~/source/RMS"
+        exit 1
+    else
+        print_status "info" "Valid git repository found"
+    fi
+    
+    # Check what remotes we have
+    print_status "info" "Checking remote configuration..."
+    local remotes=$(git remote)
+    local rms_url="https://github.com/CroatianMeteorNetwork/RMS.git"
+    RMS_REMOTE=""  # Will store the remote we'll use
+    
+    if [ -z "$remotes" ]; then
+        print_status "warning" "No remotes configured. Adding RMS repository..."
+        git remote add origin "$rms_url"
+        RMS_REMOTE="origin"
+    else
+        # Check all remotes to find RMS repository
+        for remote in $remotes; do
+            url=$(git remote get-url $remote)
+            print_status "info" "Found remote '$remote' pointing to: $url"
+            if [[ "$url" == *"CroatianMeteorNetwork/RMS"* ]]; then
+                RMS_REMOTE="$remote"
+                print_status "success" "Found RMS repository at remote '$remote'"
+                break
+            fi
+        done
+        
+        # If no RMS remote found, add one
+        if [ -z "$RMS_REMOTE" ]; then
+            print_status "warning" "No remote points to RMS repository. Adding it..."
+            git remote add rms "$rms_url"
+            RMS_REMOTE="rms"
+        fi
+    fi
+    
+    # Verify we can reach the RMS repository
+    print_status "info" "Verifying connection to RMS remote..."
+    if ! git ls-remote --exit-code "$RMS_REMOTE" >/dev/null 2>&1; then
+        print_status "error" "Cannot reach RMS repository. Please check your internet connection"
+        exit 1
+    else
+        print_status "success" "Successfully connected to RMS repository through '$RMS_REMOTE' remote"
+    fi
+}
+
+
 # Function to handle interactive branch selection
 switch_branch_interactive() {
     print_status "info" "Fetching available branches..."
-    # First ensure we have latest branch info
-    if ! git fetch --all; then
-        print_status "error" "Failed to fetch branch information"
-        exit 1
-    fi
     
     # Grab the *actual* current local branch
     local current_branch
     current_branch=$(git rev-parse --abbrev-ref HEAD)
 
     # Get list of remote branches, excluding HEAD
-    branches=( $(git branch -r | grep -v HEAD | sed 's/origin\///') )
-    
+    branches=( $(git branch -r | grep "$RMS_REMOTE/" | grep -v HEAD | sed "s/$RMS_REMOTE\///") )    
     if [ ${#branches[@]} -eq 0 ]; then
         print_status "error" "No branches found"
         exit 1
@@ -138,6 +218,29 @@ check_disk_space() {
     if [ "$available_mb" -lt "$required_mb" ]; then
         print_status "error" "Insufficient disk space in $dir. Need ${required_mb}MB, have ${available_mb}MB"
         return 1
+    fi
+    return 0
+}
+
+# Function to check and fix git index
+check_git_index() {
+    if ! git status &>/dev/null; then
+        if [[ $(git status 2>&1) == *"index file"* ]]; then
+            print_status "warning" "Corrupted git index detected"
+            print_status "info" "Attempting to fix git index..."
+            rm -f .git/index
+            git reset &>/dev/null
+            if ! git status &>/dev/null; then
+                print_status "error" "Failed to fix git index. Manual intervention required:"
+                print_status "error" "1. rm .git/index"
+                print_status "error" "2. git reset"
+                return 1
+            fi
+            print_status "success" "Git index fixed"
+        else
+            print_status "error" "Git repository is in an invalid state"
+            return 1
+        fi
     fi
     return 0
 }
@@ -242,7 +345,7 @@ git_with_retry() {
                 fi
                 ;;
             "reset")
-                if git reset --hard "origin/$branch"; then
+                if git reset --hard "$RMS_REMOTE/$branch"; then
                     return 0
                 fi
                 ;;
@@ -259,6 +362,67 @@ git_with_retry() {
     
     print_status "error" "Git $cmd failed after $GIT_RETRY_LIMIT attempts"
     return 1
+}
+
+# Function to safely switch to a specified branch
+switch_to_branch() {
+    local target_branch="$1"
+    local from_interactive="${2:-false}"  # Optional parameter to indicate if called from interactive mode
+
+    # Skip validation if called from interactive mode (already validated)
+    if [ "$from_interactive" = "false" ]; then
+        if [[ ! "$target_branch" =~ ^[a-zA-Z0-9_/-]+$ ]]; then
+            print_status "error" "Invalid branch name '$target_branch'. Branch names can only contain letters, numbers, underscores, forward slashes and hyphens"
+            return 1
+        fi
+        
+        print_status "info" "Validating branch: $target_branch"
+        
+        # Verify remote branch exists
+        if ! git rev-parse --verify -q "$RMS_REMOTE/$target_branch" >/dev/null 2>&1; then
+            print_status "error" "Branch '$target_branch' not found in remote '$RMS_REMOTE'"
+            print_status "info" "Available branches:"
+            git branch -r | grep "$RMS_REMOTE/" | grep -v HEAD | sed "s/$RMS_REMOTE\//  /"
+            return 1
+        fi
+
+        # Verify it's actually a branch (not a tag or other ref)
+        if ! git show-ref --verify --quiet "refs/remotes/$RMS_REMOTE/$target_branch"; then
+            print_status "error" "'$target_branch' exists but is not a valid branch"
+            return 1
+        fi
+    fi
+
+    print_status "info" "Attempting to switch to branch: $target_branch"
+
+    # First try to create a tracking branch if it doesn't exist locally
+    if ! git rev-parse --verify -q "$target_branch" >/dev/null 2>&1; then
+        print_status "info" "Creating local tracking branch..."
+        if ! git branch --track "$target_branch" "$RMS_REMOTE/$target_branch"; then
+            print_status "error" "Failed to create tracking branch for $target_branch"
+            return 1
+        fi
+    fi
+
+    # Now try to switch to the branch
+    if ! git_with_retry "checkout" "$target_branch"; then
+        print_status "error" "Failed to switch to branch $target_branch. This could be due to:"
+        print_status "error" "- Local conflicts that need resolution"
+        print_status "error" "- Insufficient permissions"
+        print_status "error" "- Corrupted local repository"
+        return 1
+    fi
+
+    # Verify we're actually on the right branch
+    local current_branch
+    current_branch=$(git rev-parse --abbrev-ref HEAD)
+    if [ "$current_branch" != "$target_branch" ]; then
+        print_status "error" "Branch switch verification failed. Expected: $target_branch, Got: $current_branch"
+        return 1
+    fi
+
+    print_status "success" "Successfully switched to branch: $target_branch"
+    return 0
 }
 
 # Install missing dependencies
@@ -322,7 +486,45 @@ install_missing_dependencies() {
     fi
 }
 
+get_commit_info() {
+    local branch=$1
+    local commit
+    local date
+    
+    commit=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    date=$(git log -1 --format="%cd" --date=local 2>/dev/null || echo "unknown")
+    
+    echo "$commit|$date"
+}
+
+print_update_report() {
+    print_header "Update Report"
+    
+    local final_commit
+    local final_date
+    IFS='|' read -r final_commit final_date <<< "$(get_commit_info)"
+    
+    tput bold
+    echo "Branch update summary:"
+    echo "  From: $INITIAL_BRANCH (${INITIAL_COMMIT} - ${INITIAL_DATE})"
+    echo "  To:   $RMS_BRANCH (${final_commit} - ${final_date})"
+    tput sgr0
+}
+
+# Function to handle error cleanup
+cleanup_on_error() {
+    print_status "warning" "Error occurred, attempting to restore files..."
+    restore_files
+    echo "0" > "$UPDATEINPROGRESSFILE"
+    exit 1
+}
+
+#######################################################
+######################   MAIN   #######################
+#######################################################
 main() {
+    parse_args "$@"
+
     print_header "Starting RMS Update"
     
     # Check for running instance FIRST
@@ -345,6 +547,10 @@ main() {
     print_status "info" "Checking available disk space..."
     check_disk_space "$RMSSOURCEDIR" "$MIN_SPACE_MB" || exit 1
 
+    # Get initial commit info
+    INITIAL_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+    IFS='|' read -r INITIAL_COMMIT INITIAL_DATE <<< "$(get_commit_info)"
+
     # Ensure the backup directory exists
     mkdir -p "$RMSBACKUPDIR"
 
@@ -366,43 +572,18 @@ main() {
     # Change to the RMS source directory
     cd "$RMSSOURCEDIR" || { print_status "error" "RMS source directory not found. Exiting."; exit 1; }
 
-     # Stash any local changes first
-    print_status "info" "Stashing any local changes..."
-    if ! git stash; then
-        print_status "warning" "Git stash failed. Proceeding with operations."
+    # Check Git configuration
+    check_git_setup
+
+    print_header "Updating from Git"
+    if ! check_git_index; then
+        exit 1
     fi
 
-    # Handle branch setup and switching
-    if [ "$1" = "--switch" ]; then
-        if [ -n "$2" ]; then
-            # Verify the specified branch exists
-            if git fetch origin "$2" 2>/dev/null; then
-                RMS_BRANCH="$2"
-                if ! git_with_retry "checkout" "$RMS_BRANCH"; then
-                    print_status "error" "Failed to switch to branch $RMS_BRANCH"
-                    exit 1
-                fi
-                print_status "success" "Switched to branch: $RMS_BRANCH"
-            else
-                print_status "error" "Branch '$2' not found"
-                exit 1
-            fi
-        else
-            switch_branch_interactive
-            if ! git_with_retry "checkout" "$RMS_BRANCH"; then
-                print_status "error" "Failed to switch to branch $RMS_BRANCH"
-                exit 1
-            fi
-        fi
-    elif [ -z "$RMS_BRANCH" ]; then
-        # If no branch specified (via --switch or environment), use current
-        RMS_BRANCH=$(git rev-parse --abbrev-ref HEAD || echo "master")
-        print_status "info" "Using current branch: $RMS_BRANCH"
+    if ! git_with_retry "fetch"; then
+        print_status "error" "Failed to fetch updates. Aborting."
+        exit 1
     fi
-
-    # Verify we're on the right branch
-    CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-    print_status "info" "Current branch: $CURRENT_BRANCH, target branch: $RMS_BRANCH"
 
     # Activate the virtual environment
     if [ -f ~/vRMS/bin/activate ]; then
@@ -411,6 +592,75 @@ main() {
         print_status "error" "Virtual environment not found. Exiting."
         exit 1
     fi
+
+    #######################################################
+    ################ DANGER ZONE START ####################
+    #######################################################
+
+    # Mark custom files backup/restore cycle as in progress
+    echo "1" > "$UPDATEINPROGRESSFILE"
+
+    # Stash any local changes first
+    print_status "info" "Stashing any local changes..."
+    if ! git stash; then
+        print_status "warning" "Git stash failed. Proceeding with operations."
+    fi
+
+    # Handle branch setup and switching
+    if [ "$1" = "--switch" ]; then
+        if [ -n "$2" ]; then
+            if ! switch_to_branch "$2"; then
+                cleanup_on_error
+            fi
+            RMS_BRANCH="$2"
+        else
+            switch_branch_interactive
+            if ! switch_to_branch "$RMS_BRANCH" "true"; then
+                cleanup_on_error
+            fi
+        fi
+    elif [ -z "$RMS_BRANCH" ]; then
+        # If no branch specified (via --switch or environment), use current
+        RMS_BRANCH=$(git rev-parse --abbrev-ref HEAD || echo "master")
+        print_status "info" "Using current branch: $RMS_BRANCH"
+    fi
+
+    # Check if updates are needed
+    print_status "info" "Checking for available updates..."
+    if ! git log HEAD.."$RMS_REMOTE/$RMS_BRANCH" --oneline | grep .; then
+        print_status "success" "Local repository already up to date with $RMS_REMOTE/$RMS_BRANCH"
+    else
+        print_status "info" "Updates available, resetting to remote state..."
+        if ! git_with_retry "reset" "$RMS_BRANCH"; then
+            print_status "error" "Failed to reset to $RMS_REMOTE/$RMS_BRANCH. Aborting."
+            cleanup_on_error
+        fi
+        print_status "success" "Successfully updated to latest version"
+        sleep 2
+    fi
+
+    # Create template from the current default config file
+    if [ -f "$CURRENT_CONFIG" ]; then
+        print_status "info" "Creating config template..."
+        mv "$CURRENT_CONFIG" "$RMSSOURCEDIR/.configTemplate"
+        
+        # Verify the move worked
+        if [ ! -f "$RMSSOURCEDIR/.configTemplate" ]; then
+            print_status "warning" "Failed to verify config template creation"
+        else
+            print_status "success" "Config template created successfully"
+        fi
+    fi
+
+    # Restore files after updates
+    restore_files
+
+    # Mark custom files backup/restore cycle as completed
+    echo "0" > "$UPDATEINPROGRESSFILE"
+
+    #######################################################
+    ################ DANGER ZONE END ######################
+    #######################################################
 
     # Perform cleanup operations before updating
     print_header "Cleaning Build Environment"
@@ -450,48 +700,6 @@ main() {
     print_status "info" "Cleaning up *.so files..."
     find . -name "*.so" -type f -delete
 
-    # Mark custom files backup/restore cycle as in progress
-    echo "1" > "$UPDATEINPROGRESSFILE"
-
-    print_header "Updating from Git"
-    if ! git_with_retry "fetch"; then
-        print_status "error" "Failed to fetch updates. Aborting."
-        exit 1
-    fi
-
-    # Check if updates are needed
-    print_status "info" "Checking for available updates..."
-    if ! git log HEAD.."origin/$RMS_BRANCH" --oneline | grep .; then
-        print_status "success" "Local repository already up to date with origin/$RMS_BRANCH"
-    else
-        print_status "info" "Updates available, resetting to remote state..."
-        if ! git_with_retry "reset" "$RMS_BRANCH"; then
-            print_status "error" "Failed to reset to origin/$RMS_BRANCH. Aborting."
-            exit 1
-        fi
-        print_status "success" "Successfully updated to latest version"
-        sleep 2
-    fi
-
-    # Create template from the current default config file
-    if [ -f "$CURRENT_CONFIG" ]; then
-        print_status "info" "Creating config template..."
-        mv "$CURRENT_CONFIG" "$RMSSOURCEDIR/.configTemplate"
-        
-        # Verify the move worked
-        if [ ! -f "$RMSSOURCEDIR/.configTemplate" ]; then
-            print_status "warning" "Failed to verify config template creation"
-        else
-            print_status "success" "Config template created successfully"
-        fi
-    fi
-
-    # Restore files after updates
-    restore_files
-
-    # Mark custom files backup/restore cycle as completed
-    echo "0" > "$UPDATEINPROGRESSFILE"
-
     # Install missing dependencies
     print_header "Installing Missing Dependencies"
     install_missing_dependencies
@@ -503,9 +711,14 @@ main() {
 
     print_header "Running Setup"
     print_status "info" "Building RMS (this may take a while)..."
-    python setup.py install
+    if ! python setup.py install; then
+        print_status "error" "Build failed. See errors above."
+        exit 1
+    fi
     print_status "success" "Build completed successfully"
-
+    
+    # Print the update report
+    print_update_report
     print_status "success" "Update process completed successfully!"
     sleep 3
 }
