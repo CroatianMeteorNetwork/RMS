@@ -674,11 +674,6 @@ main() {
         exit 1
     fi
 
-    if ! git_with_retry "fetch"; then
-        print_status "error" "Failed to fetch updates. Aborting."
-        exit 1
-    fi
-
     # Activate the virtual environment
     if [ -f ~/vRMS/bin/activate ]; then
         source ~/vRMS/bin/activate
@@ -693,6 +688,12 @@ main() {
 
     # Mark custom files backup/restore cycle as in progress
     echo "1" > "$UPDATEINPROGRESSFILE"
+
+   # Fetch updates
+    if ! git_with_retry "fetch"; then
+        print_status "error" "Failed to fetch updates. Aborting."
+        cleanup_on_error
+    fi
 
     # Stash any local changes first
     print_status "info" "Stashing any local changes..."
