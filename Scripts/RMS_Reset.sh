@@ -364,6 +364,25 @@ git_with_retry() {
     return 1
 }
 
+ensure_branch_tracking() {
+    local branch=$1
+    
+    print_status "info" "Ensuring proper tracking for branch: $branch"
+    
+    # Check if branch already has tracking information
+    if ! git rev-parse --abbrev-ref "$branch@{upstream}" >/dev/null 2>&1; then
+        print_status "info" "Setting upstream tracking for $branch..."
+        if ! git branch --set-upstream-to="$RMS_REMOTE/$branch" "$branch"; then
+            print_status "warning" "Failed to set upstream tracking. You may need to run:"
+            print_status "warning" "git branch --set-upstream-to=$RMS_REMOTE/$branch $branch"
+            return 1
+        fi
+    else
+        print_status "info" "Branch $branch already has proper tracking"
+    fi
+    return 0
+}
+
 # Function to safely switch to a specified branch
 switch_to_branch() {
     local target_branch="$1"
@@ -402,6 +421,9 @@ switch_to_branch() {
             print_status "error" "Failed to create tracking branch for $target_branch"
             return 1
         fi
+    else
+        # Ensure existing branch has proper tracking
+        ensure_branch_tracking "$target_branch"
     fi
 
     # Now try to switch to the branch
@@ -635,6 +657,13 @@ main() {
             print_status "error" "Failed to reset to $RMS_REMOTE/$RMS_BRANCH. Aborting."
             cleanup_on_error
         fi
+
+        # Ensure tracking information is maintained after reset
+        if ! ensure_branch_tracking "$RMS_BRANCH"; then
+            print_status "warning" "Failed to set branch tracking after reset"
+            print_status "warning" "You may need to manually set tracking with: git branch --set-upstream-to=$RMS_REMOTE/$RMS_BRANCH $RMS_BRANCH"
+        fi
+       
         print_status "success" "Successfully updated to latest version"
         sleep 2
     fi
