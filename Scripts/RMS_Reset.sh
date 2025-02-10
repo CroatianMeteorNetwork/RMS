@@ -100,7 +100,6 @@ print_header() {
     sleep 1
 }
 
-
 check_git_setup() {
     print_header "Checking Git Configuration"
     
@@ -324,6 +323,71 @@ restore_files() {
     fi
 }
 
+# Function to repair corrupted repository
+repair_repository() {
+    print_header "Attempting Repository Repair"
+    local repair_success=false
+    
+    # Try basic repair first
+    print_status "info" "Attempting basic repository repair..."
+    git fsck --full 2>/dev/null
+
+    # Get list of corrupted objects
+    local corrupted_objects=$(find .git/objects -type f -empty | sed 's/\.git\/objects\///')
+    
+    if [ -n "$corrupted_objects" ]; then
+        print_status "warning" "Found corrupted objects, attempting removal..."
+        while IFS= read -r obj; do
+            rm -f ".git/objects/$obj"
+        done <<< "$corrupted_objects"
+        
+        # Try to repair again
+        if ! git fsck --full 2>/dev/null; then
+            print_status "warning" "Basic repair failed, attempting full reclone..."
+            
+            # Backup current directory
+            local timestamp=$(date +%Y%m%d_%H%M%S)
+            local backup_dir="${RMSSOURCEDIR}_backup_${timestamp}"
+            
+            print_status "info" "Creating backup at: $backup_dir"
+            if ! mv "$RMSSOURCEDIR" "$backup_dir"; then
+                print_status "error" "Failed to create backup. Aborting repair."
+                return 1
+            fi
+            
+            # Reclone repository
+            print_status "info" "Recloning repository..."
+            if ! git clone https://github.com/CroatianMeteorNetwork/RMS.git "$RMSSOURCEDIR"; then
+                print_status "error" "Failed to reclone repository. Restoring backup..."
+                mv "$backup_dir" "$RMSSOURCEDIR"
+                return 1
+            fi
+            
+            # Restore config files from backup
+            print_status "info" "Restoring configuration from backup..."
+            cp "$backup_dir/.config" "$RMSSOURCEDIR/" 2>/dev/null
+            cp "$backup_dir/mask.bmp" "$RMSSOURCEDIR/" 2>/dev/null
+            
+            repair_success=true
+        else
+            repair_success=true
+        fi
+    else
+        print_status "info" "No empty objects found, checking repository integrity..."
+        if git fsck --full 2>/dev/null; then
+            repair_success=true
+        fi
+    fi
+    
+    if [ "$repair_success" = true ]; then
+        print_status "success" "Repository repair completed successfully"
+        return 0
+    else
+        print_status "error" "Repository repair failed"
+        return 1
+    fi
+}
+
 # Function for reliable git operations
 git_with_retry() {
     local cmd=$1
@@ -337,6 +401,14 @@ git_with_retry() {
             "fetch")
                 if git fetch --all --prune --force --verbose; then
                     return 0
+                fi
+                if [ $attempt -eq $GIT_RETRY_LIMIT ]; then
+                    print_status "warning" "Attempting repository repair..."
+                    if repair_repository; then
+                        if git fetch --all --prune --force --verbose; then
+                            return 0
+                        fi
+                    fi
                 fi
                 ;;
             "checkout")
@@ -360,7 +432,7 @@ git_with_retry() {
         attempt=$((attempt + 1))
     done
     
-    print_status "error" "Git $cmd failed after $GIT_RETRY_LIMIT attempts"
+    print_status "error" "Git $cmd failed after $GIT_RETRY_LIMIT attempts and repair attempts"
     return 1
 }
 
