@@ -414,7 +414,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
                     try:
                         # Archive directory for this day of ft files
-                        tar_path = os.path.join(year_dir, '{}_{}_frametimes.tar.bz2'.format(config.stationID, day))
+                        tar_path = os.path.join(year_dir, '{}_{}_FT.tar.bz2'.format(config.stationID, day))
 
                         with tarfile.open(tar_path, 'w:bz2') as tar:
                             tar.add(day_dir, arcname=os.path.basename(day_dir))
