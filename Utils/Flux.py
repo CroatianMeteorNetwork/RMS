@@ -1482,25 +1482,14 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
             date = FFfile.getMiddleTimeFF(ff_file, config.fps, ret_milliseconds=True)
             jd = date2JD(*date)
 
-            # # make a polygon on a sphere out of 5 points on each side
-            # n_points = 5
-            # y_vert = [platepar.Y_res*i/n_points for i in range(n_points)] \
-            #             + [platepar.Y_res]*n_points \
-            #             + [platepar.Y_res*(1 - i/n_points) for i in range(n_points)] + [0]*n_points
-            # x_vert = [0]*n_points + [platepar.X_res*i/n_points for i in range(n_points)] \
-            #             + [platepar.X_res]*n_points \
-            #             + [platepar.X_res*(1-i/n_points) for i in range(n_points)]
-
             # Make a polygon on a the sky using the outline of the image, 5 points on each side
             x = platepar.X_res
             y = platepar.Y_res
-            x_vert = [0, x/4, x/2, 3/4*x, x,   x,   x,     x, x, 3/4*x, x/2, x/4, 0,     0,   0,   0]
-            y_vert = [0,   0,   0,     0, 0, y/4, y/2, 3/4*y, y,     y,   y,   y, y, 3/4*y, y/2, y/4]
+            x_vert = [0, x/4, x/2, 3/4*x, x,   x,   x,     x, x, 3/4*x, x/2, x/4, 0,     0,   0,   0, 0]
+            y_vert = [0,   0,   0,     0, 0, y/4, y/2, 3/4*y, y,     y,   y,   y, y, 3/4*y, y/2, y/4, 0]
 
             _, ra_vertices, dec_vertices, _ = xyToRaDecPP(
                 [date]*len(x_vert),
-                #[0, 0, platepar.X_res, platepar.X_res], # only 4 corners
-                #[0, platepar.Y_res, platepar.Y_res, 0], # only 4 corners
                 list(reversed(x_vert)),
                 list(reversed(y_vert)),
                 [1]*len(x_vert),
@@ -1535,46 +1524,99 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
             # Compute star image levels from catalog magnitudes without any vignetting or extinction
             star_levels = 10**((mag - platepar.mag_lev)/(-2.5))
 
-            # Compute star magnitudes using vignetting and extinction
-            _, _, _, mag_corrected = xyToRaDecPP(len(x)*[date], x, y, star_levels, platepar, 
+            # Compute star magnitudes using vignetting and extinction, which make the catalog stars
+            # brighter than they are in the catalog
+            _, _, _, mag_forward = xyToRaDecPP(len(x)*[date], x, y, star_levels, platepar, 
                                                  extinction_correction=True, precompute_pointing_corr=True)
-            mag_corrected = np.array(mag_corrected)
+            mag_forward = np.array(mag_forward)
+
+            # Compute the difference between the corrected and the catalog magnitudes
+            # This is the total darkening due to extinction and vignetting
+            mag_diff = mag - mag_forward
+
+            # Apply the magnitude difference to the catalog stars to model the darkening due to extinction
+            # and vignetting
+            mag_corrected = mag + mag_diff
 
             # Filter coordinates to be in FOV and make sure that the stars that are too dim are filtered
             bounds = (mag_corrected <= lim_mag) & (y >= 0) & (y < platepar.Y_res) & (x >= 0) & (x < platepar.X_res)
-            x = x[bounds]
-            y = y[bounds]
-            mag = mag[bounds]
+            x_filtered = x[bounds]
+            y_filtered = y[bounds]
+            mag_filtered = mag[bounds]
 
 
             # Filter stars with mask
             mask_filter = np.take(
                 np.floor(mask.img/255),
                 np.ravel_multi_index(
-                    np.floor(np.array([y, x])).astype(int), (platepar.Y_res, platepar.X_res)
+                    np.floor(np.array([y_filtered, x_filtered])).astype(int), (platepar.Y_res, platepar.X_res)
                 ),
             ).astype(bool)
+
+            # Store the predicted number of stars in the FOV
+            pred_star_count[ff_file] = np.sum(mask_filter)
+            star_mag[ff_file] = mag_filtered
 
 
             # # Plot one example of matched and predicted stars
             # if show_plot and (i == int(len(ff_files)//2)):
+                
+            #     print("Predicted number of stars in {:s}: {:d}".format(ff_file, pred_star_count[ff_file]))
 
-            #     plt.title("{:s}, LM = {:.2f}".format(ff_file, lim_mag))
-            #     plt.scatter(
-            #         *np.array(recalibrated_platepars[ff_file].star_list)[:, 1:3].T[::-1], label='matched'
-            #     )
-            #     plt.scatter(x[mask_filter], y[mask_filter], c='r', marker='+', label='catalog')
-            #     plt.legend()
+            #     #### Plot in the Celestial coordinates on a polar plot
+
+            #     fig = plt.figure()
+            #     ax = fig.add_subplot(111, projection='polar')
+
+            #     # Plot the perimeter of the FOV
+            #     ax.plot(np.radians(ra_vertices), 90 - dec_vertices, 'k-')
+
+            #     # Plot the locations of all stars queried from the catalog
+            #     ax.scatter(np.radians(ra_catalog), 90 - dec_catalog, c='r', s=20, label='all stars', marker='o')
+
+            #     # Plot the stars inside the perimeter
+            #     ax.scatter(np.radians(ra_catalog[inside]), 90 - dec_catalog[inside], c='b', s=20, label='inside', marker='x')
+
             #     plt.show()
 
-            #     # print(np.sum(mask_filter))
-            #     # print(val[inside][bounds][mask_filter])
-            #     # plt.scatter(x[mask_filter], y[mask_filter], c=mag[inside & (mag <= lim_mag)][bounds][mask_filter])
-            #     # plt.show()
 
+            #     #### Plot in the image coordinates ####
 
-            pred_star_count[ff_file] = np.sum(mask_filter)
-            star_mag[ff_file] = mag
+            #     plt.title("{:s}\nLM = {:.2f}, faintest predicted = {:.2f}".format(ff_file, lim_mag, np.max(mag_filtered)))
+
+            #     # Plot matched stars
+            #     plt.scatter(
+            #         *np.array(recalibrated_platepars[ff_file].star_list)[:, 1:3].T[::-1], label='matched',
+            #         marker='+', c='r', s=60, alpha=1.0
+            #     )
+
+            #     # Plot all stars inside the FOV
+            #     plt.scatter(x, y, c='r', s=5, label='all stars', marker='o')
+
+            #     # Plot all stars witin the mask (empty circles)
+            #     plt.scatter(x_filtered[mask_filter], y_filtered[mask_filter], 
+            #                 s=40, label='within mask', marker='o', facecolors='none', edgecolors='k')
+
+            #     # Plot the effects of extinction and vignetting on the catalog stars by color coding (at the back)
+            #     plt.scatter(x, y, c=mag_diff, label='extinction/vignetting', alpha=0.5, marker='o', s=100, zorder=0)
+
+            #     # Plot the locations stars passing the magnitude filter
+            #     plt.scatter(x_filtered[mask_filter], y_filtered[mask_filter], c='g', label='filtered', marker='x', s=50)
+
+            #     plt.colorbar()
+
+            #     # Set limits to 20 px outside the image
+            #     plt.xlim(-20, platepar.X_res + 20)
+            #     plt.ylim(platepar.Y_res + 20, -20)
+
+            #     # Draw a rectangle around the FOV defined by the image resolution
+            #     plt.gca().add_patch(
+            #         plt.Rectangle((0, 0), platepar.X_res, platepar.Y_res, fill=None, edgecolor='k')
+            #         )
+
+                
+            #     plt.legend()
+            #     plt.show()
 
 
     return pred_star_count
