@@ -441,8 +441,9 @@ class PairedStars(object):
 
 
 class PlateTool(QtWidgets.QMainWindow):
-    def __init__(self, input_path, config, beginning_time=None, fps=None, gamma=None, use_fr_files=False, \
-        geo_points_input=None, startUI=True, mask=None, nobg=False, flipud=False, flatbiassub=False):
+    def __init__(self, input_path, config, beginning_time=None, fps=None, gamma=None, use_fr_files=False,
+        geo_points_input=None, startUI=True, mask=None, nobg=False, peribg=False, flipud=False,
+        flatbiassub=False):
         """ SkyFit interactive window.
 
         Arguments:
@@ -461,6 +462,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 the image as seen from the perspective of the observer.
             startUI: [bool] Start the GUI. True by default.
             nobg: [bool] Do not subtract the background for photometry. False by default.
+            peribg: [bool] Perform background subtraction using the average of the pixels adjuecent to the 
+                coloured mask instead of the avepixel. False by default.
             flipud: [bool] Flip the image upside down. False by default.
             flatbiassub: [bool] Subtract flat and bias frames. False by default.
         """
@@ -487,6 +490,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Store the background subtraction flag
         self.no_background_subtraction = nobg
+
+        # Store the peripheric background subtraction flag
+        self.peripheral_background_subtraction = peribg
 
         # Store the flip upside down flag
         self.flipud = flipud
@@ -2761,6 +2767,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update possibly missing flag for not subtracting the background
         if not hasattr(self, "no_background_subtraction"):
             self.no_background_subtraction = False
+
+        # Update possibly missing flag for peripheral background estiamtion
+        if not hasattr(self, "peripheral_background_estimation"):
+            self.peripheral_background_estimation = False
 
         # Update the possibly missing flag for flipping the image upside down
         if not hasattr(self, "flipud"):
@@ -5656,7 +5666,7 @@ class PlateTool(QtWidgets.QMainWindow):
             crop_img = masked_img[x_min:x_max, y_min:y_max]
 
             # Perform gamma correction on the colored part
-            # crop_img = Image.gammaCorrection(crop_img, self.config.gamma)
+            crop_img = Image.gammaCorrectionImage(crop_img, self.config.gamma, bp=0, wp=(2**self.config.bit_depth - 1))
 
             # Mask out the colored in pixels
             mask_img_bg = np.zeros_like(self.img.data)
@@ -5667,7 +5677,7 @@ class PlateTool(QtWidgets.QMainWindow):
             crop_bg = masked_img_bg[x_min:x_max, y_min:y_max]
 
             # Perform gamma correction on the background
-            # crop_bg = Image.gammaCorrection(crop_bg, self.config.gamma)
+            crop_bg = Image.gammaCorrectionImage(crop_bg, self.config.gamma, bp=0, wp=(2**self.config.bit_depth - 1))
 
             # Compute the median background
             background_lvl = np.ma.median(crop_bg)
@@ -5684,9 +5694,41 @@ class PlateTool(QtWidgets.QMainWindow):
             if self.no_background_subtraction:
                 background_lvl = 0
 
-            # Compute the background subtracted intensity sum (do as a float to avoid artificially pumping
-            #   up the magnitude)
-            intensity_sum = np.ma.sum(crop_img.astype(float) - background_lvl)
+
+            # If the background level is set to zero, simply sum up the intensity of the colored pixels
+            if background_lvl == 0:
+                intensity_sum = np.ma.sum(crop_img)
+
+            # Use the peripheral background subtraction method if forced or on static images
+            elif self.peripheral_background_subtraction \
+                or (self.img_handle.input_type == "dfn") \
+                or self.img_handle.single_image_mode:
+
+                # Compute the background subtracted intensity sum by using pixels peripheral to the colored 
+                # pixels
+                # (do as a float to avoid artificially pumping up the magnitude)
+                crop_img_nobg = crop_img.astype(float) - background_lvl
+                crop_img_nobg = np.clip(crop_img_nobg, 0, None)
+                intensity_sum = np.ma.sum(crop_img_nobg)
+
+            # Subtract the background using the avepixel
+            else:
+
+                # Subtract the avepixel image from the crop
+                avepixel = self.img_handle.ff.avepixel.T
+                avepixel_masked = np.ma.masked_array(avepixel, mask_img)
+                avepixel_crop = avepixel_masked[x_min:x_max, y_min:y_max]
+
+                # Perform gamma correction on the avepixel crop
+                avepixel_crop = Image.gammaCorrectionImage(avepixel_crop, self.config.gamma, bp=0, wp=(2**self.config.bit_depth - 1))
+
+                background_lvl = np.ma.median(avepixel_crop)
+
+                # Subtract the avepixel crop from the data crop, clip the negative values to 0 and
+                #  sum up the intensity
+                crop_img_nobg = crop_img.astype(float) - avepixel_crop
+                crop_img_nobg = np.clip(crop_img_nobg, 0, None)
+                intensity_sum = np.ma.sum(crop_img_nobg)
 
             # Check if the result is masked
             if np.ma.is_masked(intensity_sum):
@@ -5698,6 +5740,12 @@ class PlateTool(QtWidgets.QMainWindow):
             # Set the intensity sum to the pick
             pick['intensity_sum'] = intensity_sum
 
+            # # Plot the background subtracted crop
+            # plt.figure()
+            # plt.imshow(crop_img_nobg, cmap='gray', origin='lower')
+            # plt.colorbar()
+            # plt.title("Background subtracted crop")
+            # plt.show()
 
             ### Measure the SNR of the pick ###
 
@@ -5714,7 +5762,7 @@ class PlateTool(QtWidgets.QMainWindow):
             pick['snr'] = snr
 
             # Debug print
-            print("SNR update: intensity sum = {:d}, source px count = {:d}, background lvl = {:.2f}, background stddev = {:.2f}, SNR = {:.2f}".format(
+            print("SNR update: intensity sum = {:8d}, source px count = {:5d}, background lvl = {:8.2f}, background stddev = {:6.2f}, SNR = {:.2f}".format(
                 intensity_sum, source_px_count, background_lvl, background_stddev, snr))
 
             ### Determine if there is any saturation in the measured photometric area
@@ -6535,10 +6583,15 @@ if __name__ == '__main__':
                                  "the image as seen from the perspective of the observer.")
     
     arg_parser.add_argument('-n', '--nobg', action="store_true", \
-                            help="Do not subtract the background when doing photometry. This is useful when"
-                            "calibrating saturated objects, as the background can vary between images and the" 
+                            help="Do not subtract the background when doing photometry. This is useful when "
+                            "calibrating saturated objects, as the background can vary between images and the " 
                             "idea is that the intensity is used as a measure of the radius of the saturated "
                             "object.")
+    
+    arg_parser.add_argument('--peribg', action="store_true", \
+                            help="Compute the background using the periphery around coloured pixels instead "
+                            "of the avepixel image. This is useful when the avepixel is contaminated by the "
+                            "measured object.")
     
     arg_parser.add_argument('--flipud', action="store_true", \
                             help="Flip the image upside down. Only applied to images and videos.")
@@ -6649,7 +6702,8 @@ if __name__ == '__main__':
         # Init SkyFit
         plate_tool = PlateTool(input_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
             gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints,
-            mask=mask, nobg=cml_args.nobg, flipud=cml_args.flipud, flatbiassub=cml_args.flatbiassub)
+            mask=mask, nobg=cml_args.nobg, peribg=cml_args.peribg, flipud=cml_args.flipud, 
+            flatbiassub=cml_args.flatbiassub)
 
 
     # Run the GUI app
