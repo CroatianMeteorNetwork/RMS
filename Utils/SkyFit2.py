@@ -340,18 +340,19 @@ class PairedStars(object):
         self.paired_stars = []
 
 
-    def addPair(self, x, y, intens_acc, obj, snr=0, saturated=False):
+    def addPair(self, x, y, fwhm, intens_acc, obj, snr=0, saturated=False):
         """ Add a pair between image coordinates and a star or a geo point. 
     
         Arguments:
             x: [float] Image X coordinate.
             y: [float] Image Y coordinate.
+            fwhm: [float] Full width at half maximum (px).
             intens_acc: [float] Sum of pixel intensities.
             obj: [object] Instance of CatalogStar or GeoPoint.
 
         """
 
-        self.paired_stars.append([x, y, intens_acc, obj, snr, saturated])
+        self.paired_stars.append([x, y, fwhm, intens_acc, obj, snr, saturated])
 
 
     def removeGeoPoints(self):
@@ -406,7 +407,8 @@ class PairedStars(object):
         if draw:
             offset = 0.5
 
-        img_coords = [(x + offset, y + offset, intens_acc) for x, y, intens_acc, _, _, _ in self.paired_stars]
+        img_coords = [(x + offset, y + offset, intens_acc) for x, y, _, intens_acc, _, _, _ 
+                      in self.paired_stars]
 
         return img_coords
 
@@ -414,7 +416,7 @@ class PairedStars(object):
     def skyCoords(self):
         """ Return a list of sky coordinates. """
 
-        return [obj.coords() for _, _, _, obj, _, _ in self.paired_stars]
+        return [obj.coords() for _, _, _, _, obj, _, _ in self.paired_stars]
 
 
     def allCoords(self):
@@ -423,14 +425,14 @@ class PairedStars(object):
         """
 
         return [
-            [(x, y, intens_acc, snr, saturated), obj.coords()]
-            for x, y, intens_acc, obj, snr, saturated in self.paired_stars
+            [(x, y, fwhm, intens_acc, snr, saturated), obj.coords()]
+            for x, y, fwhm, intens_acc, obj, snr, saturated in self.paired_stars
             ]
 
     def snr(self):
         """ Return a list of SNR values. """
 
-        return [snr for _, _, _, _, snr, _ in self.paired_stars]
+        return [snr for _, _, _, _, _, snr, _ in self.paired_stars]
 
 
     def __len__(self):
@@ -2015,7 +2017,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             img_star, catalog_star = paired_star
 
-            star_x, star_y, px_intens, snr, saturated = img_star
+            star_x, star_y, fwhm, px_intens, snr, saturated = img_star
             star_ra, star_dec, star_mag = catalog_star
 
             # Skip intensities which were not properly calculated
@@ -2788,10 +2790,10 @@ class PlateTool(QtWidgets.QMainWindow):
             for entry in self.paired_stars:
                 
                 img_coords, sky_coords = entry
-                x, y, intens_acc, snr = img_coords
+                x, y, fwhm, intens_acc, snr = img_coords
                 sky_obj = CatalogStar(*sky_coords)
 
-                paired_stars_new.addPair(x, y, intens_acc, sky_obj, snr=snr)
+                paired_stars_new.addPair(x, y, fwhm, intens_acc, sky_obj, snr=snr)
 
             self.paired_stars = paired_stars_new
 
@@ -2941,7 +2943,7 @@ class PlateTool(QtWidgets.QMainWindow):
                             self.y_centroid = self.mouse_y - 0.5
 
                             # Compute the star intensity
-                            _, _, self.star_intensity, self.star_snr, self.star_saturated = self.centroid(
+                            _, _, _, self.star_intensity, self.star_snr, self.star_saturated = self.centroid(
                                 prev_x_cent=self.x_centroid, prev_y_cent=self.y_centroid)
                         else:
 
@@ -2982,7 +2984,8 @@ class PlateTool(QtWidgets.QMainWindow):
                                             self.y_centroid = stars_y[closest_dist_indx]
 
                                             # Compute the star intensity
-                                            _, _, self.star_intensity, self.star_snr, self.star_saturated = \
+                                            _, _, _, \
+                                                self.star_intensity, self.star_snr, self.star_saturated = \
                                                 self.centroid( \
                                                 prev_x_cent=self.x_centroid, prev_y_cent=self.y_centroid)
 
@@ -2993,14 +2996,14 @@ class PlateTool(QtWidgets.QMainWindow):
                             if not calstars_centroid:
 
                                 # Perform centroiding with 2 iterations
-                                x_cent_tmp, y_cent_tmp, _, _, _ = self.centroid()
+                                x_cent_tmp, y_cent_tmp, _, _, _, _ = self.centroid()
 
                                 # Check that the centroiding was successful
                                 if x_cent_tmp is not None:
 
                                     # Centroid the star around the pressed coordinates
                                     (
-                                        self.x_centroid, self.y_centroid,
+                                        self.x_centroid, self.y_centroid, self.star_fwhm,
                                         self.star_intensity, self.star_snr, self.star_saturated
                                     ) = self.centroid(prev_x_cent=x_cent_tmp, prev_y_cent=y_cent_tmp)
 
@@ -3071,7 +3074,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
                         else:
                             (
-                                self.x_centroid, self.y_centroid,
+                                self.x_centroid, self.y_centroid, self.star_fwhm,
                                 _, self.snr_centroid, self.saturated_centroid
                             ) = self.centroid()
 
@@ -3768,7 +3771,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         print("Unsuitable star at coordinates: ({}, {})".format(self.current_autopan_x, self.current_autopan_y))
 
                         self.unsuitable_stars.addPair(self.current_autopan_x, self.current_autopan_y,
-                                                        0, None)
+                                                        0, 0, None)
                         self.updateBottomLabel()
                         self.unsuitable_star_markers.addPoints(x=[self.current_autopan_x],
                                                                 y=[self.current_autopan_y])
@@ -3791,6 +3794,7 @@ class PlateTool(QtWidgets.QMainWindow):
                             selected_coords = self.geo_points[self.closest_geo_point_indx]
 
                             # Set a fixed value for star intensity and SNR
+                            self.star_fwhm = 1.0
                             self.star_intensity = 10.0
                             self.star_snr = 1.0
                             self.star_saturated = False
@@ -3803,8 +3807,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
                         # Add the image/catalog pair to the list
                         if not unsuitable:
-                            self.paired_stars.addPair(self.x_centroid, self.y_centroid, self.star_intensity, \
-                                    pair_obj, snr=self.star_snr, saturated=self.star_saturated)
+                            self.paired_stars.addPair(self.x_centroid, self.y_centroid, self.star_fwhm,
+                                    self.star_intensity, pair_obj, 
+                                    snr=self.star_snr, saturated=self.star_saturated)
 
                         # Switch back to centroiding mode
                         self.cursor.setMode(0)
@@ -3978,6 +3983,7 @@ class PlateTool(QtWidgets.QMainWindow):
         if self.cursor.mode:
             self.x_centroid = None
             self.y_centroid = None
+            self.star_fwhm = None
             self.snr_centroid = None
             self.saturated_centroid = False
             self.star_intensity = None
@@ -5033,14 +5039,47 @@ class PlateTool(QtWidgets.QMainWindow):
 
         ######################################################################################################
 
+        ### Calculate the FWHM ###
+
+        # Second pass: compute flux-weighted second moment for FWHM
+        moment_sum = 0.0
+        for i in range(img_crop.shape[0]):
+            for j in range(img_crop.shape[1]):
+                
+                # Compute distance of pixel from centre of the cropped image
+                i_rel = i - img_crop.shape[0]/2
+                j_rel = j - img_crop.shape[1]/2
+                pix_dist = math.sqrt(i_rel**2 + j_rel**2)
+
+                # Take only those pixels within the star aperture radius
+                if pix_dist <= self.star_aperture_radius:
+                    
+                    net_flux = img_crop[i, j] - bg_median
+                    
+                    # Compute radial distance from the computed centroid (account for the offset from x_min, y_min)
+                    r = math.sqrt((i + x_min - x_centroid)**2 + (j + y_min - y_centroid)**2)
+                    moment_sum += net_flux*(r**2)
+
+        # Variance (assuming source_intens > 0)
+        if source_intens > 0:
+            sigma = math.sqrt(moment_sum/source_intens)
+            fwhm = 2.355*sigma
+
+        else:
+            sigma = 0
+            fwhm = 0
+
+        ######################################################################################################
+
         # Compute the SNR using the "CCD equation" (Howell et al., 1989)
         snr = signalToNoise(source_intens, source_px_count, bg_median, bg_std)
 
         # Debug print
-        print('Centroid at ({:.2f}, {:.2f}) with intensity {:.2f} and SNR {:.2f}, saturated: {}'.format(
-           x_centroid, y_centroid, source_intens, snr, saturated))
+        if prev_x_cent is not None:
+            print('Centroid at ({:7.2f}, {:7.2f}), FWHM {:5.2f}, intensity {:9d}, SNR {:6.2f}, saturated: {}'.format(
+                x_centroid, y_centroid, fwhm, int(source_intens), snr, saturated))
 
-        return x_centroid, y_centroid, source_intens, snr, saturated
+        return x_centroid, y_centroid, fwhm, source_intens, snr, saturated
 
 
     def updateGreatCircle(self):
@@ -5333,13 +5372,13 @@ class PlateTool(QtWidgets.QMainWindow):
         print('Residuals')
         print('----------')
         print(
-            ' No,       Img X,       Img Y, RA cat (deg), Dec cat (deg),    Cat X,   Cat Y, RA img (deg), Dec img (deg), Err amin,  Err px, Direction,    Mag, -2.5*LSP, Mag err,    SNR, Saturated')
+            ' No,       Img X,       Img Y, RA cat (deg), Dec cat (deg),    Cat X,   Cat Y, RA img (deg), Dec img (deg), Err amin,  Err px, Direction,  FWHM,    Mag, -2.5*LSP, Mag err,    SNR, Saturated')
 
         # Calculate the distance and the angle between each pair of image positions and catalog predictions
         for star_no, (cat_x, cat_y, cat_coords, paired_stars, mag_err) in enumerate(
             zip(catalog_x, catalog_y, catalog_stars, self.paired_stars.allCoords(), self.photom_fit_resids)):
 
-            img_x, img_y, sum_intens, snr, saturated = paired_stars[0]
+            img_x, img_y, fwhm, sum_intens, snr, saturated = paired_stars[0]
             ra, dec, mag = cat_coords
 
             delta_x = cat_x - img_x
@@ -5367,10 +5406,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Print out the residuals
             print(
-                '{:3d}, {:11.6f}, {:11.6f}, {:>12.6f}, {:>+13.6f}, {:8.2f}, {:7.2f}, {:>12.6f}, {:>+13.6f}, {:8.2f}, {:7.2f}, {:+9.1f},  {:+6.2f}, {:7.2f}, {:+7.2f}, {:6.1f}, {:9s}'.format(
+                '{:3d}, {:11.6f}, {:11.6f}, {:>12.6f}, {:>+13.6f}, {:8.2f}, {:7.2f}, {:>12.6f}, {:>+13.6f}, {:8.2f}, {:7.2f}, {:+9.1f}, {:5.2f}, {:+6.2f}, {:8.2f}, {:+7.2f}, {:6.1f}, {:9s}'.format(
                     star_no + 1, img_x, img_y, ra, dec, cat_x, cat_y, \
                     ra_img, dec_img, 60*angular_distance, distance, np.degrees(angle),
-                    mag, lsp, mag_err, snr, str(saturated)
+                    fwhm, mag, lsp, mag_err, snr, str(saturated)
                     )
                 )
 
