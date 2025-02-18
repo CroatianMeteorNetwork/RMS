@@ -540,7 +540,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Star picking mode variables
         self.star_aperture_radius = 5
-        self.x_centroid = self.y_centroid = self.snr_centroid = None
+        self.x_centroid = self.y_centroid = self.star_fwhm = self.snr_centroid = None
         self.saturated_centroid = False
         self.closest_type = None
         self.closest_cat_star_indx = None
@@ -2943,8 +2943,11 @@ class PlateTool(QtWidgets.QMainWindow):
                             self.y_centroid = self.mouse_y - 0.5
 
                             # Compute the star intensity
-                            _, _, _, self.star_intensity, self.star_snr, self.star_saturated = self.centroid(
-                                prev_x_cent=self.x_centroid, prev_y_cent=self.y_centroid)
+                            (
+                                _, _, self.star_fwhm, self.star_intensity, self.star_snr, self.star_saturated
+                            ) = self.centroid(
+                                prev_x_cent=self.x_centroid, prev_y_cent=self.y_centroid
+                                )
                         else:
 
                             # Check if a star centroid is available from CALSTARS, and use it first because
@@ -2984,7 +2987,7 @@ class PlateTool(QtWidgets.QMainWindow):
                                             self.y_centroid = stars_y[closest_dist_indx]
 
                                             # Compute the star intensity
-                                            _, _, _, \
+                                            _, _, self.star_fwhm, \
                                                 self.star_intensity, self.star_snr, self.star_saturated = \
                                                 self.centroid( \
                                                 prev_x_cent=self.x_centroid, prev_y_cent=self.y_centroid)
