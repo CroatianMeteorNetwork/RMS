@@ -20,7 +20,8 @@ except:
     # Python 2
     import ConfigParser as configparser
 
-OMIT_FROM_CONFIG = {'lat',  # Deprecated DFNS Station
+OMIT_FROM_CONFIG = {'height_wgs84',  # Should not be exposed
+                    'lat',  # Deprecated DFNS Station
                     'lon',  # Deprecated DFNS Station
                     'location',  # Deprecated DFNS Station
                     'altitude',  # Deprecated DFNS Station

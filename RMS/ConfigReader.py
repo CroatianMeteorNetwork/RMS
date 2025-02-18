@@ -19,7 +19,10 @@ from __future__ import absolute_import, division, print_function
 import math
 import os
 import sys
+import numpy as np
+
 from RMS.Misc import getRmsRootDir
+from RMS.GeoidHeightEGM96 import mslToWGS84Height
 
 # Consolidated version-specific imports and definitions
 if sys.version_info[0] == 3:
@@ -876,6 +879,21 @@ def parseSystem(config, parser):
 
     if parser.has_option(section, "elevation"):
         config.elevation = parser.getfloat(section, "elevation")
+    
+    if parser.has_option(section, "height_wgs84"):
+        config.height_wgs84 = parser.getfloat(section, "height_wgs84")
+    else:
+        try:
+            # Calculate WGS84 height if not provided
+            config.height_wgs84 = mslToWGS84Height(
+                np.radians(config.latitude),
+                np.radians(config.longitude),
+                config.elevation,
+                config
+            )
+        except Exception as e:
+            config.height_wgs84 = config.elevation
+            print("Warning: Calculating WGS84 height failed {}. Using Geoid height instead.".format(str(e)))
         
 
     if parser.has_option(section, "cams_code"):

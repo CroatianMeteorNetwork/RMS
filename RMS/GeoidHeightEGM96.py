@@ -12,6 +12,8 @@ import numpy as np
 import scipy.interpolate
 
 import RMS.ConfigReader as cr
+from RMS.Misc import getRmsRootDir
+from RMS.Decorators import memoizeSingle
 
 
 def loadEGM96Data(dir_path, file_name):
@@ -32,6 +34,23 @@ def loadEGM96Data(dir_path, file_name):
 
     return geoid_heights
 
+
+def loadEGM96DataFromConfig(config=None):
+    """ Load a file with EGM96 data from the given config.
+    If no config given, use the root config.
+
+    """
+
+    # Load the root configuration file if no config specified
+    if not config:
+        config_filename = '.config'
+        config_path = os.path.join(getRmsRootDir(), config_filename)
+        config = cr.parse(config_path)
+
+    # Load the geoid heights
+    geoid_heights = loadEGM96Data(config.egm96_path, config.egm96_file_name)
+
+    return geoid_heights
 
 
 def interpolateEGM96Data(geoid_heights):
@@ -54,9 +73,8 @@ def interpolateEGM96Data(geoid_heights):
 
     return geoid_model
 
-
-
-def mslToWGS84Height(lat, lon, msl_height, config):
+@memoizeSingle
+def mslToWGS84Height(lat, lon, msl_height, config=None):
     """ Given the height above sea level (using the EGM96 model), compute the height above the WGS84
         ellipsoid.
 
@@ -72,7 +90,7 @@ def mslToWGS84Height(lat, lon, msl_height, config):
     """
 
     # Load the geoid heights array
-    GEOID_HEIGHTS = loadEGM96Data(config.egm96_path, config.egm96_file_name)
+    GEOID_HEIGHTS = loadEGM96DataFromConfig(config)
 
     # Init the interpolated geoid model
     GEOID_MODEL = interpolateEGM96Data(GEOID_HEIGHTS)
@@ -89,8 +107,8 @@ def mslToWGS84Height(lat, lon, msl_height, config):
     return wgs84_height
 
 
-
-def wgs84toMSLHeight(lat, lon, wgs84_height, config):
+@memoizeSingle
+def wgs84toMSLHeight(lat, lon, wgs84_height, config=None):
     """ Given the height above the WGS84 ellipsoid compute the height above sea level (using the EGM96 model).
 
     Arguments:
@@ -105,7 +123,7 @@ def wgs84toMSLHeight(lat, lon, wgs84_height, config):
     """
 
     # Load the geoid heights array
-    GEOID_HEIGHTS = loadEGM96Data(config.egm96_path, config.egm96_file_name)
+    GEOID_HEIGHTS = loadEGM96DataFromConfig(config)
 
     # Init the interpolated geoid model
     GEOID_MODEL = interpolateEGM96Data(GEOID_HEIGHTS)
