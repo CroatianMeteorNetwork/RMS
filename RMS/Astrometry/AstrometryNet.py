@@ -52,10 +52,13 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
         # Read the FF file
         ff = readFF(*os.path.split(ff_file_path))
         img = ff.avepixel
+        bit_depth = ff.nbits
 
     # If the image is given as a numpy array, use it
     elif img is not None:
         img = img
+
+        bit_depth = img.dtype.itemsize*8
 
     else:
         img = None
@@ -69,7 +72,8 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
             
             # Automatically extract stars from the image
             x_data, y_data, _, _, _  = extractStarsAuto(img, mask=mask, max_star_candidates=1500, 
-                segment_radius=8, min_stars_detect=50, max_stars_detect=150, verbose=verbose
+                segment_radius=8, min_stars_detect=50, max_stars_detect=150, bit_depth=bit_depth, 
+                verbose=verbose
             )
             
 
