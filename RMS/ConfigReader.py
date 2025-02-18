@@ -381,7 +381,7 @@ class Config:
         # Space allocation for all of rms_data
 
         # Disable the deletion by quota management for testing purposes
-        self.quota_management_disabled = False
+        self.quota_management_disabled = True
 
 
         # Space allocation for all of rms_data
