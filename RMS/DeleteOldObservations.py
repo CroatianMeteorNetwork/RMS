@@ -330,7 +330,7 @@ def getRawItems(dir_path, in_video_dir=False, unique=False):
 
     # Helper function to check frames file conditions
     def isProcessedFrameFile(path):
-        suffix = ['_frametimes.json', '_frames_timelapse.mp4', '_frames.tar.gz', '_frames.tar.bz2', '_frametimes.tar.bz2']
+        suffix = ['_frametimes.json', '_frames_timelapse.mp4', '_frames.tar.gz', '_frames.tar.bz2', '_FT.tar.bz2']
         return (os.path.isfile(path) and any(path.endswith(end) for end in suffix))
 
     # Get a list of directories / files in the given directory
