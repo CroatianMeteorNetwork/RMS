@@ -839,11 +839,11 @@ def processIncompleteCaptures(config, upload_manager):
             log.error(repr(traceback.format_exception(*sys.exc_info())))
 
         # If capture should have started do not process any more incomplete directories
-        start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation)
-        if isinstance(start_time, bool):
-
-            if start_time and config.prioritize_capture_over_reprocess:
-
+        # Ignore this for continuous capture
+        if (not config.continuous_capture):
+            
+            start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation)
+            if isinstance(start_time, bool):
                 log.info("Capture should have started, do not start reprocessing another directory")
                 break
 
@@ -1152,12 +1152,15 @@ if __name__ == "__main__":
             continue
 
 
-        # Run auto-reprocessing
+        # Run auto-reprocessing only if the config option is set
         if config.auto_reprocess:
 
-            # Check if there's a folder containing unprocessed data.
-            # This may happen if the system crashed during processing.
-            processIncompleteCaptures(config, upload_manager)
+            # In case of continuous capture, start processing incomplete captures
+            if not isinstance(start_time, bool) or config.continuous_capture:
+
+                # Check if there's a folder containing unprocessed data.
+                # This may happen if the system crashed during processing.
+                processIncompleteCaptures(config, upload_manager)
 
 
         # Wait to start capturing and initialize last night's slideshow
