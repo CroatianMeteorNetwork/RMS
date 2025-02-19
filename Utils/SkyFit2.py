@@ -2809,6 +2809,10 @@ class PlateTool(QtWidgets.QMainWindow):
                 if len(paired_star) == 5:
                     paired_star.append(False)
 
+                # If the FWHM is missing, add it to the 3rd index
+                if len(paired_star) == 6:
+                    paired_star.insert(2, 0.0)
+
 
         if self.platepar is not None:
 
