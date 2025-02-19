@@ -431,9 +431,6 @@ class Config:
         # Automatically reprocess broken capture directories
         self.auto_reprocess = True
 
-        # Prioritize capture over reprocessing - do not start reprocessing a new directory if should be capturing
-        self.prioritize_capture_over_reprocess = False
-
         # Flag file which indicates that the previously processed files are loaded during capture resume
         self.capture_resume_flag_file = ".capture_resuming"
 
@@ -1228,11 +1225,6 @@ def parseCapture(config, parser):
     # Enable/disable auto reprocessing
     if parser.has_option(section, "auto_reprocess"):
         config.auto_reprocess = parser.getboolean(section, "auto_reprocess")
-
-    # Prioritize capture over reprocessing - do not start reprocessing a new directory if should be capturing
-    if parser.has_option(section, "prioritize_capture_over_reprocess"):
-        config.prioritize_capture_over_reprocess = parser.getboolean(section, \
-            "prioritize_capture_over_reprocess")
 
     # Load name of the capture resume flag file
     if parser.has_option(section, "capture_resume_flag_file"):
