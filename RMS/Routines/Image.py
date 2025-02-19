@@ -893,7 +893,7 @@ def signalToNoise(source_intens, source_px_count, bg_median, bg_std):
     """ Compute the signal to noise ratio using the "CCD equation" (Howell et al., 1989).
 
     Arguments:
-        source_intens: [float] Source intensity (background subtracted).
+        source_intens: [float] Source intensity (integrated, background subtracted).
         source_px_count: [int] Number of source pixels.
         bg_median: [float] Background median.
         bg_std: [float] Background standard deviation.
