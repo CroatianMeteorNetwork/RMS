@@ -2771,8 +2771,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.no_background_subtraction = False
 
         # Update possibly missing flag for peripheral background estiamtion
-        if not hasattr(self, "peripheral_background_estimation"):
-            self.peripheral_background_estimation = False
+        if not hasattr(self, "peripheral_background_subtraction"):
+            self.peripheral_background_subtraction = False
 
         # Update the possibly missing flag for flipping the image upside down
         if not hasattr(self, "flipud"):
@@ -5748,7 +5748,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Use the peripheral background subtraction method if forced or on static images
             elif self.peripheral_background_subtraction \
                 or (self.img_handle.input_type == "dfn") \
-                or self.img_handle.single_image_mode:
+                or (hasattr(self.img_handle, "single_image_mode") and  self.img_handle.single_image_mode):
 
                 # Compute the background subtracted intensity sum by using pixels peripheral to the colored 
                 # pixels
