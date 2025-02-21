@@ -801,13 +801,13 @@ def deleteByQuota(archived_dir, capt_dir_quota, captured_dir, config):
     log.info(quotaReport(capt_dir_quota, config, after=False))
 
     delete_list = objectsToDelete(captured_dir, config.stationID, capt_dir_quota, bz2=False)
-    rmList(delete_list, dummy_run=config.quota_management_disabled)
+    rmList(delete_list, dummy_run= not config.quota_management_enabled)
 
     delete_list = objectsToDelete(archived_dir, config.stationID, config.arch_dir_quota, bz2=False)
-    rmList(delete_list, dummy_run=config.quota_management_disabled)
+    rmList(delete_list, dummy_run= not config.quota_management_enabled)
 
     delete_list = objectsToDelete(archived_dir, config.stationID, config.bz2_files_quota, bz2=True)
-    rmList(delete_list, dummy_run=config.quota_management_disabled)
+    rmList(delete_list, dummy_run= not config.quota_management_enabled)
 
     log.info(quotaReport(capt_dir_quota, config, after=True))
 
