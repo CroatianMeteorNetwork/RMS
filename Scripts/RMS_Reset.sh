@@ -393,22 +393,35 @@ git_with_retry() {
     local cmd=$1
     local branch=$2
     local attempt=1
-    
+
     while [ $attempt -le $GIT_RETRY_LIMIT ]; do
         print_status "info" "Attempting git $cmd (try $attempt of $GIT_RETRY_LIMIT)..."
-        
+
+        # Adjust settings based on attempt number
+        case $attempt in
+            2)
+                print_status "info" "Switching to HTTP/1.1 for this attempt"
+                git config --global http.version HTTP/1.1
+                ;;
+            3|4)
+                print_status "info" "Using HTTP/1.1 and --depth=1 for this attempt"
+                git config --global http.version HTTP/1.1
+                depth_arg="--depth=1"
+                ;;
+            5)
+                print_status "info" "Resetting git settings"
+                git config --global --unset http.version
+                depth_arg=""
+                ;;
+            *)
+                depth_arg=""
+                ;;
+        esac
+
         case $cmd in
             "fetch")
-                if git fetch --all --prune --force --verbose; then
+                if git fetch --all --prune --force --verbose $depth_arg; then
                     return 0
-                fi
-                if [ $attempt -eq $GIT_RETRY_LIMIT ]; then
-                    print_status "warning" "Attempting repository repair..."
-                    if repair_repository; then
-                        if git fetch --all --prune --force --verbose; then
-                            return 0
-                        fi
-                    fi
                 fi
                 ;;
             "checkout")
@@ -426,13 +439,13 @@ git_with_retry() {
                 return 1
                 ;;
         esac
-        
+
         print_status "warning" "Git $cmd failed, waiting ${GIT_RETRY_DELAY}s before retry..."
         sleep $GIT_RETRY_DELAY
         attempt=$((attempt + 1))
     done
-    
-    print_status "error" "Git $cmd failed after $GIT_RETRY_LIMIT attempts and repair attempts"
+
+    print_status "error" "Git $cmd failed after $GIT_RETRY_LIMIT attempts"
     return 1
 }
 
