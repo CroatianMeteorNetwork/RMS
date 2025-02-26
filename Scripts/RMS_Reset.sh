@@ -30,7 +30,7 @@ LOCKFILE="/tmp/update.lock"
 MIN_SPACE_MB=200  # Minimum required space in MB
 RETRY_LIMIT=3  # Retries for critical file operations
 GIT_RETRY_LIMIT=5
-GIT_RETRY_DELAY=20  # Seconds between git operation retries
+GIT_RETRY_DELAY=15  # Seconds between git operation retries
 
 usage() {
     echo "Usage: $0 [--switch <branch>] [--help]"
@@ -410,20 +410,29 @@ git_with_retry() {
                 depth_arg="--depth=1"
                 ;;
             4)
-                print_status "info" "Resetting Git settings and retrying with HTTP/1.1 and --depth=1"
+                print_status "info" "Enabling detailed Git debugging and resetting settings"
                 git config --global --unset http.version
                 git config --global http.version HTTP/1.1
+                export GIT_CURL_VERBOSE=1  # Debug TLS issues
                 depth_arg="--depth=1"
                 ;;
             5)
-                print_status "warning" "Final attempt: Recloning repository using HTTP/1.1"
+                print_status "warning" "Final attempt: Recloning repository with adjusted settings"
                 git config --global http.version HTTP/1.1
+                git config --global http.sslBackend openssl
+                git config --global http.postBuffer 524288000  # Increase post buffer size
+                git config --global http.lowSpeedLimit 1000
+                git config --global http.lowSpeedTime 60
 
                 cd ~ || exit 1
                 mv "$RMSSOURCEDIR" "$backup_dir"
 
-                if git clone --config http.version=HTTP/1.1 https://github.com/CroatianMeteorNetwork/RMS.git "$RMSSOURCEDIR"; then
-                    print_status "success" "Repository successfully recloned using HTTP/1.1"
+                if git clone --config http.version=HTTP/1.1 \
+                            --config http.sslBackend=openssl \
+                            --config core.compression=0 \
+                            --config http.sslVerify=false \
+                            https://github.com/CroatianMeteorNetwork/RMS.git "$RMSSOURCEDIR"; then
+                    print_status "success" "Repository successfully recloned with improved settings"
                     cd "$RMSSOURCEDIR" || exit 1
 
                     # Restore critical files from backup
