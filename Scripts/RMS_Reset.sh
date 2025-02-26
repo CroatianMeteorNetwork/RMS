@@ -393,7 +393,7 @@ git_with_retry() {
     local cmd=$1
     local branch=$2
     local attempt=1
-    local backup_dir="$RMSSOURCEDIR"_backup_$(date +%Y%m%d_%H%M%S)
+    local backup_dir="${RMSSOURCEDIR}_backup_$(date +%Y%m%d_%H%M%S)"
 
     while [ $attempt -le $GIT_RETRY_LIMIT ]; do
         print_status "info" "Attempting git $cmd (try $attempt of $GIT_RETRY_LIMIT)..."
@@ -403,22 +403,46 @@ git_with_retry() {
             2)
                 print_status "info" "Switching to HTTP/1.1 for this attempt"
                 git config --global http.version HTTP/1.1
+                depth_arg=""
                 ;;
-            3|4)
-                print_status "info" "Using HTTP/1.1 and --depth=1 for this attempt"
+            3)
+                print_status "info" "Using --depth=1 for a shallow fetch"
+                depth_arg="--depth=1"
+                ;;
+            4)
+                print_status "info" "Resetting Git settings and retrying with HTTP/1.1 and --depth=1"
+                git config --global --unset http.version
                 git config --global http.version HTTP/1.1
                 depth_arg="--depth=1"
                 ;;
             5)
-                print_status "info" "Resetting git settings"
-                git config --global --unset http.version
-                depth_arg=""
-                ;;
-            *)
-                depth_arg=""
+                print_status "warning" "Final attempt: Recloning repository using HTTP/1.1"
+                git config --global http.version HTTP/1.1
+
+                cd ~ || exit 1
+                mv "$RMSSOURCEDIR" "$backup_dir"
+
+                if git clone --config http.version=HTTP/1.1 https://github.com/CroatianMeteorNetwork/RMS.git "$RMSSOURCEDIR"; then
+                    print_status "success" "Repository successfully recloned using HTTP/1.1"
+                    cd "$RMSSOURCEDIR" || exit 1
+
+                    # Restore critical files from backup
+                    for file in .config mask.bmp; do
+                        if [ -f "$backup_dir/$file" ]; then
+                            print_status "info" "Restoring $file from backup"
+                            cp "$backup_dir/$file" "$RMSSOURCEDIR/"
+                        fi
+                    done
+                    return 0
+                else
+                    print_status "error" "Reclone failed. Restoring backup..."
+                    mv "$backup_dir" "$RMSSOURCEDIR"
+                    return 1
+                fi
                 ;;
         esac
 
+        # Execute the Git command
         case $cmd in
             "fetch")
                 if git fetch --all --prune --force --verbose $depth_arg; then
@@ -447,22 +471,7 @@ git_with_retry() {
     done
 
     print_status "error" "Git $cmd failed after $GIT_RETRY_LIMIT attempts"
-
-    # Perform last-resort recloning
-    print_status "warning" "Final attempt: Recloning repository"
-
-    cd ~ || exit 1
-    mv "$RMSSOURCEDIR" "$backup_dir"
-    
-    if git clone https://github.com/CroatianMeteorNetwork/RMS.git "$RMSSOURCEDIR"; then
-        print_status "success" "Repository successfully recloned"
-        cd "$RMSSOURCEDIR" || exit 1
-        return 0
-    else
-        print_status "error" "Reclone failed. Restoring backup..."
-        mv "$backup_dir" "$RMSSOURCEDIR"
-        return 1
-    fi
+    return 1
 }
 
 # Function to safely switch to a specified branch
