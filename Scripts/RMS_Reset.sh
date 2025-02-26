@@ -30,7 +30,7 @@ LOCKFILE="/tmp/update.lock"
 MIN_SPACE_MB=200  # Minimum required space in MB
 RETRY_LIMIT=3  # Retries for critical file operations
 GIT_RETRY_LIMIT=5
-GIT_RETRY_DELAY=60  # Seconds between git operation retries
+GIT_RETRY_DELAY=20  # Seconds between git operation retries
 
 usage() {
     echo "Usage: $0 [--switch <branch>] [--help]"
@@ -393,6 +393,7 @@ git_with_retry() {
     local cmd=$1
     local branch=$2
     local attempt=1
+    local backup_dir="$RMSSOURCEDIR"_backup_$(date +%Y%m%d_%H%M%S)
 
     while [ $attempt -le $GIT_RETRY_LIMIT ]; do
         print_status "info" "Attempting git $cmd (try $attempt of $GIT_RETRY_LIMIT)..."
@@ -446,26 +447,22 @@ git_with_retry() {
     done
 
     print_status "error" "Git $cmd failed after $GIT_RETRY_LIMIT attempts"
-    return 1
-}
 
-ensure_branch_tracking() {
-    local branch=$1
+    # Perform last-resort recloning
+    print_status "warning" "Final attempt: Recloning repository"
+
+    cd ~ || exit 1
+    mv "$RMSSOURCEDIR" "$backup_dir"
     
-    print_status "info" "Ensuring proper tracking for branch: $branch"
-    
-    # Check if branch already has tracking information
-    if ! git rev-parse --abbrev-ref "$branch@{upstream}" >/dev/null 2>&1; then
-        print_status "info" "Setting upstream tracking for $branch..."
-        if ! git branch --set-upstream-to="$RMS_REMOTE/$branch" "$branch"; then
-            print_status "warning" "Failed to set upstream tracking. You may need to run:"
-            print_status "warning" "git branch --set-upstream-to=$RMS_REMOTE/$branch $branch"
-            return 1
-        fi
+    if git clone https://github.com/CroatianMeteorNetwork/RMS.git "$RMSSOURCEDIR"; then
+        print_status "success" "Repository successfully recloned"
+        cd "$RMSSOURCEDIR" || exit 1
+        return 0
     else
-        print_status "info" "Branch $branch already has proper tracking"
+        print_status "error" "Reclone failed. Restoring backup..."
+        mv "$backup_dir" "$RMSSOURCEDIR"
+        return 1
     fi
-    return 0
 }
 
 # Function to safely switch to a specified branch
