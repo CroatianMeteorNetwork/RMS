@@ -395,10 +395,9 @@ git_with_retry() {
     local attempt=1
     local backup_dir="${RMSSOURCEDIR}_backup_$(date +%Y%m%d_%H%M%S)"
 
-    while [ $attempt -le $GIT_RETRY_LIMIT ]; do
-        print_status "info" "Attempting git $cmd (try $attempt of $GIT_RETRY_LIMIT)..."
+    while [ $attempt -le 6 ]; do
+        print_status "info" "Attempting git $cmd (try $attempt of 6)..."
 
-        # Adjust settings based on attempt number
         case $attempt in
             2)
                 print_status "info" "Switching to HTTP/1.1 for this attempt"
@@ -410,33 +409,24 @@ git_with_retry() {
                 depth_arg="--depth=1"
                 ;;
             4)
-                print_status "info" "Enabling detailed Git debugging and resetting settings"
+                print_status "info" "Resetting Git settings and retrying with HTTP/1.1 and --depth=1"
                 git config --global --unset http.version
                 git config --global http.version HTTP/1.1
-                export GIT_CURL_VERBOSE=1  # Debug TLS issues
                 depth_arg="--depth=1"
                 ;;
             5)
-                print_status "warning" "Final attempt: Recloning repository with adjusted settings"
+                print_status "warning" "Final Git attempt: Recloning repository using HTTP/1.1"
                 git config --global http.version HTTP/1.1
-                git config --global http.sslBackend openssl
-                git config --global http.postBuffer 524288000  # Increase post buffer size
-                git config --global http.lowSpeedLimit 1000
-                git config --global http.lowSpeedTime 60
 
                 cd ~ || exit 1
                 mv "$RMSSOURCEDIR" "$backup_dir"
 
-                if git clone --config http.version=HTTP/1.1 \
-                            --config http.sslBackend=openssl \
-                            --config core.compression=0 \
-                            --config http.sslVerify=false \
-                            https://github.com/CroatianMeteorNetwork/RMS.git "$RMSSOURCEDIR"; then
-                    print_status "success" "Repository successfully recloned with improved settings"
+                if git clone --config http.version=HTTP/1.1 https://github.com/CroatianMeteorNetwork/RMS.git "$RMSSOURCEDIR"; then
+                    print_status "success" "Repository successfully recloned using HTTP/1.1"
                     cd "$RMSSOURCEDIR" || exit 1
 
-                    # Restore critical files from backup
-                    for file in .config mask.bmp; do
+                    # Restore critical files
+                    for file in mask.bmp .config platepar_cmn2010.cal; do
                         if [ -f "$backup_dir/$file" ]; then
                             print_status "info" "Restoring $file from backup"
                             cp "$backup_dir/$file" "$RMSSOURCEDIR/"
@@ -444,14 +434,46 @@ git_with_retry() {
                     done
                     return 0
                 else
-                    print_status "error" "Reclone failed. Restoring backup..."
+                    print_status "error" "Reclone failed. Proceeding with rsync..."
+                fi
+                ;;
+            6)
+                print_status "error" "Git completely failed. Attempting rsync recovery..."
+
+                cd ~/source || exit 1
+                mv "$RMSSOURCEDIR" "$backup_dir"
+
+                if rsync -avzh --progress --no-perms rsync://rvrgm.asuscomm.com:12000/rmsrepo ./RMS; then
+                    print_status "success" "rsync completed successfully"
+                    cd RMS || exit 1
+
+                    # Restore critical files from backup
+                    for file in mask.bmp .config platepar_cmn2010.cal; do
+                        if [ -f "../$backup_dir/$file" ]; then
+                            print_status "info" "Restoring $file from backup"
+                            cp "../$backup_dir/$file" .
+                        fi
+                    done
+
+                    # Run RMS Update
+                    print_status "info" "Running RMS Update"
+                    ./Scripts/RMS_Update.sh
+
+                    # Restart RMS capture
+                    print_status "info" "Restarting RMS capture"
+                    pkill python
+                    ./Scripts/RMS_StartCapture.sh
+
+                    return 0
+                else
+                    print_status "error" "rsync failed. Restoring original backup..."
                     mv "$backup_dir" "$RMSSOURCEDIR"
                     return 1
                 fi
                 ;;
         esac
 
-        # Execute the Git command
+        # Attempt Git operation
         case $cmd in
             "fetch")
                 if git fetch --all --prune --force --verbose $depth_arg; then
@@ -479,7 +501,7 @@ git_with_retry() {
         attempt=$((attempt + 1))
     done
 
-    print_status "error" "Git $cmd failed after $GIT_RETRY_LIMIT attempts"
+    print_status "error" "All Git fetch attempts failed. Attempting rsync as last resort..."
     return 1
 }
 
