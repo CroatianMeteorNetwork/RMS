@@ -395,8 +395,8 @@ git_with_retry() {
     local attempt=1
     local backup_dir="${RMSSOURCEDIR}_backup_$(date +%Y%m%d_%H%M%S)"
 
-    while [ $attempt -le 6 ]; do
-        print_status "info" "Attempting git $cmd (try $attempt of 6)..."
+    while [ $attempt -le $GIT_RETRY_LIMIT ]; do
+        print_status "info" "Attempting git $cmd (try $attempt of $GIT_RETRY_LIMIT)..."
 
         case $attempt in
             2)
@@ -425,8 +425,8 @@ git_with_retry() {
                     print_status "success" "Repository successfully recloned using HTTP/1.1"
                     cd "$RMSSOURCEDIR" || exit 1
 
-                    # Restore critical files
-                    for file in mask.bmp .config platepar_cmn2010.cal; do
+                    # Restore critical files from backup
+                    for file in .config mask.bmp; do
                         if [ -f "$backup_dir/$file" ]; then
                             print_status "info" "Restoring $file from backup"
                             cp "$backup_dir/$file" "$RMSSOURCEDIR/"
@@ -507,7 +507,7 @@ git_with_retry() {
         attempt=$((attempt + 1))
     done
 
-    print_status "error" "All Git fetch attempts failed. Attempting rsync as last resort..."
+    print_status "error" "Git $cmd failed after $GIT_RETRY_LIMIT attempts"
     return 1
 }
 
