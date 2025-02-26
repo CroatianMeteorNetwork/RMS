@@ -434,42 +434,48 @@ git_with_retry() {
                     done
                     return 0
                 else
-                    print_status "error" "Reclone failed. Proceeding with rsync..."
+                    print_status "error" "Reclone failed. Proceeding with wget/curl..."
                 fi
                 ;;
             6)
-                print_status "error" "Git completely failed. Attempting rsync recovery..."
+                print_status "error" "All Git attempts failed. Attempting to download GitHub tarball..."
 
                 cd ~/source || exit 1
                 mv "$RMSSOURCEDIR" "$backup_dir"
 
-                if rsync -avzh --progress --no-perms rsync://rvrgm.asuscomm.com:12000/rmsrepo ./RMS; then
-                    print_status "success" "rsync completed successfully"
-                    cd RMS || exit 1
+                # Attempt to download with wget (resumable, 5 retries)
+                print_status "info" "Downloading latest RMS repository from GitHub using wget (supports resume)..."
+                if ! wget -c --tries=5 --timeout=30 -O RMS.tar.gz https://github.com/CroatianMeteorNetwork/RMS/archive/refs/heads/master.tar.gz; then
+                    print_status "warning" "wget failed. Trying curl as backup..."
 
-                    # Restore critical files from backup
-                    for file in mask.bmp .config platepar_cmn2010.cal; do
-                        if [ -f "../$backup_dir/$file" ]; then
-                            print_status "info" "Restoring $file from backup"
-                            cp "../$backup_dir/$file" .
-                        fi
-                    done
+                    # Attempt to download with curl (no resume support, but more control)
+                    if ! curl -L --retry 5 --retry-delay 10 --connect-timeout 30 -o RMS.tar.gz https://github.com/CroatianMeteorNetwork/RMS/archive/refs/heads/master.tar.gz; then
+                        print_status "error" "Both wget and curl failed. Restoring original backup..."
+                        mv "$backup_dir" "$RMSSOURCEDIR"
+                        return 1
+                    fi
+                fi
 
-                    # Run RMS Update
-                    print_status "info" "Running RMS Update"
-                    ./Scripts/RMS_Update.sh
-
-                    # Restart RMS capture
-                    print_status "info" "Restarting RMS capture"
-                    pkill python
-                    ./Scripts/RMS_StartCapture.sh
-
-                    return 0
-                else
-                    print_status "error" "rsync failed. Restoring original backup..."
+                # Verify the tarball integrity before extracting
+                if ! tar -tzf RMS.tar.gz >/dev/null; then
+                    print_status "error" "Downloaded tarball is corrupted. Restoring original backup..."
                     mv "$backup_dir" "$RMSSOURCEDIR"
                     return 1
                 fi
+
+                print_status "success" "Tarball downloaded successfully. Extracting..."
+                mkdir -p "$RMSSOURCEDIR"
+                tar -xzf RMS.tar.gz --strip-components=1 -C "$RMSSOURCEDIR"
+
+                # Restore critical files from backup
+                for file in .config mask.bmp; do
+                    if [ -f "$backup_dir/$file" ]; then
+                        print_status "info" "Restoring $file from backup"
+                        cp "$backup_dir/$file" "$RMSSOURCEDIR/"
+                    fi
+                done
+
+                return 0
                 ;;
         esac
 
