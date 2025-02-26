@@ -398,11 +398,19 @@ git_with_retry() {
     while [ $attempt -le $GIT_RETRY_LIMIT ]; do
         print_status "info" "Attempting git $cmd (try $attempt of $GIT_RETRY_LIMIT)..."
 
+        # Step 1: Clear Any Cached Git Settings to Ensure a Clean Retry
+        git config --global --unset http.version
+        git config --global --unset http.sslverify
+        git config --global --unset http.postbuffer
+
+        # Step 2: Apply Recommended Git Settings Before Each Attempt
+        git config --global http.version HTTP/1.1
+        git config --global http.sslverify false
+        git config --global http.postbuffer 1048576000  # Large buffer for large repo fetches
+
         case $attempt in
             2)
                 print_status "info" "Switching to HTTP/1.1 for this attempt"
-                git config --global http.version HTTP/1.1
-                depth_arg=""
                 ;;
             3)
                 print_status "info" "Using --depth=1 for a shallow fetch"
@@ -443,12 +451,16 @@ git_with_retry() {
                 cd ~/source || exit 1
                 mv "$RMSSOURCEDIR" "$backup_dir"
 
-                # Attempt to download with wget (resumable, 5 retries)
+                # Step 3: Restart SSH Agent & Kill Git Processes to Ensure Clean State
+                print_status "info" "Restarting SSH agent to clear any stuck Git connections..."
+                eval "$(ssh-agent -s)"  # Restart SSH agent
+                killall -q git || true  # Kill any running Git processes
+
+                # Step 4: Attempt wget/curl with Clean Environment
                 print_status "info" "Downloading latest RMS repository from GitHub using wget (supports resume)..."
                 if ! wget -c --tries=5 --timeout=30 -O RMS.tar.gz https://github.com/CroatianMeteorNetwork/RMS/archive/refs/heads/master.tar.gz; then
                     print_status "warning" "wget failed. Trying curl as backup..."
 
-                    # Attempt to download with curl (no resume support, but more control)
                     if ! curl -L --retry 5 --retry-delay 10 --connect-timeout 30 -o RMS.tar.gz https://github.com/CroatianMeteorNetwork/RMS/archive/refs/heads/master.tar.gz; then
                         print_status "error" "Both wget and curl failed. Restoring original backup..."
                         mv "$backup_dir" "$RMSSOURCEDIR"
@@ -479,20 +491,26 @@ git_with_retry() {
                 ;;
         esac
 
-        # Attempt Git operation
+        # Ensure Git Fails Properly Before Retrying
         case $cmd in
             "fetch")
-                if git fetch --all --prune --force --verbose $depth_arg; then
+                if ! git fetch --all --prune --force --verbose $depth_arg; then
+                    print_status "warning" "Git fetch failed, retrying..."
+                else
                     return 0
                 fi
                 ;;
             "checkout")
-                if git checkout "$branch"; then
+                if ! git checkout "$branch"; then
+                    print_status "warning" "Git checkout failed, retrying..."
+                else
                     return 0
                 fi
                 ;;
             "reset")
-                if git reset --hard "$RMS_REMOTE/$branch"; then
+                if ! git reset --hard "$RMS_REMOTE/$branch"; then
+                    print_status "warning" "Git reset failed, retrying..."
+                else
                     return 0
                 fi
                 ;;
