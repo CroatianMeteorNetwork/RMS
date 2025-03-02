@@ -156,6 +156,10 @@ def usedSpaceNoRecursion(obj_path):
 
     obj_path = os.path.expanduser(obj_path)
     path_list, n = os.walk(obj_path), 0
+
+    if os.path.isfile(obj_path):
+        n += os.path.getsize(obj_path) / 1024 ** 3
+
     for root, directory_list, file_list in path_list:
         for _ in directory_list:
             n += 4.024 / 1024 ** 2
@@ -197,6 +201,7 @@ def objectsToDelete(object_path, stationID, quota_gb=0, bz2=False):
     else:
         object_list = getNightDirs(object_path, stationID)
 
+
     # reverse it to put newest at top
     object_list.reverse()
 
@@ -232,8 +237,12 @@ def rmList(delete_list, dummy_run=True):
                 log.info("Config setting inhibited deletion of {}".format(os.path.basename(full_path)))
             else:
                 if os.path.exists(full_path):
-                    shutil.rmtree(full_path)
-                    log.info("Deleted {}".format(os.path.basename(full_path)))
+                    if os.path.isdir(full_path):
+                        shutil.rmtree(full_path)
+                        log.info("Deleted directory {}".format(os.path.basename(full_path)))
+                    if os.path.isfile(full_path):
+                        os.remove(full_path)
+                        log.info("Deleted file {}".format(os.path.basename(full_path)))
                 else:
                     log.warning("Attempted to delete {}, which did not exist".format(full_path))
         except:
