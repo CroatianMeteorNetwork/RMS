@@ -381,7 +381,7 @@ class Config:
         # Space allocation for all of rms_data
 
         # Disable the deletion by quota management for testing purposes
-        self.quota_management_disabled = False
+        self.quota_management_enabled = False
 
 
         # Space allocation for all of rms_data
@@ -983,8 +983,8 @@ def parseCapture(config, parser):
     if parser.has_option(section, "times_days_to_keep"):
         config.times_days_to_keep = int(parser.get(section, "times_days_to_keep"))
 
-    if parser.has_option(section, "quota_management_disabled"):
-        config.quota_management_disabled = parser.getboolean(section, "quota_management_disabled")
+    if parser.has_option(section, "quota_management_enabled"):
+        config.quota_management_enabled = parser.getboolean(section, "quota_management_enabled")
 
 
 

@@ -339,7 +339,7 @@ def getRawItems(dir_path, in_video_dir=False, unique=False):
 
     # Helper function to check frames file conditions
     def isProcessedFrameFile(path):
-        suffix = ['_frametimes.json', '_frames_timelapse.mp4', '_frames.tar.gz', '_frames.tar.bz2', '_frametimes.tar.bz2']
+        suffix = ['_frametimes.json', '_frames_timelapse.mp4', '_frames.tar.gz', '_frames.tar.bz2', '_FT.tar.bz2']
         return (os.path.isfile(path) and any(path.endswith(end) for end in suffix))
 
     # Get a list of directories / files in the given directory
@@ -810,13 +810,13 @@ def deleteByQuota(archived_dir, capt_dir_quota, captured_dir, config):
     log.info(quotaReport(capt_dir_quota, config, after=False))
 
     delete_list = objectsToDelete(captured_dir, config.stationID, capt_dir_quota, bz2=False)
-    rmList(delete_list, dummy_run=config.quota_management_disabled)
+    rmList(delete_list, dummy_run= not config.quota_management_enabled)
 
     delete_list = objectsToDelete(archived_dir, config.stationID, config.arch_dir_quota, bz2=False)
-    rmList(delete_list, dummy_run=config.quota_management_disabled)
+    rmList(delete_list, dummy_run= not config.quota_management_enabled)
 
     delete_list = objectsToDelete(archived_dir, config.stationID, config.bz2_files_quota, bz2=True)
-    rmList(delete_list, dummy_run=config.quota_management_disabled)
+    rmList(delete_list, dummy_run= not config.quota_management_enabled)
 
     log.info(quotaReport(capt_dir_quota, config, after=True))
 
