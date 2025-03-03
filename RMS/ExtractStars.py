@@ -160,6 +160,10 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
     sigma_fitted = np.sqrt(sigma_x_fitted**2 + sigma_y_fitted**2)
     fwhm = 2.355*sigma_fitted
 
+    # Compensate for half-pixel shift caused by the 2×2 mean filter
+    x_arr = [x + 0.5 for x in x_arr]
+    y_arr = [y + 0.5 for y in y_arr]
+
     return x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count
 
 
