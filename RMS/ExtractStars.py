@@ -133,7 +133,7 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
     # Unpack star coordinates
     y_init, x_init = np.hsplit(xy, 2)
 
-    # Compensate for half-pixel shift caused by the 2×2 mean filter
+    # Compensate for half-pixel shift caused by the 2x2 mean filter
     x_init = [x + 0.5 for x in x_init]
     y_init = [y + 0.5 for y in y_init]
 
