@@ -5062,19 +5062,26 @@ class PlateTool(QtWidgets.QMainWindow):
                 if pix_dist <= self.star_aperture_radius:
                     
                     net_flux = img_crop[i, j] - bg_median
+
+                    # If the next flux is negative, set it to zero
+                    if net_flux > 0:
                     
-                    # Compute radial distance from the computed centroid (account for the offset from x_min, y_min)
-                    r = math.sqrt((i + x_min - x_centroid)**2 + (j + y_min - y_centroid)**2)
-                    moment_sum += net_flux*(r**2)
+                        # Compute radial distance from the computed centroid (account for the offset from x_min, y_min)
+                        r = math.sqrt((i + x_min - x_centroid)**2 + (j + y_min - y_centroid)**2)
+                        moment_sum += net_flux*(r**2)
 
-        # Variance (assuming source_intens > 0)
+        # Compute the standard deviation and the FWHM
+        sigma = 0
+        fwhm = 0
         if source_intens > 0:
-            sigma = math.sqrt(moment_sum/source_intens)
-            fwhm = 2.355*sigma
 
-        else:
-            sigma = 0
-            fwhm = 0
+            # Compute the variance
+            variance = moment_sum/source_intens
+
+            # Make sure the variance is positive
+            if variance > 0:
+                sigma = math.sqrt(variance)
+                fwhm = 2.355*sigma
 
         ######################################################################################################
 
