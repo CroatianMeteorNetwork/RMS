@@ -915,18 +915,36 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.unsuitable_stars_visble = True
 
-        # calstar markers (main window)
-        self.calstar_markers = pg.ScatterPlotItem()
-        self.calstar_markers.setPen((0, 255, 0, 100))
+        # calstar markers outer rings (dark green) - main window
+        self.calstar_markers_outer = pg.ScatterPlotItem()
+        self.calstar_markers_outer.setPen(pg.mkPen((0, 100, 0, 255), width=1.5))
+        self.calstar_markers_outer.setBrush((0, 0, 0, 0))
+        self.calstar_markers_outer.setSize(14)
+        self.calstar_markers_outer.setSymbol('o')
+        self.calstar_markers_outer.setZValue(2)
+        self.img_frame.addItem(self.calstar_markers_outer)
+
+        # calstar markers inner rings (bright green) - main window
+        self.calstar_markers = pg.ScatterPlotItem() 
+        self.calstar_markers.setPen(pg.mkPen((50, 255, 50, 255), width=1.1))
         self.calstar_markers.setBrush((0, 0, 0, 0))
         self.calstar_markers.setSize(10)
         self.calstar_markers.setSymbol('o')
         self.calstar_markers.setZValue(2)
         self.img_frame.addItem(self.calstar_markers)
 
-        # calstar markers (zoom window)
+        # calstar markers outer rings (dark green) - zoom window
+        self.calstar_markers_outer2 = pg.ScatterPlotItem()
+        self.calstar_markers_outer2.setPen(pg.mkPen((0, 100, 0, 255), width=1.5))
+        self.calstar_markers_outer2.setBrush((0, 0, 0, 0))
+        self.calstar_markers_outer2.setSize(28)
+        self.calstar_markers_outer2.setSymbol('o')
+        self.calstar_markers_outer2.setZValue(5)
+        self.zoom_window.addItem(self.calstar_markers_outer2)
+
+        # calstar markers inner rings (bright green) - zoom window
         self.calstar_markers2 = pg.ScatterPlotItem()
-        self.calstar_markers2.setPen((0, 255, 0, 100))
+        self.calstar_markers2.setPen(pg.mkPen((50, 255, 50, 255), width=1.1))
         self.calstar_markers2.setBrush((0, 0, 0, 0))
         self.calstar_markers2.setSize(20)
         self.calstar_markers2.setSymbol('o')
@@ -1798,13 +1816,18 @@ class PlateTool(QtWidgets.QMainWindow):
             y = star_data[:, 0]
             x = star_data[:, 1]
 
+            # Set both the inner and outer rings
             self.calstar_markers.setData(x=x + 0.5, y=y + 0.5)
             self.calstar_markers2.setData(x=x + 0.5, y=y + 0.5)
+            self.calstar_markers_outer.setData(x=x + 0.5, y=y + 0.5)
+            self.calstar_markers_outer2.setData(x=x + 0.5, y=y + 0.5)
 
         else:
-
+            # Clear all markers if no stars
             self.calstar_markers.setData(pos=[])
             self.calstar_markers2.setData(pos=[])
+            self.calstar_markers_outer.setData(pos=[])
+            self.calstar_markers_outer2.setData(pos=[])
 
 
     def updatePicks(self):
