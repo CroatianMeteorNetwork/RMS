@@ -411,7 +411,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
             else:
 
-                if detect_end:
+                if detect_end and (duration is not None):
 
                     # Delay detection until the end of the night
                     delay_detection = duration
