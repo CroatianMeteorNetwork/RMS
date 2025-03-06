@@ -143,7 +143,22 @@ def loadImage(img_path, flatten=-1):
     else:
 
         try:
-            img = imread(img_path, as_gray=bool(flatten))
+            img = imread(img_path)
+
+            # Convert to grayscale
+            if flatten == -1:
+
+                # Convert RGB images to grayscale
+                if img.ndim == 3:
+                    img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+
+                # Handle 16 bit images
+                elif (img.ndim == 2) and (img.dtype == np.uint16):
+                    img = img.astype(np.uint16)
+
+                # Otherwise, just convert the time to 8 bit
+                else:
+                    img = img.astype(np.uint8)
 
         except TypeError:
             
