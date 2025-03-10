@@ -4287,7 +4287,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # Get astrometry.net solution, pass the FOV width estimate
                 solution = astrometryNetSolve(x_data=x_data, y_data=y_data, fov_w_range=fov_w_range, 
-                                              mask=mask)
+                                              mask=mask, 
+                                              x_center=self.platepar.X_res/2, y_center=self.platepar.Y_res/2)
 
         else:
             fail = True
@@ -4329,11 +4330,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Set parameters to platepar
         self.platepar.F_scale = scale
-        self.platepar.pos_angle_ref = rotationWrtStandardToPosAngle(self.platepar, rot_standard)
         self.platepar.az_centre = azim
         self.platepar.alt_centre = alt
 
         self.platepar.updateRefRADec(skip_rot_update=True)
+
+        self.platepar.pos_angle_ref = rotationWrtStandardToPosAngle(self.platepar, rot_standard)
 
 
         # # Reset the distortion parameters
@@ -4343,8 +4345,6 @@ class PlateTool(QtWidgets.QMainWindow):
         print()
         print('Astrometry.net solution:')
         print('------------------------')
-        # print(' RA    = {:.2f} deg'.format(ra))
-        # print(' Dec   = {:.2f} deg'.format(dec))
         print(' RA    = {:.2f} deg'.format(self.platepar.RA_d))
         print(' Dec   = {:.2f} deg'.format(self.platepar.dec_d))
         print(' Azim  = {:.2f} deg'.format(self.platepar.az_centre))
