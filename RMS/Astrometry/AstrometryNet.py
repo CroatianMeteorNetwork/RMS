@@ -24,7 +24,7 @@ except ImportError:
 
 
 def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_data=None, fov_w_range=None,
-                       max_stars=100, verbose=False):
+                       max_stars=100, verbose=False, x_center=None, y_center=None):
     """ Find an astrometric solution of X, Y image coordinates of stars detected on an image using the 
         local installation of astrometry.net.
 
@@ -38,12 +38,14 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
             width of the FOV in degrees.
         max_stars: [int] Maximum number of stars to use for the astrometry.net solution. Default is 100.
         verbose: [bool] Print verbose output. Default is False.
+        x_center: [float] X coordinate of the image center. Default is None.
+        y_center: [float] Y coordinate of the image center. Default is None.
     """
 
     # If the local installation of astrometry.net is not available, use the nova.astrometry.net API
     if not ASTROMETRY_NET_AVAILABLE:
         return novaAstrometryNetSolve(ff_file_path=ff_file_path, img=img, x_data=x_data, y_data=y_data, 
-                                      fov_w_range=fov_w_range)
+                                      fov_w_range=fov_w_range, x_center=x_center, y_center=y_center)
     
 
     # Read the FF file, if given
@@ -197,12 +199,13 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
         wcs_obj = WCS(solution.best_match().wcs_fields)
 
         # Get the image center in pixel coordinates
-        if img is not None:
-            x_center = img.shape[1]/2
-            y_center = img.shape[0]/2
-        else:
-            x_center = np.median(x_data)
-            y_center = np.median(y_data)
+        if (x_center is None) or (y_center is None):
+            if img is not None:
+                x_center = img.shape[1]/2
+                y_center = img.shape[0]/2
+            else:
+                x_center = np.median(x_data)
+                y_center = np.median(y_data)
 
         # print("Image center, x = {:.2f}, y = {:.2f}".format(x_center, y_center))
 
