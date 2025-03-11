@@ -238,7 +238,7 @@ class GstVideoFile():
                 "videoconvert ! video/x-raw,format={} ! "
                 "appsink emit-signals=True max-buffers=100 drop=False sync=0 name=appsink"
             "".format(self.file_path, self.video_format)
-)
+            )
 
         self.pipeline = Gst.parse_launch(pipeline_str)
 
