@@ -4356,36 +4356,95 @@ class PlateTool(QtWidgets.QMainWindow):
         print(' FOV = {:.2f} x {:.2f} deg'.format(fov_w, fov_h))
 
 
-        # If a list of detected stars is provided by the astrometry.net, use it to run FFT alignment
+        # If a list of detected stars is provided by the astrometry.net:
+        # - use it to run FFT alignment
+        # - fit a platepar with a radial3-odd distortion model
         if star_data is not None:
 
-            print()
-            print("Running FFT alignment...")
+            # Construct an array with star coordinates (x, y, ra, dec per row)
+            x_data, y_data, ra_data, dec_data = star_data
 
-            # Construct an array with star coordinates (x, y per row)
-            calstars_coords = np.array(star_data).T
+
+            ### TEST
+
+            # Print the star data
+            print()
+            print("Star data for automated fitting:")
+            print("       X       Y       RA      Dec")
+            for x, y, ra, dec in zip(x_data, y_data, ra_data, dec_data):
+                print("{:8.2f} {:8.2f} {:8.2f} {:8.2f}".format(x, y, ra, dec))
+
+            # # Plot the x, y coordinates
+            # plt.figure()
+            # plt.scatter(x_data, y_data, c='r', s=10)
+            # plt.show()
+
+            # # Plot the ra, dec coordinates on a polar plot
+            # plt.figure()
+            # plt.polar(np.radians(ra_data), 90-dec_data, 'ro')
+            # plt.show()
+
+
+            ###
+
+            calstars_coords = np.array([x_data, y_data]).T
+            catalog_coords = np.array([ra_data, dec_data, np.zeros_like(ra_data)]).T
 
             # Get the time of the image
             calstars_time = self.img_handle.currentTime()
 
-            self.platepar = alignPlatepar(
-                self.config, self.platepar, 
-                calstars_time, calstars_coords, 
-                scale_update=True, show_plot=False
-                )
+
+            # Make sure there are at least 4 stars for FOV alignment
+            if len(calstars_coords) > 4:
+
+                print()
+                print("Running FFT alignment...")
+
+                self.platepar = alignPlatepar(
+                    self.config, self.platepar, 
+                    calstars_time, calstars_coords, 
+                    scale_update=True, show_plot=False
+                    )
+                
+                self.platepar.updateRefRADec(skip_rot_update=True)
+                
+                print()
+                print('FFT aligned:')
+                print('------------------------')
+                print(' RA    = {:.2f} deg'.format(self.platepar.RA_d))
+                print(' Dec   = {:.2f} deg'.format(self.platepar.dec_d))
+                print(' Azim  = {:.2f} deg'.format(self.platepar.az_centre))
+                print(' Alt   = {:.2f} deg'.format(self.platepar.alt_centre))
+                print(' Rot horiz   = {:.2f} deg'.format(self.platepar.rotation_from_horiz))
+                print(' Pos angle   = {:.2f} deg'.format(self.platepar.pos_angle_ref))
+                print(' Scale = {:.3f} arcmin/px'.format(60/self.platepar.F_scale))
+
+
+            # Make sure there are at least 6 stars for distortion fitting
+            if len(calstars_coords) > 6:
+
+                ### Fit a platepar with a radial3-odd distortion model ###
+                print()
+                print("Fitting a platepar with a radial3-odd distortion model...")
+
+                # Turn on asymmetry correction
+                self.platepar.asymmetry_corr = True
+
+                # Switch the platepar to the radial3-odd distortion model
+                self.platepar.setDistortionType('radial3-odd', reset_params=True)
+
+                # Do a platepar fit on the provided star data
+                self.platepar.fitAstrometry(
+                    date2JD(*calstars_time), 
+                    calstars_coords, catalog_coords,
+                    first_platepar_fit=True, fit_only_pointing=False, fixed_scale=False
+                    )
+                
+                # Print platepar parameters
+                print()
+                print('Fitted platepar:')
+                print(self.platepar)
             
-            self.platepar.updateRefRADec(skip_rot_update=True)
-            
-            print()
-            print('FFT aligned:')
-            print('------------------------')
-            print(' RA    = {:.2f} deg'.format(self.platepar.RA_d))
-            print(' Dec   = {:.2f} deg'.format(self.platepar.dec_d))
-            print(' Azim  = {:.2f} deg'.format(self.platepar.az_centre))
-            print(' Alt   = {:.2f} deg'.format(self.platepar.alt_centre))
-            print(' Rot horiz   = {:.2f} deg'.format(self.platepar.rotation_from_horiz))
-            print(' Pos angle   = {:.2f} deg'.format(self.platepar.pos_angle_ref))
-            print(' Scale = {:.3f} arcmin/px'.format(60/self.platepar.F_scale))
 
 
     def getFOVcentre(self):

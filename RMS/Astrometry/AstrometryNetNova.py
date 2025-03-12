@@ -368,8 +368,12 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
     # Add keyword arguments
     kwargs = {}
     kwargs['publicly_visible'] = 'y'
+
+    # Force the center to be at the center of the image
     kwargs['crpix_center'] = True
-    kwargs['tweak_order'] = 3
+
+    # Set the polynomial distortion order to 2
+    kwargs['tweak_order'] = 2
 
     # Add the scale to keyword arguments, if given
     if fov_w_range is not None:
@@ -544,7 +548,46 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
     fov_w = result['width_arcsec']/3600
     fov_h = result['height_arcsec']/3600
 
-    return ra_mid, dec_mid, rot_eq_standard, scale, fov_w, fov_h, None
+
+    ### Construct an array of star data ###
+
+    # If the star data is available, use it and map to RA and dec
+    if (x_data is not None) and (y_data is not None):
+
+        # Convert the star data to RA and dec
+        ra_data, dec_data = wcs_obj.all_pix2world(x_data, y_data, 1)
+
+        star_data = [x_data, y_data, ra_data, dec_data]
+
+    elif img is not None:
+        
+        # If the star x and y coordinates are not available, sample image coordinates are regular intervals
+        # to get the RA and dec coordinates
+
+        # Image dimensions
+        h, w = img.shape
+
+        # Start 10 px from the edge, sample 5 samples in each image dimension for a total of 25 samples
+        x_data = np.linspace(10, w-10, 5)
+        y_data = np.linspace(10, h-10, 5)
+
+        x_data, y_data = np.meshgrid(x_data, y_data)
+        x_data = x_data.flatten()
+        y_data = y_data.flatten()
+
+
+        # Convert the star data to RA and dec
+        ra_data, dec_data = wcs_obj.all_pix2world(x_data, y_data, 1)
+
+        star_data = [x_data, y_data, ra_data, dec_data]
+
+    else:
+        star_data = None
+
+    ###
+
+
+    return ra_mid, dec_mid, rot_eq_standard, scale, fov_w, fov_h, star_data
 
 
 if __name__ == '__main__':

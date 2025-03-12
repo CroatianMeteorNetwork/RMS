@@ -411,7 +411,7 @@ class Platepar(object):
             if not fixed_scale:
                 F_scale = params[3]
 
-            img_x, img_y, _ = img_stars.T
+            img_x, img_y = img_stars[:, :2].T
 
             pp_copy = copy.deepcopy(platepar)
 
@@ -441,7 +441,7 @@ class Platepar(object):
             if not fixed_scale:
                 F_scale = params[3]
 
-            img_x, img_y, _ = img_stars.T
+            img_x, img_y = img_stars[:, :2].T
 
             pp_copy = copy.deepcopy(platepar)
 
@@ -453,7 +453,7 @@ class Platepar(object):
             if not fixed_scale:
                 pp_copy.F_scale = abs(F_scale)
 
-            img_x, img_y, _ = img_stars.T
+            img_x, img_y = img_stars[:, :2].T
 
             # Get image coordinates of catalog stars
             ra_array, dec_array = getPairedStarsSkyPositions(img_x, img_y, jd, pp_copy)
@@ -546,7 +546,7 @@ class Platepar(object):
                 pp_copy.x_poly_rev = np.zeros(platepar.poly_length)
                 pp_copy.y_poly_rev = params
 
-            img_x, img_y, _ = img_stars.T
+            img_x, img_y = img_stars[:, :2].T
 
             # Get image coordinates of catalog stars
             catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(catalog_stars, jd, pp_copy)
@@ -587,7 +587,7 @@ class Platepar(object):
             else:
                 pp_copy.y_poly_fwd = params
 
-            img_x, img_y, _ = img_stars.T
+            img_x, img_y = img_stars[:, :2].T
 
             # Get image coordinates of catalog stars
             ra_array, dec_array = getPairedStarsSkyPositions(img_x, img_y, jd, pp_copy)
@@ -638,7 +638,7 @@ class Platepar(object):
             # Assign distortion parameters
             pp_copy.x_poly_rev = params[4:]
 
-            img_x, img_y, _ = img_stars.T
+            img_x, img_y = img_stars[:, :2].T
 
             # Get image coordinates of catalog stars
             catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(catalog_stars, jd, pp_copy)
@@ -672,7 +672,7 @@ class Platepar(object):
             # Assign distortion parameters
             pp_copy.x_poly_fwd = params[4:]
 
-            img_x, img_y, _ = img_stars.T
+            img_x, img_y = img_stars[:, :2].T
 
             # Get image coordinates of catalog stars
             ra_array, dec_array = getPairedStarsSkyPositions(img_x, img_y, jd, pp_copy)
