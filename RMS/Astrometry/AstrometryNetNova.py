@@ -372,8 +372,8 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
     # Force the center to be at the center of the image
     kwargs['crpix_center'] = True
 
-    # Set the polynomial distortion order to 2
-    kwargs['tweak_order'] = 2
+    # Set the polynomial distortion order to 3
+    kwargs['tweak_order'] = 3
 
     # Add the scale to keyword arguments, if given
     if fov_w_range is not None:
