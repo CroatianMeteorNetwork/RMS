@@ -107,6 +107,12 @@ def initLogging(config, log_file_prefix="", safedir=None):
 
     # If the log directory doesn't exist or is not writable, use the safe directory
     if safedir is not None:
+
+        # Make sure the safedir is a directory and not a file
+        if os.path.isfile(safedir):
+            safedir = os.path.dirname(safedir)
+
+        # Make sure the safe directory exists and is writable
         if not os.path.exists(log_path) or not os.access(log_path, os.W_OK):
             print("Log directory not writable, using safe directory: " + safedir)
             log_path = safedir

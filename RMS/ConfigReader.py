@@ -557,6 +557,9 @@ class Config:
         self.vect_angle_thresh = 20 # angle similarity between 2 lines in a stripe to be merged
         self.frame_extension = 3 # how many frames to check during centroiding before and after the initially determined frame range
 
+        # Number of pixels to dilate the centroid mask beyond the thresholded image
+        self.centroid_dilation = 2
+
         # Centroid filtering parameters
         self.centroids_max_deviation = 2 # maximum deviation of a centroid point from a LSQ fitted line (if above max, it will be rejected)
         self.centroids_max_distance =  30 # maximum distance in pixels between centroids (used for filtering spurious centroids)
@@ -574,6 +577,9 @@ class Config:
 
         # Path to the ML model
         self.ml_model_path = os.path.join(self.rms_root_dir, "share", "meteorml32.tflite")
+
+        # Detection border (in pixels) - detections too close to the border of the mask will be rejected
+        self.detection_border = 5
 
         # Number of CPU cores to use for detection. 0 means all available cores, -1 all but one core (default)
         self.num_cores = -1
@@ -1555,6 +1561,9 @@ def parseMeteorDetection(config, parser):
     if parser.has_option(section, "frame_extension"):
         config.frame_extension = parser.getint(section, "frame_extension")
 
+    if parser.has_option(section, "centroid_dilation"):
+        config.centroid_dilation = parser.getint(section, "centroid_dilation")
+
 
     if parser.has_option(section, "centroids_max_deviation"):
         config.centroids_max_deviation = parser.getfloat(section, "centroids_max_deviation")
@@ -1579,6 +1588,11 @@ def parseMeteorDetection(config, parser):
         # Disable the min_patch_intensity filter if the ML filter is used and the ML library is available
         if TFLITE_AVAILABLE and (config.ml_filter > 0):
             config.min_patch_intensity_multiplier = 0
+
+
+    if parser.has_option(section, "detection_border"):
+        config.detection_border = parser.getint(section, "detection_border")
+
 
     if parser.has_option(section, "num_cores"):
         config.num_cores = parser.getint(section, "num_cores")
