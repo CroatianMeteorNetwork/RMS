@@ -34,7 +34,7 @@ from RMS.Astrometry.FFTalign import alignPlatepar
 from RMS.Formats import CALSTARS, FFfile, FTPdetectinfo, Platepar, StarCatalog
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, validDefaultFTPdetectinfo
 from RMS.Math import angularSeparation
-from RMS.Logger import initLogging
+from RMS.Logger import initLogging, getLogger
 from RMS.Misc import RmsDateTime
 
 # Neighbourhood size around individual FFs with detections which will be takes for recalibration
@@ -42,8 +42,7 @@ from RMS.Misc import RmsDateTime
 RECALIBRATE_NEIGHBOURHOOD_SIZE = 3
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
-log.setLevel(logging.INFO)
+log = getLogger("logger", level="INFO")
 
 def loadRecalibratedPlatepar(dir_path, config, file_list=None, type='meteor'):
     """
@@ -1227,8 +1226,7 @@ if __name__ == "__main__":
     initLogging(config, 'recalibrate_', safedir=dir_path)
 
     # Get the logger handle
-    log = logging.getLogger("logger")
-    log.setLevel(logging.INFO)
+    log = getLogger("logger", level="INFO")
 
     # Run the recalibration and recomputation
     applyRecalibrate(ftpdetectinfo_path, config, load_all=cml_args.all, generate_ufoorbit=(not cml_args.skipuforbit))

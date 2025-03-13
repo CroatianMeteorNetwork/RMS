@@ -2,10 +2,6 @@ from __future__ import print_function, division, absolute_import
 
 import os
 import sys
-# Set GStreamer debug level. Use '2' for warnings in production environments.
-os.environ['GST_DEBUG'] = '3'
-
-
 import time
 import numpy as np
 import multiprocessing

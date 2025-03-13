@@ -20,7 +20,6 @@ import sys
 import traceback
 import time
 import datetime
-import logging
 import multiprocessing
 from math import floor
 import numpy as np
@@ -30,6 +29,7 @@ import cv2
 from RMS.VideoExtraction import Extractor
 from RMS.Formats import FFfile, FFStruct
 from RMS.Formats import FieldIntensities
+from RMS.Logger import getLogger
 from RMS.Routines.Image import saveImage
 
 # Import Cython functions
@@ -39,7 +39,7 @@ from RMS.CompressionCy import compressFrames
 
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 class Compressor(multiprocessing.Process):
@@ -59,7 +59,7 @@ class Compressor(multiprocessing.Process):
             array1: first numpy array in shared memory of grayscale video frames
             startTime1: float in shared memory that holds time of first frame in array1
             array2: second numpy array in shared memory
-            startTime1: float in shared memory that holds time of first frame in array2
+            startTime2: float in shared memory that holds time of first frame in array2
             config: configuration class
 
         Keyword arguments:

@@ -4,7 +4,6 @@ from __future__ import print_function, division, absolute_import
 
 from time import time
 import os
-import logging
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -21,6 +20,7 @@ except ImportError:
 
 
 from RMS.Formats.FFfile import selectFFFrames
+from RMS.Logger import getLogger
 from RMS.Routines import Image
 from RMS.Routines import MaskImage
 from RMS.Math import vectNorm
@@ -32,7 +32,7 @@ import RMS.Routines.MorphCy as morph
 
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
@@ -65,23 +65,20 @@ def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
 
     # Load the mask if given
     if mask_path:
-        
         mask = MaskImage.loadMask(mask_path)
 
-        # If the mask is all white, set it to None
-        if (mask is not None) and np.all(mask.img == 255):
-            print('Mask is all white, setting it to None.')
-            mask = None
+        if mask is not None:
+            info_msg = 'Loaded mask: {:s} '.format(mask_path)
 
-    if mask is not None:
-        print('Loaded mask:', mask_path)
-        log.info('Loaded mask: {:s}'.format(mask_path))
+            # If the mask is all white, set it to None
+            if np.all(mask.img == 255):
+                info_msg += '(all white)'
+                mask = None
 
-    else:
-        log.info('No mask file has been found.')
-
-
-
+            print(info_msg)
+            log.info(info_msg)
+        else:
+            log.info('No mask file has been found.')
 
     # Try loading the dark frame
     dark = None

@@ -21,13 +21,10 @@ import sys
 import ctypes
 import traceback
 
-# Set GStreamer debug level. Use '2' for warnings in production environments.
-os.environ['GST_DEBUG'] = '3'
-
 import re
 import time
-import logging
 import datetime
+import copy
 import os.path
 from multiprocessing import Process, Event, Value, Array
 
@@ -42,11 +39,11 @@ from RMS.Routines.GstreamerCapture import GstVideoFile
 from RMS.Formats.ObservationSummary import getObsDBConn, addObsParam
 from RMS.RawFrameSave import RawFrameSaver
 from RMS.Misc import RmsDateTime, mkdirP
+from RMS.Formats import FTfile, FTStruct
+from RMS.Logger import getLogger, gstDebugLogger
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
-# Prevent infinite GStreamer logging propagation
-log.propagate = False
+log = getLogger("logger")
 
 try:
     # py3
@@ -495,8 +492,8 @@ class BufferedCapture(Process):
                     log.info("GStreamer Buffer did not contain a frame.")
                     return False, None, None
 
-                # Handling for grayscale conversion
-                frame = self.handleGrayscaleConversion(map_info)
+                # Convert to np.ndarray
+                frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
 
                 # Smooth raw pts and calculate actual timestamp
                 smoothed_pts = self.smoothPTS(gst_timestamp_ns)
@@ -509,6 +506,9 @@ class BufferedCapture(Process):
                 ret, frame = self.device.read()
                 if ret:
                     timestamp = time.time()
+
+            # Handling for grayscale conversion
+            frame = self.handleGrayscaleConversion(frame)
 
         return ret, frame, timestamp
 
@@ -535,7 +535,7 @@ class BufferedCapture(Process):
 
             return rtsp_url
 
-        # If no match is found, return None or handle as appropriate        
+        # If no match is found, return None or handle as appropriate
         else:
             log.error("No RTSP URL found in the input string: {}".format(input_string))
             raise ValueError("No RTSP URL found in the input string: {}".format(input_string))
@@ -650,66 +650,110 @@ class BufferedCapture(Process):
             return False, RtspProbeResult.UNKNOWN_ERROR
                 
 
-    def isGrayscale(self, frame):
+    def isGrayscale(self, frame, stride=64):
         """
-        Return True if all color channels contain identical data.
+        Quickly check if a frame is grayscale by sampling pixels along the diagonal.
+        If all three channels match on those diagonal samples, return True.
+        If an IndexError is raised (i.e., frame is single-channel), also return True.
+        This trades completeness for speed, as only the diagonal is checked.
+
+        Args:
+            frame (numpy.ndarray): The image frame to check (usually BGR or GRAY).
+            stride (int): Spacing for diagonal sampling, skipping many pixels for efficiency.
+
+        Returns:
+            bool: True if all sampled channels match (or frame is single-channel), otherwise False.
         """
 
-        # If the frame is one-dimensional, it is grayscale
-        if len(frame.shape) == 2:
-            return True
+        # We don't explicitly check frame.shape first; instead we rely on an IndexError
+        # if 'frame' is single-channel (which is inherently grayscale).
+        # This is faster than an extra dimension check for most BGR GMN stations 
 
-        # Check if the R, G, and B channels are equal
-        b, g, r = cv2.split(frame)
-        if np.array_equal(r, g) and np.array_equal(g, b):
-            return True
+        try:
+            # If diagonal samples are not identical, frame is color
+            is_gray = np.all(frame[::stride, ::stride, 0] == frame[::stride, ::stride, 1]) and \
+                      np.all(frame[::stride, ::stride, 1] == frame[::stride, ::stride, 2])
+        except IndexError:
+             # If IndexError, frame is grayscale
+            is_gray = True
+
+        if getattr(self, '_previous_grayscale_state', is_gray) != is_gray:
+            log.info("Frame grayscale state changed: {} -> {}".format(not is_gray, is_gray))
+            self._previous_grayscale_state = is_gray
+
+        return is_gray
+
+
+    def handleGrayscaleConversion(self, frame):
+        """Handle conversion of frame to grayscale if necessary.
+
+            Camera outputs BGR (3 channels) even in night mode. For efficiency, we save raw frames in:
+            - Grayscale (1 channel) when all channels are identical
+            - Full BGR (3 channels) when they differ
+
+            Note: While raw frames are saved in color when available, frames are converted
+            to grayscale before compression in the processing pipeline
+
+        Args:
+            frame: a numpy.ndarray frame
+
+        Returns:
+            numpy.ndarray: Frame data either as grayscale (2D) or BGR (3D) array
+        """
+
+        # First check if frame is None to prevent NoneType subscript error
+        if frame is None:
+            return None
+
+        # We don't explicitly check frame.shape first; instead we rely on an IndexError
+        # if 'frame' is single-channel (which is inherently grayscale).
+        # This is faster than an extra dimension check for most BGR GMN stations 
+
+        try:
+            # If frame channels are not identical (color), return all 3 channels
+            if not self.convert_to_gray:
+                return frame
+
+            try:
+                # If frame channels are identical (gray), extract green channel for grayscale
+                return frame[:, :, 1]
         
-        return False
-
-    
-    def handleGrayscaleConversion(self, map_info):
-        """Handle conversion of frame to grayscale if necessary."""
-
-        # If the frame is already grayscale, return it as is
-        if len(self.frame_shape) == 2:
-            return np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
-
-        if (self.daytime_mode is not None) and (self.daytime_mode.value):
-            return np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
-
-        # Convert to grayscale by selecting a specific channel
-        bgr_frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
-        gray_frame = bgr_frame[:, :, 0]  # Assuming the blue channel for grayscale
-        return gray_frame
-
+            except IndexError:
+                # If IndexError occurs, frame is already grayscale (single-channel)
+                return frame
+            
+        except Exception as e:
+            log.error('Error in grayscale conversion: {}'.format(e))
+            log.debug('Frame shape: {}'.format(frame.shape if frame is not None else None))
+            return None
 
 
     def moveSegment(self, splitmuxsink, fragment_id):
         """
         Custom callback for splitmuxsink's format-location signal to name and move each segment as its
-        created. Generates a timestamp-based folder structure: Year/Day-Of-Year/Hour/ per video segment
+        created. Generates a timestamp-based folder structure: Year/Day-Of-Year/Hour/ per video segment.
 
         Arguments:
           splitmuxsink [GstElement]: The splitmuxsink object itself, included in arguments as GStreamer expects it.
           fragment_id [int]: Fragment / segment number of the new clip
 
         Returns:
-          full_path [str]: Full path to save this new segment to
+          full_path [str]: Full path to save this new video segment to
         """
 
-        base_time = RmsDateTime.utcnow()
+        # Segment name is based on timestamp recorded during last segment save
+        segment_time = datetime.datetime.fromtimestamp(self.last_segment_savetime)
+        self.last_segment_savetime = time.time()
+        segment_filename = segment_time.strftime("{}_%Y%m%d_%H%M%S_video.mkv".format(self.config.stationID))
+        segment_subpath = os.path.join(self.config.data_dir, self.config.video_dir, segment_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
 
-        # Generate names from current timestamp
-        subpath = os.path.join(self.config.data_dir, self.config.video_dir, base_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
-        filename = base_time.strftime("{}_%Y%m%d_%H%M%S_video.mkv".format(self.config.stationID))
-
-        # Create full path and directory
-        mkdirP(subpath)
-        full_path = os.path.join(subpath, filename)
-        log.info("Created new video segment #{} at: {}".format(fragment_id, full_path))
+        # Create full path for the segment
+        mkdirP(segment_subpath)
+        segment_full_path = os.path.join(segment_subpath, segment_filename)
+        log.info("Created new video segment #{} at: {}".format(fragment_id, segment_full_path))
 
         # Return full path to splitmux's callback
-        return full_path
+        return segment_full_path
 
       
     def handleStateChange(self, pipeline, target_state, timeout=60):
@@ -842,7 +886,7 @@ class BufferedCapture(Process):
             # The splitmuxsink will save the segments to video_file_dir
             # The splitmuxsink will use the matroskamux muxer
             # The splitmuxsink will use the format-location signal to name and move each segment
-            # The data chuncks are limited with queue2 (150 frames, 2MB, 5 seconds, whichever comes first)
+            # queue2 smooths out the writes, but doesn't wait until the buffers fill up for writing
             storage_branch = (
                 "t. ! queue2 max-size-buffers=150 max-size-bytes=2097152 max-size-time=5000000000 ! "
                 "splitmuxsink name=splitmuxsink0 max-size-time={:d} muxer-factory=matroskamux"
@@ -1288,7 +1332,26 @@ class BufferedCapture(Process):
         """
         try:
             log.debug("Initializing process-specific resources...")
-            
+
+            # GStreamer debug setup
+            if GST_IMPORTED:
+                try:
+                    # Activate debug system
+                    Gst.debug_set_active(True)
+
+                    # Set debug level from environment or default given value
+                    # The Gst debug level is set in Logger.py
+                    debug_env = os.environ.get("GST_DEBUG", "2")
+                    Gst.debug_set_default_threshold(int(debug_env))
+
+                    # Comment out if higher than logging level 3 is needed
+                    Gst.debug_add_log_function(gstDebugLogger, None)
+
+                    log.info("GStreamer logging initialized at level: {}".format(debug_env))
+
+                except Exception as e:
+                    log.error("Failed to initialize GStreamer logging: {}".format(e))
+
             # Initialize process-specific variables
             self.media_backend_override = False
             self.video_device_type = "cv2"
@@ -1332,6 +1395,16 @@ class BufferedCapture(Process):
                 self.sharedRawArrayBase2 = None
                 self.sharedRawArray2 = None
                 self.raw_frame_saver = None
+
+            # Initialize timestamp array for ft file buffer
+            if self.config.save_frame_times:
+                self.timestamp_buffer = []
+                # For testing ft files
+                # self.ft_test_time = time.time()
+
+            # Initialize segment saving time for raw video saving
+            if self.config.raw_video_save:
+                self.last_segment_savetime = time.time()
 
             log.debug("Process-specific initialization complete")
 
@@ -1477,7 +1550,6 @@ class BufferedCapture(Process):
                 ret, frame, frame_timestamp = self.read()
                 t_frame = time.time() - t1_frame
 
-
                 # If the video device was disconnected, wait for reconnection
                 if (self.video_file is None) and (not ret):
 
@@ -1505,13 +1577,19 @@ class BufferedCapture(Process):
                     # Always set first frame timestamp in the beginning of the block
                     first_frame_timestamp = frame_timestamp
 
+                # Append current timestamp to ft file buffer
+                if self.config.save_frame_times:
+                    self.timestamp_buffer.append((total_frames, frame_timestamp))
 
                 # If save_frames is set and a video device is used, save a frame every nth frames
                 if (self.config.save_frames
                     and self.video_file is None
                     and total_frames % self.config.frame_save_interval_count == 0):
 
-                    # In case of a mode switch, the frame shape might change (color or grayscale)
+                    # Check if RGB channels contain color information
+                    self.convert_to_gray = self.isGrayscale(frame)
+
+                    # Check if frame shape changed (color or grayscale)
                     if frame.shape != self.current_raw_frame_shape:
                         log.info("Frame shape changed, reinitializing arrays...")
 
@@ -1731,6 +1809,37 @@ class BufferedCapture(Process):
                 log.info('Estimated FPS: {:.3f}'.format(block_frames/(time.time() - t_block)))
         
 
+            # Save current timestamp buffer to ft file
+            # Construct FTStruct, record timestamps, and reset the timestamp array in memory
+            if self.config.save_frame_times:
+                ft = FTStruct.FTStruct()
+                ft.timestamps = copy.copy(self.timestamp_buffer)
+                self.timestamp_buffer.clear()
+
+                base_time = datetime.datetime.fromtimestamp(first_frame_timestamp)
+                ft_filename = base_time.strftime("FT_{}_%Y%m%d_%H%M%S.bin".format(self.config.stationID))
+                ft_subpath = os.path.join(self.config.data_dir, self.config.times_dir, base_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
+
+                mkdirP(ft_subpath)
+                FTfile.write(ft, ft_subpath, ft_filename)
+                log.info("Created FT file {} for block starting at {}".format(os.path.join(ft_subpath, ft_filename), first_frame_timestamp))
+
+                # For Testing: 
+                # Print first and last 10 timestamps, array length, average time difference and time difference from last block
+                # Enable self.ft_test_time in __init__
+                
+                # print("\n\n --- FT file data --- \nFirst 10 timestamps: {}\n\nLast 10 timestamps: {}\n\nArray length: {}\n\n".format(
+                #       ft.timestamps[:11], 
+                #       ft.timestamps[-10:],
+                #       len(ft.timestamps),
+                # ),
+                #       "Average per-frame time difference: {}\n\nLast segment time difference: {}\n\n ---------------- \n\n".format(
+                #       sum(ft.timestamps[i+1][1] - ft.timestamps[i][1] for i in range(len(ft.timestamps) - 1)) / (len(ft.timestamps) - 1),
+                #       ft.timestamps[0][1] - self.ft_test_time
+                # ), end='')
+                # self.ft_test_time = ft.timestamps[-1][1]
+
+
         log.info('Releasing video device...')
         self.releaseResources()
 
@@ -1768,7 +1877,7 @@ if __name__ == "__main__":
     initLogging(config)
 
     # Get the logger handle
-    log = logging.getLogger("logger")
+    log = getLogger("logger")
 
     # Print the kind of media backend
     print("Station code: {}".format(config.stationID))

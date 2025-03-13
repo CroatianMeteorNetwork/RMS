@@ -10,7 +10,6 @@ import os
 import random
 import shutil
 import sys
-import logging
 
 import matplotlib.pyplot as plt # 
 import numpy as np
@@ -24,14 +23,14 @@ from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
 from RMS.Astrometry.FFTalign import alignPlatepar
 from RMS.Formats import CALSTARS, FFfile, Platepar, StarCatalog
 from RMS.Math import angularSeparation
-from RMS.Logger import initLogging
+from RMS.Logger import initLogging, getLogger
 
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import matchStars, subsetCatalog
 
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 def computeMinimizationTolerances(config, platepar, star_dict_len):
@@ -698,8 +697,7 @@ if __name__ == "__main__":
     initLogging(config, 'checkfit_', safedir=dir_path)
 
     # Get the logger handle
-    log = logging.getLogger("logger")
-    log.setLevel(logging.INFO)
+    log = getLogger("logger", level="INFO")
 
     # Get a list of files in the night folder
     file_list = os.listdir(dir_path)

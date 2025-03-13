@@ -26,7 +26,7 @@ from os.path import exists as file_exists
 import paramiko
 
 
-from RMS.UploadManager import _agentAuth, existsRemoteDirectory, createRemoteDirectory
+from RMS.UploadManager import getSSHAndSFTP, existsRemoteDirectory, createRemoteDirectory
 from RMS.Misc import RmsDateTime
 
 
@@ -37,7 +37,7 @@ log = logging.getLogger("logger")
 
 
 
-def downloadNewMask(config, port=22):
+def downloadNewMask(config):
     """ Connect to the central server and download a new mask file, if available. """
 
     if config.mask_download_permissive:
@@ -52,118 +52,121 @@ def downloadNewMask(config, port=22):
         log.debug("Can't contact the server: RSA private key file not found.")
         return False
 
-    log.debug('Establishing SSH connection to: ' + config.hostname + ':' + str(port) + '...')
+    ssh = None
+    sftp = None
 
     try:
         # Connect to host
-        t = paramiko.Transport((config.hostname, port))
-        t.start_client()
+        # Connect with timeouts
+        ssh, sftp = getSSHAndSFTP(
+            config.hostname,
+            port=config.host_port,
+            username=config.stationID.lower(),
+            key_filename=config.rsa_private_key,
+            timeout=60,
+            banner_timeout=60,
+            auth_timeout=60
+        )
 
-        # Authenticate the connection
-        auth_status = _agentAuth(t, config.stationID.lower(), config.rsa_private_key)
-        if not auth_status:
+        # Check that the remote directory exists
+        try:
+            sftp.stat(config.remote_dir)
+
+        except Exception as e:
+            log.error("Remote directory '" + config.remote_dir + "' does not exist!")
             return False
 
-        # Open new SFTP connection
-        sftp = paramiko.SFTPClient.from_transport(t)
 
-    except:
-        log.error('Connecting to server failed!')
-        return False
+        # Construct path to remote mask directory
+        remote_mask_path = config.remote_dir + '/' + config.remote_mask_dir
 
-    # Check that the remote directory exists
-    try:
-        sftp.stat(config.remote_dir)
+        if not existsRemoteDirectory(sftp, remote_mask_path):
+            log.info("{} does not exist, creating".format(remote_mask_path))
+            createRemoteDirectory(sftp, remote_mask_path)
+        else:
+            log.info("{} exists".format(remote_mask_path))
 
-    except Exception as e:
-        log.error("Remote directory '" + config.remote_dir + "' does not exist!")
-        return False
+        # Add path separator
+        remote_mask_path += "/"
 
+        # Upload the most recent flat
+        captured_dirs = os.listdir(os.path.join(os.path.expanduser(config.data_dir), config.captured_dir))
+        captured_dirs.sort(reverse=True)
 
-    # Construct path to remote mask directory
-    remote_mask_path = config.remote_dir + '/' + config.remote_mask_dir
+        try:
+            if captured_dirs != []:
+                for captured_dir in captured_dirs:
+                    most_recent_flat = os.path.join(os.path.expanduser(config.data_dir), config.captured_dir, captured_dir,config.flat_file)
 
-    if not existsRemoteDirectory(sftp, remote_mask_path):
-        log.info("{} does not exist, creating".format(remote_mask_path))
-        createRemoteDirectory(sftp, remote_mask_path)
-    else:
-        log.info("{} exists".format(remote_mask_path))
-
-    # Add path separator
-    remote_mask_path += "/"
-
-    # Upload the most recent flat
-    captured_dirs = os.listdir(os.path.join(os.path.expanduser(config.data_dir), config.captured_dir))
-    captured_dirs.sort(reverse=True)
-
-    try:
-        if captured_dirs != []:
-            for captured_dir in captured_dirs:
-                most_recent_flat = os.path.join(os.path.expanduser(config.data_dir), config.captured_dir, captured_dir,config.flat_file)
+                    if file_exists(most_recent_flat):
+                        break
+                    else:
+                        most_recent_flat = ""
+                log.info("Most recent flat {}".format(most_recent_flat))
 
                 if file_exists(most_recent_flat):
-                    break
-                else:
-                    most_recent_flat = ""
-            log.info("Most recent flat {}".format(most_recent_flat))
-
-            if file_exists(most_recent_flat):
-                # Create AU002B_20231219_flat.bmp
-                remote_flat_name = "{}_{}_{}".format(captured_dir.split('_')[0], captured_dir.split('_')[1], config.flat_file)
-                log.info("Uploading to {} as {}".format(remote_mask_path, remote_flat_name))
-                sftp.put(most_recent_flat, remote_mask_path + "/" + remote_flat_name)
-                remote_files = sftp.listdir(path=remote_mask_path)
-                for file_to_test in remote_files:
-                    if "_{}".format(config.flat_file) in file_to_test:
-                        # Don't remove latest uploaded file
-                        if file_to_test != remote_flat_name:
-                            log.info("Removing old flat file {}".format(file_to_test))
-                            sftp.remove(remote_mask_path + "/" + file_to_test)
+                    # Create AU002B_20231219_flat.bmp
+                    remote_flat_name = "{}_{}_{}".format(captured_dir.split('_')[0], captured_dir.split('_')[1], config.flat_file)
+                    log.info("Uploading to {} as {}".format(remote_mask_path, remote_flat_name))
+                    sftp.put(most_recent_flat, remote_mask_path + "/" + remote_flat_name)
+                    remote_files = sftp.listdir(path=remote_mask_path)
+                    for file_to_test in remote_files:
+                        if "_{}".format(config.flat_file) in file_to_test:
+                            # Don't remove latest uploaded file
+                            if file_to_test != remote_flat_name:
+                                log.info("Removing old flat file {}".format(file_to_test))
+                                sftp.remove(remote_mask_path + "/" + file_to_test)
+                            else:
+                                log.info("Not removing newly uploaded file {}".format(file_to_test))
                         else:
-                            log.info("Not removing newly uploaded file {}".format(file_to_test))
-                    else:
-                        log.info("Not removing {}".format(file_to_test))
+                            log.info("Not removing {}".format(file_to_test))
 
 
-            else:
-                log.info("Did not find {}".format(most_recent_flat))
-    except:
-        log.warning("Could not upload latest flat")
+                else:
+                    log.info("Did not find {}".format(most_recent_flat))
+        except:
+            log.warning("Could not upload latest flat")
 
 
-    # Change the directory into file
-    remote_mask = remote_mask_path + config.mask_remote_name
+        # Change the directory into file
+        remote_mask = remote_mask_path + config.mask_remote_name
 
 
-    # Check if the remote mask file exists
-    try:
-        sftp.lstat(remote_mask)
-    
-    except IOError as e:
-        log.info('No new mask on the server!')
-        return False
+        # Check if the remote mask file exists
+        try:
+            sftp.lstat(remote_mask)
+        
+        except IOError as e:
+            log.info('No new mask on the server!')
+            return False
 
 
-    # Download the remote mask
-    log.info("Downloading {} from {} to {}".format(remote_mask, remote_mask_path, os.path.join(config.config_file_path, config.mask_file)))
-    sftp.get(remote_mask, os.path.join(config.config_file_path, config.mask_file))
-    log.info('Latest mask downloaded!')
+        # Download the remote mask
+        log.info("Downloading {} from {} to {}".format(remote_mask, remote_mask_path, os.path.join(config.config_file_path, config.mask_file)))
+        sftp.get(remote_mask, os.path.join(config.config_file_path, config.mask_file))
+        log.info('Latest mask downloaded!')
 
 
 
 
-    ### Rename the remote mask file, add a timestamp of download
-    ### This prevents the same mask being downloaded and overwriting an operator's more recent changes
+        ### Rename the remote mask file, add a timestamp of download
+        ### This prevents the same mask being downloaded and overwriting an operator's more recent changes
 
-    # Construct a new name with the time of the download included
-    dl_mask_name = remote_mask_path + 'mask_dl_' \
-        + RmsDateTime.utcnow().strftime('%Y%m%d_%H%M%S.%f') + '.bmp'
+        # Construct a new name with the time of the download included
+        dl_mask_name = remote_mask_path + 'mask_dl_' \
+            + RmsDateTime.utcnow().strftime('%Y%m%d_%H%M%S.%f') + '.bmp'
 
-    sftp.posix_rename(remote_mask, dl_mask_name)
+        sftp.posix_rename(remote_mask, dl_mask_name)
 
-    log.info('Remote mask renamed to: ' + dl_mask_name)
+        log.info('Remote mask renamed to: ' + dl_mask_name)
 
-    ### ###
+    finally:
+        if sftp:
+            log.debug("Closing SFTP channel")
+            sftp.close()
+        if ssh:
+            log.debug("Closing SSH client connection")
+            ssh.close()
 
     return True
 
@@ -194,4 +197,4 @@ if __name__ == "__main__":
 
 
     # Test mask downloading
-    downloadNewMask(config, port=22)
+    downloadNewMask(config)

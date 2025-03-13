@@ -20,7 +20,6 @@ import sys
 import gc
 import os
 import time
-import logging
 import argparse
 
 import numpy as np
@@ -36,11 +35,12 @@ from RMS.ExtractStarsFrameInterface import extractStarsFrameInterface
 from RMS.Detection import detectMeteors
 from RMS.DetectionTools import loadImageCalibration
 from RMS.QueuedPool import QueuedPool
+from RMS.Logger import getLogger
 from RMS.Misc import RmsDateTime
 
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 
@@ -476,7 +476,7 @@ if __name__ == "__main__":
     from RMS.Logger import initLogging
     initLogging(config, 'detection_', safedir=cml_args.dir_path)
 
-    log = logging.getLogger("logger")
+    log = getLogger("logger")
 
     ######
 

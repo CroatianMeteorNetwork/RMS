@@ -15,7 +15,6 @@ import sys
 import copy
 import shutil
 import argparse
-import logging
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -28,7 +27,7 @@ from RMS.Formats.FFfile import getMiddleTimeFF
 from RMS.Formats import Platepar
 from RMS.Formats import StarCatalog
 from RMS.Math import rotatePoint
-from RMS.Logger import initLogging
+from RMS.Logger import initLogging, getLogger
 
 # Import Cython functions
 import pyximport
@@ -36,7 +35,7 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog
 
 
-log = logging.getLogger('logger')
+log = getLogger('logger')
 
 
 def addPoint(img, xc, yc, radius):
@@ -376,8 +375,7 @@ if __name__ == "__main__":
     initLogging(config, 'fftalign_')
 
     # Get the logger handle
-    log = logging.getLogger("logger")
-    log.setLevel(logging.INFO)
+    log = getLogger("logger", level="INFO")
 
     # Get a list of files in the night folder
     file_list = os.listdir(dir_path)

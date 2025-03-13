@@ -8,7 +8,6 @@ import platform
 import shutil
 import datetime
 import time
-import logging
 import glob
 import argparse
 import subprocess
@@ -18,11 +17,11 @@ import ephem
 
 from RMS.CaptureDuration import captureDuration
 from RMS.ConfigReader import loadConfigFromDirectory
-from RMS.Logger import initLogging
+from RMS.Logger import initLogging, getLogger
 from RMS.Misc import RmsDateTime
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 # Python 2 doesn't have the timestamp function, so make one
@@ -157,6 +156,10 @@ def usedSpaceNoRecursion(obj_path):
 
     obj_path = os.path.expanduser(obj_path)
     path_list, n = os.walk(obj_path), 0
+
+    if os.path.isfile(obj_path):
+        n += os.path.getsize(obj_path) / 1024 ** 3
+
     for root, directory_list, file_list in path_list:
         for _ in directory_list:
             n += 4.024 / 1024 ** 2
@@ -198,6 +201,7 @@ def objectsToDelete(object_path, stationID, quota_gb=0, bz2=False):
     else:
         object_list = getNightDirs(object_path, stationID)
 
+
     # reverse it to put newest at top
     object_list.reverse()
 
@@ -233,8 +237,12 @@ def rmList(delete_list, dummy_run=True):
                 log.info("Config setting inhibited deletion of {}".format(os.path.basename(full_path)))
             else:
                 if os.path.exists(full_path):
-                    shutil.rmtree(full_path)
-                    log.info("Deleted {}".format(os.path.basename(full_path)))
+                    if os.path.isdir(full_path):
+                        shutil.rmtree(full_path)
+                        log.info("Deleted directory {}".format(os.path.basename(full_path)))
+                    if os.path.isfile(full_path):
+                        os.remove(full_path)
+                        log.info("Deleted file {}".format(os.path.basename(full_path)))
                 else:
                     log.warning("Attempted to delete {}, which did not exist".format(full_path))
         except:
@@ -309,24 +317,29 @@ def getNightDirs(dir_path, stationID):
     return dir_list
 
 
-def getRawItems(dir_path, in_frame_dir=False, unique=False):
-    """ Returns a sorted list of video directories / frame files from within the raw video / frames directories respectively.
-        In case of frames directory, only adds to the list the processed frames-(archive, timelapse, json) files and
-        not directories as they may be unprocessed.
+def getRawItems(dir_path, in_video_dir=False, unique=False):
+    """ Designed to work with dir_path = frame_dir, video_dir, OR times_dir
+        For video_dir: returns a sorted list of directories with mkv clips
+        For frame_dir: returns a sorted list of processed frames-(archive, timelapse, json) files
+        For times_dir: returns a sorted list of processed frame times (ft file) archives
+        
+        Directories are not added for frame_dir or times_dir as they may not have gone through post-processing;
+        post-processing ensures raw directories for these are removed
 
     Arguments:
-        dir_path: [str] Path to the raw video / frames directory.
-        in_frame_dir: [bool] Set this to True when dir_path is frames directory. False by default.
-        unique: [bool] Set this to True to get unique files by date
+        dir_path: [str] Path to the raw video / frames / frame times directory.
+        in_video_dir: [bool] Set this to True when dir_path is video directory. False by default.
+        unique: [bool] Set this to True to get unique files by date 
 
     Return:
-        dir_list: [list] A list of directories / files in the raw video / frame directories, each corresponding to one day of data
+        dir_list: [list] A list of directories / files in the raw video / frame / frame time directories,
+            each corresponding to one day of data
 
     """
 
     # Helper function to check frames file conditions
     def isProcessedFrameFile(path):
-        suffix = ['_frametimes.json', '_frames_timelapse.mp4', '_frames.tar.gz', '_frames.tar.bz2']
+        suffix = ['_frametimes.json', '_frames_timelapse.mp4', '_frames.tar.gz', '_frames.tar.bz2', '_FT.tar.bz2']
         return (os.path.isfile(path) and any(path.endswith(end) for end in suffix))
 
     # Get a list of directories / files in the given directory
@@ -335,16 +348,21 @@ def getRawItems(dir_path, in_frame_dir=False, unique=False):
     
     raw_list = []
     
+    # All of raw video, frame, and frame time directories follow Year/Day/Hour/ hierarchy for files.
     for year in os.listdir(dir_path):
         year_path = os.path.join(dir_path, year)
 
-        if in_frame_dir:
-            raw_list += [os.path.join(year_path, day_file) for day_file in os.listdir(year_path) if isProcessedFrameFile(os.path.join(year_path, day_file))]
+        if in_video_dir:
+            raw_list += [os.path.join(year_path, day_dir) for day_dir in os.listdir(year_path) if \
+                         os.path.isdir(os.path.join(year_path, day_dir))]
         else:
-            raw_list += [os.path.join(year_path, day_dir) for day_dir in os.listdir(year_path) if os.path.isdir(os.path.join(year_path, day_dir))]
+            raw_list += [os.path.join(year_path, day_file) for day_file in os.listdir(year_path) if \
+                         isProcessedFrameFile(os.path.join(year_path, day_file))]
 
 
-    # Output files with unique dates
+    # Output files with unique dates - used for counting frame files (in days) in the main function deleteOldObservations
+    # The local function above isProcessedFrameFiles lists the multiple frames data files suffixes that could exist for 
+    # a single day
     if unique:
         unique_dates = []
         temp_path_list = []
@@ -423,32 +441,37 @@ def deleteNightFolders(dir_path, config, delete_all=False):
     return getNightDirs(dir_path, config.stationID)
 
 
-def deleteRawItems(dir_path, delete_all=False, in_frame_dir=False, unique=False):
-    """ Deletes raw video / frames data directories / files respectively, to free up disk space. In case of frames directory,
-        it only will check for and delete old processed files (timelapses, archives, and json files) per day
-        and not directories as they may be unprocessed.
+def deleteRawItems(dir_path, delete_all=False, in_video_dir=False, unique=False):
+    """ Designed to work with dir_path = frame_dir, video_dir, OR times_dir
+        Uses the output of getRawItems. It deletes single item(s) unless delete_all = True.
+
+        For video_dir: delete a single day's directory with mkv clips, 
+        For frame_dir: delete a single day's SET of processed frames-(archive, timelapse, json) files
+        For times_dir: delete a single day's archive of processed frame times (ft file)
+        
+        Directories are not deleted for frame_dir or times_dir as they may not have gone through post-processing;
+        post-processing ensures raw directories for these are removed
 
     Arguments:
-        dir_path: [str] Path to the data directory
-
-    Keyword arguments:
-        delete_all: [bool] If True, all raw video / frame folders will be deleted. False by default.
-        in_frame_dir: [bool] Set this to True when dir_path is frames directory. False by default.
-        unique: [bool] Set this to True to get unique files by date
+        dir_path: [str] Path to the raw video / frames / frame times directory.
+        delete_all: [bool] If True, all raw video / frame / frame time data will be deleted. False by default.
+        in_video_dir: [bool] Set this to True when dir_path is video directory. False by default.
+        unique: [bool] Set this to True to get unique files by date 
 
     Return:
         dir_list: [list] A list of remaining raw video/frame directories/files in the data directory.
     """
 
     # Get the list of raw directories/files
-    del_list = getRawItems(dir_path, in_frame_dir=in_frame_dir)
+    del_list = getRawItems(dir_path, in_video_dir=in_video_dir)
 
     # Delete the raw video / frames directories / files, respectively
     for item in del_list:
         
         # Delete the next directory or file(s) in the list, i.e. the oldest ones
         try:
-            if in_frame_dir:
+            # For frames_dir or times_dir
+            if not in_video_dir:
                 
                 # For frame files, each day has a triplet of files: an archive (gz or bz2), a timelapse, and a json file
                 # We match file date for this batch of files for one day. The file base names are of type STATIONID_YYYYMMDD-DoY_*
@@ -460,6 +483,7 @@ def deleteRawItems(dir_path, delete_all=False, in_frame_dir=False, unique=False)
                 for file in files_to_delete:
                     os.remove(file)
 
+            # For video_dir
             else:
                 shutil.rmtree(item)
 
@@ -470,8 +494,8 @@ def deleteRawItems(dir_path, delete_all=False, in_frame_dir=False, unique=False)
         if not delete_all:
             break
 
-    # Return the list of remaining raw frame/video directories
-    return getRawItems(dir_path, in_frame_dir=in_frame_dir, unique=unique)
+    # Return the list of remaining raw video / frame / frame time directories
+    return getRawItems(dir_path, in_video_dir=in_video_dir, unique=unique)
 
 
 
@@ -555,6 +579,7 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     archived_dir = os.path.join(data_dir, archived_dir)
     frame_dir = os.path.join(data_dir, config.frame_dir)
     video_dir = os.path.join(data_dir, config.video_dir)
+    times_dir = os.path.join(data_dir, config.times_dir)
 
     # clear down logs first
     log.info('clearing down log files')
@@ -652,24 +677,24 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     while True:
 
         # Delete one day of video directory data
-        video_dirs_remaining = deleteRawItems(video_dir)
+        video_dirs_remaining = deleteRawItems(video_dir, in_video_dir=True)
 
-        log.info("Deleted dir in video directory: {:s}".format(video_dir))
+        log.info("Deleted dir(s) in video files directory: {:s}".format(video_dir))
         log.info("Free space: {:.2f} GB".format(availableSpace(data_dir)/1024/1024/1024))
 
-        # Break the there's enough space
+        # Break if there's enough space
         if availableSpace(data_dir) > next_night_bytes:
             free_space_status = True
             break
 
 
         # Delete one day of frame directory data
-        frame_dirs_remaining = deleteRawItems(frame_dir, in_frame_dir=True)
+        frame_dirs_remaining = deleteRawItems(frame_dir)
 
         log.info("Deleted files in frame directory: {:s}".format(frame_dir))
         log.info("Free space: {:.2f} GB".format(availableSpace(data_dir)/1024/1024/1024))
 
-        # Break the there's enough space
+        # Break if there's enough space
         if availableSpace(data_dir) > next_night_bytes:
             free_space_status = True
             break
@@ -681,7 +706,7 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
         log.info("Deleted dir in captured directory: {:s}".format(captured_dir))
         log.info("Free space: {:.2f} GB".format(availableSpace(data_dir)/1024/1024/1024))
 
-        # Break the there's enough space
+        # Break if there's enough space
         if availableSpace(data_dir) > next_night_bytes:
             free_space_status = True
             break
@@ -699,6 +724,18 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
             break
 
 
+        # Delete one day of times directory data
+        times_dirs_remaining = deleteRawItems(times_dir)
+
+        log.info("Deleted dir(s) in ft files directory: {:s}".format(times_dir))
+        log.info("Free space: {:.2f} GB".format(availableSpace(data_dir)/1024/1024/1024))
+
+        # Break if there's enough space
+        if availableSpace(data_dir) > next_night_bytes:
+            free_space_status = True
+            break
+
+
         # Wait 10 seconds between deletes. This helps to balance out the space distribution if multiple
         #   instances of RMS are running on the same system
         log.info("Still not enough space, waiting 10 s...")
@@ -706,9 +743,9 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
 
         # If no folders left to delete, try to delete archived files
         if (len(captured_dirs_remaining) + len(archived_dirs_remaining) + 
-            len(frame_dirs_remaining) + len(video_dirs_remaining) == 0):
+            len(frame_dirs_remaining) + len(video_dirs_remaining) + len(times_dirs_remaining) == 0):
 
-            log.info("Deleted all Capture, Archived, Frame and Video directories, deleting archived bz2 files...")
+            log.info("Deleted all Capture, Archived, Frame, Video and Time directories, deleting archived bz2 files...")
 
             archived_files_remaining = deleteFiles(archived_dir, config)
 
@@ -773,13 +810,13 @@ def deleteByQuota(archived_dir, capt_dir_quota, captured_dir, config):
     log.info(quotaReport(capt_dir_quota, config, after=False))
 
     delete_list = objectsToDelete(captured_dir, config.stationID, capt_dir_quota, bz2=False)
-    rmList(delete_list, dummy_run=config.quota_management_disabled)
+    rmList(delete_list, dummy_run= not config.quota_management_enabled)
 
     delete_list = objectsToDelete(archived_dir, config.stationID, config.arch_dir_quota, bz2=False)
-    rmList(delete_list, dummy_run=config.quota_management_disabled)
+    rmList(delete_list, dummy_run= not config.quota_management_enabled)
 
     delete_list = objectsToDelete(archived_dir, config.stationID, config.bz2_files_quota, bz2=True)
-    rmList(delete_list, dummy_run=config.quota_management_disabled)
+    rmList(delete_list, dummy_run= not config.quota_management_enabled)
 
     log.info(quotaReport(capt_dir_quota, config, after=True))
 
@@ -825,11 +862,11 @@ def deleteOldDirs(data_dir, config):
     final_count = 0
     frame_dir = os.path.join(data_dir, config.frame_dir)
     if config.frame_days_to_keep > 0:
-        framedir_list = getRawItems(frame_dir, in_frame_dir=True, unique=True)
+        framedir_list = getRawItems(frame_dir, unique=True)
         orig_count = len(framedir_list)
         while len(framedir_list) > config.frame_days_to_keep:
             prev_length = len(framedir_list)
-            framedir_list = deleteRawItems(frame_dir, in_frame_dir=True, unique=True)
+            framedir_list = deleteRawItems(frame_dir, unique=True)
             if len(framedir_list) == prev_length:
                 log.error("Failed to delete folder from FrameFiles. Exiting loop.")
                 break
@@ -842,16 +879,34 @@ def deleteOldDirs(data_dir, config):
     final_count = 0
     video_dir = os.path.join(data_dir, config.video_dir)
     if config.video_days_to_keep > 0:
-        videodir_list = getRawItems(video_dir)
+        videodir_list = getRawItems(video_dir, in_video_dir=True)
         orig_count = len(videodir_list)
         while len(videodir_list) > config.video_days_to_keep:
             prev_length = len(videodir_list)
-            videodir_list = deleteRawItems(video_dir)
+            videodir_list = deleteRawItems(video_dir, in_video_dir=True)
             if len(videodir_list) == prev_length:
                 log.error("Failed to delete folder from VideoFiles. Exiting loop.")
                 break
         final_count = len(videodir_list)
     log.info('Purged {} days of old folders from VideoFiles'.format(orig_count - final_count))
+
+
+    # Deleting old video timestamp (ft file) archives.
+    orig_count = 0
+    final_count = 0
+    times_dir = os.path.join(data_dir, config.times_dir)
+    if config.times_days_to_keep > 0:
+        timesdir_list = getRawItems(times_dir)
+        orig_count = len(timesdir_list)
+        while len(timesdir_list) > config.times_days_to_keep:
+            prev_length = len(timesdir_list)
+            timesdir_list = deleteRawItems(times_dir)
+            if len(timesdir_list) == prev_length:
+                log.error("Failed to delete folder from TimeFiles. Exiting loop.")
+                break
+        final_count = len(timesdir_list)
+    log.info('Purged {} days of old folders from TimeFiles'.format(orig_count - final_count))
+
 
     # Deleting old bz2 files
     orig_count = 0
@@ -931,7 +986,7 @@ if __name__ == '__main__':
 
     # Initialize the logger
     initLogging(config)
-    log = logging.getLogger("logger")
+    log = getLogger("logger")
 
     if not os.path.isdir(config.data_dir):
         log.info('Data Dir not found {}'.format(config.data_dir))

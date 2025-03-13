@@ -291,7 +291,7 @@ class Config:
         # Decoder for the gstreamer media backend (e.g. decodebin, avdec_h264, nvh264dec)
         self.gst_decoder = "avdec_h264"
 
-        # Toggle raw video saving in data_dir/video_dir.
+        # Toggle raw video saving in data_dir/video_dir
         self.raw_video_save = False
 
         # Duration of the raw video segment (seconds)
@@ -341,6 +341,7 @@ class Config:
         self.archived_dir = "ArchivedFiles"
         self.frame_dir = "FramesFiles"
         self.video_dir = "VideoFiles"
+        self.times_dir = "TimeFiles"
 
         # days of logfiles to keep
         self.logdays_to_keep = 30
@@ -367,7 +368,12 @@ class Config:
         # Keep this many video dirs (days)
         # Zero means keep them all
         self.video_days_to_keep = 2
-        
+
+        # Timestamp dirs to keep
+        # Keep this many ft file (timestamp) folders (days)
+        # Zero means keep them all
+        self.times_days_to_keep = 8
+
         # Space quotas in GB
 
 
@@ -375,7 +381,7 @@ class Config:
         # Space allocation for all of rms_data
 
         # Disable the deletion by quota management for testing purposes
-        self.quota_management_disabled = False
+        self.quota_management_enabled = False
 
 
         # Space allocation for all of rms_data
@@ -397,6 +403,9 @@ class Config:
 
         # Enable/disable saving a live.jpg file in the data directory with the latest image
         self.live_jpg = False
+
+        # Toggle saving of frame time files (FT files) to times_dir
+        self.save_frame_times = True
 
         # Toggle saving video frames at a set interval to the frame_dir
         self.save_frames = True
@@ -421,9 +430,6 @@ class Config:
 
         # Automatically reprocess broken capture directories
         self.auto_reprocess = True
-
-        # Prioritize capture over reprocessing - do not start reprocessing a new directory if should be capturing
-        self.prioritize_capture_over_reprocess = False
 
         # Flag file which indicates that the previously processed files are loaded during capture resume
         self.capture_resume_flag_file = ".capture_resuming"
@@ -977,8 +983,11 @@ def parseCapture(config, parser):
     if parser.has_option(section, "video_days_to_keep"):
         config.video_days_to_keep = int(parser.get(section, "video_days_to_keep"))
 
-    if parser.has_option(section, "quota_management_disabled"):
-        config.quota_management_disabled = parser.getboolean(section, "quota_management_disabled")
+    if parser.has_option(section, "times_days_to_keep"):
+        config.times_days_to_keep = int(parser.get(section, "times_days_to_keep"))
+
+    if parser.has_option(section, "quota_management_enabled"):
+        config.quota_management_enabled = parser.getboolean(section, "quota_management_enabled")
 
 
 
@@ -1002,6 +1011,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "video_dir"):
         config.video_dir = parser.get(section, "video_dir")
+
+    if parser.has_option(section, "times_dir"):
+        config.times_dir = parser.get(section, "times_dir")
 
     if parser.has_option(section, "width"):
         config.width = parser.getint(section, "width")
@@ -1166,6 +1178,10 @@ def parseCapture(config, parser):
     if parser.has_option(section, "live_jpg"):
         config.live_jpg = parser.getboolean(section, "live_jpg")
 
+    # Toggle saving of frame time files (FT files) to times_dir
+    if parser.has_option(section, "save_frame_times"):
+        config.save_frame_times = parser.getboolean(section, "save_frame_times")
+
     # Enable/disable saving video frames
     if parser.has_option(section, "save_frames"):
         config.save_frames = parser.getboolean(section, "save_frames")
@@ -1215,11 +1231,6 @@ def parseCapture(config, parser):
     # Enable/disable auto reprocessing
     if parser.has_option(section, "auto_reprocess"):
         config.auto_reprocess = parser.getboolean(section, "auto_reprocess")
-
-    # Prioritize capture over reprocessing - do not start reprocessing a new directory if should be capturing
-    if parser.has_option(section, "prioritize_capture_over_reprocess"):
-        config.prioritize_capture_over_reprocess = parser.getboolean(section, \
-            "prioritize_capture_over_reprocess")
 
     # Load name of the capture resume flag file
     if parser.has_option(section, "capture_resume_flag_file"):

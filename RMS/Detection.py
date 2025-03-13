@@ -17,7 +17,6 @@
 from __future__ import print_function, absolute_import, division
 
 import argparse
-import logging
 from time import time
 import datetime
 import sys, os
@@ -44,6 +43,7 @@ from RMS.Formats import FFfile
 from RMS.Formats import FTPdetectinfo
 from RMS.Formats.FrameInterface import detectInputType
 from RMS.Formats.AST import loadAST
+from RMS.Logger import getLogger
 from RMS.Misc import mkdirP
 from RMS.Routines.Grouping3D import find3DLines, getAllPoints
 from RMS.Routines.CompareLines import compareLines
@@ -63,7 +63,7 @@ VERBOSE_DEBUG = False
 
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 
@@ -1732,7 +1732,7 @@ if __name__ == "__main__":
     from RMS.Logger import initLogging
     initLogging(config, 'detection_', safedir=os.path.dirname(cml_args.dir_path[0]))
 
-    log = logging.getLogger("logger")
+    log = getLogger("logger")
 
     ######
 

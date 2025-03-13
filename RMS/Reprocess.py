@@ -8,9 +8,10 @@ import os
 import sys
 import traceback
 import argparse
-import logging
 import random
 import glob
+import tarfile
+import shutil
 
 from RMS.ArchiveDetections import archiveDetections, archiveFieldsums
 # from RMS.Astrometry.ApplyAstrometry import applyAstrometryFTPdetectinfo
@@ -24,6 +25,7 @@ from RMS.Formats.FFfile import validFFName
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
 from RMS.Formats.Platepar import Platepar
 from RMS.Formats import CALSTARS
+from RMS.Logger import getLogger
 from RMS.MLFilter import filterFTPdetectinfoML
 from RMS.UploadManager import UploadManager
 from RMS.Routines.Image import saveImage
@@ -45,7 +47,7 @@ from RMS.Misc import RmsDateTime
 
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 
@@ -94,9 +96,8 @@ def getPlatepar(config, night_data_dir):
         log.info('No platepar file found!')
 
 
+    # Make sure that the station code from the config and the platepar match
     if platepar is not None:
-        
-        # Make sure that the station code from the config and the platepar match
         if platepar.station_code is not None:
             if config.stationID != platepar.station_code:
 
@@ -114,7 +115,8 @@ def getPlatepar(config, night_data_dir):
                 platepar.elev = config.elevation
 
         
-        # Make sure the config and the platepar FOV are within a factor of two
+    # Make sure the config and the platepar FOV are within a factor of two
+    if platepar is not None:
         if (platepar.fov_h is not None) and (platepar.fov_v is not None):
             
             # Calculate the diagonal FOV for both the platepar and the config
@@ -375,14 +377,10 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     # Archive all fieldsums to one archive
     archiveFieldsums(night_data_dir)
 
-
-    # If videos were saved, rename them with the timestamp of the first frame
-    # This command requires the FS archive to be present
+    # Timestamp RMS videos if configured
     # if config.raw_video_save:
-
     #     try:
     #         timestampRMSVideos(config.video_dir, rename=True)
-
     #     except Exception as e:
     #         log.debug('Renaming videos failed with the message:\n' + repr(e))
     #         log.debug(repr(traceback.format_exception(*sys.exc_info())))
@@ -391,6 +389,52 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     # List for any extra files which will be copied to the night archive directory. Full paths have to be 
     #   given
     extra_files = []
+
+
+    # Add relevant FT files the upload archive.
+    if config.save_frame_times:
+
+        log.info('Archiving new frame time (FT) files...')
+
+        # Archive unprocessed FT files, one day at a time 
+        try:
+            ft_file_dir = os.path.join(config.data_dir, config.times_dir)
+
+            for year in os.listdir(ft_file_dir):
+                # Each 'year' is 2024, 2025, ...
+                year_dir = os.path.join(ft_file_dir, year)
+
+                # FT file directory at this level will only consist of unprocessed days (directories) or
+                # processed days (bz2 archives)
+
+                for day in os.listdir(year_dir):
+                    # Each 'day' is 20240923-267, 20240924-268, ...
+                    day_dir = os.path.join(year_dir, day)
+                    
+                    # Skip if not directory (eg. bz2 archive) or if inside today's directory
+                    if (not os.path.isdir(day_dir)) or (day == RmsDateTime.utcnow().strftime("%Y%m%d-%j")):
+                        continue
+
+                    try:
+                        # Archive directory for this day of ft files
+                        tar_path = os.path.join(year_dir, '{}_{}_FT.tar.bz2'.format(config.stationID, day))
+
+                        with tarfile.open(tar_path, 'w:bz2') as tar:
+                            tar.add(day_dir, arcname=os.path.basename(day_dir))
+
+                        # Delete directory for this day of ft files
+                        shutil.rmtree(day_dir)
+                        print("Successfully created tar archive at: {}".format(tar_path))
+
+                        # Add to extra files for upload
+                        extra_files.append(tar_path)
+
+                    except Exception as e:
+                        print("Error creating tar archive: {}".format(e))
+
+        except Exception as e:
+            log.debug('Archiving FT files failed with message:\n' + repr(e))
+            log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
 
     log.info('Making a flat...')
@@ -731,7 +775,7 @@ if __name__ == "__main__":
     from RMS.Logger import initLogging
     initLogging(config, 'reprocess_')
 
-    log = logging.getLogger("logger")
+    log = getLogger("logger")
 
     ######
 
