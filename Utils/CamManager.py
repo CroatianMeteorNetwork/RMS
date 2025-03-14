@@ -505,7 +505,7 @@ def ProcessCMD(cmd):
                 print("Interface set to ", intf)
             pass
         else:
-            print(f'available interfaces {det_intfs}')
+            print('available interfaces {}'.format(det_intfs))
             print('nb: enclose in double-quotes if there is a space in the name')
             
     if cmd[0].lower() == "config":
@@ -827,7 +827,7 @@ if __name__ == "__main__":
 
     if cml_args.intf:
         intf = cml_args.intf
-        print(f'using interface {intf}')
+        print('using interface {}'.format(intf))
     else:
         intf = None
 
@@ -843,7 +843,7 @@ if __name__ == "__main__":
         root = Tk()
         app = GUITk(root)
         style = Style()
-        print(f'themse are {style.theme_names()}')
+        print('themse are {}'.format(style.theme_names()))
         if theme and theme in style.theme_names():
             style.theme_use(theme)
         root.mainloop()
