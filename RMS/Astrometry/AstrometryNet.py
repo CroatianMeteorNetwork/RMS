@@ -22,9 +22,8 @@ except ImportError:
 
 
 
-
-def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_data=None, fov_w_range=None,
-                       max_stars=100, verbose=False, x_center=None, y_center=None):
+def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None, y_data=None, 
+                            fov_w_range=None, max_stars=100, verbose=False, x_center=None, y_center=None):
     """ Find an astrometric solution of X, Y image coordinates of stars detected on an image using the 
         local installation of astrometry.net.
 
@@ -40,13 +39,17 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
         verbose: [bool] Print verbose output. Default is False.
         x_center: [float] X coordinate of the image center. Default is None.
         y_center: [float] Y coordinate of the image center. Default is None.
-    """
 
-    # If the local installation of astrometry.net is not available, use the nova.astrometry.net API
-    if not ASTROMETRY_NET_AVAILABLE:
-        return novaAstrometryNetSolve(ff_file_path=ff_file_path, img=img, x_data=x_data, y_data=y_data, 
-                                      fov_w_range=fov_w_range, x_center=x_center, y_center=y_center)
-    
+    Returns:
+        [tuple] A tuple containing the following elements:
+            - ra_mid: [float] Right ascension of the image center in degrees.
+            - dec_mid: [float] Declination of the image center in degrees.
+            - rot_eq_standard: [float] Equatorial orientation in degrees.
+            - scale: [float] Scale in arcsec/pixel.
+            - fov_w: [float] Width of the FOV in degrees.
+            - fov_h: [float] Height of the FOV in degrees.
+            - star_data: [list] A list of star data, where star_data = [x_data, y_data].
+    """
 
     # Read the FF file, if given
     if ff_file_path is not None:
@@ -254,6 +257,56 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
     else:
         print("No solution found.")
         return None
+
+
+def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_data=None, fov_w_range=None,
+                       max_stars=100, verbose=False, x_center=None, y_center=None):
+    """ Find an astrometric solution of X, Y image coordinates of stars detected on an image using the 
+        local installation of astrometry.net.
+
+    Keyword arguments:
+        ff_file_path: [str] Path to the FF file to load.
+        img: [ndarray] Numpy array containing image data.
+        mask: [ndarray] Mask image. None by default.
+        x_data: [list] A list of star x image coordinates.
+        y_data: [list] A list of star y image coordinates
+        fov_w_range: [2 element tuple] A tuple of scale_lower and scale_upper, i.e. the estimate of the 
+            width of the FOV in degrees.
+        max_stars: [int] Maximum number of stars to use for the astrometry.net solution. Default is 100.
+        verbose: [bool] Print verbose output. Default is False.
+        x_center: [float] X coordinate of the image center. Default is None.
+        y_center: [float] Y coordinate of the image center. Default is None.
+    """
+
+    # If the local installation of astrometry.net is not available, use the nova.astrometry.net API
+    if not ASTROMETRY_NET_AVAILABLE:
+        return novaAstrometryNetSolve(
+            ff_file_path=ff_file_path, img=img, x_data=x_data, y_data=y_data, 
+            fov_w_range=fov_w_range, x_center=x_center, y_center=y_center
+            )
+    
+
+    else:
+
+        # Try to solve the image using the local installation of astrometry.net
+        try:
+            return astrometryNetSolveLocal(
+                ff_file_path=ff_file_path, img=img, mask=mask, x_data=x_data, y_data=y_data, 
+                fov_w_range=fov_w_range, max_stars=max_stars, verbose=verbose, 
+                x_center=x_center, y_center=y_center
+                )
+        
+        # If it fails, use the nova.astrometry.net API
+        except Exception as e:
+
+            print("Local astrometry.net solver failed with error:")
+            print(e)
+            print("Trying the nova.astrometry.net API...")
+
+            return novaAstrometryNetSolve(
+                ff_file_path=ff_file_path, img=img, x_data=x_data, y_data=y_data, 
+                fov_w_range=fov_w_range, x_center=x_center, y_center=y_center
+                )
 
 
 if __name__ == "__main__":
