@@ -39,7 +39,6 @@ from Utils.PlotFieldsums import plotFieldsums
 from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
 from Utils.ShowerAssociation import showerAssociation
 from Utils.PlotTimeIntervals import plotFFTimeIntervals
-from Utils.TimestampRMSVideos import timestampRMSVideos
 from RMS.Formats.ObservationSummary import addObsParam, getObsDBConn, nightSummaryData
 from RMS.Formats.ObservationSummary import serialize, startObservationSummaryReport, finalizeObservationSummary
 from Utils.AuditConfig import compareConfigs
@@ -376,15 +375,6 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
     # Archive all fieldsums to one archive
     archiveFieldsums(night_data_dir)
-
-    # Timestamp RMS videos if configured
-    # if config.raw_video_save:
-    #     try:
-    #         timestampRMSVideos(config.video_dir, rename=True)
-    #     except Exception as e:
-    #         log.debug('Renaming videos failed with the message:\n' + repr(e))
-    #         log.debug(repr(traceback.format_exception(*sys.exc_info())))
-
 
     # List for any extra files which will be copied to the night archive directory. Full paths have to be 
     #   given
