@@ -41,7 +41,7 @@ from RMS.Misc import decimalDegreesToSexHours
 from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
 from RMS.Routines.CustomPyqtgraphClasses import *
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle, greatCirclePhase
-from RMS.Routines.Image import signalToNoise
+from RMS.Routines.Image import signalToNoise, applyDark, applyFlat
 from RMS.Routines.MaskImage import getMaskFile
 from RMS.Routines import RollingShutterCorrection
 from RMS.Routines.MaskImage import loadMask, MaskStructure, getMaskFile
@@ -5798,8 +5798,16 @@ class PlateTool(QtWidgets.QMainWindow):
             # Subtract the background using the avepixel
             else:
 
-                # Subtract the avepixel image from the crop
+                # Get the avepixel image and apply a dark and flat to it if needed
                 avepixel = self.img_handle.ff.avepixel.T
+
+                if self.dark is not None:
+                    avepixel = applyDark(avepixel, self.dark)
+                if self.flat_struct is not None:
+                    avepixel = applyFlat(avepixel, self.flat_struct)
+
+                
+                # Mask out the colored in pixels
                 avepixel_masked = np.ma.masked_array(avepixel, mask_img)
                 avepixel_crop = avepixel_masked[x_min:x_max, y_min:y_max]
 
