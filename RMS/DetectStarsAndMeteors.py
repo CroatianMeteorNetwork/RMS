@@ -342,6 +342,10 @@ def saveDetections(detection_results, ff_dir, config, output_suffix=''):
     # Generate the name for the CALSTARS file
     calstars_name = 'CALSTARS_' + prefix + suffix + '.txt'
 
+    # Create the ff_dir if it doesn't exist
+    if not os.path.exists(ff_dir):
+        os.makedirs(ff_dir)
+
     # Write detected stars to the CALSTARS file
     CALSTARS.writeCALSTARS(star_list, ff_dir, calstars_name, config.stationID, config.height, 
         config.width)
