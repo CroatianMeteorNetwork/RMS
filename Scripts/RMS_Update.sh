@@ -12,7 +12,7 @@ BACKUP_CONFIG="$RMSBACKUPDIR/.config"
 BACKUP_MASK="$RMSBACKUPDIR/mask.bmp"
 SYSTEM_PACKAGES="$RMSSOURCEDIR/system_packages.txt"
 UPDATEINPROGRESSFILE=$RMSBACKUPDIR/update_in_progress
-LOCKFILE="/tmp/update.lock"
+LOCKFILE="/tmp/update-$(id -u).lock"
 MIN_SPACE_MB=200  # Minimum required space in MB
 RETRY_LIMIT=3
 
