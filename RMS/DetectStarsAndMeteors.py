@@ -296,10 +296,23 @@ def saveDetections(detection_results, ff_dir, config, output_suffix=''):
 
 
         if len(star_data) == 4:
+            
             x2, y2, background, intensity = star_data
+            
+            amplitude = np.zeros_like(x2).tolist()
             fwhm = (np.zeros_like(x2) - 1).tolist()
-        else:
+            snr = np.ones_like(x2).tolist()
+            saturated_count = np.zeros_like(x2).tolist()
+
+        elif len(star_data) == 6:
             _, x2, y2, background, intensity, fwhm = star_data
+
+            amplitude = np.zeros_like(x2).tolist()
+            snr = np.ones_like(x2).tolist()
+            saturated_count = np.zeros_like(x2).tolist()
+
+        else:
+            x2, y2, amplitude, intensity, fwhm, background, snr, saturated_count = star_data
             
 
         # Skip if no stars were found
@@ -307,7 +320,7 @@ def saveDetections(detection_results, ff_dir, config, output_suffix=''):
             continue
 
         # Construct the table of the star parameters
-        star_data = zip(y2, x2, background, intensity, fwhm)
+        star_data = zip(y2, x2, amplitude, intensity, fwhm, background, snr, saturated_count)
 
         # Add star info to the star list
         star_list.append([ff_name, star_data])
