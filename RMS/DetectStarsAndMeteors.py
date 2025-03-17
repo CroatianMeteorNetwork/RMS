@@ -312,7 +312,7 @@ def saveDetections(detection_results, ff_dir, config, output_suffix=''):
             saturated_count = np.zeros_like(x2).tolist()
 
         else:
-            x2, y2, amplitude, intensity, fwhm, background, snr, saturated_count = star_data
+            _, x2, y2, amplitude, intensity, fwhm, background, snr, saturated_count = star_data
             
 
         # Skip if no stars were found
