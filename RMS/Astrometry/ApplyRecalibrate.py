@@ -931,7 +931,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
             # Use the initial platepar for calibration
             applyAstrometryFTPdetectinfo(dir_path, ftpdetectinfo_file, None, platepar=platepar)
 
-            return recalibrated_platepars
+            return recalibrated_platepars, ftpdetectinfo_file_list
 
     ### ###
 
@@ -962,6 +962,14 @@ def recalibrateIndividualFFsAndApplyAstrometry(
     hour_list = []
     photom_offset_list = []
     photom_offset_std_list = []
+
+    # If the length of the recalibrated platepars is less than 2, skip the plot generation
+    if len(recalibrated_platepars_all) < 2:
+
+        log.info('Less than 2 FF files were recalibrated, skipping the plot generation...')
+
+        return recalibrated_platepars_all, ftpdetectinfo_file_list
+    
 
     first_dt = np.min([FFfile.filenameToDatetime(ff_name) for ff_name in recalibrated_platepars_all])
 
