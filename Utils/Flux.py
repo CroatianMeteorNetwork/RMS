@@ -1801,16 +1801,17 @@ def sensorCharacterization(config, flux_config, dir_path, meteor_data, default_f
     found_good_calstars = False
     for cal_file in os.listdir(dir_path):
 
-        if ('CALSTARS' in cal_file) and ('.txt' in cal_file) and (not found_good_calstars):
+        if cal_file.startswith("CALSTARS") and cal_file.endswith(".txt") and (not found_good_calstars):
 
             # Load the calstars file
             calstars_data = CALSTARS.readCALSTARS(dir_path, cal_file)
-            calstars_list, ff_frames = calstars_data
+            calstars_list, _ = calstars_data
 
             # Check that at least one image has good FWHM measurements
             for ff_name, star_data in calstars_list:
 
-                if len(star_data) > 0 and star_data[0][4] > -1:  # if stars were detected
+                if (len(star_data) > 0) and (star_data[0][4] > -1):  # if stars were detected
+
                     star_data = np.array(star_data)
 
                     # Check if the calstars file have FWHM information
@@ -1822,7 +1823,12 @@ def sensorCharacterization(config, flux_config, dir_path, meteor_data, default_f
                         print('CALSTARS file: ' + cal_file + ' loaded!')
                         break
 
+                    else:
+                        print("Bad FWHM values in {:s}!".format(cal_file))
+                
+                # If there are no FWHM entries, but the FF files exist, use the default FWHM
                 elif not exists_FF_files and (len(star_data) > 0) and (star_data[0][4] == -1):
+
                     if default_fwhm is not None:
                         found_good_calstars = True
                         print('CALSTARS file: ' + cal_file + ' loaded!')
@@ -1839,6 +1845,9 @@ def sensorCharacterization(config, flux_config, dir_path, meteor_data, default_f
                         #     'CALSTARS file does not have fwhm and FF files do not exist in'
                         #     'directory. You must give a fwhm value with "--fwhm 3"'
                         # )
+
+                else:
+                    print("No stars with good FWHM values detected for file {:s}!".format(ff_name))
 
     # If the FWHM information is not present, run the star extraction
     if not found_good_calstars and exists_FF_files:

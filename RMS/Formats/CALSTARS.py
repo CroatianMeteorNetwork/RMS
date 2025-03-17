@@ -176,25 +176,25 @@ def readCALSTARS(file_path, file_name, chunk_frames=256):
             y, x, level, amplitude = float(line[0]), float(line[1]), int(line[2]), int(line[3])
 
             # Read FWHM if given
-            if len(line) == 5:
+            if len(line) >= 5:
                 fwhm = float(line[4])
             else:
                 fwhm = -1.0
 
             # Read the background level
-            if len(line) == 6:
+            if len(line) >= 6:
                 background = int(line[5])
             else:
                 background = -1
 
             # Read the SNR
-            if len(line) == 7:
+            if len(line) >= 7:
                 snr = float(line[6])
             else:
                 snr = -1.0
 
             # Read the number of saturated pixels
-            if len(line) == 8:
+            if len(line) >= 8:
                 saturated_count = int(line[7])
             else:
                 saturated_count = -1
