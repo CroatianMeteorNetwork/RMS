@@ -1817,7 +1817,7 @@ def sensorCharacterization(config, flux_config, dir_path, meteor_data, default_f
                     fwhm = star_data[:, 4]
 
                     # Check that FWHM values have been computed well
-                    if np.all(fwhm > 1):
+                    if np.all(fwhm > 0):
                         found_good_calstars = True
                         print('CALSTARS file: ' + cal_file + ' loaded!')
                         break
