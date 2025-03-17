@@ -1450,6 +1450,9 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                         img_handle.setFrame(int(frame_no))
                         fr_img = img_handle.loadFrame()
 
+                        # Save a raw copy on which saturation will be checked
+                        fr_img_raw = np.copy(fr_img)
+
                         # Get the frame sequence number (frame number since the beginning of the recording)
                         seq_num = img_handle.getSequenceNumber()
 
@@ -1478,6 +1481,9 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
                         # If the FF file is used, set the sequence number to the current frame number
                         seq_num = i
+
+                        # Extract the raw frame if FF file is used, used for saturation check
+                        fr_img_raw = img_thres
 
 
                     # Calculate intensity as the sum of threshold passer pixels on the stripe
@@ -1515,7 +1521,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
                     # Count the number of saturated pixels (on original, non-gamma corrected image)
                     saturated_count = np.sum(
-                        fr_img[half_frame_pixels_stripe[:,1], half_frame_pixels_stripe[:,0]]
+                        fr_img_raw[half_frame_pixels_stripe[:,1], half_frame_pixels_stripe[:,0]]
                             >= saturation_threshold_report
                         )
 
