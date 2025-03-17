@@ -7,15 +7,11 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 
-from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP
-from RMS.Astrometry.Conversions import date2JD, jd2Date
-from RMS.Formats.FFfile import validFFName, getMiddleTimeFF, filenameToDatetime
-from RMS.Formats.FTPdetectinfo import readFTPdetectinfo
-from RMS.Formats.FFfile import read as readFF
+from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
+from RMS.Astrometry.Conversions import date2JD
+from RMS.Formats.FFfile import getMiddleTimeFF
 from RMS.Formats.Platepar import Platepar
 from RMS.Math import angularSeparation
-from Utils.ShowerAssociation import showerAssociation
-from RMS.Routines.MaskImage import loadMask, MaskStructure
 
 
 def drawConstellations(platepar, ff_file, separation_deg=90, color_bgra=None):
