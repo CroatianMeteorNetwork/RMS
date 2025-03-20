@@ -148,14 +148,14 @@ def gstDebugLogger(category, level, file, function, line, obj, message, user_dat
 class CustomHandler(logging.handlers.TimedRotatingFileHandler):
     """ Custom handler for rotating log files.
     
-    The live file: log_XX0000_2024-12-29_112347.log
-    On rollover: log_XX0000_2024-12-29_112347-[29_1123-to-30_1123].log
+    The live file: log_XX0000_20241229_112347.log
+    On rollover: log_XX0000_20241229_112347-[29_1123-to-30_1123].log
     """
     def __init__(self, station_id, start_time_str, *args, **kwargs):
         self.station_id = station_id
         self.start_time_str = start_time_str
         super(CustomHandler, self).__init__(*args, **kwargs)
-        self.suffix = "%Y-%m-%d_%H%M%S"
+        self.suffix = "%Y%m%d_%H%M%S"
         self.namer = self._rename_on_rollover
 
     def _rename_on_rollover(self, default_name):
@@ -167,7 +167,7 @@ class CustomHandler(logging.handlers.TimedRotatingFileHandler):
             base_noext = base_noext[:-4]
         
         # Calculate time range for the log file
-        start_time = datetime.datetime.strptime(start_time_str, "%Y-%m-%d_%H%M%S")
+        start_time = datetime.datetime.strptime(start_time_str, "%Y%m%d_%H%M%S")
         end_time = datetime.datetime.fromtimestamp(self.rolloverAt)
         
         # Format the new filename with time range
@@ -228,7 +228,7 @@ def _listener_configurer(config, log_file_prefix, safedir):
             mkdirP(log_path)
 
     # Generate log filename with timestamp
-    start_time_str = RmsDateTime.utcnow().strftime("%Y-%m-%d_%H%M%S")
+    start_time_str = RmsDateTime.utcnow().strftime("%Y%m%d_%H%M%S")
     logfile_name = "{}log_{}_{}.log".format(log_file_prefix, config.stationID, start_time_str)
     full_path = os.path.join(log_path, logfile_name)
 
