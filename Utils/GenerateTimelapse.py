@@ -256,6 +256,7 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
     
     # Process a valid first image to get dimensions
     # Try up to 10 images to find a valid one for dimensions
+    # Necessary for the streaming method
     sample_size = min(10, len(image_files))
     found_valid_image = False
     width, height = 0, 0
@@ -335,7 +336,6 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
             extracted_time = datetime.strptime(image_name_parts[1] + image_name_parts[2], "%Y%m%d%H%M%S")
             
             # Record timestamp data (only for frames that are successfully processed)
-            # Record timestamp data in the old format without station ID
             timestamp_data[str(processed_count)] = "_".join(os.path.basename(img_path).split('.')[0].split('_')[1:])
 
             # Add timestamp with outline for better visibility
@@ -351,7 +351,6 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
             
         except Exception as e:
             log.info("Warning: Error processing metadata for {}: {}".format(img_path, e))
-            # Still try to use the image without timestamp
         
         # Handle color conversion based on target mode
         try:
