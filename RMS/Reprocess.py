@@ -528,70 +528,116 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
     # Generate a timelapse from frames
     if config.timelapse_generate_from_frames:
-
         log.info('Generating timelapse from saved frames...')
         try:
             frame_dir = os.path.join(config.data_dir, config.frame_dir)
+            current_day = RmsDateTime.utcnow().strftime("%Y%m%d-%j")
 
             # Generate timelapse for each day of the year, if not present
             for year in os.listdir(frame_dir):
-                # Each 'year' is 2024, 2025, ...
                 year_dir = os.path.join(frame_dir, year)
 
-
                 for day in os.listdir(year_dir):
-                    # Each 'day' is 20240923-267, 20240924-268, ...
                     day_dir = os.path.join(year_dir, day)
 
                     # Skip if not directory or if inside today's directory
-                    if (not os.path.isdir(day_dir)) or (day == RmsDateTime.utcnow().strftime("%Y%m%d-%j")):
+                    if (not os.path.isdir(day_dir)) or (day == current_day):
                         continue
                     
+                    # Clean up temporary directories and files from previous attempts
+    
+                    # 1. Clean up temp_raw_img_dir from the original implementation
+                    temp_raw_dir = os.path.join(day_dir, "temp_raw_img_dir")
+                    if os.path.exists(temp_raw_dir):
+                        log.info(f"Found temporary image directory from previous attempt: {temp_raw_dir}, cleaning up...")
+                        try:
+                            shutil.rmtree(temp_raw_dir)
+                            log.info(f"Removed temporary directory: {temp_raw_dir}")
+                        except Exception as e:
+                            log.warning(f"Failed to remove temporary directory {temp_raw_dir}: {e}")
+                    
+                    # 2. Clean up filelist.txt from the original implementation
+                    filelist_path = os.path.join(day_dir, "filelist.txt")
+                    if os.path.exists(filelist_path):
+                        log.info(f"Found temporary file list from previous attempt: {filelist_path}, removing...")
+                        try:
+                            os.remove(filelist_path)
+                            log.info(f"Removed temporary file list: {filelist_path}")
+                        except Exception as e:
+                            log.warning(f"Failed to remove temporary file list {filelist_path}: {e}")
+                    
+                    # 3. Clean up temporary files from the new implementation
+                    frames_timelapse_base = f"{config.stationID}_{day}_frames_timelapse"
+                    year_dir_files = os.listdir(year_dir)
+                    for file in year_dir_files:
+                        # Check for temp files from new implementation (with _temp in the name)
+                        if frames_timelapse_base in file and "_temp" in file:
+                            temp_file_path = os.path.join(year_dir, file)
+                            log.info(f"Found temporary file from previous attempt: {temp_file_path}, removing...")
+                            try:
+                                os.remove(temp_file_path)
+                                log.info(f"Removed temporary file: {temp_file_path}")
+                            except Exception as e:
+                                log.warning(f"Failed to remove temporary file {temp_file_path}: {e}")
+
+                    # Make the name of the timelapse file from day directory
+                    frames_timelapse_path = os.path.join(year_dir, "{}_{}_frames_timelapse.mp4".format(config.stationID, day))
+                    timelapse_json_path = os.path.join(year_dir, "{}_{}_frametimes.json".format(config.stationID, day))
+                    
+                    # Check for temporary files from failed previous attempts
+                    temp_files_pattern = os.path.join(year_dir, "{}_{}_frames_timelapse_temp*".format(config.stationID, day))
+                    temp_files = glob.glob(temp_files_pattern)
+                    
+                    if temp_files:
+                        log.info(f"Found temporary files from previous attempts for {day}, cleaning up...")
+                        for temp_file in temp_files:
+                            try:
+                                os.remove(temp_file)
+                                log.info(f"Removed temporary file: {temp_file}")
+                            except Exception as e:
+                                log.warning(f"Failed to remove temporary file {temp_file}: {e}")
+                    
+                    # Count image files in the day's directory
                     img_count = 0
-
-
-                    # Checking frames for each hour
                     for hour in os.listdir(day_dir):
-                        # Each 'hour' is 20240923-267_00, 20240923-267_01, ...
                         hour_dir = os.path.join(day_dir, hour)
-
-                        # Skip if not directory
-                        if not os.path.isdir(hour_dir):
-                            continue
-
-                        # Count both .jpg and .png files in the hourly subdirectory(s)
-                        img_count += len(glob.glob(os.path.join(hour_dir, '*.jpg')) + \
-                                         glob.glob(os.path.join(hour_dir, '*.png')))
-
+                        if os.path.isdir(hour_dir):
+                            img_count += len(glob.glob(os.path.join(hour_dir, '*.jpg')) + \
+                                            glob.glob(os.path.join(hour_dir, '*.png')))
 
                     if img_count < 2:
-                        # Skip this directory if fewer than 2 JPG files are found
+                        log.info(f"Skipping {day} - too few images ({img_count})")
                         continue
 
-                    # Search for current day's timelapse in the corresponding year's directory
-                    found_files = glob.glob(os.path.join(year_dir, "{}_frames_timelapse.mp4".format(day)))
-
-                    # If not found, generate timelapse for the current day
-                    if not found_files:
-                        log.info("No frames timelapse for {} found in {}, generating new timelapse...".format(day, year_dir))
-
-                        # Make the name of the timelapse file from day directory
-                        # The day's timelapse and its frametimes.json are both stored in their corresponding year's directory
-                        frames_timelapse_path = os.path.join(year_dir, "{}_{}_frames_timelapse.mp4".format(config.stationID, day))
-                        timelapse_json_path = os.path.join(year_dir, "{}_{}_frametimes.json".format(config.stationID, day))
-
-                        # Generate the timelapse and cleanup
-                        generateTimelapseFromFrames(day_dir, frames_timelapse_path, cleanup_mode='tar')
-
-                        # Add the timelapse and its frametimes.json to the extra files
-                        extra_files.append(frames_timelapse_path)
-                        extra_files.append(timelapse_json_path)
-
+                    # Check if video exists and is valid (non-empty)
+                    video_exists = os.path.exists(frames_timelapse_path) and os.path.getsize(frames_timelapse_path) > 0
+                    
+                    if not video_exists:
+                        log.info(f"Generating timelapse for {day} ({img_count} frames)...")
+                        
+                        try:
+                            # Generate the timelapse and cleanup
+                            generateTimelapseFromFrames(day_dir, frames_timelapse_path, cleanup_mode='tar')
+                            
+                            # Verify the timelapse was created successfully
+                            if os.path.exists(frames_timelapse_path) and os.path.getsize(frames_timelapse_path) > 0:
+                                log.info(f"Successfully created timelapse for {day}")
+                                
+                                # Add the timelapse and its frametimes.json to the extra files
+                                extra_files.append(frames_timelapse_path)
+                                if os.path.exists(timelapse_json_path):
+                                    extra_files.append(timelapse_json_path)
+                            else:
+                                log.warning(f"Timelapse generation completed but file is missing or empty for {day}")
+                        except Exception as e:
+                            log.warning(f'Generating timelapse for {day} failed: {repr(e)}')
+                            log.debug(repr(traceback.format_exception(*sys.exc_info())))
+                    else:
+                        log.debug(f"Timelapse already exists for {day}, skipping")
 
         except Exception as e:
-            log.debug('Generating JPEG timelapse failed with message:\n' + repr(e))
+            log.error('Timelapse generation process failed with message:\n' + repr(e))
             log.debug(repr(traceback.format_exception(*sys.exc_info())))
-
 
 
     ### Add extra files to archive
