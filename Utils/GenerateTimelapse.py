@@ -71,8 +71,7 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
     dir_tmp_path = os.path.join(dir_path, "temp_img_dir")
 
     if os.path.exists(dir_tmp_path):
-        shutil.rmtree(dir_tmp_path)
-        print("Deleted directory : " + dir_tmp_path)
+        rmtreeWithProgress(dir_tmp_path)
 		
     mkdirP(dir_tmp_path)
     log.info("Created directory : " + dir_tmp_path)
@@ -173,12 +172,11 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
         subprocess.call(com, shell=True, cwd=dir_path)
 		
     else :
-        log.info ("generateTimelapse only works on Linux or Windows the video could not be encoded")
+        log.warning ("generateTimelapse only works on Linux or Windows the video could not be encoded")
 
     #Delete temporary directory and files inside
     if os.path.exists(dir_tmp_path) and not keep_images:
-        shutil.rmtree(dir_tmp_path)
-        log.info("Deleted temporary directory : " + dir_tmp_path)
+        rmtreeWithProgress(dir_tmp_path)
 		
     log.info("Total time:", RmsDateTime.utcnow() - t1)
 
@@ -219,6 +217,42 @@ def getOptimalThreadCount():
     else:
         # More powerful system - use cores minus 2
         return max(2, cpu_count - 2)
+
+def rmtreeWithProgress(directory_path):
+    """Remove a directory tree with progress reporting."""
+    
+    # First count total files to delete
+    total_files = 0
+    for root, dirs, files in os.walk(directory_path):
+        total_files += len(files)
+    
+    if total_files == 0:
+        shutil.rmtree(directory_path)
+        return
+    
+    print("Removing directory with {} files...".format(total_files))
+    
+    # Delete files with progress reporting
+    deleted_files = 0
+    last_report = 0
+    for root, dirs, files in os.walk(directory_path, topdown=False):
+        for file in files:
+            os.remove(os.path.join(root, file))
+            deleted_files += 1
+            
+            # Report progress every 5%
+            progress = (deleted_files / total_files) * 100
+            if progress >= last_report + 5:
+                last_report = int(progress / 5) * 5
+                print("Cleanup progress: {}% ({}/{})".format(last_report, deleted_files, total_files))
+        
+        # Remove empty directories
+        for dir in dirs:
+            os.rmdir(os.path.join(root, dir))
+    
+    # Finally remove the root directory
+    os.rmdir(directory_path)
+    log.info("Directory removal complete: {}".format(directory_path))
 
 
 def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mode='none', compression='bz2', use_color=True):
@@ -269,7 +303,7 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
             break
     
     if not found_valid_image:
-        log.info("Error: Could not find any valid images to determine dimensions.")
+        log.error("Error: Could not find any valid images to determine dimensions.")
         return
     
     # Set up ffmpeg command based on color mode
@@ -278,7 +312,7 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
     elif platform.system() == 'Windows':
         ffmpeg_path = os.path.join(os.path.dirname(__file__), "ffmpeg.exe")
     else:
-        log.info("Unsupported platform.")
+        log.warning("Unsupported platform.")
         return
     
     # Get optimal thread count for this system
@@ -325,7 +359,7 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
         # Load image with error handling
         image = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
         if image is None:
-            log.info("Warning: Skipping corrupted or unreadable image: {}".format(img_path))
+            log.warning("Warning: Skipping corrupted or unreadable image: {}".format(img_path))
             skipped_count += 1
             continue  # Skip this frame
         
@@ -350,7 +384,7 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
             cv2.putText(image, text, position, font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
             
         except Exception as e:
-            log.info("Warning: Error processing metadata for {}: {}".format(img_path, e))
+            log.warning("Warning: Error processing metadata for {}: {}".format(img_path, e))
         
         # Handle color conversion based on target mode
         try:
@@ -368,7 +402,7 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
             processed_count += 1
             
         except Exception as e:
-            log.info("Warning: Error processing image {}: {}".format(img_path, e))
+            log.error("Warning: Error processing image {}: {}".format(img_path, e))
             skipped_count += 1
     
     # Create a temporary timestamp JSON file
@@ -379,7 +413,7 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
         with open(temp_timestamp_path, 'w') as f:
             json.dump(timestamp_data, f, indent=2)
     except Exception as e:
-        log.info("Warning: Error saving timestamp data: {}".format(e))
+        log.warning("Warning: Error saving timestamp data: {}".format(e))
     
     # Finalize video
     log.info("All frames processed. Successfully processed: {}, Skipped: {}".format(processed_count, skipped_count))
@@ -390,9 +424,9 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
         return_code = ffmpeg_process.wait(timeout=300)  # Wait up to 5 minutes
         
         if return_code != 0:
-            log.info("Warning: ffmpeg process exited with code {}".format(return_code))
+            log.warning("Warning: ffmpeg process exited with code {}".format(return_code))
     except subprocess.TimeoutExpired:
-        log.info("Warning: ffmpeg process did not complete within timeout, terminating...")
+        log.warning("Warning: ffmpeg process did not complete within timeout, terminating...")
         ffmpeg_process.terminate()
         try:
             ffmpeg_process.wait(timeout=10)
@@ -422,11 +456,7 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
         
             # Handle cleanup based on specified mode
             if cleanup_mode == 'delete':
-                try:
-                    shutil.rmtree(day_dir)
-                    log.info("Successfully deleted the source directory: {}".format(day_dir))
-                except Exception as e:
-                    log.info("Error deleting the source directory: {}".format(e))
+                rmtreeWithProgress(day_dir)
 
             elif cleanup_mode == 'tar':
                 try:
@@ -453,11 +483,10 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
                     os.rename(temp_tar_path, tar_path)
 
                     # Remove the original directory
-                    shutil.rmtree(day_dir)
-                    log.info("Successfully created tar archive at: {}".format(tar_path))
+                    rmtreeWithProgress(day_dir)
 
                 except Exception as e:
-                    log.info("Error creating tar archive: {}".format(e))
+                    log.error("Error creating tar archive: {}".format(e))
                     # Clean up temporary tar file if it exists
                     if os.path.exists(temp_tar_path):
                         try:
@@ -465,10 +494,10 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
                         except:
                             pass
         except Exception as e:
-            log.info("Error finalizing files: {}".format(e))
+            log.error("Error finalizing files: {}".format(e))
             log.info("Temporary file remains at: {}".format(temp_video_path))
     else:
-        log.info("Video creation failed or resulted in an empty file.")
+        log.warning("Video creation failed or resulted in an empty file.")
         # Clean up temporary files
         for temp_file in [temp_video_path, temp_timestamp_path]:
             if os.path.exists(temp_file):
