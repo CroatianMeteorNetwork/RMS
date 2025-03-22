@@ -238,7 +238,7 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
     output_dir = os.path.dirname(video_path)
     output_filename = os.path.basename(video_path)
     output_name, output_ext = os.path.splitext(output_filename)
-    temp_video_path = os.path.join(output_dir, f"{output_name}_temp{output_ext}")
+    temp_video_path = os.path.join(output_dir, "{}_temp{}".format(output_name, output_ext))
 
     # Find all image files
     image_files = []
@@ -282,7 +282,7 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
     
     # Get optimal thread count for this system
     thread_count = getOptimalThreadCount()
-    log.info(f"Using {thread_count} encoding threads based on system capabilities")
+    log.info("Using {} encoding threads based on system capabilities".format(thread_count))
 
     # Configure ffmpeg command based on color mode
     pix_fmt = "bgr24" if use_color else "gray"
@@ -290,7 +290,7 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
         ffmpeg_path, "-y", "-nostdin",
         "-f", "rawvideo", 
         "-vcodec", "rawvideo",
-        "-s", f"{width}x{height}",
+        "-s", "{}x{}".format(width, height),
         "-pix_fmt", pix_fmt,
         "-r", str(fps),
         "-i", "-",
@@ -305,26 +305,26 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
         temp_video_path  # Use temporary path
     ]
     
-    log.info(f"Starting ffmpeg process for {video_path}...")
-    log.info(f"Video mode: {'Color' if use_color else 'Grayscale'}")
+    log.info("Starting ffmpeg process for {}...".format(video_path))
+    log.info("Video mode: {}".format('Color' if use_color else 'Grayscale'))
     ffmpeg_process = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE)
     
     # Initialize timestamp JSON data
     timestamp_data = {}
     
     # Process frames
-    log.info(f"Processing {len(image_files)} frames...")
+    log.info("Processing {} frames...".format(len(image_files)))
     processed_count = 0
     skipped_count = 0
     
     for index, img_path in enumerate(image_files):
         if index % 100 == 0:
-            print(f"Processing frame {index}/{len(image_files)} ({(index/len(image_files)*100):.1f}%)")
+            print("Processing frame {}/{} ({:.1f}%)".format(index, len(image_files), (index/len(image_files)*100)))
         
         # Load image with error handling
         image = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
         if image is None:
-            log.info(f"Warning: Skipping corrupted or unreadable image: {img_path}")
+            log.info("Warning: Skipping corrupted or unreadable image: {}".format(img_path))
             skipped_count += 1
             continue  # Skip this frame
         
@@ -350,7 +350,7 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
             cv2.putText(image, text, position, font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
             
         except Exception as e:
-            log.info(f"Warning: Error processing metadata for {img_path}: {e}")
+            log.info("Warning: Error processing metadata for {}: {}".format(img_path, e))
             # Still try to use the image without timestamp
         
         # Handle color conversion based on target mode
@@ -369,21 +369,21 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
             processed_count += 1
             
         except Exception as e:
-            log.info(f"Warning: Error processing image {img_path}: {e}")
+            log.info("Warning: Error processing image {}: {}".format(img_path, e))
             skipped_count += 1
     
     # Create a temporary timestamp JSON file
     timestamp_path = video_path.replace(output_ext, '_timestamps.json')
-    temp_timestamp_path = os.path.join(output_dir, f"{output_name}_temp_timestamps.json")
+    temp_timestamp_path = os.path.join(output_dir, "{}_temp_timestamps.json".format(output_name))
     
     try:
         with open(temp_timestamp_path, 'w') as f:
             json.dump(timestamp_data, f, indent=2)
     except Exception as e:
-        log.info(f"Warning: Error saving timestamp data: {e}")
+        log.info("Warning: Error saving timestamp data: {}".format(e))
     
     # Finalize video
-    log.info(f"All frames processed. Successfully processed: {processed_count}, Skipped: {skipped_count}")
+    log.info("All frames processed. Successfully processed: {}, Skipped: {}".format(processed_count, skipped_count))
     log.info("Finalizing video...")
     
     try:
@@ -391,7 +391,7 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
         return_code = ffmpeg_process.wait(timeout=300)  # Wait up to 5 minutes
         
         if return_code != 0:
-            log.info(f"Warning: ffmpeg process exited with code {return_code}")
+            log.info("Warning: ffmpeg process exited with code {}".format(return_code))
     except subprocess.TimeoutExpired:
         log.info("Warning: ffmpeg process did not complete within timeout, terminating...")
         ffmpeg_process.terminate()
@@ -412,22 +412,22 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
             
             # Rename video file
             os.rename(temp_video_path, video_path)
-            log.info(f"Video created successfully: {video_path} ({video_size_mb:.2f} MB)")
+            log.info("Video created successfully: {} ({:.2f} MB)".format(video_path, video_size_mb))
             
             # Rename timestamp file if it exists
             if os.path.exists(temp_timestamp_path):
                 if os.path.exists(timestamp_path):
                     os.remove(timestamp_path)
                 os.rename(temp_timestamp_path, timestamp_path)
-                log.info(f"Timestamp data saved to: {timestamp_path}")
+                log.info("Timestamp data saved to: {}".format(timestamp_path))
         
             # Handle cleanup based on specified mode
             if cleanup_mode == 'delete':
                 try:
                     shutil.rmtree(day_dir)
-                    log.info(f"Successfully deleted the source directory: {day_dir}")
+                    log.info("Successfully deleted the source directory: {}".format(day_dir))
                 except Exception as e:
-                    log.info(f"Error deleting the source directory: {e}")
+                    log.info("Error deleting the source directory: {}".format(e))
 
             elif cleanup_mode == 'tar':
                 try:
@@ -455,10 +455,10 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
 
                     # Remove the original directory
                     shutil.rmtree(day_dir)
-                    log.info(f"Successfully created tar archive at: {tar_path}")
+                    log.info("Successfully created tar archive at: {}".format(tar_path))
 
                 except Exception as e:
-                    log.info(f"Error creating tar archive: {e}")
+                    log.info("Error creating tar archive: {}".format(e))
                     # Clean up temporary tar file if it exists
                     if os.path.exists(temp_tar_path):
                         try:
@@ -466,8 +466,8 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
                         except:
                             pass
         except Exception as e:
-            log.info(f"Error finalizing files: {e}")
-            log.info(f"Temporary file remains at: {temp_video_path}")
+            log.info("Error finalizing files: {}".format(e))
+            log.info("Temporary file remains at: {}".format(temp_video_path))
     else:
         log.info("Video creation failed or resulted in an empty file.")
         # Clean up temporary files
@@ -475,7 +475,7 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
             if os.path.exists(temp_file):
                 try:
                     os.remove(temp_file)
-                    log.info(f"Removed incomplete temporary file: {temp_file}")
+                    log.info("Removed incomplete temporary file: {}".format(temp_file))
                 except:
                     pass
 
