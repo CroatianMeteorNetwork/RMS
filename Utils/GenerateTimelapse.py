@@ -406,7 +406,7 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
             skipped_count += 1
     
     # Create a temporary timestamp JSON file
-    timestamp_path = video_path.replace(output_ext, '_timestamps.json')
+    timestamp_path = video_path.replace('frames_timelapse.mp4', 'frametimes.json')
     temp_timestamp_path = os.path.join(output_dir, "{}_temp_timestamps.json".format(output_name))
     
     try:
