@@ -10,7 +10,6 @@ import traceback
 import argparse
 import random
 import glob
-import tarfile
 import shutil
 
 from RMS.ArchiveDetections import archiveDetections, archiveFieldsums
@@ -42,7 +41,7 @@ from Utils.PlotTimeIntervals import plotFFTimeIntervals
 from RMS.Formats.ObservationSummary import addObsParam, getObsDBConn, nightSummaryData
 from RMS.Formats.ObservationSummary import serialize, startObservationSummaryReport, finalizeObservationSummary
 from Utils.AuditConfig import compareConfigs
-from RMS.Misc import RmsDateTime
+from RMS.Misc import RmsDateTime, tarWithProgress
 
 
 # Get the logger from the main module
@@ -408,20 +407,25 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                     try:
                         # Archive directory for this day of ft files
                         tar_path = os.path.join(year_dir, '{}_{}_FT.tar.bz2'.format(config.stationID, day))
-
-                        with tarfile.open(tar_path, 'w:bz2') as tar:
-                            tar.add(day_dir, arcname=os.path.basename(day_dir))
-
-                        # Delete directory for this day of ft files
-                        shutil.rmtree(day_dir)
-                        print("Successfully created tar archive at: {}".format(tar_path))
-
-                        # Add to extra files for upload
-                        extra_files.append(tar_path)
-
+                        
+                        # Use the tarWithProgress function with removal of source
+                        print("Creating archive for {} FT files...".format(day))
+                        archive_success = tarWithProgress(
+                            source_dir=day_dir,
+                            tar_path=tar_path,
+                            compression='bz2',
+                            remove_source=True
+                        )
+                        
+                        if archive_success:
+                            print("Successfully created tar archive at: {}".format(tar_path))
+                            # Add to extra files for upload
+                            extra_files.append(tar_path)
+                        else:
+                            print("Archive creation failed, keeping original directory: {}".format(day_dir))
+                            
                     except Exception as e:
-                        print("Error creating tar archive: {}".format(e))
-
+                        print("Error in archiving process: {}".format(e))
         except Exception as e:
             log.debug('Archiving FT files failed with message:\n' + repr(e))
             log.debug(repr(traceback.format_exception(*sys.exc_info())))
@@ -617,7 +621,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                         
                         try:
                             # Generate the timelapse and cleanup
-                            generateTimelapseFromFrames(day_dir, frames_timelapse_path, cleanup_mode='tar')
+                            generateTimelapseFromFrames(day_dir, frames_timelapse_path, cleanup_mode=config.frame_cleanup)
                             
                             # Verify the timelapse was created successfully
                             if os.path.exists(frames_timelapse_path) and os.path.getsize(frames_timelapse_path) > 0:
