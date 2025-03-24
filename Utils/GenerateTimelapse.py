@@ -7,12 +7,9 @@ from __future__ import print_function, division, absolute_import
 import sys
 import os
 import platform
-import argparse
 import subprocess
 import shutil
 import cv2
-import glob
-import tarfile
 import json
 from datetime import datetime
 
@@ -20,7 +17,7 @@ from PIL import ImageFont
 
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName, filenameToDatetime
-from RMS.Misc import mkdirP, RmsDateTime
+from RMS.Misc import mkdirP, RmsDateTime, tarWithProgress
 from RMS.Logger import getLogger
 
 log = getLogger("logger")
@@ -71,7 +68,7 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
     dir_tmp_path = os.path.join(dir_path, "temp_img_dir")
 
     if os.path.exists(dir_tmp_path):
-        rmtreeWithProgress(dir_tmp_path)
+        rmtreeWithLogging(dir_tmp_path)
 		
     mkdirP(dir_tmp_path)
     log.info("Created directory : " + dir_tmp_path)
@@ -176,7 +173,7 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
 
     #Delete temporary directory and files inside
     if os.path.exists(dir_tmp_path) and not keep_images:
-        rmtreeWithProgress(dir_tmp_path)
+        rmtreeWithLogging(dir_tmp_path)
 		
     log.info("Total time:", RmsDateTime.utcnow() - t1)
 
@@ -218,40 +215,12 @@ def getOptimalThreadCount():
         # More powerful system - use cores minus 2
         return max(2, cpu_count - 2)
 
-def rmtreeWithProgress(directory_path):
-    """Remove a directory tree with progress reporting."""
+
+def rmtreeWithLogging(directory_path):
+    """Remove a directory tree and log."""
     
-    # First count total files to delete
-    total_files = 0
-    for root, dirs, files in os.walk(directory_path):
-        total_files += len(files)
-    
-    if total_files == 0:
-        shutil.rmtree(directory_path)
-        return
-    
-    print("Removing directory with {} files...".format(total_files))
-    
-    # Delete files with progress reporting
-    deleted_files = 0
-    last_report = 0
-    for root, dirs, files in os.walk(directory_path, topdown=False):
-        for file in files:
-            os.remove(os.path.join(root, file))
-            deleted_files += 1
-            
-            # Report progress every 5%
-            progress = (deleted_files / total_files) * 100
-            if progress >= last_report + 5:
-                last_report = int(progress / 5) * 5
-                print("Cleanup progress: {}% ({}/{})".format(last_report, deleted_files, total_files))
-        
-        # Remove empty directories
-        for dir in dirs:
-            os.rmdir(os.path.join(root, dir))
-    
-    # Finally remove the root directory
-    os.rmdir(directory_path)
+    log.info("Removing directory: {}".format(directory_path))
+    shutil.rmtree(directory_path)
     log.info("Directory removal complete: {}".format(directory_path))
 
 
@@ -456,7 +425,7 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
         
             # Handle cleanup based on specified mode
             if cleanup_mode == 'delete':
-                rmtreeWithProgress(day_dir)
+                rmtreeWithLogging(day_dir)
 
             elif cleanup_mode == 'tar':
                 try:
@@ -471,31 +440,43 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
                     # Create a temporary tar file
                     temp_tar_path = tar_path + ".tmp"
                     
-                    # Create the tar archive with the correct mode
-                    mode = 'w:bz2' if compression == 'bz2' else 'w:gz'
-
-                    with tarfile.open(temp_tar_path, mode) as tar:
-                        tar.add(day_dir, arcname=os.path.basename(day_dir))
+                    log.info("Creating {} archive of {}...".format(compression, day_dir))
                     
-                    # Rename to final tar path
-                    if os.path.exists(tar_path):
-                        os.remove(tar_path)
-                    os.rename(temp_tar_path, tar_path)
-
-                    # Remove the original directory
-                    rmtreeWithProgress(day_dir)
-
+                    # Determine if we should remove the source files based on cleanup_mode
+                    remove_source = cleanup_mode == 'tar'
+                    
+                    # Create tar with progress reporting, verification, and optional source removal
+                    archive_success = tarWithProgress(day_dir, temp_tar_path, compression, remove_source)
+                    
+                    if archive_success:
+                        # Rename to final tar path
+                        if os.path.exists(tar_path):
+                            os.remove(tar_path)
+                        os.rename(temp_tar_path, tar_path)
+                        log.info("Archive created successfully at: {}".format(tar_path))
+                    else:
+                        log.warning("Archive creation or verification failed. Keeping original directory.")
+                        # Clean up temporary tar file if it exists
+                        if os.path.exists(temp_tar_path):
+                            try:
+                                os.remove(temp_tar_path)
+                                log.info("Removed incomplete archive file")
+                            except:
+                                pass
+                    
                 except Exception as e:
-                    log.error("Error creating tar archive: {}".format(e))
+                    log.error("Error in archiving process: {}".format(e))
                     # Clean up temporary tar file if it exists
                     if os.path.exists(temp_tar_path):
                         try:
                             os.remove(temp_tar_path)
                         except:
                             pass
+
         except Exception as e:
             log.error("Error finalizing files: {}".format(e))
             log.info("Temporary file remains at: {}".format(temp_video_path))
+   
     else:
         log.warning("Video creation failed or resulted in an empty file.")
         # Clean up temporary files
