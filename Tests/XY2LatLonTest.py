@@ -1,6 +1,8 @@
 import logging
 logging.getLogger('matplotlib.font_manager').disabled = True
 
+import json 
+
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -13,9 +15,128 @@ from RMS.Formats.Platepar import Platepar
 
 if __name__ == "__main__":
 
+    pp_json = """
+{
+    "F_scale": 15.701176160218697,
+    "Ho": 313.86851592408493,
+    "JD": 2460740.915217384,
+    "RA_d": 109.18334207962252,
+    "UT_corr": 0,
+    "X_res": 1280,
+    "Y_res": 720,
+    "alt_centre": 37.96222492347106,
+    "asymmetry_corr": true,
+    "auto_check_fit_refined": false,
+    "auto_recalibrated": false,
+    "az_centre": 175.86983442281368,
+    "dec_d": -74.08689102624128,
+    "distortion_type": "radial7-odd",
+    "distortion_type_list": [
+        "poly3+radial",
+        "poly3+radial3",
+        "poly3+radial5",
+        "radial3-all",
+        "radial4-all",
+        "radial5-all",
+        "radial3-odd",
+        "radial5-odd",
+        "radial7-odd",
+        "radial9-odd"
+    ],
+    "distortion_type_poly_length": [
+        12,
+        13,
+        14,
+        7,
+        8,
+        9,
+        6,
+        7,
+        8,
+        9
+    ],
+    "elev": 271.0,
+    "equal_aspect": true,
+    "extinction_scale": 0.6,
+    "force_distortion_centre": false,
+    "fov_h": 88.65210403644974,
+    "fov_v": 47.014859261006805,
+    "gamma": 1.0,
+    "lat": -22.47,
+    "lon": 143.18,
+    "mag_0": -2.5,
+    "mag_lev": 10.009485462304724,
+    "mag_lev_stddev": 0.2002279247131813,
+    "measurement_apparent_to_true_refraction": false,
+    "poly_length": 7,
+    "pos_angle_ref": 343.0805344830111,
+    "refraction": true,
+    "rotation_from_horiz": -1.4937393230898501,
+    "star_list": [
+    ],
+    "station_code": "AU004P",
+    "version": 2,
+    "vignetting_coeff": 0.0006141654982057213,
+    "vignetting_fixed": false,
+    "x_poly": [
+        0.032439499444704714,
+        0.030238153496385207,
+        0.01114345505377356,
+        -0.2604269175454886,
+        0.0752264534197823,
+        -0.0006981065281311777,
+        0.012335178584800453
+    ],
+    "x_poly_fwd": [
+        0.032439499444704714,
+        0.030238153496385207,
+        0.01114345505377356,
+        -0.2604269175454886,
+        0.0752264534197823,
+        -0.0006981065281311777,
+        0.012335178584800453
+    ],
+    "x_poly_rev": [
+        0.03244007706072434,
+        0.03027620597179506,
+        0.010881721890645384,
+        -0.25797257944584695,
+        0.07273219719598978,
+        -0.00720498334132414,
+        0.0023641562141605544
+    ],
+    "y_poly": [
+        0.5,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+    ],
+    "y_poly_fwd": [
+        0.5,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+    ],
+    "y_poly_rev": [
+        0.5,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+    ]
+}"""
+
     # Load a platepar file
     pp = Platepar()
-    pp.read("C:\\temp\\AU004P_20250323_085721_715219_detected\\platepar_cmn2010.cal")
+    pp.loadFromDict(json.loads(pp_json))
 
     # Reference height
     ht = 10_000 # m
