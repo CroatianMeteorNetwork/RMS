@@ -172,13 +172,25 @@ class BufferedCapture(Process):
         log.info("Joining capture...")
 
         # Wait for the capture to join for 60 seconds, then terminate
-        for i in range(60):
+        waiting_to_join = 60
+        log.info("Waiting up to {} seconds for capture to join...".format(waiting_to_join))
+        
+        # Track how many seconds we actually waited
+        seconds_waited = 0
+        
+        for i in range(waiting_to_join):
+            seconds_waited = i + 1
             if self.is_alive():
                 time.sleep(1)
             else:
                 break
-
-        if self.is_alive():
+        
+        # Log the outcome based on final state
+        if not self.is_alive():
+            log.info("Capture joined successfully after {} seconds".format(seconds_waited))
+        else:
+            log.info("Timed out after waiting {} seconds, capture thread still alive".format(seconds_waited))
+            log.info("This is a known issue with GStreamer pipelines not releasing all threads")
             log.info('Terminating capture...')
             self.terminate()
 
