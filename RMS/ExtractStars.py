@@ -35,6 +35,7 @@ from RMS.Formats import FFfile
 from RMS.Formats import CALSTARS
 from RMS.DetectionTools import loadImageCalibration
 from RMS.Logger import getLogger
+from RMS.Math import twoDGaussian
 from RMS.Routines import MaskImage
 from RMS.Routines import Image
 from RMS.QueuedPool import QueuedPool
@@ -490,48 +491,7 @@ def extractStarsImgHandle(img_handle,
         return error_return
 
     return star_list
-    
 
-
-
-
-def twoDGaussian(params, amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
-    """ Defines a 2D Gaussian distribution. 
-    
-    Arguments:
-        params: [tuple of floats] 
-            - (x, y) independent variables, 
-            - saturation: [int] Value at which saturation occurs
-        amplitude: [float] amplitude of the PSF
-        xo: [float] PSF center, X component
-        yo: [float] PSF center, Y component
-        sigma_x: [float] standard deviation X component
-        sigma_y: [float] standard deviation Y component
-        theta: [float] PSF rotation in radians
-        offset: [float] PSF offset from the 0 (i.e. the "elevation" of the PSF)
-
-    Return:
-        g: [ndarray] values of the given Gaussian at (x, y) coordinates
-
-    """
-
-    x, y, saturation = params
-
-    if isinstance(saturation, np.ndarray):
-        saturation = saturation[0, 0]
-    
-    xo = float(xo)
-    yo = float(yo)
-
-    a = (np.cos(theta)**2)/(2*sigma_x**2) + (np.sin(theta)**2)/(2*sigma_y**2)
-    b = -(np.sin(2*theta))/(4*sigma_x**2) + (np.sin(2*theta))/(4*sigma_y**2)
-    c = (np.sin(theta)**2)/(2*sigma_x**2) + (np.cos(theta)**2)/(2*sigma_y**2)
-    g = offset + amplitude*np.exp(-(a*((x - xo)**2) + 2*b*(x - xo)*(y - yo) + c*((y - yo)**2)))
-
-    # Limit values to saturation level
-    g[g > saturation] = saturation
-
-    return g.ravel()
 
 
 
@@ -628,6 +588,11 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
 
         # Unpack fitted gaussian parameters
         amplitude, yo, xo, sigma_y, sigma_x, theta, offset = popt
+
+        # Take absolute values of some parameters
+        amplitude = abs(amplitude)
+        sigma_x = abs(sigma_x)
+        sigma_y = abs(sigma_y)
 
         # Filter hot pixels by looking at the ratio between x and y sigmas (HPs are very narrow)
         if min(sigma_y/sigma_x, sigma_x/sigma_y) < roundness_threshold:
