@@ -22,7 +22,6 @@ import traceback
 import time
 import multiprocessing
 from math import floor
-import json
 
 import cv2
 
@@ -72,56 +71,7 @@ class RawFrameSaver(multiprocessing.Process):
         self.run_exited = multiprocessing.Event()
 
 
-    def initRawFrameCount(self):        
-        """Initiates frame counter for the JSON file with (frame, timestamp) pairs, so that the frame count is
-        consistent after a reboot
-        """
-
-        # Find sidecar json file for current day in year's directory
-        json_subpath = time.strftime("%Y/{}_%Y%m%d-%j".format(self.config.stationID)) + "_frametimes.json"
-        json_file_path = os.path.join(self.saved_frames_dir, json_subpath)
-
-
-        # Get latest frame count in case file exists
-        if os.path.exists(json_file_path):
-            with open(json_file_path, 'r') as json_file:
-                json_data = json.load(json_file)
-            self.total_saved_frames = max(map(int, json_data.keys())) + 1
-            log.info("Continuing raw frame saving for today from frame #{}".format(self.total_saved_frames))
-
-
-    def saveJsonTimestamps(self, block_timestamp, block_json_data) :
-        """Produces/Updates a JSON file with (frame, timestamp) pairs
-
-        Arguments
-        ---------
-            block_timestamp : [float] time of first frame in block
-            block_json_data: [Dict] (frame, timestamp) mappings
-
-        """
-
-        # Sidecar json file to write to (frame, timestamp) pairs to year's directory
-        json_subpath = time.strftime("%Y/{}_%Y%m%d-%j".format(self.config.stationID), time.gmtime(block_timestamp)) + "_frametimes.json"
-        json_file_path = os.path.join(self.saved_frames_dir, json_subpath)
-
-        # Create JSON on path if not present, else update file
-        if not os.path.exists(json_file_path):
-            present_json_data = block_json_data
-            log.info("Initialized new json at {}.".format(json_file_path)) 
-
-        else:
-            with open(json_file_path, 'r') as json_file:
-                present_json_data = json.load(json_file)
-            present_json_data.update(block_json_data)
-
-        with open(json_file_path, 'w') as json_file:
-            json.dump(present_json_data, json_file, indent=4)
-
-        log.info("Updated {} with {} new frame timestamps".format(json_file_path, len(block_json_data))) 
-
-
-
-    def saveFramesToDisk(self, frametimes, block_start_time):
+    def saveFramesToDisk(self, frametimes):
         """Saves a block of raw image frames to disk with timestamp-based filenames.
 
         This method calculates each filename using station ID, the UTC date
@@ -137,10 +87,8 @@ class RawFrameSaver(multiprocessing.Process):
         Arguments
         ---------
             frametimes : [List] list of (frame, timestamp) pairs of corresponding frames and timestamps
-            block_start_time: [float] time of first frame in frame_array
         """
 
-        block_json_data = {}
 
         for (frame, timestamp) in frametimes:
 
@@ -151,12 +99,7 @@ class RawFrameSaver(multiprocessing.Process):
             # In case the timestamp day changes mid-block
             if self.day_of_year != time.strftime("%j", time.gmtime(timestamp)):
                 
-                # Save block data from previous day
-                self.saveJsonTimestamps(block_start_time, block_json_data)
-
                 # Adjust values for the day change
-                block_json_data = {}
-                block_start_time = timestamp
                 self.total_saved_frames = 0
                 self.day_of_year = time.strftime("%j", time.gmtime(timestamp))
 
@@ -199,14 +142,7 @@ class RawFrameSaver(multiprocessing.Process):
             except Exception as e:
                 log.error("Could not save frame to disk: {0}".format(e))
 
-
-            # Write timestamps to temporary dictionary, to be then saved to json
-            block_json_data[self.total_saved_frames] = "{0}_{1:03d}".format(date_string, millis)
             self.total_saved_frames += 1
-
-
-        self.saveJsonTimestamps(block_start_time, block_json_data)
-
 
 
     def stop(self):
@@ -239,8 +175,6 @@ class RawFrameSaver(multiprocessing.Process):
     def run(self):
         """ Retrieve raw frames from shared array and save them.
         """
-
-        self.initRawFrameCount()
 
         # Repeat until the raw frame saver is killed from the outside
         while not self.exit.is_set():
@@ -296,7 +230,7 @@ class RawFrameSaver(multiprocessing.Process):
             t = time.time()
 
             # Run the frame block save
-            self.saveFramesToDisk(frametimes, startTime)
+            self.saveFramesToDisk(frametimes)
 
             # Once the frame saving is done, tell the capture thread to keep filling the buffer
             if raw_buffer_one:

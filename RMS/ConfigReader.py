@@ -420,10 +420,13 @@ class Config:
         self.png_compression = 3
 
         # Set the time interval for saving video frames
-        self.frame_save_interval = 10
+        self.frame_save_interval = 5
 
         # Set the frame count interval for saving video frames (calculated from the time interval)
         self.frame_save_interval_count = 256
+
+        # Set whether to delete, archive, or leave saved frames after making timelapse ('delete', 'tar', 'none')
+        self.frame_cleanup = 'delete'
 
         # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
         self.slideshow_enable = False
@@ -1222,6 +1225,10 @@ def parseCapture(config, parser):
             config.frame_save_interval_count = 256
             print()
             print("WARNING! The frame_save_interval must result in more than 5 frames interval. It has been reset to 256 frames!")
+
+    # Set whether to delete, archive, or leave saved frames after making timelapse ('delete', 'tar', 'none')
+    if parser.has_option(section, "frame_cleanup"):
+        config.frame_cleanup = parser.get(section, "frame_cleanup")
 
     # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
     if parser.has_option(section, "slideshow_enable"):
