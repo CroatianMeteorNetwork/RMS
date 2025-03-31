@@ -1377,8 +1377,12 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                     continue
 
                 # Dilate the coordinates to encompass more pixels for photometry and centroiding
-                frame_pixels_stripe = dilateCoordinates(frame_pixels_stripe, config.height, config.width, \
-                                                        width=config.centroid_dilation)
+                # Only for non-FF files
+                if img_handle.input_type != 'ff':
+
+                    frame_pixels_stripe = dilateCoordinates(
+                        frame_pixels_stripe, config.height, config.width, width=config.centroid_dilation
+                        )
 
                 # Calculate centroids by half-frame
                 for half_frame in range(2):
