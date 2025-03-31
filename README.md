@@ -74,14 +74,11 @@ You will probably need some cables and connectors to connect your camera to the 
 
 ---------
 
-The code was designed to run on a RPi, but it will also run an some Linux distributions. We have tested it on Linux Mint 20 and Ubuntu 20 and 22. 
+The code was designed to run on a RPi, but it will also run an some Linux distributions. Ubuntu and Linux Mint have been successfeuly tested, others will probably work too.
 
-The recording **will not** run on Windows, but most of other submodules will (astrometric calibration, viewing the data, manual reduction, etc.). The problem under Windows is that for some reason the logging module object cannot be pickled when parallelized by the multiprocessing library. **We weren't able to solve this issue, but we invite people to try to take a stab at it.**
+Meteor detection **does not** run on Windows, but most of other submodules do (astrometric calibration, viewing the data, manual reduction, etc.). The problem in Windows is that for some reason the logging module object cannot be pickled when parallelized by the multiprocessing library. **We weren't able to solve this issue, but we invite people to try to take a stab at it.**
 
-
-Here we provide installation instructions for the RPi, but the procedure should be the same for any Debian-based Linux distribution: [LINK](https://docs.google.com/document/d/e/2PACX-1vTh_CtwxKu3_vxB6YpEoctLpsn5-v677qJgWsYi6gEr_QKacrfrfIz4lFM1l-CZO86t1HwFfk3P5Nb6/pub#h.399xr1c3jau2)
-
-Alternatively, if you are using Anaconda Python on your Linux PC, you can install all libraries except OpenCV by running:
+If you are using Anaconda Python on your Windows or Linux PC, you can simply install all required libraries by running the following commands in the Anaconda Powershell:
 
 ```
 conda create -y -n rms -c conda-forge python==3.11.6
@@ -93,19 +90,14 @@ conda install -y -c conda-forge Pillow pyqtgraph==0.12.3
 conda install -y -c conda-forge ephem
 conda install -y -c conda-forge imageio pandas
 conda install -y -c conda-forge pygobject
+conda install -y -c conda-forge opencv
 conda install -y -c astropy astropy
 pip install rawpy'<0.22'
 pip install git+https://github.com/matejak/imreg_dft@master#egg=imreg_dft'>2.0.0'
 pip install astrometry
 ```
 
-If you want to use the machine for capture using OpenCV, you need to install it using the ```opencv4_install.sh``` script. This will build OpenCV with gstreamer and ffmpeg support. If you are not planning to run the capture but you are planning to use other RMS tool, you can install opencv using conda:
-
-```
-conda install -y -c conda-forge opencv
-```
-
-If you want full gstreamer support, you need to install the additional gstreamer libraries:
+If you want full gstreamer support (for better capture and raw video recording), you need to install the additional gstreamer libraries:
 
 ```
 conda install -y -c conda-forge gstreamer==1.22.3
@@ -114,13 +106,20 @@ conda install -y -c conda-forge gst-libav
 conda install -y -c conda-forge gst-plugins-bad gst-plugins-base gst-plugins-good gst-plugins-ugly
 ```
 
+Next, clone this repository from GitHub in a directory of your choice:
+
+```
+git clone https://github.com/CroatianMeteorNetwork/RMS.git
+```
+
+And finally, install the RMS code as a package by running the following command in the terminal (make sure you are in the RMS directory):
+
+```
+pip install .
+```
+
 
 ## Setting up
-
-### Installing on Windows
-The RMS code runs on Windows with the exception of meteor detection (I guess the most crucial part). I wasn't able to get the detection to work, but we encourage everybody to try!
-
-Nevertheless, other RMS tools work well under Windows and you can follow [these instructions](https://globalmeteornetwork.org/wiki/index.php?title=Windows_Installation) to install it.
 
 ### Setting the timezone to UTC
 It is always a good idea to set the timezone to UTC when recording any data. This provides a common time reference among observations, and more than once there have been issues when people were using different time zones. So, use your favorite search engine to find how to change the timezone on your RPi to UTC.
@@ -128,35 +127,6 @@ It is always a good idea to set the timezone to UTC when recording any data. Thi
 
 ### Enabling the watchdog service
 A watchdog service is a service that occasionally checks if the RPi is responsive and if it's working fine. If the RPi hangs of freezes, it will reboot it. See under [Guides/enabling_watchdog.md](Guides/enabling_watchdog.md) for more information.
-
-
-### Getting this code
-First, find directory where you want to download the code. If you don't care, I presume the home directory /home/pi is fine.
-The simplest way of obtaining this code is by opening the terminal and running:
-
-```
-git clone https://github.com/CroatianMeteorNetwork/RMS.git
-```
-
-This will download the code in this repository in the RMS directory. 
-
-
-### Running setup.py and compiling the Kernel-based Hough Transform module
-Navigate with terminal to base git directory (e.g. /home/pi/RMS/), and run:
-
-```
-pip install .
-```
-
-This will compile the code in C++ which we are using as one of the processing steps in meteor detection. The method in question is called Kernel-based Hough Transform, and you can read more about it here: [KHT](http://www2.ic.uff.br/~laffernandes/projects/kht/)
-
-This will also install all Python libraries that you might need, except OpenCV. If you are on Windows, you can install OpenCV this way:
-
-```
-sudo apt-get install libopencv-dev python-opencv
-```
-
-If you are using an IP camera, you will need gstreamer support and then use the ```opencv4_install.sh``` script.
 
 
 ### Checking video device and initializing proper settings - ANALOG CAMERAS ONLY!
@@ -178,6 +148,7 @@ mplayer tv:// -tv driver=v4l2:device=/dev/video0:input=0:norm=PAL -vo x11
 This is a very important step as all settings are read from the configuration file. The file in question is the [.config](.config) file. Once you download this repository, start editing the file with your favorite editor.
 
 #### [System]
+
 ##### Station ID
 If you want to join our network of global cameras, please send me an e-mail and I will give you a station code. The codes are made up of the 2-letter ISO code of your country (e.g. DE for Germany), followed by a 4 character alphanumeric code starting at 0001 and ending with ZZZZ, giving a total number of 1.5 million unique combinations for every country. For testing purposes you might use XX0001.
 
@@ -187,6 +158,13 @@ Edit the latitude, longitude and elevation of the location of your camera. This 
 
 #### [Capture]
 
+##### IP cameras
+If you are using an IP camera, you need to give it the rtsp link so I can access the video stream. Here is an example of a string for the IMX291 camera with the Hikvision firmware:
+
+```
+device: rtsp://192.168.42.10:554/user=admin&password=&channel=1&stream=0.sdp
+```
+
 ##### Capture cards, video devices
 If you are using an analog camera or some other Linux video device, make sure you can see it as ```/dev/videoX```, where ```X``` is the number of the video device. This will usually be 0. So if you want RMS to use ```/dev/video0``` as the video source, specify the device in the config file as:
 
@@ -194,42 +172,9 @@ If you are using an analog camera or some other Linux video device, make sure yo
 device: 0
 ```
 
-##### IP cameras
-Alternatively, if you are using IP cameras and use gstreamer for capture, you need to give it the full gstreamer string and the IP camera address (gstreamer should be installed during OpenCV installation with the provided script). Let's say that you're on the RPi, the RTSP protocol is used to read the video and the camera is at 192.168.42.10, then the device setting should look something like this (IMX291 camera specific):
-
-```
-device: rtspsrc location=rtsp://192.168.42.10:554/user=admin&password=&channel=1&stream=0.sdp ! rtph264depay ! queue ! h264parse ! omxh264dec ! queue ! videoconvert ! appsink sync=1
-```
-
-This string will make sure that the H.264 encoded video is decoded using the hardware decoding on the Pi (omxh264dec module). 
-
-If you are running on a PC, the string should look something like this:
-
-```
-device: rtspsrc location=rtsp://192.168.42.10:554/user=admin&password=&channel=1&stream=0.sdp ! rtph264depay ! h264parse ! decodebin ! videoconvert ! appsink sync=1
-```
-
-because the omxh264dec module is only available on the Pi. It's possible that some gstreamer libraries will be missing on some PC Linux distributions, you can install them by running:
-
-```
-sudo apt-get install gstreamer1.0-plugins-bad gstreamer1.0-libav
-```
-
-You can also preview the video directly in gstreamer. If you're on the Pi, run something like this:
-
-```
-gst-launch-1.0 rtspsrc location="rtsp://192.168.42.10:554/user=admin&password=&channel=1&stream=0.sdp" ! rtph264depay ! h264parse ! omxh264dec ! autovideosink
-```
-
-and this if you're on a Linux PC:
-
-```
-gst-launch-1.0 rtspsrc location="rtsp://192.168.42.10:554/user=admin&password=&channel=1&stream=0.sdp" ! rtph264depay ! h264parse ! decodebin ! autovideosink
-```
-
 
 ##### Resolution and FPS
-To be able to capture the video properly, you need to set up the right resolution and FPS (frames per second). For IP cameras, use the maximum resolution of 1280x720, as the Pi can't really handle 1080p, and such a high resolution produces enormous amounts of data.
+To be able to capture the video properly, you need to set up the right resolution and FPS (frames per second). For IP cameras, use the maximum resolution of 1280x720, as the Pi4 can't really handle 1080p, and such a high resolution produces enormous amounts of data.
 
 
 ## Running the code
