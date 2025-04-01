@@ -939,29 +939,32 @@ def deleteOldLogfiles(data_dir, config, days_to_keep=None):
     # Date to purge before
     if days_to_keep is None:
         days_to_keep = int(config.logdays_to_keep)
-    date_to_purge_to = datetime.datetime.now() - datetime.timedelta(days=days_to_keep)
-    date_to_purge_to = timestamp(date_to_purge_to)
 
-    # Only going to purge RMS log files
-    flist = glob.glob1(log_dir, 'log*.log*')
+    if config.logdays_to_keep > 0:
 
-    for fl in flist:
+        date_to_purge_to = datetime.datetime.now() - datetime.timedelta(days=days_to_keep)
+        date_to_purge_to = timestamp(date_to_purge_to)
 
-        log_file_path = os.path.join(log_dir, fl)
+        # Only going to purge RMS log files
+        flist = glob.glob1(log_dir, 'log*.log*')
 
-        # Check if the file exists and check if it should be purged
-        if os.path.isfile(log_file_path):
+        for fl in flist:
 
-            # Get the file modification time
-            file_mtime = os.stat(log_file_path).st_mtime
+            log_file_path = os.path.join(log_dir, fl)
 
-            # If the file is older than the date to purge to, delete it
-            if file_mtime < date_to_purge_to:
-                try:
-                    os.remove(log_file_path)
-                    log.info("deleted {}".format(fl))
-                except Exception as e:
-                    log.warning('unable to delete {}: '.format(log_file_path) + repr(e)) 
+            # Check if the file exists and check if it should be purged
+            if os.path.isfile(log_file_path):
+
+                # Get the file modification time
+                file_mtime = os.stat(log_file_path).st_mtime
+
+                # If the file is older than the date to purge to, delete it
+                if file_mtime < date_to_purge_to:
+                    try:
+                        os.remove(log_file_path)
+                        log.info("deleted {}".format(fl))
+                    except Exception as e:
+                        log.warning('unable to delete {}: '.format(log_file_path) + repr(e))
                 
 
 if __name__ == '__main__':
