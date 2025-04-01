@@ -939,6 +939,9 @@ def deleteOldLogfiles(data_dir, config, days_to_keep=None):
     # Date to purge before
     if days_to_keep is None:
         days_to_keep = int(config.logdays_to_keep)
+
+
+
     date_to_purge_to = datetime.datetime.now() - datetime.timedelta(days=days_to_keep)
     date_to_purge_to = timestamp(date_to_purge_to)
 
@@ -956,12 +959,12 @@ def deleteOldLogfiles(data_dir, config, days_to_keep=None):
             file_mtime = os.stat(log_file_path).st_mtime
 
             # If the file is older than the date to purge to, delete it
-            if file_mtime < date_to_purge_to:
+            if file_mtime < date_to_purge_to and days_to_keep > 0:
                 try:
                     os.remove(log_file_path)
                     log.info("deleted {}".format(fl))
                 except Exception as e:
-                    log.warning('unable to delete {}: '.format(log_file_path) + repr(e)) 
+                    log.warning('unable to delete {}: '.format(log_file_path) + repr(e))
                 
 
 if __name__ == '__main__':
