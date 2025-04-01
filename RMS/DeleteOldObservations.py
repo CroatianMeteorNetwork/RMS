@@ -965,7 +965,7 @@ def deleteOldLogfiles(data_dir, config, days_to_keep=None):
                         log.info("deleted {}".format(fl))
                     except Exception as e:
                         log.warning('unable to delete {}: '.format(log_file_path) + repr(e))
-                
+
 
 if __name__ == '__main__':
     """ Delete old data to free up space for next night's run
