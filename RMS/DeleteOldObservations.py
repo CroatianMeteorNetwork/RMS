@@ -955,7 +955,7 @@ def deleteOldLogfiles(data_dir, config, days_to_keep=None):
             # Get the file modification time
             file_mtime = os.stat(log_file_path).st_mtime
 
-            # If the file is older than the date to purge to, delete it
+            # If the file is older than the date to purge to and days_to_keep >0, delete it
             if file_mtime < date_to_purge_to and days_to_keep > 0:
                 try:
                     os.remove(log_file_path)
