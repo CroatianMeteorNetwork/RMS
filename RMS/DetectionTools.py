@@ -14,6 +14,10 @@ try:
     from numba import njit
     NUMBA_AVAILABLE = True
 
+    # If it's available, set the numba debug level to WARNING
+    import logging
+    logging.getLogger("numba").setLevel(logging.WARNING)
+
 except ImportError:
     NUMBA_AVAILABLE = False
 
