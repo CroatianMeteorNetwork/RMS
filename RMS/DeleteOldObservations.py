@@ -50,7 +50,16 @@ def quotaReport(capt_dir_quota, config, after=False):
 
     captured_dir = os.path.join(config.data_dir, config.captured_dir)
     archived_dir = os.path.join(config.data_dir, config.archived_dir)
+    log_dir = os.path.join(config.data_dir, config.log_dir)
 
+    frames_files = os.path.join(config.data_dir, config.frame_dir)
+    time_files = os.path.join(config.data_dir, config.times_dir)
+    video_files = os.path.join(config.data_dir, config.video_dir)
+
+    frames_files_used_space = usedSpace(frames_files)
+    time_files_used_space = usedSpace(time_files)
+    video_files_used_space = usedSpace(video_files)
+    continuous_capture_used_space = frames_files_used_space + time_files_used_space + video_files_used_space
 
     rep = "\n\n"
     rep += ("--------------------------------------------\n")
@@ -60,16 +69,26 @@ def quotaReport(capt_dir_quota, config, after=False):
         rep += ("Directory quotas before management\n")
     rep += ("--------------------------------------------\n")
     rep += ("Space used                              \n")
-    rep += ("   Total space used for RMS_data : {:7.02f}GB\n".format(usedSpace(config.data_dir)))
-    rep += ("            bz2 files space used : {:7.02f}GB\n".format(sizeBz2Files(config)))
-    rep += (" archived directories space used : {:7.02f}GB\n".format(sizeArchivedDirs(config)))
+    rep += ("                       log files : {:7.02f}GB\n".format(usedSpace(log_dir)))
+    rep += ("                    frames files : {:7.02f}GB  \n".format(frames_files_used_space))
+    rep += ("                      time files : {:7.02f}GB  \n".format(time_files_used_space))
+    rep += ("                     video files : {:7.02f}GB  \n".format(video_files_used_space))
+    rep += ("    total for continuous capture : {:7.02f}GB\n".format(continuous_capture_used_space))
+
+    rep += ("            bz2 files space used : {:7.02f}GB  \n".format(sizeBz2Files(config)))
+    rep += (" archived directories space used : {:7.02f}GB  \n".format(sizeArchivedDirs(config)))
     rep += ("              total for archives : {:7.02f}GB\n".format(usedSpace(archived_dir)))
-    rep += ("   Captured directory space used : {:7.02f}GB\n".format(usedSpace(captured_dir)))
+    rep += ("   captured directory space used : {:7.02f}GB\n".format(usedSpace(captured_dir)))
+    rep += ("   total space used for RMS_data : {:7.02f}GB\n".format(usedSpace(config.data_dir)))
+    rep += "\n"
     rep += ("Quotas allowed                          \n")
-    rep += ("        Total quota for RMS_data : {:7.02f}GB\n".format(config.rms_data_quota))
     rep += ("                  bz2 file quota : {:7.02f}GB\n".format(config.bz2_files_quota))
-    rep += ("      Archived directories quota : {:7.02f}GB\n".format(config.arch_dir_quota))
-    rep += ("          Remaining for captured : {:7.02f}GB\n".format(capt_dir_quota))
+    rep += ("      archived directories quota : {:7.02f}GB\n".format(config.arch_dir_quota))
+    rep += ("                 log files quota : {:7.02f}GB\n".format(config.log_files_quota))
+    rep += ("        continuous capture quota : {:7.02f}GB\n".format(config.continuous_capture_quota))
+    rep += ("          remaining for captured : {:7.02f}GB\n".format(capt_dir_quota))
+    rep += ("        total quota for RMS_data : {:7.02f}GB\n".format(config.rms_data_quota))
+    rep += "\n"
     rep += ("Space on drive                          \n")
     rep += ("        Available space on drive : {:7.02f}GB\n".format(availableSpace(config.data_dir) / (1024 ** 3)))
     rep += ("--------------------------------------------\n")
@@ -590,10 +609,19 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     deleteOldDirs(data_dir, config)
 
     # calculate the captured directory allowance and print to log
-    if config.rms_data_quota is None or config.arch_dir_quota is None or config.bz2_files_quota is None:
+    if (config.rms_data_quota is None or
+        config.arch_dir_quota is None or
+        config.bz2_files_quota is None or
+        config.continuous_capture_quota is None or
+        config.log_files_quota is None):
         log.info("Deleting files by space quota is not enabled, some quota is None.")
     else:
-        capt_dir_quota = config.rms_data_quota - (config.arch_dir_quota + config.bz2_files_quota)
+        capt_dir_quota = config.rms_data_quota
+        capt_dir_quota -= config.arch_dir_quota
+        capt_dir_quota -= config.bz2_files_quota
+        capt_dir_quota -= config.continuous_capture_quota
+        capt_dir_quota -= config.log_files_quota
+
         if capt_dir_quota <= 0:
             log.warning("No quota allocation remains for captured directories, please increase rms_data_quota")
             capt_dir_quota = 0
