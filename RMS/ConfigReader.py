@@ -1008,7 +1008,7 @@ def parseCapture(config, parser):
         config.bz2_files_quota = int(parser.get(section, "bz2_files_quota"))
 
     if parser.has_option(section, "log_files_quota"):
-        config.log_files_quota = int(parser.get(section, "log_files_quota"))
+        config.log_files_quota = float(parser.get(section, "log_files_quota"))
 
     if parser.has_option(section, "continuous_capture_quota"):
         config.continuous_capture_quota = int(parser.get(section, "continuous_capture_quota"))
