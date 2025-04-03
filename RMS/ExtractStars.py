@@ -784,35 +784,55 @@ def extractStarsAndSave(config, ff_dir):
         extraction_list.append(ff_name)
 
 
-    # The number of workers should be the minimum of cores and the number of tasks, so we don't have too many
-    # workers waiting for the tasks to finish
-    num_cores = min(config.num_cores, len(extraction_list))
+    # If just one file is given, run the extraction on it instead of using the QueuedPool
+    workpool = None
+    if len(extraction_list) == 1:
+        ff_name = extraction_list[0]
 
-    # Run the QueuedPool for detection
-    workpool = QueuedPool(extractStarsFF, cores=num_cores, backup_dir=ff_dir, input_queue_maxsize=None)
+        log.info('Extracting stars from ' + ff_name)
 
+        # Run the extraction
+        result = extractStarsFF(
+            ff_dir, ff_name, flat_struct=flat_struct, dark=dark, mask=mask,
+            config=config
+        )
 
-    # Add jobs for the pool
-    for ff_name in extraction_list:
-        log.info('Adding for extraction: ' + ff_name)
-        workpool.addJob([ff_dir, ff_name, flat_struct, dark, mask, config, None, None, None, None, None, None, None])
-
-
-    log.info('Starting pool...')
-
-    # Start the detection
-    workpool.startPool()
+        results = [result]
 
 
-    log.info('Waiting for the detection to finish...')
+    else:
 
-    # Wait for the detector to finish and close it
-    workpool.closePool()
+        # The number of workers should be the minimum of cores and the number of tasks, so we don't have too many
+        # workers waiting for the tasks to finish
+        num_cores = min(config.num_cores, len(extraction_list))
+
+        # Run the QueuedPool for detection
+        workpool = QueuedPool(extractStarsFF, cores=num_cores, backup_dir=ff_dir, input_queue_maxsize=None)
+
+
+        # Add jobs for the pool
+        for ff_name in extraction_list:
+            log.info('Adding for extraction: ' + ff_name)
+            workpool.addJob([ff_dir, ff_name, flat_struct, dark, mask, config, None, None, None, None, None, None, None])
+
+
+        log.info('Starting pool...')
+
+        # Start the detection
+        workpool.startPool()
+
+
+        log.info('Waiting for the detection to finish...')
+
+        # Wait for the detector to finish and close it
+        workpool.closePool()
+
+        results = workpool.getResults()
 
 
     # Get extraction results
     star_list = []
-    for result in workpool.getResults():
+    for result in results:
 
         try:
             ff_name, x2, y2, amplitude, intensity, fwhm_data, background, snr, saturated_count = result
@@ -850,7 +870,8 @@ def extractStarsAndSave(config, ff_dir):
     CALSTARS.writeCALSTARS(star_list, ff_dir, calstars_name, config.stationID, config.height, config.width)
 
     # Delete QueuedPool backed up files
-    workpool.deleteBackupFiles()
+    if workpool is not None:
+        workpool.deleteBackupFiles()
 
     log.info('Total time taken: {:.2f} s'.format(time.time() - time_start))
 
