@@ -933,6 +933,7 @@ def deleteByQuota(archived_dir, capt_dir_quota, captured_dir, config):
         None
     """
 
+    log.info("Starting quota based disc space management...")
     log.info(quotaReport(capt_dir_quota, config, after=False))
 
     delete_list = objectsToDelete(captured_dir, config.stationID, capt_dir_quota, bz2=False)
