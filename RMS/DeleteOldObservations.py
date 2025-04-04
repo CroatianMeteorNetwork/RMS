@@ -939,27 +939,34 @@ def deleteByQuota(archived_dir, capt_dir_quota, captured_dir, config):
     """
 
     log.info("Starting quota based disc space management...")
+
+    # Log the actual use and quotas before the start of the work
     log.info(quotaReport(capt_dir_quota, config, after=False))
 
+    # Manage size of the captured directory
     delete_list = objectsToDelete(captured_dir, config.stationID, capt_dir_quota, bz2=False)
     rmList(delete_list, dummy_run= not config.quota_management_enabled)
 
+    # Manage the size of the archived directory
     delete_list = objectsToDelete(archived_dir, config.stationID, config.arch_dir_quota, bz2=False)
     rmList(delete_list, dummy_run= not config.quota_management_enabled)
 
+    # Manage the size of the bz2 files
     delete_list = objectsToDelete(archived_dir, config.stationID, config.bz2_files_quota, bz2=True)
     rmList(delete_list, dummy_run= not config.quota_management_enabled)
 
+    # Manage the size of the log files
     delete_list = objectsToDeleteByTime(config.data_dir, [config.log_dir], config.log_files_quota)
     rmList(delete_list, dummy_run=not config.quota_management_enabled)
 
+    # Manage the size of the continuous capture directories
     delete_list = objectsToDeleteByTime(config.data_dir,
                                         [config.frame_dir, config.times_dir, config.video_dir],
                                         config.continuous_capture_quota)
     rmList(delete_list, dummy_run=not config.quota_management_enabled)
 
 
-
+    # Log the actual use and the quotas after the work
     log.info(quotaReport(capt_dir_quota, config, after=True))
 
 
