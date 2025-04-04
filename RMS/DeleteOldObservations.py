@@ -186,7 +186,7 @@ def usedSpaceNoRecursion(obj_path):
         n += os.path.getsize(obj_path) / 1024 ** 3
 
     for root, directory_list, file_list in path_list:
-        time.sleep(0.01)
+        time.sleep(0.001)
         for _ in directory_list:
             n += 4.024 / 1024 ** 2
         for file_name in file_list:
