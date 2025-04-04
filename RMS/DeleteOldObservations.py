@@ -226,6 +226,12 @@ def objectsToDeleteByTime(top_level_dir, directories_list, quota_gb=0):
     # Reverse sort by date
     # Iterate through the list adding up the sizes until the accumulator > quota
     # Then start appending the paths to the delete lists
+
+    accumulated_size = 0
+    accumulated_deletion_size = 0
+    objects_to_delete = []
+    logged_deletion_start_time = False
+
     if len(directories_list) == 0:
         log.warn("objectsToDelete by time passed an empty list of directories")
     elif len(directories_list) == 1:
@@ -246,10 +252,7 @@ def objectsToDeleteByTime(top_level_dir, directories_list, quota_gb=0):
             # combine the three lists into one list sorted by date, newest first
             file_date_path_size_list = list(reversed(sorted(list(zip(file_dates_list, file_paths_list, file_sizes_list)))))
 
-    accumulated_size = 0
-    accumulated_deletion_size = 0
-    objects_to_delete = []
-    logged_deletion_start_time = False
+
     for file_date_path_size in file_date_path_size_list:
         accumulated_size += file_date_path_size[2] / (1024 ** 3)
         if accumulated_size > quota_gb:
@@ -259,7 +262,7 @@ def objectsToDeleteByTime(top_level_dir, directories_list, quota_gb=0):
                 logged_deletion_start_time = True
             objects_to_delete.append(file_date_path_size[1])
         pass
-
+    log.info("Quota allowance is                {:7.03f}GB".format(quota_gb))
     log.info("Total size of files found is      {:7.03f}GB".format(accumulated_size))
 
     if logged_deletion_start_time:
