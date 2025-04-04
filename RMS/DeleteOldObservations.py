@@ -337,6 +337,11 @@ def rmList(delete_list, dummy_run=True, log_deletions=True):
         elif files_to_delete_count > 1:
             log.info("Deleting {} files, anticipated time {:.0f} seconds".format(files_to_delete_count, files_to_delete_count / 500))
 
+    elif len(delete_list) > 100:
+        log.info("Deleting {} files, anticipated time {:.0f} seconds, files will not be logged individually"
+                            .format(files_to_delete_count, files_to_delete_count / 500))
+        log_deletions = False
+
     for full_path in delete_list:
         # sleep to allow other threads to run
         time.sleep(0.001)
