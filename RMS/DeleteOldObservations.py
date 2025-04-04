@@ -12,6 +12,7 @@ import glob
 import argparse
 import subprocess
 import re
+from http.cookiejar import UTC_ZONES
 
 import ephem
 
@@ -62,12 +63,12 @@ def quotaReport(capt_dir_quota, config, after=False):
     continuous_capture_used_space = frames_files_used_space + time_files_used_space + video_files_used_space
 
     rep = "\n\n"
-    rep += ("--------------------------------------------\n")
+    rep += ("-----------------------------------------------\n")
     if after:
         rep += ("Directory quotas after management\n")
     else:
         rep += ("Directory quotas before management\n")
-    rep += ("--------------------------------------------\n")
+    rep += ("-----------------------------------------------\n")
     rep += ("Space used                              \n")
     rep += "\n"
     rep += ("                          log files : {:7.02f}GB\n".format(usedSpace(log_dir)))
@@ -76,12 +77,12 @@ def quotaReport(capt_dir_quota, config, after=False):
     rep += ("                        video files : {:7.02f}GB\n".format(video_files_used_space))
     rep += ("       total for continuous capture : {:7.02f}GB\n".format(continuous_capture_used_space))
 
-    rep += ("               bz2 files space used : {:7.02f}GB\n".format(sizeBz2Files(config)))
-    rep += ("    archived directories space used : {:7.02f}GB\n".format(sizeArchivedDirs(config)))
+    rep += ("                          bz2 files : {:7.02f}GB\n".format(sizeBz2Files(config)))
+    rep += ("               archived directories : {:7.02f}GB\n".format(sizeArchivedDirs(config)))
     rep += ("                 total for archives : {:7.02f}GB\n".format(usedSpace(archived_dir)))
 
-    rep += ("      captured directory space used : {:7.02f}GB\n".format(usedSpace(captured_dir)))
-    rep += ("      total space used for RMS_data : {:7.02f}GB\n".format(usedSpace(config.data_dir)))
+    rep += ("               captured directories : {:7.02f}GB\n".format(usedSpace(captured_dir)))
+    rep += ("                 total for RMS_data : {:7.02f}GB\n".format(usedSpace(config.data_dir)))
 
     rep += "\n"
     rep += ("Quotas allowed                                  \n")
@@ -96,7 +97,7 @@ def quotaReport(capt_dir_quota, config, after=False):
     rep += "\n"
     rep += ("Space on drive                          \n")
     rep += ("           Available space on drive : {:7.02f}GB\n".format(availableSpace(config.data_dir) / (1024 ** 3)))
-    rep += ("--------------------------------------------\n")
+    rep += ("-----------------------------------------------\n")
 
     return rep
 
@@ -203,6 +204,71 @@ def usedSpace(obj):
     obj = os.path.expanduser((obj))
     return usedSpaceNoRecursion(obj)
 
+
+def objectsToDeleteByTime(top_level_dir, directories_list, quota_gb=0):
+    """
+    Return a list of the oldest files to delete to reduce the size of all the files in a list
+    of directories to a quota 
+    
+    Args:
+        top_level_dir : path to top level directory
+        directory_path_list : list of paths to directories to be examined
+        quota_gb : allowed quota in gb
+    
+    Returns:
+        list of files to be deleted
+    
+    """
+
+    # Strategy
+
+    # Make three lists and zip together into file dates, file paths, file sizes in GB
+    # Reverse sort by date
+    # Iterate through the list adding up the sizes until the accumulator > quota
+    # Then start appending the paths to the delete lists
+    if len(directories_list) == 0:
+        log.warn("objectsToDelete by time passed an empty list of directories")
+    elif len(directories_list) == 1:
+        log.info("Managing directory {}".format(directories_list[0]))
+    elif len(directories_list) > 1:
+        log.info("Managing directories:")
+        for directory in directories_list:
+            log.info("    {}".format(directory))
+
+    file_dates_list, file_paths_list, file_sizes_list = [], [], []
+    # iterate through all the files in each of the directories building up three lists of path, sizes and dates
+    for directory_path in directories_list:
+        for root, directory_list, file_list in os.walk(os.path.join(top_level_dir, directory_path)):
+            for file_name in file_list:
+                file_paths_list.append(os.path.join(root, file_name))
+                file_sizes_list.append(os.path.getsize(os.path.join(root, file_name)))
+                file_dates_list.append(os.path.getmtime(os.path.join(root, file_name)))
+            # combine the three lists into one list sorted by date, newest first
+            file_date_path_size_list = list(reversed(sorted(list(zip(file_dates_list, file_paths_list, file_sizes_list)))))
+
+    accumulated_size = 0
+    accumulated_deletion_size = 0
+    objects_to_delete = []
+    logged_deletion_start_time = False
+    for file_date_path_size in file_date_path_size_list:
+        accumulated_size += file_date_path_size[2] / (1024 ** 3)
+        if accumulated_size > quota_gb:
+            accumulated_deletion_size += file_date_path_size[2] / (1024 ** 3)
+            if not logged_deletion_start_time:
+                log.info("Deleting files before {}".format(datetime.datetime.fromtimestamp(file_date_path_size[0]).strftime('%Y%m%d_%H%M%S')))
+                logged_deletion_start_time = True
+            objects_to_delete.append(file_date_path_size[1])
+        pass
+
+    log.info("Total size of files found is      {:7.03f}GB".format(accumulated_size))
+
+    if logged_deletion_start_time:
+        log.info("Total size of files to delete is  {:7.03f}GB".format(accumulated_deletion_size))
+        log.info("Size after management will be     {:7.03f}GB".format(accumulated_size - accumulated_deletion_size))
+    else:
+        log.info("Not required to delete any files.")
+
+    return objects_to_delete
 
 def objectsToDelete(object_path, stationID, quota_gb=0, bz2=False):
     """
@@ -850,6 +916,14 @@ def deleteByQuota(archived_dir, capt_dir_quota, captured_dir, config):
 
     delete_list = objectsToDelete(archived_dir, config.stationID, config.bz2_files_quota, bz2=True)
     rmList(delete_list, dummy_run= not config.quota_management_enabled)
+
+    delete_list = objectsToDeleteByTime(config.data_dir, [config.log_dir], config.log_files_quota)
+    rmList(delete_list, dummy_run=not config.quota_management_enabled)
+
+    delete_list = objectsToDeleteByTime(config.data_dir, [config.frame_dir, config.times_dir, config.video_dir], config.continuous_capture_quota)
+    rmList(delete_list, dummy_run=not config.quota_management_enabled)
+
+
 
     log.info(quotaReport(capt_dir_quota, config, after=True))
 
