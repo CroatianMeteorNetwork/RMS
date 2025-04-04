@@ -328,8 +328,13 @@ def rmList(delete_list, dummy_run=True, log_deletions=True):
         None
     """
 
+    if delete_list is None:
+        log.warn("rmList passed a list of None")
+        return
+
+    files_to_delete_count = len(delete_list)
     if not log_deletions:
-        files_to_delete_count = len(delete_list)
+
         if files_to_delete_count < 1:
             log.info("Nothing to delete")
         elif files_to_delete_count == 1:
