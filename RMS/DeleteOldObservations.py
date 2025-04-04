@@ -950,7 +950,7 @@ def deleteByQuota(archived_dir, capt_dir_quota, captured_dir, config):
     delete_list = objectsToDeleteByTime(config.data_dir,
                                         [config.frame_dir, config.times_dir, config.video_dir],
                                         config.continuous_capture_quota)
-    rmList(delete_list, dummy_run=not config.quota_management_enabled, log_deletions=False)
+    rmList(delete_list, dummy_run=not config.quota_management_enabled)
 
 
 
