@@ -226,7 +226,7 @@ def objectsToDeleteByTime(top_level_dir, directories_list, quota_gb=0):
     # Make three lists and zip together into file dates, file paths, file sizes in GB
     # Reverse sort by date
     # Iterate through the list adding up the sizes until the accumulator > quota
-    # Then start appending the paths to the delete lists
+    # Then start appending the paths to the delete list
 
     accumulated_size = 0
     accumulated_deletion_size = 0
@@ -340,7 +340,7 @@ def rmList(delete_list, dummy_run=True, log_deletions=True):
         elif files_to_delete_count == 1:
             log.info("Deleting {} file".format(files_to_delete_count))
         elif files_to_delete_count > 1:
-            log.info("Deleting {} files, anticipated time {:.0f} seconds".format(files_to_delete_count, files_to_delete_count / 500))
+            log.info("Deleting {} files, anticipated time {:.0f} seconds".format(files_to_delete_count, files_to_delete_count / 100))
 
     elif len(delete_list) > 100:
         log.info("Deleting {} files, anticipated time {:.0f} seconds, files will not be logged individually"
@@ -1113,7 +1113,7 @@ if __name__ == '__main__':
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, help="Path to a config file")
     cml_args = arg_parser.parse_args()
 
-    print("Disc use routine checks -these should all produce similar results")
+    print("Disc use routine checks - these should all produce similar results")
     print("Used space no recursion   {:.5f}GB".format(usedSpaceNoRecursion("~/source/RMS")))
     print("Used space with recursion {:.5f}GB".format(usedSpaceRecursive("~/source/RMS")))
     print("Used space from OS        {:.5f}GB".format(usedSpaceFromOS("~/source/RMS")))
