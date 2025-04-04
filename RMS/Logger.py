@@ -212,7 +212,7 @@ def _listener_configurer(config, log_file_prefix, safedir):
     print("   Success: {}".format(data_dir_status))
     print("Creating directory: " + log_path)
     log_path_status = mkdirP(log_path)
-    print("   Sucess: {}".format(log_path_status))
+    print("   Success: {}".format(log_path_status))
 
     # If the log directory doesn't exist or is not writable, use the safe directory
     if safedir is not None:
