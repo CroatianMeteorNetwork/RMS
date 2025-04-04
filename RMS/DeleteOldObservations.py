@@ -186,6 +186,7 @@ def usedSpaceNoRecursion(obj_path):
         n += os.path.getsize(obj_path) / 1024 ** 3
 
     for root, directory_list, file_list in path_list:
+        time.sleep(0.01)
         for _ in directory_list:
             n += 4.024 / 1024 ** 2
         for file_name in file_list:
@@ -246,6 +247,8 @@ def objectsToDeleteByTime(top_level_dir, directories_list, quota_gb=0):
     for directory_path in directories_list:
         for root, directory_list, file_list in os.walk(os.path.join(top_level_dir, directory_path)):
             for file_name in file_list:
+                # sleep to allow other processes to run
+                time.sleep(0.01)
                 file_paths_list.append(os.path.join(root, file_name))
                 file_sizes_list.append(os.path.getsize(os.path.join(root, file_name)))
                 file_dates_list.append(os.path.getmtime(os.path.join(root, file_name)))
@@ -324,6 +327,7 @@ def rmList(delete_list, dummy_run=True):
     """
 
     for full_path in delete_list:
+        time.sleep(0.01)
         full_path = os.path.expanduser(full_path)
         try:
             if dummy_run:
