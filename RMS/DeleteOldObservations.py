@@ -245,10 +245,11 @@ def objectsToDeleteByTime(top_level_dir, directories_list, quota_gb=0):
     file_dates_list, file_paths_list, file_sizes_list = [], [], []
     # iterate through all the files in each of the directories building up three lists of path, sizes and dates
     for directory_path in directories_list:
+        log.info("Working on directory {}".format(directory_path))
         for root, directory_list, file_list in os.walk(os.path.join(top_level_dir, directory_path)):
             for file_name in file_list:
                 # sleep to allow other processes to run
-                time.sleep(0.01)
+                time.sleep(0.0001)
                 file_paths_list.append(os.path.join(root, file_name))
                 file_sizes_list.append(os.path.getsize(os.path.join(root, file_name)))
                 file_dates_list.append(os.path.getmtime(os.path.join(root, file_name)))
@@ -272,7 +273,8 @@ def objectsToDeleteByTime(top_level_dir, directories_list, quota_gb=0):
         log.info("Total size of files to delete is  {:7.03f}GB".format(accumulated_deletion_size))
         log.info("Size after management will be     {:7.03f}GB".format(accumulated_size - accumulated_deletion_size))
     else:
-        log.info("Not required to delete any files.")
+        log.info("Within quota, not required to delete any files.")
+        time.sleep(1)
 
     return objects_to_delete
 
@@ -316,7 +318,7 @@ def objectsToDelete(object_path, stationID, quota_gb=0, bz2=False):
 
     return objects_to_delete
 
-def rmList(delete_list, dummy_run=True):
+def rmList(delete_list, dummy_run=True, log_deletions=True):
     """
     Args:
         delete_list (): list of full paths to objects to be deleted
@@ -326,8 +328,19 @@ def rmList(delete_list, dummy_run=True):
         None
     """
 
+    if not log_deletions:
+        files_to_delete_count = len(delete_list)
+        if files_to_delete_count < 1:
+            log.info("Nothing to delete")
+        elif files_to_delete_count == 1:
+            log.info("Deleting {} file".format(files_to_delete_count))
+        elif files_to_delete_count > 1:
+            log.info("Deleting {} files, anticipated time {:.0f} seconds".format(files_to_delete_count, files_to_delete_count / 500))
+
     for full_path in delete_list:
-        time.sleep(0.01)
+        # sleep to allow other threads to run
+        time.sleep(0.001)
+
         full_path = os.path.expanduser(full_path)
         try:
             if dummy_run:
@@ -336,10 +349,12 @@ def rmList(delete_list, dummy_run=True):
                 if os.path.exists(full_path):
                     if os.path.isdir(full_path):
                         shutil.rmtree(full_path)
-                        log.info("Deleted directory {}".format(os.path.basename(full_path)))
+                        if log_deletions:
+                            log.info("Deleted directory {}".format(os.path.basename(full_path)))
                     if os.path.isfile(full_path):
                         os.remove(full_path)
-                        log.info("Deleted file {}".format(os.path.basename(full_path)))
+                        if log_deletions:
+                            log.info("Deleted file {}".format(os.path.basename(full_path)))
                 else:
                     log.warning("Attempted to delete {}, which did not exist".format(full_path))
         except:
@@ -927,8 +942,10 @@ def deleteByQuota(archived_dir, capt_dir_quota, captured_dir, config):
     delete_list = objectsToDeleteByTime(config.data_dir, [config.log_dir], config.log_files_quota)
     rmList(delete_list, dummy_run=not config.quota_management_enabled)
 
-    delete_list = objectsToDeleteByTime(config.data_dir, [config.frame_dir, config.times_dir, config.video_dir], config.continuous_capture_quota)
-    rmList(delete_list, dummy_run=not config.quota_management_enabled)
+    delete_list = objectsToDeleteByTime(config.data_dir,
+                                        [config.frame_dir, config.times_dir, config.video_dir],
+                                        config.continuous_capture_quota)
+    rmList(delete_list, dummy_run=not config.quota_management_enabled, log_deletions=False)
 
 
 
