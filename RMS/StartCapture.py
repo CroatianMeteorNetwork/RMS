@@ -351,7 +351,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
     # Initialize buffered capture
     bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config, video_file=video_file,
-                         night_data_dir=night_data_dir, saved_frames_dir=saved_frames_dir, daytime_mode=daytime_mode)
+                         night_data_dir=night_data_dir, saved_frames_dir=saved_frames_dir, daytime_mode=daytime_mode, switchCameraModeNow=switchCameraModeNow)
     bc.startCapture()
 
     # To track and make new directories every iteration
@@ -1314,9 +1314,10 @@ if __name__ == "__main__":
             
             # Setup shared value to communicate day/night switch between processes.
             daytime_mode = multiprocessing.Value(ctypes.c_bool, False)
+            switchCameraModeNow = multiprocessing.Value(ctypes.c_bool, True)
 
             # Setup the capture mode switcher on another thread
-            capture_switcher = threading.Thread(target=captureModeSwitcher, args=(config, daytime_mode))
+            capture_switcher = threading.Thread(target=captureModeSwitcher, args=(config, daytime_mode, switchCameraModeNow))
             
             # To make sure the capture switcher thread exits automatically at the end
             capture_switcher.daemon = True
@@ -1338,6 +1339,7 @@ if __name__ == "__main__":
 
         else:
             daytime_mode = None
+            switchCameraModeNow = None
             log.info('Starting capture for {:.2f} hours'.format(duration/60/60))
 
 

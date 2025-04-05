@@ -41,6 +41,7 @@ from RMS.RawFrameSave import RawFrameSaver
 from RMS.Misc import RmsDateTime, mkdirP
 from RMS.Formats import FTfile, FTStruct
 from RMS.Logger import getLogger, gstDebugLogger
+from RMS.CaptureModeSwitcher import switchCameraMode
 
 # Get the logger from the main module
 log = getLogger("logger")
@@ -96,7 +97,7 @@ class BufferedCapture(Process):
     running = False
     
     def __init__(self, array1, startTime1, array2, startTime2, config, video_file=None, night_data_dir=None,
-                 saved_frames_dir=None, daytime_mode=None):
+                 saved_frames_dir=None, daytime_mode=None, switchCameraModeNow=None):
         """ Populate arrays with (startTime, frames) after startCapture is called.
         
         Arguments:
@@ -120,6 +121,7 @@ class BufferedCapture(Process):
         self.night_data_dir = night_data_dir
         self.saved_frames_dir = saved_frames_dir
         self.daytime_mode = daytime_mode
+        self.switchCameraModeNow = switchCameraModeNow
 
         # Store shared memory arrays and values for compressor (these are designed for multiprocessing)
         self.array1 = array1
@@ -1017,6 +1019,11 @@ class BufferedCapture(Process):
                     }
                     log.error("Camera connection failed: {}".format(error_messages[probe_result]))
                     return False
+                else:
+                    # After camera connection is established, if necessary switch camera mode
+                    if self.config.continuous_capture and self.config.switch_camera_modes:
+                        if self.switchCameraModeNow.value:
+                            switchCameraMode(self.config, self.daytime_mode, self.switchCameraModeNow)
 
             # Init the video device
             log.info("Initializing the video device...")
