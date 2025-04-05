@@ -400,7 +400,6 @@ class Config:
         self.continuous_capture_quota = None
 
 
-
         # Extra space to leave on disk for the archive (in GB) after the captured files have been taken
         #   into account
         self.extra_space_gb = 6
