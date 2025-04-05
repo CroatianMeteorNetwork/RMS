@@ -26,6 +26,7 @@ def switchCameraMode(config, daytime_mode, switchCameraModeNow):
     try:
         cc.cameraControlV2(config, mode_string)
         switchCameraModeNow.value = False
+        time.sleep(2)
         log.info("Successfully switched camera mode to %s", mode_string)
     except Exception as e:
         log.warning("Camera switch to %s failed: %s. Will retry later.", mode_string, e)
@@ -34,7 +35,7 @@ def switchCameraMode(config, daytime_mode, switchCameraModeNow):
 
 
 # Function to switch capture between day and night modes
-def captureModeSwitcher(config, daytime_mode):
+def captureModeSwitcher(config, daytime_mode, switchCameraModeNow):
     """ Wait and switch between day and night capture modes based on current time.
     
     Arguments:
