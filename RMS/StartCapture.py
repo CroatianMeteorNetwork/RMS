@@ -1314,6 +1314,7 @@ if __name__ == "__main__":
             
             # Setup shared value to communicate day/night switch between processes.
             daytime_mode = multiprocessing.Value(ctypes.c_bool, False)
+            switchCameraModeNow = multiprocessing.Value(ctypes.c_bool, True)
 
             # Setup the capture mode switcher on another thread
             capture_switcher = threading.Thread(target=captureModeSwitcher, args=(config, daytime_mode))

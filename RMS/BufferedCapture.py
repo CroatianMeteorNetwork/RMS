@@ -41,6 +41,7 @@ from RMS.RawFrameSave import RawFrameSaver
 from RMS.Misc import RmsDateTime, mkdirP
 from RMS.Formats import FTfile, FTStruct
 from RMS.Logger import getLogger, gstDebugLogger
+from RMS.CaptureModeSwitcher import switchCameraMode
 
 # Get the logger from the main module
 log = getLogger("logger")
@@ -1005,6 +1006,11 @@ class BufferedCapture(Process):
                     }
                     log.error("Camera connection failed: {}".format(error_messages[probe_result]))
                     return False
+                else:
+                    # After camera connection is established, if necessary switch camera mode
+                    if config.continuous_capture and config.switch_camera_modes:
+                        if switchCameraModeNow.value:
+                            switchCameraMode(config, daytime_mode, switchCameraModeNow)
 
             # Init the video device
             log.info("Initializing the video device...")
