@@ -1548,6 +1548,11 @@ class BufferedCapture(Process):
             # Capture a block of 256 frames
             block_frames = 256
 
+            # Check if camera needs switching
+            if self.config.continuous_capture and self.config.switch_camera_modes:
+                if self.switchCameraModeNow.value:
+                    switchCameraMode(self.config, self.daytime_mode, self.switchCameraModeNow)
+
             log.info('Grabbing a new block of {:d} frames...'.format(block_frames))
             for i in range(block_frames):
 
