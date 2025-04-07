@@ -380,7 +380,7 @@ class Config:
 
         # Space allocation for all of rms_data
 
-        # Disable the deletion by quota management for testing purposes
+        # Enable quota management
         self.quota_management_enabled = False
 
 
@@ -392,6 +392,12 @@ class Config:
 
         # Of that allocation for all of rms_data, this is set aside for bz2 files
         self.bz2_files_quota = None
+
+        # Of that allocation for all of rms_data, this is set aside for log files
+        self.log_files_quota = None
+
+        # Of that allocation for all of rms_data, this is set aside for continuous capture
+        self.continuous_capture_quota = None
 
 
         # Extra space to leave on disk for the archive (in GB) after the captured files have been taken
@@ -1002,6 +1008,12 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "bz2_files_quota"):
         config.bz2_files_quota = int(parser.get(section, "bz2_files_quota"))
+
+    if parser.has_option(section, "log_files_quota"):
+        config.log_files_quota = float(parser.get(section, "log_files_quota"))
+
+    if parser.has_option(section, "continuous_capture_quota"):
+        config.continuous_capture_quota = int(parser.get(section, "continuous_capture_quota"))
 
     if parser.has_option(section, "captured_dir"):
         config.captured_dir = parser.get(section, "captured_dir")
