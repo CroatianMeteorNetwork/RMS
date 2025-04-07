@@ -448,8 +448,11 @@ class BufferedCapture(Process):
         return smoothed_pts
 
 
-    def read(self):
+    def read(self, check_color=False):
         """ Retrieve frames and timestamp.
+
+        Arguments:
+            check_color: [bool] whether to check if frame contains color information
 
         Return:
         (tuple): (ret, frame, timestamp) where ret is a boolean indicating success,
@@ -508,6 +511,10 @@ class BufferedCapture(Process):
                 ret, frame = self.device.read()
                 if ret:
                     timestamp = time.time()
+
+            # Check if frame contains color information
+            if check_color:
+                self.convert_to_gray = self.isGrayscale(frame)
 
             # Handling for grayscale conversion
             frame = self.handleGrayscaleConversion(frame)
@@ -673,15 +680,13 @@ class BufferedCapture(Process):
 
         try:
             # If diagonal samples are not identical, frame is color
-            is_gray = np.all(frame[::stride, ::stride, 0] == frame[::stride, ::stride, 1]) and \
-                      np.all(frame[::stride, ::stride, 1] == frame[::stride, ::stride, 2])
+            sampled = frame[::stride, ::stride]
+            is_gray = np.all(sampled[..., 0] == sampled[..., 1]) and \
+                    np.all(sampled[..., 1] == sampled[..., 2])
+            
         except IndexError:
              # If IndexError, frame is grayscale
             is_gray = True
-
-        if getattr(self, '_previous_grayscale_state', is_gray) != is_gray:
-            log.info("Frame grayscale state changed: {} -> {}".format(not is_gray, is_gray))
-            self._previous_grayscale_state = is_gray
 
         return is_gray
 
@@ -1524,7 +1529,7 @@ class BufferedCapture(Process):
 
                     # Read the frame
                     log.info("Reading frame...")
-                    ret, _, _ = self.read()
+                    ret, _, _ = self.read(check_color=True)
                     log.info("Frame read!")
 
                     # If the connection was made and the frame was retrieved, continue with the capture
@@ -1556,10 +1561,16 @@ class BufferedCapture(Process):
             log.info('Grabbing a new block of {:d} frames...'.format(block_frames))
             for i in range(block_frames):
 
+                # Set flag to save a raw frame
+                save_this_frame = (
+                self.config.save_frames and
+                self.video_file is None and
+                total_frames % self.config.frame_save_interval_count == 0
+                )
 
-                # Read the frame (keep track how long it took to grab it)
+                # Read the frame (keep track how long it took to grab it), and check for color if saving raw frame
                 t1_frame = time.time()
-                ret, frame, frame_timestamp = self.read()
+                ret, frame, frame_timestamp = self.read(check_color=save_this_frame)
                 t_frame = time.time() - t1_frame
 
                 # If the video device was disconnected, wait for reconnection
@@ -1594,12 +1605,7 @@ class BufferedCapture(Process):
                     self.timestamp_buffer.append((total_frames, frame_timestamp))
 
                 # If save_frames is set and a video device is used, save a frame every nth frames
-                if (self.config.save_frames
-                    and self.video_file is None
-                    and total_frames % self.config.frame_save_interval_count == 0):
-
-                    # Check if RGB channels contain color information
-                    self.convert_to_gray = self.isGrayscale(frame)
+                if save_this_frame:
 
                     # Check if frame shape changed (color or grayscale)
                     if frame.shape != self.current_raw_frame_shape:
