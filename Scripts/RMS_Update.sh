@@ -186,6 +186,11 @@ fi
 echo "Cleaning up *.so files in the repository..."
 find . -name "*.so" -type f -delete
 
+echo "Fetching and pruning all remotes..."
+if ! git fetch --prune --all; then
+    echo "Error: fetch --prune failed. Continuing without fetch updates."
+fi
+
 # Mark the update as in progress
 echo "1" > "$UPDATEINPROGRESSFILE"
 
