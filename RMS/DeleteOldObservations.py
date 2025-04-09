@@ -242,7 +242,7 @@ def objectsToDeleteByTime(top_level_dir, directories_list, quota_gb=0):
         for directory in directories_list:
             log.info("    {}".format(directory))
 
-    file_dates_list, file_paths_list, file_sizes_list = [], [], []
+    file_dates_list, file_paths_list, file_sizes_list, file_date_path_size_list  = [], [], [], []
     # iterate through all the files in each of the directories building up three lists of path, sizes and dates
     for directory_path in directories_list:
         log.info("Working on directory {}".format(directory_path))
