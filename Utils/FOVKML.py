@@ -87,13 +87,13 @@ def fovKML(dir_path, platepar, mask=None, area_ht=100000, side_points=10, plot_s
             side_vertices = []
 
             # Add coordinates of the station (first point)
-            side_vertices.append([platepar.lat, platepar.lon, platepar.elev])
+            side_vertices.append([platepar.lat, platepar.lon, platepar.height_wgs84])
 
             for side_p in side:
                 side_vertices.append(side_p)        
 
             # Add coordinates of the station (last point)
-            side_vertices.append([platepar.lat, platepar.lon, platepar.elev])
+            side_vertices.append([platepar.lat, platepar.lon, platepar.height_wgs84])
 
             polygon_list.append(list(side_vertices))
 

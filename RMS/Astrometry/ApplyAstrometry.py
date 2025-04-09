@@ -901,7 +901,7 @@ def xyHt2Geo(platepar, x, y, h):
         # Convert the apparent alt/az to geo coordinates
         lat, lon = AEGeoidH2LatLonAlt(
             np.degrees(az), np.degrees(elev), h[i], 
-            platepar.lat, platepar.lon, platepar.elev
+            platepar.lat, platepar.lon, platepar.height_wgs84
             )
         
         lat_arr[i] = lat
@@ -929,7 +929,7 @@ def geoHt2RaDec(platepar, jd, lat, lon, h):
 
     # Convert the target and camera coordinats into the ECI frame
     vector_target = np.array(geo2Cartesian(lat, lon, h, jd))
-    vector_station = np.array(geo2Cartesian(platepar.lat, platepar.lon, platepar.elev, jd))
+    vector_station = np.array(geo2Cartesian(platepar.lat, platepar.lon, platepar.height_wgs84, jd))
 
     # Compute the pointing vector from the station to the target
     pointing_vector = vector_target - vector_station

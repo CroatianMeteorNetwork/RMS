@@ -39,6 +39,7 @@ import RMS.Astrometry.ApplyAstrometry
 import scipy.optimize
 from RMS.Astrometry.Conversions import date2JD, jd2Date, trueRaDec2ApparentAltAz
 from RMS.Math import angularSeparation, sphericalPointFromHeadingAndDistance
+from RMS.GeoidHeightEGM96 import mslToWGS84Height
 
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import (
@@ -950,6 +951,18 @@ class Platepar(object):
         # Add the version if it was not in the platepar (v1 platepars didn't have a version)
         if not 'version' in self.__dict__:
             self.version = 1
+
+        # If the refraction was not used for the fit, assume it is disabled
+        if not 'height_wgs84' in self.__dict__:
+            try:
+                self.height_wgs84 = mslToWGS84Height(
+                    np.radians(self.lat),
+                    np.radians(self.lon),
+                    self.elev,
+                )
+            except Exception as e:
+                self.height_wgs84 = self.elev
+                print("Warning: Calculating platepar WGS84 height failed {}. Using Geoid height instead.".format(str(e)))
 
         # If the refraction was not used for the fit, assume it is disabled
         if not 'refraction' in self.__dict__:
