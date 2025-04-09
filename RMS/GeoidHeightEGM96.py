@@ -11,44 +11,26 @@ import argparse
 import numpy as np
 import scipy.interpolate
 
-import RMS.ConfigReader as cr
 from RMS.Misc import getRmsRootDir
 from RMS.Decorators import memoizeSingle
 
 
-def loadEGM96Data(dir_path, file_name):
+def loadEGM96Data(file_path=None):
     """ Load a file with EGM96 data.
 
     EGM96 data source: http://earth-info.nga.mil/GandG/wgs84/gravitymod/egm96/binary/binarygeoid.html
     """
+    if not file_path:
+        file_path = os.path.join(getRmsRootDir(), 'share', 'WW15MGH.DAC')
 
     # Load the geoid heights
-    geoid_heights = np.fromfile(os.path.join(dir_path, file_name), \
-        dtype=np.int16).byteswap().astype(np.float64)
+    geoid_heights = np.fromfile(file_path, dtype=np.int16).byteswap().astype(np.float64)
 
     # Reshape the data to 15 min grid
     geoid_heights = geoid_heights.reshape(721, 1440)
 
     # Compute the height in meters
     geoid_heights /= 100
-
-    return geoid_heights
-
-
-def loadEGM96DataFromConfig(config=None):
-    """ Load a file with EGM96 data from the given config.
-    If no config given, use the root config.
-
-    """
-
-    # Load the root configuration file if no config specified
-    if not config:
-        config_filename = '.config'
-        config_path = os.path.join(getRmsRootDir(), config_filename)
-        config = cr.parse(config_path)
-
-    # Load the geoid heights
-    geoid_heights = loadEGM96Data(config.egm96_path, config.egm96_file_name)
 
     return geoid_heights
 
@@ -74,7 +56,7 @@ def interpolateEGM96Data(geoid_heights):
     return geoid_model
 
 @memoizeSingle
-def mslToWGS84Height(lat, lon, msl_height, config=None):
+def mslToWGS84Height(lat, lon, msl_height, egm96_file_path=None):
     """ Given the height above sea level (using the EGM96 model), compute the height above the WGS84
         ellipsoid.
 
@@ -82,7 +64,8 @@ def mslToWGS84Height(lat, lon, msl_height, config=None):
         lat: [float] Latitude +N (rad).
         lon: [float] Longitude +E (rad).
         msl_height: [float] Height above sea level (meters).
-        config: Config instance with the path to EGM96 coefficients
+        egm96_file_path (str, optional): Full path to the EGM96 geoid data file.
+                                          Defaults to RMS/share/WW15MGH.DAC.
 
     Return:
         wgs84_height: [float] Height above the WGS84 ellipsoid.
@@ -90,7 +73,7 @@ def mslToWGS84Height(lat, lon, msl_height, config=None):
     """
 
     # Load the geoid heights array
-    GEOID_HEIGHTS = loadEGM96DataFromConfig(config)
+    GEOID_HEIGHTS = loadEGM96Data(file_path=egm96_file_path)
 
     # Init the interpolated geoid model
     GEOID_MODEL = interpolateEGM96Data(GEOID_HEIGHTS)
@@ -108,14 +91,16 @@ def mslToWGS84Height(lat, lon, msl_height, config=None):
 
 
 @memoizeSingle
-def wgs84toMSLHeight(lat, lon, wgs84_height, config=None):
+def wgs84toMSLHeight(lat, lon, wgs84_height, egm96_file_path=None):
     """ Given the height above the WGS84 ellipsoid compute the height above sea level (using the EGM96 model).
 
     Arguments:
         lat: [float] Latitude +N (rad).
         lon: [float] Longitude +E (rad).
         wgs84_height: [float] Height above the WGS84 ellipsoid (meters).
-        config: Config instance with the path to EGM96 coefficients
+        egm96_file_path (str, optional): Full path to the EGM96 geoid data file.
+                                          Defaults to RMS/share/WW15MGH.DAC.
+
 
     Return:
         msl_height: [float] Height above sea level (meters).
@@ -123,7 +108,7 @@ def wgs84toMSLHeight(lat, lon, wgs84_height, config=None):
     """
 
     # Load the geoid heights array
-    GEOID_HEIGHTS = loadEGM96DataFromConfig(config)
+    GEOID_HEIGHTS = loadEGM96Data(file_path=egm96_file_path)
 
     # Init the interpolated geoid model
     GEOID_MODEL = interpolateEGM96Data(GEOID_HEIGHTS)
@@ -143,15 +128,14 @@ def wgs84toMSLHeight(lat, lon, wgs84_height, config=None):
 
 if __name__ == "__main__":
 
-    import matplotlib.pyplot as plt
 
     ### COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Convert mean sea level (EGM96) to WGS84")
 
-    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
-        help="Path to a config file which will be used instead of the default one.")
+    arg_parser.add_argument('--egm96', type=str,
+            help="Path to EGM96 file (defaults to RMS/share/WW15MGH.DAC)")
 
     arg_parser.add_argument('-i', '--inverse', action="store_true", \
             help="Convert WGS84 to EGM96 (default is False)")
@@ -165,8 +149,7 @@ if __name__ == "__main__":
 
     #########################
 
-    # Load the config file
-    config = cr.loadConfigFromDirectory(cml_args.config, ".")
+    egm96_file_path = cml_args.egm96
 
     # Load latitude and longitude
     lat = cml_args.latitude
@@ -175,11 +158,11 @@ if __name__ == "__main__":
     if not cml_args.inverse:
         print("Converting MSL height to WGS84 height")
         msl_height = cml_args.height
-        wgs84_height = mslToWGS84Height(np.radians(lat), np.radians(lon), msl_height, config)
+        wgs84_height = mslToWGS84Height(np.radians(lat), np.radians(lon), msl_height, egm96_file_path)
     else:
         print("Converting WGS84 height to MSL height")
         wgs84_height = cml_args.height
-        msl_height = wgs84toMSLHeight(np.radians(lat), np.radians(lon), wgs84_height, config)
+        msl_height = wgs84toMSLHeight(np.radians(lat), np.radians(lon), wgs84_height, egm96_file_path)
 
     print('Latitude:', lat)
     print('Longitude', lon)
