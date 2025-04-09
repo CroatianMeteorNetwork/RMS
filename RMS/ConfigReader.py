@@ -294,7 +294,7 @@ class Config:
         # Decoder for the gstreamer media backend (e.g. decodebin, avdec_h264, nvh264dec)
         self.gst_decoder = "avdec_h264"
 
-        # Toggle raw video saving in data_dir/video_dir.
+        # Toggle raw video saving in data_dir/video_dir
         self.raw_video_save = False
 
         # Duration of the raw video segment (seconds)
@@ -344,6 +344,7 @@ class Config:
         self.archived_dir = "ArchivedFiles"
         self.frame_dir = "FramesFiles"
         self.video_dir = "VideoFiles"
+        self.times_dir = "TimeFiles"
 
         # days of logfiles to keep
         self.logdays_to_keep = 30
@@ -364,21 +365,26 @@ class Config:
         # Frame dirs to keep
         # Keep this many frame dirs (days)
         # Zero means keep them all
-        self.frame_dirs_to_keep = 8
+        self.frame_days_to_keep = 4
 
         # Video dirs to keep
         # Keep this many video dirs (days)
         # Zero means keep them all
-        self.video_dirs_to_keep = 2
-        
+        self.video_days_to_keep = 2
+
+        # Timestamp dirs to keep
+        # Keep this many ft file (timestamp) folders (days)
+        # Zero means keep them all
+        self.times_days_to_keep = 8
+
         # Space quotas in GB
 
 
 
         # Space allocation for all of rms_data
 
-        # Disable the deletion by quota management for testing purposes
-        self.quota_management_disabled = False
+        # Enable quota management
+        self.quota_management_enabled = False
 
 
         # Space allocation for all of rms_data
@@ -389,6 +395,12 @@ class Config:
 
         # Of that allocation for all of rms_data, this is set aside for bz2 files
         self.bz2_files_quota = None
+
+        # Of that allocation for all of rms_data, this is set aside for log files
+        self.log_files_quota = None
+
+        # Of that allocation for all of rms_data, this is set aside for continuous capture
+        self.continuous_capture_quota = None
 
 
         # Extra space to leave on disk for the archive (in GB) after the captured files have been taken
@@ -401,8 +413,11 @@ class Config:
         # Enable/disable saving a live.jpg file in the data directory with the latest image
         self.live_jpg = False
 
+        # Toggle saving of frame time files (FT files) to times_dir
+        self.save_frame_times = True
+
         # Toggle saving video frames at a set interval to the frame_dir
-        self.save_frames = False
+        self.save_frames = True
 
         # The file extension for saved frames ('jpg' or 'png')
         self.frame_file_type = 'jpg'
@@ -414,19 +429,19 @@ class Config:
         self.png_compression = 3
 
         # Set the time interval for saving video frames
-        self.frame_save_interval = 10
+        self.frame_save_interval = 5
 
         # Set the frame count interval for saving video frames (calculated from the time interval)
         self.frame_save_interval_count = 256
+
+        # Set whether to delete, archive, or leave saved frames after making timelapse ('delete', 'tar', 'none')
+        self.frame_cleanup = 'delete'
 
         # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
         self.slideshow_enable = False
 
         # Automatically reprocess broken capture directories
         self.auto_reprocess = True
-
-        # Prioritize capture over reprocessing - do not start reprocessing a new directory if should be capturing
-        self.prioritize_capture_over_reprocess = False
 
         # Flag file which indicates that the previously processed files are loaded during capture resume
         self.capture_resume_flag_file = ".capture_resuming"
@@ -448,6 +463,9 @@ class Config:
 
         # Run capture continuously, during the day or night
         self.continuous_capture = False
+
+        # Switch camera settings between day/night modes, for when continuous_capture is enabled
+        self.switch_camera_modes = False
 
         ##### Upload
 
@@ -557,6 +575,9 @@ class Config:
         self.vect_angle_thresh = 20 # angle similarity between 2 lines in a stripe to be merged
         self.frame_extension = 3 # how many frames to check during centroiding before and after the initially determined frame range
 
+        # Number of pixels to dilate the centroid mask beyond the thresholded image
+        self.centroid_dilation = 2
+
         # Centroid filtering parameters
         self.centroids_max_deviation = 2 # maximum deviation of a centroid point from a LSQ fitted line (if above max, it will be rejected)
         self.centroids_max_distance =  30 # maximum distance in pixels between centroids (used for filtering spurious centroids)
@@ -574,6 +595,9 @@ class Config:
 
         # Path to the ML model
         self.ml_model_path = os.path.join(self.rms_root_dir, "share", "meteorml32.tflite")
+
+        # Detection border (in pixels) - detections too close to the border of the mask will be rejected
+        self.detection_border = 5
 
         # Number of CPU cores to use for detection. 0 means all available cores, -1 all but one core (default)
         self.num_cores = -1
@@ -604,8 +628,9 @@ class Config:
         self.star_catalog_path = os.path.join(self.rms_root_dir, 'Catalogs')
         self.star_catalog_file = 'gaia_dr2_mag_11.5.npy'
 
-        # BVRI band ratios for GAIA G band and Sony CMOS cameras
-        self.star_catalog_band_ratios = [0.45, 0.70, 0.72, 0.50]
+        # Catalog band ratios for Sony CMOS cameras
+        #                                   B     V     R     I   (G    BR    BR)
+        self.star_catalog_band_ratios = [0.15, 0.30, 0.25, 0.30, 0.00, 0.0, 0.00]
 
         self.platepar_name = 'platepar_cmn2010.cal'
         self.platepars_flux_recalibrated_name = 'platepars_flux_recalibrated.json'
@@ -979,14 +1004,17 @@ def parseCapture(config, parser):
     if parser.has_option(section, "capt_dirs_to_keep"):
         config.capt_dirs_to_keep = int(parser.get(section, "capt_dirs_to_keep"))
 
-    if parser.has_option(section, "frame_dirs_to_keep"):
-        config.bz2_files_to_keep = int(parser.get(section, "frame_dirs_to_keep"))
+    if parser.has_option(section, "frame_days_to_keep"):
+        config.frame_days_to_keep = int(parser.get(section, "frame_days_to_keep"))
 
-    if parser.has_option(section, "video_dirs_to_keep"):
-        config.capt_dirs_to_keep = int(parser.get(section, "video_dirs_to_keep"))
+    if parser.has_option(section, "video_days_to_keep"):
+        config.video_days_to_keep = int(parser.get(section, "video_days_to_keep"))
 
-    if parser.has_option(section, "quota_management_disabled"):
-        config.quota_management_disabled = parser.getboolean(section, "quota_management_disabled")
+    if parser.has_option(section, "times_days_to_keep"):
+        config.times_days_to_keep = int(parser.get(section, "times_days_to_keep"))
+
+    if parser.has_option(section, "quota_management_enabled"):
+        config.quota_management_enabled = parser.getboolean(section, "quota_management_enabled")
 
 
 
@@ -999,6 +1027,12 @@ def parseCapture(config, parser):
     if parser.has_option(section, "bz2_files_quota"):
         config.bz2_files_quota = int(parser.get(section, "bz2_files_quota"))
 
+    if parser.has_option(section, "log_files_quota"):
+        config.log_files_quota = float(parser.get(section, "log_files_quota"))
+
+    if parser.has_option(section, "continuous_capture_quota"):
+        config.continuous_capture_quota = int(parser.get(section, "continuous_capture_quota"))
+
     if parser.has_option(section, "captured_dir"):
         config.captured_dir = parser.get(section, "captured_dir")
     
@@ -1010,6 +1044,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "video_dir"):
         config.video_dir = parser.get(section, "video_dir")
+
+    if parser.has_option(section, "times_dir"):
+        config.times_dir = parser.get(section, "times_dir")
 
     if parser.has_option(section, "width"):
         config.width = parser.getint(section, "width")
@@ -1174,6 +1211,10 @@ def parseCapture(config, parser):
     if parser.has_option(section, "live_jpg"):
         config.live_jpg = parser.getboolean(section, "live_jpg")
 
+    # Toggle saving of frame time files (FT files) to times_dir
+    if parser.has_option(section, "save_frame_times"):
+        config.save_frame_times = parser.getboolean(section, "save_frame_times")
+
     # Enable/disable saving video frames
     if parser.has_option(section, "save_frames"):
         config.save_frames = parser.getboolean(section, "save_frames")
@@ -1215,6 +1256,10 @@ def parseCapture(config, parser):
             print()
             print("WARNING! The frame_save_interval must result in more than 5 frames interval. It has been reset to 256 frames!")
 
+    # Set whether to delete, archive, or leave saved frames after making timelapse ('delete', 'tar', 'none')
+    if parser.has_option(section, "frame_cleanup"):
+        config.frame_cleanup = parser.get(section, "frame_cleanup")
+
     # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
     if parser.has_option(section, "slideshow_enable"):
         config.slideshow_enable = parser.getboolean(section, "slideshow_enable")
@@ -1223,11 +1268,6 @@ def parseCapture(config, parser):
     # Enable/disable auto reprocessing
     if parser.has_option(section, "auto_reprocess"):
         config.auto_reprocess = parser.getboolean(section, "auto_reprocess")
-
-    # Prioritize capture over reprocessing - do not start reprocessing a new directory if should be capturing
-    if parser.has_option(section, "prioritize_capture_over_reprocess"):
-        config.prioritize_capture_over_reprocess = parser.getboolean(section, \
-            "prioritize_capture_over_reprocess")
 
     # Load name of the capture resume flag file
     if parser.has_option(section, "capture_resume_flag_file"):
@@ -1255,6 +1295,9 @@ def parseCapture(config, parser):
     if parser.has_option(section, "continuous_capture"):
         config.continuous_capture = parser.getboolean(section, "continuous_capture")
 
+    # Load option to switch camera settings between day/night modes, for when continuous_capture is enabled
+    if parser.has_option(section, "switch_camera_modes"):
+        config.switch_camera_modes = parser.getboolean(section, "switch_camera_modes")
 
 def parseUpload(config, parser):
     section = "Upload"
@@ -1566,6 +1609,9 @@ def parseMeteorDetection(config, parser):
     if parser.has_option(section, "frame_extension"):
         config.frame_extension = parser.getint(section, "frame_extension")
 
+    if parser.has_option(section, "centroid_dilation"):
+        config.centroid_dilation = parser.getint(section, "centroid_dilation")
+
 
     if parser.has_option(section, "centroids_max_deviation"):
         config.centroids_max_deviation = parser.getfloat(section, "centroids_max_deviation")
@@ -1590,6 +1636,11 @@ def parseMeteorDetection(config, parser):
         # Disable the min_patch_intensity filter if the ML filter is used and the ML library is available
         if TFLITE_AVAILABLE and (config.ml_filter > 0):
             config.min_patch_intensity_multiplier = 0
+
+
+    if parser.has_option(section, "detection_border"):
+        config.detection_border = parser.getint(section, "detection_border")
+
 
     if parser.has_option(section, "num_cores"):
         config.num_cores = parser.getint(section, "num_cores")
@@ -1675,6 +1726,15 @@ def parseCalibration(config, parser):
 
         # Parse the ratios as a list of floats
         config.star_catalog_band_ratios = list(map(float, ratios_str.split(',')))
+
+        # Add zeros to the end of the list if it is too short (need 7 numbers)
+        while len(config.star_catalog_band_ratios) < 7:
+            config.star_catalog_band_ratios.append(0.0)
+
+        # If they're all zero, use the V band
+        if all([x == 0 for x in config.star_catalog_band_ratios]):
+            config.star_catalog_band_ratios[1] = 1.0
+            print('Warning! All band ratios are zero! Using the V band as the default band ratio...')
 
 
     if parser.has_option(section, "platepar_name"):

@@ -38,21 +38,28 @@ import numpy as np
 import pyximport
 import RMS.Formats.Platepar
 import scipy.optimize
-from RMS.Astrometry.AtmosphericExtinction import \
-    atmosphericExtinctionCorrection
-from RMS.Astrometry.Conversions import J2000_JD, date2JD, jd2Date, raDec2AltAz, AEGeoidH2LatLonAlt
+from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
+from RMS.Astrometry.Conversions import (J2000_JD, 
+                                        date2JD, 
+                                        jd2Date, 
+                                        raDec2AltAz, 
+                                        AEGeoidH2LatLonAlt, 
+                                        geo2Cartesian,
+                                        vector2RaDec
+                                        )
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Formats.FTPdetectinfo import (findFTPdetectinfoFile,
                                        readFTPdetectinfo, writeFTPdetectinfo)
 from RMS.GeoidHeightEGM96 import mslToWGS84Height
 from RMS.Math import angularSeparation, cartesianToPolar, polarToCartesian
+from RMS.Misc import RmsDateTime
+from RMS.Routines.SphericalPolygonCheck import sphericalPolygonCheck
 
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import (cyraDecToXY, cyTrueRaDec2ApparentAltAz,
                                         cyXYToRADec,
                                         eqRefractionApparentToTrue,
                                         equatorialCoordPrecession)
-from RMS.Misc import RmsDateTime
 
 # Handle Python 2/3 compatibility
 if sys.version_info.major == 3:
@@ -763,11 +770,14 @@ def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=
     if np.any(level_data):
         meteor_meas = meteor_meas[level_data > 0, :]
 
-    # Extract frame number, x, y, intensity
+    # Extract frame number, x, y, intensity, background, SNR, and saturated count
     frames = meteor_meas[:, 1]
     X_data = meteor_meas[:, 2]
     Y_data = meteor_meas[:, 3]
     level_data = meteor_meas[:, 8]
+    background_data = meteor_meas[:, 10]
+    snr_data = meteor_meas[:, 11]
+    saturated_data = meteor_meas[:, 12]
 
     # Get the beginning time of the FF file
     time_beg = filenameToDatetime(ff_name)
@@ -775,6 +785,7 @@ def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=
     # Calculate time data of every point
     time_data = []
     for frame_n in frames:
+
         t = time_beg + datetime.timedelta(seconds=frame_n/fps)
         time_data.append([t.year, t.month, t.day, t.hour, t.minute, t.second, int(t.microsecond/1000)])
 
@@ -813,15 +824,16 @@ def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=
 
     # Construct the meteor measurements array
     meteor_picks = np.c_[frames, X_data, Y_data, RA_data, dec_data, az_data, alt_data, level_data, \
-        magnitudes]
+        magnitudes, background_data, snr_data, saturated_data]
 
 
     return meteor_picks
 
 
-def XyHt2Geo(platepar, x, y, h):
+def xyHt2Geo(platepar, x, y, h):
     """ Given pixel coordinates on the image and a height of the target above sea level,
-        compute geo coordinates of the point.
+        compute geo coordinates of the point. The assumption is that the target is close enough for the
+        refraction not to be needed to be applied.
 
     Arguments:
         platepar: [Platepar object]
@@ -833,29 +845,277 @@ def XyHt2Geo(platepar, x, y, h):
         (lat, lon): [tuple of floats] latitude in degrees (+north), longitude in degrees (+east), 
 
     """
-    jd_arr, ra_arr, dec_arr, _ = xyToRaDecPP([jd2Date(platepar.JD)], np.array([x]), \
-        np.array([y]), [1], platepar, extinction_correction=False, precompute_pointing_corr=True)
-    
-    az, elev = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr), np.radians(dec_arr), jd_arr, \
-        np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction)
+
+    # Disable the refraction correction
+    platepar = copy.deepcopy(platepar)
+    platepar.refraction = False
+
+    # If any of the input parameters are arrays, get their length
+    arr_len = None
+    if isinstance(x, np.ndarray) or isinstance(x, list):
+        arr_len = len(x)
+    elif isinstance(y, np.ndarray) or isinstance(y, list):
+        arr_len = len(y)
+    elif isinstance(h, np.ndarray) or isinstance(h, list):
+        arr_len = len(h)
+
+    # If there are arrays as inputs but one is not an array, convert it to an array
+    if arr_len is not None:
+        if not isinstance(x, np.ndarray) or isinstance(x, list):
+            x = np.array([x]*arr_len)
+        if not isinstance(y, np.ndarray) or isinstance(y, list):
+            y = np.array([y]*arr_len)
+        if not isinstance(h, np.ndarray) or isinstance(h, list):
+            h = np.array([h]*arr_len)
+
+
+    # Convert x and y to arrays if they're not already
+    if not isinstance(x, np.ndarray) or isinstance(y, list):
+        x = np.array([x])
+    if not isinstance(y, np.ndarray) or isinstance(y, list):
+        y = np.array([y])
+    if not isinstance(h, np.ndarray) or isinstance(h, list):
+        h = np.array([h])
+
+    # Convert the pixel coordinates to RA/Dec
+    jd_arr, ra_arr, dec_arr, _ = xyToRaDecPP(
+        [platepar.JD]*len(x), x, y, [1]*len(x),
+        platepar, 
+        extinction_correction=False, precompute_pointing_corr=True, jd_time=True,
+        measurement=False # Disables refraction correction
+        )
         
-    # Calculate WGS84 height
-    wgs84_height = mslToWGS84Height(
-        np.radians(platepar.lat),
-        np.radians(platepar.lon),
-        platepar.elev
-    )
+    # Iterate through the altitudes and azimuths and compute the geo coordinates
+    lat_arr = np.zeros_like(ra_arr)
+    lon_arr = np.zeros_like(ra_arr)
+
+    for i in range(len(ra_arr)):
+
+        # Compute the apparent alt/az
+        az, elev = cyTrueRaDec2ApparentAltAz(
+            np.radians(ra_arr[i]), np.radians(dec_arr[i]), jd_arr[i], \
+            np.radians(platepar.lat), np.radians(platepar.lon), 
+            False # Disable refraction correction
+            )
+
+        # Convert the apparent alt/az to geo coordinates
+        lat, lon = AEGeoidH2LatLonAlt(
+            np.degrees(az), np.degrees(elev), h[i], 
+            platepar.lat, platepar.lon, platepar.elev
+            )
+        
+        lat_arr[i] = lat
+        lon_arr[i] = lon
     
-    lat, lon = AEGeoidH2LatLonAlt(
-        np.degrees(az),
-        np.degrees(elev),
-        h,
-        platepar.lat,
-        platepar.lon,
-        wgs84_height
-    )
+    return lat_arr, lon_arr
+
+
+
+def geoHt2RaDec(platepar, jd, lat, lon, h):
+    """ Given geo coordinates of the target and a height of the target above sea level,
+        compute equatorial coordinates of the target.
+
+    Arguments:
+        platepar: [Platepar object]
+        jd: [float] Julian date.
+        lat: [float] latitude in degrees (+north).
+        lon: [float] longitude in degrees (+east).
+        h: [float] elevation of the target in meters (WGS84).
+
+    Return:
+        (ra, dec): [tuple of floats] Right ascension and declination in degrees
+
+    """
+
+    # Convert the target and camera coordinats into the ECI frame
+    vector_target = np.array(geo2Cartesian(lat, lon, h, jd))
+    vector_station = np.array(geo2Cartesian(platepar.lat, platepar.lon, platepar.elev, jd))
+
+    # Compute the pointing vector from the station to the target
+    pointing_vector = vector_target - vector_station
+
+    # Convert the pointing vector to RA/Dec
+    ra, dec = vector2RaDec(pointing_vector)
+
+    return ra, dec
+
+
+def geoHt2XY(platepar, lat, lon, h):
+    """ Given geo coordinates of the target and a height of the target above sea level,
+        compute pixel coordinates on the image.
+
+    Arguments:
+        platepar: [Platepar object]
+        lat: [float] latitude in degrees (+north)
+        lon: [float] longitude in degrees (+east)
+        h: [float] elevation of the target in meters (WGS84)
+
+    Return:
+        (x, y): [tuple of floats] Image X and Y coordinates
+
+    """
+
+    # Disable the refraction correction
+    platepar = copy.deepcopy(platepar)
+    platepar.refraction = False
+
+    ra, dec = geoHt2RaDec(platepar, J2000_JD.days, lat, lon, h)
+
+    # If Ra and Dec are not arrays, convert them to arrays
+    if not isinstance(ra, np.ndarray):
+        ra = np.array([ra])
+        dec = np.array([dec])
+
+    # Project the RA/Dec to the image
+    x, y = raDecToXYPP(ra, dec, J2000_JD.days, platepar)
     
-    return lat, lon
+    return x, y
+
+
+def fovEdgePolygon(platepar, jd, side_sample=10, trim_px=2):
+    """ Compute the polygon describing the edges of the FOV in RA and Dec, with side_sample points on each 
+        side. The FOV polygon is trimmed on each end to minimize the effect of the distortion near the edges.
+
+    Arguments:
+        platepar: [Platepar object].
+        jd: [float] Julian date.
+
+    Keyword arguments:
+        side_sample: [int] Number of points on each side of the FOV. 10 by default.
+        trim_px: [int] Number of pixels to trim on each side. 2 by default.
+
+    Return:
+        (x_vert, y_vert, ra_vert, dec_vert): [tuple of ndarrays] Image X and Y coordinates and RA/Dec of the
+            FOV polygon.
+
+    """
+
+    x = platepar.X_res - trim_px
+    y = platepar.Y_res - trim_px
+
+    # Scale the number of points with the shape of the image, so there are side_points on the longest side
+    longer_side, shorter_side = (x, y) if x > y else (y, x)
+    longer_samples = side_sample
+    shorter_samples = int(side_sample*shorter_side/longer_side)
+
+    # Make sure there are at least 3 points on each side
+    longer_samples = max(3, longer_samples)
+    shorter_samples = max(3, shorter_samples)
+
+    x_samples = longer_samples if x > y else shorter_samples
+    y_samples = shorter_samples if x > y else longer_samples
+
+    # Compute the polygon describing the edges of the FOV, with side_sample points on each side
+    x_vert = []
+    y_vert = []
+
+    # Top side
+    x_vert += [i*x/x_samples + trim_px for i in range(x_samples)]
+    y_vert += [trim_px]*x_samples
+
+    # Right side
+    x_vert += [x]*y_samples
+    y_vert += [i*y/y_samples + trim_px for i in range(y_samples)]
+
+    # Bottom side
+    x_vert += reversed([i*x/x_samples for i in range(1, x_samples + 1)])
+    y_vert += [y]*(x_samples)
+    x_vert += [trim_px]
+    y_vert += [y]
+
+    # Left side (make sure to close the polygon)
+    x_vert += [trim_px]*y_samples
+    y_vert += reversed([i*y/y_samples for i in range(y_samples)])
+
+    # Convert the polygon to RA/Dec
+    _, ra_vert, dec_vert, _ = xyToRaDecPP(
+        [float(jd)]*len(x_vert), x_vert, y_vert, [1]*len(x_vert), platepar, 
+        extinction_correction=False, jd_time=True, precompute_pointing_corr=True
+        )
+
+    return x_vert, y_vert, ra_vert, dec_vert
+
+
+def geoHt2XYInsideFOV(platepar, lat_arr, lon_arr, h_att, side_sample=10):
+    """ Given geo coordinates of the target and a height of the target above sea level,
+        compute pixel coordinates on the image. The function will return the pixel coordinates only if
+        the coordinates are inside the camera field of view.
+
+    Arguments:
+        platepar: [Platepar object]
+        lat_arr: [ndarray] Array of latitudes in degrees (+north).
+        lon_arr: [ndarray] Array of longitudes in degrees (+east).
+        h_att: [ndarray] Array of elevations of the target in meters (WGS84).
+
+    Return:
+        (x, y, inside_indices): [tuple of floats] Image X and Y coordinates and the mask
+
+    """
+
+    # Disable the refraction correction
+    platepar = copy.deepcopy(platepar)
+    platepar.refraction = False
+
+    # If any of the input parameters is an iterable but the rest are not, convert them them all to arrays
+    arr_len = None
+    if isinstance(lat_arr, np.ndarray) or isinstance(lat_arr, list):
+        arr_len = len(lat_arr)
+    elif isinstance(lon_arr, np.ndarray) or isinstance(lon_arr, list):
+        arr_len = len(lon_arr)
+    elif isinstance(h_att, np.ndarray) or isinstance(h_att, list):
+        arr_len = len(h_att)
+
+    # If there are arrays as inputs but one is not an array, convert it to an array
+    if arr_len is None:
+        arr_len = 1
+
+    # If there are arrays as inputs but one is not an array, convert it to an array
+    if arr_len is not None:
+        if not isinstance(lat_arr, np.ndarray) or isinstance(lat_arr, list):
+            lat_arr = np.array([lat_arr]*arr_len)
+        if not isinstance(lon_arr, np.ndarray) or isinstance(lon_arr, list):
+            lon_arr = np.array([lon_arr]*arr_len)
+        if not isinstance(h_att, np.ndarray) or isinstance(h_att, list):
+            h_att = np.array([h_att]*arr_len)
+
+
+    # Compute the polygon describing the edges of the FOV, with side_sample points on each side
+    _, _, ra_vert, dec_vert = fovEdgePolygon(platepar, J2000_JD.days, side_sample=side_sample)
+
+    # Compute the ra, dec of the target
+    ra_arr = []
+    dec_arr = []
+
+    for i in range(len(lat_arr)):
+        ra, dec = geoHt2RaDec(platepar, J2000_JD.days, lat_arr[i], lon_arr[i], h_att[i])
+        ra_arr.append(ra)
+        dec_arr.append(dec)
+
+    ra_arr = np.array(ra_arr)
+    dec_arr = np.array(dec_arr)
+
+
+    # Define the polygon as [[ra1, dec1], [ra2, dec2], ...]
+    fov_polygon = np.c_[ra_vert, dec_vert]
+
+    # Define the points as [[ra1, dec1], [ra2, dec2], ...]
+    target_points = np.c_[ra_arr, dec_arr]
+
+    # Compute the mask
+    inside_indices = sphericalPolygonCheck(fov_polygon, target_points)
+
+    # Select only the points inside the FOV
+    ra_inside, dec_inside = ra_arr[inside_indices], dec_arr[inside_indices]
+
+    # If there are no points inside the FOV, return empty arrays
+    if len(ra_inside) == 0:
+        return np.array([]), np.array([]), inside_indices
+    
+    # Convert the points to image coordinates
+    x, y = raDecToXYPP(ra_inside, dec_inside, J2000_JD.days, platepar)
+
+    return x, y, inside_indices
+
 
 
 def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, UT_corr=0, platepar=None):

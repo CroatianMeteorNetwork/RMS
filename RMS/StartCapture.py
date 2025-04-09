@@ -26,7 +26,6 @@ import random
 import signal
 import shutil
 import ctypes
-import logging
 import threading
 import multiprocessing
 import traceback
@@ -39,10 +38,10 @@ import numpy as np
 from Utils.LiveViewer import LiveViewer
 
 import RMS.ConfigReader as cr
-from RMS.Logger import initLogging
+from RMS.Logger import initLogging, getLogger
 from RMS.BufferedCapture import BufferedCapture
 from RMS.CaptureDuration import captureDuration
-from RMS.CameraModeSwitcher import cameraModeSwitcher
+from RMS.CaptureModeSwitcher import captureModeSwitcher
 from RMS.Compression import Compressor
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
@@ -68,6 +67,8 @@ def breakHandler(signum, frame):
     # Set the flag to stop capturing video
     STOP_CAPTURE = True
 
+    # This log entry is an adhoc fix to prevents Ctrl+C failure until the root cause is identified
+    log.info("Ctrl+C pressed. Setting STOP_CAPTURE to True")
 
 # Save the original event for the Ctrl+C
 ORIGINAL_BREAK_HANDLE = signal.getsignal(signal.SIGINT)
@@ -99,8 +100,7 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
         compressor: [Compressor] compressor process object
         buffered_capture: [BufferedCapture] buffered capture process object
         video_file: [str] Path to the video file, if it was given as the video source.
-        daytime_mode: [bool] shared boolean variable to that indicates 
-        daytime_mode: [bool] shared boolean variable to keep track of camera day/night mode switching. None by default.
+        daytime_mode: [multiprocessing.Value] shared boolean variable to keep track of camera day/night mode switching. None by default.
     """
 
     global STOP_CAPTURE
@@ -115,7 +115,7 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
     if daytime_mode is not None:
         daytime_mode_prev = daytime_mode.value
     else:
-        daytime_mode_prev = None
+        daytime_mode_prev = False
 
     while True:
 
@@ -157,7 +157,7 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
 
 
 def runCapture(config, duration=None, video_file=None, nodetect=False, detect_end=False, \
-    upload_manager=None, eventmonitor=None, resume_capture=False, fixed_duration=False, daytime_mode=None):
+    upload_manager=None, eventmonitor=None, resume_capture=False, daytime_mode=None):
     """ Run capture and compression for the given time.given
     
     Arguments:
@@ -173,8 +173,6 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             the central server. None by default.
         eventmonitor: [EventMonitor object]. Event monitor object. None by default.
         resume_capture: [bool] Resume capture in the last data directory in CapturedFiles. False by default.
-        fixed_duration: [bool] The capture is run with a given fixed duration and not automatically 
-            determined. False by default.
         daytime_mode: [multiprocessing.Value] shared boolean variable to keep track of camera day/night mode switching. None by default.
 
     Return:
@@ -218,9 +216,6 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         else:
             log.info("Previous capture directory found: {:s}".format(night_data_dir))
 
-        # Resume run is finished now, reset resume flag
-        cml_args.resume = False
-
 
     # Make a name for the capture data directory
     if night_data_dir_name is None:
@@ -238,18 +233,21 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         night_data_dir = os.path.join(os.path.abspath(config.data_dir), config.captured_dir, \
             night_data_dir_name)
 
-        # Full path to the saved frames directory
-        if config.save_frames:
-            saved_frames_dir = os.path.join(os.path.abspath(config.data_dir), config.frame_dir)
-        else:
-            saved_frames_dir = None
+    # Full path to the time files directories
+    if config.save_frame_times:
+        ft_file_dir = os.path.join(os.path.abspath(config.data_dir), config.times_dir)
 
-        # Full path to the video files directory
-        if config.raw_video_save:
-            saved_video_dir = os.path.join(os.path.abspath(config.data_dir), config.video_dir)
-        else:
-            saved_video_dir = None
+    # Full path to the saved frames directory
+    if config.save_frames:
+        saved_frames_dir = os.path.join(os.path.abspath(config.data_dir), config.frame_dir)
+    else:
+        saved_frames_dir = None
 
+    # Full path to the video files
+    if config.raw_video_save:
+        saved_video_dir = os.path.join(os.path.abspath(config.data_dir), config.video_dir)
+    else:
+        saved_video_dir = None
 
 
     # Add a note about Patreon supporters
@@ -276,6 +274,11 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         mkdirP(night_data_dir)
         log.info('Data directory: ' + night_data_dir)
 
+    # Make a directory for the time files if configured
+    if config.save_frame_times:
+        mkdirP(ft_file_dir)
+        log.info('Saved FT files directory: {}'.format(ft_file_dir))
+
     # Make a directory for the saved frames
     if saved_frames_dir is not None:
         mkdirP(saved_frames_dir)
@@ -289,7 +292,12 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Copy the used config file to the capture directory
     if os.path.isfile(config.config_file_name):
         try:
-            shutil.copy2(config.config_file_name, os.path.join(night_data_dir, ".config"))
+            # Get the name of the originating config file
+            config_file_name = os.path.basename(config.config_file_name)
+
+            # Copy the config file to the capture directory
+            shutil.copy2(config.config_file_name, os.path.join(night_data_dir, config_file_name))
+
         except:
             log.error("Cannot copy the config file to the capture directory!")
 
@@ -408,7 +416,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
             else:
 
-                if detect_end:
+                if detect_end and (duration is not None):
 
                     # Delay detection until the end of the night
                     delay_detection = duration
@@ -490,7 +498,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             compressor.start()
 
             # Capture until Ctrl+C is pressed / camera switches modes
-            daytime_mode_prev = daytime_mode.value
+            if (daytime_mode is not None):
+                daytime_mode_prev = daytime_mode.value
+                
             wait(duration, compressor, bc, video_file, daytime_mode)
 
             # Stop the compressor
@@ -511,9 +521,10 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 log.debug('Live view stopped')
 
 
-        # Continuous mode: stops BufferedCapture when capture is terminated manually
-        # Standard mode: stops BufferedCapture when night is done
-        if STOP_CAPTURE or (not config.continuous_capture) or (disk_full):
+        # Manage capture termination:
+        # stops BufferedCapture when capture is terminated manually (Continuous Mode)
+        # stops BufferedCapture when night is done (Standard mode)
+        if STOP_CAPTURE or (not config.continuous_capture):
 
             log.info('Ending capture...')
 
@@ -690,7 +701,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             runExternalScript(night_data_dir, night_archive_dir, config)
 
 
-        # Continuous OR standard mode: exit when capture is terminated manually
+        # If capture is terminated manually, or the disk is full, exit program
         if STOP_CAPTURE or (disk_full):
 
             # Stop the upload manager
@@ -708,9 +719,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
             sys.exit()
 
-
         # Standard mode: need to run it all just once
-        if (not config.continuous_capture):
+        # Continuous mode: if the program just got done with nighttime processing and needs to reboot
+        elif (not config.continuous_capture) or (not daytime_mode_prev and config.reboot_after_processing):
             break 
 
         ran_once = True
@@ -833,11 +844,11 @@ def processIncompleteCaptures(config, upload_manager):
             log.error(repr(traceback.format_exception(*sys.exc_info())))
 
         # If capture should have started do not process any more incomplete directories
-        start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation)
-        if isinstance(start_time, bool):
-
-            if start_time and config.prioritize_capture_over_reprocess:
-
+        # Ignore this for continuous capture
+        if (not config.continuous_capture):
+            
+            start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation)
+            if isinstance(start_time, bool):
                 log.info("Capture should have started, do not start reprocessing another directory")
                 break
 
@@ -893,7 +904,7 @@ if __name__ == "__main__":
     initLogging(config)
 
     # Get the logger handle
-    log = logging.getLogger("logger")
+    log = getLogger("logger")
 
 
     log.info("Program start")
@@ -972,9 +983,13 @@ if __name__ == "__main__":
 
         log.info("Running for " + str(duration/60/60) + ' hours...')
 
+        # Disable continuous capture for fixed duration capture
+        config.continuous_capture = False
+
         # Run the capture for the given number of hours
         runCapture(config, duration=duration, nodetect=cml_args.nodetect, upload_manager=upload_manager, \
-            detect_end=cml_args.detectend, resume_capture=cml_args.resume, fixed_duration=True)
+            detect_end=cml_args.detectend, resume_capture=cml_args.resume)
+        cml_args.resume = False
 
         if upload_manager is not None:
             # Stop the upload manager
@@ -994,9 +1009,13 @@ if __name__ == "__main__":
 
         log.info('Video source: ' + cml_args.input)
 
+        # Disable continuous capture for video file capture
+        config.continuous_capture = False
+        
         # Capture the video frames from the video file
         runCapture(config, duration=None, video_file=video_file, nodetect=cml_args.nodetect,
             resume_capture=cml_args.resume)
+        cml_args.resume = False
 
         sys.exit()
 
@@ -1081,14 +1100,16 @@ if __name__ == "__main__":
 
 
                 ### Stop reboot tries if it's time to capture ###
-                if isinstance(start_time, bool):
-                    if start_time:
-                        break
+                if (not config.continuous_capture):
+                    
+                    if isinstance(start_time, bool):
+                        if start_time:
+                            break
 
-                time_now = RmsDateTime.utcnow()
-                waiting_time = start_time - time_now
-                if waiting_time.total_seconds() <= 0:
-                    break
+                    time_now = RmsDateTime.utcnow()
+                    waiting_time = start_time - time_now
+                    if waiting_time.total_seconds() <= 0:
+                        break
 
                 ### ###
 
@@ -1136,16 +1157,19 @@ if __name__ == "__main__":
             continue
 
 
-        # Wait to start capturing and initialize last night's slideshow
-        if not isinstance(start_time, bool):
+        # Run auto-reprocessing only if the config option is set
+        if config.auto_reprocess:
 
-            # Run auto-reprocessing
-            if config.auto_reprocess:
+            # In case of continuous capture, start processing incomplete captures
+            if not isinstance(start_time, bool) or config.continuous_capture:
 
                 # Check if there's a folder containing unprocessed data.
                 # This may happen if the system crashed during processing.
                 processIncompleteCaptures(config, upload_manager)
 
+
+        # Wait to start capturing and initialize last night's slideshow
+        if not isinstance(start_time, bool):
 
             # Initialize the slideshow of last night's detections
             if config.slideshow_enable:
@@ -1291,16 +1315,29 @@ if __name__ == "__main__":
             # Setup shared value to communicate day/night switch between processes.
             daytime_mode = multiprocessing.Value(ctypes.c_bool, False)
 
-            # Setup camera mode switcher on another thread
-            cam_switcher = threading.Thread(target=cameraModeSwitcher, args=(config, daytime_mode))
+            # Setup the capture mode switcher on another thread
+            capture_switcher = threading.Thread(target=captureModeSwitcher, args=(config, daytime_mode))
             
-            # To make sure switcher thread exits automatically at the end
-            cam_switcher.daemon = True
+            # To make sure the capture switcher thread exits automatically at the end
+            capture_switcher.daemon = True
             
-            cam_switcher.start()
-            log.info('Started camera mode switcher on separate thread')
+            capture_switcher.start()
+
+            # Wait for the switcher to complete calculation and switch to correct camera mode
+            time.sleep(3)
+
+            # Capture the health of the thread. If dead, then restart capture with
+            # continuous_capture disabled
+            if capture_switcher.is_alive():
+                log.info('Started capture mode switcher on a separate thread')
+
+            else:
+                log.error('Capture mode switcher thread failed. Restarting capture with continuous capture off')
+                config.continuous_capture = False
+                continue
 
         else:
+            daytime_mode = None
             log.info('Starting capture for {:.2f} hours'.format(duration/60/60))
 
 
@@ -1308,6 +1345,7 @@ if __name__ == "__main__":
         night_archive_dir = runCapture(config, duration=duration, nodetect=cml_args.nodetect, \
             upload_manager=upload_manager, eventmonitor=eventmonitor, detect_end=(cml_args.detectend or config.postprocess_at_end), \
             resume_capture=cml_args.resume, daytime_mode=daytime_mode)
+        cml_args.resume = False
 
         # Indicate that the capture was done once
         ran_once = True

@@ -19,11 +19,12 @@ from __future__ import print_function, division, absolute_import
 import numpy as np
 from math import sqrt
 from time import time
-import logging
+
+from RMS.Logger import getLogger
 
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 # Cython init

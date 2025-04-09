@@ -18,21 +18,25 @@
 import os
 
 
-def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols):
+def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols, chunk_frames=256):
     """ Writes the star list into the CAMS CALSTARS format. 
 
-    @param star_list: [list] a list of star data, entries:
-        ff_name, star_data
-        star_data entries:
-            x, y, bg_level, level
+    Arguments:
+        star_list: [list] a list of star data, entries:
+            ff_name, star_data
+            star_data entries:
+                x, y, bg_level, level
+        ff_directory: [str] path to the directory in which the file will be written
+        file_name: [str] file name in which the data will be written
+        cam_code: [str] camera code
+        nrows: [int] number of rows in the image
+        ncols: [int] number of columns in the image
 
-    @param ff_directory: [str] path to the directory in which the file will be written
-    @param file_name: [str] file name in which the data will be written
-    @param cam_code: [str] camera code
-    @param nrows: [int] number of rows in the image
-    @param ncols: [int] number of columns in the image
+    Keyword arguments:
+        chunk_frames: [int] Number of frames in the FF file or frame chunk. Default is 256.
 
-    @return None
+    Return:
+        None
     """
 
     with open(os.path.join(ff_directory, file_name), 'w') as star_file:
@@ -41,16 +45,21 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols):
         star_file.write("==========================================================================\n")
         star_file.write("RMS star extractor" + "\n")
         star_file.write("Cal time = FF header time plus 255/(2*framerate_Hz) seconds" + "\n")
-        star_file.write("Row  Column  Intensity-Backgnd  Amplitude  (integrated values) FWHM" + "\n")
+        star_file.write("      Y       X IntensSum Ampltd  FWHM  BgLvl   SNR NSatPx" + "\n")
         star_file.write("==========================================================================\n")
         star_file.write("FF folder = " + ff_directory + "\n")
-        star_file.write("Cam #  = " + str(cam_code) + "\n")
-        star_file.write("Nrows  = " + str(nrows) + "\n")
-        star_file.write("Ncols  = " + str(ncols) + "\n")
-        star_file.write("Nstars = -1" + "\n")
+        star_file.write("Cam #   = " + str(cam_code) + "\n")
+        star_file.write("Nrows   = " + str(nrows) + "\n")
+        star_file.write("Ncols   = " + str(ncols) + "\n")
+        star_file.write("Nframes = " + str(chunk_frames) + "\n")
+        star_file.write("Nstars  = -1" + "\n")
 
         # Write all stars in the CALSTARS file
         for star in star_list:
+
+            # Skip empty star lists
+            if len(star) < 2:
+                continue
 
             # Unpack star data
             ff_name, star_data = star
@@ -62,25 +71,43 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols):
             star_file.write("Integ pixels  = -1" + "\n")
 
             # Write every star to file
-            for y, x, amplitude, level, fwhm in list(star_data):
-                star_file.write("{:7.2f} {:7.2f} {:6d} {:6d} {:5.2f}".format(round(y, 2), round(x, 2), 
-                    int(level), int(amplitude), fwhm) + "\n")
+            for y, x, amplitude, level, fwhm, background, snr, saturated_count in list(star_data):
+
+                # Limit the saturation count to 999999
+                if saturated_count > 999999:
+                    saturated_count = 999999
+
+                # Limit the SNR to 99.99
+                if snr > 99.99:
+                    snr = 99.99
+
+                star_file.write("{:7.2f} {:7.2f} {:9d} {:6d} {:5.2f} {:6d} {:5.2f} {:6d}".format(
+                    round(y, 2), round(x, 2), 
+                    int(level), int(amplitude), fwhm, int(background), snr, int(saturated_count)) + "\n")
 
         # Write the end separator
         star_file.write("##########################################################################\n")
 
 
 
-def readCALSTARS(file_path, file_name):
+def readCALSTARS(file_path, file_name, chunk_frames=256):
     """ Reads a list of detected stars from a CAMS CALSTARS format. 
 
-    @param file_path: [string] path to the directory where the CALSTARS file is located
-    @param file_name: [string] name of the CALSTARS file
+    Arguments:
+        file_path: [str] Path to the directory where the CALSTARS file is located.
+        file_name: [str] Name of the CALSTARS file.
 
-    @return star_list: [list] a list of star data, entries:
-        ff_name, star_data
-        star_data entries:
-            x, y, bg_level, level, fwhm
+    Keyword arguments:
+        chunk_frames: [int] Number of frames in the FF file or frame chunk. Default is 256.
+            Will be overwritten by a number in the CALSTARS file if present.
+
+    Return:
+        star_list, chunk_frames: 
+            - star_list [list] a list of star data, entries:
+                ff_name, star_data
+                star_data entries:
+                    x, y, bg_level, level, fwhm
+            - chunk_frames [int] Number of frames in the FF file or frame chunk.
     """
 
     
@@ -106,8 +133,13 @@ def readCALSTARS(file_path, file_name):
                 skip_lines -= 1
                 continue
 
+            # Read the number of frames if given (Nframes = ...)
+            if "Nframes" in line:
+                chunk_frames = int(line.split('=')[-1])
+                continue
+
             # Check for end of star entry
-            if ("===" in line) or ("###" in line):
+            if (("===" in line) or ("###" in line)) and len(ff_name):
 
                 # Add the star list to the main list
                 calibrationstars_list.append([ff_name, star_data])
@@ -140,14 +172,35 @@ def readCALSTARS(file_path, file_name):
             except:
                 continue
 
+            # Read the star data
+            y, x, level, amplitude = float(line[0]), float(line[1]), int(line[2]), int(line[3])
+
             # Read FWHM if given
-            if len(line) == 5:
+            if len(line) >= 5:
                 fwhm = float(line[4])
             else:
                 fwhm = -1.0
 
+            # Read the background level
+            if len(line) >= 6:
+                background = int(line[5])
+            else:
+                background = -1
+
+            # Read the SNR
+            if len(line) >= 7:
+                snr = float(line[6])
+            else:
+                snr = -1.0
+
+            # Read the number of saturated pixels
+            if len(line) >= 8:
+                saturated_count = int(line[7])
+            else:
+                saturated_count = -1
+
             # Save star data
-            star_data.append([float(line[0]), float(line[1]), int(line[2]), int(line[3]), fwhm])
+            star_data.append([y, x, level, amplitude, fwhm, background, snr, saturated_count])
 
     
-    return calibrationstars_list
+    return calibrationstars_list, chunk_frames

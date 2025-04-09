@@ -549,7 +549,7 @@ def testPoints(int gap_threshold, np.ndarray[UINT16_TYPE_t, ndim=1] pointsy, \
         z_dist = pointsz[i] - z_prev
         y_dist = pointsy[i] - y_prev
         
-        distance = y_dist**2 + z_dist**2 + z_dist**2
+        distance = x_dist**2 + y_dist**2 + z_dist**2
         
         # Count the point if there is no gap from the previous point
         if(distance < gap_threshold):

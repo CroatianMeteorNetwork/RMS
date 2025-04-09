@@ -27,7 +27,6 @@ import dateutil
 import glob
 import sqlite3
 import multiprocessing
-import logging
 import copy
 import uuid
 import random
@@ -58,6 +57,7 @@ import RMS.ConfigReader as cr
 
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector
 from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt
+from RMS.Logger import getLogger
 from RMS.Math import angularSeparationVect
 from RMS.Formats.FFfile import convertFRNameToFF
 from RMS.Formats.Platepar import Platepar
@@ -74,7 +74,7 @@ import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz
 
-log = logging.getLogger("logger")
+log = getLogger("logger")
 EM_RAISE = False
 
 """
@@ -2326,6 +2326,12 @@ def convertGMNTimeToPOSIX(timestring):
     returns:
         posix compatible time
     """
+
+
+    # remove any trailing decimal part of timestring
+    if "." in timestring:
+        timestring, _, _ = timestring.partition(".")
+
     try:
         dt_object = datetime.datetime.strptime(timestring.strip(), "%Y%m%d_%H%M%S")
     except:
@@ -2834,6 +2840,18 @@ def testsanitise():
 
     return success
 
+
+def testTimeObjectCreator():
+
+    success = True
+    if convertGMNTimeToPOSIX("20250319_181910.0") == convertGMNTimeToPOSIX("20250319_181910"):
+        success = success
+    else:
+        success = False
+
+
+    return success
+
 def testIndividuals(logging = True):
 
 
@@ -2850,7 +2868,13 @@ def testIndividuals(logging = True):
 
     individuals_success = True
 
-
+    if testTimeObjectCreator():
+        individuals_success = individuals_success
+        if logging:
+            log.info("TimeObjectCreator passed tests")
+    else:
+        individuals_success = False
+        log.error("TimeObjectCreator failed tests")
 
     if testsanitise():
         if logging:
