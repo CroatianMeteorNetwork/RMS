@@ -1605,7 +1605,7 @@ class InputTypeImages(object):
                 self.config.latitude = np.degrees(self.fripon_header["LATITUDE"])
                 self.config.longitude = np.degrees(self.fripon_header["LONGITUD"])
                 self.config.elevation = wgs84toMSLHeight(np.radians(self.config.latitude), 
-                    np.radians(self.config.longitude), self.fripon_header["ALTITUDE"], self.config) # WGS84 in fits
+                    np.radians(self.config.longitude), self.fripon_header["ALTITUDE"], egm96_file_path=self.config.egm96_full_path) # WGS84 in fits
 
                 # Set approximate FOV
                 self.config.fov_w = 40

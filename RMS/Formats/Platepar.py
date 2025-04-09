@@ -942,9 +942,8 @@ class Platepar(object):
             self.y_poly_fwd = self.y_poly_fwd[: self.poly_length]
             self.y_poly_rev = self.y_poly_rev[: self.poly_length]
 
-    def loadFromDict(self, platepar_dict, use_flat=None):
+    def loadFromDict(self, platepar_dict, use_flat=None, egm96_file_path=None):
         """Load the platepar from a dictionary."""
-
         # Parse JSON into an object with attributes corresponding to dict keys
         self.__dict__ = platepar_dict
 
@@ -959,6 +958,7 @@ class Platepar(object):
                     np.radians(self.lat),
                     np.radians(self.lon),
                     self.elev,
+                    egm96_file_path=egm96_file_path
                 )
             except Exception as e:
                 self.height_wgs84 = self.elev
@@ -1060,7 +1060,7 @@ class Platepar(object):
         # Calculate the datetime
         self.time = jd2Date(self.JD, dt_obj=True)
 
-    def read(self, file_name, fmt=None, use_flat=None):
+    def read(self, file_name, fmt=None, use_flat=None, config=None):
         """Read the platepar.
 
         Arguments:
@@ -1069,6 +1069,7 @@ class Platepar(object):
             fmt: [str] Format of the platepar file. 'json' for JSON format and 'txt' for the usual CMN textual
                 format.
             use_flat: [bool] Indicates whether a flat is used or not. None by default.
+            config: [Config] Configuration object. 
         Return:
             fmt: [str]
         """
@@ -1076,6 +1077,12 @@ class Platepar(object):
         # Check if platepar exists
         if not os.path.isfile(file_name):
             return False
+
+        # Get the egm96 path from config if possible
+        if config:
+            egm96_file_path = config.egm96_full_path
+        else:
+            egm96_file_path = None
 
         # Determine the type of the platepar if it is not given
         if fmt is None:
@@ -1099,7 +1106,7 @@ class Platepar(object):
                 data = " ".join(f.readlines())
 
             # Load the platepar from the JSON dictionary
-            self.loadFromDict(json.loads(data), use_flat=use_flat)
+            self.loadFromDict(json.loads(data), use_flat=use_flat, egm96_file_path=egm96_file_path)
 
         # Load the file as TXT (old CMN format)
         else:
@@ -1112,6 +1119,17 @@ class Platepar(object):
 
                 # Parse latitude, longitude, elevation
                 self.lon, self.lat, self.elev = self.parseLine(f)
+
+                try:
+                    self.height_wgs84 = mslToWGS84Height(
+                        np.radians(self.lat),
+                        np.radians(self.lon),
+                        self.elev,
+                        egm96_file_path=egm96_file_path
+                    )
+                except Exception as e:
+                    self.height_wgs84 = self.elev
+                    print("Warning: Calculating platepar WGS84 height failed {}. Using Geoid height instead.".format(str(e)))
 
                 # Parse date and time as int
                 D, M, Y, h, m, s = map(int, f.readline().split())
@@ -1507,12 +1525,12 @@ def findBestPlatepar(config, night_data_dir=None):
     default_platepar_path = os.path.join(config.config_file_path, config.platepar_name)
 
     if (night_data_dir is not None) and os.path.exists(night_platepar_path):
-        platepar.read(night_platepar_path, use_flat=config.use_flat)
+        platepar.read(night_platepar_path, use_flat=config.use_flat, config=config)
 
         return platepar
 
     elif os.path.exists(default_platepar_path):
-        platepar.read(default_platepar_path, use_flat=config.use_flat)
+        platepar.read(default_platepar_path, use_flat=config.use_flat, config=config)
 
         return platepar
 
