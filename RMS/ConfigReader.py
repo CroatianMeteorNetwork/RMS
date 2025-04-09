@@ -901,7 +901,7 @@ def parseSystem(config, parser):
                 np.radians(config.latitude),
                 np.radians(config.longitude),
                 config.elevation,
-                config
+                config=config
             )
         except Exception as e:
             config.height_wgs84 = config.elevation
