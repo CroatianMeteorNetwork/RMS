@@ -192,14 +192,28 @@ echo "1" > "$UPDATEINPROGRESSFILE"
 # Stash any local changes
 echo "Stashing local changes..."
 if ! git stash; then
-    echo "Error: git stash failed. Aborting update."
+    echo "Error: git stash failed. Attempting to restore backed up files..."
+    if restore_files; then
+        echo "Files restored successfully."
+        echo "0" > "$UPDATEINPROGRESSFILE"
+    else
+        echo "Critical: File restore failed. Leaving update flag set."
+    fi
+    echo "Update aborted due to git stash failure. Exiting."
     exit 1
 fi
 
 # Pull the latest code from GitHub
 echo "Pulling latest code from GitHub..."
 if ! git pull; then
-    echo "Error: git pull failed. Aborting update."
+    echo "Error: git pull failed. Attempting to restore backed up files..."
+    if restore_files; then
+        echo "Files restored successfully."
+        echo "0" > "$UPDATEINPROGRESSFILE"
+    else
+        echo "Critical: File restore failed. Leaving update flag set."
+    fi
+    echo "Update aborted. Exiting."
     exit 1
 fi
 
