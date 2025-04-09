@@ -709,6 +709,7 @@ class Config:
 
         self.egm96_path = os.path.join(self.rms_root_dir, 'share')
         self.egm96_file_name = 'WW15MGH.DAC'
+        self.egm96_full_path = os.path.join(self.egm96_path, self.egm96_file_name)
 
         # How many degrees in solar longitude to check from the shower peak for showers that don't have
         # a specified beginning and end
@@ -901,7 +902,7 @@ def parseSystem(config, parser):
                 np.radians(config.latitude),
                 np.radians(config.longitude),
                 config.elevation,
-                config=config
+                egm96_file_path=config.egm96_full_path
             )
         except Exception as e:
             config.height_wgs84 = config.elevation

@@ -21,6 +21,7 @@ except:
     import ConfigParser as configparser
 
 OMIT_FROM_CONFIG = {'height_wgs84',  # Should not be exposed
+                    'egm96_full_path', # Should not be exposed
                     'lat',  # Deprecated DFNS Station
                     'lon',  # Deprecated DFNS Station
                     'location',  # Deprecated DFNS Station
