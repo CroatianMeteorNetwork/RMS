@@ -178,44 +178,6 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
     log.info("Total time:", RmsDateTime.utcnow() - t1)
 
 
-def getOptimalThreadCount():
-    """Determine optimal thread count based on CPU cores and system type"""
-    import os
-    import platform
-    
-    # Get number of available CPU cores
-    try:
-        cpu_count = os.cpu_count()
-    except:
-        cpu_count = 4  # Default if we can't determine
-    
-    # Adjust based on platform
-    system = platform.system()
-    machine = platform.machine()
-    
-    # Detect Raspberry Pi
-    is_raspberry_pi = False
-    try:
-        with open('/proc/device-tree/model', 'r') as f:
-            if 'Raspberry Pi' in f.read():
-                is_raspberry_pi = True
-    except:
-        pass
-    
-    if is_raspberry_pi:
-        # Raspberry Pi - be very conservative
-        return max(1, cpu_count // 4)
-    elif cpu_count <= 2:
-        # Very limited CPU - use 1 thread
-        return 1
-    elif cpu_count <= 4:
-        # Limited CPU - use half the cores
-        return max(1, cpu_count // 2)
-    else:
-        # More powerful system - use cores minus 2
-        return max(2, cpu_count - 2)
-
-
 def rmtreeWithLogging(directory_path):
     """Remove a directory tree and log."""
     
@@ -304,7 +266,7 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
         "-preset", "medium",  # fast, medium, slow to change size/processing speed
         "-pix_fmt", "yuv420p",
         "-movflags", "faststart",  # Optimize for streaming
-        "-threads", str(thread_count),
+        "-threads", "1",
         "-g", "120",
         temp_video_path  # Use temporary path
     ]
