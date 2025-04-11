@@ -478,6 +478,19 @@ class Config:
         # SSH port
         self.host_port = 22
 
+        # SFTP performance parameters
+        # Default Paramiko window size (2GB) - good for decent connections
+        self.window_size = 2147483648  # 2^31 = 2GB
+
+        # Default Paramiko max packet size
+        self.max_packet_size = 32768  # 32KB
+
+        # Default Paramiko rekey bytes (1GB)
+        self.rekey_bytes = 1073741824  # 1GB
+
+        # Default block size for SFTP transfers
+        self.block_size = 32768  # 32KB
+
         # Location of the SSH private key
         self.rsa_private_key = os.path.expanduser("~/.ssh/id_rsa")
 
@@ -1302,6 +1315,22 @@ def parseUpload(config, parser):
     # SSH port
     if parser.has_option(section, "host_port"):
         config.host_port = parser.getint(section, "host_port")
+
+    # SFTP window size - controls data in-flight before requiring ACK
+    if parser.has_option(section, "window_size"):
+        config.window_size = parser.getint(section, "window_size")
+        
+    # SFTP max packet size
+    if parser.has_option(section, "max_packet_size"):
+        config.max_packet_size = parser.getint(section, "max_packet_size")
+        
+    # SFTP rekey bytes - how much data before rekeying
+    if parser.has_option(section, "rekey_bytes"):
+        config.rekey_bytes = parser.getint(section, "rekey_bytes")
+        
+    # SFTP block size - chunk size for file transfers
+    if parser.has_option(section, "block_size"):
+        config.block_size = parser.getint(section, "block_size")
 
     # Location of the SSH private key
     if parser.has_option(section, "rsa_private_key"):
