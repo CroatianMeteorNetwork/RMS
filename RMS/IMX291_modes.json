@@ -1,0 +1,14 @@
+{
+    "day": [
+        ["Camera", "DayNightColor", "1"],
+        ["Camera", "BLCMode", "1"],
+        ["Camera", "ElecLevel", "50"],
+        ["Camera", "BroadTrends", "AutoGain", "1"]
+    ],
+    "night": [
+        ["Camera", "DayNightColor", "2"],
+        ["Camera", "BLCMode", "0"],
+        ["Camera", "ElecLevel", "60"],
+        ["Camera", "BroadTrends", "AutoGain", "0"]
+    ]
+}
