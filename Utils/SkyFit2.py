@@ -4319,6 +4319,11 @@ class PlateTool(QtWidgets.QMainWindow):
                         message_type="error")
 
             return None
+        
+
+        # Reset the lens distortion parameters
+        self.platepar.resetDistortionParameters()
+
 
         # Extract the parameters
         ra, dec, rot_standard, scale, fov_w, fov_h, star_data = solution
@@ -4336,10 +4341,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.updateRefRADec(skip_rot_update=True)
 
         self.platepar.pos_angle_ref = rotationWrtStandardToPosAngle(self.platepar, rot_standard)
-
-
-        # # Reset the distortion parameters
-        # self.platepar.resetDistortionParameters()
 
         # Print estimated parameters
         print()
