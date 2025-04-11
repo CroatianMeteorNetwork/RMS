@@ -1555,7 +1555,7 @@ class BufferedCapture(Process):
 
             # Check if camera needs switching
             if self.config.continuous_capture and self.config.switch_camera_modes:
-                if self.switchCameraModeNow.value:
+                if self.switchCameraModeNow is not None and self.switchCameraModeNow.value:
                     switchCameraMode(self.config, self.daytime_mode, self.switchCameraModeNow)
 
             log.info('Grabbing a new block of {:d} frames...'.format(block_frames))
