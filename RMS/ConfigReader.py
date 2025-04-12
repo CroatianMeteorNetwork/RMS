@@ -291,6 +291,9 @@ class Config:
         # Decoder for the gstreamer media backend (e.g. decodebin, avdec_h264, nvh264dec)
         self.gst_decoder = "avdec_h264"
 
+        # Path to the json file containing camera settings
+        self.camera_settings_path = "./camera_settings.json"
+
         # Toggle raw video saving in data_dir/video_dir
         self.raw_video_save = False
 
@@ -1107,6 +1110,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "gst_decoder"):
         config.gst_decoder = parser.get(section, "gst_decoder")
+
+    if parser.has_option(section, "camera_settings_path"):
+        config.camera_settings_path = parser.get(section, "camera_settings_path")
 
     if parser.has_option(section, "raw_video_save"):
         config.raw_video_save = parser.getboolean(section, "raw_video_save")
