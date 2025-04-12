@@ -38,15 +38,15 @@ class RawFrameSaver(multiprocessing.Process):
 
     running = False
     
-    def __init__(self, saved_frames_dir, array1, startTime1, array2, startTime2, tsArray1, tsArray2, config):
+    def __init__(self, saved_frames_dir, array1, start_time1, array2, start_time2, tsArray1, tsArray2, config):
         """
 
         Arguments:
             saved_frames_dir: directory to save raw frames to
             array1: first numpy array in shared memory of raw video frames
-            startTime1: float in shared memory that holds time of first raw frame in array1
+            start_time1: float in shared memory that holds time of first raw frame in array1
             array2: second numpy array in shared memory
-            startTime1: float in shared memory that holds time of first raw frame in array2
+            start_time1: float in shared memory that holds time of first raw frame in array2
             tsArray1: first numpy array in shared memory for timestamps
             tsArray2: second numpy array in shared memory for timestamps
             config: configuration class
@@ -57,9 +57,9 @@ class RawFrameSaver(multiprocessing.Process):
         
         self.saved_frames_dir = saved_frames_dir
         self.array1 = array1
-        self.startTime1 = startTime1
+        self.start_time1 = start_time1
         self.array2 = array2
-        self.startTime2 = startTime2
+        self.start_time2 = start_time2
         self.timeStamps1 = tsArray1
         self.timeStamps2 = tsArray2
         self.config = config
@@ -180,7 +180,7 @@ class RawFrameSaver(multiprocessing.Process):
         while not self.exit.is_set():
 
             # Block until the raw frames are available
-            while (self.startTime1.value == 0) and (self.startTime2.value == 0):
+            while (self.start_time1.value == 0) and (self.start_time2.value == 0):
 
                 # Exit function if process was stopped from the outside
                 if self.exit.is_set():
@@ -194,10 +194,10 @@ class RawFrameSaver(multiprocessing.Process):
 
             raw_buffer_one = True
 
-            if self.startTime1.value > 0:
+            if self.start_time1.value > 0:
 
                 # Retrieve time of first frame
-                startTime = float(self.startTime1.value)
+                startTime = float(self.start_time1.value)
 
                 # Copy raw (frames, timestamps)
                 # Clear out the timestamp array so it can be used by 
@@ -206,10 +206,10 @@ class RawFrameSaver(multiprocessing.Process):
                 self.timeStamps1.fill(0)
                 raw_buffer_one = True
 
-            elif self.startTime2.value > 0:
+            elif self.start_time2.value > 0:
 
                 # Retrieve time of first frame
-                startTime = float(self.startTime2.value)
+                startTime = float(self.start_time2.value)
 
                 # Copy raw (frames, timestamps)
                 # Clear out the timestamp array so it can be used by 
@@ -234,9 +234,9 @@ class RawFrameSaver(multiprocessing.Process):
 
             # Once the frame saving is done, tell the capture thread to keep filling the buffer
             if raw_buffer_one:
-                self.startTime1.value = 0
+                self.start_time1.value = 0
             else:
-                self.startTime2.value = 0
+                self.start_time2.value = 0
 
             log.debug("Raw frame block saving time: {:.3f} s".format(time.time() - t))
 
