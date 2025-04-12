@@ -1484,6 +1484,11 @@ class BufferedCapture(Process):
             raw_buffer_one = True
             first_raw_frame_timestamp = False
 
+
+        # Set up a mechanisam to limit the frequency of camera mode switched to once every 5 seconds
+        switching_attempt_last_time = time.time()
+
+
         # Run until stopped from the outside
         while not self.exit.is_set():
 
@@ -1558,8 +1563,19 @@ class BufferedCapture(Process):
 
             # Check if camera needs switching
             if self.config.continuous_capture and self.config.switch_camera_modes:
-                if self.camera_mode_switch_trigger is not None and self.camera_mode_switch_trigger.value:
+
+                # Check that the camera mode switch is triggered and that the time since the last switch is 
+                # greater than 5 seconds
+                if (self.camera_mode_switch_trigger is not None) \
+                    and self.camera_mode_switch_trigger.value \
+                    and (time.time() - switching_attempt_last_time > 5):
+                    
+                    # If the camera mode switch trigger is set, switch the camera mode
                     switchCameraMode(self.config, self.daytime_mode, self.camera_mode_switch_trigger)
+                    
+                    # Save the time of the last switch
+                    switching_attempt_last_time = time.time()
+                    
 
             log.info('Grabbing a new block of {:d} frames...'.format(block_frames))
             for i in range(block_frames):

@@ -27,6 +27,7 @@ def switchCameraMode(config, daytime_mode, camera_mode_switch_trigger):
         cc.cameraControlV2(config, mode_string)
         camera_mode_switch_trigger.value = False
         log.info("Successfully switched camera mode to %s", mode_string)
+
     except Exception as e:
         log.warning("Camera switch to %s failed: %s. Will retry later.", mode_string, e)
         camera_mode_switch_trigger.value = True
