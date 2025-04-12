@@ -96,21 +96,24 @@ class BufferedCapture(Process):
     
     running = False
     
-    def __init__(self, array1, startTime1, array2, startTime2, config, video_file=None, night_data_dir=None,
-                 saved_frames_dir=None, daytime_mode=None, switchCameraModeNow=None):
+    def __init__(self, array1, start_time1, array2, start_time2, config, video_file=None, night_data_dir=None,
+                 saved_frames_dir=None, daytime_mode=None, camera_mode_switch_trigger=None):
         """ Populate arrays with (startTime, frames) after startCapture is called.
         
         Arguments:
             array1: numpy array in shared memory that is going to be filled with frames
-            startTime1: float in shared memory that holds time of first frame in array1
+            start_time1: float in shared memory that holds time of first frame in array1
             array2: second numpy array in shared memory
-            startTime2: float in shared memory that holds time of first frame in array2
+            start_time2: float in shared memory that holds time of first frame in array2
 
         Keyword arguments:
             video_file: [str] Path to the video file, if it was given as the video source. None by default.
             night_data_dir: [str] Path to the directory where night data is stored. None by default.
             saved_frames_dir: [str] Path to the directory where saved frames are stored. None by default.
-            daytime_mode: [multiprocessing.Value] shared boolean variable to communicate camera mode switch
+            daytime_mode: [multiprocessing.Value] Shared boolean variable to communicate camera mode switch
+                direction (daytime or nighttime).
+            camera_mode_switch_trigger: [multiprocessing.Value] Shared boolean variable to trigger camera 
+                mode switch at the right time.
         """
         
         super(BufferedCapture, self).__init__()
@@ -121,15 +124,15 @@ class BufferedCapture(Process):
         self.night_data_dir = night_data_dir
         self.saved_frames_dir = saved_frames_dir
         self.daytime_mode = daytime_mode
-        self.switchCameraModeNow = switchCameraModeNow
+        self.camera_mode_switch_trigger = camera_mode_switch_trigger
 
         # Store shared memory arrays and values for compressor (these are designed for multiprocessing)
         self.array1 = array1
-        self.startTime1 = startTime1
+        self.start_time1 = start_time1
         self.array2 = array2
-        self.startTime2 = startTime2
-        self.startTime1.value = 0
-        self.startTime2.value = 0
+        self.start_time2 = start_time2
+        self.start_time1.value = 0
+        self.start_time2.value = 0
 
         # Initialize shared values for raw frame saving (these are designed for multiprocessing)
         if self.config.save_frames:
@@ -137,10 +140,10 @@ class BufferedCapture(Process):
             # Frame saving block size - these many raw frames are written to buffer before saving to disk
             self.num_raw_frames = 10
 
-            self.startRawTime1 = Value('d', 0.0)
-            self.startRawTime2 = Value('d', 0.0)
-            self.sharedTimestampsBase = Array(ctypes.c_double, self.num_raw_frames)
-            self.sharedTimestampsBase2 = Array(ctypes.c_double, self.num_raw_frames)
+            self.start_raw_time1 = Value('d', 0.0)
+            self.start_raw_time2 = Value('d', 0.0)
+            self.shared_timestamps_base = Array(ctypes.c_double, self.num_raw_frames)
+            self.shared_timestamps_base2 = Array(ctypes.c_double, self.num_raw_frames)
 
         # Initialize shared counter for dropped frames
         self.dropped_frames = Value('i', 0)
@@ -193,14 +196,14 @@ class BufferedCapture(Process):
 
             # Raw frame and timestamp buffers if they exist
             if self.config.save_frames:
-                del self.sharedTimestampsBase
-                del self.sharedTimestampsBase2
+                del self.shared_timestamps_base
+                del self.shared_timestamps_base2
 
-                if hasattr(self, 'sharedRawArrayBase'):
-                    del self.sharedRawArrayBase
-                    del self.sharedRawArrayBase2
-                    del self.sharedRawArray
-                    del self.sharedRawArray2
+                if hasattr(self, 'shared_raw_array_base'):
+                    del self.shared_raw_array_base
+                    del self.shared_raw_array_base2
+                    del self.shared_raw_array
+                    del self.shared_raw_array2
 
             log.debug('Shared memory resources freed successfully')
 
@@ -1015,8 +1018,8 @@ class BufferedCapture(Process):
                 else:
                     # After camera connection is established, if necessary switch camera mode
                     if self.config.continuous_capture and self.config.switch_camera_modes:
-                        if self.switchCameraModeNow.value:
-                            switchCameraMode(self.config, self.daytime_mode, self.switchCameraModeNow)
+                        if self.camera_mode_switch_trigger.value:
+                            switchCameraMode(self.config, self.daytime_mode, self.camera_mode_switch_trigger)
 
             # Init the video device
             log.info("Initializing the video device...")
@@ -1293,10 +1296,10 @@ class BufferedCapture(Process):
             self.raw_frame_saver = None
 
         # Clean up array resources
-        del self.sharedRawArrayBase
-        del self.sharedRawArray
-        del self.sharedRawArrayBase2
-        del self.sharedRawArray2
+        del self.shared_raw_array_base
+        del self.shared_raw_array
+        del self.shared_raw_array_base2
+        del self.shared_raw_array2
 
 
     def initRawFrameArrays(self, frame_shape):
@@ -1320,13 +1323,13 @@ class BufferedCapture(Process):
             log.debug("Creating shared arrays with shape: {}".format(array_shape))
 
             # Initialize shared memory arrays
-            self.sharedRawArrayBase = Array(ctypes.c_uint8, buffer_size)
-            self.sharedRawArray = np.ctypeslib.as_array(self.sharedRawArrayBase.get_obj())
-            self.sharedRawArray = self.sharedRawArray.reshape(array_shape)
+            self.shared_raw_array_base = Array(ctypes.c_uint8, buffer_size)
+            self.shared_raw_array = np.ctypeslib.as_array(self.shared_raw_array_base.get_obj())
+            self.shared_raw_array = self.shared_raw_array.reshape(array_shape)
 
-            self.sharedRawArrayBase2 = Array(ctypes.c_uint8, buffer_size)
-            self.sharedRawArray2 = np.ctypeslib.as_array(self.sharedRawArrayBase2.get_obj())
-            self.sharedRawArray2 = self.sharedRawArray2.reshape(array_shape)
+            self.shared_raw_array_base2 = Array(ctypes.c_uint8, buffer_size)
+            self.shared_raw_array2 = np.ctypeslib.as_array(self.shared_raw_array_base2.get_obj())
+            self.shared_raw_array2 = self.shared_raw_array2.reshape(array_shape)
 
             # Store current array configuration
             self.current_raw_frame_shape = frame_shape
@@ -1398,14 +1401,14 @@ class BufferedCapture(Process):
                 self.raw_frame_count = 0
                 
                 # Convert shared timestamp arrays to numpy arrays
-                self.sharedTimestamps = np.ctypeslib.as_array(self.sharedTimestampsBase.get_obj())
-                self.sharedTimestamps2 = np.ctypeslib.as_array(self.sharedTimestampsBase2.get_obj())
+                self.sharedTimestamps = np.ctypeslib.as_array(self.shared_timestamps_base.get_obj())
+                self.sharedTimestamps2 = np.ctypeslib.as_array(self.shared_timestamps_base2.get_obj())
 
                 # Raw frame arrays will be initialized after we know the frame shape
-                self.sharedRawArrayBase = None
-                self.sharedRawArray = None
-                self.sharedRawArrayBase2 = None
-                self.sharedRawArray2 = None
+                self.shared_raw_array_base = None
+                self.shared_raw_array = None
+                self.shared_raw_array_base2 = None
+                self.shared_raw_array2 = None
                 self.raw_frame_saver = None
 
             # Initialize timestamp array for ft file buffer
@@ -1490,10 +1493,10 @@ class BufferedCapture(Process):
                 wait_for_compression = False
 
                 if buffer_one:
-                    if self.startTime1.value == -1:
+                    if self.start_time1.value == -1:
                         wait_for_compression = True
                 else:
-                    if self.startTime2.value == -1:
+                    if self.start_time2.value == -1:
                         wait_for_compression = True
 
                 if wait_for_compression:
@@ -1503,9 +1506,9 @@ class BufferedCapture(Process):
 
             
             if buffer_one:
-                self.startTime1.value = 0
+                self.start_time1.value = 0
             else:
-                self.startTime2.value = 0
+                self.start_time2.value = 0
             
 
             # If the video device was disconnected, wait 5s for reconnection
@@ -1555,8 +1558,8 @@ class BufferedCapture(Process):
 
             # Check if camera needs switching
             if self.config.continuous_capture and self.config.switch_camera_modes:
-                if self.switchCameraModeNow is not None and self.switchCameraModeNow.value:
-                    switchCameraMode(self.config, self.daytime_mode, self.switchCameraModeNow)
+                if self.camera_mode_switch_trigger is not None and self.camera_mode_switch_trigger.value:
+                    switchCameraMode(self.config, self.daytime_mode, self.camera_mode_switch_trigger)
 
             log.info('Grabbing a new block of {:d} frames...'.format(block_frames))
             for i in range(block_frames):
@@ -1613,9 +1616,9 @@ class BufferedCapture(Process):
 
                         # First signal the raw frame saver to finish saving current block
                         if raw_buffer_one:
-                            self.startRawTime1.value = first_raw_frame_timestamp
+                            self.start_raw_time1.value = first_raw_frame_timestamp
                         else:
-                            self.startRawTime2.value = first_raw_frame_timestamp
+                            self.start_raw_time2.value = first_raw_frame_timestamp
 
                         if not self.initRawFrameArrays(frame.shape):
                             log.error("Failed to reinitialize arrays after mode change")
@@ -1624,8 +1627,8 @@ class BufferedCapture(Process):
                             # Initialize new frame saver
                             self.raw_frame_saver = RawFrameSaver(
                                 self.saved_frames_dir,
-                                self.sharedRawArray, self.startRawTime1,
-                                self.sharedRawArray2, self.startRawTime2,
+                                self.shared_raw_array, self.start_raw_time1,
+                                self.shared_raw_array2, self.start_raw_time2,
                                 self.sharedTimestamps, self.sharedTimestamps2,
                                 self.config
                             )
@@ -1638,9 +1641,9 @@ class BufferedCapture(Process):
                     if self.raw_frame_count == 0:
 
                         if raw_buffer_one:
-                            self.startRawTime1.value = 0
+                            self.start_raw_time1.value = 0
                         else:
-                            self.startRawTime2.value = 0
+                            self.start_raw_time2.value = 0
 
                         # Always set first raw frame timestamp in the beginning of the block
                         first_raw_frame_timestamp = frame_timestamp 
@@ -1651,18 +1654,18 @@ class BufferedCapture(Process):
                     if len(frame.shape) == 3:
                         # Color frame - use 4D indexing
                         if raw_buffer_one:
-                            self.sharedRawArray[self.raw_frame_count, :, :, :] = frame
+                            self.shared_raw_array[self.raw_frame_count, :, :, :] = frame
                             self.sharedTimestamps[self.raw_frame_count] = frame_timestamp
                         else:
-                            self.sharedRawArray2[self.raw_frame_count, :, :, :] = frame
+                            self.shared_raw_array2[self.raw_frame_count, :, :, :] = frame
                             self.sharedTimestamps2[self.raw_frame_count] = frame_timestamp
                     else:
                         # Grayscale frame - use 3D indexing
                         if raw_buffer_one:
-                            self.sharedRawArray[self.raw_frame_count, :, :] = frame
+                            self.shared_raw_array[self.raw_frame_count, :, :] = frame
                             self.sharedTimestamps[self.raw_frame_count] = frame_timestamp
                         else:
-                            self.sharedRawArray2[self.raw_frame_count, :, :] = frame
+                            self.shared_raw_array2[self.raw_frame_count, :, :] = frame
                             self.sharedTimestamps2[self.raw_frame_count] = frame_timestamp
 
                     self.raw_frame_count += 1
@@ -1671,9 +1674,9 @@ class BufferedCapture(Process):
                     if self.raw_frame_count == self.num_raw_frames:
 
                         if raw_buffer_one:
-                            self.startRawTime1.value = first_raw_frame_timestamp
+                            self.start_raw_time1.value = first_raw_frame_timestamp
                         else:
-                            self.startRawTime2.value = first_raw_frame_timestamp
+                            self.start_raw_time2.value = first_raw_frame_timestamp
                         
                         self.raw_frame_count = 0
                         raw_buffer_one = not raw_buffer_one
@@ -1800,9 +1803,9 @@ class BufferedCapture(Process):
                 # Save leftover raw frames from last used buffer
                 if self.config.save_frames:
                     if raw_buffer_one:
-                        self.startRawTime1.value = first_raw_frame_timestamp
+                        self.start_raw_time1.value = first_raw_frame_timestamp
                     else:
-                        self.startRawTime2.value = first_raw_frame_timestamp
+                        self.start_raw_time2.value = first_raw_frame_timestamp
 
                 break
 
@@ -1812,10 +1815,10 @@ class BufferedCapture(Process):
                 # Set the starting value of the frame block, which indicates to the compression that the
                 # block is ready for processing
                 if buffer_one:
-                    self.startTime1.value = first_frame_timestamp
+                    self.start_time1.value = first_frame_timestamp
 
                 else:
-                    self.startTime2.value = first_frame_timestamp
+                    self.start_time2.value = first_frame_timestamp
 
                 log.info('New block of raw frames available for compression with starting time: {:s}'
                          .format(str(first_frame_timestamp)))
