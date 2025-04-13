@@ -23,7 +23,7 @@ def switchCameraMode(config, daytime_mode, switchCameraModeNow):
     """
     mode_name = "day" if daytime_mode.value else "night"
 
-    mode_path = config.mode_path
+    mode_path = config.camera_settings_path
 
     try:
         if not os.path.exists(mode_path):
@@ -35,8 +35,7 @@ def switchCameraMode(config, daytime_mode, switchCameraModeNow):
         if mode_name not in modes:
             raise KeyError("Mode '{}' not defined in {}.".format(mode_name, mode_path))
 
-        for cmd in modes[mode_name]:
-            cc.cameraControlV2(config, "SetParam", cmd)
+        cc.cameraControlV2(config, "SwitchMode", mode_name)
 
         # After successful camera mode switching, don't keep trying
         switchCameraModeNow.value = False
