@@ -653,31 +653,35 @@ def setParameter(cam, opts):
         print('Setting not currently supported for', opts)
 
 
-def switchDayTime(cam):
-    """ Switches the camera to daytime mode. Reboots camera. """
+def switchMode(cam, mode_name, path='./camera_settings.json'):
+    """
+    Switch camera to a named mode by applying the corresponding parameters from a JSON file.
 
-    setCameraParam(cam, 'Camera ExposureParam LeastTime 1000'.split()) # 1 millisecond
-    setCameraParam(cam, 'Camera DayNightColor 1'.split()) # Color mode
-    setCameraParam(cam, 'Camera BLCMode 1'.split())
-    setCameraParam(cam, 'Camera ElecLevel 50'.split())
-    setCameraParam(cam, 'Camera GainParam Gain 10'.split())
-    setCameraParam(cam, 'Camera BroadTrends AutoGain 1'.split())
+    Args:
+        cam: The camera object to control.
+        mode_name (str): The name of the mode to switch to.
+        path (str): The path to the JSON file containing mode definitions.
 
-
-def switchNightTime(cam):
-    """ Switches the camera to nighttime mode. Resets settings done by switchDayTime above.
-        Reboots camera.
+    Raises:
+        FileNotFoundError: If the JSON file does not exist.
+        ValueError: If the given mode_name is not found in the JSON file.
     """
 
-    setCameraParam(cam, 'Camera ExposureParam LeastTime 40000'.split()) # 40000 microseconds = 40ms
-    setCameraParam(cam, 'Camera DayNightColor 2'.split()) # Black and white mode
-    setCameraParam(cam, 'Camera BLCMode 0'.split())
-    setCameraParam(cam, 'Camera ElecLevel 100'.split())
-    setCameraParam(cam, 'Camera GainParam Gain 60'.split())
-    setCameraParam(cam, 'Camera BroadTrends AutoGain 0'.split())
+    if not os.path.isfile(path):
+        raise FileNotFoundError("Camera settings file '{}' not found.".format(path))
+
+    with open(path, 'r') as f:
+        modes = json.load(f)
+
+    if mode_name not in modes:
+        raise ValueError("Mode '{}' not found in '{}'. Available modes: {}"
+                         .format(mode_name, path, list(modes.keys())))
+
+    for param in modes[mode_name]:
+        setCameraParam(cam, param)
 
 
-def dvripCall(cam, cmd, opts):
+def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
     """ retrieve or display the camera network settings
 
     Args:
@@ -769,19 +773,16 @@ def dvripCall(cam, cmd, opts):
     elif cmd == 'SetAutoReboot':
         setAutoReboot(cam, opts)
 
-    elif cmd == 'SwitchNightTime':
-        switchNightTime(cam)
-    
-    elif cmd == 'SwitchDayTime':
-        switchDayTime(cam)
-    
+    elif cmd == 'SwitchMode':
+        switchMode(cam, opts, camera_settings_path)
+        
     else:
         print('System Info')
         ugi=cam.get_upgrade_info()
         print(ugi['Hardware'])
 
 
-def cameraControl(camera_ip, cmd, opts=''):
+def cameraControl(camera_ip, cmd, opts='', camera_settings_path='./camera_settings.json'):
     """CameraControl - main entry point to the module
 
     Args:
@@ -793,7 +794,7 @@ def cameraControl(camera_ip, cmd, opts=''):
     cam = dvr.DVRIPCam(camera_ip)
     if cam.login():
         try:
-            dvripCall(cam, cmd, opts)
+            dvripCall(cam, cmd, opts, camera_settings_path)
         except Exception as e:
             print("Error executing command: {}".format(e))
             print("This command may not be supported.")
@@ -803,13 +804,20 @@ def cameraControl(camera_ip, cmd, opts=''):
 
 
 def cameraControlV2(config, cmd, opts=''):
+    """High-level entry point that uses config to figure out IP and path."""
+
     if str(config.deviceID).isdigit():
         print('Error: this utility only works with IP cameras')
         exit(1)
     # extract IP from config file
     camera_ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0]
 
-    cameraControl(camera_ip, cmd, opts)
+    if not hasattr(config, 'camera_settings_path') or not os.path.isfile(config.camera_settings_path):
+        camera_settings_path = './camera_settings.json'
+    else:
+        camera_settings_path = config.camera_settings_path
+
+    cameraControl(camera_ip, cmd, opts, camera_settings_path=camera_settings_path)
 
 
 if __name__ == '__main__':
@@ -823,7 +831,7 @@ if __name__ == '__main__':
     cmd_list = ['reboot', 'GetHostname', 'GetSettings','GetDeviceInformation', 'GetNetConfig',
         'GetCameraParams', 'GetEncodeParams', 'SetParam', 'SaveSettings', 'LoadSettings',
         'SetColor', 'SetOSD', 'SetAutoReboot', 'GetIP', 'GetAutoReboot', 'CloudConnection', 'CameraTime',
-        'SwitchDayTime', 'SwitchNightTime']
+        'SwitchMode']
     opthelp='optional parameters for SetParam for example Camera ElecLevel 70 \n' \
         'will set the AE Ref to 70.\n To see possibilities, execute GetSettings first. ' \
         'Call a function with no parameters to see the possibilities'
