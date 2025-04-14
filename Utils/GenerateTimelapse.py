@@ -245,10 +245,6 @@ def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=25, cleanup_mod
     else:
         log.warning("Unsupported platform.")
         return
-    
-    # Get optimal thread count for this system
-    thread_count = getOptimalThreadCount()
-    log.info("Using {} encoding threads based on system capabilities".format(thread_count))
 
     # Configure ffmpeg command based on color mode
     pix_fmt = "bgr24" if use_color else "gray"
