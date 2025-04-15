@@ -658,18 +658,14 @@ def setParameter(cam, opts):
 
 def switchMode(cam, mode_name, path='./camera_settings.json'):
     """
-    Switch camera to a named mode by applying the corresponding parameters from a JSON file.
+    Switch the camera to a named mode by executing the commands in the JSON file.
+    Filters out any "SwitchMode" entries to avoid recursion.
 
     Args:
-        cam: The camera object to control.
-        mode_name (str): The name of the mode to switch to.
-        path (str): The path to the JSON file containing mode definitions.
-
-    Raises:
-        FileNotFoundError: If the JSON file does not exist.
-        ValueError: If the given mode_name is not found in the JSON file.
+        cam: An authenticated camera object.
+        mode_name (str): The name of the mode to switch to ("day", "night", etc.).
+        path (str): Path to the JSON file containing mode definitions.
     """
-
     if not os.path.isfile(path):
         raise FileNotFoundError("Camera settings file '{}' not found.".format(path))
 
@@ -677,15 +673,22 @@ def switchMode(cam, mode_name, path='./camera_settings.json'):
         modes = json.load(f)
 
     if mode_name not in modes:
-        raise ValueError(
-            "Mode '{}' not found in '{}'. Available modes: {}".format(
-                mode_name, path, list(modes.keys())
-            )
-        )
+        raise ValueError("Mode '{}' not found in '{}'. Available modes: {}"
+                         .format(mode_name, path, list(modes.keys())))
 
+    # Loop over each command array in the specified mode
     for param in modes[mode_name]:
-        setCameraParam(cam, param)
+        cmd = param[0]
+        opts = param[1:]
 
+        # Avoid calling "SwitchMode" from within switchMode
+        if cmd == "SwitchMode":
+            log.warning("Ignoring SwitchMode command inside JSON to prevent recursion.")
+            continue
+
+        # Pass everything else directly to dvripCall
+        dvripCall(cam, cmd, opts)
+        
 
 def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
     """ retrieve or display the camera network settings
