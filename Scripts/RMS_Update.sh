@@ -236,7 +236,7 @@ fi
 # Create template from the current default config file
 if [ -f "$CURRENT_CONFIG" ]; then
     echo "Creating config template..."
-    mv "$CURRENT_CONFIG" "$RMSSOURCEDIR/.configTemplate"
+    cp "$CURRENT_CONFIG" "$RMSSOURCEDIR/.configTemplate"
     
     # Verify the move worked
     if [ ! -f "$RMSSOURCEDIR/.configTemplate" ]; then
