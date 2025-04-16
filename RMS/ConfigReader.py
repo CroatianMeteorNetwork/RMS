@@ -425,7 +425,7 @@ class Config:
         # Set PNG compression for the saved frames for png file type
         self.png_compression = 3
 
-        # Set the time interval for saving video frames
+        # Set the time interval for saving video frames (s)
         self.frame_save_interval = 5
 
         # Set the frame count interval for saving video frames (calculated from the time interval)
