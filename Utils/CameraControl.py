@@ -801,10 +801,13 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
         return
 
     elif cmd == 'SwitchMode':
-        log.info('Switching mode to %s', opts[0])
-        switchMode(cam, opts, camera_settings_path)
+        if not opts:
+            log.error("No mode specified for SwitchMode.")
+            return
+        mode_name = opts[0]  # e.g. 'day'
+        switchMode(cam, mode_name, camera_settings_path)
         return
-
+    
     # -- If we get here, command is not recognized:
     else:
         log.error("Unrecognized command '%s' in dvripCall. Options were: %s", cmd, opts)
