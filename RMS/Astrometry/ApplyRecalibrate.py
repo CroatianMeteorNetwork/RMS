@@ -409,13 +409,13 @@ def recalibratePlateparsForFF(
     Arguments:
         prev_platepar: [platepar]
         ff_file_names: [list] list of ff file names
-        calstars: [dict] A dictionary with only one entry, where the key is 'jd' and the value is the
-            list of star coordinates.
-        catalog_stars: [list] A list of entries [[ff_name, star_coordinates], ...].
+        calstars: [dict] A dictionary with only one entry, where the key is the FF file name and the value is 
+            the list of star coordinates.
+        catalog_stars: [list] A list of catalog stars which should be in the image.
         config: [config]
 
     Keyword arguments:
-        lim_mag: [float]
+        lim_mag: [float] Limiting magnitude for the catalog. If None, use the default value from the config.
         ignore_distance_threshold: [bool] Don't consider the recalib as failed if the median distance
             is larger than the threshold.
         ignore_max_stars: [bool] Ignore the maximum number of image stars for recalibration.
