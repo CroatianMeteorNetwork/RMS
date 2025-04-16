@@ -16,17 +16,17 @@
 
 from __future__ import absolute_import, division, print_function
 
-import logging
 import os
 import zipfile
 
 import numpy as np
 import cv2
 
+from RMS.Logger import getLogger
 from RMS.Routines.Image import loadImage
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 

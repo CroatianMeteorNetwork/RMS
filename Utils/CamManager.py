@@ -15,8 +15,56 @@ copies or substantial portions of the Software.
 
 # based on https://github.com/OpenIPC/python-dvr/blob/master/DeviceManager.py
 """
-
 from __future__ import print_function, unicode_literals, division, absolute_import
+
+import sys
+if sys.version_info[0] < 3:
+    print("This script cannot run on Python 2.")
+    sys.exit(1)
+
+import os
+import struct
+if sys.platform != 'win32':
+    import fcntl
+else:
+    import ifaddr
+
+import json
+from locale import getlocale
+from socket import socket, inet_aton, inet_ntoa, if_nameindex
+from socket import SOL_SOCKET, SO_REUSEADDR, SO_BROADCAST, IP_MULTICAST_TTL, SOCK_DGRAM, AF_INET, IPPROTO_UDP, IPPROTO_IP
+from datetime import datetime
+import hashlib
+import argparse
+
+try:
+    from dvrip import DVRIPCam
+except ImportError:
+    print("Exiting: dvrip module not found.")
+    sys.exit(1)
+
+try:
+    from tkinter import Tk, PhotoImage, Frame, Scrollbar, Menu, Label, Entry, Button
+    from tkinter import VERTICAL, HORIZONTAL, W, N, END, YES, BOTH
+
+    from tkinter.filedialog import asksaveasfilename
+    from tkinter.messagebox import showerror
+    from tkinter.ttk import Treeview, Style, Combobox
+
+    GUI_TK = True
+except:
+    GUI_TK = False
+
+# set app to None, so we can test later if its been initialised
+app = None
+
+# initialise other globals
+log = "search.log"
+logLevel = 20
+devices = {}
+searchers = {}
+configure = {}
+intf = None
 
 CODES = {
     100: "Success",
@@ -111,11 +159,19 @@ def local_ip():
 
 def get_ip_address(ifname):
     server = socket(AF_INET, SOCK_DGRAM)
-    return inet_ntoa(fcntl.ioctl(
-        server.fileno(),
-        0x8915,  # SIOCGIFADDR
-        struct.pack('256s', bytes(ifname[:15], 'utf-8'))
-    )[20:24])
+    if sys.platform == 'win32':
+        interfaces = ifaddr.get_adapters()
+        for thisintf in interfaces:
+            ips = thisintf.ips
+            for ip in ips:
+                if ip.network_prefix <=32 and ip.nice_name == ifname:
+                    return ip.ip
+    else:
+        return inet_ntoa(fcntl.ioctl(
+            server.fileno(),
+            0x8915,  # SIOCGIFADDR
+            struct.pack('256s', bytes(ifname[:15], 'utf-8'))
+        )[20:24])
 
 
 def sofia_hash(password):
@@ -132,40 +188,44 @@ def SetIP(ip):
     return "0x%08X" % struct.unpack("I", inet_aton(ip))
 
 
-def GetAllAddr():
-    if os.name == "nt":
-        return [
-            x.split(":")[1].strip()
-            for x in str(check_output(["ipconfig"]), "866").split("\r\n")
-            if "IPv4" in x
-        ]
+def GetInterfaces(checkip=False):
+    # if the GUI is initialised, just read the list of interfaces from the dropdown
+    if app is not None:
+        return [app.intf.get()]
+    
+    # otherwise find the active interfaces. This is linux-specific. 
+    det_intfs = []
+    if sys.platform == 'win32':
+        interfaces = ifaddr.get_adapters()
+        for thisintf in interfaces:
+            ips = thisintf.ips
+            for ip in ips:
+                if ip.network_prefix >24 or ip.network_prefix < 17:
+                    continue 
+                det_intfs.append(ip.nice_name)
     else:
-        iptool = ["ip", "address"]
-        if platform.system() == "Darwin":
-            iptool = ["ifconfig"]
-        return [
-            x.split("/")[0].strip().split(" ")[1]
-            for x in str(check_output(iptool), "ascii").split("\n")
-            if "inet " in x and "127.0." not in x
-        ]
-
-def GetInterfaces():
-        # pick the first wired interface
-    det_intfs = list(zip(*if_nameindex()))[1]
-    det_intfs = list(det_intfs)
-    det_intfs.remove('lo')
-    print("detected network interfaces:", det_intfs)
+        det_intfs = list(zip(*if_nameindex()))[1]
+        det_intfs = list(det_intfs)
+        if 'lo' in det_intfs:
+            det_intfs.remove('lo')
+        #print("detected network interfaces:", det_intfs)
+        if checkip:
+            for intf in det_intfs:
+                try:
+                    _ = get_ip_address(intf)
+                except Exception:
+                    #print('no ip address for ', intf)
+                    det_intfs.remove(intf)
+        if len(det_intfs) == 0:
+            det_intfs = ['None']
     return det_intfs
 
 
-def SearchXM(devices):
+def SearchXM(intf=None):
 
     server = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
-    try:
-        intf = app.intf.get()
-    except:
-        # no GUI
-        intf = 'eth0'
+    if not intf:
+        intf = GetInterfaces(checkip=True)[0]
     print("Interface:", intf)
     try:
         ip = get_ip_address(intf)
@@ -174,13 +234,16 @@ def SearchXM(devices):
         print("Error during IP estimation, interface up?")
 
     print("IP:", ip)
-    server.bind(('', 34569))
+    if sys.platform == 'win32':
+        server.bind((ip, 34569))
+    else:
+        server.bind(('', 34569))
     print("socket bound")
     server.settimeout(3)
     server.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
     server.setsockopt(SOL_SOCKET, SO_BROADCAST, 1)
-    # fix for RMS Buster distro, as UTF-8 support is missing
-    server.setsockopt(SOL_SOCKET, 25, intf.encode('utf-8') + '\0'.encode('utf-8'))
+    if sys.platform != 'win32':
+        server.setsockopt(SOL_SOCKET, 25, intf.encode('utf-8') + '\0'.encode('utf-8'))
     server.setsockopt(IPPROTO_IP, IP_MULTICAST_TTL, 1)
     server.sendto(
         struct.pack("BBHIIHHI", 255, 0, 0, 0, 0, 0, 1530, 0), ("255.255.255.255", 34569)
@@ -192,7 +255,7 @@ def SearchXM(devices):
         )
         if (msg == 1531) and leng > 0:
             answer = json.loads(
-                data[0][20 : 20 + leng].replace(b"\x00", b""))
+                data[0][20: 20 + leng].replace(b"\x00", b""))
             if answer["NetWork.NetCommon"]["MAC"] not in devices.keys():
                 devices[answer["NetWork.NetCommon"]["MAC"]] = answer[
                     "NetWork.NetCommon"
@@ -202,33 +265,55 @@ def SearchXM(devices):
     return devices
 
 
-def ConfigXM(data):
+def ConfigXM(data, debug=False, intf=None):
+    if not intf:
+        intf = GetInterfaces(checkip=True)[0]
+    print("Interface:", intf)
+    try:
+        ip = get_ip_address(intf)
+    except Exception:
+        ip = ''
+        print("Error during IP estimation, interface up?")
+
+    print("IP:", ip)
+
     config = {}
     #TODO: may be just copy whwole devices[data[1]] to config?
     for k in [u"HostName",u"HttpPort",u"MAC",u"MaxBps",u"MonMode",u"SSLPort",u"TCPMaxConn",u"TCPPort",u"TransferPlan",u"UDPPort","UseHSDownLoad"]:
         if k in devices[data[1]]:
             config[k] = devices[data[1]][k]
-    print(devices[data[1]][u"HostName"])
+    print('Remote host:', devices[data[1]][u"HostName"])
     config[u"DvrMac"] = devices[data[1]][u"MAC"]
     config[u"EncryptType"] = 1
     config[u"GateWay"] = SetIP(data[4])
     config[u"HostIP"] = SetIP(data[2])
     config[u"Submask"] = SetIP(data[3])
     config[u"Username"] = "admin"
-    config[u"Password"] = sofia_hash(data[5])
+    if len(data) > 5:
+        passwd = sofia_hash(data[5])
+    else:
+        passwd = sofia_hash('')
+    config[u"Password"] = passwd
     devices[data[1]][u"GateWay"] = config[u"GateWay"]
     devices[data[1]][u"HostIP"] = config[u"HostIP"]
     devices[data[1]][u"Submask"] = config[u"Submask"]
     config = json.dumps(
         config, ensure_ascii=False, sort_keys=True, separators=(", ", " : ")
     ).encode("utf8")
-    server = socket(AF_INET, SOCK_DGRAM)
-    server.bind(("", 34569))
+    server = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+    if sys.platform == 'win32':
+        server.bind((ip, 34569))
+    else:
+        server.bind(('', 34569))
     server.settimeout(1)
     server.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
     server.setsockopt(SOL_SOCKET, SO_BROADCAST, 1)
+    if sys.platform != 'win32':
+        server.setsockopt(SOL_SOCKET, 25, intf.encode('utf-8') + '\0'.encode('utf-8'))
+    server.setsockopt(IPPROTO_IP, IP_MULTICAST_TTL, 1)
     clen = len(config)
-    print(struct.pack(
+    if debug:
+        print(struct.pack(
             "BBHIIHHI%ds2s" % clen,
             255,
             0,
@@ -257,23 +342,23 @@ def ConfigXM(data):
         ),
         ("255.255.255.255", 34569),
     )
-    answer = {"Ret": 203}
+    answer = {"Ret": 101}
     e = 0
     while True:
         try:
             data = server.recvfrom(1024)
-            head, ver, typ, session, packet, info, msg, leng = struct.unpack(
-                "BBHIIHHI", data[0][:20]
-            )
+            _, _, _, _, _, _, msg, leng = struct.unpack("BBHIIHHI", data[0][:20])
+            if debug:
+                print(data)
             if (msg == 1533) and leng > 0:
-                answer = json.loads(
-                    data[0][20 : 20 + leng].replace(b"\x00", b""))
+                answer = json.loads(data[0][20: 20 + leng].replace(b"\x00", b""))
                 break
         except:
             e += 1
             if e > 3:
                 break
     server.close()
+    print(answer)
     return answer
 
 
@@ -287,7 +372,7 @@ def FlashXM(cmd):
 
 
 def ProcessCMD(cmd):
-    global log, logLevel, devices, searchers, configure
+    global log, logLevel, devices, searchers, configure, intf
     if logLevel == 20:
         tolog(datetime.now().strftime("[%Y-%m-%d %H:%M:%S] >") + " ".join(cmd))
     if cmd[0].lower() == "q" or cmd[0].lower() == "quit":
@@ -298,7 +383,7 @@ def ProcessCMD(cmd):
         tolog("%s" % ("Search"))
         if len(cmd) > 1 and cmd[1].lower() in searchers.keys():
             try:
-                devices = searchers[cmd[1].lower()](devices)
+                devices = searchers[cmd[1].lower()]()
             except Exception as error:
                 print(" ".join([str(x) for x in list(error.args)]))
             print("Searching %s, found %d devices" % (cmd[1], len(devices)))
@@ -306,7 +391,7 @@ def ProcessCMD(cmd):
             for s in searchers:
                 tolog("Search" + " %s\r" % s)
                 try:
-                    devices = searchers[s](devices)
+                    devices = searchers[s](intf=intf)
                 except Exception as error:
                     print(" ".join([str(x) for x in list(error.args)]))
             tolog("Found %d devices" % len(devices))
@@ -411,14 +496,25 @@ def ProcessCMD(cmd):
             return json.dumps(devices[cmd[1]])
         else:
             return "device [MAC]"
+    if "interface" in cmd[0].lower():
+        det_intfs = GetInterfaces(True)
+        if len(cmd) > 1:
+            req_intf = ' '.join(cmd[1:]).replace('"','')
+            if req_intf in det_intfs:
+                intf = req_intf
+                print("Interface set to ", intf)
+            pass
+        else:
+            print('available interfaces {}'.format(det_intfs))
+            print('nb: enclose in double-quotes if there is a space in the name')
             
     if cmd[0].lower() == "config":
         if (
-            len(cmd) > 5
+            len(cmd) > 4
             and cmd[1] in devices.keys()
             and devices[cmd[1]]["Brand"] in configure.keys()
         ):
-            return configure[devices[cmd[1]]["Brand"]](cmd)
+            return configure[devices[cmd[1]]["Brand"]](cmd, logLevel>30, intf=intf)
         else:
             return "config [MAC] [IP] [MASK] [GATE] [Pasword]"
     
@@ -575,10 +671,7 @@ class GUITk:
 
     def search(self):
         self.clear()
-        #if self.ven["values"].index(self.ven.get()) == 0:
         ProcessCMD(["search"])
-        #else:
-        #    ProcessCMD(["search", self.ven.get()])
         self.pop()
 
     def pop(self):
@@ -623,6 +716,9 @@ class GUITk:
         self.tcp.insert(END, devices[dev]["TCPPort"])
 
     def setconfig(self):
+        if len(self.table.selection()) == 0:
+            showerror("Error", "Select a device first")
+            return
         dev = self.table.item(self.table.selection()[0], option="values")[0]
         devices[dev][u"TCPPort"] = int(self.tcp.get())
         devices[dev][u"HttpPort"] = int(self.http.get())
@@ -679,47 +775,21 @@ class GUITk:
 
 if __name__ == "__main__":
 
-    import os, sys, struct, fcntl, json
-    from locale import getlocale
-    from subprocess import check_output
-    from socket import *
-    import platform
-    from datetime import *
-    import hashlib, base64
-
-    try:
-        from dvrip import DVRIPCam
-
-    except ImportError:
-        print("Exiting: dvrip module not found. This script cannot run on Python 2.")
-        sys.exit(1)
-
-    try:
-        try:
-            from tkinter import *
-        except:
-            from Tkinter import *
-        from tkinter.filedialog import asksaveasfilename, askopenfilename
-        from tkinter.messagebox import showinfo, showerror
-        from tkinter.ttk import *
-
-        GUI_TK = True
-    except:
-        GUI_TK = False
 
     logLevel = 30	
-    searchers = { "xm": SearchXM }
-    configure = { "xm": ConfigXM }
+    searchers = {"xm": SearchXM}
+    configure = {"xm": ConfigXM}
 
-    # list of preferred interfaces - camera is supposed to be connected to a wired interface
-    intfs = ['eth', 'eno', 'wlx', 'enx']
-    devices = {}
-    log = "search.log"
+    # check if there's a DISPLAY, and use commandline mode if not
+    if os.getenv('DISPLAY', default=None) is None and sys.platform !='win32':
+        GUI_TK = False
+
     icon = "R0lGODlhIAAgAPcAAAAAAAkFAgwKBwQBABQNBRAQDQQFERAOFA4QFBcWFSAaFCYgGAoUMhwiMSUlJCsrKyooJy8wLjUxLjkzKTY1Mzw7OzY3OEpFPwsaSRsuTRUsWD4+QCo8XQAOch0nYB05biItaj9ARjdHYiRMfEREQ0hIR0xMTEdKSVNOQ0xQT0NEUVFNUkhRXlVVVFdYWFxdXFtZVV9wXGZjXUtbb19fYFRda19gYFZhbF5wfWRkZGVna2xsa2hmaHFtamV0Ynp2aHNzc3x8fHh3coF9dYJ+eH2Fe3K1YoGBfgIgigwrmypajDtXhw9FpxFFpSdVpzlqvFNzj0FvnV9zkENnpUh8sgdcxh1Q2jt3zThi0SJy0Dl81Rhu/g50/xp9/x90/zB35TJv8DJ+/EZqzj2DvlGDrlqEuHqLpHeQp26SuhqN+yiC6imH/zSM/yqa/zeV/zik/1aIwlmP0mmayWSY122h3VWb6kyL/1yP8UGU/UiW/VWd/miW+Eqp/12k/1Co/1yq/2Gs/2qr/WKh/nGv/3er9mK3/3K0/3e4+4ODg4uLi4mHiY+Qj5WTjo+PkJSUlJycnKGem6ShnY2ZrKOjo6urrKqqpLi0prS0tLu8vMO+tb+/wJrE+bzf/sTExMfIx8zMzMjIxtrWyM/Q0NXU1NfY193d3djY1uDf4Mnj+931/OTk5Ozs7O/v8PLy8gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACH5BAEAAAAALAAAAAAgACAAAAj+AAEIHEiwoMGDCBMqXMiwocOHECNKnEixosWLGDNq3Mgx4iVMnTyJInVKlclSpD550nRpUqKGmD59EjWqlMlVOFWdIgWq0iNNoBIhSujokidPn0aNKrmqVStWqjxRumTqyI5KOxI5OpiIkiakNG2yelqK5alKLSAJgbBBB6RIjArmCKLIkV1HjyZNpTTJFKgSQoI4cGBiBxBIR6QM6TGQxooWL3LwMBwkSJEcLUq8YATDAZAdMkKh+GGpAo0cL1wInJuokSNIeqdeCgLBAoVMR2CEMkHDzAcnTCzsCAKERwsXK3wYKYLIdd6pjh4guCGJw5IpT7R8CeNlCwsikx7+JTJ+PAZlRHXxOgqBAQMTLXj0AAKkJw+eJw6CXGqJyAWNyT8QgZ5rsD2igwYEOOEGH38EEoghgcQhQgJAxISJI/8ZNoQUijiX1yM7NIBAFm3wUcghh9yBhQcCFEBDJ6V8MskKhgERxBGMMILXI7AhsoAAGSgRBRlliLHHHlZgMAAJmLByCiUnfGajFEcgotVzjkhggAYjjBHFFISgkoodSDAwAyStqDIJAELs4CYQQxChVSRTQcJCFWmUyAcghmzCCRgdXCEHEU69VJiNdDmnV0s4rNHFGmzgkUcfhgiShAd0nNHDVAc9YIEFFWxAQgkVpKAGF1yw4UYdc6AhhQohJFiwQAIRPQCHFlRAccMJFCRAgAAVJXDBBAsQEEBHDwUEADs="
     help = """
-        Usage: %s [-q] [-n] [Command];[Command];...
+        Usage: %s [-q] [-n] [- i intf] [Command];[Command];...
         -q				No output
         -n				No gui
+        -i xxx          Use interface xxx
         Command			Description
 
         help			This help
@@ -731,40 +801,61 @@ if __name__ == "__main__":
         json			JSON String of devices
         device [MAC]		JSON String of [MAC]
         config [MAC] [IP] [MASK] [GATE] [Pasword]   - Configure searched divice
+        interface [ifname]  view or set the interface to search
         """ % os.path.basename(
         sys.argv[0]
     )
     lang, charset = getlocale()
 
-    if len(sys.argv) > 1:
-        cmds = " ".join(sys.argv[1:])
-        if cmds.find("-q ") != -1:
-            cmds = cmds.replace("-q ", "").replace("-n ", "").strip()
-            logLevel = 0
-        for cmd in cmds.split(";"):
+    arg_parser = argparse.ArgumentParser(description="Manage an IMX291 or IMX307 camera")
+
+    arg_parser.add_argument('-q', '--quiet', action="store_true", help='no output')
+    arg_parser.add_argument('-n', '--nogui', action="store_true", help='no GUI')
+    arg_parser.add_argument('-i', '--intf', metavar='INTF', type=str, help='Use interface xxx')
+    arg_parser.add_argument('-t', '--theme', metavar='THEME', type=str, help="""
+                            use specified theme for the UI - options are 
+                            'winnative', 'clam', 'alt', 'default', 'classic', 'vista', 'xpnative'""")
+    arg_parser.add_argument('cmds', nargs='?', metavar='CMDS', type=str, help='optional commands separated by semicolons')
+
+    cml_args = arg_parser.parse_args()
+
+    if cml_args.quiet:
+        logLevel = 0
+
+    if cml_args.nogui:
+        GUI_TK = False
+
+    if cml_args.intf:
+        intf = cml_args.intf
+        print('using interface {}'.format(intf))
+    else:
+        intf = None
+
+    theme = None
+    if cml_args.theme:
+        theme = cml_args.theme
+        
+    if cml_args.cmds:
+        for cmd in cml_args.cmds.split(";"):
             ProcessCMD(cmd.split(" "))
-    if GUI_TK and "-n" not in sys.argv:
+
+    if GUI_TK:
         root = Tk()
         app = GUITk(root)
-        if (
-            "--theme" in sys.argv
-        ):  # ('winnative', 'clam', 'alt', 'default', 'classic', 'vista', 'xpnative')
-            style = Style()
-            theme = [sys.argv.index("--theme") + 1]
-            if theme in style.theme_names():
-                style.theme_use(theme)
+        style = Style()
+        print('themse are {}'.format(style.theme_names()))
+        if theme and theme in style.theme_names():
+            style.theme_use(theme)
         root.mainloop()
         sys.exit(1)
-
-    # cmdline only, works only for eth0
-    print("Type help or ? to display help(q or quit to exit)")
-    while True:
-        data = input("> ").split(";")
-        for cmd in data:
-            result = ProcessCMD(cmd.split(" "))
-            if hasattr(result, "keys") and "Ret" in result.keys():
-                print(CODES[result["Ret"]])
-            else:
-                print(result)
-    sys.exit(1)
-    
+    else:
+        # cmdline only, uses first interface with an IP address
+        print("Type help or ? to display help(q or quit to exit)")
+        while True:
+            data = input("> ").split(";")
+            for cmd in data:
+                result = ProcessCMD(cmd.split(" "))
+                if hasattr(result, "keys") and "Ret" in result.keys():
+                    print(CODES[result["Ret"]])
+                else:
+                    print(result)

@@ -3,11 +3,11 @@
 
 import os
 import sys
-import logging
 import traceback
 
 
 from RMS.Formats.FFfile import validFFName
+from RMS.Logger import getLogger
 from RMS.Misc import archiveDir
 from RMS.Routines import MaskImage
 from Utils.GenerateThumbnails import generateThumbnails
@@ -15,7 +15,7 @@ from Utils.StackFFs import stackFFs
 
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 def selectFiles(config, dir_path, ff_detected):
