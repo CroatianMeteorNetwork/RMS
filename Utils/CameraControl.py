@@ -804,7 +804,13 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
         if not opts:
             log.error("No mode specified for SwitchMode.")
             return
-        mode_name = opts[0]  # e.g. 'day'
+        
+        # If opts is just a string, use it directly; if it's a list, pull the first element
+        if isinstance(opts, str):
+            mode_name = opts
+        else:
+            mode_name = opts[0]
+        
         switchMode(cam, mode_name, camera_settings_path)
         return
     
