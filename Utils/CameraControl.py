@@ -688,7 +688,7 @@ def switchMode(cam, mode_name, path='./camera_settings.json'):
 
         # Pass everything else directly to dvripCall
         dvripCall(cam, cmd, opts)
-        
+
 
 def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
     """ retrieve or display the camera network settings
@@ -701,27 +701,35 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
     if cmd == 'GetHostname':
         nt, _, _ = getNetworkParams(cam, False)
         log.info(nt['HostName'])
+        return
 
     elif cmd == 'GetNetConfig':
         getNetworkParams(cam, True)
+        return
 
     elif cmd == 'reboot':
         rebootCamera(cam)
+        return
 
     elif cmd == 'GetIP':
         getIP(cam)
+        return
 
     elif cmd == 'GetAutoReboot':
         getGeneralParams(cam, True)
+        return
 
     elif cmd == 'CloudConnection':
         manageCloudConnection(cam, opts)
+        return
 
     elif cmd == 'GetCameraParams':
         getCameraParams(cam, True)
+        return
 
     elif cmd == 'GetEncodeParams':
         getEncodeParams(cam, True)
+        return
 
     elif cmd == 'GetSettings':
         getNetworkParams(cam, True)
@@ -730,6 +738,7 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
         getGuiParams(cam, True)
         getColorParams(cam, True)
         getGeneralParams(cam, True)
+        return
 
     elif cmd == 'SaveSettings':
         nc, dh, nt = getNetworkParams(cam, False)
@@ -739,6 +748,7 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
         cp = getColorParams(cam, False)
         rb, lc = getGeneralParams(cam, False)
         saveToFile(nc, dh, nt, cs, vs, gu, cp, rb, lc)
+        return
 
     elif cmd == 'LoadSettings':
         loaded = loadFromFile()
@@ -755,9 +765,11 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
         cam.set_info("General.AutoMaintain", rb)
         cam.set_info("General.Location", lc)
         rebootCamera(cam)
+        return
 
     elif cmd == 'SetParam':
         setParameter(cam, opts)
+        return
 
     elif cmd == 'CameraTime':
         if opts[0] == 'get':
@@ -774,24 +786,31 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
                 log.info('time set to %s', reqtime)
         else:
             log.info('usage CameraTime get|set')
-
+        return
 
     elif cmd == 'SetColor':
         setColor(cam, opts)
+        return
 
     elif cmd == 'SetOSD':
         setOSD(cam, opts)
+        return
 
     elif cmd == 'SetAutoReboot':
         setAutoReboot(cam, opts)
+        return
 
     elif cmd == 'SwitchMode':
         switchMode(cam, opts, camera_settings_path)
-        
+        return
+
+    # -- If we get here, command is not recognized:
     else:
+        log.error("Unrecognized command '%s' in dvripCall. Options were: %s", cmd, opts)
         log.info('System Info')
         ugi = cam.get_upgrade_info()
         log.info(ugi['Hardware'])
+        return
 
 
 def cameraControl(camera_ip, cmd, opts='', camera_settings_path='./camera_settings.json'):
