@@ -801,6 +801,7 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
         return
 
     elif cmd == 'SwitchMode':
+        log.info('Switching mode to %s', opts[0])
         switchMode(cam, opts, camera_settings_path)
         return
 
