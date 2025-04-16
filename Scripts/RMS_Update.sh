@@ -166,6 +166,13 @@ else
     exit 1
 fi
 
+# Remove any stale global or egg installs of RMS before we rebuild
+echo "Clearing old RMS installs from site‑packages…"
+pip uninstall -y RMS 2>/dev/null || true              # yank a pip‑installed wheel/egg
+find "$VIRTUAL_ENV/lib" -name 'RMS-*.*.egg' -prune -exec rm -rf {} +  # nuke stray eggs
+find "$VIRTUAL_ENV/lib" -name 'RMS-*.dist-info' -prune -exec rm -rf {} +
+find "$VIRTUAL_ENV/lib" -name 'RMS-*.egg-info'  -prune -exec rm -rf {} +
+
 # Perform cleanup operations before updating
 echo "Removing the build directory..."
 rm -rf build
