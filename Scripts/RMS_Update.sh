@@ -307,14 +307,14 @@ install_missing_dependencies
 # Install Python requirements
 pip install -r requirements.txt
 
-# Run the Python setup
-pip install -e . --no-deps --no-build-isolation
-
 # Restore files after updates
 restore_files
 
 # Mark the update as completed
 echo "0" > "$UPDATEINPROGRESSFILE"
+
+# Run the Python setup
+pip install -e . --no-deps --no-build-isolation
 
 echo "Update process completed successfully! Exiting in 5 seconds..."
 sleep 5
