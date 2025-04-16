@@ -169,9 +169,18 @@ fi
 # Remove any stale global or egg installs of RMS before we rebuild
 echo "Clearing old RMS installs from site‑packages…"
 pip uninstall -y RMS 2>/dev/null || true              # yank a pip‑installed wheel/egg
-find "$VIRTUAL_ENV/lib" -name 'RMS-*.*.egg' -prune -exec rm -rf {} +  # nuke stray eggs
-find "$VIRTUAL_ENV/lib" -name 'RMS-*.dist-info' -prune -exec rm -rf {} +
-find "$VIRTUAL_ENV/lib" -name 'RMS-*.egg-info'  -prune -exec rm -rf {} +
+
+# Resolve the active site‑packages directory inside the venv
+SITE_DIR=$(python - <<'PY'
+import site, sys
+print(site.getsitepackages()[0])
+PY
+)
+
+# Nuke any leftover RMS installs (eggs, .dist‑info, .egg‑info)
+find "$SITE_DIR" -maxdepth 1 -name 'RMS-*.egg'       -prune -exec rm -rf {} +
+find "$SITE_DIR" -maxdepth 1 -name 'RMS-*.dist-info' -prune -exec rm -rf {} +
+find "$SITE_DIR" -maxdepth 1 -name 'RMS-*.egg-info'  -prune -exec rm -rf {} +
 
 # Perform cleanup operations before updating
 echo "Removing the build directory..."
@@ -299,7 +308,7 @@ install_missing_dependencies
 pip install -r requirements.txt
 
 # Run the Python setup
-python setup.py install
+pip install -e . --no-deps --no-build-isolation
 
 # Restore files after updates
 restore_files
