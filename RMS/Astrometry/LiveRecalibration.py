@@ -31,7 +31,7 @@ class LiveRecalibration(threading.Thread):
     appropriate recalibrated pointing.
     """
     
-    def __init__(self, config, platepar, meas_tiggered_recalib=True, meas_trigger_dt=30):
+    def __init__(self, config, platepar, meas_triggered_recalib=True, meas_trigger_dt=30):
         """
         Initialize the LiveRecalibration class.
 
@@ -40,7 +40,7 @@ class LiveRecalibration(threading.Thread):
             platepar: [Platepar] Initial platepar to be used for recalibration.
 
         Keyword Arguments:
-            meas_tiggered_recalib: [bool] If True, only recalibrate platepars that are close to measurements
+            meas_triggered_recalib: [bool] If True, only recalibrate platepars that are close to measurements
                 in the measurement queue. If False, all platepars are recalibrated. Default is True.
             meas_trigger_dt: [int] Minimum time difference in seconds to trigger recalibration for 
                 measurements. Default is 30 seconds.
@@ -51,15 +51,15 @@ class LiveRecalibration(threading.Thread):
         self.config = config
         self.orig_platepar = platepar
 
-        self.meas_tiggered_recalib = meas_tiggered_recalib
+        self.meas_triggered_recalib = meas_triggered_recalib
         self.meas_trigger_dt = meas_trigger_dt
 
         # Thread lifecycle control event
         self._stop_event = threading.Event()
         self.started = False
 
-        # Queue of CALSTARS data to be processed (max size of 10,000)
-        self.calstars_queue = queue.Queue(maxsize=10_000)
+        # Queue of CALSTARS data to be processed (no limit)
+        self.calstars_queue = queue.Queue()
 
         # Queue of measurements to be processed (max size of 10,000)
         self.measurement_input_queue = queue.Queue(maxsize=10_000)
@@ -71,6 +71,7 @@ class LiveRecalibration(threading.Thread):
         # Dictionary of recalibrated platepars (keys are FF names)
         self.recalibrated_platepars = {}
         self.recalibrated_platepars_lock = threading.Lock()
+
 
         ### LOAD THE STAR CATALOG ###
 
@@ -89,6 +90,7 @@ class LiveRecalibration(threading.Thread):
 
         ### ###
 
+
     # Helper function to generate a unique hash for measurement
     @staticmethod
     def _hash_measurement(ff_name, meteor_meas):
@@ -105,18 +107,24 @@ class LiveRecalibration(threading.Thread):
 
 
             # Only do the recalibrations of the platepars close to the measurements
-            if self.meas_tiggered_recalib:
+            # i.e. recalibrations will be triggered by measurements in the queue
+            if self.meas_triggered_recalib:
 
                 # Go through the measurements queue and check if there are any calibration stars close in
                 # time to the measurements
                 try:
-                    # Pull all new measurements and associate them with timestamps and hash keys
+                    # Pull all new measurements and associate them with timestamps and unique hash keys
                     measurements = {}
                     while not self.measurement_input_queue.empty():
                         ff_name, meas = self.measurement_input_queue.get_nowait()
                         meas_time = filenameToDatetime(ff_name)
                         key = self._hash_measurement(ff_name, meas)
                         measurements[key] = (ff_name, meas, meas_time)
+
+                    # If there are no measurements, continue to wait
+                    if not measurements:
+                        time.sleep(0.1)
+                        continue
 
                     # Drain the CALSTARS queue to get all available calibration data
                     calstars_entries = []
@@ -128,11 +136,16 @@ class LiveRecalibration(threading.Thread):
                         except queue.Empty:
                             break
 
-                    # Match each measurement with the closest CALSTARS file within the trigger time window
+                    # Sort the calibration stars by their datetime (newest first)
+                    calstars_entries.sort(key=lambda x: x[1], reverse=True)
+
+                    # Match each measurement with the closest calibration star record within the trigger time 
+                    # window
                     for key, (m_ff_name, m_meas, m_dt) in measurements.items():
                         closest_entry = None
                         closest_diff = float('inf')
 
+                        # Iterate through the calibration stars to find the closest match
                         for entry in calstars_entries:
                             ff_name, ff_dt, _, _ = entry
                             diff = abs((ff_dt - m_dt).total_seconds())
@@ -140,18 +153,42 @@ class LiveRecalibration(threading.Thread):
                                 closest_diff = diff
                                 closest_entry = entry
 
+                            # If the difference is less than 5.12 seconds (128 frames / 25 FPS), break the 
+                            # loop
+                            if diff <= 5.12:
+                                break
+
+                        # If no matching CALSTARS was found, try to use a previously recalibrated platepar
+                        if closest_entry is None:
+
+                            with self.recalibrated_platepars_lock:
+
+                                for ff_name, platepar in self.recalibrated_platepars.items():
+
+                                    ff_dt = filenameToDatetime(ff_name)
+                                    diff = abs((ff_dt - m_dt).total_seconds())
+
+                                    if diff < closest_diff and diff <= self.meas_trigger_dt:
+
+                                        closest_diff = diff
+                                        closest_entry = (ff_name, ff_dt, None, None)  # No need to recalibrate again
+
                         # If a suitable match was found, recalibrate if not done already
                         if closest_entry is not None:
                             ff_name, ff_dt, star_data, calstars_ff_frames = closest_entry
 
+                            # Check if the recalibration for this file has already been done
                             with self.recalibrated_platepars_lock:
                                 already_done = ff_name in self.recalibrated_platepars
 
                             # Perform recalibration only if this file hasn't been processed yet
-                            if not already_done:
+                            if not already_done and star_data is not None:
 
                                 try:
+                                    # Fetch the platepar closest in time to the current FF file
                                     working_platepar, _ = self.getClosestPlatepar(ff_dt)
+
+                                    # Run the recalibration procedure
                                     recalibrated_platepars = recalibratePlateparsForFF(
                                         working_platepar,
                                         [ff_name],
@@ -163,10 +200,16 @@ class LiveRecalibration(threading.Thread):
                                         ignore_max_stars=False,
                                         ff_frames=calstars_ff_frames,
                                     )
+
+                                    # Safely update the shared platepar dictionary
                                     with self.recalibrated_platepars_lock:
                                         self.recalibrated_platepars.update(recalibrated_platepars)
+
+
                                     print(f"Recalibrated platepar for {ff_name}")
                                     print("Success:", recalibrated_platepars[ff_name].auto_recalibrated)
+
+
                                 except Exception as e:
                                     log.exception(f"Recalibration failed for {ff_name}: {e}")
 
@@ -174,8 +217,10 @@ class LiveRecalibration(threading.Thread):
                             mapped = self.mapCoordinates(m_ff_name, m_meas, 
                                                          pp_time_diff_limit=self.meas_trigger_dt)
                             
+                            # If mapping was successful, put the result in the output queue
                             if mapped is not None:
                                 self.measurement_output_queue.put((key, m_ff_name, mapped))
+
 
                     # Requeue CALSTARS entries that were not used in this pass
                     for entry in calstars_entries:
@@ -495,7 +540,7 @@ if __name__ == "__main__":
     # Prepare measurements and track them using unique keys
     expected_keys = collections.OrderedDict()
 
-    # Choose the first few meteors for testing
+    # Add meteor measurements to the recalibrator input queue
     for meteor_entry in meteor_list:
         ff_name, meteor_No, rho, phi, meteor_meas = meteor_entry
 
