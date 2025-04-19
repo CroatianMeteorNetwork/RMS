@@ -1302,10 +1302,15 @@ class BufferedCapture(Process):
         if self.raw_frame_saver is not None:
             self.raw_frame_saver.stop()
             
-            # Give it time to stop
-            time.sleep(0.1)  
-            
-            self.raw_frame_saver = None
+        # Wait (with timeout) for the child to confirm it is done
+        self.raw_frame_saver.join(5)
+
+        if self.raw_frame_saver.is_alive():
+            log.warning("RawFrameSaver still busy. Terminating")
+            self.raw_frame_saver.terminate()
+            self.raw_frame_saver.join()
+
+        self.raw_frame_saver = None
 
         # Clean up array resources
         del self.shared_raw_array_base
@@ -1345,6 +1350,7 @@ class BufferedCapture(Process):
 
             # Store current array configuration
             self.current_raw_frame_shape = frame_shape
+            self.current_mode = self.daytime_mode.value
             
             return True
 
@@ -1407,6 +1413,7 @@ class BufferedCapture(Process):
             self.last_m_err = float('inf')
             self.last_m_err_n = 0
             self.current_raw_frame_shape = None
+            self.current_mode = None
 
             # Initialize raw frame handling if enabled
             if self.config.save_frames:
@@ -1628,9 +1635,11 @@ class BufferedCapture(Process):
                 # If save_frames is set and a video device is used, save a frame every nth frames
                 if save_this_frame:
 
-                    # Check if frame shape changed (color or grayscale)
-                    if frame.shape != self.current_raw_frame_shape:
-                        log.info("Frame shape changed, reinitializing arrays...")
+                    # Check if frame shape (color or grayscale) or capture mode changed (day or night)
+                    if (frame.shape != self.current_raw_frame_shape or
+                        self.current_mode != self.daytime_mode.value):
+
+                        log.info("Frame shape/mode changed, reinitializing arrays...")
 
                         # First signal the raw frame saver to finish saving current block
                         if raw_buffer_one:
@@ -1648,6 +1657,7 @@ class BufferedCapture(Process):
                                 self.shared_raw_array, self.start_raw_time1,
                                 self.shared_raw_array2, self.start_raw_time2,
                                 self.sharedTimestamps, self.sharedTimestamps2,
+                                self.daytime_mode.value if self.daytime_mode is not None else False,
                                 self.config
                             )
                             self.raw_frame_saver.start()
