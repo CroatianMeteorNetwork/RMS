@@ -294,6 +294,9 @@ class Config:
         # Path to the json file containing camera settings
         self.camera_settings_path = "./camera_settings.json"
 
+        # Whether to run the one‑time camera setup defined in camera_settings.json
+        self.initialize_camera = False
+
         # Toggle raw video saving in data_dir/video_dir
         self.raw_video_save = False
 
@@ -1113,6 +1116,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "camera_settings_path"):
         config.camera_settings_path = parser.get(section, "camera_settings_path")
+
+    if parser.has_option(section, "initialize_camera"):
+        config.initialize_camera = parser.getboolean(section, "initialize_camera")
 
     if parser.has_option(section, "raw_video_save"):
         config.raw_video_save = parser.getboolean(section, "raw_video_save")
