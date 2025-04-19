@@ -9,6 +9,10 @@ from RMS.Misc import RmsDateTime
 # Get the logger from the main module
 log = getLogger("logger")
 
+# Sun altitude (in degrees) that defines the switch point.
+# Negative numbers mean the Sun is below the horizon.
+SWITCH_HORIZON_DEG = "-9"
+
 
 def switchCameraMode(config, daytime_mode, camera_mode_switch_trigger):
     """
@@ -33,7 +37,6 @@ def switchCameraMode(config, daytime_mode, camera_mode_switch_trigger):
         camera_mode_switch_trigger.value = True
 
 
-
 # Function to switch capture between day and night modes
 def captureModeSwitcher(config, daytime_mode, camera_mode_switch_trigger):
     """ Wait and switch between day and night capture modes based on current time.
@@ -55,7 +58,7 @@ def captureModeSwitcher(config, daytime_mode, camera_mode_switch_trigger):
             o.elevation = config.elevation
 
             # The Sun should be about 9 degrees below the horizon when the capture modes switch
-            o.horizon = '-9'
+            o.horizon = SWITCH_HORIZON_DEG
 
             # Set the current time
             current_time = RmsDateTime.utcnow()
@@ -128,6 +131,39 @@ def captureModeSwitcher(config, daytime_mode, camera_mode_switch_trigger):
     except Exception as e:
 
         log.error('CaptureModeSwitcher thread failed with following error: ' + repr(e))
+
+
+
+def lastNightToDaySwitch(config, whenUtc=None):
+    """
+    Return the UTC datetime of the most recent night-to-day switch
+    (Sun rose above SWITCH_HORIZON_DEG) that occurred before *whenUtc*.
+
+    Parameters
+    ----------
+    config  : RMS config object (must provide latitude, longitude, elevation)
+    whenUtc : optional datetime (naive UTC). If None, uses RmsDateTime.utcnow().
+
+    Returns
+    -------
+    datetime : timestamp of the last switch, or None in polar-day / polar-night cases
+    """
+
+    if whenUtc is None:
+        whenUtc = RmsDateTime.utcnow()
+
+    obs = ephem.Observer()
+    obs.lat = str(config.latitude)
+    obs.long = str(config.longitude)
+    obs.elevation = config.elevation
+    obs.horizon = SWITCH_HORIZON_DEG
+    obs.date = ephem.Date(whenUtc)
+
+    sun = ephem.Sun()
+    try:
+        return obs.previous_rising(sun).datetime()
+    except (ephem.AlwaysUpError, ephem.NeverUpError):
+        return None
 
 
     ### For testing switching only ###
