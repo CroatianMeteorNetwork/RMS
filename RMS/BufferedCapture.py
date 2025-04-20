@@ -43,6 +43,7 @@ from RMS.Misc import RmsDateTime, mkdirP
 from RMS.Formats import FTfile, FTStruct
 from RMS.Logger import getLogger, gstDebugLogger
 from RMS.CaptureModeSwitcher import switchCameraMode
+import Utils.CameraControl as cc
 
 # Get the logger from the main module
 log = getLogger("logger")
