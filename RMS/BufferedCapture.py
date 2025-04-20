@@ -1055,7 +1055,6 @@ class BufferedCapture(Process):
                     # -------------------------------------------
                     # Day/night switching
                     # -------------------------------------------
-                    if self.config.initialize_camera and 
                     if self.config.continuous_capture and self.config.switch_camera_modes:
                         if self.switchCameraModeNow.value:
                             switchCameraMode(self.config, self.daytime_mode, self.switchCameraModeNow)
