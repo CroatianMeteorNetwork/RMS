@@ -1042,7 +1042,7 @@ class BufferedCapture(Process):
                                 raise KeyError("Mode '{}' not defined in {}.".format(mode_name, mode_path))
 
                             try:
-                                cc.cameraControlV2(config, "SwitchMode", mode_name)
+                                cc.cameraControlV2(self.config, "SwitchMode", mode_name)
                             except Exception as e:
                                 raise RuntimeError("Failed to switch camera mode: {}".format(e))
 
