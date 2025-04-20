@@ -1,5 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
+import os
+import json
 import time
 import ephem
 import Utils.CameraControl as cc
@@ -10,14 +12,14 @@ from RMS.Misc import RmsDateTime
 log = getLogger("logger")
 
 
-def switchCameraMode(config, daytime_mode, switchCameraModeNow):
+def switchCameraMode(config, daytime_mode, camera_mode_switch_trigger):
     """
     Attempt to switch the camera to 'day' or 'night' using external JSON-based mode definitions.
 
     Arguments:
         config: RMS config object
         daytime_mode: multiprocessing.Value(bool) indicating day/night
-        switchCameraModeNow: multiprocessing.Value(bool) flag to trigger switching
+        camera_mode_switch_trigger: multiprocessing.Value(bool) flag to trigger switching
     """
     mode_name = "day" if daytime_mode.value else "night"
 
@@ -39,14 +41,14 @@ def switchCameraMode(config, daytime_mode, switchCameraModeNow):
             raise RuntimeError("Failed to switch camera mode: {}".format(e))
 
         # After successful camera mode switching, don't keep trying
-        switchCameraModeNow.value = False
+        camera_mode_switch_trigger.value = False
         log.info("Successfully switched camera mode to %s", mode_name)
 
     except Exception as e:
         log.warning("Camera switch to %s mode failed: %s. Will retry later.", mode_name, e)
 
         # After failure, retry on next opportunity
-        switchCameraModeNow.value = True
+        camera_mode_switch_trigger.value = True
 
 
 # Function to switch capture between day and night modes
