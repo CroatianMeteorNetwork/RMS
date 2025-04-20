@@ -8,8 +8,10 @@ RMSSOURCEDIR=~/source/RMS
 RMSBACKUPDIR=~/.rms_backup
 CURRENT_CONFIG="$RMSSOURCEDIR/.config"
 CURRENT_MASK="$RMSSOURCEDIR/mask.bmp"
+CURRENT_CAMERA_SETTINGS="$RMSSOURCEDIR/camera_settings.json"
 BACKUP_CONFIG="$RMSBACKUPDIR/.config"
 BACKUP_MASK="$RMSBACKUPDIR/mask.bmp"
+BACKUP_CAMERA_SETTINGS="$RMSBACKUPDIR/camera_settings.json"
 SYSTEM_PACKAGES="$RMSSOURCEDIR/system_packages.txt"
 UPDATEINPROGRESSFILE=$RMSBACKUPDIR/update_in_progress
 LOCKFILE="$RMSBACKUPDIR/update.lock"
@@ -111,6 +113,16 @@ backup_files() {
     else
         echo "No original mask.bmp found. Blank mask will be used."
     fi
+
+    # Backup camera_settings.json
+    if [ -f "$CURRENT_CAMERA_SETTINGS" ]; then
+        if ! retry_cp "$CURRENT_CAMERA_SETTINGS" "$BACKUP_CAMERA_SETTINGS"; then
+            echo "Critical Error: Could not back up camera_settings.json file. Aborting."
+            exit 1
+        fi
+    else
+        echo "No original camera_settings.json found. Blank mask will be used."
+    fi
 }
 
 # Restore files
@@ -135,6 +147,16 @@ restore_files() {
         fi
     else
         echo "No backup mask.bmp found - a new blank mask will be created by the installation."
+    fi
+
+    # Restore camera_settings.json
+    if [ -f "$BACKUP_CAMERA_SETTINGS" ]; then
+        if ! retry_cp "$BACKUP_CAMERA_SETTINGS" "$CURRENT_CAMERA_SETTINGS"; then
+            echo "Critical Error: Failed to restore camera_settings.json. Aborting."
+            exit 1
+        fi
+    else
+        echo "No backup camera_settings.json found - a new default settings file will be created by the installation."
     fi
 }
 # Ensure the backup directory exists
@@ -227,6 +249,19 @@ if [ -f "$CURRENT_CONFIG" ]; then
         echo "Warning: Failed to verify config template creation"
     else
         echo "Config template created successfully"
+    fi
+fi
+
+# Create template from the current default camera_settings file
+if [ -f "$CURRENT_CAMERA_SETTINGS" ]; then
+    echo "Creating camera_settings template..."
+    mv "$CURRENT_CAMERA_SETTINGS" "$RMSSOURCEDIR/camera_settings_template.json"
+    
+    # Verify the move worked
+    if [ ! -f "$RMSSOURCEDIR/camera_settings_template.json" ]; then
+        echo "Warning: Failed to verify camera settings template creation"
+    else
+        echo "Camera settings template created successfully"
     fi
 fi
 

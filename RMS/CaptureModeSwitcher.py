@@ -1,5 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
+import os
+import json
 import time
 import ephem
 import Utils.CameraControl as cc
@@ -12,26 +14,41 @@ log = getLogger("logger")
 
 def switchCameraMode(config, daytime_mode, camera_mode_switch_trigger):
     """
-    Attempt to switch the camera to the given mode_string ('SwitchDayTime' or 'SwitchNightTime')
-    
-    Arguments:
-        config: The RMS config object
-    """
-    if daytime_mode.value:
-        mode_string = "SwitchDayTime"
-    else:
-        mode_string = "SwitchNightTime"
+    Attempt to switch the camera to 'day' or 'night' using external JSON-based mode definitions.
 
-    # Attempt the actual camera mode switch
+    Arguments:
+        config: RMS config object
+        daytime_mode: multiprocessing.Value(bool) indicating day/night
+        camera_mode_switch_trigger: multiprocessing.Value(bool) flag to trigger switching
+    """
+    mode_name = "day" if daytime_mode.value else "night"
+
+    mode_path = config.camera_settings_path
+
     try:
-        cc.cameraControlV2(config, mode_string)
+        if not os.path.exists(mode_path):
+            raise FileNotFoundError("Mode file {} not found.".format(mode_path))
+
+        with open(mode_path, 'r') as f:
+            modes = json.load(f)
+
+        if mode_name not in modes:
+            raise KeyError("Mode '{}' not defined in {}.".format(mode_name, mode_path))
+
+        try:
+            cc.cameraControlV2(config, "SwitchMode", mode_name)
+        except Exception as e:
+            raise RuntimeError("Failed to switch camera mode: {}".format(e))
+
+        # After successful camera mode switching, don't keep trying
         camera_mode_switch_trigger.value = False
-        log.info("Successfully switched camera mode to %s", mode_string)
+        log.info("Successfully switched camera mode to %s", mode_name)
 
     except Exception as e:
-        log.warning("Camera switch to %s failed: %s. Will retry later.", mode_string, e)
-        camera_mode_switch_trigger.value = True
+        log.warning("Camera switch to %s mode failed: %s. Will retry later.", mode_name, e)
 
+        # After failure, retry on next opportunity
+        camera_mode_switch_trigger.value = True
 
 
 # Function to switch capture between day and night modes
