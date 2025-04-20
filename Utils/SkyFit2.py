@@ -15,6 +15,7 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+import scipy.optimize
 import pyqtgraph as pg
 import random
 
@@ -4321,6 +4322,11 @@ class PlateTool(QtWidgets.QMainWindow):
                         message_type="error")
 
             return None
+        
+
+        # Reset the lens distortion parameters
+        self.platepar.resetDistortionParameters()
+
 
         # Extract the parameters
         ra, dec, rot_standard, scale, fov_w, fov_h, star_data = solution
@@ -4338,10 +4344,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.updateRefRADec(skip_rot_update=True)
 
         self.platepar.pos_angle_ref = rotationWrtStandardToPosAngle(self.platepar, rot_standard)
-
-
-        # # Reset the distortion parameters
-        # self.platepar.resetDistortionParameters()
 
         # Print estimated parameters
         print()
@@ -5042,8 +5044,7 @@ class PlateTool(QtWidgets.QMainWindow):
         ######################################################################################################
 
 
-
-        ### Calculate the centroid ###
+        ### Calculate the centroid using a center of mass method ###
         ######################################################################################################
         x_acc = 0
         y_acc = 0
@@ -5076,42 +5077,113 @@ class PlateTool(QtWidgets.QMainWindow):
 
         ### Calculate the FWHM ###
 
-        # Second pass: compute flux-weighted second moment for FWHM
-        moment_sum = 0.0
+        # Convert centroid to cropped image coordinates
+        x_centroid_crop = x_centroid - x_min
+        y_centroid_crop = y_centroid - y_min
+
+        # Initialize moment accumulators
+        moment_x = 0.0
+        moment_y = 0.0
+        total_flux = 0.0
+
         for i in range(img_crop.shape[0]):
             for j in range(img_crop.shape[1]):
-                
-                # Compute distance of pixel from centre of the cropped image
-                i_rel = i - img_crop.shape[0]/2
-                j_rel = j - img_crop.shape[1]/2
+                i_rel = i - img_crop.shape[0] / 2
+                j_rel = j - img_crop.shape[1] / 2
                 pix_dist = math.sqrt(i_rel**2 + j_rel**2)
 
-                # Take only those pixels within the star aperture radius
                 if pix_dist <= self.star_aperture_radius:
-                    
                     net_flux = img_crop[i, j] - bg_median
-
-                    # If the next flux is negative, set it to zero
                     if net_flux > 0:
-                    
-                        # Compute radial distance from the computed centroid (account for the offset from x_min, y_min)
-                        r = math.sqrt((i + x_min - x_centroid)**2 + (j + y_min - y_centroid)**2)
-                        moment_sum += net_flux*(r**2)
+                        dx = i - x_centroid_crop
+                        dy = j - y_centroid_crop
+                        moment_x += net_flux * dx**2
+                        moment_y += net_flux * dy**2
+                        total_flux += net_flux
 
-        # Compute the standard deviation and the FWHM
-        sigma = 0
-        fwhm = 0
-        if source_intens > 0:
+        # Compute sigma and FWHM
+        fwhm_x = fwhm_y = fwhm = 0
+        if total_flux > 0:
 
-            # Compute the variance
-            variance = moment_sum/source_intens
+            # Compute the standard deviations in x and y directions
+            sigma_x = math.sqrt(moment_x/total_flux)
+            sigma_y = math.sqrt(moment_y/total_flux)
 
-            # Make sure the variance is positive
-            if variance > 0:
-                sigma = math.sqrt(variance)
-                fwhm = 2.355*sigma
+            # Compute the circular sigma
+            sigma = math.sqrt((moment_x + moment_y) / (2 * total_flux))
+
+            # Compute a circular FWHM
+            fwhm = 2.355 * sigma
 
         ######################################################################################################
+
+
+        # ######################################################################################################
+
+        # # Left - image, right - horizontal profile of the star
+        # plt.figure(figsize=(12, 6))
+
+        # # Plot the image
+        # plt.subplot(1, 2, 1)
+
+        # # Plot a background-subtracted cropped image (colormap red for above zero and blue for below zero)
+        # img_ax = plt.imshow(img_crop - bg_median, cmap='bwr')
+
+        # # Plot a circle with the radius of the star aperture
+        # circle = plt.Circle((img_crop.shape[1]/2, img_crop.shape[0]/2), self.star_aperture_radius, color='black', fill=False, label='Aperture')
+        # plt.gca().add_artist(circle)
+
+        # # Plot the centroid location
+        # plt.scatter(y_centroid - y_min, x_centroid - x_min, color='black', s=100, marker='x', label='Centroid')
+
+        # # Plot the sigma as the radius around the centroid
+        # circle = plt.Circle((y_centroid - y_min, x_centroid - x_min), sigma, color='orange', fill=False, label='1 Sigma')
+        # plt.gca().add_artist(circle)
+
+        # # Plot the FWHM as the radius around the centroid
+        # circle = plt.Circle((y_centroid - y_min, x_centroid - x_min), fwhm/2, color='green', fill=False, label='FWHM')
+        # plt.gca().add_artist(circle)
+
+        # plt.legend()
+
+        # # Add a colorbar on the brightness of the image
+        # plt.colorbar(img_ax, label='Brightness')
+
+        # plt.gca().invert_yaxis()
+        # plt.gca().invert_xaxis()
+
+
+        # # Plot the horizontal profile of the star
+        # plt.subplot(1, 2, 2)
+
+        # # Compute the horizontal profile of the star
+        # # Cut the image horizontally at the centroid (y_centroid)
+        # horizontal_profile = img_crop[int(round(x_centroid - x_min)), :]
+        # plt.plot(horizontal_profile - bg_median, label='Horizontal profile')
+
+        # # Plot the background level
+        # plt.axhline(y=0, color='black', linestyle='--', label='Background level')
+
+        # # Plot the centroid location
+        # plt.axvline(x=y_centroid - y_min, color='black', linestyle=':', label='Centroid')
+
+        # # Plot the FWHM as the radius around the centroid
+        # plt.axvline(x=y_centroid - y_min - fwhm/2, color='green', linestyle=':', label='FWHM')
+        # plt.axvline(x=y_centroid - y_min + fwhm/2, color='green', linestyle=':')
+
+        # # Plot the sigma as the radius around the centroid
+        # plt.axvline(x=y_centroid - y_min - sigma, color='orange', linestyle=':', label='1 Sigma')
+        # plt.axvline(x=y_centroid - y_min + sigma, color='orange', linestyle=':')
+
+        # plt.legend()
+
+
+        # plt.show()
+
+        # ######################################################################################################
+
+
+
 
         # Compute the SNR using the "CCD equation" (Howell et al., 1989)
         snr = signalToNoise(source_intens, source_px_count, bg_median, bg_std)

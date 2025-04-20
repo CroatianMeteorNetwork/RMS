@@ -2326,6 +2326,12 @@ def convertGMNTimeToPOSIX(timestring):
     returns:
         posix compatible time
     """
+
+
+    # remove any trailing decimal part of timestring
+    if "." in timestring:
+        timestring, _, _ = timestring.partition(".")
+
     try:
         dt_object = datetime.datetime.strptime(timestring.strip(), "%Y%m%d_%H%M%S")
     except:
@@ -2834,6 +2840,18 @@ def testsanitise():
 
     return success
 
+
+def testTimeObjectCreator():
+
+    success = True
+    if convertGMNTimeToPOSIX("20250319_181910.0") == convertGMNTimeToPOSIX("20250319_181910"):
+        success = success
+    else:
+        success = False
+
+
+    return success
+
 def testIndividuals(logging = True):
 
 
@@ -2850,7 +2868,13 @@ def testIndividuals(logging = True):
 
     individuals_success = True
 
-
+    if testTimeObjectCreator():
+        individuals_success = individuals_success
+        if logging:
+            log.info("TimeObjectCreator passed tests")
+    else:
+        individuals_success = False
+        log.error("TimeObjectCreator failed tests")
 
     if testsanitise():
         if logging:

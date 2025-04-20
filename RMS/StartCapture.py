@@ -344,14 +344,14 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     sharedArrayBase2 = multiprocessing.Array(ctypes.c_uint8, 256*(config.width + array_pad)*(config.height + array_pad))
     sharedArray2 = np.ctypeslib.as_array(sharedArrayBase2.get_obj())
     sharedArray2 = sharedArray2.reshape(256, (config.height + array_pad), (config.width + array_pad))
-    startTime2 = multiprocessing.Value('d', 0.0)
+    start_time2 = multiprocessing.Value('d', 0.0)
 
     log.info('Initializing frame buffers done!')
 
 
     # Initialize buffered capture
-    bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config, video_file=video_file,
-                         night_data_dir=night_data_dir, saved_frames_dir=saved_frames_dir, daytime_mode=daytime_mode, switchCameraModeNow=switchCameraModeNow)
+    bc = BufferedCapture(sharedArray, startTime, sharedArray2, start_time2, config, video_file=video_file,
+                         night_data_dir=night_data_dir, saved_frames_dir=saved_frames_dir, daytime_mode=daytime_mode, camera_mode_switch_trigger=camera_mode_switch_trigger)
     bc.startCapture()
 
     # To track and make new directories every iteration
@@ -487,7 +487,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
             # Initialize compression
-            compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, config,
+            compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, start_time2, config,
                 detector=detector)
 
             # Open the observation summary report
@@ -1314,10 +1314,10 @@ if __name__ == "__main__":
             
             # Setup shared value to communicate day/night switch between processes.
             daytime_mode = multiprocessing.Value(ctypes.c_bool, False)
-            switchCameraModeNow = multiprocessing.Value(ctypes.c_bool, True)
+            camera_mode_switch_trigger = multiprocessing.Value(ctypes.c_bool, True)
 
             # Setup the capture mode switcher on another thread
-            capture_switcher = threading.Thread(target=captureModeSwitcher, args=(config, daytime_mode, switchCameraModeNow))
+            capture_switcher = threading.Thread(target=captureModeSwitcher, args=(config, daytime_mode, camera_mode_switch_trigger))
             
             # To make sure the capture switcher thread exits automatically at the end
             capture_switcher.daemon = True
@@ -1339,7 +1339,7 @@ if __name__ == "__main__":
 
         else:
             daytime_mode = None
-            switchCameraModeNow = None
+            camera_mode_switch_trigger = None
             log.info('Starting capture for {:.2f} hours'.format(duration/60/60))
 
 

@@ -35,6 +35,7 @@ from RMS.Formats import FFfile
 from RMS.Formats import CALSTARS
 from RMS.DetectionTools import loadImageCalibration
 from RMS.Logger import getLogger
+from RMS.Math import twoDGaussian
 from RMS.Routines import MaskImage
 from RMS.Routines import Image
 from RMS.QueuedPool import QueuedPool
@@ -490,48 +491,7 @@ def extractStarsImgHandle(img_handle,
         return error_return
 
     return star_list
-    
 
-
-
-
-def twoDGaussian(params, amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
-    """ Defines a 2D Gaussian distribution. 
-    
-    Arguments:
-        params: [tuple of floats] 
-            - (x, y) independent variables, 
-            - saturation: [int] Value at which saturation occurs
-        amplitude: [float] amplitude of the PSF
-        xo: [float] PSF center, X component
-        yo: [float] PSF center, Y component
-        sigma_x: [float] standard deviation X component
-        sigma_y: [float] standard deviation Y component
-        theta: [float] PSF rotation in radians
-        offset: [float] PSF offset from the 0 (i.e. the "elevation" of the PSF)
-
-    Return:
-        g: [ndarray] values of the given Gaussian at (x, y) coordinates
-
-    """
-
-    x, y, saturation = params
-
-    if isinstance(saturation, np.ndarray):
-        saturation = saturation[0, 0]
-    
-    xo = float(xo)
-    yo = float(yo)
-
-    a = (np.cos(theta)**2)/(2*sigma_x**2) + (np.sin(theta)**2)/(2*sigma_y**2)
-    b = -(np.sin(2*theta))/(4*sigma_x**2) + (np.sin(2*theta))/(4*sigma_y**2)
-    c = (np.sin(theta)**2)/(2*sigma_x**2) + (np.cos(theta)**2)/(2*sigma_y**2)
-    g = offset + amplitude*np.exp(-(a*((x - xo)**2) + 2*b*(x - xo)*(y - yo) + c*((y - yo)**2)))
-
-    # Limit values to saturation level
-    g[g > saturation] = saturation
-
-    return g.ravel()
 
 
 
@@ -628,6 +588,11 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
 
         # Unpack fitted gaussian parameters
         amplitude, yo, xo, sigma_y, sigma_x, theta, offset = popt
+
+        # Take absolute values of some parameters
+        amplitude = abs(amplitude)
+        sigma_x = abs(sigma_x)
+        sigma_y = abs(sigma_y)
 
         # Filter hot pixels by looking at the ratio between x and y sigmas (HPs are very narrow)
         if min(sigma_y/sigma_x, sigma_x/sigma_y) < roundness_threshold:
@@ -819,35 +784,55 @@ def extractStarsAndSave(config, ff_dir):
         extraction_list.append(ff_name)
 
 
-    # The number of workers should be the minimum of cores and the number of tasks, so we don't have too many
-    # workers waiting for the tasks to finish
-    num_cores = min(config.num_cores, len(extraction_list))
+    # If just one file is given, run the extraction on it instead of using the QueuedPool
+    workpool = None
+    if len(extraction_list) == 1:
+        ff_name = extraction_list[0]
 
-    # Run the QueuedPool for detection
-    workpool = QueuedPool(extractStarsFF, cores=num_cores, backup_dir=ff_dir, input_queue_maxsize=None)
+        log.info('Extracting stars from ' + ff_name)
 
+        # Run the extraction
+        result = extractStarsFF(
+            ff_dir, ff_name, flat_struct=flat_struct, dark=dark, mask=mask,
+            config=config
+        )
 
-    # Add jobs for the pool
-    for ff_name in extraction_list:
-        log.info('Adding for extraction: ' + ff_name)
-        workpool.addJob([ff_dir, ff_name, flat_struct, dark, mask, config, None, None, None, None, None, None, None])
-
-
-    log.info('Starting pool...')
-
-    # Start the detection
-    workpool.startPool()
+        results = [result]
 
 
-    log.info('Waiting for the detection to finish...')
+    else:
 
-    # Wait for the detector to finish and close it
-    workpool.closePool()
+        # The number of workers should be the minimum of cores and the number of tasks, so we don't have too many
+        # workers waiting for the tasks to finish
+        num_cores = min(config.num_cores, len(extraction_list))
+
+        # Run the QueuedPool for detection
+        workpool = QueuedPool(extractStarsFF, cores=num_cores, backup_dir=ff_dir, input_queue_maxsize=None)
+
+
+        # Add jobs for the pool
+        for ff_name in extraction_list:
+            log.info('Adding for extraction: ' + ff_name)
+            workpool.addJob([ff_dir, ff_name, flat_struct, dark, mask, config, None, None, None, None, None, None, None])
+
+
+        log.info('Starting pool...')
+
+        # Start the detection
+        workpool.startPool()
+
+
+        log.info('Waiting for the detection to finish...')
+
+        # Wait for the detector to finish and close it
+        workpool.closePool()
+
+        results = workpool.getResults()
 
 
     # Get extraction results
     star_list = []
-    for result in workpool.getResults():
+    for result in results:
 
         try:
             ff_name, x2, y2, amplitude, intensity, fwhm_data, background, snr, saturated_count = result
@@ -885,7 +870,8 @@ def extractStarsAndSave(config, ff_dir):
     CALSTARS.writeCALSTARS(star_list, ff_dir, calstars_name, config.stationID, config.height, config.width)
 
     # Delete QueuedPool backed up files
-    workpool.deleteBackupFiles()
+    if workpool is not None:
+        workpool.deleteBackupFiles()
 
     log.info('Total time taken: {:.2f} s'.format(time.time() - time_start))
 

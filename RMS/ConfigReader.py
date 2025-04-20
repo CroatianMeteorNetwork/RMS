@@ -386,7 +386,7 @@ class Config:
 
         # Space allocation for all of rms_data
 
-        # Disable the deletion by quota management for testing purposes
+        # Enable quota management
         self.quota_management_enabled = False
 
 
@@ -398,6 +398,12 @@ class Config:
 
         # Of that allocation for all of rms_data, this is set aside for bz2 files
         self.bz2_files_quota = None
+
+        # Of that allocation for all of rms_data, this is set aside for log files
+        self.log_files_quota = None
+
+        # Of that allocation for all of rms_data, this is set aside for continuous capture
+        self.continuous_capture_quota = None
 
 
         # Extra space to leave on disk for the archive (in GB) after the captured files have been taken
@@ -425,11 +431,14 @@ class Config:
         # Set PNG compression for the saved frames for png file type
         self.png_compression = 3
 
-        # Set the time interval for saving video frames
-        self.frame_save_interval = 10
+        # Set the time interval for saving video frames (s)
+        self.frame_save_interval = 5
 
         # Set the frame count interval for saving video frames (calculated from the time interval)
         self.frame_save_interval_count = 256
+
+        # Set whether to delete, archive, or leave saved frames after making timelapse ('delete', 'tar', 'none')
+        self.frame_cleanup = 'delete'
 
         # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
         self.slideshow_enable = False
@@ -1006,6 +1015,12 @@ def parseCapture(config, parser):
     if parser.has_option(section, "bz2_files_quota"):
         config.bz2_files_quota = int(parser.get(section, "bz2_files_quota"))
 
+    if parser.has_option(section, "log_files_quota"):
+        config.log_files_quota = float(parser.get(section, "log_files_quota"))
+
+    if parser.has_option(section, "continuous_capture_quota"):
+        config.continuous_capture_quota = int(parser.get(section, "continuous_capture_quota"))
+
     if parser.has_option(section, "captured_dir"):
         config.captured_dir = parser.get(section, "captured_dir")
     
@@ -1234,6 +1249,10 @@ def parseCapture(config, parser):
             config.frame_save_interval_count = 256
             print()
             print("WARNING! The frame_save_interval must result in more than 5 frames interval. It has been reset to 256 frames!")
+
+    # Set whether to delete, archive, or leave saved frames after making timelapse ('delete', 'tar', 'none')
+    if parser.has_option(section, "frame_cleanup"):
+        config.frame_cleanup = parser.get(section, "frame_cleanup")
 
     # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
     if parser.has_option(section, "slideshow_enable"):

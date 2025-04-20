@@ -1,7 +1,5 @@
 from __future__ import print_function, division, absolute_import
 
-import os
-import json
 import time
 import ephem
 import Utils.CameraControl as cc
@@ -52,7 +50,7 @@ def switchCameraMode(config, daytime_mode, switchCameraModeNow):
 
 
 # Function to switch capture between day and night modes
-def captureModeSwitcher(config, daytime_mode, switchCameraModeNow):
+def captureModeSwitcher(config, daytime_mode, camera_mode_switch_trigger):
     """ Wait and switch between day and night capture modes based on current time.
     
     Arguments:
@@ -95,7 +93,7 @@ def captureModeSwitcher(config, daytime_mode, switchCameraModeNow):
                     if config.switch_camera_modes:
                         if not is_first_switch:
                             time.sleep(config.capture_wait_seconds)
-                        switchCameraModeNow.value = True
+                        camera_mode_switch_trigger.value = True
 
                     daytime_mode.value = True
                     time_to_wait = (next_set - current_time).total_seconds()
@@ -106,7 +104,7 @@ def captureModeSwitcher(config, daytime_mode, switchCameraModeNow):
                     if config.switch_camera_modes:
                         if not is_first_switch:
                             time.sleep(config.capture_wait_seconds)
-                        switchCameraModeNow.value = True
+                        camera_mode_switch_trigger.value = True
 
                     daytime_mode.value = False
                     time_to_wait = (next_rise - current_time).total_seconds()
@@ -118,7 +116,7 @@ def captureModeSwitcher(config, daytime_mode, switchCameraModeNow):
                 if config.switch_camera_modes:
                     if not is_first_switch:
                         time.sleep(config.capture_wait_seconds)
-                    switchCameraModeNow.value = True
+                    camera_mode_switch_trigger.value = True
 
                 daytime_mode.value = True
                 time_to_wait = 86400
@@ -130,7 +128,7 @@ def captureModeSwitcher(config, daytime_mode, switchCameraModeNow):
                 if config.switch_camera_modes:
                     if not is_first_switch:
                         time.sleep(config.capture_wait_seconds)
-                    switchCameraModeNow.value = True
+                    camera_mode_switch_trigger.value = True
 
                 daytime_mode.value = False
                 time_to_wait = 86400

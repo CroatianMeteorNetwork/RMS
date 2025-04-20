@@ -10,7 +10,6 @@ import traceback
 import argparse
 import random
 import glob
-import tarfile
 import shutil
 
 from RMS.ArchiveDetections import archiveDetections, archiveFieldsums
@@ -42,7 +41,7 @@ from Utils.PlotTimeIntervals import plotFFTimeIntervals
 from RMS.Formats.ObservationSummary import addObsParam, getObsDBConn, nightSummaryData
 from RMS.Formats.ObservationSummary import serialize, startObservationSummaryReport, finalizeObservationSummary
 from Utils.AuditConfig import compareConfigs
-from RMS.Misc import RmsDateTime
+from RMS.Misc import RmsDateTime, tarWithProgress
 
 
 # Get the logger from the main module
@@ -408,20 +407,25 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                     try:
                         # Archive directory for this day of ft files
                         tar_path = os.path.join(year_dir, '{}_{}_FT.tar.bz2'.format(config.stationID, day))
-
-                        with tarfile.open(tar_path, 'w:bz2') as tar:
-                            tar.add(day_dir, arcname=os.path.basename(day_dir))
-
-                        # Delete directory for this day of ft files
-                        shutil.rmtree(day_dir)
-                        print("Successfully created tar archive at: {}".format(tar_path))
-
-                        # Add to extra files for upload
-                        extra_files.append(tar_path)
-
+                        
+                        # Use the tarWithProgress function with removal of source
+                        print("Creating archive for {} FT files...".format(day))
+                        archive_success = tarWithProgress(
+                            source_dir=day_dir,
+                            tar_path=tar_path,
+                            compression='bz2',
+                            remove_source=True
+                        )
+                        
+                        if archive_success:
+                            print("Successfully created tar archive at: {}".format(tar_path))
+                            # Add to extra files for upload
+                            extra_files.append(tar_path)
+                        else:
+                            print("Archive creation failed, keeping original directory: {}".format(day_dir))
+                            
                     except Exception as e:
-                        print("Error creating tar archive: {}".format(e))
-
+                        print("Error in archiving process: {}".format(e))
         except Exception as e:
             log.debug('Archiving FT files failed with message:\n' + repr(e))
             log.debug(repr(traceback.format_exception(*sys.exc_info())))
@@ -528,70 +532,116 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
     # Generate a timelapse from frames
     if config.timelapse_generate_from_frames:
-
         log.info('Generating timelapse from saved frames...')
         try:
             frame_dir = os.path.join(config.data_dir, config.frame_dir)
+            current_day = RmsDateTime.utcnow().strftime("%Y%m%d-%j")
 
             # Generate timelapse for each day of the year, if not present
             for year in os.listdir(frame_dir):
-                # Each 'year' is 2024, 2025, ...
                 year_dir = os.path.join(frame_dir, year)
 
-
                 for day in os.listdir(year_dir):
-                    # Each 'day' is 20240923-267, 20240924-268, ...
                     day_dir = os.path.join(year_dir, day)
 
                     # Skip if not directory or if inside today's directory
-                    if (not os.path.isdir(day_dir)) or (day == RmsDateTime.utcnow().strftime("%Y%m%d-%j")):
+                    if (not os.path.isdir(day_dir)) or (day == current_day):
                         continue
                     
+                    # Clean up temporary directories and files from previous attempts
+    
+                    # 1. Clean up temp_raw_img_dir from the original implementation
+                    temp_raw_dir = os.path.join(day_dir, "temp_raw_img_dir")
+                    if os.path.exists(temp_raw_dir):
+                        log.info("Found temporary image directory from previous attempt: {}, cleaning up...".format(temp_raw_dir))
+                        try:
+                            shutil.rmtree(temp_raw_dir)
+                            log.info("Removed temporary directory: {}".format(temp_raw_dir))
+                        except Exception as e:
+                            log.warning("Failed to remove temporary directory {}: {}".format(temp_raw_dir, e))
+                    
+                    # 2. Clean up filelist.txt from the original implementation
+                    filelist_path = os.path.join(day_dir, "filelist.txt")
+                    if os.path.exists(filelist_path):
+                        log.info("Found temporary file list from previous attempt: {}, removing...".format(filelist_path))
+                        try:
+                            os.remove(filelist_path)
+                            log.info("Removed temporary file list: {}".format(filelist_path))
+                        except Exception as e:
+                            log.warning("Failed to remove temporary file list {}: {}".format(filelist_path, e))
+                    
+                    # 3. Clean up temporary files from the new implementation
+                    frames_timelapse_base = "{}_{}_frames_timelapse".format(config.stationID, day)
+                    year_dir_files = os.listdir(year_dir)
+                    for file in year_dir_files:
+                        # Check for temp files from new implementation (with _temp in the name)
+                        if frames_timelapse_base in file and "_temp" in file:
+                            temp_file_path = os.path.join(year_dir, file)
+                            log.info("Found temporary file from previous attempt: {}, removing...".format(temp_file_path))
+                            try:
+                                os.remove(temp_file_path)
+                                log.info("Removed temporary file: {}".format(temp_file_path))
+                            except Exception as e:
+                                log.warning("Failed to remove temporary file {}: {}".format(temp_file_path, e))
+
+                    # Make the name of the timelapse file from day directory
+                    frames_timelapse_path = os.path.join(year_dir, "{}_{}_frames_timelapse.mp4".format(config.stationID, day))
+                    timelapse_json_path = os.path.join(year_dir, "{}_{}_frametimes.json".format(config.stationID, day))
+                    
+                    # Check for temporary files from failed previous attempts
+                    temp_files_pattern = os.path.join(year_dir, "{}_{}_frames_timelapse_temp*".format(config.stationID, day))
+                    temp_files = glob.glob(temp_files_pattern)
+                    
+                    if temp_files:
+                        log.info("Found temporary files from previous attempts for {}, cleaning up...".format(day))
+                        for temp_file in temp_files:
+                            try:
+                                os.remove(temp_file)
+                                log.info("Removed temporary file: {}".format(temp_file))
+                            except Exception as e:
+                                log.warning("Failed to remove temporary file {}: {}".format(temp_file, e))
+                    
+                    # Count image files in the day's directory
                     img_count = 0
-
-
-                    # Checking frames for each hour
                     for hour in os.listdir(day_dir):
-                        # Each 'hour' is 20240923-267_00, 20240923-267_01, ...
                         hour_dir = os.path.join(day_dir, hour)
-
-                        # Skip if not directory
-                        if not os.path.isdir(hour_dir):
-                            continue
-
-                        # Count both .jpg and .png files in the hourly subdirectory(s)
-                        img_count += len(glob.glob(os.path.join(hour_dir, '*.jpg')) + \
-                                         glob.glob(os.path.join(hour_dir, '*.png')))
-
+                        if os.path.isdir(hour_dir):
+                            img_count += len(glob.glob(os.path.join(hour_dir, '*.jpg')) + \
+                                            glob.glob(os.path.join(hour_dir, '*.png')))
 
                     if img_count < 2:
-                        # Skip this directory if fewer than 2 JPG files are found
+                        log.info("Skipping {} - too few images ({})".format(day, img_count))
                         continue
 
-                    # Search for current day's timelapse in the corresponding year's directory
-                    found_files = glob.glob(os.path.join(year_dir, "{}_frames_timelapse.mp4".format(day)))
-
-                    # If not found, generate timelapse for the current day
-                    if not found_files:
-                        log.info("No frames timelapse for {} found in {}, generating new timelapse...".format(day, year_dir))
-
-                        # Make the name of the timelapse file from day directory
-                        # The day's timelapse and its frametimes.json are both stored in their corresponding year's directory
-                        frames_timelapse_path = os.path.join(year_dir, "{}_{}_frames_timelapse.mp4".format(config.stationID, day))
-                        timelapse_json_path = os.path.join(year_dir, "{}_{}_frametimes.json".format(config.stationID, day))
-
-                        # Generate the timelapse and cleanup
-                        generateTimelapseFromFrames(day_dir, frames_timelapse_path, cleanup_mode='tar')
-
-                        # Add the timelapse and its frametimes.json to the extra files
-                        extra_files.append(frames_timelapse_path)
-                        extra_files.append(timelapse_json_path)
-
+                    # Check if video exists and is valid (non-empty)
+                    video_exists = os.path.exists(frames_timelapse_path) and os.path.getsize(frames_timelapse_path) > 0
+                    
+                    if not video_exists:
+                        log.info("Generating timelapse for {} ({} frames)...".format(day, img_count))
+                        
+                        try:
+                            # Generate the timelapse and cleanup
+                            generateTimelapseFromFrames(day_dir, frames_timelapse_path, cleanup_mode=config.frame_cleanup)
+                            
+                            # Verify the timelapse was created successfully
+                            if os.path.exists(frames_timelapse_path) and os.path.getsize(frames_timelapse_path) > 0:
+                                log.info("Successfully created timelapse for {}".format(day))
+                                
+                                # Add the timelapse and its frametimes.json to the extra files
+                                extra_files.append(frames_timelapse_path)
+                                if os.path.exists(timelapse_json_path):
+                                    extra_files.append(timelapse_json_path)
+                            else:
+                                log.warning("Timelapse generation completed but file is missing or empty for {}".format(day))
+                        except Exception as e:
+                            log.warning("Generating timelapse for {} failed: {}".format(day, repr(e)))
+                            log.debug(repr(traceback.format_exception(*sys.exc_info())))
+                    else:
+                        log.debug("Timelapse already exists for {}, skipping".format(day))
 
         except Exception as e:
-            log.debug('Generating JPEG timelapse failed with message:\n' + repr(e))
+            log.error('Timelapse generation process failed with message:\n' + repr(e))
             log.debug(repr(traceback.format_exception(*sys.exc_info())))
-
 
 
     ### Add extra files to archive
