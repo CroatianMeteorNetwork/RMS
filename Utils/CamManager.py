@@ -17,67 +17,6 @@ copies or substantial portions of the Software.
 """
 
 from __future__ import print_function, unicode_literals, division, absolute_import
-import os, sys, struct, fcntl, json
-from locale import getlocale
-from subprocess import check_output
-from socket import *
-import platform
-from datetime import *
-import hashlib, base64
-
-try:
-    from dvrip import DVRIPCam
-
-except ImportError:
-    print("Exiting: dvrip module not found. This script cannot run on Python 2.")
-    sys.exit(1)
-
-try:
-    try:
-        from tkinter import *
-    except:
-        from Tkinter import *
-    from tkinter.filedialog import asksaveasfilename, askopenfilename
-    from tkinter.messagebox import showinfo, showerror
-    from tkinter.ttk import *
-
-    GUI_TK = True
-except:
-    GUI_TK = False
-
-# list of preffered interfaces - camera is supposed to be connected to a wired interface
-intfs = ['eth', 'eno', 'wlx', 'enx']
-devices = {}
-log = "search.log"
-icon = "R0lGODlhIAAgAPcAAAAAAAkFAgwKBwQBABQNBRAQDQQFERAOFA4QFBcWFSAaFCYgGAoUMhwiMSUlJCsrKyooJy8wLjUxLjkzKTY1Mzw7OzY3OEpFPwsaSRsuTRUsWD4+QCo8XQAOch0nYB05biItaj9ARjdHYiRMfEREQ0hIR0xMTEdKSVNOQ0xQT0NEUVFNUkhRXlVVVFdYWFxdXFtZVV9wXGZjXUtbb19fYFRda19gYFZhbF5wfWRkZGVna2xsa2hmaHFtamV0Ynp2aHNzc3x8fHh3coF9dYJ+eH2Fe3K1YoGBfgIgigwrmypajDtXhw9FpxFFpSdVpzlqvFNzj0FvnV9zkENnpUh8sgdcxh1Q2jt3zThi0SJy0Dl81Rhu/g50/xp9/x90/zB35TJv8DJ+/EZqzj2DvlGDrlqEuHqLpHeQp26SuhqN+yiC6imH/zSM/yqa/zeV/zik/1aIwlmP0mmayWSY122h3VWb6kyL/1yP8UGU/UiW/VWd/miW+Eqp/12k/1Co/1yq/2Gs/2qr/WKh/nGv/3er9mK3/3K0/3e4+4ODg4uLi4mHiY+Qj5WTjo+PkJSUlJycnKGem6ShnY2ZrKOjo6urrKqqpLi0prS0tLu8vMO+tb+/wJrE+bzf/sTExMfIx8zMzMjIxtrWyM/Q0NXU1NfY193d3djY1uDf4Mnj+931/OTk5Ozs7O/v8PLy8gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACH5BAEAAAAALAAAAAAgACAAAAj+AAEIHEiwoMGDCBMqXMiwocOHECNKnEixosWLGDNq3Mgx4iVMnTyJInVKlclSpD550nRpUqKGmD59EjWqlMlVOFWdIgWq0iNNoBIhSujokidPn0aNKrmqVStWqjxRumTqyI5KOxI5OpiIkiakNG2yelqK5alKLSAJgbBBB6RIjArmCKLIkV1HjyZNpTTJFKgSQoI4cGBiBxBIR6QM6TGQxooWL3LwMBwkSJEcLUq8YATDAZAdMkKh+GGpAo0cL1wInJuokSNIeqdeCgLBAoVMR2CEMkHDzAcnTCzsCAKERwsXK3wYKYLIdd6pjh4guCGJw5IpT7R8CeNlCwsikx7+JTJ+PAZlRHXxOgqBAQMTLXj0AAKkJw+eJw6CXGqJyAWNyT8QgZ5rsD2igwYEOOEGH38EEoghgcQhQgJAxISJI/8ZNoQUijiX1yM7NIBAFm3wUcghh9yBhQcCFEBDJ6V8MskKhgERxBGMMILXI7AhsoAAGSgRBRlliLHHHlZgMAAJmLByCiUnfGajFEcgotVzjkhggAYjjBHFFISgkoodSDAwAyStqDIJAELs4CYQQxChVSRTQcJCFWmUyAcghmzCCRgdXCEHEU69VJiNdDmnV0s4rNHFGmzgkUcfhgiShAd0nNHDVAc9YIEFFWxAQgkVpKAGF1yw4UYdc6AhhQohJFiwQAIRPQCHFlRAccMJFCRAgAAVJXDBBAsQEEBHDwUEADs="
-help = """
-	Usage: %s [-q] [-n] [Command];[Command];...
-	-q				No output
-	-n				No gui
-	Command			Description
-
-	help			This help
-	echo			Just echo
-	log [filename]		Set log file
-	logLevel [0..100]	Set log verbosity
-	search [brand]		Searching devices of [brand] or all
-	table			Table of devices
-	json			JSON String of devices
-	device [MAC]		JSON String of [MAC]
-	config [MAC] [IP] [MASK] [GATE] [Pasword]   - Configure searched divice
-	""" % os.path.basename(
-    sys.argv[0]
-)
-lang, charset = getlocale()
-
-#locale = {'utf-8'}
-
-#def _(msg):
-#    if lang in locale.keys():
-#        if msg in locale[lang].keys():
-#            return locale[lang][msg]
-#    return msg
-
 
 CODES = {
     100: "Success",
@@ -221,25 +160,27 @@ def GetInterfaces():
 
 def SearchXM(devices):
 
-    #intfsf = list(filter(lambda i: i[:3] in intfs, det_intfs))       
-    #print("prefferd interfaces:", intfsf)
-    #intf = intfs[0]
     server = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
-    intf = app.intf.get()
-    # hack to use eth0 interface instantly
+    try:
+        intf = app.intf.get()
+    except:
+        # no GUI
+        intf = 'eth0'
     print("Interface:", intf)
     try:
         ip = get_ip_address(intf)
     except:
         ip = ''
         print("Error during IP estimation, interface up?")
+
     print("IP:", ip)
     server.bind(('', 34569))
     print("socket bound")
     server.settimeout(3)
     server.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
     server.setsockopt(SOL_SOCKET, SO_BROADCAST, 1)
-    #server.setsockopt(SOL_SOCKET, 25, intf.encode('utf-8') + '\0'.encode('utf-8'))
+    # fix for RMS Buster distro, as UTF-8 support is missing
+    server.setsockopt(SOL_SOCKET, 25, intf.encode('utf-8') + '\0'.encode('utf-8'))
     server.setsockopt(IPPROTO_IP, IP_MULTICAST_TTL, 1)
     server.sendto(
         struct.pack("BBHIIHHI", 255, 0, 0, 0, 0, 0, 1530, 0), ("255.255.255.255", 34569)
@@ -592,26 +533,17 @@ class GUITk:
         self.gate = Entry(self.fr_config, width=15, font="6")
         self.gate.grid(row=3, column=1, pady=3, padx=5, sticky=W + N)
         self.aspc = Button(self.fr_config, text="As on PC", command=self.addr_pc)
-        #self.aspc.grid(row=4, column=1, pady=3, padx=5, sticky="ew")
         self.l4 = Label(self.fr_config, text="HTTP Port")
-        #self.l4.grid(row=5, column=0, pady=3, padx=5, sticky=W + N)
         self.http = Entry(self.fr_config, width=5, font="6")
-        #self.http.grid(row=5, column=1, pady=3, padx=5, sticky=W + N)
         self.l5 = Label(self.fr_config, text="TCP Port")
-        #self.l5.grid(row=6, column=0, pady=3, padx=5, sticky=W + N)
         self.tcp = Entry(self.fr_config, width=5, font="6")
-        #self.tcp.grid(row=6, column=1, pady=3, padx=5, sticky=W + N)
         self.l6 = Label(self.fr_config, text="Password")
         self.l6.grid(row=7, column=0, pady=3, padx=5, sticky=W + N)
         self.passw = Entry(self.fr_config, width=15, font="6")
         self.passw.grid(row=7, column=1, pady=3, padx=5, sticky=W + N)
         self.aply = Button(self.fr_config, text="Apply", command=self.setconfig)
         self.aply.grid(row=8, column=1, pady=3, padx=5, sticky="ew")
-
-        #self.l7 = Label(self.fr_tools, text=_("Vendor"))
-        #self.l7.grid(row=0, column=0, pady=3, padx=5, sticky="wns")
         self.ven = Combobox(self.fr_tools, width=10)
-        #self.ven.grid(row=0, column=1, padx=5, sticky="w")
         self.ven["values"] = ["XM",]
         self.ven.current(0)
         self.l8 = Label(self.fr_tools, text="Interface", width=10)
@@ -625,9 +557,6 @@ class GUITk:
         self.reset.grid(row=0, column=3, pady=5, padx=5, sticky=W + N)
         self.exp = Button(self.fr_tools, text="Export", command=self.export)
         self.exp.grid(row=0, column=4, pady=5, padx=5, sticky=W + N)
-        #self.fl_state = StringVar(value=_("Flash"))
-        #self.fl = Button(self.fr_tools, textvar=self.fl_state, command=self.flash)
-        #self.fl.grid(row=0, column=5, pady=5, padx=5, sticky=W + N)
 
     def popup(self, event):
         try:
@@ -748,21 +677,65 @@ class GUITk:
         ProcessCMD(["loglevel", str(10)])
 
 
-searchers = {
-    #"wans": SearchWans,
-    "xm": SearchXM,
-    #"dahua": SearchDahua,
-    #"fros": SearchFros,
-    #"beward": SearchBeward,
-}
-configure = {
-    #"wans": ConfigWans,
-    "xm": ConfigXM,
-    #"fros": ConfigFros,
-}  # ,"dahua":ConfigDahua
-#flashers = {"xm": FlashXM}  # ,"dahua":FlashDahua,"fros":FlashFros
-logLevel = 30
 if __name__ == "__main__":
+
+    import os, sys, struct, fcntl, json
+    from locale import getlocale
+    from subprocess import check_output
+    from socket import *
+    import platform
+    from datetime import *
+    import hashlib, base64
+
+    try:
+        from dvrip import DVRIPCam
+
+    except ImportError:
+        print("Exiting: dvrip module not found. This script cannot run on Python 2.")
+        sys.exit(1)
+
+    try:
+        try:
+            from tkinter import *
+        except:
+            from Tkinter import *
+        from tkinter.filedialog import asksaveasfilename, askopenfilename
+        from tkinter.messagebox import showinfo, showerror
+        from tkinter.ttk import *
+
+        GUI_TK = True
+    except:
+        GUI_TK = False
+
+    logLevel = 30	
+    searchers = { "xm": SearchXM }
+    configure = { "xm": ConfigXM }
+
+    # list of preferred interfaces - camera is supposed to be connected to a wired interface
+    intfs = ['eth', 'eno', 'wlx', 'enx']
+    devices = {}
+    log = "search.log"
+    icon = "R0lGODlhIAAgAPcAAAAAAAkFAgwKBwQBABQNBRAQDQQFERAOFA4QFBcWFSAaFCYgGAoUMhwiMSUlJCsrKyooJy8wLjUxLjkzKTY1Mzw7OzY3OEpFPwsaSRsuTRUsWD4+QCo8XQAOch0nYB05biItaj9ARjdHYiRMfEREQ0hIR0xMTEdKSVNOQ0xQT0NEUVFNUkhRXlVVVFdYWFxdXFtZVV9wXGZjXUtbb19fYFRda19gYFZhbF5wfWRkZGVna2xsa2hmaHFtamV0Ynp2aHNzc3x8fHh3coF9dYJ+eH2Fe3K1YoGBfgIgigwrmypajDtXhw9FpxFFpSdVpzlqvFNzj0FvnV9zkENnpUh8sgdcxh1Q2jt3zThi0SJy0Dl81Rhu/g50/xp9/x90/zB35TJv8DJ+/EZqzj2DvlGDrlqEuHqLpHeQp26SuhqN+yiC6imH/zSM/yqa/zeV/zik/1aIwlmP0mmayWSY122h3VWb6kyL/1yP8UGU/UiW/VWd/miW+Eqp/12k/1Co/1yq/2Gs/2qr/WKh/nGv/3er9mK3/3K0/3e4+4ODg4uLi4mHiY+Qj5WTjo+PkJSUlJycnKGem6ShnY2ZrKOjo6urrKqqpLi0prS0tLu8vMO+tb+/wJrE+bzf/sTExMfIx8zMzMjIxtrWyM/Q0NXU1NfY193d3djY1uDf4Mnj+931/OTk5Ozs7O/v8PLy8gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACH5BAEAAAAALAAAAAAgACAAAAj+AAEIHEiwoMGDCBMqXMiwocOHECNKnEixosWLGDNq3Mgx4iVMnTyJInVKlclSpD550nRpUqKGmD59EjWqlMlVOFWdIgWq0iNNoBIhSujokidPn0aNKrmqVStWqjxRumTqyI5KOxI5OpiIkiakNG2yelqK5alKLSAJgbBBB6RIjArmCKLIkV1HjyZNpTTJFKgSQoI4cGBiBxBIR6QM6TGQxooWL3LwMBwkSJEcLUq8YATDAZAdMkKh+GGpAo0cL1wInJuokSNIeqdeCgLBAoVMR2CEMkHDzAcnTCzsCAKERwsXK3wYKYLIdd6pjh4guCGJw5IpT7R8CeNlCwsikx7+JTJ+PAZlRHXxOgqBAQMTLXj0AAKkJw+eJw6CXGqJyAWNyT8QgZ5rsD2igwYEOOEGH38EEoghgcQhQgJAxISJI/8ZNoQUijiX1yM7NIBAFm3wUcghh9yBhQcCFEBDJ6V8MskKhgERxBGMMILXI7AhsoAAGSgRBRlliLHHHlZgMAAJmLByCiUnfGajFEcgotVzjkhggAYjjBHFFISgkoodSDAwAyStqDIJAELs4CYQQxChVSRTQcJCFWmUyAcghmzCCRgdXCEHEU69VJiNdDmnV0s4rNHFGmzgkUcfhgiShAd0nNHDVAc9YIEFFWxAQgkVpKAGF1yw4UYdc6AhhQohJFiwQAIRPQCHFlRAccMJFCRAgAAVJXDBBAsQEEBHDwUEADs="
+    help = """
+        Usage: %s [-q] [-n] [Command];[Command];...
+        -q				No output
+        -n				No gui
+        Command			Description
+
+        help			This help
+        echo			Just echo
+        log [filename]		Set log file
+        logLevel [0..100]	Set log verbosity
+        search [brand]		Searching devices of [brand] or all
+        table			Table of devices
+        json			JSON String of devices
+        device [MAC]		JSON String of [MAC]
+        config [MAC] [IP] [MASK] [GATE] [Pasword]   - Configure searched divice
+        """ % os.path.basename(
+        sys.argv[0]
+    )
+    lang, charset = getlocale()
+
     if len(sys.argv) > 1:
         cmds = " ".join(sys.argv[1:])
         if cmds.find("-q ") != -1:
@@ -773,8 +746,6 @@ if __name__ == "__main__":
     if GUI_TK and "-n" not in sys.argv:
         root = Tk()
         app = GUITk(root)
-        #app.interface.values = GetInterfaces()
-        #app.interface
         if (
             "--theme" in sys.argv
         ):  # ('winnative', 'clam', 'alt', 'default', 'classic', 'vista', 'xpnative')
@@ -784,6 +755,8 @@ if __name__ == "__main__":
                 style.theme_use(theme)
         root.mainloop()
         sys.exit(1)
+
+    # cmdline only, works only for eth0
     print("Type help or ? to display help(q or quit to exit)")
     while True:
         data = input("> ").split(";")

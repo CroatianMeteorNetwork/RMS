@@ -65,7 +65,7 @@ def captureDuration(lat, lon, elevation, current_time=None, max_hours=23):
         print("Searching for the next sunset...")
         for i in range(0, 6*30*24):
             
-            # Increment the time by 10 minutes
+            # Increment the time by 1 hour
             o.date = o.date.datetime() + datetime.timedelta(hours=1)
 
             try:

@@ -11,6 +11,9 @@ import argparse
 import subprocess
 import shutil
 import cv2
+import glob
+import tarfile
+from datetime import datetime
 
 from PIL import ImageFont
 
@@ -141,7 +144,7 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
         com = "cd " + dir_path + ";" \
             + software_name + nostdin + " -v quiet -r "+ str(fps) +" -y -i " + temp_img_path \
             + " -vcodec libx264 -pix_fmt yuv420p -crf " + str(crf) \
-            + " -movflags faststart -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)\" " \
+            + " -movflags faststart -threads 2 -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)\" " \
             + mp4_path
 
         print("Creating timelapse using {:s}...".format(software_name))
@@ -176,6 +179,134 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
         print("Deleted temporary directory : " + dir_tmp_path)
 		
     print("Total time:", RmsDateTime.utcnow() - t1)
+
+
+def generateTimelapseFromFrames(day_dir, video_path, fps=30, crf=27, cleanup_mode='none', compression='bz2'):
+    """
+    Generate a timelapse video from frame images and optionally cleanup the
+    source directory.
+
+    Keyword arguments:
+        day_dir: [str] Directory containing a day of frame image files. day_dir is expected to have
+                       subdirectories by the hour of day "00", "01", ..., "23"
+        video_path: [str] Output path for the generated video.
+        fps: [int] Frames per second for the output video. 30 by default.
+        crf: [int] Constant Rate Factor for video compression. 26 by default.
+        cleanup_mode: [str] Cleanup mode after video creation.
+                      Options: 'none', 'delete', 'tar'. 'none' by default.
+        compression: [str] Compression method for tar.
+                     Options: 'bz2', 'gz'. 'bz2' by default.
+    """
+
+    # Create temporary directory for timestamped images
+    # Remove any existing such directory so they don't get listed in image_files
+    raw_dir_tmp_path = os.path.join(day_dir, "temp_raw_img_dir")
+
+    if os.path.exists(raw_dir_tmp_path):
+        shutil.rmtree(raw_dir_tmp_path)
+        print("Deleted directory : " + raw_dir_tmp_path)
+
+    mkdirP(raw_dir_tmp_path)
+    print("Created directory : " + raw_dir_tmp_path)
+    print("Preparing files for the timelapse...")
+
+    # Combine all required files paths
+    image_files = [img for img in sorted(glob.glob(os.path.join(day_dir, "*/*.jpg")))] + \
+                  [img for img in sorted(glob.glob(os.path.join(day_dir, "*/*.png")))]
+
+    if len(image_files) == 0:
+        print("No images found.")
+        return
+
+    # Start timestamping overlay on images
+    for index, img_path in enumerate(image_files):
+
+        # Setup timestamp text from filename (img_path example : 'XX0001_20241123_100015_442')
+        image_name_parts = os.path.basename(img_path).split('_')
+        station_id = image_name_parts[0]
+        extracted_time = datetime.strptime(image_name_parts[1] + image_name_parts[2], "%Y%m%d%H%M%S")
+        
+        # Draw timestamp to image
+        image = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
+        text = station_id + " " + extracted_time.strftime("%Y-%m-%d %H:%M:%S") + " UTC"
+        position = (10, image.shape[0] - 10)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        cv2.putText(image, text, position, font, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
+
+        # Save the labelled image to disk
+        timestamped_img_path = os.path.join(raw_dir_tmp_path, 'temp_{:05d}.jpg'.format(index))
+        cv2.imwrite(timestamped_img_path, image, [cv2.IMWRITE_JPEG_QUALITY, 100])
+
+        # Update the new frame path in the image_file list
+        image_files[index] = timestamped_img_path
+
+
+    # Create a text file listing all the images
+    list_file_path = os.path.join(day_dir, "filelist.txt")
+    with open(list_file_path, 'w') as f:
+        for img_path in image_files:
+            f.write("file '{0}'\n".format(img_path))
+
+    if platform.system() in ['Linux', 'Darwin']:  # Darwin is macOS
+        software_name = "ffmpeg"
+    elif platform.system() == 'Windows':
+        software_name = os.path.join(os.path.dirname(__file__), "ffmpeg.exe")
+    else:
+        print("Unsupported platform.")
+        return
+
+    # Formulate the ffmpeg command
+    encode_command = [
+        software_name, "-nostdin", "-f", "concat", "-safe", "0", "-v", "quiet",
+        "-r", str(fps), "-y", "-i", list_file_path, "-c:v", "libx264",
+        "-crf", str(crf), "-threads", "2", "-g", "15", video_path
+    ]
+
+    # Execute the command
+    print("Creating timelapse using ffmpeg...")
+    subprocess.call(encode_command)
+
+    # Avoid archiving raw frame temp directory
+    if os.path.exists(raw_dir_tmp_path):
+        shutil.rmtree(raw_dir_tmp_path)
+        print("Deleted directory : " + raw_dir_tmp_path)
+
+    # Cleanup process
+    if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
+        print("Video created successfully at {0}".format(video_path))
+        # Cleanup based on the specified mode
+        if cleanup_mode == 'delete':
+            try:
+                shutil.rmtree(day_dir)
+                print("Successfully deleted the source directory: {0}".format(day_dir))
+            except Exception as e:
+                print("Error deleting the source directory: {0}".format(e))
+
+        elif cleanup_mode == 'tar':
+            try:
+                ext = '.tar.bz2' if compression == 'bz2' else '.tar.gz'
+
+                # Derive the tar file name from video_path, stripping '_timelapse.mp4'
+                base_name = os.path.basename(video_path).replace('_timelapse.mp4', '')
+
+                # Construct the full path for the tar file
+                tar_path = os.path.join(os.path.dirname(video_path), base_name + ext)
+
+                # Create the tar archive with the correct mode
+                mode = 'w:bz2' if compression == 'bz2' else 'w:gz'
+
+                with tarfile.open(tar_path, mode) as tar:
+                    tar.add(day_dir, arcname=os.path.basename(day_dir))
+
+                # Remove the original directory
+                shutil.rmtree(day_dir)
+                print("Successfully created tar archive at: {0}".format(tar_path))
+
+            except Exception as e:
+                print("Error creating tar archive: {0}".format(e))
+    else:
+        print("Video creation failed or resulted in an empty file.")
+
 
 
 if __name__ == "__main__":

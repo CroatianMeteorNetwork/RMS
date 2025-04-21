@@ -1,6 +1,8 @@
+from __future__ import print_function, division, absolute_import
+
 import os
 import sys
-
+import subprocess
 import numpy
 
 from setuptools import setup, Extension, find_packages
@@ -28,6 +30,37 @@ kht_module = Extension("kht_module",
                     extra_compile_args=["-O3", "-Wall"])
 
 
+def isPackageInstalled(package_name):
+    """Check if a package is installed."""
+    try:
+        print("Checking if {:s} is installed...".format(package_name))
+        subprocess.check_call([sys.executable, '-c', 'import {:s}'.format(package_name)])
+        print("{:s} is already installed.".format(package_name))
+        return True
+    except subprocess.CalledProcessError:
+        print("{:s} is not installed.".format(package_name))
+        return False
+
+
+def attemptInstall(package):
+    """Attempt to install a package using pip."""
+    try:
+        print("Attempting to install {:s}...".format(package))
+        subprocess.check_call([sys.executable, '-m', 'pip', 'install', package])
+        print("Successfully installed {:s}.".format(package))
+        return True
+    except subprocess.CalledProcessError:
+        print("Failed to install {:s}.".format(package))
+        return False
+
+
+
+# Check if TensorFlow is already installed
+if not isPackageInstalled('tensorflow'):
+    # Attempt to install tflite-runtime
+    if not attemptInstall('tflite-runtime'):
+        # If tflite-runtime fails, install TensorFlow
+        attemptInstall('tensorflow')
 
 # Read requirements file
 with open('requirements.txt') as f:

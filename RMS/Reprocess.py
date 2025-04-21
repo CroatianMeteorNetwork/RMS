@@ -31,7 +31,7 @@ from RMS.Routines.MaskImage import loadMask
 from Utils.CalibrationReport import generateCalibrationReport
 from Utils.Flux import prepareFluxFiles
 from Utils.FOVKML import fovKML
-from Utils.GenerateTimelapse import generateTimelapse
+from Utils.GenerateTimelapse import generateTimelapse, generateTimelapseFromFrames
 from Utils.MakeFlat import makeFlat
 from Utils.PlotFieldsums import plotFieldsums
 from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
@@ -41,6 +41,7 @@ from Utils.TimestampRMSVideos import timestampRMSVideos
 from RMS.Formats.ObservationSummary import addObsParam, getObsDBConn, nightSummaryData
 from RMS.Formats.ObservationSummary import serialize, startObservationSummaryReport, finalizeObservationSummary
 from Utils.AuditConfig import compareConfigs
+from RMS.Misc import RmsDateTime
 
 
 # Get the logger from the main module
@@ -111,6 +112,26 @@ def getPlatepar(config, night_data_dir):
                 platepar.lat = config.latitude
                 platepar.lon = config.longitude
                 platepar.elev = config.elevation
+
+        
+        # Make sure the config and the platepar FOV are within a factor of two
+        if (platepar.fov_h is not None) and (platepar.fov_v is not None):
+            
+            # Calculate the diagonal FOV for both the platepar and the config
+            pp_fov_diag = (platepar.fov_h**2 + platepar.fov_v**2)**0.5
+            config_fov_diag = (config.fov_w**2 + config.fov_h**2)**0.5
+
+            # Compute the ratio of the FOVs
+            fov_ratio = pp_fov_diag/config_fov_diag
+
+            # If the ratio is smaller than 0.5 or greater than 2, don't use this platepar
+            if (fov_ratio < 0.5) or (fov_ratio > 2):
+                    
+                # If they don't match, don't use this platepar
+                log.info("The FOV in the platepar is not within a factor of 2 of the FOV in the config file! Not using the platepar...")
+
+                platepar = None
+                platepar_fmt = None
 
 
     # Make sure the image resolution matches
@@ -354,14 +375,14 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
     # If videos were saved, rename them with the timestamp of the first frame
     # This command requires the FS archive to be present
-    if (config.raw_video_dir is not None) or config.raw_video_dir_night:
+    # if config.raw_video_save:
 
-        try:
-            timestampRMSVideos(night_data_dir, rename=True)
+    #     try:
+    #         timestampRMSVideos(config.video_dir, rename=True)
 
-        except Exception as e:
-            log.debug('Renaming videos failed with the message:\n' + repr(e))
-            log.debug(repr(traceback.format_exception(*sys.exc_info())))
+    #     except Exception as e:
+    #         log.debug('Renaming videos failed with the message:\n' + repr(e))
+    #         log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
 
     # List for any extra files which will be copied to the night archive directory. Full paths have to be 
@@ -463,6 +484,74 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     except Exception as e:
         log.debug('Generating config audit failed with message:\n' + repr(e))
         log.debug(repr(traceback.format_exception(*sys.exc_info())))
+
+
+    # Generate a timelapse from frames
+    if config.timelapse_generate_from_frames:
+
+        log.info('Generating timelapse from saved frames...')
+        try:
+            frame_dir = os.path.join(config.data_dir, config.frame_dir)
+
+            # Generate timelapse for each day of the year, if not present
+            for year in os.listdir(frame_dir):
+                # Each 'year' is 2024, 2025, ...
+                year_dir = os.path.join(frame_dir, year)
+
+
+                for day in os.listdir(year_dir):
+                    # Each 'day' is 20240923-267, 20240924-268, ...
+                    day_dir = os.path.join(year_dir, day)
+
+                    # Skip if not directory or if inside today's directory
+                    if (not os.path.isdir(day_dir)) or (day == RmsDateTime.utcnow().strftime("%Y%m%d-%j")):
+                        continue
+                    
+                    img_count = 0
+
+
+                    # Checking frames for each hour
+                    for hour in os.listdir(day_dir):
+                        # Each 'hour' is 20240923-267_00, 20240923-267_01, ...
+                        hour_dir = os.path.join(day_dir, hour)
+
+                        # Skip if not directory
+                        if not os.path.isdir(hour_dir):
+                            continue
+
+                        # Count both .jpg and .png files in the hourly subdirectory(s)
+                        img_count += len(glob.glob(os.path.join(hour_dir, '*.jpg')) + \
+                                         glob.glob(os.path.join(hour_dir, '*.png')))
+
+
+                    if img_count < 2:
+                        # Skip this directory if fewer than 2 JPG files are found
+                        continue
+
+                    # Search for current day's timelapse in the corresponding year's directory
+                    found_files = glob.glob(os.path.join(year_dir, "{}_frames_timelapse.mp4".format(day)))
+
+                    # If not found, generate timelapse for the current day
+                    if not found_files:
+                        log.info("No frames timelapse for {} found in {}, generating new timelapse...".format(day, year_dir))
+
+                        # Make the name of the timelapse file from day directory
+                        # The day's timelapse and its frametimes.json are both stored in their corresponding year's directory
+                        frames_timelapse_path = os.path.join(year_dir, "{}_{}_frames_timelapse.mp4".format(config.stationID, day))
+                        timelapse_json_path = os.path.join(year_dir, "{}_{}_frametimes.json".format(config.stationID, day))
+
+                        # Generate the timelapse and cleanup
+                        generateTimelapseFromFrames(day_dir, frames_timelapse_path, cleanup_mode='tar')
+
+                        # Add the timelapse and its frametimes.json to the extra files
+                        extra_files.append(frames_timelapse_path)
+                        extra_files.append(timelapse_json_path)
+
+
+        except Exception as e:
+            log.debug('Generating JPEG timelapse failed with message:\n' + repr(e))
+            log.debug(repr(traceback.format_exception(*sys.exc_info())))
+
 
 
     ### Add extra files to archive

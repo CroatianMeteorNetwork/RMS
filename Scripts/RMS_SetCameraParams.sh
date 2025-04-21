@@ -27,6 +27,7 @@ python -m Utils.CameraControl CameraTime set
 python -m Utils.CameraControl CloudConnection off
 
 # set the Video Encoder parameters
+python -m Utils.CameraControl SetParam General VideoFormat PAL
 python -m Utils.CameraControl SetParam Encode Video Compression H.264
 python -m Utils.CameraControl SetParam Encode Video Resolution 720P
 python -m Utils.CameraControl SetParam Encode Video BitRateControl VBR
@@ -37,6 +38,8 @@ python -m Utils.CameraControl SetParam Encode VideoEnable 1
 python -m Utils.CameraControl SetParam Encode SecondStream 0
 
 # camera parameters
+python -m Utils.CameraControl SetParam Camera ClearFog enable 0
+python -m Utils.CameraControl SetParam Camera ClearFog level 50
 python -m Utils.CameraControl SetParam Camera Style type1
 python -m Utils.CameraControl SetParam Camera AeSensitivity 1
 python -m Utils.CameraControl SetParam Camera ApertureMode 0
@@ -51,6 +54,8 @@ python -m Utils.CameraControl SetParam Camera ExposureParam Level 0
 python -m Utils.CameraControl SetParam Camera ExposureParam MostTime 40000
 python -m Utils.CameraControl SetParam Camera GainParam AutoGain 1
 python -m Utils.CameraControl SetParam Camera GainParam Gain 60
+python -m Utils.CameraControl SetParam Camera BroadTrends AutoGain 0
+python -m Utils.CameraControl SetParam Camera BroadTrends Gain 50
 python -m Utils.CameraControl SetParam Camera IRCUTMode 0
 python -m Utils.CameraControl SetParam Camera IrcutSwap 0
 python -m Utils.CameraControl SetParam Camera Night_nfLevel 0

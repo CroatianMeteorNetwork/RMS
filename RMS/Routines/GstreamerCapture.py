@@ -219,13 +219,26 @@ class GstVideoFile():
         # Initialize GStreamer
         Gst.init(None)
 
-        pipeline_str = (
-            "filesrc location={} ! matroskademux ! h264parse ! {} ! "
-            "videoconvert ! video/x-raw,format={} ! "
-            "queue leaky=downstream max-size-buffers=100 ! "
-            "appsink emit-signals=True max-buffers=100 drop=False sync=0 name=appsink"
-            "".format(self.file_path, self.decoder, self.video_format)
-        )
+        # Unless nvdec is specified, use decodebin
+        if self.decoder == 'nvh264dec':
+
+            pipeline_str = (
+                "filesrc location={} ! matroskademux ! h264parse ! {} ! "
+                "videoconvert ! video/x-raw,format={} ! "
+                "queue leaky=downstream max-size-buffers=100 ! "
+                "appsink emit-signals=True max-buffers=100 drop=False sync=0 name=appsink"
+                "".format(self.file_path, self.decoder, self.video_format)
+            )
+
+        else:
+
+            pipeline_str = (
+                "filesrc location={} ! decodebin name=dec ! "
+                "queue leaky=downstream max-size-buffers=100 ! "
+                "videoconvert ! video/x-raw,format={} ! "
+                "appsink emit-signals=True max-buffers=100 drop=False sync=0 name=appsink"
+            "".format(self.file_path, self.video_format)
+            )
 
         self.pipeline = Gst.parse_launch(pipeline_str)
 

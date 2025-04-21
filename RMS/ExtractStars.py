@@ -91,12 +91,12 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
         img_median = np.median(img)
 
     # Apply a mean filter to the image to reduce noise
-    img = ndimage.filters.convolve(img, weights=np.full((2, 2), 1.0/4))
+    img_convolved = ndimage.filters.convolve(img, weights=np.full((2, 2), 1.0/4))
 
     # Locate local maxima on the image
-    img_max = filters.maximum_filter(img, neighborhood_size)
-    maxima = (img == img_max)
-    img_min = filters.minimum_filter(img, neighborhood_size)
+    img_max = filters.maximum_filter(img_convolved, neighborhood_size)
+    maxima = (img_convolved == img_max)
+    img_min = filters.minimum_filter(img_convolved, neighborhood_size)
     diff = ((img_max - img_min) > intensity_threshold)
     maxima[diff == 0] = 0
 
@@ -125,7 +125,7 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
         return False
 
     # Find centres of mass of each labeled objects
-    xy = np.array(ndimage.center_of_mass(img, labeled, range(1, num_objects + 1)))
+    xy = np.array(ndimage.center_of_mass(img_convolved, labeled, range(1, num_objects + 1)))
 
     # Remove all detection on the border
     #xy = xy[np.where((xy[:, 1] > border) & (xy[:,1] < ff.ncols - border) & (xy[:,0] > border) & (xy[:,0] < ff.nrows - border))]
@@ -133,10 +133,14 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
     # Unpack star coordinates
     y_init, x_init = np.hsplit(xy, 2)
 
+    # Compensate for half-pixel shift caused by the 2x2 mean filter
+    x_init = [x + 0.5 for x in x_init]
+    y_init = [y + 0.5 for y in y_init]
+
     # # Plot stars before the PSF fit
     # plotStars(ff, x, y)
 
-    # Fit a PSF to each star
+    # Fit a PSF to each star on the raw image
     (
         x_arr, y_arr, amplitude, intensity, 
         sigma_y_fitted, sigma_x_fitted
@@ -158,6 +162,8 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
     sigma_y_fitted = np.array(sigma_y_fitted)
     sigma_fitted = np.sqrt(sigma_x_fitted**2 + sigma_y_fitted**2)
     fwhm = 2.355*sigma_fitted
+
+    
 
     return x_arr, y_arr, amplitude, intensity, fwhm
 
@@ -621,9 +627,12 @@ def extractStarsAndSave(config, ff_dir):
         extraction_list.append(ff_name)
 
 
+    # The number of workers should be the minimum of cores and the number of tasks, so we don't have too many
+    # workers waiting for the tasks to finish
+    num_cores = min(config.num_cores, len(extraction_list))
 
     # Run the QueuedPool for detection
-    workpool = QueuedPool(extractStarsFF, cores=config.num_cores, backup_dir=ff_dir, input_queue_maxsize=None)
+    workpool = QueuedPool(extractStarsFF, cores=num_cores, backup_dir=ff_dir, input_queue_maxsize=None)
 
 
     # Add jobs for the pool

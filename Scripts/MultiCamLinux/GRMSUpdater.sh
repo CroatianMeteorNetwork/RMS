@@ -16,6 +16,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+# Version 1.9 changed parsing of the current username and display number to handle various display managers
+#
+# Version 1.8 changed parsing of the current username and display number to handle username ending in a digit
+#
 # Version 1.7 changed parsing of the current username and display number to be agnostic to either the display manager or the session manager
 #
 # Version 1.6 bug fixes -
@@ -43,7 +47,7 @@
 # Default behaviour if called with no arguments, - capture all the running RMS processes, kill them, update RMS, then start 
 # all that are configured within directory ~/source/Stations -
 
-UserDisp=($(w -h | awk '/\ :[0-9]/ {print $1,$3}')) # grab the RMS username and current display number
+UserDisp=($(who | awk '$NF ~ /^\(:[0-9]+\)$/ {gsub(/[()]/,"",$NF); print $1,$NF}')) # grab the RMS username and current display number
 RunList=( $( ps -ef|grep -E -w -o '\/bin\/bash .*\/source\/RMS\/Scripts\/MultiCamLinux\/StartCapture.sh\ [[:alnum:]]{6}'| awk '{print $NF}' | sort -u )) # create an array of the running station names
 
 
