@@ -200,6 +200,7 @@ def recalibrateFF(
 
     # Go through all radii and match the stars
     min_match_radius = None
+    good_matched_stars = None
     for match_radius in radius_list:
 
         # Skip radiuses that are too small if the radius filter is on
@@ -309,6 +310,9 @@ def recalibrateFF(
             # Keep track of the minimum match radius
             min_match_radius = match_radius
 
+            # Store the matched stars for later use
+            good_matched_stars = matched_stars
+
             log.info('Astrometry fit successful with radius {:.1f} px!'.format(match_radius))
 
     # Choose which radius will be chosen for the goodness of fit check
@@ -322,12 +326,12 @@ def recalibrateFF(
     if (
         CheckFit.checkFitGoodness(config, working_platepar, catalog_stars, star_dict_ff, goodness_check_radius)
         or force_platepar_save
-    ):
+    ) and (good_matched_stars is not None):
 
         ### PHOTOMETRY FIT ###
 
         # Get a list of matched image and catalog stars
-        image_stars, matched_catalog_stars, _ = matched_stars[jd]
+        image_stars, matched_catalog_stars, _ = good_matched_stars[jd]
         star_intensities = image_stars[:, 2]
         ra_catalog, dec_catalog, catalog_mags = matched_catalog_stars.T
 
