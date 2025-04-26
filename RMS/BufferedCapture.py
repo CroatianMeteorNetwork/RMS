@@ -911,7 +911,7 @@ class BufferedCapture(Process):
             # queue2 smooths out the writes, but doesn't wait until the buffers fill up for writing
             storage_branch = (
                 "t. ! queue2 max-size-buffers=150 max-size-bytes=2097152 max-size-time=5000000000 ! "
-                "splitmuxsink name=splitmuxsink0 message-forward=false max-size-time={:d} muxer-factory=matroskamux"
+                "splitmuxsink name=splitmuxsink0 max-size-time={:d} muxer-factory=matroskamux"
                 ).format(int(segment_duration_sec*1e9))
 
         # Otherwise, skip saving the raw stream to disk
