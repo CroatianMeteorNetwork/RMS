@@ -1299,18 +1299,16 @@ class BufferedCapture(Process):
 
     def releaseRawArrays(self):
         """Clean up raw frame arrays and saver."""
-        if self.raw_frame_saver is not None:
-            self.raw_frame_saver.stop()
-            
-        # Wait (with timeout) for the child to confirm it is done
-        self.raw_frame_saver.join(5)
-
-        if self.raw_frame_saver.is_alive():
-            log.warning("RawFrameSaver still busy. Terminating")
-            self.raw_frame_saver.terminate()
-            self.raw_frame_saver.join()
-
-        self.raw_frame_saver = None
+        if self.raw_frame_saver:
+            try:
+                self.raw_frame_saver.stop()
+                self.raw_frame_saver.join(5)
+                if self.raw_frame_saver.is_alive():
+                    log.warning("RawFrameSaver still busy. Terminating")
+                    self.raw_frame_saver.terminate()
+                    self.raw_frame_saver.join()
+            finally:
+                self.raw_frame_saver = None
 
         # Clean up array resources
         self.current_raw_frame_shape = None
