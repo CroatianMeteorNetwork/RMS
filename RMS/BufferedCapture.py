@@ -848,6 +848,37 @@ class BufferedCapture(Process):
             return False, None
 
 
+    def _onBusMessage(self, bus, message):
+        """
+        Drain GStreamer's bus so its internal queue never overflows.
+
+        Parameters
+        ----------
+        bus : Gst.Bus
+            The bus this callback is attached to (unused, but part of the signature).
+        message : Gst.Message
+            A single message pulled off the bus.
+
+        Returns
+        -------
+        bool
+            Always True to keep the signal watch active.
+        """
+        mtype = message.type
+
+        # We care about errors and warnings; the rest are just discarded to
+        # relieve back-pressure.
+        if mtype == Gst.MessageType.ERROR:
+            err, dbg = message.parse_error()
+            log.error("GST ERROR from %s: %s", message.src.get_name(), err)
+
+        elif mtype == Gst.MessageType.WARNING:
+            warn, dbg = message.parse_warning()
+            log.warning("GST WARN  from %s: %s", message.src.get_name(), warn)
+
+        # Returning True tells GLib to keep this callback alive.
+        return True
+
 
     def createGstreamDevice(self, video_format, gst_decoder='decodebin', 
                             video_file_dir=None, segment_duration_sec=30, max_retries=5, retry_interval=1):
@@ -939,6 +970,16 @@ class BufferedCapture(Process):
                 self.pipeline = Gst.parse_launch(pipeline_str)
                 if not self.pipeline:
                     raise ValueError("Could not create pipeline")
+                
+                # Prevent “queue overflows with 1024 messages”:
+                #   • Every element can push status / QoS / segment-done messages onto the
+                #     pipeline’s bus.  splitmuxsink is especially chatty.
+                #   • If nobody reads the bus, GStreamer buffers up to 1024 messages and then
+                #     warns & starts dropping them.
+                #   • We drain the bus in the background so it never fills.
+                bus = self.pipeline.get_bus()
+                bus.add_signal_watch()                 # turn the bus into a GLib signal source
+                bus.connect("message", self._onBusMessage)
                 
                 # If raw video saving is enabled, Connect the "format-location" signal to the 
                 # moveSegment function
