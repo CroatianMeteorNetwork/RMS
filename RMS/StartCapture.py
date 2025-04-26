@@ -48,7 +48,7 @@ from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
 from RMS.Formats.FFfile import validFFName
 from RMS.Misc import mkdirP, RmsDateTime
 from RMS.QueuedPool import QueuedPool
-from RMS.Reprocess import getPlatepar, processNight
+from RMS.Reprocess import getPlatepar, processNight, processFrames
 from RMS.RunExternalScript import runExternalScript
 from RMS.UploadManager import UploadManager
 from RMS.EventMonitor import EventMonitor
@@ -649,52 +649,84 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
             # Put the archive up for upload
             if upload_manager is not None:
-                log.info('Adding file to upload list: ' + archive_name)
+                log.info("Adding file to upload list: %s", archive_name)
                 upload_manager.addFiles([archive_name])
-                log.info('File added...')
+                log.info("File added.")
 
-                # Delay the upload, if the delay is given
-                upload_manager.delayNextUpload(delay=60*config.upload_delay)
+                # optional delay (minutes in .config, converted to seconds)
+                upload_manager.delayNextUpload(delay=60 * config.upload_delay)
 
+                # ---- non‑blocking upload thread --------------------------------
+                def _upload_worker(mgr):
+                    try:
+                        # honour any delay the manager has set
+                        with mgr.next_runtime_lock:
+                            next_run = mgr.next_runtime
+
+                        if next_run is not None:
+                            wait_s = max(0.0, (next_run - RmsDateTime.utcnow()).total_seconds())
+                            if wait_s:
+                                log.info("Background upload sleeping %.1f s ...", wait_s)
+                                time.sleep(wait_s)
+
+                        log.info("Background upload starting …")
+                        mgr.uploadData()
+                        log.info("Background upload finished.")
+                    except Exception:
+                        log.exception("Background upload failed")
+
+                threading.Thread(target=_upload_worker,
+                                args=(upload_manager,),
+                                daemon=True).start()
 
             # Delete detector backup files
             if detector is not None:
                 detector.deleteBackupFiles()
 
 
-            # !!! Currently under testing
-            # # If the capture was run for a limited time, run the upload right away
-            # if fixed_duration and (upload_manager is not None):
+            # ------------------------------------------------------------------------
+            # frames → timelapse(s) → archive(s) → upload
+            # ------------------------------------------------------------------------
+            if config.timelapse_generate_from_frames:
+                try:
+                    log.info("Running processFrames() ...")
+                    archive_paths = processFrames(config)          # may return None
+                    log.info("processFrames() done.")
 
-            if upload_manager is not None: # temporary code, will make the script upload after each capture
+                except Exception:
+                    log.exception("processFrames() threw an exception")
+                    archive_paths = None
 
-                # Check if the upload delay is set
-                with upload_manager.next_runtime_lock:
+                # ── enqueue & upload ─────────────────────────────────────────────────
+                if archive_paths and upload_manager is not None:
+                    try:
+                        for arc_path in archive_paths:
+                            if not arc_path or not os.path.isfile(arc_path):
+                                log.warning("Archive missing -- skipped: %s", arc_path)
+                                continue
 
-                    # Check if the upload delay is up
-                    if upload_manager.next_runtime is not None:
+                            log.info("Adding file to upload list: %s", arc_path)
+                            upload_manager.addFiles([arc_path])
 
-                        # Wait for the upload delay to pass
-                        sleep_time = None
-                        while (RmsDateTime.utcnow() - upload_manager.next_runtime).total_seconds() < 0:
-                            
-                            wait_time = (RmsDateTime.utcnow() - upload_manager.next_runtime).total_seconds()
-                            log.info("Waiting for upload delay to pass: {:.1f} seconds...".format(abs(wait_time)))
+                        # optional post-enqueue delay (minutes → seconds)
+                        upload_manager.delayNextUpload(delay=60 * config.upload_delay)
 
-                            # Sleep for a short interval between 1 and 30 seconds
-                            if sleep_time is None:
+                        # honour any next-runtime gate the manager has set
+                        with upload_manager.next_runtime_lock:
+                            next_run = upload_manager.next_runtime
 
-                                sleep_time = wait_time/10
+                        if next_run:
+                            wait_s = max(0.0, (next_run - RmsDateTime.utcnow()).total_seconds())
+                            if wait_s:
+                                log.info("Upload sleeping %.1f s ...", wait_s)
+                                time.sleep(wait_s)
 
-                                if sleep_time < 1:
-                                    sleep_time = 1
-                                elif sleep_time > 30:
-                                    sleep_time = 30
+                        log.info("Frames upload starting ...")
+                        upload_manager.uploadData()
+                        log.info("Frames upload finished.")
 
-                            time.sleep(sleep_time)
-
-                log.info('Uploading data before exiting...')
-                upload_manager.uploadData()
+                    except Exception:
+                        log.exception("Frames upload failed")
 
 
             # Run the external script

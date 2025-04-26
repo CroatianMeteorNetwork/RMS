@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 import time
+from datetime import timedelta
 import ephem
 import Utils.CameraControl as cc
 from RMS.Logger import getLogger
@@ -146,7 +147,7 @@ def lastNightToDaySwitch(config, whenUtc=None):
 
     Returns
     -------
-    datetime : timestamp of the last switch, or None in polar-day / polar-night cases
+    datetime : timestamp of the last switch, or the fallback midnight.
     """
 
     if whenUtc is None:
@@ -162,8 +163,13 @@ def lastNightToDaySwitch(config, whenUtc=None):
     sun = ephem.Sun()
     try:
         return obs.previous_rising(sun).datetime()
+    
     except (ephem.AlwaysUpError, ephem.NeverUpError):
-        return None
+        # Fallback: last midnight before whenUtc
+        midnight = whenUtc.replace(hour=0, minute=0, second=0, microsecond=0)
+        if midnight >= whenUtc:
+            midnight -= timedelta(days=1)
+        return midnight
 
 
     ### For testing switching only ###

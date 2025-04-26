@@ -12,7 +12,7 @@ import random
 import glob
 import shutil
 
-from RMS.ArchiveDetections import archiveDetections, archiveFieldsums
+from RMS.ArchiveDetections import archiveDetections, archiveFieldsums, archiveFrameTimelapse
 # from RMS.Astrometry.ApplyAstrometry import applyAstrometryFTPdetectinfo
 from RMS.Astrometry.ApplyRecalibrate import recalibrateIndividualFFsAndApplyAstrometry
 from RMS.Astrometry.CheckFit import autoCheckFit
@@ -32,7 +32,8 @@ from RMS.Routines.MaskImage import loadMask
 from Utils.CalibrationReport import generateCalibrationReport
 from Utils.Flux import prepareFluxFiles
 from Utils.FOVKML import fovKML
-from Utils.GenerateTimelapse import generateTimelapse, generateTimelapseFromFrames
+from Utils.GenerateTimelapse import generateTimelapse, generateTimelapseFromFrameBlocks, listImageBlocksBefore
+from RMS.CaptureModeSwitcher import lastNightToDaySwitch
 from Utils.MakeFlat import makeFlat
 from Utils.PlotFieldsums import plotFieldsums
 from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
@@ -784,6 +785,96 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     return night_archive_dir, archive_name, detector
 
 
+def cleanupTempArtifacts(config):
+    """Remove transient artifacts left by interrupted timelapse builds.
+
+    The routine walks the whole *frame_dir* tree and removes:
+        • any directory named ``temp_raw_img_dir``
+        • any ``filelist.txt`` file
+        • any file whose name contains the substring ``_temp``
+
+    Arguments:
+        config: [Config obj]
+    """
+    # Get the path to the frame directory
+    frameDir = os.path.join(config.data_dir, config.frame_dir)
+
+    # Walk the whole directory tree once.
+    for root, dirs, files in os.walk(frameDir):
+
+        # --- Remove temp_raw_img_dir directories ---------------------------
+        if "temp_raw_img_dir" in dirs:
+            tmpPath = os.path.join(root, "temp_raw_img_dir")
+            try:
+                shutil.rmtree(tmpPath)
+                log.info("Removed temporary directory: %s", tmpPath)
+            except Exception as exc:
+                log.warning("Failed to remove %s: %s", tmpPath, exc)
+
+        # --- Remove filelist.txt files ------------------------------------
+        if "filelist.txt" in files:
+            listPath = os.path.join(root, "filelist.txt")
+            try:
+                os.remove(listPath)
+                log.info("Removed temporary file list: %s", listPath)
+            except Exception as exc:
+                log.warning("Failed to remove %s: %s", listPath, exc)
+
+        # --- Remove *_temp artifacts --------------------------------------
+        for fname in files:
+            if "_temp" in fname:
+                tmpFile = os.path.join(root, fname)
+                try:
+                    os.remove(tmpFile)
+                    log.info("Removed temporary file: %s", tmpFile)
+                except Exception as exc:
+                    log.warning("Failed to remove %s: %s", tmpFile, exc)
+
+
+def processFrames(config):
+    """
+    Convert saved frame files into timelapse videos and archive them.
+
+    Returns
+    -------
+    list[str] | None
+        Paths to the .tar archives produced, or None if timelapse generation
+        failed before archiving.
+    """
+
+    # ── 1. house-keeping ──────────────────────────────────────────────────
+    cleanupTempArtifacts(config)
+
+    frame_dir = os.path.join(config.data_dir, config.frame_dir)
+
+    # ── 2. build timelapses ───────────────────────────────────────────────
+    log.info("Generating timelapse(s) from saved frames…")
+
+    try:
+        cutoff_utc = lastNightToDaySwitch(config)
+        image_blocks = listImageBlocksBefore(cutoff_utc, frame_dir)
+
+        timelapse_results = generateTimelapseFromFrameBlocks(
+            image_blocks,
+            frame_dir,
+            cleanup_mode=config.frame_cleanup
+        )
+
+    except Exception as exc:
+        log.error("Timelapse generation failed: %s", exc, exc_info=True)
+        return None                                          # bail early
+
+    # ── 3. archive ────────────────────────────────────────────────────────
+    log.info("Archiving frame timelapses in %s", frame_dir)
+
+    archive_paths = archiveFrameTimelapse(
+        frame_dir,
+        timelapse_results,
+        config,
+        remove_source=(config.frame_cleanup == "delete")
+    )
+
+    return archive_paths
 
 
 if __name__ == "__main__":

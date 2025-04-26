@@ -4,6 +4,7 @@ from __future__ import print_function, division, absolute_import
 import platform
 import os
 import sys
+import traceback
 import shutil
 import errno
 import subprocess
@@ -773,93 +774,125 @@ def obfuscatePassword(url):
     except Exception as e:
         log.error("Error in obfuscate_password: %s", str(e))
         return "[URL_REDACTED_DUE_TO_ERROR]"
-    
 
-def tarWithProgress(source_dir, tar_path, compression='bz2', remove_source=False):
+
+def _portableCommonpath(paths):
+    """
+    Lightweight back-port of os.path.commonpath for 2.7 / early 3.x.
+
+    * On 3.5+ we just defer to the real thing.
+    * On 2.7/3.4 we mimic its behaviour enough for archive paths.
+    """
+    try:
+        return os.path.commonpath(paths)          # Py 3.5+
+    
+    except AttributeError:
+        if not paths:
+            return ''
+        
+        split_paths = [os.path.normpath(p).split(os.sep) for p in paths]
+        prefix_parts = os.path.commonprefix(split_paths)
+
+        if not prefix_parts:
+            return os.path.dirname(paths[0])      # diff drives (Windows)
+        
+        prefix = os.sep.join(prefix_parts)
+
+        if not os.path.isdir(prefix):
+            prefix = os.path.dirname(prefix)
+
+        return prefix or os.path.dirname(paths[0])
+
+
+def tarWithProgress(source_dir, tar_path, compression='bz2', remove_source=False, file_list=None):
     """Create a tar archive with progress reporting based on file count, verify it, and optionally remove source.
     
     Args:
-        source_dir: Directory to archive
-        tar_path: Path where to save the tar file
-        compression: Compression type ('bz2' or 'gz')
-        remove_source: Whether to remove the source directory after successful archiving
+        source_dir : [str or None] Directory whose contents will be archived. Ignored whe *file_list* is supplied.
+        tar_path : [str] Full path to the output archive.
+        compression : [{'bz2', 'gz'}, optional] Compression algorithm. Default is **'bz2'**.
+        remove_source : [bool, optional]
+            If *True* and the archive verifies successfully, delete
+            *source_dir*. (Ignored when *file_list* mode is used.)
+        file_list : [list(str) or None, optional]
+            Explicit list of file paths to archive. When given, the function
+            skips the directory walk and stores each file relative to the
+            deepest common parent directory.
         
     Returns:
         bool: True if archive was created and verified successfully, False otherwise
     """
     try:
-        # Count total files to be archived
-        total_files = 0
-        for root, dirs, files in os.walk(source_dir):
-            total_files += len(files)
-        
-        log.info("Found {} files to archive".format(total_files))
-        
-        # Open the archive file
+        # 1. Build list of files ------------------------------------------------
+        if file_list is not None:
+            files_to_archive = list(file_list)
+            if not files_to_archive:
+                log.error("No files given in file_list – nothing to archive")
+                return False
+            base_dir = _portableCommonpath(files_to_archive)       # ★
+        else:
+            files_to_archive = [os.path.join(r, f)
+                                for r, _, fs in os.walk(source_dir)
+                                for f in fs]
+            base_dir = source_dir
+
+        total_files = len(files_to_archive)
+        if not total_files:
+            log.info("Nothing to archive")
+            return False
+
+        log.info("Found {:d} files to archive".format(total_files))
+                
+        # 2. Create tarball -----------------------------------------------------
         mode = 'w:bz2' if compression == 'bz2' else 'w:gz'
         with tarfile.open(tar_path, mode) as tar:
-            # Initialize progress tracking
-            processed_files = 0
-            last_percent = 0
-            
-            # Loop through files and add them to the archive
-            for root, dirs, files in os.walk(source_dir):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    arcname = os.path.join(os.path.basename(source_dir), os.path.relpath(file_path, source_dir))
-                    
-                    # Add the file to the archive
-                    tar.add(file_path, arcname=arcname)
-                    
-                    # Update and report progress
-                    processed_files += 1
-                    percent = int((processed_files / total_files) * 100)
-                    
-                    # Report progress every 5%
-                    if percent >= last_percent + 5:
-                        last_percent = (percent // 5) * 5
-                        log.info("Archiving progress: {}% ({}/{} files)".format(last_percent, processed_files, total_files))
-                        print("Archiving progress: {}% ({}/{} files)".format(last_percent, processed_files, total_files))
+            processed = 0
+            last_pct = 0
+            for fpath in files_to_archive:
+                rel = os.path.relpath(fpath, base_dir)
+                
+                # Check if the file is outside the base directory
+                if rel.startswith(os.pardir):
+                    raise ValueError("{} is outside {}".format(fpath, base_dir))
+                
+                arcname = os.path.join(os.path.basename(base_dir), rel)
+                tar.add(fpath, arcname=arcname)
+
+                processed += 1
+                pct = int(processed * 100.0/total_files)
+                if pct >= last_pct + 5:
+                    last_pct = (pct//5)*5
+                    print("Archiving progress: {}% ({}/{})".format(
+                          last_pct, processed, total_files))
         
-        # Verify the archive
-        log.info("Verifying archive integrity...")
-        print("Verifying archive integrity...")
-        
-        # Check file exists and has non-zero size
-        if not os.path.exists(tar_path) or os.path.getsize(tar_path) == 0:
-            log.error("Archive verification failed: File is empty or missing")
+        # 3. Verify -------------------------------------------------------------
+        log.info("Verifying archive integrity…")
+        read_mode = 'r:bz2' if compression == 'bz2' else 'r:gz'
+
+        if not (os.path.exists(tar_path) and os.path.getsize(tar_path) > 0):
+            log.error("Archive verification failed: file is empty or missing")
             return False
-            
-        # Try to open and list contents
-        try:
-            # Read mode depends on compression
-            read_mode = 'r:bz2' if compression == 'bz2' else 'r:gz'
-            with tarfile.open(tar_path, read_mode) as test_tar:
-                # Count files in archive
-                archive_files = len(test_tar.getnames())
-                
-                # We expect at least (total_files) files in the archive
-                # (The count may not match exactly due to directory entries)
-                if archive_files < total_files:
-                    log.error("Archive verification failed: Expected at least {} files, found {}".format(
-                        total_files, archive_files))
-                    return False
-                    
-                log.info("Archive verified successfully: contains {} files".format(archive_files))
-                print("Archive verified successfully: contains {} files".format(archive_files))
-                
-                # Remove source directory if requested and verification passed
-                if remove_source:
-                    log.info("Removing source directory {}...".format(source_dir))
-                    shutil.rmtree(source_dir)
-                    log.info("Source directory removed successfully")
-                
-                return True
-                
-        except Exception as e:
-            log.error("Archive verification failed: {}".format(e))
-            return False
-            
+
+        with tarfile.open(tar_path, read_mode) as tst:
+            archive_files = len(tst.getnames())
+            if archive_files < total_files:
+                log.error("Archive verification failed: wanted ≥{} files, found {}".format(
+                          total_files, archive_files))
+                return False
+            log.info("Archive verified successfully: contains {} files".format(
+                     archive_files))
+            print("Archive verified successfully: contains {} files".format(
+                  archive_files))
+
+        # 4. Optional cleanup ---------------------------------------------------
+        if remove_source and file_list is None and source_dir:
+            log.info("Removing source directory {} …".format(source_dir))
+            shutil.rmtree(source_dir)
+            log.info("Source directory removed")
+
+        return True
+
     except Exception as e:
         log.error("Error creating archive: {}".format(e))
+        log.error("".join(traceback.format_exception(*sys.exc_info())))
         return False
