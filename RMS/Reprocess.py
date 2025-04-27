@@ -756,7 +756,6 @@ def processFrames(config):
     archive_paths = archiveFrameTimelapse(
         frame_dir,
         timelapse_results,
-        config,
         remove_source=(config.frame_cleanup == "delete")
     )
 
