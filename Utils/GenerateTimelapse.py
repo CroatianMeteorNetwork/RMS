@@ -351,7 +351,7 @@ def generateTimelapseFromFrames(image_files,
 
             # Add timestamp with outline for better visibility
             text = station_id + " " + extracted_time.strftime("%Y-%m-%d %H:%M:%S") + " UTC"
-            position = (10, image.shape[0] - 10)
+            position = (10, image.shape[0] - 6)
             font = cv2.FONT_HERSHEY_SIMPLEX
             font_scale = 0.4
             thickness = 1
@@ -596,7 +596,12 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
         # Draw text to image
         font = cv2.FONT_HERSHEY_SIMPLEX
         text = camid + " " + timestamp + " UTC"
-        cv2.putText(img, text, (10, ff.nrows - 6), font, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
+        position = (10, ff.nrows - 6)
+        font_scale = 0.4
+        thickness = 1
+
+        cv2.putText(img, text, position, font, font_scale, (0, 0, 0), thickness + 2, cv2.LINE_AA)
+        cv2.putText(img, text, position, font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
 
         # Save the labelled image to disk
         cv2.imwrite(os.path.join(dir_tmp_path, img_file_name), img, [cv2.IMWRITE_JPEG_QUALITY, 100])
