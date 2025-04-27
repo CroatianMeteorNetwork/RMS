@@ -577,8 +577,8 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
         timestamp = filenameToDatetime(file_name).strftime("%Y-%m-%d %H:%M:%S")
 		
         # Get id cam from the file name
-            # e.g.  FF499_20170626_020520_353_0005120.bin
-            # or FF_CA0001_20170626_020520_353_0005120.fits
+        # e.g.  FF499_20170626_020520_353_0005120.bin
+        # or FF_CA0001_20170626_020520_353_0005120.fits
 
         file_split = file_name.split('_')
 
@@ -606,7 +606,7 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
         # Print elapsed time
         if c % 30 == 0:
             print("{:>5d}/{:>5d}, Elapsed: {:s}".format(c + 1, len(ff_list), \
-                str(RmsDateTime.utcnow() - t1)), end="\r")
+                  str(RmsDateTime.utcnow() - t1)), end="\r")
             sys.stdout.flush()
 
 
@@ -654,14 +654,14 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
         subprocess.call(com, shell=True, cwd=dir_path)
 		
     else :
-        log.warning ("generateTimelapse only works on Linux or Windows the video could not be encoded")
+        log.warning("generateTimelapse only works on Linux or Windows the video could not be encoded")
 
     #Delete temporary directory and files inside
     if os.path.exists(dir_tmp_path) and not keep_images:
         shutil.rmtree(dir_tmp_path)
         log.info("Directory removal complete: {}".format(dir_tmp_path))
 		
-    log.info("Total time:", RmsDateTime.utcnow() - t1)
+    log.info("Total time: %s", RmsDateTime.utcnow() - t1)
 
 
 
