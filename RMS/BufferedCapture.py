@@ -27,6 +27,7 @@ import datetime
 import copy
 import os.path
 from multiprocessing import Process, Event, Value, Array
+import threading
 
 import cv2
 import numpy as np
@@ -848,6 +849,39 @@ class BufferedCapture(Process):
             return False, None
 
 
+    def _busPoller(self):
+        """
+        Drain GStreamer's bus so its internal queue never overflows.
+
+        Runs in a background daemon thread:
+
+        * Wakes once a second (`timed_pop_filtered` timeout).
+        * Removes ERROR and WARNING messages, logging them for visibility.
+        * Silently discards all other message types (they were only clogging
+        the queue).
+
+        The loop exits automatically when `self.pipeline` is set to `None`
+        in `releaseResources()`.
+        """
+        if not GST_IMPORTED:
+            return
+
+        bus = self.pipeline.get_bus()
+        mask = Gst.MessageType.ERROR | Gst.MessageType.WARNING
+
+        while self.pipeline:
+            # pop messages from bus every 5 seconds
+            msg = bus.timed_pop_filtered(5*Gst.SECOND, mask)
+            if not msg:
+                continue
+
+            if msg.type == Gst.MessageType.ERROR:
+                err, _dbg = msg.parse_error()
+                log.error("GST ERROR from %s: %s", msg.src.get_name(), err)
+            else:  # WARNING
+                warn, _dbg = msg.parse_warning()
+                log.warning("GST WARN  from %s: %s", msg.src.get_name(), warn)
+
 
     def createGstreamDevice(self, video_format, gst_decoder='decodebin', 
                             video_file_dir=None, segment_duration_sec=30, max_retries=5, retry_interval=1):
@@ -939,6 +973,9 @@ class BufferedCapture(Process):
                 self.pipeline = Gst.parse_launch(pipeline_str)
                 if not self.pipeline:
                     raise ValueError("Could not create pipeline")
+                
+                # Start a daemon thread that drains the GstBus so it never fills
+                threading.Thread(target=self._busPoller, daemon=True).start()
                 
                 # If raw video saving is enabled, Connect the "format-location" signal to the 
                 # moveSegment function
