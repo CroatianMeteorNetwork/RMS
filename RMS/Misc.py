@@ -866,7 +866,7 @@ def tarWithProgress(source_dir, tar_path, compression='bz2', remove_source=False
                           last_pct, processed, total_files))
         
         # 3. Verify -------------------------------------------------------------
-        log.info("Verifying archive integrity…")
+        log.info("Verifying archive integrity...")
         read_mode = 'r:bz2' if compression == 'bz2' else 'r:gz'
 
         if not (os.path.exists(tar_path) and os.path.getsize(tar_path) > 0):
@@ -886,7 +886,7 @@ def tarWithProgress(source_dir, tar_path, compression='bz2', remove_source=False
 
         # 4. Optional cleanup ---------------------------------------------------
         if remove_source and file_list is None and source_dir:
-            log.info("Removing source directory {} …".format(source_dir))
+            log.info("Removing source directory {} ...".format(source_dir))
             shutil.rmtree(source_dir)
             log.info("Source directory removed")
 

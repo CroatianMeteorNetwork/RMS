@@ -734,7 +734,7 @@ def processFrames(config):
     frame_dir = os.path.join(config.data_dir, config.frame_dir)
 
     # ── 2. build timelapses ───────────────────────────────────────────────
-    log.info("Generating timelapse(s) from saved frames…")
+    log.info("Generating timelapse(s) from saved frames...")
 
     try:
         cutoff_utc = lastNightToDaySwitch(config)

@@ -669,7 +669,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                                 log.info("Background upload sleeping %.1f s ...", wait_s)
                                 time.sleep(wait_s)
 
-                        log.info("Background upload starting …")
+                        log.info("Background upload starting ...")
                         mgr.uploadData()
                         log.info("Background upload finished.")
                     except Exception:
