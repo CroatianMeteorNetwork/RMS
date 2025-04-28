@@ -305,7 +305,7 @@ def archiveFrameTimelapse(frames_root,
         archive_path  = os.path.join(frames_root, base_name + ".tar")
         tmp_archive   = archive_path + ".tmp"
 
-        log.info("Archiving %s and %s → %s",
+        log.info("Archiving %s and %s to %s",
                  os.path.basename(mp4_path),
                  os.path.basename(json_path),
                  os.path.basename(archive_path))

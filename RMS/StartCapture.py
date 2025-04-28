@@ -685,7 +685,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
             # ------------------------------------------------------------------------
-            # frames → timelapse(s) → archive(s) → upload
+            # frames -> timelapse(s) -> archive(s) -> upload
             # ------------------------------------------------------------------------
             if config.timelapse_generate_from_frames:
                 try:
@@ -708,7 +708,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                             log.info("Adding file to upload list: %s", arc_path)
                             upload_manager.addFiles([arc_path])
 
-                        # optional post-enqueue delay (minutes → seconds)
+                        # optional post-enqueue delay (minutes to seconds)
                         upload_manager.delayNextUpload(delay=60 * config.upload_delay)
 
                         # honour any next-runtime gate the manager has set

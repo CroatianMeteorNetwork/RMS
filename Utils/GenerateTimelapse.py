@@ -170,7 +170,7 @@ def generateTimelapseFromFrameBlocks(frame_blocks,
     """
     results = []
     for block in frame_blocks:
-        if not block:                       # empty block → skip
+        if not block:
             results.append(None)
             continue
 
