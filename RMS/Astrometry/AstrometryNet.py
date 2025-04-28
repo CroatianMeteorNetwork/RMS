@@ -242,7 +242,13 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
             fov_h = y_max*solution.best_match().scale_arcsec_per_pixel/3600
 
 
-        star_data = [x_data, y_data]
+        # Compute the RA and Dec of x_data, y_data
+        x_data = np.array(x_data)
+        y_data = np.array(y_data)
+
+        ra_data, dec_data = wcs_obj.all_pix2world(x_data, y_data, 1)
+
+        star_data = [x_data, y_data, ra_data, dec_data]
 
         return ra_mid, dec_mid, rot_eq_standard, scale, fov_w, fov_h, star_data
     
