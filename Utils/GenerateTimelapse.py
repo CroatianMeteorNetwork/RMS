@@ -77,7 +77,7 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
         log.info("Directory removal complete: {}".format(dir_tmp_path))
 		
     mkdirP(dir_tmp_path)
-    log.info("Created directory : " + dir_tmp_path)
+    log.info("Created directory : {}".format(dir_tmp_path))
     
     log.info("Preparing files for the timelapse...")
     c = 0
@@ -131,8 +131,8 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
 
         # Print elapsed time
         if c % 30 == 0:
-            print("{:>5d}/{:>5d}, Elapsed: {:s}".format(c + 1, len(ff_list), \
-                  str(RmsDateTime.utcnow() - t1)), end="\r")
+            print("{:>5d}/{:>5d}, Elapsed: {:s}".format(c, len(ff_list), \
+                str(RmsDateTime.utcnow() - t1)), end="\r")
             sys.stdout.flush()
 
 
@@ -156,7 +156,7 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
             + " -movflags faststart -threads 2 -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)\" " \
             + mp4_path
 
-        log.info("Creating timelapse using {:s}...".format(software_name))
+        log.info("Creating timelapse using {}...".format(software_name))
         log.info(com)
         subprocess.call([com], shell=True)
 

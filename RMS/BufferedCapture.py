@@ -33,6 +33,7 @@ import cv2
 import numpy as np
 import socket
 import errno
+import json
 
 
 from RMS.Misc import obfuscatePassword
@@ -43,6 +44,7 @@ from RMS.Misc import RmsDateTime, mkdirP
 from RMS.Formats import FTfile, FTStruct
 from RMS.Logger import getLogger, gstDebugLogger
 from RMS.CaptureModeSwitcher import switchCameraMode
+import Utils.CameraControl as cc
 
 # Get the logger from the main module
 log = getLogger("logger")
@@ -1065,7 +1067,47 @@ class BufferedCapture(Process):
                     log.error("Camera connection failed: {}".format(error_messages[probe_result]))
                     return False
                 else:
-                    # After camera connection is established, if necessary switch camera mode
+                    # After camera connection is established, if necessary inititliaze camera settings
+                    # and/or perform camera mode change
+
+                    # ------------------------------------------------------------------
+                    # One‑time camera initialization
+                    # ------------------------------------------------------------------
+                    root_dir  = self.config.rms_root_dir
+
+                    # e.g.  “XX0001.camera_init.done”
+                    flag_file = os.path.join(root_dir, "{}.camera_init.done".format(self.config.stationID))
+
+                    if self.config.initialize_camera and not os.path.exists(flag_file):
+                        log.info("Running camera init sequence ...")
+                        try:
+                            mode_name = "init"
+                            mode_path = self.config.camera_settings_path
+
+                            if not os.path.exists(mode_path):
+                                raise FileNotFoundError("Mode file {} not found.".format(mode_path))
+
+                            with open(mode_path, 'r') as f:
+                                modes = json.load(f)
+
+                            if mode_name not in modes:
+                                raise KeyError("Mode '{}' not defined in {}.".format(mode_name, mode_path))
+
+                            try:
+                                cc.cameraControlV2(self.config, "SwitchMode", mode_name)
+                            except Exception as e:
+                                raise RuntimeError("Failed to switch camera mode: {}".format(e))
+
+                            # create empty sentinel file
+                            open(flag_file, "a").close()
+                            log.info("Init complete - flag written to %s", flag_file)
+
+                        except Exception as e:
+                            log.warning("Camera switch to %s mode failed: %s. Will retry later.", mode_name, e)
+
+                    # -------------------------------------------
+                    # Day/night switching
+                    # -------------------------------------------
                     if self.config.continuous_capture and self.config.switch_camera_modes:
                         if self.camera_mode_switch_trigger.value:
                             switchCameraMode(self.config, self.daytime_mode, self.camera_mode_switch_trigger)

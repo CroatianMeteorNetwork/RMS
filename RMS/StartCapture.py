@@ -157,7 +157,7 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
 
 
 def runCapture(config, duration=None, video_file=None, nodetect=False, detect_end=False, \
-    upload_manager=None, eventmonitor=None, resume_capture=False, daytime_mode=None):
+    upload_manager=None, eventmonitor=None, resume_capture=False, daytime_mode=None, camera_mode_switch_trigger=None):
     """ Run capture and compression for the given time.given
     
     Arguments:
@@ -270,9 +270,10 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     print("################################################################")
 
     # Make a directory for the night - if currently in night capture mode
-    if (not config.continuous_capture) or (not daytime_mode.value):
+    in_night_capture = (daytime_mode is None) or (not daytime_mode.value)
+    if (not config.continuous_capture) or in_night_capture:
         mkdirP(night_data_dir)
-        log.info('Data directory: ' + night_data_dir)
+        log.info('Data directory: {}'.format(night_data_dir))
 
     # Make a directory for the time files if configured
     if config.save_frame_times:
@@ -290,7 +291,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         log.info('Saved videos directory: {}'.format(saved_video_dir))
 
     # Copy the used config file to the capture directory
-    if os.path.isfile(config.config_file_name):
+    if os.path.isfile(config.config_file_name) and os.path.isdir(night_data_dir):
         try:
             # Get the name of the originating config file
             config_file_name = os.path.basename(config.config_file_name)
@@ -360,6 +361,12 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # To handle control flow in case of disk space issues
     disk_full = False
 
+    # Keep track of which state we started at
+    daytime_mode_prev = False
+
+    # Initialize the detector
+    detector = None
+
     # Loop to handle both continuous and standard capture modes
     while True:
 
@@ -376,7 +383,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             # Make a directory for the next capture
             mkdirP(night_data_dir)
 
-            log.info('New data directory: ' + night_data_dir)
+            log.info('New data directory: {}'.format(night_data_dir))
 
             # Copy the used config file to the capture directory
             if os.path.isfile(config.config_file_name):
@@ -560,10 +567,13 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             if not nodetect:
 
                 try:
-                    log.info('Finishing up the detection, ' + str(detector.input_queue.qsize()) \
+                    if detector is None:
+                        log.info('No detection queued')
+                    else:
+                        log.info('Finishing up the detection, ' + str(detector.input_queue.qsize()) \
                         + ' files to process...')
-                except:
-                    print('Finishing up the detection... error when getting input queue size!')
+                except Exception:
+                    log.exception('Finishing up the detection... error when getting input queue size!')
 
 
                 # Reset the Ctrl+C to KeyboardInterrupt
@@ -594,7 +604,10 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                     log.info('Waiting for the detection to finish...')
 
                     # Wait for the detector to finish and close it
-                    detector.closePool()
+                    try:
+                        detector.closePool()
+                    except Exception:
+                        log.exception('Detector closePool() raised; continuing with shutdown')
 
                     log.info('Detection finished!')
 
@@ -1378,7 +1391,7 @@ if __name__ == "__main__":
         # Run capture and compression
         night_archive_dir = runCapture(config, duration=duration, nodetect=cml_args.nodetect, \
             upload_manager=upload_manager, eventmonitor=eventmonitor, detect_end=(cml_args.detectend or config.postprocess_at_end), \
-            resume_capture=cml_args.resume, daytime_mode=daytime_mode)
+            resume_capture=cml_args.resume, daytime_mode=daytime_mode, camera_mode_switch_trigger=camera_mode_switch_trigger)
         cml_args.resume = False
 
         # Indicate that the capture was done once
