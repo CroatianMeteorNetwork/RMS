@@ -23,489 +23,10 @@ from RMS.Logger import getLogger
 
 log = getLogger("logger")
 
-IMAGE_PATTERN = re.compile(
-    r"""
-    ^(?P<station>.+?)_
-      (?P<date>\d{8})_            # YYYYMMDD
-      (?P<time>\d{6})_            # HHMMSS
-      (?P<msec>\d{3})             # milliseconds
-    (?:_(?P<suffix>[dn]))?        # optional _d / _n
-    \.(?P<ext>jpg|png)$
-    """,
-    re.VERBOSE | re.IGNORECASE,
-)
 
-ONE_DAY = timedelta(days=1)
-
-
-def _timestampFromName(fname):
-    """Parse the UTC timestamp in the filename and return a *naïve* datetime."""
-    m = IMAGE_PATTERN.match(os.path.basename(fname))
-    if not m:
-        raise ValueError("Bad filename: {}".format(fname))
-    stamp = "{}{}{}".format(m.group("date"), m.group("time"), m.group("msec"))
-    return datetime.strptime(stamp, "%Y%m%d%H%M%S%f")  # no tzinfo
-
-
-def _modeFromName(fname):
-    m = IMAGE_PATTERN.match(os.path.basename(fname))
-    return (m.group("suffix") or '').lower()           # '', 'd', or 'n'
-
-
-def listImageBlocksBefore(cutoff, dir_path):
-    """
-    cutoff   : naïve datetime assumed to be in UTC
-    dir_path : directory tree to walk
-
-    Returns  : list[list[str]] - blocks that are
-               • consecutive in time
-               • homogeneous in mode ('', 'd', 'n')
-               • never longer than 24 h (split only if >24 h)
-    """
-    # 1. collect .jpg / .png whose embedded time < cutoff -------------------
-    paths = []
-    for root, _, files in os.walk(dir_path):
-        for fname in files:
-            if not IMAGE_PATTERN.match(fname):
-                continue
-            ts = _timestampFromName(fname)
-            if ts >= cutoff:
-                continue
-            paths.append(os.path.join(root, fname))
-
-    if not paths:
-        return []
-
-    # 2. chronological sort -------------------------------------------------
-    paths.sort(key=_timestampFromName)
-
-    # 3. first pass – break on mode changes ---------------------------------
-    prelim_blocks, cur_block, cur_mode = [], [], None
-    for path in paths:
-        mode = _modeFromName(path)
-        if cur_block and mode != cur_mode:          # mode switch ⇒ new block
-            prelim_blocks.append(cur_block)
-            cur_block = []
-        cur_block.append(path)
-        cur_mode = mode
-    if cur_block:
-        prelim_blocks.append(cur_block)
-
-    # 4. second pass – split blocks that run > 24 h at each UTC midnight ----
-    final_blocks = []
-    for block in prelim_blocks:
-        start_ts = _timestampFromName(block[0])
-        end_ts = _timestampFromName(block[-1])
-
-        if end_ts - start_ts < ONE_DAY:             # already ≤24 h
-            final_blocks.append(block)
-            continue
-
-        next_midnight = (start_ts + ONE_DAY).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-        chunk = []
-        for path in block:
-            ts = _timestampFromName(path)
-            if ts >= next_midnight:                 # crossed midnight
-                final_blocks.append(chunk)
-                chunk = []
-                while ts >= next_midnight:
-                    next_midnight += ONE_DAY
-            chunk.append(path)
-        if chunk:
-            final_blocks.append(chunk)
-
-    return final_blocks
-
-
-_name_re = re.compile(r"""
-    (?P<station>[^_]+)_          # station  (e.g. US005C)
-    (?P<date>\d{8})_             # YYYYMMDD
-    (?P<time>\d{6})_             # HHMMSS
-    """, re.VERBOSE)
-
-
-def _parse(fname):
-    """Return (station, datetime) extracted from an image filename."""
-    m = _name_re.match(os.path.basename(fname))
-    if not m:
-        raise ValueError(f"Cannot parse name: {fname}")
-    dt = datetime.strptime(m["date"] + m["time"], "%Y%m%d%H%M%S")
-    return m["station"], dt
-
-
-def _video_path(frames_root, first_img, last_img):
-    """Build .../STN_YYYYMMDD_[doy_hhmm-to-doy_hhmm]_frames_timelapse.mp4"""
-    station, t0 = _parse(first_img)
-    _,       t1 = _parse(last_img)
-
-    doy0, doy1 = t0.timetuple().tm_yday, t1.timetuple().tm_yday
-    name = (f"{station}_{t0:%Y%m%d}_[{doy0:03d}_{t0:%H%M}-"
-            f"to-{doy1:03d}_{t1:%H%M}]_frames_timelapse.mp4")
-    return os.path.join(frames_root, name)
-
-
-def generateTimelapseFromFrameBlocks(frame_blocks,
-                                     frames_root,
-                                     fps=30,
-                                     base_crf=25,
-                                     cleanup_mode='none',
-                                     compression='bz2',
-                                     use_color=True):
-    """
-    Create one timelapse per block and collect the resulting paths.
-
-    Parameters
-    ----------
-    frame_blocks : list[list[str]]
-        Each sub-list is a chronologically ordered set of image paths.
-    frames_root  : str
-        Directory where the timelapse files will be written.
-
-    Returns
-    -------
-    list[tuple[str, str] | None]
-        (mp4_path, json_path) per block, or None if that block failed.
-    """
-    results = []
-    for block in frame_blocks:
-        if not block:
-            results.append(None)
-            continue
-
-        first_img, last_img = block[0], block[-1]
-        mp4_path = _video_path(frames_root, first_img, last_img)
-
-        mp4_path, json_path = generateTimelapseFromFrames(
-            image_files=block,
-            video_path=mp4_path,
-            fps=fps,
-            base_crf=base_crf,
-            cleanup_mode=cleanup_mode,
-            compression=compression,
-            use_color=use_color
-        )
-
-        results.append((mp4_path, json_path) if mp4_path else None)
-
-    return results
-
-
-def deleteFilesAndEmptyDirs(file_paths):
-    """Delete files and empty directories.
-    
-    Arguments:
-        file_paths: [list] List of file paths to delete.
-    """
-    
-    for file_path in file_paths:
-        if os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except Exception as e:
-                log.error("Error removing file {}: {}".format(file_path, e))
-    
-    # Remove empty directories
-    for dir_path in set(os.path.dirname(p) for p in file_paths):
-        if os.path.exists(dir_path) and not os.listdir(dir_path):
-            try:
-                os.rmdir(dir_path)
-                # log.info("Removed empty directory: {}".format(dir_path))
-            except Exception as e:
-                log.error("Error removing directory {}: {}".format(dir_path, e))
-
-
-def generateTimelapseFromFrames(image_files,
-                                video_path,
-                                fps=30,
-                                base_crf=25,
-                                cleanup_mode='none',
-                                compression='bz2',
-                                use_color=True):
-    """
-    Generate a timelapse video using streaming to avoid temporary storage.
-    
-    Parameters:
-        image_files: [list] List of image file paths.
-        video_path: [str] Output path for the generated video.
-        fps: [int] Frames per second for the output video.
-        base_crf: [int] Base Constant Rate Factor for video compression. Used as is for color video and increased
-                    by 2 for grayscale.
-        cleanup_mode: [str] Cleanup mode after video creation ('none', 'delete', 'tar').
-        compression: [str] Compression method for tar ('bz2', 'gz').
-        use_color: [bool] Whether to create a color video (True) or grayscale video (False).
-    Returns
-        (video_path, json_path) on success, (None, None) on failure.
-    """
-    # Validate input parameters
-    image_files = list(image_files)
-    total_frames = len(image_files)
-    if total_frames == 0:
-        log.warning('generateTimelapseFromFrames: no images supplied')
-        return None, None
-    
-    # Create a temporary output path
-    output_dir = os.path.dirname(video_path)
-    output_filename = os.path.basename(video_path)
-    output_name, output_ext = os.path.splitext(output_filename)
-    temp_video_path = os.path.join(output_dir, "{}_temp{}".format(output_name, output_ext))
-    
-    # Process a valid first image to get dimensions
-    # Try up to 10 images to find a valid one for dimensions
-    # Necessary for the streaming method
-    sample_size = min(10, len(image_files))
-    found_valid_image = False
-    width, height = 0, 0
-    
-    for i in range(sample_size):
-        sample_image = cv2.imread(image_files[i], cv2.IMREAD_UNCHANGED)
-        if sample_image is not None:
-            # Get dimensions from the first valid image
-            height, width = sample_image.shape[:2]
-
-            # Determine if the image is grayscale or color
-            channels = 1 if sample_image.ndim == 2 else sample_image.shape[2]
-
-            is_color = channels > 1
-
-            found_valid_image = True
-            break
-    
-    if not found_valid_image:
-        log.error("Error: Could not find any valid images to determine dimensions.")
-        return None, None
-    
-    # Set up ffmpeg command based on color mode
-    if platform.system() in ['Linux', 'Darwin']:
-        ffmpeg_path = "ffmpeg"
-    elif platform.system() == 'Windows':
-        ffmpeg_path = os.path.join(os.path.dirname(__file__), "ffmpeg.exe")
-    else:
-        log.warning("Unsupported platform.")
-        return None, None
-
-    # Configure ffmpeg command based on color mode
-    if use_color and is_color:
-        # If the image is color, use the base CRF value
-        crf = base_crf
-
-        # Set pixel format for color
-        pix_fmt = "bgr24"
-    else:
-        # If the image is grayscale, increase CRF by 2
-        crf = base_crf + 2
-
-        # Set pixel format for grayscale
-        pix_fmt = "gray"
-
-    ffmpeg_cmd = [ffmpeg_path, "-y", "-nostdin",
-                  "-f", "rawvideo", 
-                  "-vcodec", "rawvideo",
-                  "-s", "{}x{}".format(width, height),
-                  "-pix_fmt", pix_fmt,
-                  "-r", str(fps),
-                  "-i", "-",
-                  "-c:v", "libx264",
-                  "-crf", str(crf),
-                  "-profile:v", "high", # baseline, main, high
-                  "-preset", "medium",  # fast, medium, slow to change size/processing speed
-                  "-pix_fmt", "yuv420p",
-                  "-movflags", "faststart",  # Optimize for streaming
-                  "-threads", "1",
-                  "-g", "120",
-                  temp_video_path]  # Use temporary path
-    
-    log.info("Starting ffmpeg process for {}...".format(video_path))
-    log.info("Video mode: {}".format('Color' if use_color else 'Grayscale'))
-    ffmpeg_process = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE)
-    
-    # Initialize timestamp JSON data
-    timestamp_data = {}
-    
-    # Process frames
-    log.info("Processing {} frames...".format(len(image_files)))
-    processed_count = 0
-    skipped_count = 0
-    
-    for index, img_path in enumerate(image_files):
-        if index % 100 == 0:
-            print("Processing frame {}/{} ({:.1f}%)"
-                  .format(index, len(image_files), (index/len(image_files)*100.0)))
-        
-        # Load image with error handling
-        image = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
-        if image is None:
-            log.warning("Warning: Skipping corrupted or unreadable image: {}".format(img_path))
-            skipped_count += 1
-            continue  # Skip this frame
-        
-        # Extract timestamp from filename
-        try:
-            image_name_parts = os.path.basename(img_path).split('_')
-            station_id = image_name_parts[0]
-            extracted_time = datetime.strptime(image_name_parts[1] + image_name_parts[2], "%Y%m%d%H%M%S")
-            
-            # Record timestamp data (only for frames that are successfully processed)
-            timestamp_data[str(processed_count)] = "_".join(os.path.basename(img_path).split('.')[0].split('_')[1:])
-
-            # Add timestamp with outline for better visibility
-            text = station_id + " " + extracted_time.strftime("%Y-%m-%d %H:%M:%S") + " UTC"
-            position = (10, image.shape[0] - 6)
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 0.4
-            thickness = 1
-            
-            # Create text with outline (black background, white text)
-            cv2.putText(image, text, position, font, font_scale, (0, 0, 0), thickness + 2, cv2.LINE_AA)
-            cv2.putText(image, text, position, font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
-            
-        except Exception as e:
-            log.warning("Warning: Error processing metadata for {}: {}".format(img_path, e))
-        
-        # Handle color conversion based on target mode
-        try:
-            if not use_color and is_color:
-                # Convert to grayscale if color
-                if len(image.shape) == 3:
-                    image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-                     
-            # Write frame to ffmpeg
-            ffmpeg_process.stdin.write(image.tobytes())
-            processed_count += 1
-            
-        except Exception as e:
-            log.error("Warning: Error processing image {}: {}".format(img_path, e))
-            skipped_count += 1
-    
-    # Create a temporary timestamp JSON file
-    timestamp_path = video_path.replace('frames_timelapse.mp4', 'frametimes.json')
-    temp_timestamp_path = os.path.join(output_dir, "{}_temp_timestamps.json".format(output_name))
-    
-    try:
-        with open(temp_timestamp_path, 'w') as f:
-            json.dump(timestamp_data, f, indent=2)
-    except Exception as e:
-        log.warning("Warning: Error saving timestamp data: {}".format(e))
-    
-    # Finalize video
-    log.info("All frames processed. Successfully processed: {}, Skipped: {}"
-             .format(processed_count, skipped_count))
-    log.info("Finalizing video...")
-    
-    try:
-        ffmpeg_process.stdin.close()
-        return_code = ffmpeg_process.wait(timeout=300)  # Wait up to 5 minutes
-        
-        if return_code != 0:
-            log.warning("Warning: ffmpeg process exited with code {}".format(return_code))
-    except subprocess.TimeoutExpired:
-        log.warning("Warning: ffmpeg process did not complete within timeout, terminating...")
-        ffmpeg_process.terminate()
-        try:
-            ffmpeg_process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            ffmpeg_process.kill()
-    
-    # Check result and handle cleanup
-    if os.path.exists(temp_video_path) and os.path.getsize(temp_video_path) > 0:
-        video_size_mb = os.path.getsize(temp_video_path) / (1024 * 1024)
-        
-        # Rename temporary files to final paths
-        try:
-            # Remove destination file if it exists
-            if os.path.exists(video_path):
-                os.remove(video_path)
-            
-            # Rename video file
-            os.rename(temp_video_path, video_path)
-            log.info("Video created successfully: {} ({:.2f} MB)".format(video_path, video_size_mb))
-            
-            # Rename timestamp file if it exists
-            if os.path.exists(temp_timestamp_path):
-                if os.path.exists(timestamp_path):
-                    os.remove(timestamp_path)
-                os.rename(temp_timestamp_path, timestamp_path)
-                log.info("Timestamp data saved to: {}".format(timestamp_path))
-        
-            # Handle cleanup based on specified mode
-            if cleanup_mode == 'delete':
-                deleteFilesAndEmptyDirs(image_files)
-
-            elif cleanup_mode == 'tar':
-                try:
-                    ext = '.tar.bz2' if compression == 'bz2' else '.tar.gz'
-
-                    # Derive the tar file name from video_path, stripping '_timelapse.mp4'
-                    base_name = os.path.basename(video_path).replace('_timelapse.mp4', '')
-
-                    # Construct the full path for the tar file
-                    tar_path = os.path.join(os.path.dirname(video_path), base_name + ext)
-
-                    # Create a temporary tar file
-                    temp_tar_path = tar_path + ".tmp"
-                    
-                    log.info("Creating {} archive of {}...".format(compression, base_name))
-                    
-                    # Determine if we should remove the source files based on cleanup_mode
-                    remove_source = cleanup_mode == 'tar'
-                    
-                    # Create tar with progress reporting, verification, and optional source removal
-                    archive_success = tarWithProgress(None,
-                                                      temp_tar_path,
-                                                      compression,
-                                                      remove_source, 
-                                                      file_list=image_files)
-                    
-                    if archive_success:
-                        # Rename to final tar path
-                        if os.path.exists(tar_path):
-                            os.remove(tar_path)
-                        os.rename(temp_tar_path, tar_path)
-                        log.info("Archive created successfully at: {}".format(tar_path))
-                        if remove_source:
-                            # Remove source files if archive creation was successful
-                            deleteFilesAndEmptyDirs(image_files)
-                            log.info("Removed source files after archiving.")
-                    else:
-                        log.warning("Archive creation or verification failed. Keeping original directory.")
-                        # Clean up temporary tar file if it exists
-                        if os.path.exists(temp_tar_path):
-                            try:
-                                os.remove(temp_tar_path)
-                                log.info("Removed incomplete archive file")
-                            except:
-                                pass
-                    
-                except Exception as e:
-                    log.error("Error in archiving process: {}".format(e))
-                    # Clean up temporary tar file if it exists
-                    if os.path.exists(temp_tar_path):
-                        try:
-                            os.remove(temp_tar_path)
-                        except:
-                            pass
-
-        except Exception as e:
-            log.error("Error finalizing files: {}".format(e))
-            log.info("Temporary file remains at: {}".format(temp_video_path))
-        
-        return video_path, timestamp_path
-   
-    else:
-        log.warning("Video creation failed or resulted in an empty file.")
-        # Clean up temporary files
-        for temp_file in [temp_video_path, temp_timestamp_path]:
-            if os.path.exists(temp_file):
-                try:
-                    os.remove(temp_file)
-                    log.info("Removed incomplete temporary file: {}".format(temp_file))
-                except:
-                    pass
-        return None, None
-    
-
-
+# --------------------------------------------------------------------
+#  Timelapse generation from FF files (meteors)
+# --------------------------------------------------------------------
 def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, hires=False):
     """ Generate an High Quality MP4 movie from FF files. 
     
@@ -669,6 +190,570 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
     log.info("Total time: %s", RmsDateTime.utcnow() - t1)
 
 
+# --------------------------------------------------------------------
+#  Timelapse generation from image files (Contrails)
+# --------------------------------------------------------------------
+
+#  Output-naming helpers – one place to tweak naming scheme
+FNAME_TEMPLATE = (
+    "{station}_{doy_start:03d}_{start:%Y%m%d-%H%M%S}_to_{end:%Y%m%d-%H%M%S}_{suffix}"
+)
+
+MP4_SUFFIX = "frames_timelapse.mp4"
+TS_JSON_SUFFIX = "frametimes.json"
+TAR_SUFFIX_BZ2 = "frames_timelapse.tar.bz2"
+TAR_SUFFIX_GZ = "frames_timelapse.tar.gz"
+
+# Source image filename pattern
+IMAGE_PATTERN = re.compile(
+    r"""
+    ^(?P<station>.+?)_
+      (?P<date>\d{8})_            # YYYYMMDD
+      (?P<time>\d{6})_            # HHMMSS
+      (?P<msec>\d{3})             # milliseconds
+    (?:_(?P<suffix>[dn]))?        # optional _d / _n
+    \.(?P<ext>jpg|png)$
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+
+ONE_DAY = timedelta(days=1)
+
+
+def _buildName(station, t0, t1, suffix):
+    """Return the final basename according to FNAME_TEMPLATE."""
+    return FNAME_TEMPLATE.format(
+        station=station,
+        doy_start=t0.timetuple().tm_yday,
+        # doy_end=t1.timetuple().tm_yday,
+        start=t0,
+        end=t1,
+        suffix=suffix,
+    )
+
+
+def _timestampFromName(fname):
+    """Parse the UTC timestamp in the filename and return a *naïve* datetime."""
+    m = IMAGE_PATTERN.match(os.path.basename(fname))
+    if not m:
+        raise ValueError("Bad filename: {}".format(fname))
+    stamp = "{}{}{}".format(m.group("date"), m.group("time"), m.group("msec"))
+    return datetime.strptime(stamp, "%Y%m%d%H%M%S%f")  # no tzinfo
+
+
+def _modeFromName(fname):
+    m = IMAGE_PATTERN.match(os.path.basename(fname))
+    return (m.group("suffix") or '').lower()           # '', 'd', or 'n'
+
+
+def _parse(fname):
+    """
+    Return (station, datetime) extracted from an image filename,
+    """
+    m = IMAGE_PATTERN.match(os.path.basename(fname))
+    if not m:
+        raise ValueError(f"Cannot parse name: {fname}")
+
+    station = m.group("station")
+
+    # Ignore milliseconds here; keep them if you ever need sub-second precision
+    dt = datetime.strptime(m.group("date") + m.group("time"),
+                           "%Y%m%d%H%M%S")
+    return station, dt
+
+
+def listImageBlocksBefore(cutoff, dir_path):
+    """
+    cutoff   : naïve datetime assumed to be in UTC
+    dir_path : directory tree to walk
+
+    Returns  : list[list[str]] - blocks that are
+               • consecutive in time
+               • homogeneous in mode ('', 'd', 'n')
+               • never longer than 24 h (split only if >24 h)
+    """
+    # 1. collect .jpg / .png whose embedded time < cutoff -------------------
+    paths = []
+    for root, _, files in os.walk(dir_path):
+        for fname in files:
+            if not IMAGE_PATTERN.match(fname):
+                continue
+            ts = _timestampFromName(fname)
+            if ts >= cutoff:
+                continue
+            paths.append(os.path.join(root, fname))
+
+    if not paths:
+        return []
+
+    # 2. chronological sort -------------------------------------------------
+    paths.sort(key=_timestampFromName)
+
+    # 3. first pass – break on mode changes ---------------------------------
+    prelim_blocks, cur_block, cur_mode = [], [], None
+    for path in paths:
+        mode = _modeFromName(path)
+        if cur_block and mode != cur_mode:          # mode switch ⇒ new block
+            prelim_blocks.append(cur_block)
+            cur_block = []
+        cur_block.append(path)
+        cur_mode = mode
+    if cur_block:
+        prelim_blocks.append(cur_block)
+
+    # 4. second pass – split blocks that run > 24 h at each UTC midnight ----
+    final_blocks = []
+    for block in prelim_blocks:
+        start_ts = _timestampFromName(block[0])
+        end_ts = _timestampFromName(block[-1])
+
+        if end_ts - start_ts < ONE_DAY:             # already ≤24 h
+            final_blocks.append(block)
+            continue
+
+        next_midnight = (start_ts + ONE_DAY).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        chunk = []
+        for path in block:
+            ts = _timestampFromName(path)
+            if ts >= next_midnight:                 # crossed midnight
+                final_blocks.append(chunk)
+                chunk = []
+                while ts >= next_midnight:
+                    next_midnight += ONE_DAY
+            chunk.append(path)
+        if chunk:
+            final_blocks.append(chunk)
+
+    return final_blocks
+
+
+def deleteFilesAndEmptyDirs(file_paths):
+    """Delete files and empty directories.
+    
+    Arguments:
+        file_paths: [list] List of file paths to delete.
+    """
+    
+    for file_path in file_paths:
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                log.error("Error removing file {}: {}".format(file_path, e))
+    
+    # Remove empty directories
+    for dir_path in set(os.path.dirname(p) for p in file_paths):
+        if os.path.exists(dir_path) and not os.listdir(dir_path):
+            try:
+                os.rmdir(dir_path)
+                # log.info("Removed empty directory: {}".format(dir_path))
+            except Exception as e:
+                log.error("Error removing directory {}: {}".format(dir_path, e))
+
+
+def generateTimelapseFromFrameBlocks(frame_blocks,
+                                     frames_root,
+                                     fps=30,
+                                     base_crf=25,
+                                     cleanup_mode='none',
+                                     compression='bz2',
+                                     use_color=True):
+    """
+    Create one timelapse per block and collect the resulting paths.
+
+    Parameters
+    ----------
+    frame_blocks : list[list[str]]
+        Each sub-list is a chronologically ordered set of image paths.
+    frames_root  : str
+        Directory where the timelapse files will be written.
+
+    Returns
+    -------
+    list[tuple[str, str] | None]
+        (mp4_path, json_path) per block, or None if that block failed.
+    """
+    results = []
+    for block in frame_blocks:
+        if not block:
+            results.append(None)
+            continue
+
+        first_img, last_img = block[0], block[-1]
+
+        station, t0 = _parse(first_img)
+        _,       t1 = _parse(last_img)
+
+        video_name = _buildName(station, t0, t1, MP4_SUFFIX)
+
+        mp4_path_in =  os.path.join(frames_root, video_name)
+
+        mp4_path, json_path = generateTimelapseFromFrames(
+            image_files=block,
+            video_path=mp4_path_in,
+            fps=fps,
+            base_crf=base_crf,
+            cleanup_mode=cleanup_mode,
+            compression=compression,
+            use_color=use_color
+        )
+
+        results.append((mp4_path, json_path) if mp4_path else None)
+
+    return results
+
+
+def generateTimelapseFromDir(dir_path,
+                             video_path=None,
+                             fps=30,
+                             base_crf=25,
+                             cleanup_mode="none",
+                             compression="bz2",
+                             use_color=True,
+                             ):
+        """
+        Build a single timelapse from *all* images under *dir_path*.
+
+        Returns
+        -------
+        (video_path, json_path) on success, (None, None) on failure.
+        """
+        # 1 – gather images -----------------------------------------------------
+        img_paths = []
+        for root, _, files in os.walk(dir_path):         # use os.listdir(dir_path) if
+            for f in files:                              # you *don't* want recursion
+                if IMAGE_PATTERN.match(f):
+                    img_paths.append(os.path.join(root, f))
+
+        if not img_paths:
+            log.warning("generateTimelapseFromDir: no images found in %s", dir_path)
+            return None, None
+
+        img_paths.sort(key=_timestampFromName)
+
+        # 2 – build output paths ------------------------------------------------
+        station, t0 = _parse(img_paths[0])
+        _,       t1 = _parse(img_paths[-1])
+
+        if video_path is None:
+            video_name = _buildName(station, t0, t1, MP4_SUFFIX)
+            video_path = os.path.join(dir_path, video_name)
+
+        # 3 – delegate to the frame-streamer ------------------------------------
+        return generateTimelapseFromFrames(
+            image_files=img_paths,
+            video_path=video_path,
+            fps=fps,
+            base_crf=base_crf,
+            cleanup_mode=cleanup_mode,
+            compression=compression,
+            use_color=use_color,
+        )
+
+
+def generateTimelapseFromFrames(image_files,
+                                video_path,
+                                fps=30,
+                                base_crf=25,
+                                cleanup_mode='none',
+                                compression='bz2',
+                                use_color=True):
+    """
+    Generate a timelapse video using streaming to avoid temporary storage.
+    
+    Parameters:
+        image_files: [list] List of image file paths.
+        video_path: [str] Output path for the generated video.
+        fps: [int] Frames per second for the output video.
+        base_crf: [int] Base Constant Rate Factor for video compression. Used as is for color video and increased
+                    by 2 for grayscale.
+        cleanup_mode: [str] Cleanup mode after video creation ('none', 'delete', 'tar').
+        compression: [str] Compression method for tar ('bz2', 'gz').
+        use_color: [bool] Whether to create a color video (True) or grayscale video (False).
+    Returns
+        (video_path, json_path) on success, (None, None) on failure.
+    """
+    # Validate input parameters
+    image_files = list(image_files)
+    total_frames = len(image_files)
+    if total_frames == 0:
+        log.warning('generateTimelapseFromFrames: no images supplied')
+        return None, None
+    
+    # Create a temporary output path
+    output_dir = os.path.dirname(video_path)
+    output_filename = os.path.basename(video_path)
+    output_name, output_ext = os.path.splitext(output_filename)
+    temp_video_path = os.path.join(output_dir, "{}_temp{}".format(output_name, output_ext))
+    
+    # Process a valid first image to get dimensions
+    # Try up to 10 images to find a valid one for dimensions
+    # Necessary for the streaming method
+    sample_size = min(10, len(image_files))
+    found_valid_image = False
+    width, height = 0, 0
+    
+    for i in range(sample_size):
+        sample_image = cv2.imread(image_files[i], cv2.IMREAD_UNCHANGED)
+        if sample_image is not None:
+            # Get dimensions from the first valid image
+            height, width = sample_image.shape[:2]
+
+            # Determine if the image is grayscale or color
+            channels = 1 if sample_image.ndim == 2 else sample_image.shape[2]
+
+            is_color = channels > 1
+
+            found_valid_image = True
+            break
+    
+    if not found_valid_image:
+        log.error("Error: Could not find any valid images to determine dimensions.")
+        return None, None
+    
+    # Set up ffmpeg command based on color mode
+    if platform.system() in ['Linux', 'Darwin']:
+        ffmpeg_path = "ffmpeg"
+    elif platform.system() == 'Windows':
+        ffmpeg_path = os.path.join(os.path.dirname(__file__), "ffmpeg.exe")
+    else:
+        log.warning("Unsupported platform.")
+        return None, None
+
+    # Configure ffmpeg command based on color mode
+    if use_color and is_color:
+        # If the image is color, use the base CRF value
+        crf = base_crf
+
+        # Set pixel format for color
+        pix_fmt = "bgr24"
+
+    else:
+        # If the image is grayscale, increase CRF by 2
+        crf = base_crf + 2
+
+        # Set pixel format for grayscale
+        pix_fmt = "gray"
+
+        # Don't use color if grayscale
+        use_color = False
+
+    # Set maxrate and bufsize based on height to prevent very large video files with noisy source images.
+    # With normal images, maxrate and bufsize are not limiting - crf is the main factor.
+    if height <= 720:
+        maxrate, bufsize = "2M", "4M"
+    else:
+        maxrate, bufsize = "4M", "8M"
+
+    ffmpeg_cmd = [ffmpeg_path, "-y", "-nostdin",
+                  "-f", "rawvideo", 
+                  "-vcodec", "rawvideo",
+                  "-s", "{}x{}".format(width, height),
+                  "-pix_fmt", pix_fmt,
+                  "-r", str(fps),
+                  "-i", "-",
+                  "-c:v", "libx264",
+                  "-crf", str(crf),
+                  "-maxrate", maxrate,       # <-- cap bursts
+                  "-bufsize", bufsize,       # <-- smoothing window
+                  "-profile:v", "high",      # baseline, main, high
+                  "-preset", "medium",       # fast, medium, slow to change size/processing speed
+                  "-pix_fmt", "yuv420p",
+                  "-movflags", "faststart",  # Optimize for streaming
+                  "-threads", "1",
+                  "-g", "120",
+                  temp_video_path]           # Use temporary path
+    
+    log.info("Starting ffmpeg process for {}...".format(video_path))
+    log.info("Video mode: {}".format('Color' if use_color else 'Grayscale'))
+    ffmpeg_process = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE)
+    
+    # Initialize timestamp JSON data
+    timestamp_data = {}
+    
+    # Process frames
+    log.info("Processing {} frames...".format(len(image_files)))
+    processed_count = 0
+    skipped_count = 0
+    
+    for index, img_path in enumerate(image_files):
+        if index % 100 == 0:
+            print("Processing frame {}/{} ({:.1f}%)"
+                  .format(index, len(image_files), (index/len(image_files)*100.0)))
+        
+        # Load image with error handling
+        image = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
+        if image is None:
+            log.warning("Warning: Skipping corrupted or unreadable image: {}".format(img_path))
+            skipped_count += 1
+            continue  # Skip this frame
+        
+        # Extract timestamp from filename
+        try:
+            image_name_parts = os.path.basename(img_path).split('_')
+            station_id = image_name_parts[0]
+            extracted_time = datetime.strptime(image_name_parts[1] + image_name_parts[2], "%Y%m%d%H%M%S")
+            
+            # Record timestamp data (only for frames that are successfully processed)
+            timestamp_data[str(processed_count)] = "_".join(os.path.basename(img_path).split('.')[0].split('_')[1:])
+
+            # Add timestamp with outline for better visibility
+            text = station_id + " " + extracted_time.strftime("%Y-%m-%d %H:%M:%S") + " UTC"
+            position = (10, image.shape[0] - 6)
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.4
+            thickness = 1
+            
+            # Create text with outline (black background, white text)
+            cv2.putText(image, text, position, font, font_scale, (0, 0, 0), thickness + 2, cv2.LINE_AA)
+            cv2.putText(image, text, position, font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
+            
+        except Exception as e:
+            log.warning("Warning: Error processing metadata for {}: {}".format(img_path, e))
+        
+        # Handle color conversion based on target mode
+        try:
+            if not use_color and is_color:
+                # Convert to grayscale if color
+                if len(image.shape) == 3:
+                    image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+                     
+            # Write frame to ffmpeg
+            ffmpeg_process.stdin.write(image.tobytes())
+            processed_count += 1
+            
+        except Exception as e:
+            log.error("Warning: Error processing image {}: {}".format(img_path, e))
+            skipped_count += 1
+    
+    # Create a temporary timestamp JSON file
+    timestamp_path = video_path.replace(MP4_SUFFIX, TS_JSON_SUFFIX)
+    temp_timestamp_path = os.path.join(output_dir, "{}_temp_timestamps.json".format(output_name))
+    
+    try:
+        with open(temp_timestamp_path, 'w') as f:
+            json.dump(timestamp_data, f, indent=2)
+    except Exception as e:
+        log.warning("Warning: Error saving timestamp data: {}".format(e))
+    
+    # Finalize video
+    log.info("All frames processed. Successfully processed: {}, Skipped: {}"
+             .format(processed_count, skipped_count))
+    log.info("Finalizing video...")
+    
+    try:
+        ffmpeg_process.stdin.close()
+        return_code = ffmpeg_process.wait(timeout=300)  # Wait up to 5 minutes
+        
+        if return_code != 0:
+            log.warning("Warning: ffmpeg process exited with code {}".format(return_code))
+    except subprocess.TimeoutExpired:
+        log.warning("Warning: ffmpeg process did not complete within timeout, terminating...")
+        ffmpeg_process.terminate()
+        try:
+            ffmpeg_process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            ffmpeg_process.kill()
+    
+    # Check result and handle cleanup
+    if os.path.exists(temp_video_path) and os.path.getsize(temp_video_path) > 0:
+        video_size_mb = os.path.getsize(temp_video_path) / (1024 * 1024)
+        
+        # Rename temporary files to final paths
+        try:
+            # Remove destination file if it exists
+            if os.path.exists(video_path):
+                os.remove(video_path)
+            
+            # Rename video file
+            os.rename(temp_video_path, video_path)
+            log.info("Video created successfully: {} ({:.2f} MB)".format(video_path, video_size_mb))
+            
+            # Rename timestamp file if it exists
+            if os.path.exists(temp_timestamp_path):
+                if os.path.exists(timestamp_path):
+                    os.remove(timestamp_path)
+                os.rename(temp_timestamp_path, timestamp_path)
+                log.info("Timestamp data saved to: {}".format(timestamp_path))
+        
+            # Handle cleanup based on specified mode
+            if cleanup_mode == 'delete':
+                deleteFilesAndEmptyDirs(image_files)
+
+            elif cleanup_mode == 'tar':
+                try:
+                    tar_suffix = TAR_SUFFIX_BZ2 if compression == 'bz2' else TAR_SUFFIX_GZ
+
+                    # Derive the tar file name from video_path, stripping the MP4 suffix
+                    base_name = os.path.basename(video_path).replace(MP4_SUFFIX, tar_suffix)
+
+                    # Construct the full path for the tar file
+                    tar_path = os.path.join(os.path.dirname(video_path), base_name)
+
+                    # Create a temporary tar file
+                    temp_tar_path = tar_path + ".tmp"
+                    
+                    log.info("Creating {} archive of {}...".format(compression, base_name))
+                    
+                    # Determine if we should remove the source files based on cleanup_mode
+                    remove_source = cleanup_mode == 'tar'
+                    
+                    # Create tar with progress reporting, verification, and optional source removal
+                    archive_success = tarWithProgress(None,
+                                                      temp_tar_path,
+                                                      compression,
+                                                      remove_source, 
+                                                      file_list=image_files)
+                    
+                    if archive_success:
+                        # Rename to final tar path
+                        if os.path.exists(tar_path):
+                            os.remove(tar_path)
+                        os.rename(temp_tar_path, tar_path)
+                        log.info("Archive created successfully at: {}".format(tar_path))
+                        if remove_source:
+                            # Remove source files if archive creation was successful
+                            deleteFilesAndEmptyDirs(image_files)
+                            log.info("Removed source files after archiving.")
+                    else:
+                        log.warning("Archive creation or verification failed. Keeping original directory.")
+                        # Clean up temporary tar file if it exists
+                        if os.path.exists(temp_tar_path):
+                            try:
+                                os.remove(temp_tar_path)
+                                log.info("Removed incomplete archive file")
+                            except:
+                                pass
+                    
+                except Exception as e:
+                    log.error("Error in archiving process: {}".format(e))
+                    # Clean up temporary tar file if it exists
+                    if os.path.exists(temp_tar_path):
+                        try:
+                            os.remove(temp_tar_path)
+                        except:
+                            pass
+
+        except Exception as e:
+            log.error("Error finalizing files: {}".format(e))
+            log.info("Temporary file remains at: {}".format(temp_video_path))
+        
+        return video_path, timestamp_path
+   
+    else:
+        log.warning("Video creation failed or resulted in an empty file.")
+        # Clean up temporary files
+        for temp_file in [temp_video_path, temp_timestamp_path]:
+            if os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                    log.info("Removed incomplete temporary file: {}".format(temp_file))
+                except:
+                    pass
+        return None, None
+
 
 def main():
     """
@@ -717,16 +802,16 @@ def main():
     
     # Generate the timelapse
     try:
-        generateTimelapseFromFrames(
-            day_dir=args.input_dir,
+        video_path, json_path = generateTimelapseFromDir(
+            dir_path=args.input_dir,
             video_path=args.output,
             fps=args.fps,
             base_crf=args.crf,
             cleanup_mode=args.cleanup,
             compression=args.compression,
-            use_color=not args.grayscale
+            use_color=not args.grayscale,
         )
-        
+
         # Record and print completion time and duration
         end_time = datetime.now()
         duration = end_time - start_time
@@ -734,8 +819,9 @@ def main():
         print(f"Total processing time: {duration}")
         
         # Print file sizes if successful
-        if os.path.exists(args.output):
-            video_size = os.path.getsize(args.output) / (1024 * 1024)  # Convert to MB
+        if video_path and os.path.exists(video_path):
+            video_size = os.path.getsize(video_path) / (1024 * 1024)
+            
             print(f"Output video size: {video_size:.2f} MB")
             
             # Check if tar was created
