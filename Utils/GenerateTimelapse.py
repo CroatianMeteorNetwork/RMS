@@ -496,7 +496,13 @@ def generateTimelapseFromFrames(image_files,
     width, height = 0, 0
     
     for i in range(sample_size):
-        sample_image = cv2.imread(image_files[i], cv2.IMREAD_UNCHANGED)
+        # work backward from the last image in the sample window as the first images are sometimes not
+        # representative in case of multiple captures per camera
+        # (e.g. main capture controls camera mode and passive auxiliary captures)
+        idx = sample_size - 1 - i
+
+        sample_image = cv2.imread(image_files[idx], cv2.IMREAD_UNCHANGED)
+
         if sample_image is not None:
             # Get dimensions from the first valid image
             height, width = sample_image.shape[:2]
@@ -556,8 +562,8 @@ def generateTimelapseFromFrames(image_files,
                   "-i", "-",
                   "-c:v", "libx264",
                   "-crf", str(crf),
-                  "-maxrate", maxrate,       # <-- cap bursts
-                  "-bufsize", bufsize,       # <-- smoothing window
+                  "-maxrate", maxrate,       # cap bursts
+                  "-bufsize", bufsize,       # smoothing window
                   "-profile:v", "high",      # baseline, main, high
                   "-preset", "medium",       # fast, medium, slow to change size/processing speed
                   "-pix_fmt", "yuv420p",
@@ -615,11 +621,17 @@ def generateTimelapseFromFrames(image_files,
         
         # Handle color conversion based on target mode
         try:
-            if not use_color and is_color:
-                # Convert to grayscale if color
-                if len(image.shape) == 3:
+            if use_color:
+                # we promised ffmpeg bgr24
+                if image.ndim == 2:
+                    image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+                elif image.shape[2] == 4:
+                    image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
+            else:
+                # we promised ffmpeg gray
+                if image.ndim == 3:
                     image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-                     
+
             # Write frame to ffmpeg
             ffmpeg_process.stdin.write(image.tobytes())
             processed_count += 1
