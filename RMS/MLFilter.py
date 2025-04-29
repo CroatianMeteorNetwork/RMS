@@ -14,7 +14,6 @@ import numpy as np
 from PIL import Image
 import traceback
 #import time
-import logging
 import datetime
 import shutil
 
@@ -36,11 +35,11 @@ except ImportError:
 
 from RMS.Formats import FFfile
 from RMS.Formats import FTPdetectinfo
-from RMS.Logger import initLogging
+from RMS.Logger import initLogging, getLogger
 import RMS.ConfigReader as cr
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 # Suffix for unfiltered FTPdetectinfo files
@@ -612,7 +611,7 @@ if __name__ == "__main__":
 
     ### Init the logger
     initLogging(config, 'reprocess_')
-    log = logging.getLogger("logger")
+    log = getLogger("logger")
 
     #########################
 

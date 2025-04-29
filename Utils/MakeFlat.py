@@ -55,7 +55,8 @@ def makeFlat(dir_path, config, nostars=False, use_images=False, make_dark=False)
             return None
 
         # Load the calstars file
-        calstars_list = CALSTARS.readCALSTARS(dir_path, calstars_file)
+        calstars_data = CALSTARS.readCALSTARS(dir_path, calstars_file)
+        calstars_list, ff_frames = calstars_data
 
         # Convert the list to a dictionary
         calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
@@ -140,7 +141,8 @@ def makeFlat(dir_path, config, nostars=False, use_images=False, make_dark=False)
 
                 else:
                     # Calculate the time of the FF files
-                    ff_time = date2JD(*getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True))
+                    ff_time = date2JD(*getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True, 
+                                                       ff_frames=ff_frames))
 
 
                 ff_times.append(ff_time)

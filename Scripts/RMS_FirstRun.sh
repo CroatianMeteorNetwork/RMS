@@ -205,7 +205,7 @@ fi
 
 echo ""
 echo "Updating to the latest version of RMS..."
-bash $RMSUPDATESCRIPT 1
+bash $RMSUPDATESCRIPT
 
 echo ""
 echo "4) Editing the configuration file"

@@ -23,4 +23,5 @@ tensorflow; python_version >= '3.12' and platform_machine != "armv6l" and platfo
 astrometry; python_version >= "3.8" and sys_platform != 'win32'
 astrometry==3.0.0; python_version >= "3.5" and python_version < "3.8" and sys_platform != 'win32'
 pyclean>=2.7.6; python_version >= "3.5"
+ifaddr; sys_platform =="win32"
 PyGObject<=3.50; python_version >= '3.6'
