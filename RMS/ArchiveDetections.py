@@ -267,7 +267,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
 
 def archiveFrameTimelapse(frames_root,
-                          video_json_pairs,      # list[(mp4_path, json_path)]
+                          video_json_pairs,
                           remove_source=False):
     """
     Tar-up each (mp4, json) pair **without compression**.
@@ -300,10 +300,9 @@ def archiveFrameTimelapse(frames_root,
             continue
 
         # Build archive name: strip suffix, keep in same root, plain .tar
-        base_name     = os.path.basename(mp4_path).replace(
-                            "_frames_timelapse.mp4", "")
-        archive_path  = os.path.join(frames_root, base_name + ".tar")
-        tmp_archive   = archive_path + ".tmp"
+        base_name = os.path.basename(mp4_path).replace(".mp4", ".tar")
+        archive_path = os.path.join(frames_root, base_name)
+        tmp_archive = archive_path + ".tmp"
 
         log.info("Archiving %s and %s to %s",
                  os.path.basename(mp4_path),
