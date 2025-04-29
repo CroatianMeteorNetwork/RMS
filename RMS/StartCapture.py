@@ -669,37 +669,12 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 # optional delay (minutes in .config, converted to seconds)
                 upload_manager.delayNextUpload(delay=60 * config.upload_delay)
 
-                # ---- non‑blocking upload thread --------------------------------
-                def _upload_worker(mgr):
-                    try:
-                        # honour any delay the manager has set
-                        with mgr.next_runtime_lock:
-                            next_run = mgr.next_runtime
-
-                        if next_run is not None:
-                            wait_s = max(0.0, (next_run - RmsDateTime.utcnow()).total_seconds())
-                            if wait_s:
-                                log.info("Background upload sleeping %.1f s ...", wait_s)
-                                time.sleep(wait_s)
-
-                        log.info("Background upload starting ...")
-                        mgr.uploadData()
-                        log.info("Background upload finished.")
-                    except Exception:
-                        log.exception("Background upload failed")
-
-                threading.Thread(target=_upload_worker,
-                                args=(upload_manager,),
-                                daemon=True).start()
-
             # Delete detector backup files
             if detector is not None:
                 detector.deleteBackupFiles()
 
 
-            # ------------------------------------------------------------------------
             # frames -> timelapse(s) -> archive(s) -> upload
-            # ------------------------------------------------------------------------
             if config.timelapse_generate_from_frames:
                 try:
                     log.info("Running processFrames() ...")
@@ -711,32 +686,11 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                     archive_paths = None
 
                 # ── enqueue & upload ─────────────────────────────────────────────────
-                if archive_paths and upload_manager is not None:
+                if archive_paths and upload_manager:
                     try:
-                        for arc_path in archive_paths:
-                            if not arc_path or not os.path.isfile(arc_path):
-                                log.warning("Archive missing -- skipped: %s", arc_path)
-                                continue
-
-                            log.info("Adding file to upload list: %s", arc_path)
-                            upload_manager.addFiles([arc_path])
-
-                        # optional post-enqueue delay (minutes to seconds)
-                        upload_manager.delayNextUpload(delay=60 * config.upload_delay)
-
-                        # honour any next-runtime gate the manager has set
-                        with upload_manager.next_runtime_lock:
-                            next_run = upload_manager.next_runtime
-
-                        if next_run:
-                            wait_s = max(0.0, (next_run - RmsDateTime.utcnow()).total_seconds())
-                            if wait_s:
-                                log.info("Upload sleeping %.1f s ...", wait_s)
-                                time.sleep(wait_s)
-
-                        log.info("Frames upload starting ...")
-                        upload_manager.uploadData()
-                        log.info("Frames upload finished.")
+                        log.info("Adding file to upload list: %s", archive_paths)
+                        upload_manager.addFiles([archive_paths])
+                        log.info("File added.")
 
                     except Exception:
                         log.exception("Frames upload failed")
