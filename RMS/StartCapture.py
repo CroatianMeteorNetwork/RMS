@@ -689,7 +689,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 if archive_paths and upload_manager:
                     try:
                         log.info("Adding file to upload list: %s", archive_paths)
-                        upload_manager.addFiles([archive_paths])
+                        upload_manager.addFiles(archive_paths)
                         log.info("File added.")
 
                     except Exception:
