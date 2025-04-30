@@ -329,28 +329,50 @@ def listImageBlocksBefore(cutoff, dir_path):
     return final_blocks
 
 
-def deleteFilesAndEmptyDirs(file_paths):
-    """Delete files and empty directories.
-    
-    Arguments:
-        file_paths: [list] List of file paths to delete.
+def deleteFilesAndEmptyDirs(file_paths, stop_at=None, max_up=3):
     """
-    
+    Delete every file in file_paths
+    Prune empty parent dirs, but:
+        - never past stop_at
+        - at most max_up levels
+        - never remove stop_at itself
+    """
+
+    if not file_paths:
+        return
+
+    if stop_at is None:
+        # deepest common parent of all files
+        stop_at = os.path.commonpath(file_paths)
+
+    stop_at = os.path.abspath(stop_at)
+
+    # ---------- pass 1: delete & record candidate dirs ----------
+    prune_these = set()
     for file_path in file_paths:
-        if os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except Exception as e:
-                log.error("Error removing file {}: {}".format(file_path, e))
-    
-    # Remove empty directories
-    for dir_path in set(os.path.dirname(p) for p in file_paths):
-        if os.path.exists(dir_path) and not os.listdir(dir_path):
-            try:
-                os.rmdir(dir_path)
-                # log.info("Removed empty directory: {}".format(dir_path))
-            except Exception as e:
-                log.error("Error removing directory {}: {}".format(dir_path, e))
+        try:
+            os.remove(file_path)
+        except OSError:
+            pass
+
+        # climb up to max_up collecting dirs beneath stop_at
+        current = os.path.dirname(file_path)
+        hops = 0
+        while hops < max_up and os.path.commonpath([stop_at, current]) == stop_at:
+            prune_these.add(current)
+            if current == stop_at:
+                break
+            current = os.path.dirname(current)
+            hops += 1
+
+    # ---------- pass 2: bottom-up prune just those dirs ----------
+    for dir in sorted(prune_these, key=lambda p: p.count(os.sep), reverse=True):
+        if os.path.samefile(dir, stop_at):
+            continue            # never delete the anchor
+        try:
+            os.rmdir(dir)         # succeeds only if empty
+        except OSError:
+            pass                # not empty, leave it
 
 
 def generateTimelapseFromFrameBlocks(frame_blocks,
@@ -392,6 +414,7 @@ def generateTimelapseFromFrameBlocks(frame_blocks,
 
         mp4_path, json_path = generateTimelapseFromFrames(
             image_files=block,
+            frames_root=frames_root,
             video_path=mp4_path_in,
             fps=fps,
             base_crf=base_crf,
@@ -406,6 +429,7 @@ def generateTimelapseFromFrameBlocks(frame_blocks,
 
 
 def generateTimelapseFromDir(dir_path,
+                             frames_root=None,
                              video_path=None,
                              fps=30,
                              base_crf=25,
@@ -444,6 +468,7 @@ def generateTimelapseFromDir(dir_path,
         # 3 – delegate to the frame-streamer ------------------------------------
         return generateTimelapseFromFrames(
             image_files=img_paths,
+            frames_root=frames_root,
             video_path=video_path,
             fps=fps,
             base_crf=base_crf,
@@ -454,6 +479,7 @@ def generateTimelapseFromDir(dir_path,
 
 
 def generateTimelapseFromFrames(image_files,
+                                frames_root,
                                 video_path,
                                 fps=30,
                                 base_crf=25,
@@ -467,11 +493,13 @@ def generateTimelapseFromFrames(image_files,
         image_files: [list] List of image file paths.
         video_path: [str] Output path for the generated video.
         fps: [int] Frames per second for the output video.
-        base_crf: [int] Base Constant Rate Factor for video compression. Used as is for color video and increased
-                    by 2 for grayscale.
+        base_crf: [int] Base Constant Rate Factor for video compression.
+                    Used as is for color video and increased by 2 for grayscale.
         cleanup_mode: [str] Cleanup mode after video creation ('none', 'delete', 'tar').
         compression: [str] Compression method for tar ('bz2', 'gz').
-        use_color: [bool] Whether to create a color video (True) or grayscale video (False).
+        use_color: [bool] Whether to create a color video if source is in color (True) or
+                    grayscale video (False) even if source is in color. Grayscale is always used
+                    for monochrome source images.
     Returns
         (video_path, json_path) on success, (None, None) on failure.
     """
@@ -692,7 +720,7 @@ def generateTimelapseFromFrames(image_files,
         
             # Handle cleanup based on specified mode
             if cleanup_mode == 'delete':
-                deleteFilesAndEmptyDirs(image_files)
+                deleteFilesAndEmptyDirs(image_files, stop_at=frames_root)
 
             elif cleanup_mode == 'tar':
                 try:
@@ -727,7 +755,7 @@ def generateTimelapseFromFrames(image_files,
                         log.info("Archive created successfully at: {}".format(tar_path))
                         if remove_source:
                             # Remove source files if archive creation was successful
-                            deleteFilesAndEmptyDirs(image_files)
+                            deleteFilesAndEmptyDirs(image_files, stop_at=frames_root)
                             log.info("Removed source files after archiving.")
                     else:
                         log.warning("Archive creation or verification failed. Keeping original directory.")
