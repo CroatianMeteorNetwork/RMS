@@ -13,7 +13,6 @@
 # Usage: sudo ./Scripts/ToggleCacheMode.sh
 
 CACHE_FILE_BASE="/sys/block"
-RC_LOCAL="/etc/rc.local"
 
 # Check for sudo/root privileges
 if [[ $EUID -ne 0 ]]; then
@@ -88,8 +87,7 @@ case "$MODE_CHOICE" in
         ;;
 esac
 
-# Apply the cache mode using `tee`
-echo "$MODE" | sudo tee "$CACHE_FILE"
+printf "%s\n" "$MODE" > "$CACHE_FILE"
 if [[ $? -eq 0 ]]; then
     echo "Cache mode set to '$MODE' for $DEVICE."
 else
@@ -97,33 +95,32 @@ else
     exit 1
 fi
 
-# Make the change persistent
-if [[ -w $RC_LOCAL ]]; then
-    echo "Configuring $RC_LOCAL for persistence..."
-    
-    # Add or update the command in /etc/rc.local
-    sed -i '/write_cache/d' $RC_LOCAL 2>/dev/null
-    sed -i '/exit 0/d' $RC_LOCAL
-    echo "echo \"$MODE\" | sudo tee \"$CACHE_FILE\"" >> $RC_LOCAL
-    echo "exit 0" >> $RC_LOCAL
-    chmod +x $RC_LOCAL
+# Make the change persistent using a systemd oneshot service
+SERVICE_PATH="/etc/systemd/system/write-cache@${DEVICE}.service"
 
-    # Enable the rc-local service
-    systemctl enable rc-local
-    systemctl start rc-local
+cat > "$SERVICE_PATH" <<EOF
+[Unit]
+Description=Set write-cache mode for %i
+ConditionPathExists=$CACHE_FILE
+After=local-fs.target
 
-    echo "Persistence added to $RC_LOCAL and service enabled."
-else
-    echo "Error: Cannot write to $RC_LOCAL. Check permissions."
-    exit 1
-fi
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'printf "%s\n" "$MODE" > $CACHE_FILE'
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now "write-cache@${DEVICE}.service"
 
 # Final verification
-echo "Verifying persistence configuration..."
-if systemctl is-enabled rc-local >/dev/null 2>&1; then
-    echo "rc-local service is enabled."
+echo "Verifying persistence configuration (systemd)..."
+if systemctl is-enabled "write-cache@${DEVICE}.service" >/dev/null 2>&1; then
+    echo "write-cache service is enabled."
 else
-    echo "Failed to enable rc-local service. Check systemctl logs for more details."
+    echo "Failed to enable write-cache service. Check systemctl logs for more details."
     exit 1
 fi
 
