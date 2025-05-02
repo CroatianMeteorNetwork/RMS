@@ -792,7 +792,7 @@ def parse(path, strict=True):
         parser = RawConfigParser()
 
 
-    parser.read(path)
+    parser.read(path, encoding='utf-8')
 
 
     # Remove inline comments
