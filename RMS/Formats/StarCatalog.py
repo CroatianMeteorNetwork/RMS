@@ -17,6 +17,8 @@ except ImportError:
 import numpy as np
 
 from RMS.Decorators import memoizeSingle
+from RMS.Misc import RmsDateTime
+from datetime import datetime
 
 
 def downloadCatalog(url, dir_path, file_name):
@@ -177,7 +179,13 @@ def loadGaiaCatalog(dir_path, file_name, lim_mag=None):
 
 
 @memoizeSingle
-def loadGMNStarCatalog(file_path, years_from_J2000=0, lim_mag=None, mag_band_ratios=None, catalog_file=''):
+def loadGMNStarCatalog(file_path,
+                       years_from_J2000=0,
+                       lim_mag=None,
+                       mag_band_ratios=None,
+                       catalog_file='',
+                       additional_fields=None
+                       ):
     """
     Reads in the GMN Star Catalog from a compressed binary file, applying proper motion correction,
     magnitude limiting, and synthetic magnitude computation. Adjusts the RA/Dec positions to the J2000 epoch.
@@ -191,6 +199,10 @@ def loadGMNStarCatalog(file_path, years_from_J2000=0, lim_mag=None, mag_band_rat
         mag_band_ratios: [list] Relative contributions of photometric bands [B, V, R, I]
             to compute synthetic magnitudes (default: None).
         catalog_file: [str] Name of the catalog file (default: ''). Used for caching purposes.
+        additional_fields: [list or str] Optional. List of extra column names to include in the output,
+            or "all" to return all available columns. **If any requested name is not present
+            in the catalog dtype, the function now raises `ValueError` to prevent column
+            mis‑alignment.**
 
     Returns:
         filtered_data: [ndarray] A filtered and corrected catalog contained as a structured NumPy array 
@@ -289,13 +301,75 @@ def loadGMNStarCatalog(file_path, years_from_J2000=0, lim_mag=None, mag_band_rat
     corrected_dec = catalog_data['dec'] + catalog_data['pmdec']*time_elapsed*mas_to_deg
 
     # Step 5: Prepare the filtered data for output
-    filtered_data = np.zeros((len(catalog_data), 3), dtype=np.float64)
-    filtered_data[:, 0] = corrected_ra  # RA
-    filtered_data[:, 1] = corrected_dec  # Dec
-    filtered_data[:, 2] = synthetic_mag  # Magnitude
 
-    # Step 6: Sort the filtered data by descending declination
-    filtered_data = filtered_data[np.argsort(filtered_data[:, 1])[::-1]]
+    if not additional_fields:
+        # Default: just ra, dec, mag
+        filtered_data = np.zeros((len(catalog_data), 3), dtype=np.float64)
+        filtered_data[:, 0] = corrected_ra  # RA
+        filtered_data[:, 1] = corrected_dec  # Dec
+        filtered_data[:, 2] = synthetic_mag  # Magnitude
+    else:
+        # ------------------------------------------------------------------
+        # Resolve the list of extra columns the caller requested
+        # ------------------------------------------------------------------
+        if additional_fields == 'all':
+            requested = list(catalog_data.dtype.names)
+        else:
+            requested = list(additional_fields)
+
+        # Mandatory coordinates & synthetic magnitude
+        mandatory = ['ra', 'dec']
+        if 'mag' not in requested:
+            requested.append('mag')
+        requested = mandatory + requested  # prepend coords for readability
+
+        # Drop duplicates while preserving order
+        seen = set()
+        requested = [f for f in requested if not (f in seen or seen.add(f))]
+
+        # Validate field names against the catalog dtype
+        valid_names = set(catalog_data.dtype.names)
+        unknown = [f for f in requested if f not in valid_names
+                   and f not in ('ra', 'dec', 'mag')]
+
+        if unknown:
+            raise ValueError(
+                f"loadGMNStarCatalog: unknown field name(s): {', '.join(unknown)}"
+            )
+
+        requested = [f for f in requested
+                     if (f in valid_names) or (f in ('ra', 'dec', 'mag'))]
+
+        # Build dtype: reuse catalog dtypes where possible
+        dtype_list = []
+        for fld in requested:
+            if fld == 'ra':
+                dtype_list.append(('ra', 'f8'))
+            elif fld == 'dec':
+                dtype_list.append(('dec', 'f8'))
+            elif fld == 'mag':
+                dtype_list.append(('mag', 'f4'))
+            else:
+                dtype_list.append((fld, catalog_data.dtype[fld]))
+
+        struct_data = np.zeros(len(catalog_data), dtype=dtype_list)
+        for fld in struct_data.dtype.names:
+            if fld in ('ra', 'dec', 'mag'):
+                if fld == 'ra':
+                    struct_data['ra'] = corrected_ra
+                elif fld == 'dec':
+                    struct_data['dec'] = corrected_dec
+                elif fld == 'mag':
+                    struct_data['mag'] = synthetic_mag.astype('f4')
+            else:
+                struct_data[fld] = catalog_data[fld]
+        # Sort the structured array by descending declination
+        struct_data = struct_data[np.argsort(struct_data['dec'])[::-1]]
+        filtered_data = struct_data
+
+    # Step 6: Sort the filtered data by descending declination (already sorted above if struct_data)
+    if not additional_fields:
+        filtered_data = filtered_data[np.argsort(filtered_data[:, 1])[::-1]]
 
     # Step 7: Generate the magnitude band string
     if mag_band_ratios is None:
@@ -320,7 +394,8 @@ def loadGMNStarCatalog(file_path, years_from_J2000=0, lim_mag=None, mag_band_rat
     return filtered_data, mag_band_string, tuple(mag_band_ratios or [0.0, 1.0, 0.0, 0.0])
 
 
-def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None, mag_band_ratios=None):
+def readStarCatalog(dir_path, file_name, years_from_J2000=None, lim_mag=None,
+                   mag_band_ratios=None, additional_fields=None):
     """ Import the star catalog into a numpy array.
     
     Arguments:
@@ -335,6 +410,8 @@ def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None, mag_b
         mag_band_ratios: [list] A list of relative contributions of every photometric band (BVRI) to the 
             final camera-bandpass magnitude. The list should contain 4 numbers, one for every band: 
                 [B, V, R, I].
+        additional_fields: [list | str | None] Extra GMN column names to return, or "all".
+            Passed straight through to `loadGMNStarCatalog`. Ignored for other catalog types.
     
     Return:
         (star_data, mag_band_string): 
@@ -362,6 +439,10 @@ def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None, mag_b
 
     # Use the GMN star catalog
     if "GMN_StarCatalog".lower() in file_name.lower():
+        if not years_from_J2000:
+            delta = RmsDateTime.utcnow() - datetime(2000, 1, 1, 12, 0, 0)
+            years_from_J2000 = delta.days/365.25
+            print("Using the current date for proper motion correction: ", years_from_J2000)
 
         # Define catalog names for the bright and faint stars
         gmn_starcat_lm9 = "GMN_StarCatalog_LM9.0.bin"
@@ -373,6 +454,10 @@ def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None, mag_b
         # Ensure mag_band_ratios is a tuple for caching
         if (mag_band_ratios is not None) and isinstance(mag_band_ratios, list):
             mag_band_ratios = tuple(mag_band_ratios)
+
+        # --- make additional_fields hashable so memoizeSingle works ----------
+        if (additional_fields is not None) and isinstance(additional_fields, list):
+            additional_fields = tuple(additional_fields)
 
         # Determine which catalog file to use based on the limiting magnitude
         if (lim_mag is not None) and (lim_mag <= 9.0):
@@ -411,7 +496,8 @@ def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None, mag_b
             years_from_J2000=years_from_J2000, 
             lim_mag=lim_mag, 
             mag_band_ratios=mag_band_ratios,
-            catalog_file=catalog_to_load
+            catalog_file=catalog_to_load,
+            additional_fields=additional_fields
         )
 
 
