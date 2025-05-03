@@ -269,23 +269,20 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 def archiveFrameTimelapse(frames_root,
                           video_json_pairs,
                           remove_source=False):
-    """
-    Tar-up each (mp4, json) pair **without compression**.
+    """Tar-up each (mp4, json) pair **without compression**.
 
-    Parameters
-    ----------
-    frames_root       : str
-        Directory where the archives will be placed.
-    video_json_pairs  : list[tuple[str, str] | None]
-        Output from generateTimelapseFromFrameBlocks; each element is either
-        (mp4_path, json_path) or None if that block failed.
-    remove_source     : bool
-        If True, delete the mp4 and json after a verified archive is created.
+    Arguments:
+        frames_root: [str] Directory where the archives will be placed.
+        video_json_pairs: [list[tuple[str, str] | None]] Output from
+            generateTimelapseFromFrameBlocks; each element is either
+            (mp4_path, json_path) or None if that block failed.
 
-    Returns
-    -------
-    list[str]
-        Paths of archives successfully created.
+    Keyword arguments:
+        remove_source: [bool] If True, delete the mp4 and json after a verified
+            archive is created. False by default.
+
+    Return:
+        archive_paths: [list[str]] Paths of archives successfully created.
     """
     archive_paths = []
 

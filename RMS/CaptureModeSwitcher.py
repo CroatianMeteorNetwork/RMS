@@ -153,20 +153,22 @@ def captureModeSwitcher(config, daytime_mode, camera_mode_switch_trigger):
 
 
 def lastNightToDaySwitch(config, whenUtc=None):
+    """Return the UTC timestamp of the most recent night-to-day switch.
+
+    Arguments:
+        config: [Config] RMS configuration object; must expose latitude,
+            longitude and elevation attributes.
+
+    Keyword arguments:
+        whenUtc: [datetime] Naive UTC time used as the upper bound of the
+            search window. None by default, which means the current
+            ``RmsDateTime.utcnow()`` is used.
+
+    Return:
+        last_switch: [datetime] UTC time at which the Sun last rose above
+            ``SWITCH_HORIZON_DEG`` before *whenUtc* (or the preceding midnight
+            if the Sun is always up/down at that location).
     """
-    Return the UTC datetime of the most recent night-to-day switch
-    (Sun rose above SWITCH_HORIZON_DEG) that occurred before *whenUtc*.
-
-    Parameters
-    ----------
-    config  : RMS config object (must provide latitude, longitude, elevation)
-    whenUtc : optional datetime (naive UTC). If None, uses RmsDateTime.utcnow().
-
-    Returns
-    -------
-    datetime : timestamp of the last switch, or the fallback midnight.
-    """
-
     if whenUtc is None:
         whenUtc = RmsDateTime.utcnow()
 

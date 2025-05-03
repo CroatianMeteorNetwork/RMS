@@ -672,15 +672,18 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
 
 def cleanupTempArtifacts(config):
-    """Remove transient artifacts left by interrupted timelapse builds.
+    """Remove transient artefacts left by interrupted timelapse builds.
 
-    The routine walks the whole *frame_dir* tree and removes:
-        • any directory named ``temp_raw_img_dir``
-        • any ``filelist.txt`` file
-        • any file whose name contains the substring ``_temp``
+    The routine walks the entire *frame_dir* tree and removes:
+        - any directory named ``temp_raw_img_dir``
+        - any ``filelist.txt`` file
+        - any file whose name contains the substring ``_temp``
 
     Arguments:
-        config: [Config obj]
+        config: [Config] Loaded configuration object.
+
+    Return:
+        None
     """
     # Get the path to the frame directory
     frameDir = os.path.join(config.data_dir, config.frame_dir)
@@ -717,23 +720,23 @@ def cleanupTempArtifacts(config):
                     log.warning("Failed to remove %s: %s", tmpFile, exc)
 
 
-def processFrames(config):
-    """
-    Convert saved frame files into timelapse videos and archive them.
+def processFramesFiles(config):
+    """Convert saved frame files into timelapse videos and archive them.
 
-    Returns
-    -------
-    list[str] | None
-        Paths to the .tar archives produced, or None if timelapse generation
-        failed before archiving.
+    Arguments:
+        config: [Config] Loaded configuration object.
+
+    Return:
+        archive_paths: [list[str] | None] Paths to the .tar archives produced,
+            or None if timelapse generation failed.
     """
 
-    # ── 1. house-keeping ──────────────────────────────────────────────────
+    # -- 1. house-keeping ----------------------------------------------------
     cleanupTempArtifacts(config)
 
     frame_dir = os.path.join(config.data_dir, config.frame_dir)
 
-    # ── 2. build timelapses ───────────────────────────────────────────────
+    # -- 2. build timelapses -------------------------------------------------
     log.info("Generating timelapse(s) from saved frames...")
 
     try:
@@ -750,7 +753,7 @@ def processFrames(config):
         log.error("Timelapse generation failed: %s", exc, exc_info=True)
         return None                                          # bail early
 
-    # ── 3. archive ────────────────────────────────────────────────────────
+    # -- 3. archive ----------------------------------------------------------
     log.info("Archiving frame timelapses in %s", frame_dir)
 
     archive_paths = archiveFrameTimelapse(

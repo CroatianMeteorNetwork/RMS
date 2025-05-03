@@ -48,7 +48,7 @@ from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
 from RMS.Formats.FFfile import validFFName
 from RMS.Misc import mkdirP, RmsDateTime
 from RMS.QueuedPool import QueuedPool
-from RMS.Reprocess import getPlatepar, processNight, processFrames
+from RMS.Reprocess import getPlatepar, processNight, processFramesFiles
 from RMS.RunExternalScript import runExternalScript
 from RMS.UploadManager import UploadManager
 from RMS.EventMonitor import EventMonitor
@@ -677,15 +677,15 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             # frames -> timelapse(s) -> archive(s) -> upload
             if config.timelapse_generate_from_frames:
                 try:
-                    log.info("Running processFrames() ...")
-                    archive_paths = processFrames(config)          # may return None
-                    log.info("processFrames() done.")
+                    log.info("Running processFramesFiles() ...")
+                    archive_paths = processFramesFiles(config)          # may return None
+                    log.info("processFramesFiles() done.")
 
                 except Exception:
-                    log.exception("processFrames() threw an exception")
+                    log.exception("processFramesFiles() threw an exception")
                     archive_paths = None
 
-                # ── enqueue & upload ─────────────────────────────────────────────────
+                # -- enqueue & upload -----------------------------------------
                 if archive_paths and upload_manager:
                     try:
                         log.info("Adding file to upload list: %s", archive_paths)

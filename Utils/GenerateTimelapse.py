@@ -28,16 +28,22 @@ log = getLogger("logger")
 #  Timelapse generation from FF files (meteors)
 # --------------------------------------------------------------------
 def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, hires=False):
-    """ Generate an High Quality MP4 movie from FF files. 
-    
+    """Generate a high-quality MP4 movie from FF files.
+
     Arguments:
-        dir_path: [str] Path to the directory containing the FF files.
+        dir_path: [str] Directory that contains the FF files.
 
     Keyword arguments:
-        keep_images: [bool] Keep the temporary images. False by default.
-        fps: [int] Frames per second. 30 by default.
-        output_file: [str] Output file name. If None, the file name will be the same as the directory name.
-        hires: [bool] Make a higher resolution timelapse. False by default.
+        keep_images: [bool] Retain the temporary JPGs after encoding.
+            False by default.
+        fps: [int] Frames per second; 30 by default.
+        output_file: [str] Custom output filename. If None, the basename of
+            *dir_path* is used. None by default.
+        hires: [bool] Produce a higher-resolution movie (lower CRF). False by
+            default.
+
+    Return:
+        None
     """
 
     # Set the default FPS if not given
@@ -194,7 +200,7 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
 #  Timelapse generation from image files (Contrails)
 # --------------------------------------------------------------------
 
-#  Output-naming helpers – one place to tweak naming scheme
+#  Output-naming helpers - one place to tweak naming scheme
 FNAME_TEMPLATE = (
     "{station}_{doy_start:03d}_{start:%Y%m%d-%H%M%S}_to_{end:%Y%m%d-%H%M%S}_{suffix}"
 )
@@ -221,7 +227,17 @@ ONE_DAY = timedelta(days=1)
 
 
 def _buildName(station, t0, t1, suffix):
-    """Return the final basename according to FNAME_TEMPLATE."""
+    """Return the timelapse base filename derived from start/end timestamps.
+
+    Arguments:
+        station: [str] Station identifier.
+        t0: [datetime] UTC timestamp of the first frame in the block.
+        t1: [datetime] UTC timestamp of the last frame in the block.
+        suffix: [str] Filename suffix such as ``frames_timelapse.mp4``.
+
+    Return:
+        fname: [str] Basename (no directory) built from *FNAME_TEMPLATE*.
+    """
     return FNAME_TEMPLATE.format(
         station=station,
         doy_start=t0.timetuple().tm_yday,
@@ -233,7 +249,14 @@ def _buildName(station, t0, t1, suffix):
 
 
 def _timestampFromName(fname):
-    """Parse the UTC timestamp in the filename and return a *naïve* datetime."""
+    """Extract the UTC timestamp embedded in the filename.
+
+    Arguments:
+        fname: [str] Image filename.
+
+    Return:
+        ts: [datetime] Naive datetime parsed from the name (no timezone).
+    """
     m = IMAGE_PATTERN.match(os.path.basename(fname))
     if not m:
         raise ValueError("Bad filename: {}".format(fname))
@@ -242,20 +265,33 @@ def _timestampFromName(fname):
 
 
 def _modeFromName(fname):
+    """Return '' (unknown), 'd' (day) or 'n' (night) encoded in the filename.
+
+    Arguments:
+        fname: [str] Image filename.
+
+    Return:
+        mode: [str] One of '', 'd', 'n' in lower-case.
+    """
     m = IMAGE_PATTERN.match(os.path.basename(fname))
     return (m.group("suffix") or '').lower()           # '', 'd', or 'n'
 
 
 def _parse(fname):
-    """
-    Return (station, datetime) extracted from an image filename,
+    """Return *(station, datetime)* extracted from an image filename.
+
+    Arguments:
+        fname: [str] Image filename.
+
+    Return:
+        station: [str] Station identifier.
+        dt: [datetime] UTC timestamp (naive) truncated to whole seconds.
     """
     m = IMAGE_PATTERN.match(os.path.basename(fname))
     if not m:
         raise ValueError(f"Cannot parse name: {fname}")
 
     station = m.group("station")
-
     # Ignore milliseconds here; keep them if you ever need sub-second precision
     dt = datetime.strptime(m.group("date") + m.group("time"),
                            "%Y%m%d%H%M%S")
@@ -263,14 +299,16 @@ def _parse(fname):
 
 
 def listImageBlocksBefore(cutoff, dir_path):
-    """
-    cutoff   : naïve datetime assumed to be in UTC
-    dir_path : directory tree to walk
+    """Group images into chronological, same-mode blocks before a cutoff.
 
-    Returns  : list[list[str]] - blocks that are
-               • consecutive in time
-               • homogeneous in mode ('', 'd', 'n')
-               • never longer than 24 h (split only if >24 h)
+    Arguments:
+        cutoff: [datetime] Naive UTC timestamp; images >= cutoff are ignored.
+        dir_path: [str] Root directory to search (walks sub-dirs recursively).
+
+    Return:
+        blocks: [list[list[str]]] Each sub-list is a consecutive sequence of
+            image paths that share capture mode and never span more than
+            24 h.
     """
     # 1. collect .jpg / .png whose embedded time < cutoff -------------------
     paths = []
@@ -289,11 +327,11 @@ def listImageBlocksBefore(cutoff, dir_path):
     # 2. chronological sort -------------------------------------------------
     paths.sort(key=_timestampFromName)
 
-    # 3. first pass – break on mode changes ---------------------------------
+    # 3. first pass - break on mode changes ---------------------------------
     prelim_blocks, cur_block, cur_mode = [], [], None
     for path in paths:
         mode = _modeFromName(path)
-        if cur_block and mode != cur_mode:          # mode switch ⇒ new block
+        if cur_block and mode != cur_mode:          # mode switch - new block
             prelim_blocks.append(cur_block)
             cur_block = []
         cur_block.append(path)
@@ -301,13 +339,13 @@ def listImageBlocksBefore(cutoff, dir_path):
     if cur_block:
         prelim_blocks.append(cur_block)
 
-    # 4. second pass – split blocks that run > 24 h at each UTC midnight ----
+    # 4. second pass - split blocks that run > 24 h at each UTC midnight ----
     final_blocks = []
     for block in prelim_blocks:
         start_ts = _timestampFromName(block[0])
         end_ts = _timestampFromName(block[-1])
 
-        if end_ts - start_ts < ONE_DAY:             # already ≤24 h
+        if end_ts - start_ts < ONE_DAY:             # already <=24 h
             final_blocks.append(block)
             continue
 
@@ -330,12 +368,19 @@ def listImageBlocksBefore(cutoff, dir_path):
 
 
 def deleteFilesAndEmptyDirs(file_paths, stop_at=None, max_up=3):
-    """
-    Delete every file in file_paths
-    Prune empty parent dirs, but:
-        - never past stop_at
-        - at most max_up levels
-        - never remove stop_at itself
+    """Delete files then prune empty parent directories.
+
+    Arguments:
+        file_paths: [list[str]] Paths to delete.
+
+    Keyword arguments:
+        stop_at: [str | None] Directory that acts as an upper boundary when
+            pruning. Defaults to the deepest common parent of *file_paths*.
+        max_up: [int] Maximum directory levels to climb above each file before
+            stopping the prune. 3 by default.
+
+    Return:
+        None
     """
 
     if not file_paths:
@@ -382,20 +427,24 @@ def generateTimelapseFromFrameBlocks(frame_blocks,
                                      cleanup_mode='none',
                                      compression='bz2',
                                      use_color=True):
-    """
-    Create one timelapse per block and collect the resulting paths.
+    """Create one timelapse per block and return their paths.
 
-    Parameters
-    ----------
-    frame_blocks : list[list[str]]
-        Each sub-list is a chronologically ordered set of image paths.
-    frames_root  : str
-        Directory where the timelapse files will be written.
+    Arguments:
+        frame_blocks: [list[list[str]]] Chronologically ordered image sets.
+        frames_root: [str] Directory where output files will be written.
 
-    Returns
-    -------
-    list[tuple[str, str] | None]
-        (mp4_path, json_path) per block, or None if that block failed.
+    Keyword arguments:
+        fps: [int] Frames per second; 30 by default.
+        base_crf: [int] Base CRF for H.264 encoding; 25 by default.
+        cleanup_mode: [str] Post-encode cleanup: 'none', 'delete', or 'tar'.
+            'none' by default.
+        compression: [str] Tar compression when *cleanup_mode* == 'tar';
+            'bz2' or 'gz'. 'bz2' by default.
+        use_color: [bool] Encode colour if possible. True by default.
+
+    Return:
+        results: [list[tuple[str, str] | None]] One *(mp4_path, json_path)*
+            per block, or *None* if that block failed.
     """
     results = []
     for block in frame_blocks:
@@ -437,14 +486,25 @@ def generateTimelapseFromDir(dir_path,
                              compression="bz2",
                              use_color=True,
                              ):
-        """
-        Build a single timelapse from *all* images under *dir_path*.
+    """Build a single timelapse from every image under *dir_path*.
 
-        Returns
-        -------
-        (video_path, json_path) on success, (None, None) on failure.
-        """
-        # 1 – gather images -----------------------------------------------------
+    Arguments:
+        dir_path: [str] Root directory containing the images.
+
+    Keyword arguments:
+        frames_root: [str | None] Override for the output directory.
+        video_path: [str | None] Explicit output path; constructed if None.
+        fps: [int] Frames per second; 30 by default.
+        base_crf: [int] Base CRF for H.264; 25 by default.
+        cleanup_mode: [str] Post-encode action: 'none', 'delete', or 'tar'.
+        compression: [str] Tar compression when *cleanup_mode* == 'tar'.
+        use_color: [bool] Encode colour if possible. True by default.
+
+    Return:
+        (video_path, json_path): [tuple[str, str] | (None, None)]
+            Paths on success, (None, None) on failure.
+    """
+        # 1 - gather images -----------------------------------------------------
         img_paths = []
         for root, _, files in os.walk(dir_path):         # use os.listdir(dir_path) if
             for f in files:                              # you *don't* want recursion
@@ -457,7 +517,7 @@ def generateTimelapseFromDir(dir_path,
 
         img_paths.sort(key=_timestampFromName)
 
-        # 2 – build output paths ------------------------------------------------
+        # 2 - build output paths ------------------------------------------------
         station, t0 = _parse(img_paths[0])
         _,       t1 = _parse(img_paths[-1])
 
@@ -465,7 +525,7 @@ def generateTimelapseFromDir(dir_path,
             video_name = _buildName(station, t0, t1, MP4_SUFFIX)
             video_path = os.path.join(dir_path, video_name)
 
-        # 3 – delegate to the frame-streamer ------------------------------------
+        # 3 - delegate to the frame-streamer ------------------------------------
         return generateTimelapseFromFrames(
             image_files=img_paths,
             frames_root=frames_root,
@@ -486,22 +546,25 @@ def generateTimelapseFromFrames(image_files,
                                 cleanup_mode='none',
                                 compression='bz2',
                                 use_color=True):
-    """
-    Generate a timelapse video using streaming to avoid temporary storage.
-    
-    Parameters:
-        image_files: [list] List of image file paths.
-        video_path: [str] Output path for the generated video.
-        fps: [int] Frames per second for the output video.
-        base_crf: [int] Base Constant Rate Factor for video compression.
-                    Used as is for color video and increased by 2 for grayscale.
-        cleanup_mode: [str] Cleanup mode after video creation ('none', 'delete', 'tar').
-        compression: [str] Compression method for tar ('bz2', 'gz').
-        use_color: [bool] Whether to create a color video if source is in color (True) or
-                    grayscale video (False) even if source is in color. Grayscale is always used
-                    for monochrome source images.
-    Returns
-        (video_path, json_path) on success, (None, None) on failure.
+    """Stream images into ffmpeg and write a timelapse without temp JPGs.
+
+    Arguments:
+        image_files: [list[str]] Ordered list of image paths.
+        frames_root: [str] Directory used when archiving or deleting frames.
+        video_path: [str] Destination .mp4 path.
+
+    Keyword arguments:
+        fps: [int] Frames per second; 30 by default.
+        base_crf: [int] Base CRF for H.264; 25 by default.
+        cleanup_mode: [str] What to do with source frames: 'none', 'delete',
+            or 'tar'. 'none' by default.
+        compression: [str] Tar compression when cleanup_mode == 'tar';
+            'bz2' or 'gz'. 'bz2' by default.
+        use_color: [bool] Encode colour if possible. True by default.
+
+    Return:
+        (video_path, json_path): [tuple[str, str] | (None, None)]
+            Output paths on success, (None, None) on failure.
     """
     # Validate input parameters
     image_files = list(image_files)
@@ -796,9 +859,13 @@ def generateTimelapseFromFrames(image_files,
 
 
 def main():
-    """
-    Test function for the generateTimelapseFromFrames function.
-    This allows testing the function with different parameters from the command line.
+    """CLI harness for manual timelapse generation.
+
+    Arguments:
+        None
+
+    Return:
+        exit_code: [int] 0 on success, non-zero on failure.
     """
     import argparse
     import os

@@ -852,18 +852,21 @@ class BufferedCapture(Process):
 
 
     def _busPoller(self):
-        """
-        Drain GStreamer's bus so its internal queue never overflows.
+        """Poll the GStreamer bus and drain queued messages.
 
         Runs in a background daemon thread:
+                - Wakes every 5 s via ``bus.timed_pop_filtered``.
+                - Logs any ``ERROR`` or ``WARNING`` message for visibility.
+                - Silently discards all other message types to keep the queue small.
 
-        * Wakes once a second (`timed_pop_filtered` timeout).
-        * Removes ERROR and WARNING messages, logging them for visibility.
-        * Silently discards all other message types (they were only clogging
-        the queue).
+        The loop exits when ``self.pipeline`` becomes ``None`` inside ``releaseResources``.
 
-        The loop exits automatically when `self.pipeline` is set to `None`
-        in `releaseResources()`.
+        Arguments:
+            None
+
+        Return:
+            None
+
         """
         if not GST_IMPORTED:
             return
@@ -1071,11 +1074,11 @@ class BufferedCapture(Process):
                     # and/or perform camera mode change
 
                     # ------------------------------------------------------------------
-                    # One‑time camera initialization
+                    # One-time camera initialization
                     # ------------------------------------------------------------------
                     root_dir  = self.config.rms_root_dir
 
-                    # e.g.  “XX0001.camera_init.done”
+                    # e.g.  "XX0001.camera_init.done"
                     flag_file = os.path.join(root_dir, "{}.camera_init.done".format(self.config.stationID))
 
                     if self.config.initialize_camera and not os.path.exists(flag_file):

@@ -777,11 +777,15 @@ def obfuscatePassword(url):
 
 
 def _portableCommonpath(paths):
-    """
-    Lightweight back-port of os.path.commonpath for 2.7 / early 3.x.
+    """Return the longest common sub-path shared by all given paths.
 
-    * On 3.5+ we just defer to the real thing.
-    * On 2.7/3.4 we mimic its behaviour enough for archive paths.
+    Arguments:
+        paths: [list[str]] Sequence (list, tuple, etc.) of file-system
+            paths to compare.
+
+    Return:
+        common_path: [str] The directory prefix common to every element in
+            *paths*, or an empty string if none exists.
     """
     try:
         return os.path.commonpath(paths)          # Py 3.5+
@@ -805,31 +809,37 @@ def _portableCommonpath(paths):
 
 
 def tarWithProgress(source_dir, tar_path, compression='bz2', remove_source=False, file_list=None):
-    """Create a tar archive with progress reporting based on file count, verify it, and optionally remove source.
-    
-    Args:
-        source_dir : [str or None] Directory whose contents will be archived. Ignored whe *file_list* is supplied.
-        tar_path : [str] Full path to the output archive.
-        compression : [{'bz2', 'gz'}, optional] Compression algorithm. Default is **'bz2'**.
-        remove_source : [bool, optional]
-            If *True* and the archive verifies successfully, delete
-            *source_dir*. (Ignored when *file_list* mode is used.)
-        file_list : [list(str) or None, optional]
-            Explicit list of file paths to archive. When given, the function
-            skips the directory walk and stores each file relative to the
-            deepest common parent directory.
-        
-    Returns:
-        bool: True if archive was created and verified successfully, False otherwise
+    """Create a tar archive with progress feedback, verify it, and (optionally) delete the sources.
+
+    Arguments:
+        source_dir: [str | None] Directory whose entire contents will be
+            archived. Ignored when *file_list* is supplied.
+        tar_path: [str] Full path (including extension) where the archive
+            will be written.
+
+    Keyword arguments:
+        compression: [str] Compression algorithm: 'bz2' or 'gz'.
+            'bz2' by default.
+        remove_source: [bool] If *True* and *file_list* is *None*, delete
+            *source_dir* after the archive verifies correctly. False by
+            default.
+        file_list: [list[str] | None] Explicit list of file paths to
+            archive. When given, the directory walk is skipped and each
+            file is stored relative to their deepest common parent
+            directory. None by default.
+
+    Return:
+        success: [bool] True if the archive was created **and** verified
+            successfully, False otherwise.
     """
     try:
         # 1. Build list of files ------------------------------------------------
         if file_list is not None:
             files_to_archive = list(file_list)
             if not files_to_archive:
-                log.error("No files given in file_list – nothing to archive")
+                log.error("No files given in file_list - nothing to archive")
                 return False
-            base_dir = _portableCommonpath(files_to_archive)       # ★
+            base_dir = _portableCommonpath(files_to_archive)
         else:
             files_to_archive = [os.path.join(r, f)
                                 for r, _, fs in os.walk(source_dir)
@@ -876,7 +886,7 @@ def tarWithProgress(source_dir, tar_path, compression='bz2', remove_source=False
         with tarfile.open(tar_path, read_mode) as tst:
             archive_files = len(tst.getnames())
             if archive_files < total_files:
-                log.error("Archive verification failed: wanted ≥{} files, found {}".format(
+                log.error("Archive verification failed: wanted >={} files, found {}".format(
                           total_files, archive_files))
                 return False
             log.info("Archive verified successfully: contains {} files".format(

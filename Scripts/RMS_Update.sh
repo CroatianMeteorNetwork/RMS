@@ -278,7 +278,7 @@ install_missing_dependencies() {
     # -----------------------------------------------------------------------------
     # We store system-level dependencies in a separate file (system_packages.txt)
     # so that when RMS_Update pulls new code (including a potentially updated list of packages),
-    # we can read those new dependencies during the same run — no need to run the update
+    # we can read those new dependencies during the same run - no need to run the update
     # script twice. Because the main script is loaded into memory, changing it mid-run
     # won't reload it. But updating this separate file allows us to immediately pick
     # up any added or changed packages without requiring a second pass.
