@@ -504,38 +504,38 @@ def generateTimelapseFromDir(dir_path,
         (video_path, json_path): [tuple[str, str] | (None, None)]
             Paths on success, (None, None) on failure.
     """
-        # 1 - gather images -----------------------------------------------------
-        img_paths = []
-        for root, _, files in os.walk(dir_path):         # use os.listdir(dir_path) if
-            for f in files:                              # you *don't* want recursion
-                if IMAGE_PATTERN.match(f):
-                    img_paths.append(os.path.join(root, f))
+    # 1 - gather images -----------------------------------------------------
+    img_paths = []
+    for root, _, files in os.walk(dir_path):         # use os.listdir(dir_path) if
+        for f in files:                              # you *don't* want recursion
+            if IMAGE_PATTERN.match(f):
+                img_paths.append(os.path.join(root, f))
 
-        if not img_paths:
-            log.warning("generateTimelapseFromDir: no images found in %s", dir_path)
-            return None, None
+    if not img_paths:
+        log.warning("generateTimelapseFromDir: no images found in %s", dir_path)
+        return None, None
 
-        img_paths.sort(key=_timestampFromName)
+    img_paths.sort(key=_timestampFromName)
 
-        # 2 - build output paths ------------------------------------------------
-        station, t0 = _parse(img_paths[0])
-        _,       t1 = _parse(img_paths[-1])
+    # 2 - build output paths ------------------------------------------------
+    station, t0 = _parse(img_paths[0])
+    _,       t1 = _parse(img_paths[-1])
 
-        if video_path is None:
-            video_name = _buildName(station, t0, t1, MP4_SUFFIX)
-            video_path = os.path.join(dir_path, video_name)
+    if video_path is None:
+        video_name = _buildName(station, t0, t1, MP4_SUFFIX)
+        video_path = os.path.join(dir_path, video_name)
 
-        # 3 - delegate to the frame-streamer ------------------------------------
-        return generateTimelapseFromFrames(
-            image_files=img_paths,
-            frames_root=frames_root,
-            video_path=video_path,
-            fps=fps,
-            base_crf=base_crf,
-            cleanup_mode=cleanup_mode,
-            compression=compression,
-            use_color=use_color,
-        )
+    # 3 - delegate to the frame-streamer ------------------------------------
+    return generateTimelapseFromFrames(
+        image_files=img_paths,
+        frames_root=frames_root,
+        video_path=video_path,
+        fps=fps,
+        base_crf=base_crf,
+        cleanup_mode=cleanup_mode,
+        compression=compression,
+        use_color=use_color,
+    )
 
 
 def generateTimelapseFromFrames(image_files,
