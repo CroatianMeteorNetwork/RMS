@@ -6,6 +6,7 @@ from __future__ import absolute_import, division, print_function
 
 import argparse
 import copy
+import datetime
 import os
 import random
 import shutil
@@ -513,17 +514,36 @@ def autoCheckFit(config, platepar, calstars_data, _fft_refinement=False):
     if _fft_refinement:
         log.info('Second ACF run with an updated platepar via FFT phase correlation...')
 
-
-    # Load catalog stars (overwrite the mag band ratios if specific catalog is used)
-    catalog_stars, _, config.star_catalog_band_ratios = StarCatalog.readStarCatalog(config.star_catalog_path, \
-        config.star_catalog_file, lim_mag=config.catalog_mag_limit, \
-        mag_band_ratios=config.star_catalog_band_ratios)
-    
     # Extract the star data and the number of frames in the FF files
     calstars_list, ff_frames = calstars_data
 
     # Dictionary which will contain the JD, and a list of (X, Y, bg_intens, intens) of the stars
     star_dict = starListToDict(config, calstars_data, max_ffs=config.calstars_files_N)
+
+    ts = FFfile.getMiddleTimeFF(calstars_list[0][0], fps=config.fps, ret_milliseconds=True, dt_obj=True)
+
+    J2000 = datetime.datetime(2000, 1, 1, 12, 0, 0)
+
+    # Compute the number of years from J2000
+    years_from_J2000 = (ts - J2000).total_seconds()/(365.25*24*3600)
+    log.info('Loading star catalog with years from J2000: {:.2f}'.format(years_from_J2000))
+
+    # Load catalog stars (overwrite the mag band ratios if specific catalog is used)
+    star_catalog_status = StarCatalog.readStarCatalog(
+        config.star_catalog_path,
+        config.star_catalog_file,
+        years_from_J2000=years_from_J2000,
+        lim_mag=config.catalog_mag_limit,
+        mag_band_ratios=config.star_catalog_band_ratios
+    )
+
+    if not star_catalog_status:
+        log.info("Could not load the star catalog!")
+        log.info(os.path.join(config.star_catalog_path, config.star_catalog_file))
+        return {}
+
+    catalog_stars, _, config.star_catalog_band_ratios = star_catalog_status
+
 
     # There has to be a minimum of 200 FF files for star fitting
     if len(star_dict) < config.calstars_files_N:
