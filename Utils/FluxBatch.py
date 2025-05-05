@@ -15,6 +15,8 @@ import multiprocessing
 import ephem
 import numpy as np
 import scipy
+import scipy.interpolate
+import scipy.signal
 import matplotlib.pyplot as plt
 from matplotlib import scale as mscale
 from cycler import cycler
@@ -74,7 +76,8 @@ class StationPlotParams:
 
 
 class FluxBatchBinningParams(object):
-    def __init__(self, min_meteors=None, min_tap=None, min_bin_duration=None, max_bin_duration=None):
+    def __init__(self, min_meteors=None, min_tap=None, min_bin_duration=None, max_bin_duration=None, 
+                 diurnal_correction=None, diurnal_bandwidth=None):
         """ Container for fluxBatch binning parameters. """
 
         if min_meteors is None:
@@ -96,6 +99,17 @@ class FluxBatchBinningParams(object):
             self.max_bin_duration = 12
         else:
             self.max_bin_duration = max_bin_duration
+
+        if diurnal_correction is None:
+            self.diurnal_correction = False
+        else:
+            self.diurnal_correction = diurnal_correction
+
+        if diurnal_bandwidth is None:
+            self.diurnal_bandwidth = 0.1
+
+        else:
+            self.diurnal_bandwidth = diurnal_bandwidth
 
 
 
@@ -1062,9 +1076,12 @@ def computeBatchFluxParallel(file_data, shower_code, mass_index, ref_ht, bin_dat
         total_summary_population_index
 
 
-def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin_duration=5, ci=0.95, min_meteors=50, 
-    min_tap=2, min_bin_duration=0.5, max_bin_duration=12, compute_single=False, metadata_dir=None, 
-    cpu_cores=1):
+def fluxBatch(
+        config, shower_code, mass_index, dir_params, 
+        ref_ht=-1, atomic_bin_duration=5, ci=0.95, 
+        min_meteors=50, min_tap=2, min_bin_duration=0.5, max_bin_duration=12, 
+        compute_single=False, metadata_dir=None, cpu_cores=1,
+        diurnal_correction=False, diurnal_bandwidth=0.05):
     """ Compute flux by combining flux measurements from multiple stations.
     
     Arguments:
@@ -1092,6 +1109,12 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
         metadata_dir: [str] A separate directory for flux metadata. If not given, the data directory will be
             used.
         cpu_cores: [int] Number of CPU cores to use. If -1, all available cores will be used. 1 by default.
+        diurnal_correction: [bool] Apply diurnal correction to the flux. False by default.
+        diurnal_bandwidth: [float] Bandwidth of the notch filter for the diurnal correction in degrees. 
+            0.05 by default.
+
+    Returns:
+        fbr: [FluxBatchResult] A FluxBatchResult object containing the computed flux and other information.
     """
 
     # Make the metadata directory, if given
@@ -1253,6 +1276,25 @@ def fluxBatch(config, shower_code, mass_index, dir_params, ref_ht=-1, atomic_bin
     comb_sol = np.degrees(comb_sol)
     comb_sol_tap_weighted = np.degrees(comb_sol_tap_weighted)
     comb_sol_bins = np.degrees(comb_sol_bins)
+
+
+    # Apply the diurnal correction to the flux
+    if diurnal_correction:
+        
+        # Filter the nominal flux
+        comb_flux = stftNotchFilter(
+            comb_sol_tap_weighted, comb_flux, bandwidth=diurnal_bandwidth
+        )
+
+        # Filter the lower and upper confidence interval fluxes
+        comb_flux_lower = stftNotchFilter(
+            comb_sol_tap_weighted, comb_flux_lower, bandwidth=diurnal_bandwidth
+        )
+        comb_flux_upper = stftNotchFilter(
+            comb_sol_tap_weighted, comb_flux_upper, bandwidth=diurnal_bandwidth
+        )
+
+
 
     # Computed the weighted mean initial velocity
     summary_v_init = np.sum(
@@ -1814,6 +1856,104 @@ def saveBatchFluxCSV(fbr, dir_path, output_filename):
 
 
         return data_out_path
+
+
+def stftNotchFilter(
+    sol_lon, flux, harmonics=[1, 2, 3], bandwidth=0.1, base_freq=365.25/360
+    ):
+    """
+    Apply STFT-based harmonic notch filtering to flux and confidence intervals.
+
+    Arguments:
+        sol_lon: [ndarray] 1D array of solar longitude in degrees.
+        flux: [ndarray] Flux array (same length as time).
+
+    Keyword Arguments:
+        harmonics: [list] List of harmonic multipliers (e.g. [1, 2, 3]).
+        bandwidth: [float] Notch width around each harmonic frequency.
+        base_freq: [float] Base frequency to multiply harmonics (default: 365.25/360).
+
+    Returns:
+        flux_filtered: [ndarray] Filtered flux array (same length as time).
+
+    """
+
+    # Create uniform samples in solar longitude (keep in mind that sol is periodic and wraps around)
+    min_sol = np.min(sol_lon)
+    max_sol = np.max(sol_lon)
+    if (max_sol - min_sol) > 180:
+
+        # If the range is larger than 180 degrees, we need to wrap around
+        sol_lon[sol_lon < 180] += 360
+        min_sol = np.min(sol_lon)
+        max_sol = np.max(sol_lon)
+
+    # Create a uniform grid of solar longitude values (sample with double the number of original points for 
+    # better interpolation)
+    sol_lon_uniform = np.linspace(min_sol, max_sol, 2*len(sol_lon))
+
+    # Interpolate the flux data to the uniform solar longitude grid
+    flux_uniform = scipy.interpolate.interp1d(sol_lon, flux, kind='linear')(sol_lon_uniform)
+
+    # Remove NaN values from the interpolated flux data
+    mask = ~np.isnan(flux_uniform)
+    sol_lon_uniform = sol_lon_uniform[mask]
+    flux_uniform = flux_uniform[mask]
+
+    # Define the sampling frequency based on the time array
+    fs = 1/np.median(np.diff(sol_lon_uniform))
+
+    # Scale the minimum npreseg based on the number of samples in the uniform grid
+    # This ensures that the STFT window size is appropriate for the data length
+    # and the desired frequency resolution.
+    # Round to the nearest power of 2 for better performance in STFT (celing to the next power of 2)
+    min_perseg = 2**np.ceil(np.log2(len(sol_lon_uniform)/10) + 1).astype(int)
+    min_perseg = max(min_perseg, 32)  # Ensure minimum segment length is at least 32 samples
+
+    # Define the base frequency for the 1× harmonic
+    nperseg = min(min_perseg, len(sol_lon_uniform))
+
+    # Calculate the number of overlapping samples
+    noverlap = int(nperseg*0.75)
+
+    # Calculate the STFT of the flux data
+    f_stft, t_stft, Zxx = scipy.signal.stft(
+                                            flux_uniform,
+                                            fs=fs, nperseg=nperseg, noverlap=noverlap, boundary='zeros'
+                                            )
+
+    # Calculate the frequencies for the harmonics
+    notch_mask = np.zeros_like(f_stft, dtype=bool)
+    for h in harmonics:
+        f_h = h*base_freq
+        notch_mask |= (f_stft >= f_h - bandwidth) & (f_stft <= f_h + bandwidth)
+
+    # Apply the notch filter in the frequency domain
+    Zxx_filtered = Zxx.copy()
+    Zxx_filtered[notch_mask, :] = 0
+    _, flux_filtered_uniform = scipy.signal.istft(
+                                            Zxx_filtered, 
+                                            fs=fs, nperseg=nperseg, noverlap=noverlap, input_onesided=True
+                                            )
+    
+    # Ensure output length matches the uniform grid
+    flux_filtered_uniform = flux_filtered_uniform[:len(sol_lon_uniform)]
+    
+    # Resample the filtered flux data to the original solar longitude grid
+    flux_filtered = scipy.interpolate.interp1d(sol_lon_uniform, flux_filtered_uniform, kind='linear')(sol_lon)
+
+    # # Plot the original and interpolated data
+    # plt.scatter(sol_lon, flux, label='Original Data', alpha=0.5)
+    # plt.plot(sol_lon_uniform, flux_uniform, label='Interpolated Data', linewidth=2)
+
+    # # Plot the filtered data
+    # plt.scatter(sol_lon, flux_filtered, label='Filtered Data', alpha=0.5)
+    # plt.plot(sol_lon_uniform, flux_filtered_uniform, label='Filtered Data', linewidth=2)
+    # plt.xlabel("Solar Longitude (deg)")
+    # plt.ylabel("Flux @+6.5M")
+    # plt.show()
+
+    return flux_filtered
 
 
 

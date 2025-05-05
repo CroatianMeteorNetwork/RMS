@@ -833,6 +833,8 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
                 compute_single=False,
                 metadata_dir=metadata_dir,
                 cpu_cores=cpu_cores,
+                diurnal_correction=fb_bin_params.diurnal_correction,
+                diurnal_bandwidth=fb_bin_params.diurnal_bandwidth,
                 )
 
 
