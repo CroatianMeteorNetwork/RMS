@@ -205,10 +205,23 @@ def getSSHClient(hostname,
     
     return None
 
-def getSFTPClient(ssh):
+def getSFTPClient(ssh, 
+                 window_size=None,
+                 max_packet_size=None, 
+                 rekey_bytes=None):
     """
-    Opens an SFTP session from an established SSH client.
-    If SFTP fails, logs the error and returns None.
+    Opens an SFTP session from an established SSH client with configured transfer parameters.
+    
+    Arguments:
+        ssh: [paramiko.SSHClient] Established SSH client connection
+        
+    Keyword Arguments:
+        window_size: [int] Window size for the SFTP connection. Default is None (use Paramiko default)
+        max_packet_size: [int] Maximum packet size for SFTP. Default is None (use Paramiko default)
+        rekey_bytes: [int] Number of bytes before rekeying. Default is None (use Paramiko default)
+        
+    Returns:
+        [paramiko.SFTPClient or None] SFTP client if successful, None otherwise
     """
     if ssh is None:
         log.error("Cannot open SFTP session: SSH client is None.")
@@ -216,17 +229,31 @@ def getSFTPClient(ssh):
 
     log.debug("Attempting to open SFTP connection...")
     try:
-        # TODO: consider using asyncio when Python 2 support is dropped
-        # as ssh.open_sftp() has the potential to hang indefinitely
-        # import asyncio
-        # async def open_sftp_async(ssh):
-        #     return await asyncio.get_event_loop().run_in_executor(None, ssh.open_sftp)
+        # Configure transport parameters if specified
+        transport = ssh.get_transport()
+        
+        if transport:
+            # Apply window size if specified (controls how much data can be in-flight)
+            if window_size is not None:
+                orig_window_size = transport.window_size
+                transport.window_size = window_size
+                log.info(f"SFTP window size set from {orig_window_size} to {window_size} bytes")
+            
+            # Configure packet size if specified
+            if max_packet_size is not None:
+                orig_max_packet_size = transport.packetizer.MAX_PACKET_SIZE
+                transport.packetizer.MAX_PACKET_SIZE = max_packet_size
+                log.info(f"SFTP max packet size set from {orig_max_packet_size} to {max_packet_size} bytes")
+                
+            # Configure rekey frequency if specified
+            if rekey_bytes is not None:
+                orig_rekey_bytes = transport.packetizer.REKEY_BYTES
+                transport.packetizer.REKEY_BYTES = rekey_bytes
+                log.info(f"SFTP rekey bytes set from {orig_rekey_bytes} to {rekey_bytes} bytes")
 
-        # # Usage
-        # sftp = await asyncio.wait_for(open_sftp_async(ssh), timeout=30)
-
+        # Open SFTP session
         sftp = ssh.open_sftp()
-        log.info("SFTP connection established.")
+        log.info("SFTP connection established with configured parameters.")
         return sftp
 
     except Exception as e:
@@ -236,11 +263,38 @@ def getSFTPClient(ssh):
 
 def getSSHAndSFTP(hostname, **kwargs):
     """
-    Wrapper function that returns both SSH and SFTP clients.
-    If SSH fails, SFTP is not attempted.
+    Wrapper function that returns both SSH and SFTP clients with configured transfer parameters.
+    
+    Arguments:
+        hostname: [str] Hostname or IP address of the SSH server
+        
+    Keyword Arguments:
+        port: [int] SSH port number
+        username: [str] SSH username
+        key_filename: [str] Path to private key file
+        timeout: [int] Connection timeout in seconds
+        banner_timeout: [int] SSH banner timeout in seconds
+        auth_timeout: [int] Authentication timeout in seconds
+        keepalive_interval: [int] Keepalive interval in seconds
+        window_size: [int] SFTP window size in bytes
+        max_packet_size: [int] SFTP maximum packet size in bytes
+        rekey_bytes: [int] SFTP rekey frequency in bytes
+        
+    Returns:
+        [tuple] (ssh_client, sftp_client) - Both can be None if connection failed
     """
+    # Extract SFTP-specific parameters
+    sftp_params = {}
+    for param in ['window_size', 'max_packet_size', 'rekey_bytes']:
+        if param in kwargs:
+            sftp_params[param] = kwargs.pop(param)
+    
+    # Establish SSH connection
     ssh = getSSHClient(hostname, **kwargs)
-    sftp = getSFTPClient(ssh) if ssh else None
+    
+    # Establish SFTP connection with the configured parameters
+    sftp = getSFTPClient(ssh, **sftp_params) if ssh else None
+    
     return ssh, sftp
 
 
@@ -250,7 +304,11 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                connect_timeout=300,
                banner_timeout=300,
                auth_timeout=300,
-               keepalive_interval=30):
+               keepalive_interval=30,
+               window_size=32768,         # Default reduced from 2**31 to 32KB for ADSL
+               max_packet_size=32768,     # Default reduced from ~35000 to 32KB
+               rekey_bytes=10*1024*1024,  # Default 10MB before rekeying
+               block_size=8192):          # Default reduced from 32768 to 8KB
     """ Upload the given list of files using SFTP with progress reporting.
         The upload only supports uploading files from one local directory to one remote directory.
         The files are uploaded only if they do not already exist on the server, or if they are of 
@@ -273,6 +331,10 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
         port: [int] SSH port. 22 by default.
         rsa_private_key: [str] Path to the SSH private key. ~/.ssh/id_rsa by default.
         allow_dir_creation: [bool] Create a remote directory if it doesn't exist. False by default.
+        window_size: [int] Window size for SFTP transport (bytes in flight before ACK).
+        max_packet_size: [int] Maximum size of individual SFTP packets.
+        rekey_bytes: [int] Number of bytes before rekeying the connection.
+        block_size: [int] Block size for file transfers (smaller = slower but gentler).
 
     Return:
         [bool] True if upload successful, false otherwise.
@@ -290,7 +352,14 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
     sftp = None
 
     try:
-        # Connect with timeouts
+        # Log bandwidth optimization parameters
+        log.info(f"SFTP optimization parameters:")
+        log.info(f"  - Window size: {format_size(window_size)}")
+        log.info(f"  - Max packet size: {format_size(max_packet_size)}")
+        log.info(f"  - Rekey bytes: {format_size(rekey_bytes)}")
+        log.info(f"  - Block size: {format_size(block_size)}")
+        
+        # Connect with timeouts and SFTP optimization parameters
         ssh, sftp = getSSHAndSFTP(
             hostname,
             port=port,
@@ -299,7 +368,10 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
             timeout=connect_timeout,
             banner_timeout=banner_timeout,
             auth_timeout=auth_timeout,
-            keepalive_interval=keepalive_interval
+            keepalive_interval=keepalive_interval,
+            window_size=window_size,
+            max_packet_size=max_packet_size,
+            rekey_bytes=rekey_bytes
         )
 
         # Optionally ensure remote directory exists
@@ -419,7 +491,10 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
             
             # Upload the file to the server if it isn't already there
             log.info('Starting upload of ' + local_file + ' ({}) to '.format(format_size(local_file_size)) + remote_file)
-            sftp.put(local_file, remote_file, callback=progress_callback)
+            
+            # Use the optimized block size for the transfer
+            sftp.put(local_file, remote_file, callback=progress_callback, block_size=block_size)
+            
             log.info("Upload completed, verifying...")
 
             # Check that the size of the remote file is correct, indicating a successful upload
@@ -489,6 +564,12 @@ class UploadManager(multiprocessing.Process):
 
         # Load the list of files to upload, and have not yet been uploaded
         self.loadQueue()
+        
+        # Set default SFTP throttling parameters
+        self.sftp_window_size = self.config.window_size
+        self.sftp_max_packet_size = self.config.max_packet_size
+        self.sftp_rekey_bytes = self.config.rekey_bytes
+        self.sftp_block_size = self.config.block_size
 
 
 
@@ -635,9 +716,19 @@ class UploadManager(multiprocessing.Process):
             data_path, f_name = os.path.split(file_name)
 
             # Upload the file via SFTP (use the lowercase version of the station ID as the username)
-            upload_status = uploadSFTP(self.config.hostname, self.config.stationID.lower(), data_path, \
-                self.config.remote_dir, [f_name], rsa_private_key=self.config.rsa_private_key, 
-                port=self.config.host_port)
+            upload_status = uploadSFTP(
+                self.config.hostname, 
+                self.config.stationID.lower(), 
+                data_path, 
+                self.config.remote_dir, 
+                [f_name], 
+                rsa_private_key=self.config.rsa_private_key, 
+                port=self.config.host_port,
+                window_size=self.sftp_window_size,
+                max_packet_size=self.sftp_max_packet_size,
+                rekey_bytes=self.sftp_rekey_bytes,
+                block_size=self.sftp_block_size
+            )
 
             # If the upload was successful, rewrite the holding file, which will remove the uploaded file
             if upload_status:
@@ -727,6 +818,12 @@ if __name__ == "__main__":
             self.stationID = 'dvida'
             self.rsa_private_key = os.path.expanduser("~/.ssh/id_rsa")
 
+            # SFTP optimization parameters for ADSL connections
+            self.sftp_window_size = 32768        # Default 32KB (reduced from 2**31)
+            self.sftp_max_packet_size = 32768    # Default 32KB (reduced from ~35000)
+            self.sftp_rekey_bytes = 10*1024*1024 # Default 10MB before rekeying
+            self.sftp_block_size = 8192          # Default 8KB (reduced from default)
+
             self.upload_queue_file = 'FILES_TO_UPLOAD.inf'
 
             self.data_dir = os.path.join(os.path.expanduser('~'), 'RMS_data')
@@ -753,7 +850,12 @@ if __name__ == "__main__":
         dir_local, remote_dir, 
         ['test.txt'], 
         rsa_private_key=config.rsa_private_key,
-        allow_dir_creation=True
+        allow_dir_creation=True,
+        # Using the ADSL-optimized parameters 
+        window_size=config.sftp_window_size,
+        max_packet_size=config.sftp_max_packet_size,
+        rekey_bytes=config.sftp_rekey_bytes,
+        block_size=config.sftp_block_size
         )
     
     sys.exit()
