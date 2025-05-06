@@ -1282,17 +1282,26 @@ def fluxBatch(
     if diurnal_correction:
         
         # Filter the nominal flux
-        comb_flux = stftNotchFilter(
+        comb_flux_new = stftNotchFilter(
             comb_sol_tap_weighted, comb_flux, bandwidth=diurnal_bandwidth
         )
 
         # Filter the lower and upper confidence interval fluxes
-        comb_flux_lower = stftNotchFilter(
+        comb_flux_lower_new = stftNotchFilter(
             comb_sol_tap_weighted, comb_flux_lower, bandwidth=diurnal_bandwidth
         )
-        comb_flux_upper = stftNotchFilter(
+        comb_flux_upper_new = stftNotchFilter(
             comb_sol_tap_weighted, comb_flux_upper, bandwidth=diurnal_bandwidth
         )
+
+        # Scale the TAP for the difference in the flux after the diurnal correction
+        comb_flux_correction_factor = comb_flux_new/comb_flux
+        comb_ta_prod /= comb_flux_correction_factor
+
+        # Assign the new flux values
+        comb_flux = comb_flux_new
+        comb_flux_lower = comb_flux_lower_new
+        comb_flux_upper = comb_flux_upper_new
 
 
 
