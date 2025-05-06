@@ -1937,9 +1937,34 @@ def stftNotchFilter(
         f_h = h*base_freq
         notch_mask |= (f_stft >= f_h - bandwidth) & (f_stft <= f_h + bandwidth)
 
-    # Apply the notch filter in the frequency domain
+    # Calculate the magnitude of the STFT
+    Zxx_mag = np.abs(Zxx)
+
+    # or each frequency bin in your notch_mask, compute the local background
     Zxx_filtered = Zxx.copy()
-    Zxx_filtered[notch_mask, :] = 0
+    attenuation_factor = np.ones_like(Zxx_mag)
+
+    for i, freq in enumerate(f_stft):
+        if not notch_mask[i]:
+            continue
+
+        # Define a background window (e.g., ±5 bins excluding the notch itself)
+        window = np.r_[max(i-10,0):i-2, i+3:min(i+10, len(f_stft))]
+
+        # Compute the local background magnitude
+        #local_background = np.median(Zxx_mag[window, :], axis=0)
+        local_background = np.percentile(Zxx_mag[window, :], 25, axis=0)
+        
+        # Compute gain: bring magnitude toward the background level
+        ratio = local_background / (Zxx_mag[i, :] + 1e-10)
+        ratio = np.clip(ratio, 0.01, 1.0)  # Prevent amplification
+        attenuation_factor[i, :] = ratio
+
+
+    # Apply the notch filter in the frequency domain by using the attenuation factor
+    Zxx_filtered *= attenuation_factor
+
+    # Reconstruct the filtered signal using the inverse STFT
     _, flux_filtered_uniform = scipy.signal.istft(
                                             Zxx_filtered, 
                                             fs=fs, nperseg=nperseg, noverlap=noverlap, input_onesided=True
@@ -1960,6 +1985,27 @@ def stftNotchFilter(
     # plt.plot(sol_lon_uniform, flux_filtered_uniform, label='Filtered Data', linewidth=2)
     # plt.xlabel("Solar Longitude (deg)")
     # plt.ylabel("Flux @+6.5M")
+    # plt.show()
+
+    # # Frequency spectrum plot of original vs filtered signal
+    # fs_plot = 1 / np.median(np.diff(sol_lon))  # Effective sampling rate for the original grid
+    # n = 2**int(np.ceil(np.log2(len(flux))))    # Zero-padded length for higher frequency resolution
+
+    # fft_orig = np.abs(np.fft.fft(flux, n=n))
+    # fft_filt = np.abs(np.fft.fft(flux_filtered, n=n))
+    # freqs = np.fft.fftfreq(n, d=1/fs_plot)
+
+    # # Plot only the positive frequencies
+    # mask = freqs > 0
+    # plt.figure(figsize=(10, 5))
+    # plt.plot(freqs[mask], fft_orig[mask], label='Original Flux', alpha=0.7)
+    # plt.plot(freqs[mask], fft_filt[mask], label='Filtered Flux', alpha=0.7)
+    # plt.xlabel('Frequency (1/deg)')
+    # plt.ylabel('Magnitude')
+    # plt.title('Frequency Spectrum: Original vs Filtered')
+    # plt.legend()
+    # plt.grid(True)
+    # plt.tight_layout()
     # plt.show()
 
     return flux_filtered
