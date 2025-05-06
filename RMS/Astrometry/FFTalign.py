@@ -13,6 +13,7 @@ except ImportError:
 import os
 import sys
 import copy
+import datetime
 import shutil
 import argparse
 
@@ -224,6 +225,13 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
     # Create a copy of the config not to mess with the original config parameters
     config = copy.deepcopy(config)
 
+    year, month, day, hour, minute, second, millisecond = calstars_time
+    ts = datetime.datetime(year, month, day, hour, minute, second, millisecond)
+    J2000 = datetime.datetime(2000, 1, 1, 12, 0, 0)
+
+    # Compute the number of years from J2000
+    years_from_J2000 = (ts - J2000).total_seconds()/(365.25*24*3600)
+    log.info('Loading star catalog with years from J2000: {:.2f}'.format(years_from_J2000))
 
     # Try to optimize the catalog limiting magnitude until the number of image and catalog stars are matched
     maxiter = 10
@@ -232,8 +240,12 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
     for inum in range(maxiter):
 
         # Load the catalog stars
-        catalog_stars, _, _ = StarCatalog.readStarCatalog(config.star_catalog_path, config.star_catalog_file, \
-            lim_mag=config.catalog_mag_limit, mag_band_ratios=config.star_catalog_band_ratios)
+        catalog_stars, _, _ = StarCatalog.readStarCatalog(
+            config.star_catalog_path,
+            config.star_catalog_file,
+            years_from_J2000=years_from_J2000,
+            lim_mag=config.catalog_mag_limit,
+            mag_band_ratios=config.star_catalog_band_ratios)
 
         # Get the RA/Dec of the image centre
         _, ra_centre, dec_centre, _ = ApplyAstrometry.xyToRaDecPP([calstars_time], [platepar.X_res/2], \
