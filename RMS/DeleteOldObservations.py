@@ -461,7 +461,18 @@ def getRawItems(dir_path, in_video_dir=False, unique=False):
 
     # Helper function to check frames file conditions
     def isProcessedFrameFile(path):
-        suffix = ['_frametimes.json', '_frames_timelapse.mp4', '_frames.tar.gz', '_frames.tar.bz2', '_FT.tar.bz2']
+        suffix = [
+            '_frametimes.json',
+            '_frames_timelapse.mp4',
+            '_frames_timelapse.tar',
+            '_frames_timelapse.tar.gz',
+            '_frames_timelapse.tar.bz2',
+            '_frames.tar',
+            '_frames.tar.gz',
+            '_frames.tar.bz2',
+            '_FT.tar',
+            '_FT.tar.bz2'
+        ]
         return (os.path.isfile(path) and any(path.endswith(end) for end in suffix))
 
     # Get a list of directories / files in the given directory
@@ -469,18 +480,28 @@ def getRawItems(dir_path, in_video_dir=False, unique=False):
         return []
     
     raw_list = []
-    
+
     # All of raw video, frame, and frame time directories follow Year/Day/Hour/ hierarchy for files.
-    for year in os.listdir(dir_path):
-        year_path = os.path.join(dir_path, year)
+    for entry in os.listdir(dir_path):
+        entry_path = os.path.join(dir_path, entry)
+
+        if not os.path.isdir(entry_path):
+            if not in_video_dir and isProcessedFrameFile(entry_path):
+                raw_list.append(entry_path)        # collect the .mp4 / .json / .tar.*
+            continue                               # then move on to next entry
 
         if in_video_dir:
-            raw_list += [os.path.join(year_path, day_dir) for day_dir in os.listdir(year_path) if \
-                         os.path.isdir(os.path.join(year_path, day_dir))]
+            raw_list += [
+                os.path.join(entry_path, day_dir)
+                for day_dir in os.listdir(entry_path)
+                if os.path.isdir(os.path.join(entry_path, day_dir))
+            ]
         else:
-            raw_list += [os.path.join(year_path, day_file) for day_file in os.listdir(year_path) if \
-                         isProcessedFrameFile(os.path.join(year_path, day_file))]
-
+            raw_list += [
+                os.path.join(entry_path, day_file)
+                for day_file in os.listdir(entry_path)
+                if isProcessedFrameFile(os.path.join(entry_path, day_file))
+            ]
 
     # Output files with unique dates - used for counting frame files (in days) in the main function deleteOldObservations
     # The local function above isProcessedFrameFiles lists the multiple frames data files suffixes that could exist for 

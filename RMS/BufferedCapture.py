@@ -27,6 +27,7 @@ import datetime
 import copy
 import os.path
 from multiprocessing import Process, Event, Value, Array
+import threading
 
 import cv2
 import numpy as np
@@ -850,6 +851,42 @@ class BufferedCapture(Process):
             return False, None
 
 
+    def _busPoller(self):
+        """Poll the GStreamer bus and drain queued messages.
+
+        Runs in a background daemon thread:
+                - Wakes every 5 s via ``bus.timed_pop_filtered``.
+                - Logs any ``ERROR`` or ``WARNING`` message for visibility.
+                - Silently discards all other message types to keep the queue small.
+
+        The loop exits when ``self.pipeline`` becomes ``None`` inside ``releaseResources``.
+
+        Arguments:
+            None
+
+        Return:
+            None
+
+        """
+        if not GST_IMPORTED:
+            return
+
+        bus = self.pipeline.get_bus()
+        mask = Gst.MessageType.ERROR | Gst.MessageType.WARNING
+
+        while self.pipeline:
+            # pop messages from bus every 5 seconds
+            msg = bus.timed_pop_filtered(5*Gst.SECOND, mask)
+            if not msg:
+                continue
+
+            if msg.type == Gst.MessageType.ERROR:
+                err, _dbg = msg.parse_error()
+                log.error("GST ERROR from %s: %s", msg.src.get_name(), err)
+            else:  # WARNING
+                warn, _dbg = msg.parse_warning()
+                log.warning("GST WARN  from %s: %s", msg.src.get_name(), warn)
+
 
     def createGstreamDevice(self, video_format, gst_decoder='decodebin', 
                             video_file_dir=None, segment_duration_sec=30, max_retries=5, retry_interval=1):
@@ -941,6 +978,9 @@ class BufferedCapture(Process):
                 self.pipeline = Gst.parse_launch(pipeline_str)
                 if not self.pipeline:
                     raise ValueError("Could not create pipeline")
+                
+                # Start a daemon thread that drains the GstBus so it never fills
+                threading.Thread(target=self._busPoller, daemon=True).start()
                 
                 # If raw video saving is enabled, Connect the "format-location" signal to the 
                 # moveSegment function
@@ -1034,11 +1074,11 @@ class BufferedCapture(Process):
                     # and/or perform camera mode change
 
                     # ------------------------------------------------------------------
-                    # One‑time camera initialization
+                    # One-time camera initialization
                     # ------------------------------------------------------------------
                     root_dir  = self.config.rms_root_dir
 
-                    # e.g.  “XX0001.camera_init.done”
+                    # e.g.  "XX0001.camera_init.done"
                     flag_file = os.path.join(root_dir, "{}.camera_init.done".format(self.config.stationID))
 
                     if self.config.initialize_camera and not os.path.exists(flag_file):
@@ -1341,15 +1381,20 @@ class BufferedCapture(Process):
 
     def releaseRawArrays(self):
         """Clean up raw frame arrays and saver."""
-        if self.raw_frame_saver is not None:
-            self.raw_frame_saver.stop()
-            
-            # Give it time to stop
-            time.sleep(0.1)  
-            
-            self.raw_frame_saver = None
+        if self.raw_frame_saver:
+            try:
+                self.raw_frame_saver.stop()
+                self.raw_frame_saver.join(5)
+                if self.raw_frame_saver.is_alive():
+                    log.warning("RawFrameSaver still busy. Terminating")
+                    self.raw_frame_saver.terminate()
+                    self.raw_frame_saver.join()
+            finally:
+                self.raw_frame_saver = None
 
         # Clean up array resources
+        self.current_raw_frame_shape = None
+        self.shared_raw_array = None
         del self.shared_raw_array_base
         del self.shared_raw_array
         del self.shared_raw_array_base2
@@ -1387,6 +1432,7 @@ class BufferedCapture(Process):
 
             # Store current array configuration
             self.current_raw_frame_shape = frame_shape
+            self.current_mode = self.daytime_mode.value
             
             return True
 
@@ -1449,6 +1495,7 @@ class BufferedCapture(Process):
             self.last_m_err = float('inf')
             self.last_m_err_n = 0
             self.current_raw_frame_shape = None
+            self.current_mode = None
 
             # Initialize raw frame handling if enabled
             if self.config.save_frames:
@@ -1670,9 +1717,12 @@ class BufferedCapture(Process):
                 # If save_frames is set and a video device is used, save a frame every nth frames
                 if save_this_frame:
 
-                    # Check if frame shape changed (color or grayscale)
-                    if frame.shape != self.current_raw_frame_shape:
-                        log.info("Frame shape changed, reinitializing arrays...")
+                    # Check if frame shape (color or grayscale) or capture mode changed (day or night)
+                    if (frame.shape != self.current_raw_frame_shape or
+                        self.current_mode != self.daytime_mode.value or
+                        self.shared_raw_array is None):
+
+                        log.info("Frame shape/mode changed, reinitializing arrays...")
 
                         # First signal the raw frame saver to finish saving current block
                         if raw_buffer_one:
@@ -1690,6 +1740,7 @@ class BufferedCapture(Process):
                                 self.shared_raw_array, self.start_raw_time1,
                                 self.shared_raw_array2, self.start_raw_time2,
                                 self.sharedTimestamps, self.sharedTimestamps2,
+                                self.daytime_mode.value if self.daytime_mode is not None else False,
                                 self.config
                             )
                             self.raw_frame_saver.start()

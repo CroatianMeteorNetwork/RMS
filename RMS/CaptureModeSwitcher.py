@@ -3,6 +3,7 @@ from __future__ import print_function, division, absolute_import
 import os
 import json
 import time
+from datetime import timedelta
 import ephem
 import Utils.CameraControl as cc
 from RMS.Logger import getLogger
@@ -10,6 +11,10 @@ from RMS.Misc import RmsDateTime
 
 # Get the logger from the main module
 log = getLogger("logger")
+
+# Sun altitude (in degrees) that defines the switch point.
+# Negative numbers mean the Sun is below the horizon.
+SWITCH_HORIZON_DEG = "-9"
 
 
 def switchCameraMode(config, daytime_mode, camera_mode_switch_trigger):
@@ -50,7 +55,6 @@ def switchCameraMode(config, daytime_mode, camera_mode_switch_trigger):
         # After failure, retry on next opportunity
         camera_mode_switch_trigger.value = True
 
-
 # Function to switch capture between day and night modes
 def captureModeSwitcher(config, daytime_mode, camera_mode_switch_trigger):
     """ Wait and switch between day and night capture modes based on current time.
@@ -72,7 +76,7 @@ def captureModeSwitcher(config, daytime_mode, camera_mode_switch_trigger):
             o.elevation = config.elevation
 
             # The Sun should be about 9 degrees below the horizon when the capture modes switch
-            o.horizon = '-9'
+            o.horizon = SWITCH_HORIZON_DEG
 
             # Set the current time
             current_time = RmsDateTime.utcnow()
@@ -145,6 +149,46 @@ def captureModeSwitcher(config, daytime_mode, camera_mode_switch_trigger):
     except Exception as e:
 
         log.error('CaptureModeSwitcher thread failed with following error: ' + repr(e))
+
+
+
+def lastNightToDaySwitch(config, whenUtc=None):
+    """Return the UTC timestamp of the most recent night-to-day switch.
+
+    Arguments:
+        config: [Config] RMS configuration object; must expose latitude,
+            longitude and elevation attributes.
+
+    Keyword arguments:
+        whenUtc: [datetime] Naive UTC time used as the upper bound of the
+            search window. None by default, which means the current
+            ``RmsDateTime.utcnow()`` is used.
+
+    Return:
+        last_switch: [datetime] UTC time at which the Sun last rose above
+            ``SWITCH_HORIZON_DEG`` before *whenUtc* (or the preceding midnight
+            if the Sun is always up/down at that location).
+    """
+    if whenUtc is None:
+        whenUtc = RmsDateTime.utcnow()
+
+    obs = ephem.Observer()
+    obs.lat = str(config.latitude)
+    obs.long = str(config.longitude)
+    obs.elevation = config.elevation
+    obs.horizon = SWITCH_HORIZON_DEG
+    obs.date = ephem.Date(whenUtc)
+
+    sun = ephem.Sun()
+    try:
+        return obs.previous_rising(sun).datetime()
+    
+    except (ephem.AlwaysUpError, ephem.NeverUpError):
+        # Fallback: last midnight before whenUtc
+        midnight = whenUtc.replace(hour=0, minute=0, second=0, microsecond=0)
+        if midnight >= whenUtc:
+            midnight -= timedelta(days=1)
+        return midnight
 
 
     ### For testing switching only ###

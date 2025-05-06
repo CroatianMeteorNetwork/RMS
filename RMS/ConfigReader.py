@@ -294,7 +294,7 @@ class Config:
         # Path to the json file containing camera settings
         self.camera_settings_path = "./camera_settings.json"
 
-        # Whether to run the one‑time camera setup defined in camera_settings.json
+        # Whether to run the one-time camera setup defined in camera_settings.json
         self.initialize_camera = False
 
         # Toggle raw video saving in data_dir/video_dir

@@ -38,7 +38,7 @@ class RawFrameSaver(multiprocessing.Process):
 
     running = False
     
-    def __init__(self, saved_frames_dir, array1, start_time1, array2, start_time2, tsArray1, tsArray2, config):
+    def __init__(self, saved_frames_dir, array1, start_time1, array2, start_time2, tsArray1, tsArray2, daytime_mode, config):
         """
 
         Arguments:
@@ -50,6 +50,7 @@ class RawFrameSaver(multiprocessing.Process):
             tsArray1: first numpy array in shared memory for timestamps
             tsArray2: second numpy array in shared memory for timestamps
             config: configuration class
+            daytime_mode: [bool] True if the camera is in daytime mode, False if in nightime mode
 
         """
         
@@ -62,6 +63,7 @@ class RawFrameSaver(multiprocessing.Process):
         self.start_time2 = start_time2
         self.timeStamps1 = tsArray1
         self.timeStamps2 = tsArray2
+        self.daytime_mode = daytime_mode
         self.config = config
 
         self.total_saved_frames = 0
@@ -71,7 +73,7 @@ class RawFrameSaver(multiprocessing.Process):
         self.run_exited = multiprocessing.Event()
 
 
-    def saveFramesToDisk(self, frametimes):
+    def saveFramesToDisk(self, frametimes, daytime_mode=False):
         """Saves a block of raw image frames to disk with timestamp-based filenames.
 
         This method calculates each filename using station ID, the UTC date
@@ -111,16 +113,24 @@ class RawFrameSaver(multiprocessing.Process):
             # Calculate milliseconds
             millis = int((timestamp - floor(timestamp))*1000)
 
+            # Suffix for indicating if the camera is in daytime or nighttime mode
+            mode_suffix = ""
+            if daytime_mode:
+                mode_suffix = "_d"
+            else:
+                mode_suffix = "_n"
+
             # Create the filename
             if self.config.frame_file_type == 'png':
                 file_extension = '.png'
             else:
                 file_extension = '.jpg'
 
-            filename = "{0}_{1}_{2:03d}{3}".format(
+            filename = "{0}_{1}_{2:03d}{3}{4}".format(
                 str(self.config.stationID).zfill(3),
                 date_string,
                 millis,
+                mode_suffix,
                 file_extension
             )
 
@@ -230,7 +240,7 @@ class RawFrameSaver(multiprocessing.Process):
             t = time.time()
 
             # Run the frame block save
-            self.saveFramesToDisk(frametimes)
+            self.saveFramesToDisk(frametimes, self.daytime_mode)
 
             # Once the frame saving is done, tell the capture thread to keep filling the buffer
             if raw_buffer_one:

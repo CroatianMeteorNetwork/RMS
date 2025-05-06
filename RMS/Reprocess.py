@@ -12,7 +12,7 @@ import random
 import glob
 import shutil
 
-from RMS.ArchiveDetections import archiveDetections, archiveFieldsums
+from RMS.ArchiveDetections import archiveDetections, archiveFieldsums, archiveFrameTimelapse
 # from RMS.Astrometry.ApplyAstrometry import applyAstrometryFTPdetectinfo
 from RMS.Astrometry.ApplyRecalibrate import recalibrateIndividualFFsAndApplyAstrometry
 from RMS.Astrometry.CheckFit import autoCheckFit
@@ -32,7 +32,8 @@ from RMS.Routines.MaskImage import loadMask
 from Utils.CalibrationReport import generateCalibrationReport
 from Utils.Flux import prepareFluxFiles
 from Utils.FOVKML import fovKML
-from Utils.GenerateTimelapse import generateTimelapse, generateTimelapseFromFrames
+from Utils.GenerateTimelapse import generateTimelapse, generateTimelapseFromFrameBlocks, listImageBlocksBefore
+from RMS.CaptureModeSwitcher import lastNightToDaySwitch
 from Utils.MakeFlat import makeFlat
 from Utils.PlotFieldsums import plotFieldsums
 from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
@@ -530,120 +531,6 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
 
-    # Generate a timelapse from frames
-    if config.timelapse_generate_from_frames:
-        log.info('Generating timelapse from saved frames...')
-        try:
-            frame_dir = os.path.join(config.data_dir, config.frame_dir)
-            current_day = RmsDateTime.utcnow().strftime("%Y%m%d-%j")
-
-            # Generate timelapse for each day of the year, if not present
-            for year in os.listdir(frame_dir):
-                year_dir = os.path.join(frame_dir, year)
-
-                for day in os.listdir(year_dir):
-                    day_dir = os.path.join(year_dir, day)
-
-                    # Skip if not directory or if inside today's directory
-                    if (not os.path.isdir(day_dir)) or (day == current_day):
-                        continue
-                    
-                    # Clean up temporary directories and files from previous attempts
-    
-                    # 1. Clean up temp_raw_img_dir from the original implementation
-                    temp_raw_dir = os.path.join(day_dir, "temp_raw_img_dir")
-                    if os.path.exists(temp_raw_dir):
-                        log.info("Found temporary image directory from previous attempt: {}, cleaning up...".format(temp_raw_dir))
-                        try:
-                            shutil.rmtree(temp_raw_dir)
-                            log.info("Removed temporary directory: {}".format(temp_raw_dir))
-                        except Exception as e:
-                            log.warning("Failed to remove temporary directory {}: {}".format(temp_raw_dir, e))
-                    
-                    # 2. Clean up filelist.txt from the original implementation
-                    filelist_path = os.path.join(day_dir, "filelist.txt")
-                    if os.path.exists(filelist_path):
-                        log.info("Found temporary file list from previous attempt: {}, removing...".format(filelist_path))
-                        try:
-                            os.remove(filelist_path)
-                            log.info("Removed temporary file list: {}".format(filelist_path))
-                        except Exception as e:
-                            log.warning("Failed to remove temporary file list {}: {}".format(filelist_path, e))
-                    
-                    # 3. Clean up temporary files from the new implementation
-                    frames_timelapse_base = "{}_{}_frames_timelapse".format(config.stationID, day)
-                    year_dir_files = os.listdir(year_dir)
-                    for file in year_dir_files:
-                        # Check for temp files from new implementation (with _temp in the name)
-                        if frames_timelapse_base in file and "_temp" in file:
-                            temp_file_path = os.path.join(year_dir, file)
-                            log.info("Found temporary file from previous attempt: {}, removing...".format(temp_file_path))
-                            try:
-                                os.remove(temp_file_path)
-                                log.info("Removed temporary file: {}".format(temp_file_path))
-                            except Exception as e:
-                                log.warning("Failed to remove temporary file {}: {}".format(temp_file_path, e))
-
-                    # Make the name of the timelapse file from day directory
-                    frames_timelapse_path = os.path.join(year_dir, "{}_{}_frames_timelapse.mp4".format(config.stationID, day))
-                    timelapse_json_path = os.path.join(year_dir, "{}_{}_frametimes.json".format(config.stationID, day))
-                    
-                    # Check for temporary files from failed previous attempts
-                    temp_files_pattern = os.path.join(year_dir, "{}_{}_frames_timelapse_temp*".format(config.stationID, day))
-                    temp_files = glob.glob(temp_files_pattern)
-                    
-                    if temp_files:
-                        log.info("Found temporary files from previous attempts for {}, cleaning up...".format(day))
-                        for temp_file in temp_files:
-                            try:
-                                os.remove(temp_file)
-                                log.info("Removed temporary file: {}".format(temp_file))
-                            except Exception as e:
-                                log.warning("Failed to remove temporary file {}: {}".format(temp_file, e))
-                    
-                    # Count image files in the day's directory
-                    img_count = 0
-                    for hour in os.listdir(day_dir):
-                        hour_dir = os.path.join(day_dir, hour)
-                        if os.path.isdir(hour_dir):
-                            img_count += len(glob.glob(os.path.join(hour_dir, '*.jpg')) + \
-                                            glob.glob(os.path.join(hour_dir, '*.png')))
-
-                    if img_count < 2:
-                        log.info("Skipping {} - too few images ({})".format(day, img_count))
-                        continue
-
-                    # Check if video exists and is valid (non-empty)
-                    video_exists = os.path.exists(frames_timelapse_path) and os.path.getsize(frames_timelapse_path) > 0
-                    
-                    if not video_exists:
-                        log.info("Generating timelapse for {} ({} frames)...".format(day, img_count))
-                        
-                        try:
-                            # Generate the timelapse and cleanup
-                            generateTimelapseFromFrames(day_dir, frames_timelapse_path, cleanup_mode=config.frame_cleanup)
-                            
-                            # Verify the timelapse was created successfully
-                            if os.path.exists(frames_timelapse_path) and os.path.getsize(frames_timelapse_path) > 0:
-                                log.info("Successfully created timelapse for {}".format(day))
-                                
-                                # Add the timelapse and its frametimes.json to the extra files
-                                extra_files.append(frames_timelapse_path)
-                                if os.path.exists(timelapse_json_path):
-                                    extra_files.append(timelapse_json_path)
-                            else:
-                                log.warning("Timelapse generation completed but file is missing or empty for {}".format(day))
-                        except Exception as e:
-                            log.warning("Generating timelapse for {} failed: {}".format(day, repr(e)))
-                            log.debug(repr(traceback.format_exception(*sys.exc_info())))
-                    else:
-                        log.debug("Timelapse already exists for {}, skipping".format(day))
-
-        except Exception as e:
-            log.error('Timelapse generation process failed with message:\n' + repr(e))
-            log.debug(repr(traceback.format_exception(*sys.exc_info())))
-
-
     ### Add extra files to archive
 
     # Add the config file to the archive too
@@ -784,6 +671,98 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     return night_archive_dir, archive_name, detector
 
 
+def cleanupTempArtifacts(config):
+    """Remove transient artefacts left by interrupted timelapse builds.
+
+    The routine walks the entire *frame_dir* tree and removes:
+        - any directory named ``temp_raw_img_dir``
+        - any ``filelist.txt`` file
+        - any file whose name contains the substring ``_temp``
+
+    Arguments:
+        config: [Config] Loaded configuration object.
+
+    Return:
+        None
+    """
+    # Get the path to the frame directory
+    frameDir = os.path.join(config.data_dir, config.frame_dir)
+
+    # Walk the whole directory tree once.
+    for root, dirs, files in os.walk(frameDir):
+
+        # --- Remove temp_raw_img_dir directories ---------------------------
+        if "temp_raw_img_dir" in dirs:
+            tmpPath = os.path.join(root, "temp_raw_img_dir")
+            try:
+                shutil.rmtree(tmpPath)
+                log.info("Removed temporary directory: %s", tmpPath)
+            except Exception as exc:
+                log.warning("Failed to remove %s: %s", tmpPath, exc)
+
+        # --- Remove filelist.txt files ------------------------------------
+        if "filelist.txt" in files:
+            listPath = os.path.join(root, "filelist.txt")
+            try:
+                os.remove(listPath)
+                log.info("Removed temporary file list: %s", listPath)
+            except Exception as exc:
+                log.warning("Failed to remove %s: %s", listPath, exc)
+
+        # --- Remove *_temp artifacts --------------------------------------
+        for fname in files:
+            if "_temp" in fname:
+                tmpFile = os.path.join(root, fname)
+                try:
+                    os.remove(tmpFile)
+                    log.info("Removed temporary file: %s", tmpFile)
+                except Exception as exc:
+                    log.warning("Failed to remove %s: %s", tmpFile, exc)
+
+
+def processFramesFiles(config):
+    """Convert saved frame files into timelapse videos and archive them.
+
+    Arguments:
+        config: [Config] Loaded configuration object.
+
+    Return:
+        archive_paths: [list[str] | None] Paths to the .tar archives produced,
+            or None if timelapse generation failed.
+    """
+
+    # -- 1. house-keeping ----------------------------------------------------
+    cleanupTempArtifacts(config)
+
+    frame_dir = os.path.join(config.data_dir, config.frame_dir)
+
+    # -- 2. build timelapses -------------------------------------------------
+    log.info("Generating timelapse(s) from saved frames...")
+
+    try:
+        cutoff_utc = lastNightToDaySwitch(config)
+        image_blocks = listImageBlocksBefore(cutoff_utc, frame_dir)
+
+        timelapse_results = generateTimelapseFromFrameBlocks(
+            image_blocks,
+            frame_dir,
+            cleanup_mode=config.frame_cleanup
+        )
+
+    except Exception as exc:
+        log.error("Timelapse generation failed: %s", exc, exc_info=True)
+        return None                                          # bail early
+
+    # -- 3. archive ----------------------------------------------------------
+    log.info("Archiving frame timelapses in %s", frame_dir)
+
+    archive_paths = archiveFrameTimelapse(
+        frame_dir,
+        timelapse_results,
+        remove_source=(config.frame_cleanup == "delete")
+    )
+
+    return archive_paths
 
 
 if __name__ == "__main__":
