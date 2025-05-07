@@ -226,7 +226,7 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
     config = copy.deepcopy(config)
 
     year, month, day, hour, minute, second, millisecond = calstars_time
-    ts = datetime.datetime(year, month, day, hour, minute, second, millisecond)
+    ts = datetime.datetime(year, month, day, hour, minute, second, int(round(millisecond * 1000)))
     J2000 = datetime.datetime(2000, 1, 1, 12, 0, 0)
 
     # Compute the number of years from J2000
