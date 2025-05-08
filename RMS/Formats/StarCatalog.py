@@ -358,7 +358,7 @@ def loadGMNStarCatalog(file_path,
         return core_data, mag_band_string, tuple(mag_band_ratios or [0.0, 1.0, 0.0, 0.0])
 
 
-def readStarCatalog(dir_path, file_name, years_from_J2000=None, lim_mag=None,
+def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None,
                    mag_band_ratios=None, additional_fields=None):
     """ Import the star catalog into a numpy array.
     
