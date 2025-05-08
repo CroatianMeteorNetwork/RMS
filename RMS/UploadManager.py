@@ -474,6 +474,8 @@ class UploadManager(multiprocessing.Process):
 
         self.file_queue = Queue.Queue()
         self.exit = multiprocessing.Event()
+        # Event used to wake the run() loop immediately when new work arrives
+        self.wake_event = multiprocessing.Event()
         self.upload_in_progress = multiprocessing.Value(ctypes.c_bool, False)
 
         # Time when the upload was run last
@@ -499,10 +501,24 @@ class UploadManager(multiprocessing.Process):
 
 
 
-    def stop(self):
-        """ Stops the upload manager. """
+    def stop(self, flush=False):
+        """
+        Stop the upload manager.
+
+        If flush=True, force an immediate upload of everything still in
+        the queue before shutting down.
+        """
+        if flush:
+            # Trigger an immediate upload and wait until it completes
+            self.delayNextUpload(0)
+            self.wake_event.set()
+
+            # Block until the queue is empty and nothing is transferring
+            while (self.file_queue.qsize() > 0) or self.upload_in_progress.value:
+                time.sleep(0.5)
 
         self.exit.set()
+        self.wake_event.set()   # in case run() is sleeping
         self.join()
 
 
@@ -518,6 +534,9 @@ class UploadManager(multiprocessing.Process):
 
         # Write the queue to disk
         self.saveQueue()
+
+        # Wake the run() loop so it can reconsider its schedule right away
+        self.wake_event.set()
 
         # Make sure the data gets uploaded right away
         with self.last_runtime_lock:
@@ -688,7 +707,8 @@ class UploadManager(multiprocessing.Process):
                 # Check if the upload should be run (if 15 minutes are up)
                 if self.last_runtime is not None:
                     if (RmsDateTime.utcnow() - self.last_runtime).total_seconds() < 15*60:
-                        time.sleep(1)
+                        self.wake_event.wait(timeout=1)
+                        self.wake_event.clear()
                         continue
 
             with self.next_runtime_lock:
@@ -696,7 +716,8 @@ class UploadManager(multiprocessing.Process):
                 # Check if the upload delay is up
                 if self.next_runtime is not None:
                     if (RmsDateTime.utcnow() - self.next_runtime).total_seconds() < 0:
-                        time.sleep(1)
+                        self.wake_event.wait(timeout=1)
+                        self.wake_event.clear()
                         continue
 
             with self.last_runtime_lock:

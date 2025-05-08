@@ -667,7 +667,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 log.info("File added.")
 
                 # optional delay (minutes in .config, converted to seconds)
-                upload_manager.delayNextUpload(delay=60 * config.upload_delay)
+                upload_manager.delayNextUpload(delay=60*config.upload_delay)
+                log.info("Upload scheduled in %d min", config.upload_delay)
 
             # Delete detector backup files
             if detector is not None:
@@ -690,7 +691,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                     try:
                         log.info("Adding file to upload list: %s", archive_paths)
                         upload_manager.addFiles(archive_paths)
-                        log.info("File added.")
+                        log.info("File(s) added to upload queue.")
 
                     except Exception:
                         log.exception("Frames upload failed")
@@ -706,7 +707,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             # Stop the upload manager
             if upload_manager is not None:
                 if upload_manager.is_alive():
-                    upload_manager.stop()
+                    upload_manager.stop(flush=not config.continuous_capture)
                     log.info('Closing upload manager...')
 
             if eventmonitor is not None:
@@ -994,7 +995,7 @@ if __name__ == "__main__":
             # Stop the upload manager
             if upload_manager.is_alive():
                 log.info('Closing upload manager...')
-                upload_manager.stop()
+                upload_manager.stop(flush=True)
                 del upload_manager
 
 
@@ -1358,7 +1359,7 @@ if __name__ == "__main__":
         # Stop the upload manager
         if upload_manager.is_alive():
             log.debug('Closing upload manager...')
-            upload_manager.stop()
+            upload_manager.stop(flush=not config.continuous_capture)
             del upload_manager
 
     if eventmonitor is not None:
