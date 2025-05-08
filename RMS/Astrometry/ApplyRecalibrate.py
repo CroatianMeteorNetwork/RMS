@@ -581,6 +581,10 @@ def recalibrateSelectedFF(dir_path, ff_file_names, calstars_data, config, lim_ma
 
     calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
 
+    if not ff_file_names:
+        log.warning("recalibrateSelectedFF: no FF files after filtering - skipping recalibration")
+        return []
+    
     ts = FFfile.getMiddleTimeFF(ff_file_names[0], fps=config.fps, ret_milliseconds=True, dt_obj=True)
 
     J2000 = datetime.datetime(2000, 1, 1, 12, 0, 0)
@@ -682,6 +686,10 @@ def recalibrateIndividualFFsAndApplyAstrometry(
 
     # Make a list of sorted FF files in CALSTARS
     calstars_ffs = sorted(calstars.keys())
+
+    if not calstars_ffs:
+        log.warning("No FF entries in CALSTARS - skipping recalibration")
+        return {}
 
     # Create a dictionary mapping FF file names in CALSTARS to datetime objects
     calstars_datetime_dict = OrderedDict()
