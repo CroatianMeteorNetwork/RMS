@@ -1195,7 +1195,12 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
     recorded_files = []
     bin_used = -1
     for ff_file_name, _ in star_list:
-        date = FFfile.filenameToDatetime(ff_file_name)
+        
+        try:
+            date = FFfile.filenameToDatetime(ff_file_name)
+        except IndexError:
+            continue
+
         if starting_time is None:
             starting_time = date
 
