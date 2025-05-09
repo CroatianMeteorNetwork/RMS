@@ -298,20 +298,9 @@ def loadGMNStarCatalog(file_path,
     # GMN catalog is relative to the J2016 epoch (from GAIA DR3)
     time_elapsed = years_from_J2000 - 16
 
-    # Gaia DR3 stores pmra* (pmra already multiplied by cos_dec).
-    # Convert it back to true delta RA by dividing by cos_dec before
-    # turning mas/yr into degrees.
-    cos_dec = np.cos(np.deg2rad(catalog_data['dec']))
-    
-    # Numerical safety: guard against |cos_dec| so small that 1/cos dec blows up.
-    eps = 1e-6
-    mask = np.abs(cos_dec) < eps
-    cos_dec[mask] = eps
-    corrected_ra = catalog_data['ra'] + (catalog_data['pmra'] / cos_dec) * time_elapsed * mas_to_deg
+    # Correct the RA and Dec relative to the years_from_J2000 argument
+    corrected_ra = catalog_data['ra'] + catalog_data['pmra']*time_elapsed*mas_to_deg
     corrected_dec = catalog_data['dec'] + catalog_data['pmdec']*time_elapsed*mas_to_deg
-    
-    # Ensure RA stays within [0, 360) after proper‑motion shift
-    corrected_ra = np.mod(corrected_ra, 360.0)
 
     # Step 5: build core numeric arrays & optional extras dict ----------------
     ra_arr  = corrected_ra.astype(np.float64)
