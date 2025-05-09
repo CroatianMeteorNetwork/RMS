@@ -583,7 +583,7 @@ def recalibrateSelectedFF(dir_path, ff_file_names, calstars_data, config, lim_ma
 
     if not ff_file_names:
         log.warning("recalibrateSelectedFF: no FF files after filtering - skipping recalibration")
-        return []
+        return {}
     
     ts = FFfile.getMiddleTimeFF(ff_file_names[0], fps=config.fps, ret_milliseconds=True, dt_obj=True)
 
