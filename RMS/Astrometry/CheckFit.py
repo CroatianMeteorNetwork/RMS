@@ -517,6 +517,11 @@ def autoCheckFit(config, platepar, calstars_data, _fft_refinement=False):
     # Extract the star data and the number of frames in the FF files
     calstars_list, ff_frames = calstars_data
 
+    # Make sure we actually have at least one CALSTARS entry, otherwise bail out early
+    if not calstars_list:
+        log.warning("autoCheckFit: CALSTARS list is empty - skipping automatic check-fit")
+        return platepar, False
+
     # Dictionary which will contain the JD, and a list of (X, Y, bg_intens, intens) of the stars
     star_dict = starListToDict(config, calstars_data, max_ffs=config.calstars_files_N)
 

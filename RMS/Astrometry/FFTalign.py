@@ -418,6 +418,12 @@ if __name__ == "__main__":
     # Load the calstars file
     calstars_data = CALSTARS.readCALSTARS(dir_path, calstars_file)
     calstars_list, ff_frames = calstars_data
+
+    # Bail out gracefully if the CALSTARS list is empty
+    if not calstars_list:
+        log.warning("FFTalign: CALSTARS list is empty - nothing to align")
+        sys.exit()
+        
     calstars_dict = {ff_file: star_data for ff_file, star_data in calstars_list}
 
     log.info('CALSTARS file: ' + calstars_file + ' loaded!')

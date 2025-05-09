@@ -60,6 +60,10 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
     calstars_data = readCALSTARS(night_dir_path, calstars_file)
     calstars_list, ff_frames = calstars_data
 
+    # If there are no CALSTARS entries, abort the report generation
+    if not calstars_list:
+        print('Calibration report: CALSTARS list is empty - nothing to process.')
+        return None
 
     ### Load recalibrated platepars, if they exist ###
 
