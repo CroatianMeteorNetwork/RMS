@@ -126,8 +126,17 @@ class BufferedCapture(Process):
         self.video_file = video_file
         self.night_data_dir = night_data_dir
         self.saved_frames_dir = saved_frames_dir
-        self.daytime_mode = daytime_mode
-        self.camera_mode_switch_trigger = camera_mode_switch_trigger
+
+        # make sure the flags are always real shared Values
+        if daytime_mode is None:
+            self.daytime_mode = Value(ctypes.c_bool, False)       # default: “night”
+        else:
+            self.daytime_mode = daytime_mode
+
+        if camera_mode_switch_trigger is None:
+            self.camera_mode_switch_trigger = Value(ctypes.c_bool, False)
+        else:
+            self.camera_mode_switch_trigger = camera_mode_switch_trigger
 
         # Store shared memory arrays and values for compressor (these are designed for multiprocessing)
         self.array1 = array1
@@ -1662,7 +1671,7 @@ class BufferedCapture(Process):
             if self.config.continuous_capture and self.config.switch_camera_modes:
 
                 # Check that the camera mode switch is triggered
-                if (self.camera_mode_switch_trigger is not None) and self.camera_mode_switch_trigger.value:
+                if self.camera_mode_switch_trigger.value:
                     
                     # If the camera mode switch trigger is set, switch the camera mode
                     switchCameraMode(self.config, self.daytime_mode, self.camera_mode_switch_trigger)
@@ -1740,7 +1749,7 @@ class BufferedCapture(Process):
                                 self.shared_raw_array, self.start_raw_time1,
                                 self.shared_raw_array2, self.start_raw_time2,
                                 self.sharedTimestamps, self.sharedTimestamps2,
-                                self.daytime_mode.value if self.daytime_mode is not None else False,
+                                self.daytime_mode.value,
                                 self.config
                             )
                             self.raw_frame_saver.start()
@@ -1851,7 +1860,7 @@ class BufferedCapture(Process):
                 
 
                 ### Convert the frame to grayscale ###  (Not to be done in case of daytime mode)
-                if (self.daytime_mode is None) or (not self.daytime_mode.value):
+                if not self.daytime_mode.value:
 
                     t1_convert = time.time()
 
@@ -1921,7 +1930,7 @@ class BufferedCapture(Process):
                 break
 
 
-            if (not wait_for_reconnect) and ((self.daytime_mode is None) or (not self.daytime_mode.value)):
+            if (not wait_for_reconnect) and (not self.daytime_mode.value):
 
                 # Set the starting value of the frame block, which indicates to the compression that the
                 # block is ready for processing
