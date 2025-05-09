@@ -120,11 +120,14 @@ class FluxBatchResults(object):
         # Input parameters used to compute the flux
         ref_ht, atomic_bin_duration, ci, min_meteors, min_tap, min_bin_duration, max_bin_duration, 
         compute_single,
+        # Diurnal correction parameters
+        diurnal_correction, diurnal_bandwidth,
         # Solar longitude bins
         sol_bins, bin_datetime_yearly, comb_sol, comb_sol_tap_weighted, comb_sol_bins, 
         # Per fixed bin numers and TAP
         num_meteors, time_area_product,
         # Flux data products
+        comb_flux_nodiurnal,
         comb_flux, comb_flux_lower, comb_flux_upper, 
         comb_flux_lm_m, comb_flux_lm_m_lower, comb_flux_lm_m_upper, 
         comb_zhr, comb_zhr_lower, comb_zhr_upper,
@@ -151,6 +154,10 @@ class FluxBatchResults(object):
         self.max_bin_duration = max_bin_duration
         self.compute_single = compute_single
 
+        # Diurnal correction parameters
+        self.diurnal_correction = diurnal_correction
+        self.diurnal_bandwidth = diurnal_bandwidth
+
         # Solar longitude bins
         self.sol_bins = sol_bins
         self.bin_datetime_yearly = bin_datetime_yearly
@@ -163,6 +170,7 @@ class FluxBatchResults(object):
         self.time_area_product = time_area_product
         
         # Flux data products
+        self.comb_flux_nodiurnal = comb_flux_nodiurnal
         self.comb_flux = comb_flux
         self.comb_flux_lower = comb_flux_lower
         self.comb_flux_upper = comb_flux_upper
@@ -204,6 +212,7 @@ class FluxBatchResults(object):
         # Solar longitude bins
         self.sol_bins, self.bin_datetime_yearly, self.comb_sol, self.comb_sol_bins, 
         # Flux data products
+        self.comb_flux_nodiurnal,
         self.comb_flux, self.comb_flux_lower, self.comb_flux_upper, 
         self.comb_flux_lm_m, self.comb_flux_lm_m_lower, self.comb_flux_lm_m_upper, 
         self.comb_zhr, self.comb_zhr_lower, self.comb_zhr_upper,
@@ -1279,6 +1288,7 @@ def fluxBatch(
 
 
     # Apply the diurnal correction to the flux
+    comb_flux_nodiurnal = comb_flux.copy()
     if diurnal_correction:
         
         # Filter the nominal flux
@@ -1352,11 +1362,14 @@ def fluxBatch(
         # Input parameters used to compute the flux
         ref_ht, atomic_bin_duration, ci, min_meteors, min_tap, min_bin_duration, max_bin_duration, 
         compute_single,
+        # Diurnal correction parameters
+        diurnal_correction, diurnal_bandwidth,
         # Solar longitude bins
         sol_bins, bin_datetime_yearly, comb_sol, comb_sol_tap_weighted, comb_sol_bins, 
         # Per fixed bin numers and TAP
         num_meteors, time_area_product,
         # Flux data products
+        comb_flux_nodiurnal, # before diurnal correction, if applied
         comb_flux, comb_flux_lower, comb_flux_upper, 
         comb_flux_lm_m, comb_flux_lm_m_lower, comb_flux_lm_m_upper, 
         comb_zhr, comb_zhr_lower, comb_zhr_upper,
@@ -1796,13 +1809,16 @@ def saveBatchFluxCSV(fbr, dir_path, output_filename):
             fout.write("# Min TAP          = {:.2f} x 1000 km^2 h\n".format(fbr.min_tap))
             fout.write("# Min bin duration = {:.2f} h\n".format(fbr.min_bin_duration))
             fout.write("# Max bin duration = {:.2f} h\n".format(fbr.max_bin_duration))
+            fout.write("# Diurnal correction = {:s}\n".format(str(fbr.diurnal_correction)))
+            fout.write("# Diurnal bandwidth   = {:.2f} deg\n".format(fbr.diurnal_bandwidth))
             fout.write(
-                "# Sol bin start (deg), Mean Sol (deg), TAP-weighted Sol (deg), Flux@+6.5M (met / 1000 km^2 h), Flux CI low, Flux CI high, Flux@+{:.2f}M (met / 1000 km^2 h), Flux CI low, Flux CI high, ZHR, ZHR CI low, ZHR CI high, Meteor Count, Time-area product (corrected to +6.5M) (1000 km^2/h), Meteor LM, Radiant elev (deg), Radiat dist (deg), Ang vel (deg/s)\n".format(fbr.lm_m_mean)
+                "# Sol bin start (deg), Mean Sol (deg), TAP-weighted Sol (deg), Flux@+6.5M no diurnal corr, Flux@+6.5M (met / 1000 km^2 h), Flux CI low, Flux CI high, Flux@+{:.2f}M (met / 1000 km^2 h), Flux CI low, Flux CI high, ZHR, ZHR CI low, ZHR CI high, Meteor Count, Time-area product (corrected to +6.5M) (1000 km^2/h), Meteor LM, Radiant elev (deg), Radiat dist (deg), Ang vel (deg/s)\n".format(fbr.lm_m_mean)
             )
             for (
                 _sol_bin_start,
                 _tap_weighted_sol,
                 _mean_sol,
+                _flux_nodiurnal,
                 _flux,
                 _flux_lower,
                 _flux_upper,
@@ -1822,6 +1838,7 @@ def saveBatchFluxCSV(fbr, dir_path, output_filename):
                     fbr.comb_sol_bins,
                     fbr.comb_sol,
                     fbr.comb_sol_tap_weighted,
+                    fbr.comb_flux_nodiurnal,
                     fbr.comb_flux,
                     fbr.comb_flux_lower,
                     fbr.comb_flux_upper,
@@ -1840,10 +1857,11 @@ def saveBatchFluxCSV(fbr, dir_path, output_filename):
                     ):
 
                 fout.write(
-                    "{:.8f},{:.8f},{:.8f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:d},{:.3f},{:.2f},{:.2f},{:.2f},{:.2f}\n".format(
+                    "{:.8f},{:.8f},{:.8f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:d},{:.3f},{:.2f},{:.2f},{:.2f},{:.2f}\n".format(
                     _sol_bin_start,
                     _mean_sol,
                     _tap_weighted_sol,
+                    _flux_nodiurnal,
                     _flux,
                     _flux_lower,
                     _flux_upper,
@@ -1861,7 +1879,7 @@ def saveBatchFluxCSV(fbr, dir_path, output_filename):
                     _ang_vel,
                     ))
 
-            fout.write("{:.8f},,,,,,,,,,,,,,,,\n".format(fbr.comb_sol_bins[-1]))
+            fout.write("{:.8f},,,,,,,,,,,,,,,,,\n".format(fbr.comb_sol_bins[-1]))
 
 
         return data_out_path
