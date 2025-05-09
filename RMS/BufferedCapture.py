@@ -1432,7 +1432,7 @@ class BufferedCapture(Process):
 
             # Store current array configuration
             self.current_raw_frame_shape = frame_shape
-            self.current_mode = self.daytime_mode.value
+            self.current_mode = self.daytime_mode.value if self.daytime_mode is not None else False
             
             return True
 
