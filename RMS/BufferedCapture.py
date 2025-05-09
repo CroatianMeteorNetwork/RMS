@@ -1718,9 +1718,9 @@ class BufferedCapture(Process):
                 if save_this_frame:
 
                     # Check if frame shape (color or grayscale) or capture mode changed (day or night)
-                    if (frame.shape != self.current_raw_frame_shape or
-                        self.current_mode != self.daytime_mode.value or
-                        self.shared_raw_array is None):
+                    if (frame.shape != self.current_raw_frame_shape) or \
+                        (self.current_mode != (self.daytime_mode.value if self.daytime_mode is not None else False)) or \
+                        (self.shared_raw_array is None):
 
                         log.info("Frame shape/mode changed, reinitializing arrays...")
 
