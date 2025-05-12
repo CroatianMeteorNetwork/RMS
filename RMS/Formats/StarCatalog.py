@@ -307,7 +307,7 @@ def loadGMNStarCatalog(file_path,
     eps = 1e-6
     mask = np.abs(cos_dec) < eps
     cos_dec[mask] = eps
-    corrected_ra = catalog_data['ra'] + (catalog_data['pmra'] / cos_dec) * time_elapsed * mas_to_deg
+    corrected_ra = catalog_data['ra'] + (catalog_data['pmra']/cos_dec)*time_elapsed*mas_to_deg
     corrected_dec = catalog_data['dec'] + catalog_data['pmdec']*time_elapsed*mas_to_deg
     
     # Ensure RA stays within [0, 360) after proper‑motion shift
