@@ -1575,12 +1575,17 @@ class BufferedCapture(Process):
         # Keep track of the total number of frames
         total_frames = 0
 
+        # Timestamp of the very first good frame - becomes the run’s origin
+        run_start_ts = None
+
         # For video devices only (not files), throw away the first 10 frames
         if (self.video_file is None) and (self.video_device_type == "cv2"):
 
             first_skipped_frames = 10
             for i in range(first_skipped_frames):
-                self.read()
+                _, _, ts = self.read()
+                if run_start_ts is None:
+                    run_start_ts = ts  
 
             total_frames = first_skipped_frames
 
@@ -1677,6 +1682,9 @@ class BufferedCapture(Process):
             max_frame_interval_normalized = 0.0
             max_frame_age_seconds = 0.0
 
+            # running totals for mean calculations
+            sum_frame_interval_norm = 0.0
+            sum_frame_age_seconds   = 0.0
 
             # Capture a block of 256 frames
             block_frames = 256
@@ -1844,11 +1852,12 @@ class BufferedCapture(Process):
 
 
                 # If cv2:
-                if (self.config.media_backend != 'gst') and not self.media_backend_override:
+                if (self.config.media_backend != 'gst') and not self.media_backend_override and last_frame_timestamp is not False:
                     # Calculate the normalized frame interval between the current and last frame read, normalized by frames per second (fps)
-                    frame_interval_normalized = (frame_timestamp - last_frame_timestamp)/(1/self.config.fps)
+                    frame_interval_normalized = (frame_timestamp - last_frame_timestamp)*self.config.fps
                     # Update max_frame_interval_normalized for this cycle
                     max_frame_interval_normalized = max(max_frame_interval_normalized, frame_interval_normalized)
+                    sum_frame_interval_norm += frame_interval_normalized
 
                 # If GStreamer:
                 else:
@@ -1856,14 +1865,26 @@ class BufferedCapture(Process):
                     frame_age_seconds = time.time() - frame_timestamp
                     # Update max_frame_age_seconds for this cycles
                     max_frame_age_seconds = max(max_frame_age_seconds, frame_age_seconds)
+                    sum_frame_age_seconds += frame_age_seconds
 
                 # On the last loop, report late or dropped frames
                 if i == block_frames - 1:
 
                     # For cv2, show elapsed time since frame read to assess loop performance
                     if self.config.media_backend != 'gst' and not self.media_backend_override:
-                        log.info("Block's max frame interval: {:.3f} (normalized). Run's late frames: {}"
-                                 .format(max_frame_interval_normalized, self.dropped_frames.value))
+                        mean_interval_norm = sum_frame_interval_norm/block_frames
+
+                        # running late-frame total since the start of capture
+                        if run_start_ts is not None:
+                            elapsed_run = last_frame_timestamp - run_start_ts
+                            expected_run = int(round(elapsed_run*self.config.fps))
+                            run_late_frames = max(0, expected_run - total_frames)
+                        else:
+                            run_start_ts = last_frame_timestamp
+                            run_late_frames = 0
+
+                        log.info("Block interval: mean %.3f, max %.3f (normalized). Dropped frames: %d",
+                                 mean_interval_norm, max_frame_interval_normalized, run_late_frames)
                     
                     # For GStreamer, show elapsed time since frame capture to assess sink fill level
                     else:
