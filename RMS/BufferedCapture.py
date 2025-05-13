@@ -163,6 +163,9 @@ class BufferedCapture(Process):
         # Flag for process control
         self.exit = Event()
 
+        # handle for the Gst bus-poller thread
+        self._bus_thread = None
+
 
     def startCapture(self, cameraID=0):
         """ Start capture using specified camera.
@@ -881,9 +884,13 @@ class BufferedCapture(Process):
             return
 
         bus = self.pipeline.get_bus()
-        mask = Gst.MessageType.ERROR | Gst.MessageType.WARNING
+        mask = Gst.MessageType.ANY
 
-        while self.pipeline:
+        while True:
+            # exit as soon as pipeline ref is cleared
+            if self.pipeline is None:
+                break
+            
             # pop messages from bus every 5 seconds
             msg = bus.timed_pop_filtered(5*Gst.SECOND, mask)
             if not msg:
@@ -892,9 +899,10 @@ class BufferedCapture(Process):
             if msg.type == Gst.MessageType.ERROR:
                 err, _dbg = msg.parse_error()
                 log.error("GST ERROR from %s: %s", msg.src.get_name(), err)
-            else:  # WARNING
+            elif msg.type == Gst.MessageType.WARNING:
                 warn, _dbg = msg.parse_warning()
                 log.warning("GST WARN  from %s: %s", msg.src.get_name(), warn)
+            # all other msgs just pop & vanish
 
 
     def createGstreamDevice(self, video_format, gst_decoder='decodebin', 
@@ -989,7 +997,8 @@ class BufferedCapture(Process):
                     raise ValueError("Could not create pipeline")
                 
                 # Start a daemon thread that drains the GstBus so it never fills
-                threading.Thread(target=self._busPoller, daemon=True).start()
+                self._bus_thread = threading.Thread(target=self._busPoller, daemon=True)
+                self._bus_thread.start()
                 
                 # If raw video saving is enabled, Connect the "format-location" signal to the 
                 # moveSegment function
@@ -1322,6 +1331,11 @@ class BufferedCapture(Process):
 
                  # Clear pipeline reference to allow proper cleanup   
                 self.pipeline = None
+
+                # make sure poller thread exits
+                if self._bus_thread and self._bus_thread.is_alive():
+                    self._bus_thread.join(timeout=2)
+                    self._bus_thread = None
                     
             except Exception as e:
                 log.error("Error releasing GStreamer pipeline: {}".format(str(e)))
