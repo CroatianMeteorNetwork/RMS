@@ -689,7 +689,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
 
     if not calstars_ffs:
         log.warning("No FF entries in CALSTARS - skipping recalibration")
-        return {}
+        return {}, []
 
     # Create a dictionary mapping FF file names in CALSTARS to datetime objects
     calstars_datetime_dict = OrderedDict()
@@ -720,7 +720,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
     if not star_catalog_status:
         log.info("Could not load the star catalog!")
         log.info(os.path.join(config.star_catalog_path, config.star_catalog_file))
-        return {}
+        return {}, []
 
     catalog_stars, _, config.star_catalog_band_ratios = star_catalog_status
 
@@ -756,7 +756,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
             log.info('ERROR! The FTPdetectinfo file does not exist: {:s}'.format(ftpdetectinfo_path))
             log.info('    The recalibration on every file was not done!')
 
-            return {}
+            return {}, []
 
         # If it exists, use it as the only file to load
         ftpdetectinfo_file_list = [os.path.basename(ftpdetectinfo_path)]

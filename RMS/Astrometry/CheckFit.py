@@ -545,7 +545,7 @@ def autoCheckFit(config, platepar, calstars_data, _fft_refinement=False):
     if not star_catalog_status:
         log.info("Could not load the star catalog!")
         log.info(os.path.join(config.star_catalog_path, config.star_catalog_file))
-        return {}
+        return platepar, False
 
     catalog_stars, _, config.star_catalog_band_ratios = star_catalog_status
 
@@ -615,7 +615,7 @@ def autoCheckFit(config, platepar, calstars_data, _fft_refinement=False):
             log.info("The total number of initially matched stars is too small! Please manually redo the plate or make sure there are enough calibration stars.")
 
             # Try to refine the platepar with FFT phase correlation and redo the ACF
-            return _handleFailure(config, platepar, calstars_list, catalog_stars, _fft_refinement)
+            return _handleFailure(config, platepar, calstars_data, catalog_stars, _fft_refinement)
 
 
         # Check if the platepar is good enough and do not estimate further parameters
@@ -642,7 +642,7 @@ def autoCheckFit(config, platepar, calstars_data, _fft_refinement=False):
         if not res.success:
 
             # Try to refine the platepar with FFT phase correlation and redo the ACF
-            return _handleFailure(config, platepar, calstars_list, catalog_stars, _fft_refinement)
+            return _handleFailure(config, platepar, calstars_data, catalog_stars, _fft_refinement)
 
 
         else:
