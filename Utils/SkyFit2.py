@@ -2730,6 +2730,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 print(self.input_path)
 
+        # Update the possibly missing params
+        if not hasattr(self, "dark"):
+            self.dark = None
 
         # Update the possibly missing params
         if not hasattr(self, "fit_only_pointing"):
