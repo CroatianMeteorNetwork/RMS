@@ -1116,12 +1116,13 @@ class BufferedCapture(Process):
 
                             try:
                                 cc.cameraControlV2(self.config, "SwitchMode", mode_name)
+
+                                # create empty sentinel file
+                                open(flag_file, "a").close()
+                                log.info("Init complete - flag written to %s", flag_file)
+
                             except Exception as e:
                                 raise RuntimeError("Failed to switch camera mode: {}".format(e))
-
-                            # create empty sentinel file
-                            open(flag_file, "a").close()
-                            log.info("Init complete - flag written to %s", flag_file)
 
                         except Exception as e:
                             log.warning("Camera switch to %s mode failed: %s. Will retry later.", mode_name, e)
@@ -1132,6 +1133,13 @@ class BufferedCapture(Process):
                     if self.config.continuous_capture and self.config.switch_camera_modes:
                         if self.camera_mode_switch_trigger.value:
                             switchCameraMode(self.config, self.daytime_mode, self.camera_mode_switch_trigger)
+
+            # Wait for the camera to stabilize after potential switching modes / reboot
+            time.sleep(5)
+            success, probe_result = self.probeRtspService()
+            if not success:
+                log.error("Camera connection failed after switching modes: {}".format(probe_result))
+                return False
 
             # Init the video device
             log.info("Initializing the video device...")
@@ -1846,7 +1854,7 @@ class BufferedCapture(Process):
                 # If cv2:
                 if (self.config.media_backend != 'gst') and not self.media_backend_override:
                     # Calculate the normalized frame interval between the current and last frame read, normalized by frames per second (fps)
-                    frame_interval_normalized = (frame_timestamp - last_frame_timestamp)/(1/self.config.fps)
+                    frame_interval_normalized = (frame_timestamp - last_frame_timestamp)*self.config.fps
                     # Update max_frame_interval_normalized for this cycle
                     max_frame_interval_normalized = max(max_frame_interval_normalized, frame_interval_normalized)
 

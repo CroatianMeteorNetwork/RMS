@@ -49,7 +49,8 @@
     ["SetParam", "Camera", "DayNightColor", "1"],
     ["SetParam", "Camera", "BLCMode", "1"],
     ["SetParam", "Camera", "ElecLevel", "50"],
-    ["SetParam", "Camera", "BroadTrends", "AutoGain", "1"]
+    ["SetParam", "Camera", "BroadTrends", "AutoGain", "1"],
+    ["reboot"]
   ],
 
   "night": [
@@ -57,6 +58,7 @@
     ["SetParam", "Camera", "DayNightColor", "2"],
     ["SetParam", "Camera", "BLCMode", "0"],
     ["SetParam", "Camera", "ElecLevel", "60"],
-    ["SetParam", "Camera", "BroadTrends", "AutoGain", "0"]
+    ["SetParam", "Camera", "BroadTrends", "AutoGain", "0"],
+    ["reboot"]
   ]
 }
