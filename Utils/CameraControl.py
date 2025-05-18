@@ -458,10 +458,7 @@ def setCameraParam(cam, opts):
         subfld = opts[2].lower()
         val = int(opts[3])
         if subfld == 'enable':
-            if val == 1:
-                val = 'true'
-            else:
-                val = 'false'
+            val = True if val == 1 else False
 
         elif subfld == 'level':
             val = int(val)
