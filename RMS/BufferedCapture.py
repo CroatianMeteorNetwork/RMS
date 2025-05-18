@@ -1091,8 +1091,11 @@ class BufferedCapture(Process):
                     # After camera connection is established, if necessary inititliaze camera settings
                     # and/or perform camera mode change
 
+                    # initialize flag to indicate if camera should be reprobed after mode change
+                    reprobe = False
+
                     # ------------------------------------------------------------------
-                    # One-time camera initialization
+                    # One-time camera initialization with flag file in rms_root_dir
                     # ------------------------------------------------------------------
                     root_dir  = self.config.rms_root_dir
 
@@ -1101,6 +1104,7 @@ class BufferedCapture(Process):
 
                     if self.config.initialize_camera and not os.path.exists(flag_file):
                         log.info("Running camera init sequence ...")
+                        reprobe = True
                         try:
                             mode_name = "init"
                             mode_path = self.config.camera_settings_path
@@ -1132,14 +1136,17 @@ class BufferedCapture(Process):
                     # -------------------------------------------
                     if self.config.continuous_capture and self.config.switch_camera_modes:
                         if self.camera_mode_switch_trigger.value:
+                            reprobe = True
                             switchCameraMode(self.config, self.daytime_mode, self.camera_mode_switch_trigger)
 
-            # Wait for the camera to stabilize after potential switching modes / reboot
-            time.sleep(5)
-            success, probe_result = self.probeRtspService()
-            if not success:
-                log.error("Camera connection failed after switching modes: {}".format(probe_result))
-                return False
+            if reprobe:
+                # Wait 5 seconds for the camera to register all commands after mode switching / reboot
+                log.info("Waiting for camera to register all commands...")
+                time.sleep(5)
+                success, probe_result = self.probeRtspService()
+                if not success:
+                    log.error("Camera connection failed after switching modes: {}".format(probe_result))
+                    return False
 
             # Init the video device
             log.info("Initializing the video device...")
