@@ -1004,7 +1004,9 @@ def parseCapture(config, parser):
     if parser.has_option(section, "quota_management_enabled"):
         config.quota_management_enabled = parser.getboolean(section, "quota_management_enabled")
 
-
+    # Legacy option for quota management
+    if parser.has_option(section, "quota_management_disabled"):
+        config.quota_management_enabled = not parser.getboolean(section, "quota_management_disabled")
 
     if parser.has_option(section, "rms_data_quota"):
         config.rms_data_quota = int(parser.get(section, "rms_data_quota"))
