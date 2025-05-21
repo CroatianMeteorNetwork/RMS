@@ -303,14 +303,14 @@ def loadGMNStarCatalog(file_path,
     # turning mas/yr into degrees.
     cos_dec = np.cos(np.deg2rad(catalog_data['dec']))
     
-    # Numerical safety: guard against |cos_dec| so small that 1/cos dec blows up.
+    # Numerical safety: guard against |cos_dec| so small that 1/cos dec blows up.
     eps = 1e-6
     mask = np.abs(cos_dec) < eps
     cos_dec[mask] = eps
     corrected_ra = catalog_data['ra'] + (catalog_data['pmra']/cos_dec)*time_elapsed*mas_to_deg
     corrected_dec = catalog_data['dec'] + catalog_data['pmdec']*time_elapsed*mas_to_deg
     
-    # Ensure RA stays within [0, 360) after proper‑motion shift
+    # Ensure RA stays within [0, 360) after proper-motion shift
     corrected_ra = np.mod(corrected_ra, 360.0)
 
     # Step 5: build core numeric arrays & optional extras dict ----------------

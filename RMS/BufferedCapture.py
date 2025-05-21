@@ -129,7 +129,7 @@ class BufferedCapture(Process):
 
         # make sure the flags are always real shared Values
         if daytime_mode is None:
-            self.daytime_mode = Value(ctypes.c_bool, False)       # default: “night”
+            self.daytime_mode = Value(ctypes.c_bool, False)       # default: "night"
         else:
             self.daytime_mode = daytime_mode
 
@@ -1575,7 +1575,7 @@ class BufferedCapture(Process):
         # Keep track of the total number of frames
         total_frames = 0
 
-        # Timestamp of the very first good frame - becomes the run’s origin
+        # Timestamp of the very first good frame - becomes the run's origin
         run_start_ts = None
 
         # For video devices only (not files), throw away the first 10 frames
