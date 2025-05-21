@@ -9,12 +9,15 @@ Quick usage example
 -------------------
 Upgrade single or multi stations config (with backups) to latest configTemplate format preserving attributes:
 
-python -m Utils.MigrateConfig.py -u
+python -m Utils.MigrateConfig -u
 
 To first test the upgrade without applying it, run:
 
-python -m Utils.MigrateConfig.py
+python -m Utils.MigrateConfig
 
+# To incorporate recent default values (e.g. star catalog file) use the -r option:
+
+python -m Utils.MigrateConfig -r
 '''
 import sys
 import os
