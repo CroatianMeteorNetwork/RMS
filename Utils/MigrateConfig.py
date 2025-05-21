@@ -32,18 +32,20 @@ if sys.version_info < (2,7):
 from Utils.AuditConfig import extractConfigOptions
 from RMS.Misc import getRmsRootDir
 
-def log_message(message):
-    """Print and write log messages to buffer"""
-    print(message)
-    log_buffer.write(message + "\n")
-
 # Get ConfigReader.py path dynamically
 CONFIGREADER_PATH = os.path.join(getRmsRootDir(), "RMS", "ConfigReader.py")
 
 # Extract valid options from ConfigReader.py
 VALID_OPTIONS = extractConfigOptions(CONFIGREADER_PATH)
 
-def update_config(original_config_file, template_config_file, args, backup=True):
+
+def logMessage(message):
+    """Print and write log messages to buffer"""
+    print(message)
+    log_buffer.write(message + "\n")
+
+
+def updateConfig(original_config_file, template_config_file, args, backup=True):
     global log_buffer
     station_id = None
 
@@ -57,7 +59,7 @@ def update_config(original_config_file, template_config_file, args, backup=True)
 
     # Ensure station_id is valid
     if not station_id:
-        log_message(f"ERROR: No valid stationID found in {original_config_file}")
+        logMessage(f"ERROR: No valid stationID found in {original_config_file}")
         sys.exit(1)
     
     # build output path next to the input .config ---
@@ -71,33 +73,33 @@ def update_config(original_config_file, template_config_file, args, backup=True)
         try:
             if not os.path.exists(original_backup):
                 shutil.copy(original_config_file, original_backup)
-                log_message(f"\nOriginal backup created: {original_backup}")
+                logMessage(f"\nOriginal backup created: {original_backup}")
 
             shutil.copy(original_config_file, latest_backup)
-            log_message(f"\nBackup created: {latest_backup}")
+            logMessage(f"\nBackup created: {latest_backup}")
         except Exception as e:
-            log_message(f"ERROR: Backup failed: {e}")
+            logMessage(f"ERROR: Backup failed: {e}")
             sys.exit(1)
 
     # list of attributes with recently updated defaults
     recent_defaults_list = ["[Calibration]star_catalog_file"]
 
     if not os.path.exists(original_config_file):
-        log_message("ERROR: Can't find existing .config file {}".format(original_config_file))
+        logMessage("ERROR: Can't find existing .config file {}".format(original_config_file))
         sys.exit(1)
 
     if not os.path.exists(template_config_file):
-        log_message("ERROR: Can't find template file {}".format(template_config_file))
+        logMessage("ERROR: Can't find template file {}".format(template_config_file))
         sys.exit(1)
 
-    log_message("\nInput: {}".format(original_config_file))
+    logMessage("\nInput: {}".format(original_config_file))
 
     # read the original config and build a dictionary of attributes
     # and values
 
     with open(original_config_file, "r") as file:
         config_lines = file.readlines()
-        log_message("{} lines read".format(len(config_lines)))
+        logMessage("{} lines read".format(len(config_lines)))
 
     attributes_dict = {}
 
@@ -122,7 +124,7 @@ def update_config(original_config_file, template_config_file, args, backup=True)
         cnt = len(bits)
         if cnt > 1:
             if (section + bits[0]) in attributes_dict:
-                log_message("WARNING - duplicate value for {}, assuming last value".format(bits[0]))
+                logMessage("WARNING - duplicate value for {}, assuming last value".format(bits[0]))
             i = l.index(": ") + 2 
             attributes_dict[section + bits[0]] = l[i:].strip()
 
@@ -136,13 +138,13 @@ def update_config(original_config_file, template_config_file, args, backup=True)
             if new_key not in attributes_dict:       # don't override if already present
                 attributes_dict[new_key] = 'false' if disabled else 'true'
 
-    log_message("{} attributes identified".format(len(attributes_dict)))
+    logMessage("{} attributes identified".format(len(attributes_dict)))
 
     if not "[System]stationID" in attributes_dict:
-        log_message("\nERROR: No stationID found in the [System] section of .config !!!\n")
+        logMessage("\nERROR: No stationID found in the [System] section of .config !!!\n")
         raise SystemExit("Exiting the program\n")
 
-    log_message("\n[System]stationID: {}".format(attributes_dict['[System]stationID']))
+    logMessage("\n[System]stationID: {}".format(attributes_dict['[System]stationID']))
 
     new_config_file = os.path.join(
         output_dir,
@@ -154,13 +156,13 @@ def update_config(original_config_file, template_config_file, args, backup=True)
             args.output if os.path.isabs(args.output)
             else os.path.join(output_dir, args.output)
         )
-        log_message("Output: {}\n".format(new_config_file))
+        logMessage("Output: {}\n".format(new_config_file))
 
     with open(template_config_file, "r") as templatefile:
         template_lines = templatefile.readlines()
-        log_message("{} lines read from {}".format(len(template_lines),template_config_file))
+        logMessage("{} lines read from {}".format(len(template_lines),template_config_file))
 
-    log_message("\nMerging attributes...")
+    logMessage("\nMerging attributes...")
 
     custom_cnt = 0
     section = "unknown"
@@ -218,14 +220,14 @@ def update_config(original_config_file, template_config_file, args, backup=True)
                         newfile.write(
                             "{}: {}\n".format(bits[0],original_value)
                         )  # write original attribute/value pair
-                        log_message(
+                        logMessage(
                             "  {}{}: {} carried forward over => {}"
                                     .format(section,bits[0],original_value,new_default_value)
                         )
                         custom_cnt += 1
                         continue
 
-                    log_message(
+                    logMessage(
                         "  {}{}: {} RECENT template default applied => {}"
                                 .format(section,bits[0],original_value,new_default_value)
                     )
@@ -237,10 +239,10 @@ def update_config(original_config_file, template_config_file, args, backup=True)
             "\n; Reformated by {} on {}\n".format(sys.argv[0],datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         )
 
-        log_message("{} customized attributes written".format(custom_cnt))
+        logMessage("{} customized attributes written".format(custom_cnt))
 
         if len(attributes_dict) > 0:
-            log_message("\n{} unrecognized attributes preserved in new config".format(len(attributes_dict)))
+            logMessage("\n{} unrecognized attributes preserved in new config".format(len(attributes_dict)))
 
         # Read the new config into memory to insert attributes at correct positions
         with open(new_config_file, "r") as newfile:
@@ -271,7 +273,7 @@ def update_config(original_config_file, template_config_file, args, backup=True)
 
             # **Only preserve attributes that are valid (found in ConfigReader.py)**
             if attr_name.lower() not in VALID_OPTIONS:
-                log_message(f"  IGNORING: {section} {attr_name.strip()} => {value} (Not supported by RMS)")
+                logMessage(f"  IGNORING: {section} {attr_name.strip()} => {value} (Not supported by RMS)")
                 continue  # Skip this attribute
 
             # Find where to insert the attribute
@@ -293,7 +295,7 @@ def update_config(original_config_file, template_config_file, args, backup=True)
 
             # Insert attribute at the correct position **after the last attribute in the section**
             new_config_lines.insert(insert_position + 2, f"{attr_name.strip()}: {value}\n")
-            log_message(f"  PRESERVING: {section} {attr_name.strip()} => {value} (Supported by RMS)")
+            logMessage(f"  PRESERVING: {section} {attr_name.strip()} => {value} (Supported by RMS)")
 
         # Write the modified config back to disk
         with open(new_config_file, "w") as newfile:
@@ -302,7 +304,7 @@ def update_config(original_config_file, template_config_file, args, backup=True)
     return new_config_file, station_id
 
 
-def get_system_info():
+def getSystemInfo():
     system = platform.system()
     release = platform.release()
     version = platform.version()
@@ -316,8 +318,6 @@ def get_system_info():
         "Machine": machine,
         "Processor": processor
     }
-#
-#
 
 
 if __name__ == "__main__":
@@ -382,7 +382,7 @@ if __name__ == "__main__":
     # process each input config
     for orig_config in original_config_files:
         log_buffer = StringIO()
-        out_file_name, station_id = update_config(orig_config, template_config_file, args, backup=args.update)
+        out_file_name, station_id = updateConfig(orig_config, template_config_file, args, backup=args.update)
 
         if args.update:
             try:
