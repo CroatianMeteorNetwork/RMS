@@ -3,7 +3,7 @@
 '''
 Acknowledgement
 ---------------
-This script builds on an script graciously shared by Steve Matheson.
+This script builds on a script graciously shared by Steve Matheson.
 
 Quick usage example
 -------------------
