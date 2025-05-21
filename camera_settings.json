@@ -11,6 +11,8 @@
     ["SetParam", "Encode", "Video", "Compression", "H.264"],
     ["SetParam", "Encode", "Video", "Resolution", "720P"],
     ["SetParam", "Encode", "Video", "BitRateControl", "VBR"],
+    ["SetParam", "Encode", "Video", "BitRate", "4096"],
+    ["SetParam", "Encode", "Video", "GOP", "2"],
     ["SetParam", "Encode", "Video", "FPS", "25"],
     ["SetParam", "Encode", "Video", "Quality", "6"],
     ["SetParam", "Encode", "AudioEnable", "0"],
@@ -18,7 +20,7 @@
     ["SetParam", "Encode", "SecondStream", "0"],
 
     ["SetParam", "Camera", "ClearFog", "enable", "0"],
-    ["SetParam", "Camera", "ClearFog", "level", "50"],
+    ["SetParam", "Camera", "ClearFog", "level", "30"],
     ["SetParam", "Camera", "Style", "type1"],
     ["SetParam", "Camera", "AeSensitivity", "1"],
     ["SetParam", "Camera", "ApertureMode", "0"],
@@ -47,18 +49,19 @@
   "day": [
     ["CameraTime", "set"],
     ["SetParam", "Camera", "DayNightColor", "1"],
-    ["SetParam", "Camera", "BLCMode", "1"],
     ["SetParam", "Camera", "ElecLevel", "50"],
     ["SetParam", "Camera", "BroadTrends", "AutoGain", "1"],
+    ["SetParam", "Camera", "ClearFog", "enable", "1"],
+    ["SetParam", "Camera", "ClearFog", "level", "30"],
     ["reboot"]
   ],
 
   "night": [
     ["CameraTime", "set"],
     ["SetParam", "Camera", "DayNightColor", "2"],
-    ["SetParam", "Camera", "BLCMode", "0"],
     ["SetParam", "Camera", "ElecLevel", "60"],
     ["SetParam", "Camera", "BroadTrends", "AutoGain", "0"],
+    ["SetParam", "Camera", "ClearFog", "enable", "0"],
     ["reboot"]
   ]
 }
