@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 '''
 Acknowledgement
@@ -27,10 +27,6 @@ from datetime import datetime
 import shutil
 import platform
 from io import StringIO
-
-if sys.version_info < (2,7):
-    print("Python versions < 2.7 not supported")
-    sys.exit(1)
 
 from Utils.AuditConfig import extractConfigOptions
 from RMS.Misc import getRmsRootDir
