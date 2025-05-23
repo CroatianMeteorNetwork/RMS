@@ -502,8 +502,8 @@ class BufferedCapture(Process):
             # GStreamer
             if GST_IMPORTED and (self.config.media_backend == 'gst') and (not self.media_backend_override):
 
-                # Pull a frame from the GStreamer pipeline
-                sample = self.device.emit("pull-sample")
+                # Pull a frame from the GStreamer pipeline with a .5 sec timeout
+                sample = self.device.emit("try-pull-sample", 500 * Gst.MSECOND)
                 if not sample:
                     log.info("GStreamer pipeline did not emit a sample.")
                     return False, None, None
