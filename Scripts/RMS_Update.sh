@@ -188,6 +188,22 @@ else
     exit 1
 fi
 
+# Remove any stale global or egg installs of RMS before we rebuild
+echo "Clearing old RMS installs from site‑packages…"
+pip uninstall -y RMS 2>/dev/null || true              # yank a pip‑installed wheel/egg
+
+# Resolve the active site‑packages directory inside the venv
+SITE_DIR=$(python - <<'PY'
+import site, sys
+print(site.getsitepackages()[0])
+PY
+)
+
+# Nuke any leftover RMS installs (eggs, .dist‑info, .egg‑info)
+find "$SITE_DIR" -maxdepth 1 -name 'RMS-*.egg'       -prune -exec rm -rf {} +
+find "$SITE_DIR" -maxdepth 1 -name 'RMS-*.dist-info' -prune -exec rm -rf {} +
+find "$SITE_DIR" -maxdepth 1 -name 'RMS-*.egg-info'  -prune -exec rm -rf {} +
+
 # Perform cleanup operations before updating
 echo "Removing the build directory..."
 rm -rf build
@@ -242,7 +258,7 @@ fi
 # Create template from the current default config file
 if [ -f "$CURRENT_CONFIG" ]; then
     echo "Creating config template..."
-    mv "$CURRENT_CONFIG" "$RMSSOURCEDIR/.configTemplate"
+    cp "$CURRENT_CONFIG" "$RMSSOURCEDIR/.configTemplate"
     
     # Verify the move worked
     if [ ! -f "$RMSSOURCEDIR/.configTemplate" ]; then
@@ -326,14 +342,14 @@ install_missing_dependencies
 # Install Python requirements
 pip install -r requirements.txt
 
-# Run the Python setup
-python setup.py install
-
 # Restore files after updates
 restore_files
 
 # Mark the update as completed
 echo "0" > "$UPDATEINPROGRESSFILE"
+
+# Run the Python setup
+pip install -e .
 
 echo "Update process completed successfully! Exiting in 5 seconds..."
 sleep 5
