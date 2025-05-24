@@ -613,8 +613,23 @@ def generateTimelapseFromFrames(image_files,
     # Set up ffmpeg command based on color mode
     if platform.system() in ['Linux', 'Darwin']:
         ffmpeg_path = "ffmpeg"
+
+        # Check if ffmpeg is available in the system path
+        if shutil.which(ffmpeg_path) is None:
+            log.warning("ffmpeg not found in system path. Please install ffmpeg.")
+
+            # As a final check, try to run ffmpeg to see if it works
+            if os.system(ffmpeg_path + " -version") != 0:
+                log.warning("ffmpeg is not available or not working.")
+                return None, None
+
     elif platform.system() == 'Windows':
         ffmpeg_path = os.path.join(os.path.dirname(__file__), "ffmpeg.exe")
+
+        if not os.path.exists(ffmpeg_path):
+            log.warning("ffmpeg.exe not found in the expected location: {}".format(ffmpeg_path))
+            return None, None
+
     else:
         log.warning("Unsupported platform.")
         return None, None
