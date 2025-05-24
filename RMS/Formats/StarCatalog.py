@@ -332,7 +332,7 @@ def loadGMNStarCatalog(file_path,
         valid = set(catalog_data.dtype.names)
         unknown = [n for n in requested if n not in valid]
         if unknown:
-            raise ValueError(f"Unknown field(s) in additional_fields: {', '.join(unknown)}")
+            raise ValueError("Unknown field(s) in additional_fields:" + ', '.join(unknown))
 
         # Populate dict
         for name in requested:

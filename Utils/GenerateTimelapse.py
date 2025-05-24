@@ -289,7 +289,7 @@ def _parse(fname):
     """
     m = IMAGE_PATTERN.match(os.path.basename(fname))
     if not m:
-        raise ValueError(f"Cannot parse name: {fname}")
+        raise ValueError("Cannot parse name: {}".format(fname))
 
     station = m.group("station")
     # Ignore milliseconds here; keep them if you ever need sub-second precision
@@ -894,18 +894,18 @@ def main():
     
     # Print configuration
     print("Timelapse Generator Configuration:")
-    print(f"  Input directory: {args.input_dir}")
-    print(f"  Output video: {args.output}")
-    print(f"  FPS: {args.fps}")
-    print(f"  CRF value: {args.crf}")
-    print(f"  Cleanup mode: {args.cleanup}")
+    print("  Input directory: {}".format(args.input_dir))
+    print("  Output video: {}".format(args.output))
+    print("  FPS: {}".format(args.fps))
+    print("  CRF value: {}".format(args.crf))
+    print("  Cleanup mode: {}".format(args.cleanup))
     if args.cleanup == 'tar':
-        print(f"  Compression: {args.compression}")
-    print(f"  Video mode: {'Grayscale' if args.grayscale else 'Color'}")
+        print("  Compression: {}".format(args.compression))
+    print("  Video mode: {}".format('Grayscale' if args.grayscale else 'Color'))
     
     # Record start time
     start_time = datetime.now()
-    print(f"Starting process at: {start_time}")
+    print("Starting process at: {}".format(start_time))
     
     # Generate the timelapse
     try:
@@ -922,14 +922,14 @@ def main():
         # Record and print completion time and duration
         end_time = datetime.now()
         duration = end_time - start_time
-        print(f"Process completed at: {end_time}")
-        print(f"Total processing time: {duration}")
+        print("Process completed at: {}".format(end_time))
+        print("Total processing time: {}".format(duration))
         
         # Print file sizes if successful
         if video_path and os.path.exists(video_path):
             video_size = os.path.getsize(video_path) / (1024 * 1024)
             
-            print(f"Output video size: {video_size:.2f} MB")
+            print("Output video size: {:.2f} MB".format(video_size))
             
             # Check if tar was created
             if args.cleanup == 'tar':
@@ -939,10 +939,10 @@ def main():
                 
                 if os.path.exists(tar_path):
                     tar_size = os.path.getsize(tar_path) / (1024 * 1024)  # Convert to MB
-                    print(f"Archive size: {tar_size:.2f} MB")
+                    print("Archive size: {:.2f} MB".format(tar_size))
         
     except Exception as e:
-        print(f"Error generating timelapse: {e}")
+        print("Error generating timelapse: {}".format(e))
         import traceback
         traceback.print_exc()
         return 1

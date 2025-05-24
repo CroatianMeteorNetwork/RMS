@@ -58,7 +58,7 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
 
     # Ensure station_id is valid
     if not station_id:
-        logMessage(f"ERROR: No valid stationID found in {original_config_file}")
+        logMessage("ERROR: No valid stationID found in {}".format(original_config_file))
         sys.exit(1)
     
     # build output path next to the input .config ---
@@ -66,18 +66,18 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
     new_config_file = os.path.join(output_dir, f"configNew_{station_id}")        
 
     if backup:
-        original_backup = os.path.join(os.path.dirname(original_config_file), f"{station_id}.config.original.bak")
-        latest_backup = os.path.join(os.path.dirname(original_config_file), f"{station_id}.config.bak")
+        original_backup = os.path.join(os.path.dirname(original_config_file), "{}.config.original.bak".format(station_id))
+        latest_backup = os.path.join(os.path.dirname(original_config_file), "{}.config.bak".format(station_id))
 
         try:
             if not os.path.exists(original_backup):
                 shutil.copy(original_config_file, original_backup)
-                logMessage(f"\nOriginal backup created: {original_backup}")
+                logMessage("\nOriginal backup created: {}".format(original_backup))
 
             shutil.copy(original_config_file, latest_backup)
-            logMessage(f"\nBackup created: {latest_backup}")
+            logMessage("\nBackup created: {}".format(latest_backup))
         except Exception as e:
-            logMessage(f"ERROR: Backup failed: {e}")
+            logMessage("ERROR: Backup failed: {}".format(e))
             sys.exit(1)
 
     # list of attributes with recently updated defaults
@@ -272,7 +272,7 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
 
             # **Only preserve attributes that are valid (found in ConfigReader.py)**
             if attr_name.lower() not in VALID_OPTIONS:
-                logMessage(f"  IGNORING: {section} {attr_name.strip()} => {value} (Not supported by RMS)")
+                logMessage("  IGNORING: {} {} => {} (Not supported by RMS)".format(section, attr_name.strip(), value))
                 continue  # Skip this attribute
 
             # Find where to insert the attribute
@@ -280,7 +280,7 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
                 insert_position = section_positions[section]["last_option"] + 1  # Insert after last valid option
             else:
                 # If section is missing or empty, add at the end
-                new_config_lines.append(f"\n{section}\n")
+                new_config_lines.append("\n{}\n".format(section))
                 insert_position = len(new_config_lines)
 
             # Ensure a blank line before inserting the first preserved option (if needed)
@@ -294,7 +294,7 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
 
             # Insert attribute at the correct position **after the last attribute in the section**
             new_config_lines.insert(insert_position + 2, f"{attr_name.strip()}: {value}\n")
-            logMessage(f"  PRESERVING: {section} {attr_name.strip()} => {value} (Supported by RMS)")
+            logMessage("  PRESERVING: {} {} => {} (Supported by RMS)".format(section, attr_name.strip(), value))
 
         # Write the modified config back to disk
         with open(new_config_file, "w") as newfile:
@@ -391,7 +391,7 @@ if __name__ == "__main__":
 
                 log_file = os.path.join(os.path.dirname(orig_config), f"{station_id}_MigrateConfig.log")
                 with open(log_file, "a") as log:
-                    log.write(f"\n=== Migration Log: {datetime.now():%Y-%m-%d %H:%M:%S} ===\n\n")
+                    log.write("\n=== Migration Log: {} ===\n\n".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
                     log.write(log_buffer.getvalue())
                     log.write("\nMigration applied successfully.\n")
 
@@ -400,7 +400,7 @@ if __name__ == "__main__":
                 print("Updated\n")
 
             except Exception as e:
-                print(f"ERROR: Update failed: {e}")
+                print("ERROR: Update failed: {}".format(e))
                 sys.exit(1)
 
     if not args.update:
