@@ -244,6 +244,15 @@ def getSSHAndSFTP(hostname, **kwargs):
     return ssh, sftp
 
 
+# Define a class to track progress and share values between the callback and the main thread
+class ProgressTracker(object):
+    def __init__(self, total_bytes):
+        self.total_bytes = total_bytes
+        self.uploaded_bytes = 0
+        self.last_percent = 0
+        self.start_time = time.time()
+
+
 def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                rsa_private_key=os.path.expanduser('~/.ssh/id_rsa'),
                allow_dir_creation=False,
@@ -340,52 +349,56 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                 # Means remote file doesn't exist yet, so proceed
                 pass
             
-            # Define a callback function for progress reporting
-            total_bytes = local_file_size
-            uploaded_bytes = 0
-            start_time = time.time()
-            last_percent = 0
+            # Initialize the progress tracker
+            tracker = ProgressTracker(local_file_size)
+
             update_interval = 1  # Update progress every 1% for large files or 5% for small files
-            if total_bytes > 100 * 1024 * 1024:  # For files over 100MB, update more frequently
+            if tracker.total_bytes > 100*1024*1024:  # For files over 100MB, update more frequently
                 update_interval = 0.5
 
-            def progress_callback(bytes_transferred, _):
-                nonlocal uploaded_bytes, last_percent, start_time
-                uploaded_bytes = bytes_transferred
+            # Define a callback function for progress reporting
+            def progressCallback(bytes_transferred, _):
+                """ Callback function to report upload progress. 
+                    It updates the tracker and prints the progress to the console.
+                """
+
+                tracker.uploaded_bytes = bytes_transferred
                 
                 # Calculate percentage
-                if total_bytes > 0:
-                    percent_complete = round(100.0 * uploaded_bytes / total_bytes, 1)
+                if tracker.total_bytes > 0:
+                    percent_complete = round(100.0*tracker.uploaded_bytes/tracker.total_bytes, 1)
                     
                     # Only update when the percentage changes by at least update_interval
                     # Also prevent duplicate 100% messages
-                    if (percent_complete >= last_percent + update_interval and last_percent < 100.0) or (percent_complete == 100.0 and last_percent != 100.0):
-                        elapsed_time = time.time() - start_time
+                    if (percent_complete >= tracker.last_percent + update_interval and tracker.last_percent < 100.0) \
+                        or (percent_complete == 100.0 and tracker.last_percent != 100.0):
+                        
+                        elapsed_time = time.time() - tracker.start_time
                         
                         # Calculate transfer speed
                         if elapsed_time > 0:
-                            transfer_rate = uploaded_bytes / elapsed_time / 1024  # KB/s
+                            transfer_rate = tracker.uploaded_bytes/elapsed_time/1024  # KB/s
                             
                             # Format as MB/s if over 1024 KB/s
                             if transfer_rate > 1024:
-                                transfer_rate_str = "{:.2f} MB/s".format(transfer_rate / 1024)
+                                transfer_rate_str = "{:.2f} MB/s".format(transfer_rate/1024)
                             else:
                                 transfer_rate_str = "{:.2f} KB/s".format(transfer_rate)
                             
                             # Estimate time remaining
                             if percent_complete > 0 and percent_complete < 100.0:
-                                time_remaining = (elapsed_time / percent_complete) * (100 - percent_complete)
+                                time_remaining = (elapsed_time/percent_complete)*(100 - percent_complete)
                                 # Format time remaining
                                 if time_remaining > 60:
-                                    time_str = "{:.1f} min remaining".format(time_remaining / 60)
+                                    time_str = "{:.1f} min remaining".format(time_remaining/60)
                                 else:
                                     time_str = "{:.0f} sec remaining".format(time_remaining)
                                 
                                 print('[{:.1f}%] Uploading: {} ({}/{}) @ {} - {}'.format(
                                     percent_complete,
                                     os.path.basename(local_file),
-                                    format_size(uploaded_bytes),
-                                    format_size(total_bytes),
+                                    formatSize(tracker.uploaded_bytes),
+                                    formatSize(tracker.total_bytes),
                                     transfer_rate_str,
                                     time_str
                                 ))
@@ -394,16 +407,16 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                                 if percent_complete == 100.0:
                                     print('[100.0%] Upload complete: {} ({}/{}) @ {}'.format(
                                         os.path.basename(local_file),
-                                        format_size(uploaded_bytes),
-                                        format_size(total_bytes),
+                                        formatSize(tracker.uploaded_bytes),
+                                        formatSize(tracker.total_bytes),
                                         transfer_rate_str
                                     ))
                                 else:
                                     print('[{:.1f}%] Uploading: {} ({}/{}) @ {}'.format(
                                         percent_complete,
                                         os.path.basename(local_file),
-                                        format_size(uploaded_bytes),
-                                        format_size(total_bytes),
+                                        formatSize(tracker.uploaded_bytes),
+                                        formatSize(tracker.total_bytes),
                                         transfer_rate_str
                                     ))
                         
@@ -411,15 +424,16 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                             print('[{:.1f}%] Uploading: {} ({}/{})'.format(
                                 percent_complete,
                                 os.path.basename(local_file),
-                                format_size(uploaded_bytes),
-                                format_size(total_bytes)
+                                formatSize(tracker.uploaded_bytes),
+                                formatSize(tracker.total_bytes)
                             ))
                         
-                        last_percent = percent_complete
+                        tracker.last_percent = percent_complete
             
             # Upload the file to the server if it isn't already there
-            log.info('Starting upload of ' + local_file + ' ({}) to '.format(format_size(local_file_size)) + remote_file)
-            sftp.put(local_file, remote_file, callback=progress_callback)
+            log.info('Starting upload of ' \
+                     + local_file + ' ({}) to '.format(formatSize(local_file_size)) + remote_file)
+            sftp.put(local_file, remote_file, callback=progressCallback)
             log.info("Upload completed, verifying...")
 
             # Check that the size of the remote file is correct, indicating a successful upload
@@ -428,7 +442,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
             # If the remote and the local file are of the same size, skip it
             if local_file_size != remote_info.st_size:
                 log.error('File verification failed: local size {} != remote size {}'.format(
-                    format_size(local_file_size), format_size(remote_info.st_size)))
+                    formatSize(local_file_size), formatSize(remote_info.st_size)))
                 return False
 
             log.info("File upload verified: {:s}".format(remote_file))
@@ -449,16 +463,16 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
             ssh.close()
 
 # Helper function to format file sizes in human-readable format
-def format_size(size_bytes):
+def formatSize(size_bytes):
     """Format a size in bytes into a human-readable string"""
     if size_bytes < 1024:
         return "{} B".format(size_bytes)
-    elif size_bytes < 1024 * 1024:
-        return "{:.2f} KB".format(size_bytes / 1024)
-    elif size_bytes < 1024 * 1024 * 1024:
-        return "{:.2f} MB".format(size_bytes / (1024 * 1024))
+    elif size_bytes < 1024*1024:
+        return "{:.2f} KB".format(size_bytes/1024)
+    elif size_bytes < 1024*1024*1024:
+        return "{:.2f} MB".format(size_bytes/(1024*1024))
     else:
-        return "{:.2f} GB".format(size_bytes / (1024 * 1024 * 1024))
+        return "{:.2f} GB".format(size_bytes/(1024*1024*1024))
 
 class UploadManager(multiprocessing.Process):
     def __init__(self, config):
