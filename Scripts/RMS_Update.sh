@@ -314,7 +314,7 @@ restore_files
 echo "0" > "$UPDATEINPROGRESSFILE"
 
 # Run the Python setup
-pip install -e . --no-deps --no-build-isolation
+pip install -e .
 
 echo "Update process completed successfully! Exiting in 5 seconds..."
 sleep 5
