@@ -63,7 +63,7 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
     
     # build output path next to the input .config ---
     output_dir = os.path.dirname(os.path.abspath(original_config_file))
-    new_config_file = os.path.join(output_dir, f"configNew_{station_id}")        
+    new_config_file = os.path.join(output_dir, "configNew_{}".format(station_id))        
 
     if backup:
         original_backup = os.path.join(os.path.dirname(original_config_file), "{}.config.original.bak".format(station_id))
@@ -147,7 +147,7 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
 
     new_config_file = os.path.join(
         output_dir,
-        f"configNew_{attributes_dict['[System]stationID']}"
+        "configNew_{}".format(attributes_dict['[System]stationID'])
     )
     if args.output:
         # absolute > use verbatim, relative > still next to the original
@@ -293,7 +293,7 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
                 added_comment[section] = True  # Prevent duplicate comments
 
             # Insert attribute at the correct position **after the last attribute in the section**
-            new_config_lines.insert(insert_position + 2, f"{attr_name.strip()}: {value}\n")
+            new_config_lines.insert(insert_position + 2, "{}: {}\n".format(attr_name.strip(), value))
             logMessage("  PRESERVING: {} {} => {} (Supported by RMS)".format(section, attr_name.strip(), value))
 
         # Write the modified config back to disk
@@ -389,7 +389,7 @@ if __name__ == "__main__":
                 os.remove(out_file_name)
                 print("Updated\n")
 
-                log_file = os.path.join(os.path.dirname(orig_config), f"{station_id}_MigrateConfig.log")
+                log_file = os.path.join(os.path.dirname(orig_config), "{}_MigrateConfig.log".format(station_id))
                 with open(log_file, "a") as log:
                     log.write("\n=== Migration Log: {} ===\n\n".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
                     log.write(log_buffer.getvalue())
