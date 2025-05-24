@@ -787,12 +787,13 @@ def parse(path, strict=True):
         # Python 3
         parser = RawConfigParser(inline_comment_prefixes=(delimiter), strict=strict)
 
+        parser.read(path, encoding='utf-8')
+
     except:
         # Python 2
         parser = RawConfigParser()
 
-
-    parser.read(path, encoding='utf-8')
+        parser.read(path)
 
 
     # Remove inline comments
