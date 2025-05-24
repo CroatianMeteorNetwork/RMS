@@ -2005,7 +2005,9 @@ class BufferedCapture(Process):
             if self.config.save_frame_times:
                 ft = FTStruct.FTStruct()
                 ft.timestamps = copy.copy(self.timestamp_buffer)
-                self.timestamp_buffer.clear()
+
+                # Clear the timestamp buffer list                
+                del self.timestamp_buffer[:]
 
                 base_time = datetime.datetime.fromtimestamp(first_frame_timestamp)
                 ft_filename = base_time.strftime("FT_{}_%Y%m%d_%H%M%S.bin".format(self.config.stationID))
