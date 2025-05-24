@@ -1,3 +1,6 @@
+from __future__ import print_function, division, absolute_import
+
+
 import os
 import sys
 import errno
@@ -7,6 +10,51 @@ import multiprocessing
 import datetime
 import threading
 import atexit
+
+
+try:
+    from logging.handlers import QueueHandler  # Python 3.2+
+except ImportError:
+    class QueueHandler(logging.Handler):
+        """Minimal backport of logging.handlers.QueueHandler for Python 2."""
+        def __init__(self, queue):
+            logging.Handler.__init__(self)
+            self.queue = queue
+
+        def emit(self, record):
+            try:
+                self.queue.put_nowait(record)
+            except Exception:
+                self.handleError(record)
+
+    # Inject into logging.handlers for consistent reference later
+    logging.handlers.QueueHandler = QueueHandler
+
+
+try:
+    from logging.handlers import QueueListener  # Python 3.2+
+except ImportError:
+    class QueueListener(object):
+        def __init__(self, queue, *handlers):
+            self.queue = queue
+            self.handlers = handlers
+            self._stop = False
+
+        def start(self):
+            # No-op: we pull from the queue manually in _listener_process
+            pass
+
+        def stop(self):
+            self._stop = True
+
+        def handle(self, record):
+            for handler in self.handlers:
+                if record is not None:
+                    handler.handle(record)
+
+    # Inject into logging.handlers for consistency
+    logging.handlers.QueueListener = QueueListener
+
 
 
 ##############################################################################
