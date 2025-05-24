@@ -319,9 +319,9 @@ def initLogging(config, log_file_prefix="", safedir=None, level=logging.DEBUG):
     _rms_logging_queue = multiprocessing.Queue(-1)
     _rms_listener_process = multiprocessing.Process(
         target=_listener_process,
-        args=(_rms_logging_queue, config, log_file_prefix, safedir),
-        daemon=True
+        args=(_rms_logging_queue, config, log_file_prefix, safedir)
     )
+    _rms_listener_process.daemon = True  # Set daemon attribute manually (for Python 2 compatibility)
     _rms_listener_process.start()
 
     # Set DEBUG on root logger in main process
