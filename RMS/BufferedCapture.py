@@ -129,7 +129,7 @@ class BufferedCapture(Process):
 
         # make sure the flags are always real shared Values
         if daytime_mode is None:
-            self.daytime_mode = Value(ctypes.c_bool, False)       # default: “night”
+            self.daytime_mode = Value(ctypes.c_bool, False)       # default: "night"
         else:
             self.daytime_mode = daytime_mode
 
@@ -502,8 +502,8 @@ class BufferedCapture(Process):
             # GStreamer
             if GST_IMPORTED and (self.config.media_backend == 'gst') and (not self.media_backend_override):
 
-                # Pull a frame from the GStreamer pipeline
-                sample = self.device.emit("pull-sample")
+                # Pull a frame from the GStreamer pipeline with a .5 sec timeout
+                sample = self.device.emit("try-pull-sample", 500 * Gst.MSECOND)
                 if not sample:
                     log.info("GStreamer pipeline did not emit a sample.")
                     return False, None, None
@@ -1091,8 +1091,11 @@ class BufferedCapture(Process):
                     # After camera connection is established, if necessary inititliaze camera settings
                     # and/or perform camera mode change
 
+                    # initialize flag to indicate if camera should be reprobed after mode change
+                    reprobe = False
+
                     # ------------------------------------------------------------------
-                    # One-time camera initialization
+                    # One-time camera initialization with flag file in rms_root_dir
                     # ------------------------------------------------------------------
                     root_dir  = self.config.rms_root_dir
 
@@ -1101,6 +1104,7 @@ class BufferedCapture(Process):
 
                     if self.config.initialize_camera and not os.path.exists(flag_file):
                         log.info("Running camera init sequence ...")
+                        reprobe = True
                         try:
                             mode_name = "init"
                             mode_path = self.config.camera_settings_path
@@ -1116,12 +1120,13 @@ class BufferedCapture(Process):
 
                             try:
                                 cc.cameraControlV2(self.config, "SwitchMode", mode_name)
+
+                                # create empty sentinel file
+                                open(flag_file, "a").close()
+                                log.info("Init complete - flag written to %s", flag_file)
+
                             except Exception as e:
                                 raise RuntimeError("Failed to switch camera mode: {}".format(e))
-
-                            # create empty sentinel file
-                            open(flag_file, "a").close()
-                            log.info("Init complete - flag written to %s", flag_file)
 
                         except Exception as e:
                             log.warning("Camera switch to %s mode failed: %s. Will retry later.", mode_name, e)
@@ -1131,7 +1136,17 @@ class BufferedCapture(Process):
                     # -------------------------------------------
                     if self.config.continuous_capture and self.config.switch_camera_modes:
                         if self.camera_mode_switch_trigger.value:
+                            reprobe = True
                             switchCameraMode(self.config, self.daytime_mode, self.camera_mode_switch_trigger)
+
+            if reprobe:
+                # Wait 5 seconds for the camera to register all commands after mode switching / reboot
+                log.info("Waiting for camera to register all commands...")
+                time.sleep(5)
+                success, probe_result = self.probeRtspService()
+                if not success:
+                    log.error("Camera connection failed after switching modes: {}".format(probe_result))
+                    return False
 
             # Init the video device
             log.info("Initializing the video device...")
@@ -1575,7 +1590,7 @@ class BufferedCapture(Process):
         # Keep track of the total number of frames
         total_frames = 0
 
-        # Timestamp of the very first good frame - becomes the run’s origin
+        # Timestamp of the very first good frame - becomes the run's origin
         run_start_ts = None
 
         # For video devices only (not files), throw away the first 10 frames

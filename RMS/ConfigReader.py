@@ -1010,19 +1010,19 @@ def parseCapture(config, parser):
         config.quota_management_enabled = not parser.getboolean(section, "quota_management_disabled")
 
     if parser.has_option(section, "rms_data_quota"):
-        config.rms_data_quota = int(parser.get(section, "rms_data_quota"))
+        config.rms_data_quota = float(parser.get(section, "rms_data_quota"))
 
     if parser.has_option(section, "arch_dir_quota"):
-        config.arch_dir_quota = int(parser.get(section, "arch_dir_quota"))
+        config.arch_dir_quota = float(parser.get(section, "arch_dir_quota"))
 
     if parser.has_option(section, "bz2_files_quota"):
-        config.bz2_files_quota = int(parser.get(section, "bz2_files_quota"))
+        config.bz2_files_quota = float(parser.get(section, "bz2_files_quota"))
 
     if parser.has_option(section, "log_files_quota"):
         config.log_files_quota = float(parser.get(section, "log_files_quota"))
 
     if parser.has_option(section, "continuous_capture_quota"):
-        config.continuous_capture_quota = int(parser.get(section, "continuous_capture_quota"))
+        config.continuous_capture_quota = float(parser.get(section, "continuous_capture_quota"))
 
     if parser.has_option(section, "captured_dir"):
         config.captured_dir = parser.get(section, "captured_dir")
