@@ -889,8 +889,7 @@ def main():
     # Set default output path if not specified
     if not args.output:
         input_dir_name = os.path.basename(os.path.normpath(args.input_dir))
-        args.output = os.path.join(os.path.dirname(args.input_dir), 
-                                  f"{input_dir_name}_timelapse.mp4")
+        args.output = os.path.join(os.path.dirname(args.input_dir), "{}_timelapse.mp4".format(input_dir_name))
     
     # Print configuration
     print("Timelapse Generator Configuration:")
