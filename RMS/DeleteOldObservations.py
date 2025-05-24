@@ -11,8 +11,6 @@ import time
 import glob
 import argparse
 import subprocess
-import re
-from http.cookiejar import UTC_ZONES
 
 import ephem
 
