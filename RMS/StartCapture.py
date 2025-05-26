@@ -269,6 +269,19 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         + "_|____    /__.-'|_|--|_|          ______|__\n")
     print("################################################################")
 
+    # Add a note about deceased members
+    print()
+    print("In memory of Global Meteor Network members:")
+    print("- Dr. Daniel A. Klinglesmith III (d. 2019)")
+    print("- Martin Richmond-Hardy (d. 2023)")
+    print("- Romke Schievink (d. 2025)")
+    print()
+    print("Memento mori")
+    print("Each of us, a fleeting flame")
+    print("Yet our paths remain.")
+    print()
+    print("################################################################")
+
     # Make a directory for the night - if currently in night capture mode
     in_night_capture = (daytime_mode is None) or (not daytime_mode.value)
     if (not config.continuous_capture) or in_night_capture:
