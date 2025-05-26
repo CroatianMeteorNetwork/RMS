@@ -356,14 +356,18 @@ if __name__ == "__main__":
     curr_path = os.getcwd()
     print("Current path is {}".format(curr_path))
 
-    template_config_file = os.path.expanduser("~/source/RMS/.configTemplate")
+    
+    # Get the path to the RMS root directory
+    rms_root_dir = getRmsRootDir()
+    template_config_file = os.path.join(rms_root_dir, ".configTemplate")
+
     if args.template:
         template_config_file = args.template
     
     print("\nTemplate: {}".format(template_config_file))
 
     # assume default input
-    original_config_files = [os.path.expanduser("~/source/RMS/.config")]
+    original_config_files = [os.path.join(rms_root_dir, ".config")]
 
     # if multi-cam find and assume those
     if os.path.exists(os.path.expanduser("~/source/Stations")):
