@@ -274,6 +274,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     print("In memory of Global Meteor Network members:")
     print("- Dr. Daniel A. Klinglesmith III (d. 2019)")
     print("- Martin Richmond-Hardy (d. 2023)")
+    print("- Rajko Susanj (d. 2023)")
     print("- Romke Schievink (d. 2025)")
     print()
     print("Memento mori")
