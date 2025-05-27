@@ -47,7 +47,7 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
         config: [conf object] configuration structure
 
     Keyword arguments:
-        save_frames: [bool] Save FR frames to disk. False by defualt.
+        save_frames: [bool] Save FR frames to disk. False by default.
         extract_format: [str] Format of saved images. E.g. png, jpg, mp4.
         hide: [bool] Don't show frames on the screen.
         avg_background: [bool] Avepixel as background. False by default, in which case the maxpixel will be

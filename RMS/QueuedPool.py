@@ -75,7 +75,7 @@ class BackupContainer(object):
             saved to disk when the worker function finishes, and can be later restored. 
         """
 
-        # Take the input list a tuple, as it has to be imutable to be a dictionary key
+        # Take the input list a tuple, as it has to be immutable to be a dictionary key
         self.inputs = listToTupleRecursive(inputs)
 
         self.outputs = outputs
@@ -127,7 +127,7 @@ class QueuedPool(object):
 
 
         # If cores are negative, use the total available cores minus the given number
-        if cores < 0:
+        if cores <= 0:
 
             cores = multiprocessing.cpu_count() + cores
 
@@ -160,7 +160,7 @@ class QueuedPool(object):
         # blocking when using get_nowait)
         manager = multiprocessing.Manager()
 
-        # Only init with maxsize if given, otherwise it return a TypeErorr when fed data from Compressor
+        # Only init with maxsize if given, otherwise it return a TypeError when fed data from Compressor
         if input_queue_maxsize is None:
             self.input_queue = manager.Queue()
         else:
@@ -244,7 +244,12 @@ class QueuedPool(object):
         for file_name in self._listBackupFiles():
 
             # Load the backup file
-            bkup_obj = loadPickle(self.bkup_dir, file_name)
+            try:
+                bkup_obj = loadPickle(self.bkup_dir, file_name)
+            except Exception as e:
+                self.printAndLog('Failed loading backup file:', file_name)
+                self.printAndLog(repr(e))
+                continue
 
             if bkup_obj is None:
                 continue

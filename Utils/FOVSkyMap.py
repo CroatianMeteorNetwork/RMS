@@ -174,7 +174,7 @@ if __name__ == "__main__":
 
 
 
-    # Plot all plateaprs on an alt/az sky map
+    # Plot all platepars on an alt/az sky map
     plotFOVSkyMap(platepars, cml_args.dir_path, cml_args.north_up, masks=masks)
 
             

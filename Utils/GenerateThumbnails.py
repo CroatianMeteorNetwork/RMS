@@ -40,7 +40,7 @@ import RMS.Formats.FFfile as FFfile
 
 
 def stackIfLighter(arr1, arr2):
-    """ Blends two image array with lighen method (only takes the lighter pixel on each spot).
+    """ Blends two image array with lighten method (only takes the lighter pixel on each spot).
     """
 
     arr1 = arr1.astype(np.int16)
@@ -122,7 +122,7 @@ def generateThumbnails(dir_path, config, mosaic_type, file_list=None, no_stack=F
                 # Read the FF file
                 ff = FFfile.read(dir_path, tmp_file_name)
 
-                # Skip the FF if it is corruped
+                # Skip the FF if it is corrupted
                 if ff is None:
                     continue
 

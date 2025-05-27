@@ -146,7 +146,8 @@ class AllSkyPlot(object):
 			else:
 				va = 'top'
 
-			self.ax.text(x, y, "{:+d}$^\circ$".format(dec), color='0.5', ha='center', va=va, size=7)
+			self.ax.text(x, y, "${:+d}^\\circ$".format(dec), color='0.5', ha='center', va=va, size=7)
+
 
 
 		# Plot every other RA tick and skip 0 and 360
@@ -157,7 +158,7 @@ class AllSkyPlot(object):
 			#ra_text = (180 - ra)%360
 
 			x, y = self.raDec2XY(ra, 0)
-			self.ax.text(x, y, "{:+d}$^\circ$".format(int(ra)), color='0.5', ha='center', va='top', size=7)
+			self.ax.text(x, y, "${:+d}^\\circ$".format(int(ra)), color='0.5', ha='center', va='top', size=7)
 
 
 

@@ -179,7 +179,7 @@ def getNetworkParams(cam, showit=True):
     """ retrieve or display the camera network settings
 
     Args:
-        cam : canera object
+        cam : camera object
         showit (bool, optional): whether to print out the settings.
 
     Returns:
@@ -752,5 +752,5 @@ To set these values pass split at the dot if there is one, then call SetParam
 eg
   SetParam ExposureParam Level 0
   SetParam DayNightColor 0
-Decimals will be converted to hex strings if necesssary.
+Decimals will be converted to hex strings if necessary.
 """

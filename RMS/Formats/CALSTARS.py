@@ -101,7 +101,7 @@ def readCALSTARS(file_path, file_name):
         skip_lines = 0
         for line in star_file.readlines()[11:]:
 
-            # Skip lines if neccessary
+            # Skip lines if necessary
             if skip_lines > 0:
                 skip_lines -= 1
                 continue

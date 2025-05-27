@@ -52,7 +52,7 @@ def loadPickle(dir_path, file_name):
             else:
                 return pickle.load(f, encoding='latin1')
 
-        except (IOError, EOFError, TypeError, KeyError):
+        except (IOError, EOFError, TypeError, KeyError, pickle.UnpicklingError):
             
-            print('The pickle file was corruped and could not be loaded:', os.path.join(dir_path, file_name))
+            print('The pickle file was corrupted and could not be loaded:', os.path.join(dir_path, file_name))
             return None

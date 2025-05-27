@@ -1,77 +1,72 @@
+# This software is part of the Linux port of RMS
+# Copyright (C) 2023  Ed Harman
+# 
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
 #
-# This is a modified version of the standard RMS on Linux installer linked to on the wiki.
-# It includes custom commands to automate the Multi station gui enabled software
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#!/bin/bash
+#
+# This is script will take an Ubuntu LTS or Debian-11/12 release and install all the components
+# required to run an RMS meteor station
+# If you wish to run multiple stations on this host, after running this script execute  -
+# ~/source/RMS/Scripts/MultiCamlinux/add_GStation.sh
+#
+
+cd ~/
+mkdir source
+cd  source
+sudo apt install -y git wget zip
+git clone https://github.com/CroatianMeteorNetwork/RMS.git
 sudo apt-get update
 sudo apt-get -y upgrade
-if grep -Fq Debian /etc/issue; then
-# ..might need to fix  for Bullseye..
-sudo apt-get install -y python3-tk python3-pil
-wget http://ftp.br.debian.org/debian/pool/main/x/xcb-util/libxcb-util1_0.4.0-1+b1_amd64.deb
-sudo dpkg -i libxcb-util1_0.4.0-1+b1_amd64.deb
-elif grep -Fq 'Ubuntu 20.04' /etc/issue; then
-sudo apt-get install -y python3.8-tk libxslt-dev python-imaging-tk
-elif grep -Fq 'Ubuntu 22.04' /etc/issue; then
 sudo apt-get install -y python3-tk libxslt1-dev python3-pil
-fi
 sudo apt-get install -y git mplayer python3 python3-dev python3-pip libblas-dev libatlas-base-dev \
 liblapack-dev at-spi2-core libopencv-dev libffi-dev libssl-dev socat ntp \
-libxml2-dev libxslt-dev imagemagick ffmpeg cmake unzip
+libxml2-dev libxslt-dev imagemagick ffmpeg cmake 
+sudo apt install -y python3-gi python3-gst-1.0 libgirepository1.0-dev libcairo2-dev gir1.2-gstreamer-1.0
 
-sudo pip3 install --upgrade pip
-sudo apt install python3-virtualenv
+pip3 install --upgrade pip
+if [[ $(awk '{print $3}' /etc/issue) == 11 ]]
+    then
+    sudo apt install virtualenv     # Debian <12 package this seperately
+fi
+sudo apt install -y python3-virtualenv
 cd ~
 virtualenv vRMS
 source ~/vRMS/bin/activate
-pip install -U pip setuptools
-pip install numpy==1.23.5
-pip install Pillow
-pip install gitpython cython pyephem astropy 
-pip install scipy==1.8.1
-pip install paramiko==2.8.0
-pip install matplotlib
-pip install imreg_dft
-pip install configparser==4.0.2
-pip install imageio==2.6.1
-pip install pyfits
+pip3 install -U pip
+pip install -r ~/source/RMS/requirements.txt
+pip install tflite-runtime    # missed from requirements due to python 3.11
 pip install PyQt5
 pip install pyqtgraph
-
+pip install pycairo
+pip install PyGObject
 cd ~/source/RMS
-cp  ~/source/RMS/Scripts/MultiCamLinux/opencv4_install.sh .
-./opencv4_install.sh ~/vRMS
-cd ~/source
-sudo apt install -y gstreamer1.0*
+#sudo apt install -y gstreamer1.0*  # fails in certain env's, manually install good, bad and libavcodec-dev
 sudo apt install -y gstreamer1.0-python3-dbg-plugin-loader
 sudo apt install -y gstreamer1.0-python3-plugin-loader
-sudo apt install -y ubuntu-restricted-extras
+sudo apt install -y gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly
 sudo apt install -y libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
 
+# Check what platform we are on, x86_64 platforms don't support NEON extensions that are ARM specific
+if [[ $(uname -m) == x86_64 ]]
+    then
+    ex +g/NEON/d -cwq opencv4_install.sh
+fi
 
-git clone https://github.com/opencv/opencv.git
-cd opencv/
-git checkout 4.1.0
-mkdir build
-cd build
-cmake -D CMAKE_BUILD_TYPE=RELEASE \
--D INSTALL_PYTHON_EXAMPLES=ON \
--D INSTALL_C_EXAMPLES=OFF \
--D PYTHON_EXECUTABLE=$(which python3) \
--D BUILD_opencv_python2=OFF \
--D CMAKE_INSTALL_PREFIX=$(python3 -c "import sys; print(sys.prefix)") \
--D PYTHON3_EXECUTABLE=$(which python3) \
--D PYTHON3_INCLUDE_DIR=$(python3 -c "from distutils.sysconfig import get_python_inc; print(get_python_inc())") \
--D PYTHON3_PACKAGES_PATH=$(python3 -c "from distutils.sysconfig import get_python_lib; print(get_python_lib())") \
--D WITH_GSTREAMER=ON \
--D BUILD_EXAMPLES=ON ..
--D WITH_V4L=ON \
--D WITH_LIBV4L=ON
-sudo make -j$(nproc)
-sudo make install
-sudo ldconfig
-
+./opencv4_install.sh ~/vRMS
 cd ~/source/RMS
 python setup.py install
-sudo apt install -y gstreamer1.0-plugins-good python3-pyqt5
+sudo apt install -y gstreamer1.0-plugins-good
 # get CMNbinViewer....
 cd ~/source
 git clone https://github.com/CroatianMeteorNetwork/cmn_binviewer.git
@@ -79,6 +74,5 @@ git clone https://github.com/CroatianMeteorNetwork/cmn_binviewer.git
 if [ -d "$HOME/Desktop" ]
 then 
 # generate desktop links
-cd ~/source/RMS/Scripts
-./GenerateDesktopLinks.sh
+~/source/RMS/Scripts/GenerateDesktopLinks.sh
 fi

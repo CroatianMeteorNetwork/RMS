@@ -122,8 +122,8 @@ def archiveFieldsums(dir_path):
     # Find all fieldsum FS files
     for file_name in os.listdir(dir_path):
 
-        # Take all field sum files
-        if ('FS' in file_name) and ('fieldsum' in file_name):
+        # Take all field sum .bin files
+        if file_name.startswith("FS") and file_name.endswith(".bin") and ('fieldsum' in file_name):
             fieldsum_files.append(file_name)
 
 
@@ -189,7 +189,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
 
 
-    log.info('Generating a stack of detections...')
+    log.info('Generating a stack of all captured images...')
 
     try:
 
@@ -218,10 +218,18 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         else:
             log.info("Captured stack could not be saved!")
 
+    except Exception as e:
+        log.error('Generating captured stack failed with error:' + repr(e))
+        log.error("".join(traceback.format_exception(*sys.exc_info())))
+
+
+    log.info('Generating a stack of {:d} detections...'.format(len(ff_detected)))
+
+    try:
 
         # Make a co-added image of all detections. Filter out possible clouds
         detected_stack_path, _ = stackFFs(captured_path, 'jpg', deinterlace=(config.deinterlace_order > 0), 
-            subavg=True, filter_bright=True, file_list=sorted(file_list), mask=mask)
+            subavg=True, filter_bright=True, file_list=sorted(ff_detected), mask=mask)
 
         if detected_stack_path is not None:
 

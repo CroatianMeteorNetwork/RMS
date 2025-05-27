@@ -19,7 +19,6 @@ from __future__ import print_function, division, absolute_import
 import sys
 import os
 import time
-import datetime
 import logging
 import argparse
 
@@ -31,10 +30,11 @@ from RMS.Formats import FTPdetectinfo
 from RMS.Formats import CALSTARS
 from RMS.Formats.FFfile import validFFName
 from RMS.Formats.FrameInterface import detectInputType
-from RMS.ExtractStars import extractStars
+from RMS.ExtractStars import extractStarsFF
 from RMS.Detection import detectMeteors
 from RMS.DetectionTools import loadImageCalibration
 from RMS.QueuedPool import QueuedPool
+from RMS.Misc import RmsDateTime
 
 
 # Get the logger from the main module
@@ -82,8 +82,9 @@ def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None, dark=
         byteswap=img_handle.byteswap)
 
 
-    # Run star extraction
-    star_list = extractStars(ff_directory, ff_name, config, flat_struct=flat_struct, dark=dark, mask=mask)
+    # Run star extraction on FF files
+    star_list = extractStarsFF(ff_directory, ff_name, config=config, 
+                               flat_struct=flat_struct, dark=dark, mask=mask)
 
 
     log.info('Detected stars: ' + str(len(star_list[1])))
@@ -193,6 +194,10 @@ def saveDetections(detection_results, ff_dir, config):
     # Generate the name for the CALSTARS file
     calstars_name = 'CALSTARS_' + prefix + '.txt'
 
+    # Create the ff_dir if it does not exist
+    if not os.path.isdir(ff_dir):
+        os.makedirs(ff_dir)
+
     # Write detected stars to the CALSTARS file
     CALSTARS.writeCALSTARS(star_list, ff_dir, calstars_name, config.stationID, config.height, 
         config.width)
@@ -239,7 +244,7 @@ def detectStarsAndMeteorsDirectory(dir_path, config):
     log.info('Starting detection...')
 
     # Initialize the detector
-    detector = QueuedPool(detectStarsAndMeteors, cores=-1, log=log, backup_dir=ff_dir, \
+    detector = QueuedPool(detectStarsAndMeteors, cores=config.num_cores, log=log, backup_dir=ff_dir, \
         input_queue_maxsize=None)
 
     # Start the detection
@@ -285,7 +290,7 @@ def detectStarsAndMeteorsDirectory(dir_path, config):
 
 if __name__ == "__main__":
 
-    time_start = datetime.datetime.utcnow()
+    time_start = RmsDateTime.utcnow()
 
 
     ### COMMAND LINE ARGUMENTS
@@ -324,4 +329,4 @@ if __name__ == "__main__":
     # Delete backup files
     detector.deleteBackupFiles()
 
-    log.info('Total time taken: {}'.format(datetime.datetime.utcnow() - time_start))
+    log.info('Total time taken: {}'.format(RmsDateTime.utcnow() - time_start))

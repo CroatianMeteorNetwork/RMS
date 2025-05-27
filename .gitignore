@@ -16,6 +16,9 @@ platepar*.cal
 # Flat
 flat.*
 
+# Astrometry.net cache files
+share/astrometry_cache/*
+
 # Eclipse
 .project
 .pydevproject

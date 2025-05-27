@@ -34,6 +34,7 @@ from RMS.Formats import CALSTARS, FFfile, FTPdetectinfo, Platepar, StarCatalog
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile
 from RMS.Math import angularSeparation
 from RMS.Logger import initLogging
+from RMS.Misc import RmsDateTime
 
 # Neighbourhood size around individual FFs with detections which will be takes for recalibration
 #   A size of e.g. 3 means that an FF before, the FF with the detection, an an FF after will be taken
@@ -45,7 +46,7 @@ log.setLevel(logging.INFO)
 
 def loadRecalibratedPlatepar(dir_path, config, file_list=None, type='meteor'):
     """
-    Gets recalibrated platpars. If they were already computed, load them, otherwise compute them and save
+    Gets recalibrated platepars. If they were already computed, load them, otherwise compute them and save
 
     Arguments:
         dir_path: [str] Path to the directory which contains the platepar and recalibrated platepars
@@ -102,6 +103,7 @@ def recalibrateFF(
     force_platepar_save=False,
     lim_mag=None,
     ignore_distance_threshold=False,
+    ignore_max_stars=False,
 ):
     """Given the platepar and a list of stars on one image, try to recalibrate the platepar to achieve
         the best match by brute force star matching.
@@ -112,17 +114,52 @@ def recalibrateFF(
         star_dict_ff: [dict] A dictionary with only one entry, where the key is 'jd' and the value is the
             list of star coordinates.
         catalog_stars: [ndarray] A numpy array of catalog stars which should be on the image.
-    Keyword argumnets:
+    Keyword arguments:
         max_match_radius: [float] Maximum radius used for star matching. None by default, which uses all 
             hardcoded values.
         force_platepar_save: [bool] Skip the goodness of fit check and save the platepar.
         ignore_distance_threshold: [bool] Don't consider the recalib as failed if the median distance
             is larger than the threshold.
+        ignore_max_stars: [bool] Ignore the maximum number of image stars for recalibration.
+
     Return:
         result: [?] A Platepar instance if refinement is successful, None if it failed.
-        min_match_radius: [float] Minimum radius that successfuly matched the stars (pixels).
+        min_match_radius: [float] Minimum radius that successfully matched the stars (pixels).
     """
+
     working_platepar = copy.deepcopy(working_platepar)
+
+    # If there more stars than a set limit, sample them randomly using the same seed for reproducibility
+    if not ignore_max_stars and len(star_dict_ff[jd]) > config.recalibration_max_stars:
+
+        # Make a copy so that the original star dictionary is not modified
+        star_dict_ff = copy.deepcopy(star_dict_ff)
+
+        # Python 3+
+        if hasattr(np.random, 'default_rng'):
+
+            # Use the newer Generator-based RNG
+            rng = np.random.default_rng(seed=0)
+
+            # Sample the stars and store them in a copy of the star dictionary
+            star_dict_ff = {jd: rng.choice(star_dict_ff[jd], config.recalibration_max_stars, replace=False)}
+        
+        # Python 2
+        else:
+
+            # Use the older RandomState-based RNG
+            rng = np.random.RandomState(seed=0)
+
+            # RandomState.choice requires indices for complex data types
+            indices = rng.choice(
+                len(star_dict_ff[jd]),
+                config.recalibration_max_stars,
+                replace=False
+            )
+
+            # Use the indices to select the stars
+            star_dict_ff[jd] = [star_dict_ff[jd][i] for i in indices]
+
 
     # A list of matching radiuses to try
     min_radius = 0.5
@@ -140,7 +177,7 @@ def recalibrateFF(
     # in the same regard as the cost function)
     fatol, xatol_ang = CheckFit.computeMinimizationTolerances(config, working_platepar, len(star_dict_ff))
 
-    ### If the initial match is good enough, do only quick recalibratoin ###
+    ### If the initial match is good enough, do only quick recalibration ###
 
     # Match the stars and calculate the residuals
     n_matched, avg_dist, cost, _ = CheckFit.matchStarsResiduals(
@@ -148,7 +185,7 @@ def recalibrateFF(
     )
 
     log.info(
-        'Initally match stars with {:.1f} px: {:d}/{:d}'.format(min_radius, n_matched, len(star_dict_ff[jd]))
+        'Initially match stars with {:.1f} px: {:d}/{:d}'.format(min_radius, n_matched, len(star_dict_ff[jd]))
     )
 
     # If at least half the stars are matched with the smallest radius
@@ -161,7 +198,7 @@ def recalibrateFF(
 
     ##########
 
-    # Go through all radiia and match the stars
+    # Go through all radii and match the stars
     min_match_radius = None
     for match_radius in radius_list:
 
@@ -276,14 +313,14 @@ def recalibrateFF(
 
     # Choose which radius will be chosen for the goodness of fit check
     if max_match_radius is None:
-        goodnes_check_radius = match_radius
+        goodness_check_radius = match_radius
 
     else:
-        goodnes_check_radius = max_match_radius
+        goodness_check_radius = max_match_radius
 
     # If the platepar is good, store it
     if (
-        CheckFit.checkFitGoodness(config, working_platepar, catalog_stars, star_dict_ff, goodnes_check_radius)
+        CheckFit.checkFitGoodness(config, working_platepar, catalog_stars, star_dict_ff, goodness_check_radius)
         or force_platepar_save
     ):
 
@@ -325,7 +362,7 @@ def recalibrateFF(
 
         log.info(
             "Platepar minimum error of {:.2f} with radius {:.1f} px PASSED!".format(
-                config.dist_check_threshold, goodnes_check_radius
+                config.dist_check_threshold, goodness_check_radius
             )
         )
 
@@ -364,6 +401,7 @@ def recalibratePlateparsForFF(
     config,
     lim_mag=None,
     ignore_distance_threshold=False,
+    ignore_max_stars=False,
 ):
     """
     Recalibrate platepars corresponding to ff files based on the stars.
@@ -380,6 +418,7 @@ def recalibratePlateparsForFF(
         lim_mag: [float]
         ignore_distance_threshold: [bool] Don't consider the recalib as failed if the median distance
             is larger than the threshold.
+        ignore_max_stars: [bool] Ignore the maximum number of image stars for recalibration.
 
     Returns:
         recalibrated_platepars: [dict] A dictionary where one key is ff file name and the value is
@@ -403,7 +442,7 @@ def recalibratePlateparsForFF(
             log.info('Skipped because it was not in CALSTARS: {}'.format(ff_name))
             continue
 
-        # Get stars detected on this FF file (create a dictionaly with only one entry, the residuals function
+        # Get stars detected on this FF file (create a dictionary with only one entry, the residuals function
         #   needs this format)
         calstars_time = FFfile.getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True)
         jd = date2JD(*calstars_time)
@@ -425,6 +464,7 @@ def recalibratePlateparsForFF(
                 catalog_stars,
                 lim_mag=lim_mag,
                 ignore_distance_threshold=ignore_distance_threshold,
+                ignore_max_stars=ignore_max_stars,
             )
 
             # If the recalibration failed, try using FFT alignment
@@ -510,7 +550,7 @@ def recalibratePlateparsForFF(
 
 
 def recalibrateSelectedFF(dir_path, ff_file_names, calstars_list, config, lim_mag, \
-    pp_recalib_name, ignore_distance_threshold=False):
+    pp_recalib_name, ignore_distance_threshold=False, ignore_max_stars=False):
     """Recalibrate FF files, ignoring whether there are detections.
 
     Arguments:
@@ -524,6 +564,7 @@ def recalibrateSelectedFF(dir_path, ff_file_names, calstars_list, config, lim_ma
     Keyword arguments:
         ignore_distance_threshold: [bool] Don't consider the recalib as failed if the median distance
             is larger than the threshold.
+        ignore_max_stars: [bool] Ignore the maximum number of image stars for recalibration.
 
     Return:
         recalibrated_platepars: [dict] A dictionary where the keys are FF file names and values are
@@ -563,6 +604,7 @@ def recalibrateSelectedFF(dir_path, ff_file_names, calstars_list, config, lim_ma
         config,
         lim_mag=lim_mag,
         ignore_distance_threshold=ignore_distance_threshold,
+        ignore_max_stars=ignore_max_stars,
     )
 
     # Store recalibrated platepars in json
@@ -599,6 +641,9 @@ def recalibrateIndividualFFsAndApplyAstrometry(
 
     # Use a copy of the config file
     config = copy.deepcopy(config)
+
+    # Use a copy of the platepar
+    platepar = copy.deepcopy(platepar)
 
     # If the given file does not exits, return nothing
     if not os.path.isfile(ftpdetectinfo_path):
@@ -685,7 +730,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
 
         ff_name = meteor_entry[0]
 
-        # Make sure the FF was successfuly recalibrated
+        # Make sure the FF was successfully recalibrated
         if ff_name in recalibrated_platepars:
 
             # Find the index of the given FF file in the list of calstars
@@ -705,7 +750,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
                     # Get the name of the FF file
                     ff_name_tmp = calstars_ffs[k_indx]
 
-                    # Check that the neighboring FF was successfuly recalibrated
+                    # Check that the neighboring FF was successfully recalibrated
                     if ff_name_tmp in recalibrated_platepars:
 
                         # Get the computed photometric offset and stddev
@@ -813,7 +858,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
 
         ### Plot difference from reference platepar in angular distance from (0, 0) vs rotation ###
 
-        plt.figure()
+        plt.figure(figsize=(6, 5))
 
         plt.scatter(0, 0, marker='o', edgecolor='k', label='Reference platepar', s=100, c='none', zorder=3)
 
@@ -827,6 +872,17 @@ def recalibrateIndividualFFsAndApplyAstrometry(
 
         plt.grid()
         plt.legend()
+
+        # Scale the aspect ratio so X and Y units are the same but the plot is not too narrow
+        plt.axis('scaled')
+
+        # Make the plot square by adjusting the limits to the maximum
+        min_lim = min(plt.xlim()[0], plt.ylim()[0])
+        max_lim = max(plt.xlim()[1], plt.ylim()[1])
+        abs_lim = max_lim - min_lim
+        plt.xlim(-0.1*abs_lim, 0.9*abs_lim)
+        plt.ylim(min_lim, max_lim)
+
 
         plt.tight_layout()
 
@@ -899,7 +955,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
         meteor_output_list.append([ff_name, meteor_No, rho, phi, meteor_picks])
 
     # Calibration string to be written to the FTPdetectinfo file
-    calib_str = 'Recalibrated with RMS on: ' + str(datetime.datetime.utcnow()) + ' UTC'
+    calib_str = 'Recalibrated with RMS on: ' + str(RmsDateTime.utcnow()) + ' UTC'
 
     # If no meteors were detected, set dummpy parameters
     if len(meteor_list) == 0:
@@ -911,7 +967,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
         shutil.copy(
             ftpdetectinfo_path,
             ftpdetectinfo_path.strip('.txt')
-            + '_backup_{:s}.txt'.format(datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S.%f')),
+            + '_backup_{:s}.txt'.format(RmsDateTime.utcnow().strftime('%Y%m%d_%H%M%S.%f')),
         )
     except:
         log.info('ERROR! The FTPdetectinfo file could not be backed up: {:s}'.format(ftpdetectinfo_path))

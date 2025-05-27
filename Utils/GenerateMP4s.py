@@ -12,7 +12,6 @@ import platform
 import argparse
 import subprocess
 import shutil
-import datetime
 import cv2
 import time
 import Utils.FFtoFrames as f2f
@@ -26,11 +25,11 @@ from PIL import ImageFont
 
 from RMS.Formats.FFfile import read as readFF
 #from RMS.Formats.FFfile import filenameToDatetime
-from RMS.Misc import mkdirP
+from RMS.Misc import mkdirP, RmsDateTime
 
 
 def generateMP4s(dir_path, ftpfile_name, shower_code=None, min_mag=None, config=None):
-    t1 = datetime.datetime.utcnow()
+    t1 = RmsDateTime.utcnow()
 
     # Load the font for labeling
     try:
@@ -190,7 +189,7 @@ def generateMP4s(dir_path, ftpfile_name, shower_code=None, min_mag=None, config=
 
             print("Deleted temporary directory : " + dir_tmp_path)
 
-    print("Total time:", datetime.datetime.utcnow() - t1)
+    print("Total time:", RmsDateTime.utcnow() - t1)
 
 
 if __name__ == "__main__":

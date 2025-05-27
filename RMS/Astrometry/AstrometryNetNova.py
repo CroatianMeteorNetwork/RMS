@@ -331,15 +331,16 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
     Keyword arguments:
         ff_file_path: [str] Path to the FF file to load.
         img: [ndarray] Numpy array containing image data.
-        x_data: [list] A list of star x image coordiantes.
-        y_data: [list] A list of star y image coordiantes
+        x_data: [list] A list of star x image coordinates.
+        y_data: [list] A list of star y image coordinates
         fov_w_range: [2 element tuple] A tuple of scale_lower and scale_upper, i.e. the estimate of the 
             width of the FOV in degrees.
         api_key: [str] nova.astrometry.net user API key. None by default, in which case the default API
             key will be used.
 
     Return:
-        (ra, dec, orientation, scale, fov_w, fov_h): [tuple of floats] All in degrees, scale in px/deg.
+        (ra, dec, orientation, scale, fov_w, fov_h, star_data): [tuple of floats] All in degrees, 
+            scale in px/deg.
     """
 
 
@@ -357,7 +358,7 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
     if ff_file_path is not None:
         
         # Read the FF file
-        ff = readFF(*os.path.split(cml_args.file_path[0]))
+        ff = readFF(*os.path.split(ff_file_path))
 
         img = ff.avepixel
 
@@ -513,6 +514,9 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
             results_tries += 1
 
 
+    print("Astrometry.net solution:")
+    print(result)
+
     # RA/Dec of centre
     ra = result['ra']
     dec = result['dec']
@@ -527,7 +531,7 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
     fov_w = result['width_arcsec']/3600
     fov_h = result['height_arcsec']/3600
 
-    return ra, dec, orientation, scale, fov_w, fov_h
+    return ra, dec, orientation, scale, fov_w, fov_h, None
 
 
 if __name__ == '__main__':

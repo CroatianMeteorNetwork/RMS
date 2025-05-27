@@ -2,6 +2,7 @@
 
 from __future__ import print_function, division, absolute_import
 
+from time import time
 import os
 import logging
 
@@ -54,11 +55,18 @@ def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
 
     # Load the mask if given
     if mask_path:
+        
         mask = MaskImage.loadMask(mask_path)
+
+        # If the mask is all white, set it to None
+        if (mask is not None) and np.all(mask.img == 255):
+            print('Mask is all white, setting it to None.')
+            mask = None
 
     if mask is not None:
         print('Loaded mask:', mask_path)
         log.info('Loaded mask: {:s}'.format(mask_path))
+
     else:
         log.info('No mask file has been found.')
 
@@ -277,12 +285,12 @@ def checkCentroidBounds(model_pos, img_w, img_h):
     """ Checks if the given position is within the image. 
     
     Arguments:
-        moodel_pos: [array like] (X, Y) coordinate to check.
+        model_pos: [array like] (X, Y) coordinate to check.
         img_w: [int] Image width.
         img_h: [int] Image height.
 
     Return:
-        [bool] True if witing image, False otherwise.
+        [bool] True if within image, False otherwise.
 
     """
 
@@ -314,7 +322,7 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
         dark: [ndarray] Dark frame.
 
     Keyword arguments:
-        stripe_width_factor: [float] Multipler by which the default stripe width will be multiplied. Default
+        stripe_width_factor: [float] Multiplier by which the default stripe width will be multiplied. Default
             is 1.0
         centroiding: [bool] If True, the indices will be returned in the centroiding mode, which means
             that point1 and point2 arguments must be given.
@@ -327,7 +335,7 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
     """
 
 
-    # Get indices of stripe pixels around the line of the meteor
+    # Get indices of stripe pixels around the line of the meteor (this is quite fast)
     img_h, img_w = img_handle.ff.maxpixel.shape
     stripe_indices = getStripeIndices(rho, theta, stripe_width_factor*config.stripe_width, img_h, img_w)
 
@@ -414,13 +422,13 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
                 fr_img = Image.applyFlat(fr_img, flat_struct)
 
             # Mask the image
-            fr_img = MaskImage.applyMask(fr_img, mask)
-                
+            if mask is not None:
+                fr_img = MaskImage.applyMask(fr_img, mask)
+            
 
-            # Threshold the frame
+            # Threshold the frame (THIS IS CURRENTLY SLOW)
             img_thres = Image.thresholdImg(fr_img, img_handle.ff.avepixel, img_handle.ff.stdpixel, \
                 config.k1_det, config.j1_det, mask=mask, mask_ave_bright=False)
-
 
             # Remove lonely pixels
             img_thres = morph.clean(img_thres)
@@ -474,42 +482,42 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
                 stripe = stripe_new
 
 
-                if debug:
+                # if debug:
 
-                    # Show the extracted stripe
-                    img_stripe = np.zeros_like(stripe)
-                    img_stripe[stripe_indices] = 1
-                    final_stripe = np.zeros_like(stripe)
-                    final_stripe[stripe_indices_motion] = img_stripe[stripe_indices_motion]
+                #     # Show the extracted stripe
+                #     img_stripe = np.zeros_like(stripe)
+                #     img_stripe[stripe_indices] = 1
+                #     final_stripe = np.zeros_like(stripe)
+                #     final_stripe[stripe_indices_motion] = img_stripe[stripe_indices_motion]
 
-                    plt.imshow(final_stripe)
-                    plt.show()
-
-
-            if debug and centroiding:
-
-                print(fr)
-                print('mean stdpixel3:', np.mean(img_handle.ff.stdpixel))
-                print('mean avepixel3:', np.mean(img_handle.ff.avepixel))
-                print('mean frame:', np.mean(fr_img))
-                fig, (ax1, ax2) = plt.subplots(nrows=2, sharex=True, sharey=True)
+                #     plt.imshow(final_stripe)
+                #     plt.show()
 
 
-                fr_img_noavg = Image.applyDark(fr_img, img_handle.ff.avepixel)
-                #fr_img_noavg = fr_img
+            # if debug and centroiding:
 
-                # Auto levels
-                min_lvl = np.percentile(fr_img_noavg[2:, :], 1)
-                max_lvl = np.percentile(fr_img_noavg[2:, :], 99.0)
+            #     print(fr)
+            #     print('mean stdpixel3:', np.mean(img_handle.ff.stdpixel))
+            #     print('mean avepixel3:', np.mean(img_handle.ff.avepixel))
+            #     print('mean frame:', np.mean(fr_img))
+            #     fig, (ax1, ax2) = plt.subplots(nrows=2, sharex=True, sharey=True)
 
-                # Adjust levels
-                fr_img_autolevel = Image.adjustLevels(fr_img_noavg, min_lvl, 1.0, max_lvl)
 
-                ax1.imshow(stripe, cmap='gray')
-                ax2.imshow(fr_img_autolevel, cmap='gray')
-                plt.show()
+            #     fr_img_noavg = Image.applyDark(fr_img, img_handle.ff.avepixel)
+            #     #fr_img_noavg = fr_img
 
-                pass
+            #     # Auto levels
+            #     min_lvl = np.percentile(fr_img_noavg[2:, :], 1)
+            #     max_lvl = np.percentile(fr_img_noavg[2:, :], 99.0)
+
+            #     # Adjust levels
+            #     fr_img_autolevel = Image.adjustLevels(fr_img_noavg, min_lvl, 1.0, max_lvl)
+
+            #     ax1.imshow(stripe, cmap='gray')
+            #     ax2.imshow(fr_img_autolevel, cmap='gray')
+            #     plt.show()
+
+            #     pass
 
 
             # Get stripe positions (x, y, frame)
@@ -524,10 +532,10 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
             zs_array.append(zs)
 
 
-            if debug:
-                print('---')
-                print(stripe.nonzero())
-                print(xs, ys, zs)
+            # if debug:
+            #     print('---')
+            #     print(stripe.nonzero())
+            #     print(xs, ys, zs)
 
 
         if len(xs_array) > 0:

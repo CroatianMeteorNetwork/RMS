@@ -96,9 +96,9 @@ def fitGreatCircle(x, y, z):
     """ Fits a great circle to points in 3D space. 
 
     Arguments:
-        x: [float] X coordiantes of points on the great circle.
-        y: [float] Y coordiantes of points on the great circle.
-        z: [float] Z coordiantes of points on the great circle.
+        x: [float] X coordinates of points on the great circle.
+        y: [float] Y coordinates of points on the great circle.
+        z: [float] Z coordinates of points on the great circle.
 
     Return: 
         X, theta0, phi0: [tuple of floats] Great circle parameters.
@@ -138,7 +138,7 @@ if __name__ == "__main__":
     # Fit the great circle
     C, theta0, phi0 = fitGreatCircle(x_data, y_data, z_data)
 
-    # Make a grid of independant variables
+    # Make a grid of independent variables
     X,Y = np.meshgrid(np.arange(-1.0, 1.0, 0.1), np.arange(-1.0, 1.0, 0.1))
 
     # Generate the Z component of the plane

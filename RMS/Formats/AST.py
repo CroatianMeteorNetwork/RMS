@@ -332,7 +332,7 @@ def plateASTMap(ast, x, y, reverse_map=False):
         y: [float] input parameter 2 (y by default, phi in radians if reverse_map=True).
 
     Kwargs:
-        reverse_map: [bool] Default False, if True, revese mapping is performed.
+        reverse_map: [bool] Default False, if True, reverse mapping is performed.
 
     Return:
         [tuple of floats]: Output parameters (theta, phi in radians) by default, (x, y) if reverse_map=True.
@@ -357,7 +357,7 @@ def plateASTMap(ast, x, y, reverse_map=False):
             b[9]*x*y**2
 
         
-        # Map gonomnic coordinates to theta, phi
+        # Map gnomonic coordinates to theta, phi
         th, phi = plateASTundo(ast, p, q)
 
         return th, phi

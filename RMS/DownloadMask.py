@@ -19,7 +19,6 @@ These are the default settings hard coded into ConfigReader.py
 
 from __future__ import print_function, division, absolute_import
 
-import datetime
 import logging
 import os
 from os.path import exists as file_exists
@@ -28,7 +27,7 @@ import paramiko
 
 
 from RMS.UploadManager import _agentAuth, existsRemoteDirectory, createRemoteDirectory
-
+from RMS.Misc import RmsDateTime
 
 
 
@@ -158,7 +157,7 @@ def downloadNewMask(config, port=22):
 
     # Construct a new name with the time of the download included
     dl_mask_name = remote_mask_path + 'mask_dl_' \
-        + datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S.%f') + '.bmp'
+        + RmsDateTime.utcnow().strftime('%Y%m%d_%H%M%S.%f') + '.bmp'
 
     sftp.posix_rename(remote_mask, dl_mask_name)
 

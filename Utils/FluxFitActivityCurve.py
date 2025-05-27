@@ -15,7 +15,7 @@ import ephem
 
 from RMS.Astrometry.Conversions import datetime2JD, jd2Date
 from RMS.Formats.Showers import FluxShowers
-from RMS.Misc import formatScientific
+from RMS.Misc import formatScientific, RmsDateTime
 from RMS.Math import lineFunc
 from RMS.Routines.SolarLongitude import jd2SolLonSteyaert, solLon2jdSteyaert
 from Utils.Flux import calculateZHR
@@ -24,7 +24,7 @@ def showerActivity(sol, sol_peak, background_flux, peak_flux, bp, bm):
     """ Shower activity model described with a double exponential. 
 
     Arguments:
-        sol: [float or ndarray] Solar longiude (deg), independant variable.
+        sol: [float or ndarray] Solar longitude (deg), independent variable.
         sol_peak: [float] Solar longitude of the peak (deg).
         background_flux: [float] The flux of the sporadic background, the baseline flux.
         peak_flux: [float] The flux of the peak.
@@ -65,7 +65,7 @@ def showerActivityNoBackground(sol, sol_peak, peak_flux, bp, bm):
     peaks.
 
     Arguments:
-        sol: [ndarray] Solar longiude (deg), independant variable.
+        sol: [ndarray] Solar longitude (deg), independent variable.
         sol_peak: [float] Solar longitude of the peak (deg).
         peak_flux: [float] The flux of the peak.
         bp: [float] Rising parameter.
@@ -81,7 +81,7 @@ def showerActivityCombined(sol, all_models):
     """ Compute the combined model flux.
 
     Arguments:
-        sol: [float or ndarray] Solar longitude (deg), independant variable.
+        sol: [float or ndarray] Solar longitude (deg), independent variable.
         all_models: [list] List of model parameters. Each model is a tuple of the model. The base model has
             5 parameters and each additional peak has 4 parameters.
 
@@ -92,12 +92,12 @@ def showerActivityCombined(sol, all_models):
     # Compute base model component
     flux_modelled = showerActivityVect(sol, *all_models[:5])
 
-    # Compute the remining residuals using the additional peaks
+    # Compute the remaining residuals using the additional peaks
     if len(all_models) > 5:
 
         additional_models = all_models[5:]
 
-        # Split the remianing models into groups of 4 paramers
+        # Split the remaining models into groups of 4 parameters
         additional_models = [additional_models[i:i+4] for i in range(0, len(additional_models), 4)]
 
         # Compute the contribution of each additional peak
@@ -113,7 +113,7 @@ def showerActivityResiduals(model_fit, sol, flux, fit_background, weights):
     
     Arguments:
         model_fit: [list] List of model parameters.
-        sol: [ndarray] Solar longitude (deg), independant variable.
+        sol: [ndarray] Solar longitude (deg), independent variable.
         flux: [ndarray] Observed flux.
         fit_background: [bool] If True, the background flux is fitted. If False, the background flux is fixed 
             to 0.
@@ -136,7 +136,7 @@ def showerActivityResidualsAll(all_models, sol, flux, weights):
     Arguments:
         all_models: [list] List of model parameters. Each model is a tuple of the model. The base model has
             5 parameters and each additional peak has 4 parameters.
-        sol: [ndarray] Solar longitude (deg), independant variable.
+        sol: [ndarray] Solar longitude (deg), independent variable.
         flux: [ndarray] Observed flux.
         weights: [ndarray] Weights for each data point.
 
@@ -427,7 +427,7 @@ class ShowerActivityModel(object):
             additional_fits_std: [list] List of the standard deviations of the additional fit parameters.
         """
 
-        # Compute the standard deviation of the intial fit
+        # Compute the standard deviation of the initial fit
         residuals = flux_data - showerActivityCombined(sol_data, \
             self.unpackAllFitParameters(base_fit, additional_fits))
         stddev_res = np.std(residuals)
@@ -861,7 +861,7 @@ class ShowerActivityModel(object):
         
 
     def saveModelFluxAndFitParameters(self, dir_path, shower_code, year_str, sol_delta=0.01):
-        """ Save the model parametrs to a text file for every peak, together with the values of the combined
+        """ Save the model parameters to a text file for every peak, together with the values of the combined
             model and each individual peak.
 
         Arguments:
@@ -1093,7 +1093,7 @@ def computeCurrentPeakZHR(shower_models, dt=None, time_window=24, sporadic_zhr=2
 
     # If no datetime is given, use the current time
     if dt is None:
-        dt = datetime.datetime.utcnow()
+        dt = RmsDateTime.utcnow()
 
     # Convert the time window from hours to degrees of the solar longitude
     time_window_deg = (time_window/24)*360/365.25
@@ -1193,7 +1193,7 @@ def plotYearlyZHR(config, plot_path, sporadic_zhr=25, dt_ref=None, plot_current_
 
     # If the reference datetime is not provided, use the current time
     if dt_ref is None:
-        dt_ref = datetime.datetime.utcnow()
+        dt_ref = RmsDateTime.utcnow()
 
 
     # If the date is before the vernal equinox, use the previous year for the plot
@@ -1302,7 +1302,7 @@ def plotYearlyZHR(config, plot_path, sporadic_zhr=25, dt_ref=None, plot_current_
     # Get the plot Y limits
     _, y_max = plt.gca().get_ylim()
 
-    # Shift the plot minimum to accomodate the lower text
+    # Shift the plot minimum to accommodate the lower text
     y_min = -0.25*y_max
 
 
@@ -1852,7 +1852,7 @@ if __name__ == "__main__":
 
             print("Processing {:s} {:s}...".format(shower_code, year_str))
 
-            # Load the appropraite CSV file
+            # Load the appropriate CSV file
             csv_candidates = [file_path for file_path in csv_files 
                 if (shower_code in file_path) and (year_str in file_path)]
 

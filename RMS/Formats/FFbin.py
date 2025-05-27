@@ -133,7 +133,7 @@ def write(ff, directory, filename, version=2):
             arr[3] = ff.stdpixel
         
         # Extract only the number from the camera code
-        camno_num = int(re.findall('\d+', str(ff.camno))[0])
+        camno_num = int(re.findall(r'\d+', str(ff.camno))[0])
 
 
         # Write the old version

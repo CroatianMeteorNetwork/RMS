@@ -1,4 +1,4 @@
-""" Reading the cusom star catalog. """
+""" Reading the custom star catalog. """
 
 from __future__ import print_function, division, absolute_import
 
@@ -16,7 +16,7 @@ def readBSC(file_path, file_name, years_from_J2000=0):
         file_name: [str] Name of the catalog file.
 
     Keyword arguments:
-        years_from_J2000: [float] Decimal years elapsed from the J2000 epoch (for applying poper motion 
+        years_from_J2000: [float] Decimal years elapsed from the J2000 epoch (for applying proper motion 
             correction, leave at 0 to read non-corrected coordinates).
     
     Return:
@@ -60,7 +60,7 @@ def readBSC(file_path, file_name, years_from_J2000=0):
         magnitudes = np.fromfile(fid, dtype=int_32d, count = 1)[0]
         bytes_per_entry = np.fromfile(fid, dtype=int_32d, count = 1)[0]
 
-        # Make an array for storing the star vaues (RA, dec, mag)
+        # Make an array for storing the star values (RA, dec, mag)
         BSC_data = np.zeros(shape=(star_num, 3), dtype=float_64d)
 
         # Read entries
@@ -206,7 +206,7 @@ def readStarCatalog(dir_path, file_name, lim_mag=None, mag_band_ratios=None):
             ra, dec, mag_v, mag_bv, mag_r, mag_i = list(map(float, line.split()))
 
 
-            # Use visual magnitude by defualt
+            # Use visual magnitude by default
             mag_spectrum = mag_v
 
             # Calculate the camera-bandpass magnitude if given
@@ -227,7 +227,7 @@ def readStarCatalog(dir_path, file_name, lim_mag=None, mag_band_ratios=None):
                     rr /= ratio_sum
                     ri /= ratio_sum
 
-                    # Calcualte the camera-band magnitude
+                    # Calculate the camera-band magnitude
                     mag_spectrum = rb*mag_b + rv*mag_v + rr*mag_r + ri*mag_i
 
 
