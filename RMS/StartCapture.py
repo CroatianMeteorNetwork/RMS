@@ -275,6 +275,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     print("- Dr. Daniel A. Klinglesmith III (d. 2019)")
     print("- Martin Richmond-Hardy (d. 2023)")
     print("- Rajko Susanj (d. 2023)")
+    print("- Zoran Dragic (d. 2025)")
     print("- Romke Schievink (d. 2025)")
     print()
     print("Memento mori")
