@@ -80,7 +80,7 @@ if 'win' in sys.platform and "darwin" not in sys.platform:
 else:
 
     # Check if running on the Pi
-    if 'arm' in os.uname()[4]:
+    if any(arch in os.uname()[4].lower() for arch in ['arm', 'aarch']):
         print("Not installing rawpy because it is not available on the Pi...")
 
     else:
