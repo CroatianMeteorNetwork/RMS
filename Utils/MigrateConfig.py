@@ -223,15 +223,15 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
                             "{}: {}\n".format(bits[0],original_value)
                         )  # write original attribute/value pair
                         logMessage(
-                            "  {}{}: {} carried forward over => {}"
-                                    .format(section,bits[0],original_value,new_default_value)
+                            "  {}{}: template default '{}' => kept '{}'"
+                                    .format(section, bits[0], new_default_value, original_value)
                         )
                         custom_cnt += 1
                         continue
 
                     logMessage(
-                        "  {}{}: {} RECENT template default applied => {}"
-                                .format(section,bits[0],original_value,new_default_value)
+                        "  {}{}: '{}' => RECENT template default '{}'"
+                                .format(section, bits[0], original_value, new_default_value)
                     )
 
             # if we don't need to update the template line write it out as is
