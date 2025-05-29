@@ -234,7 +234,7 @@ class NoiseFilter(logging.Filter):
     """
     def __init__(self):
         super(NoiseFilter, self).__init__()
-        self.noisy_modules = {'font_manager', 'ticker', 'transport', 'sftp', 'dvrip', 'channel', 'cmd'}
+        self.noisy_modules = {'font_manager', 'ticker', 'transport', 'sftp', 'dvrip', 'channel', 'cmd', 'PngImagePlugin'}
 
     def filter(self, record):
         if record.levelno in (logging.DEBUG, logging.INFO) and record.module in self.noisy_modules:
