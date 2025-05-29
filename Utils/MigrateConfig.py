@@ -192,6 +192,7 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
             m = re.match(r'\s*(\[[^\]]+\])', l)
             if m:
                 section = m.group(1)
+                continue
 
             if l[:1] == ";":  # comment
                 newfile.write("{}\n".format(l))
