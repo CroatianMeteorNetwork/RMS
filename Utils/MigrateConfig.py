@@ -115,8 +115,10 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
             continue
 
         # save current section
-        if l[0] == "[" and l[-1] == "]":
-            section = l
+        m = re.match(r'\s*(\[[^\]]+\])', l)
+        if m:
+            # keep only the bracketed section name (e.g. "[System]")
+            section = m.group(1)
             continue
 
         bits = re.split(": ", l)
@@ -180,8 +182,9 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
                 continue
 
             # save current section
-            if l[0] == "[" and l[-1] == "]":
-                section = l
+            m = re.match(r'\s*(\[[^\]]+\])', l)
+            if m:
+                section = m.group(1)
 
             if l[:1] == ";":  # comment
                 newfile.write("{}\n".format(l))
