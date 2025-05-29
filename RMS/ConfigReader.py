@@ -34,14 +34,18 @@ TFLITE_AVAILABLE = False
 
 # Used to determine detection parameters which will change in ML filtering is available
 try:
-    from tflite_runtime.interpreter import Interpreter
+    from ai_edge_litert.interpreter import Interpreter       # 1 – new LiteRT
     TFLITE_AVAILABLE = True
 except ImportError:
     try:
-        from tensorflow.lite.python.interpreter import Interpreter
+        from tflite_runtime.interpreter import Interpreter    # 2 – legacy wheel
         TFLITE_AVAILABLE = True
     except ImportError:
-        TFLITE_AVAILABLE = False
+        try:
+            from tensorflow.lite.python.interpreter import Interpreter  # 3 – full TF
+            TFLITE_AVAILABLE = True
+        except ImportError:
+            pass
 
 
 def choosePlatform(win_conf, rpi_conf, linux_pc_conf):
