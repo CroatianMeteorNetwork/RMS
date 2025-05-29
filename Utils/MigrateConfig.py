@@ -88,7 +88,14 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
         sys.exit(1)
 
     if not os.path.exists(template_config_file):
-        logMessage("ERROR: Can't find template file {}".format(template_config_file))
+        logMessage(
+                "ERROR: Can't find template file {}\n"
+            "       No '.configTemplate' detected. Either:\n"
+            "       - run ./Scripts/RMS_Update.sh to create/update it, or\n"
+            "       - pass the template path explicitly with -t\n"
+            "         e.g.  python -m Utils.MigrateConfig -t /path/to/.configTemplate"
+            .format(template_config_file)
+        )
         sys.exit(1)
 
     logMessage("\nInput: {}".format(original_config_file))
@@ -115,8 +122,10 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
             continue
 
         # save current section
-        if l[0] == "[" and l[-1] == "]":
-            section = l
+        m = re.match(r'\s*(\[[^\]]+\])', l)
+        if m:
+            # keep only the bracketed section name (e.g. "[System]")
+            section = m.group(1)
             continue
 
         bits = re.split(": ", l)
@@ -180,8 +189,10 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
                 continue
 
             # save current section
-            if l[0] == "[" and l[-1] == "]":
-                section = l
+            m = re.match(r'\s*(\[[^\]]+\])', l)
+            if m:
+                section = m.group(1)
+                continue
 
             if l[:1] == ";":  # comment
                 newfile.write("{}\n".format(l))
@@ -220,15 +231,15 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
                             "{}: {}\n".format(bits[0],original_value)
                         )  # write original attribute/value pair
                         logMessage(
-                            "  {}{}: {} carried forward over => {}"
-                                    .format(section,bits[0],original_value,new_default_value)
+                            "  {}{}: template default '{}' => kept '{}'"
+                                    .format(section, bits[0], new_default_value, original_value)
                         )
                         custom_cnt += 1
                         continue
 
                     logMessage(
-                        "  {}{}: {} RECENT template default applied => {}"
-                                .format(section,bits[0],original_value,new_default_value)
+                        "  {}{}: '{}' => RECENT template default '{}'"
+                                .format(section, bits[0], original_value, new_default_value)
                     )
 
             # if we don't need to update the template line write it out as is
