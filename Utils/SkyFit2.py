@@ -11,6 +11,11 @@ import datetime
 import collections
 import glob
 
+# Fix Qt platform plugin "xcb" error
+from PyQt5.QtCore import QLibraryInfo
+import cv2
+os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = QLibraryInfo.location(QLibraryInfo.PluginsPath)
+
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
