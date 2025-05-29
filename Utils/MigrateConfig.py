@@ -88,7 +88,14 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
         sys.exit(1)
 
     if not os.path.exists(template_config_file):
-        logMessage("ERROR: Can't find template file {}".format(template_config_file))
+        logMessage(
+                "ERROR: Can't find template file {}\n"
+            "       No '.configTemplate' detected. Either:\n"
+            "       - run ./Scripts/RMS_Update.sh to create/update it, or\n"
+            "       - pass the template path explicitly with -t\n"
+            "         e.g.  python -m Utils.MigrateConfig -t /path/to/.configTemplate"
+            .format(template_config_file)
+        )
         sys.exit(1)
 
     logMessage("\nInput: {}".format(original_config_file))
