@@ -677,12 +677,12 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             # frames -> timelapse(s) -> archive(s) -> upload
             if config.timelapse_generate_from_frames:
                 try:
-                    log.info("Running processFramesFiles() ...")
+                    log.info("Processing frame files...")
                     archive_paths = processFramesFiles(config)          # may return None
-                    log.info("processFramesFiles() done.")
+                    log.info("Processing frame files done.")
 
                 except Exception:
-                    log.exception("processFramesFiles() threw an exception")
+                    log.exception("An error occurred when processing frame files!")
                     archive_paths = None
 
                 # -- enqueue & upload -----------------------------------------

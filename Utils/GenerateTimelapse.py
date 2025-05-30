@@ -618,10 +618,12 @@ def generateTimelapseFromFrames(image_files,
         if shutil.which(ffmpeg_path) is None:
             log.warning("ffmpeg not found in system path. Please install ffmpeg.")
 
-            # As a final check, try to run ffmpeg to see if it works
-            if os.system(ffmpeg_path + " -version") != 0:
-                log.warning("ffmpeg is not available or not working.")
-                return None, None
+            return None, None
+        
+        # As a final check, try to run ffmpeg to see if it works
+        if os.system(ffmpeg_path + " -version") != 0:
+            log.warning("ffmpeg is not available or not working.")
+            return None, None
 
     elif platform.system() == 'Windows':
         ffmpeg_path = os.path.join(os.path.dirname(__file__), "ffmpeg.exe")
