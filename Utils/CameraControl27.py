@@ -138,7 +138,14 @@ class DVRIPCam(object):
             + data
             + b"\x0a\x00"
         )
-        self.logger.debug("=> %s", pkt)
+
+        # Skip printing keep-alive packets (message 1006)
+        if msg != 1006:
+
+            # Log the packet being sent
+            self.logger.debug("=> %s", pkt)
+
+
         self.socket_send(pkt)
         if wait_response:
             reply = {"Ret": 101}
