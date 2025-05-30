@@ -751,6 +751,9 @@ class UploadManager(multiprocessing.Process):
             if delay > 0:
                 # Log the delay
                 log.info("Upload delayed for {:.1f} min until {:s}".format(delay/60, str(self.next_runtime)))
+            else:
+                # Log that the upload will run immediately
+                log.info("Upload will run immediately at {:s}".format(str(self.next_runtime)))
 
 
 
