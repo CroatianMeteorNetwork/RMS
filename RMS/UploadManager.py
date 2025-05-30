@@ -751,11 +751,6 @@ class UploadManager(multiprocessing.Process):
     def run(self):
         """ Try uploading the files every 15 minutes. """
 
-        # Initialize the logger inside the process
-        # This is necessary to avoid issues with logging in multiprocessing
-        from RMS.Logger import initLogging
-        initLogging(self.config)
-
         with self.last_runtime_lock:
             self.last_runtime = None
 
