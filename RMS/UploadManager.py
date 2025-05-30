@@ -535,10 +535,12 @@ class UploadManager(multiprocessing.Process):
 
     def addFiles(self, file_list):
         """ Adds a list of files to be uploaded to the queue. """
+        
+        # Load the existing items in the queue (can't be under lock, as it would block the queue)
+        existing_items = set(self.getFileList())
 
         # Add new files to the queue
         with self.file_queue_lock:
-            existing_items = set(self.getFileList())
 
             new_files = [f for f in file_list if f not in existing_items]
 
@@ -591,10 +593,11 @@ class UploadManager(multiprocessing.Process):
             return None
 
 
-        # Read the queue file
+        # Load the existing items in the queue (can't be under lock, as it would block the queue)
+        existing_items = set(self.getFileList())
 
+        # Read the queue file
         with self.file_queue_lock:
-            existing_items = self.getFileList()
 
             with open(self.upload_queue_file_path) as f:
                 
