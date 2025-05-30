@@ -18,6 +18,14 @@ logging.getLogger("paramiko.transport").setLevel(logging.CRITICAL)
 logging.getLogger("paramiko.auth_handler").setLevel(logging.CRITICAL)
 
 from multiprocessing import Queue
+from multiprocessing import Lock
+
+try:
+    from queue import Empty  # Python 3
+except ImportError:
+    from Queue import Empty  # Python 2
+
+QueueEmpty = Empty
 
 
 from RMS.Misc import mkdirP, RmsDateTime
@@ -104,12 +112,12 @@ def createRemoteDirectory(sftp, path):
             # Check if the directory exists
             try:
                 sftp.stat(path)
-                print("Directory '{}' already exists.".format(path))
+                log.debug("Directory '{}' already exists.".format(path))
 
             except FileNotFoundError:
 
                 sftp.mkdir(path)
-                print("Directory '{}' created.".format(path))
+                log.debug("Directory '{}' created.".format(path))
             
             except Exception as e:
                 log.error("Unable to stat directory '{}': {}".format(path, e))
@@ -479,7 +487,8 @@ class UploadManager(multiprocessing.Process):
 
         self.config = config
 
-        self.file_queue = Queue.Queue()
+        self.file_queue = Queue()
+        self.file_queue_lock = Lock()
         self.exit = multiprocessing.Event()
         self.upload_in_progress = multiprocessing.Value(ctypes.c_bool, False)
 
@@ -506,30 +515,69 @@ class UploadManager(multiprocessing.Process):
 
 
 
-    def stop(self):
-        """ Stops the upload manager. """
+    def stop(self, timeout=60):
+        """ Stops the upload manager.
+        
+        Keyword arguments:
+            timeout: [int] Maximum time to wait for the upload manager to stop, in seconds. Default is 60 seconds.
+        """
 
         self.exit.set()
-        self.join()
+        self.join(timeout)
+
+        if self.is_alive():
+            log.warning("UploadManager did not stop in time. Forcing termination.")
+            self.terminate()
+            self.join()
 
 
 
     def addFiles(self, file_list):
         """ Adds a list of files to be uploaded to the queue. """
 
-        # Add the files to the queue
-        for file_name in file_list:
-            self.file_queue.put(file_name)
+        # Add new files to the queue
+        with self.file_queue_lock:
+            existing_items = set(self.getFileList())
+
+            new_files = [f for f in file_list if f not in existing_items]
+
+            for file_name in new_files:
+                self.file_queue.put(file_name)
 
         time.sleep(0.1)
 
-        # Write the queue to disk
-        self.saveQueue()
+        # Save only if new files were added
+        if new_files:
 
-        # Make sure the data gets uploaded right away
-        with self.last_runtime_lock:
-            self.last_runtime = None
+            self.saveQueue(overwrite=False)
 
+            # Make sure the data gets uploaded right away
+            with self.last_runtime_lock:
+                self.last_runtime = None
+
+
+    def getFileList(self):
+        """ Safely get a snapshot of all items in the queue, preserving order, with thread/process lock. """
+        items = []
+
+        with self.file_queue_lock:
+
+            # Drain the queue
+            while True:
+                try:
+                    item = self.file_queue.get_nowait()
+                    items.append(item)
+                except Empty:
+                    break
+                except Exception as e:
+                    log.error("Unexpected error while draining file_queue: {}".format(e), exc_info=True)
+                    break
+
+            # Restore the queue
+            for item in items:
+                self.file_queue.put(item)
+
+        return items
 
 
     def loadQueue(self):
@@ -542,26 +590,30 @@ class UploadManager(multiprocessing.Process):
 
 
         # Read the queue file
-        with open(self.upload_queue_file_path) as f:
-            
-            for file_name in f:
 
-                file_name = file_name.replace('\n', '').replace('\r', '')
+        with self.file_queue_lock:
+            existing_items = self.getFileList()
 
-                # Skip empty names
-                if len(file_name) == 0:
-                    continue
+            with open(self.upload_queue_file_path) as f:
+                
+                for file_name in f:
 
-                # Make sure the file for upload exists
-                if not os.path.isfile(file_name):
-                    log.warning("Local file not found: {:s}".format(file_name))
-                    log.warning("Skipping it...")
-                    continue
+                    file_name = file_name.replace('\n', '').replace('\r', '')
+
+                    # Skip empty names
+                    if len(file_name) == 0:
+                        continue
+
+                    # Make sure the file for upload exists
+                    if not os.path.isfile(file_name):
+                        log.warning("Local file not found: {:s}".format(file_name))
+                        log.warning("Skipping it...")
+                        continue
 
 
-                # Add the file if it was not already in the queue
-                if not file_name in self.file_queue.queue:
-                    self.file_queue.put(file_name)
+                    # Add the file if it was not already in the queue
+                    if not file_name in existing_items:
+                        self.file_queue.put(file_name)
 
 
 
@@ -574,13 +626,13 @@ class UploadManager(multiprocessing.Process):
         """
 
         # Convert the queue to a list
-        file_list = [file_name for file_name in self.file_queue.queue]
+        file_list = self.getFileList()
+
+        # Make the data directory if it doesn't exist
+        mkdirP(self.config.data_dir)
 
         # If overwrite is true, save the queue to the holding file completely
         if overwrite:
-
-            # Make the data directory if it doesn't exist
-            mkdirP(self.config.data_dir)
 
             # Create the queue file
             with open(self.upload_queue_file_path, 'w') as f:
@@ -593,10 +645,18 @@ class UploadManager(multiprocessing.Process):
 
             # Get a list of entries in the holding file
             existing_list = []
-            with open(self.upload_queue_file_path) as f:
-                for file_name in f:
-                    file_name = file_name.replace('\n', '').replace('\r', '')
-                    existing_list.append(file_name)
+            try:
+                with open(self.upload_queue_file_path) as f:
+                    for file_name in f:
+                        file_name = file_name.replace('\n', '').replace('\r', '')
+                        existing_list.append(file_name)
+            except FileNotFoundError:
+                log.warning("Upload queue file not found: {:s}".format(self.upload_queue_file_path))
+                log.warning("Creating a new upload queue file.")
+
+                # If the file does not exist, create it
+                with open(self.upload_queue_file_path, 'w') as f:
+                    pass
 
             # Save to disk only those entires which are not already there
             with open(self.upload_queue_file_path, 'a') as f:
@@ -629,10 +689,15 @@ class UploadManager(multiprocessing.Process):
         tries = 0
 
         # Go through every file and upload it to server
-        while self.file_queue.qsize() > 0:
+        while True:
 
             # Get a file from the queue
-            file_name = self.file_queue.get()
+            with self.file_queue_lock:
+                try:
+                    file_name = self.file_queue.get(timeout=1)
+                except QueueEmpty:
+                    break  # nothing left to do
+
             if not os.path.isfile(file_name):
                 log.warning("Local file not found: {:s}".format(file_name))
                 log.warning("Skipping it...")
@@ -658,7 +723,8 @@ class UploadManager(multiprocessing.Process):
                 log.warning('Uploading failed! Retry {:d} of {:d}'.format(tries + 1, retries))
 
                 tries += 1 
-                self.file_queue.put(file_name)
+                with self.file_queue_lock:
+                    self.file_queue.put(file_name)
 
                 # Given the network a moment to recover between attempts
                 time.sleep(10)
@@ -684,6 +750,11 @@ class UploadManager(multiprocessing.Process):
 
     def run(self):
         """ Try uploading the files every 15 minutes. """
+
+        # Initialize the logger inside the process
+        # This is necessary to avoid issues with logging in multiprocessing
+        from RMS.Logger import initLogging
+        initLogging(self.config)
 
         with self.last_runtime_lock:
             self.last_runtime = None
