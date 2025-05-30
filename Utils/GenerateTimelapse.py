@@ -611,7 +611,7 @@ def generateTimelapseFromFrames(image_files,
         sample_image = cv2.imread(image_files[idx], cv2.IMREAD_UNCHANGED)
 
         if sample_image is not None:
-            
+
             # Get dimensions from the first valid image
             height, width = sample_image.shape[:2]
 
@@ -632,7 +632,7 @@ def generateTimelapseFromFrames(image_files,
         ffmpeg_path = "ffmpeg"
         
         # Check if ffmpeg is available and working
-        if isFfmpegWorking(ffmpeg_path):
+        if not isFfmpegWorking(ffmpeg_path):
             log.warning("ffmpeg is not available or not working.")
             return None, None
 
