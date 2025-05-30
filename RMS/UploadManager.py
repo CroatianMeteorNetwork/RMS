@@ -17,14 +17,7 @@ import paramiko
 logging.getLogger("paramiko.transport").setLevel(logging.CRITICAL)
 logging.getLogger("paramiko.auth_handler").setLevel(logging.CRITICAL)
 
-try:
-    # Python 2
-    import Queue
-
-except:
-    # Python 3
-    import queue as Queue
-
+from multiprocessing import Queue
 
 
 from RMS.Misc import mkdirP, RmsDateTime
