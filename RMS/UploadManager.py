@@ -691,6 +691,8 @@ class UploadManager(multiprocessing.Process):
         # Go through every file and upload it to server
         while True:
 
+            print("Trying to upload files...")
+
             # Get a file from the queue
             with self.file_queue_lock:
                 try:
