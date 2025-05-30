@@ -114,7 +114,7 @@ class DVRIPCam(object):
 
         # Skip printing keep-alive packets
         if "KeepAlive" not in data:
-            
+
             # Log the packet being received
             self.logger.debug("<= %s", data)
 
@@ -150,7 +150,7 @@ class DVRIPCam(object):
         if msg != 1006:
 
             # Log the packet being sent
-            self.logger.debug("=> %s", pkt)
+            self.logger.debug("=> %s", data)
 
 
         self.socket_send(pkt)
