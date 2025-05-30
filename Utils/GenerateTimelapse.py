@@ -461,6 +461,8 @@ def generateTimelapseFromFrameBlocks(frame_blocks,
 
         mp4_path_in =  os.path.join(frames_root, video_name)
 
+        log.info("Generating timelapse for %s (%d frames)", video_name, len(block))
+
         mp4_path, json_path = generateTimelapseFromFrames(
             image_files=block,
             frames_root=frames_root,
