@@ -380,13 +380,13 @@ if __name__ == "__main__":
     original_config_files = [os.path.join(rms_root_dir, ".config")]
 
     # if multi-cam find and assume those
-    if os.path.exists(os.path.expanduser("~/source/Stations")):
-        original_config_files = []
-        for d in os.listdir(os.path.expanduser("~/source/Stations")):
-            original_config_files.append(
-                os.path.expanduser("~/source/Stations") + "/{}/.config".format(d)
-            )
-        print("Multi-cam count: {}".format(len(original_config_files)))
+    stations_dir = os.path.expanduser("~/source/Stations")
+    if os.path.isdir(stations_dir):
+        for d in os.listdir(stations_dir):
+            f = os.path.join(stations_dir, d, ".config")
+            if os.path.isfile(f):                 # skip broken/missing configs
+                original_config_files.append(f)
+    print("Multi-cam count: {}".format(len(original_config_files) - 1))
 
     # if specified assume
     if args.input:
