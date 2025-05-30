@@ -367,7 +367,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
     # Initialize buffered capture
     bc = BufferedCapture(sharedArray, startTime, sharedArray2, start_time2, config, video_file=video_file,
-                         night_data_dir=night_data_dir, saved_frames_dir=saved_frames_dir, daytime_mode=daytime_mode, camera_mode_switch_trigger=camera_mode_switch_trigger)
+                         night_data_dir=night_data_dir, saved_frames_dir=saved_frames_dir, 
+                         daytime_mode=daytime_mode, camera_mode_switch_trigger=camera_mode_switch_trigger)
     bc.startCapture()
 
     # To track and make new directories every iteration
@@ -682,7 +683,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 log.info("File added.")
 
                 # optional delay (minutes in .config, converted to seconds)
-                upload_manager.delayNextUpload(delay=60 * config.upload_delay)
+                upload_manager.delayNextUpload(delay=60*config.upload_delay)
 
             # Delete detector backup files
             if detector is not None:
