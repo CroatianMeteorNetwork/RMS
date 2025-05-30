@@ -1696,6 +1696,7 @@ class BufferedCapture(Process):
             t_block = time.time()
             max_frame_interval_normalized = 0.0
             max_frame_age_seconds = 0.0
+            first_frame_timestamp = None
 
             # running totals for mean calculations
             sum_frame_interval_norm = 0.0
@@ -1980,7 +1981,9 @@ class BufferedCapture(Process):
                 break
 
 
-            if (not wait_for_reconnect) and (not self.daytime_mode.value):
+            if (not wait_for_reconnect
+                and not self.daytime_mode.value
+                and first_frame_timestamp is not None):
 
                 # Set the starting value of the frame block, which indicates to the compression that the
                 # block is ready for processing
@@ -2002,7 +2005,7 @@ class BufferedCapture(Process):
 
             # Save current timestamp buffer to ft file
             # Construct FTStruct, record timestamps, and reset the timestamp array in memory
-            if self.config.save_frame_times:
+            if (self.config.save_frame_times and first_frame_timestamp is not None):
                 ft = FTStruct.FTStruct()
                 ft.timestamps = copy.copy(self.timestamp_buffer)
 
