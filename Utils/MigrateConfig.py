@@ -386,7 +386,7 @@ if __name__ == "__main__":
             f = os.path.join(stations_dir, d, ".config")
             if os.path.isfile(f):                 # skip broken/missing configs
                 original_config_files.append(f)
-    print(f"Multi-cam count: {len(original_config_files)-1}")  # minus the root
+    print("Multi-cam count: {}".format(len(original_config_files) - 1))
 
     # if specified assume
     if args.input:
