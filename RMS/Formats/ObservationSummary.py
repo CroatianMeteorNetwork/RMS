@@ -433,7 +433,8 @@ def gatherCameraInformation(config, attempts=6, delay=10, sock_timeout=3):
                 cam.close()
                 return sensor
         except (socket.timeout, OSError, ConnectionError):
-            pass          # camera may still rebooting – ignore and retry
+            # Camera may still rebooting - ignore and retry
+            pass
         time.sleep(delay)
 
     return "Unavailable"
