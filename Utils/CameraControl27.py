@@ -111,8 +111,15 @@ class DVRIPCam(object):
             return {}
 
         self.packet_count += 1
-        self.logger.debug("<= %s", data)
+
+        # Skip printing keep-alive packets
+        if "KeepAlive" not in data:
+            
+            # Log the packet being received
+            self.logger.debug("<= %s", data)
+
         reply = json.loads(data[:-2])
+
         return reply
 
     def send(self, msg, data={}, wait_response=True):
