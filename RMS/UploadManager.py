@@ -504,6 +504,7 @@ class UploadManager(multiprocessing.Process):
         self.upload_queue_file_path = os.path.join(self.config.data_dir, self.config.upload_queue_file)
 
         # Load the list of files to upload, and have not yet been uploaded
+        print("Loading upload queue from file: {:s}".format(self.upload_queue_file_path))
         self.loadQueue()
 
 
