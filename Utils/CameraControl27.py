@@ -201,6 +201,7 @@ class DVRIPCam(object):
         self.send(
             1006,
             {"Name": "KeepAlive", "SessionID": "0x%08X" % self.session},
+            wait_response=False
         )
         self.alive = threading.Timer(self.alive_time, self.keep_alive)
         self.alive.start()
