@@ -157,7 +157,7 @@ class DVRIPCam(object):
             if msg != 1006:
 
                 # Log the packet being sent
-                self.logger.debug("=> %s", pkt)
+                self.logger.debug("=> %s", data)
 
             # send packet
             self.socket_send(pkt)
