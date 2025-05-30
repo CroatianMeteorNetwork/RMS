@@ -504,7 +504,6 @@ class UploadManager(multiprocessing.Process):
         self.upload_queue_file_path = os.path.join(self.config.data_dir, self.config.upload_queue_file)
 
         # Load the list of files to upload, and have not yet been uploaded
-        print("Loading upload queue from file: {:s}".format(self.upload_queue_file_path))
         self.loadQueue()
 
 
@@ -689,15 +688,12 @@ class UploadManager(multiprocessing.Process):
         self.upload_in_progress.value = True
 
         # Read the file list from disk
-        print("Loading upload queue from file: {:s}".format(self.upload_queue_file_path))
         self.loadQueue()
 
         tries = 0
 
         # Go through every file and upload it to server
         while True:
-
-            print("Trying to upload file, attempt {:d} of {:d}".format(tries + 1, retries))
 
             # Get a file from the queue
             with self.file_queue_lock:
@@ -784,7 +780,6 @@ class UploadManager(multiprocessing.Process):
                 self.last_runtime = RmsDateTime.utcnow()
 
             # Run the upload procedure
-            print("Running upload procedure at {:s}".format(str(self.last_runtime)))
             self.uploadData()
 
             time.sleep(0.1)
