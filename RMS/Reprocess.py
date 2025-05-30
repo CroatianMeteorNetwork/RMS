@@ -751,7 +751,7 @@ def processFramesFiles(config):
 
     except Exception as exc:
         log.error("Timelapse generation failed: %s", exc, exc_info=True)
-        return None                                          # bail early
+        return None
 
     # -- 3. archive ----------------------------------------------------------
     log.info("Archiving frame timelapses in %s", frame_dir)

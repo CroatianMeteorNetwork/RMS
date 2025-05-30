@@ -539,6 +539,17 @@ def generateTimelapseFromDir(dir_path,
         use_color=use_color,
     )
 
+def isFfmpegWorking(ffmpeg_path="ffmpeg"):
+    """ Check if ffmpeg is available and working. """
+
+    try:
+        subprocess.check_call([ffmpeg_path, "-version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return True
+    
+    except Exception:
+        log.warning("ffmpeg is not available or not working.")
+        return False
+
 
 def generateTimelapseFromFrames(image_files,
                                 frames_root,
@@ -568,11 +579,13 @@ def generateTimelapseFromFrames(image_files,
         (video_path, json_path): [tuple[str, str] | (None, None)]
             Output paths on success, (None, None) on failure.
     """
+
     # Validate input parameters
     image_files = list(image_files)
     total_frames = len(image_files)
-    if total_frames == 0:
-        log.warning('generateTimelapseFromFrames: no images supplied')
+
+    if total_frames < 10:
+        log.warning('Fewer than 10 images found, cannot create timelapse.')
         return None, None
     
     # Create a temporary output path
@@ -589,6 +602,7 @@ def generateTimelapseFromFrames(image_files,
     width, height = 0, 0
     
     for i in range(sample_size):
+
         # work backward from the last image in the sample window as the first images are sometimes not
         # representative in case of multiple captures per camera
         # (e.g. main capture controls camera mode and passive auxiliary captures)
@@ -597,6 +611,7 @@ def generateTimelapseFromFrames(image_files,
         sample_image = cv2.imread(image_files[idx], cv2.IMREAD_UNCHANGED)
 
         if sample_image is not None:
+            
             # Get dimensions from the first valid image
             height, width = sample_image.shape[:2]
 
@@ -615,15 +630,9 @@ def generateTimelapseFromFrames(image_files,
     # Set up ffmpeg command based on color mode
     if platform.system() in ['Linux', 'Darwin']:
         ffmpeg_path = "ffmpeg"
-
-        # Check if ffmpeg is available in the system path
-        if shutil.which(ffmpeg_path) is None:
-            log.warning("ffmpeg not found in system path. Please install ffmpeg.")
-
-            return None, None
         
-        # As a final check, try to run ffmpeg to see if it works
-        if os.system(ffmpeg_path + " -version") != 0:
+        # Check if ffmpeg is available and working
+        if isFfmpegWorking(ffmpeg_path):
             log.warning("ffmpeg is not available or not working.")
             return None, None
 
