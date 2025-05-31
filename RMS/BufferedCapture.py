@@ -868,9 +868,9 @@ class BufferedCapture(Process):
         Arguments:
             ts : [float]  epoch timestamp of current frame (seconds)
         """
-        dt   = self.config.frame_save_interval  # seconds
-        ref  = self.sync_tick_reference         # epoch offset
-        tol  = 0.5 / self.config.fps            # half-frame
+        dt   = self.config.frame_save_aligned_interval  # seconds
+        ref  = self.sync_tick_reference                 # epoch offset
+        tol  = 0.5 / self.config.fps                    # half-frame
 
         tick = int((ts - ref) / dt + 0.5)
         tick_time = ref + tick * dt
