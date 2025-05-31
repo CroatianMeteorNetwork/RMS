@@ -186,6 +186,7 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
 
             if not l:  # blank
                 newfile.write("\n")
+                newfile.flush()
                 continue
 
             # save current section
@@ -195,6 +196,7 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
 
             if l[:1] == ";":  # comment
                 newfile.write("{}\n".format(l))
+                newfile.flush()
                 continue
 
             bits = re.split(": ", l)  # is it an attribute?
@@ -202,6 +204,7 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
 
             if cnt != 2:  # no it isn't
                 newfile.write("{}\n".format(l))
+                newfile.flush()
                 continue
 
             # insert our original .config value if we have one
@@ -229,6 +232,7 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
                         newfile.write(
                             "{}: {}\n".format(bits[0],original_value)
                         )  # write original attribute/value pair
+                        newfile.flush()
                         logMessage(
                             "  {}{}: template default '{}' => kept '{}'"
                                     .format(section, bits[0], new_default_value, original_value)
@@ -243,11 +247,12 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
 
             # if we don't need to update the template line write it out as is
             newfile.write("{}\n".format(l))
+            newfile.flush()
 
         newfile.write(
             "\n; Reformated by {} on {}\n".format(sys.argv[0],datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         )
-
+        newfile.flush()
         logMessage("{} customized attributes written".format(custom_cnt))
 
         if len(attributes_dict) > 0:
@@ -309,7 +314,7 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
         # Write the modified config back to disk
         with open(new_config_file, "w") as newfile:
             newfile.writelines(new_config_lines)
-                    
+            newfile.flush()
     return new_config_file, station_id
 
 
