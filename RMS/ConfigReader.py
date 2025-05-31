@@ -434,9 +434,6 @@ class Config:
         # Set the time interval for saving video frames (s)
         self.frame_save_interval = 5
 
-        # Set the frame count interval for saving video frames (calculated from the time interval)
-        self.frame_save_interval_count = 256
-
         # Set whether to delete, archive, or leave saved frames after making timelapse ('delete', 'tar', 'none')
         self.frame_cleanup = 'delete'
 
@@ -1243,15 +1240,6 @@ def parseCapture(config, parser):
     # Load the interval for saving video frame
     if parser.has_option(section, "frame_save_interval"):
         config.frame_save_interval = parser.getint(section, "frame_save_interval")
-
-        # Calculate the interval frame count
-        config.frame_save_interval_count = int(round(float(config.frame_save_interval)*float(config.fps)))
-
-        # Must be greater than 5
-        if config.frame_save_interval_count < 5:
-            config.frame_save_interval_count = 256
-            print()
-            print("WARNING! The frame_save_interval must result in more than 5 frames interval. It has been reset to 256 frames!")
 
     # Set whether to delete, archive, or leave saved frames after making timelapse ('delete', 'tar', 'none')
     if parser.has_option(section, "frame_cleanup"):
