@@ -1695,7 +1695,8 @@ class BufferedCapture(Process):
 
                     # Read the frame
                     log.info("Reading frame...")
-                    ret, _, _ = self.read()
+                    ret, frame, _ = self.read()
+                    self.convert_to_gray = self.isGrayscale(frame)
                     log.info("Frame read!")
 
                     # If the connection was made and the frame was retrieved, continue with the capture
