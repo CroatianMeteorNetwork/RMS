@@ -1696,12 +1696,12 @@ class BufferedCapture(Process):
                     # Read the frame
                     log.info("Reading frame...")
                     ret, frame, _ = self.read()
-                    self.convert_to_gray = self.isGrayscale(frame)
                     log.info("Frame read!")
 
                     # If the connection was made and the frame was retrieved, continue with the capture
                     if ret:
                         log.info('Video device reconnected successfully!')
+                        self.convert_to_gray = self.isGrayscale(frame)
                         wait_for_reconnect = False
                         break
 
@@ -1742,6 +1742,13 @@ class BufferedCapture(Process):
                 ret, frame, frame_timestamp = self.read()
                 t_frame = time.time() - t1_frame
 
+                # If the video device was disconnected, wait for reconnection
+                if (self.video_file is None) and (not ret):
+                    log.info('Frame grabbing failed, video device is probably disconnected!')
+                    self.releaseResources()
+                    wait_for_reconnect = True
+                    break
+
                 # Set flag to save a raw frame
                 save_this_frame = (self.config.save_frames and
                                    self.video_file is None and
@@ -1755,13 +1762,6 @@ class BufferedCapture(Process):
                 # Handling for grayscale conversion
                 frame = self.handleGrayscaleConversion(frame)
 
-                # If the video device was disconnected, wait for reconnection
-                if (self.video_file is None) and (not ret):
-
-                    log.info('Frame grabbing failed, video device is probably disconnected!')
-                    self.releaseResources()
-                    wait_for_reconnect = True
-                    break
 
 
                 # If a video file is used, compute the time using the time from the file timestamp
