@@ -700,7 +700,9 @@ class BufferedCapture(Process):
         Returns:
             bool: True if all sampled channels match (or frame is single-channel), otherwise False.
         """
-
+        if frame is None:
+            raise ValueError("isGrayscale() called with frame=None")
+        
         # We don't explicitly check frame.shape first; instead we rely on an IndexError
         # if 'frame' is single-channel (which is inherently grayscale).
         # This is faster than an extra dimension check for most BGR GMN stations 
