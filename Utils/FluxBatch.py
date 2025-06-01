@@ -1905,6 +1905,10 @@ def stftNotchFilter(
 
     """
 
+    # If the input flux is empty, return an empty array
+    if len(flux) == 0:
+        return np.array([])
+
     # Create uniform samples in solar longitude (keep in mind that sol is periodic and wraps around)
     min_sol = np.min(sol_lon)
     max_sol = np.max(sol_lon)
