@@ -650,7 +650,6 @@ class Config:
         self.remote_platepar_dir = 'platepars'
 
         # Download remote mask
-        self.mask_download_permissive = True
         self.mask_remote_name = 'mask_latest.bmp'
         self.remote_mask_dir = 'masks'
 
@@ -1780,9 +1779,6 @@ def parseCalibration(config, parser):
 
     if parser.has_option(section, "recalibration_max_stars"):
         config.recalibration_max_stars = parser.getint(section, "recalibration_max_stars")
-
-    if parser.has_option(section, "mask_download_permissive"):
-        config.mask_download_permissive = parser.getboolean(section, "mask_download_permissive")
 
     if parser.has_option(section, "mask_remote_name"):
         config.mask_remote_name = parser.get(section, "mask_remote_name")

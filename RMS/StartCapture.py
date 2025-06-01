@@ -326,7 +326,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         log.debug('Could not generate config audit report:' + repr(e))
 
     # Check for and get an updated mask
-    if config.mask_download_permissive:
+    if config.download_enabled:
         downloadNewMask(config)
 
     # Get the platepar file
@@ -895,6 +895,9 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-e', '--detectend', action="store_true", help="""Detect stars and meteors at the
         end of the night, after capture finishes. """)
+    
+    arg_parser.add_argument('-t', '--test', action="store_true", \
+        help="""Disable connection to the GMN server. """)
 
     arg_parser.add_argument('-r', '--resume', action="store_true", \
         help="""Resume capture into the last night directory in CapturedFiles. """)
@@ -960,8 +963,13 @@ if __name__ == "__main__":
     mkdirP(os.path.join(root_dir, config.captured_dir))
     mkdirP(os.path.join(root_dir, config.archived_dir))
 
+    if cml_args.test:
+        log.info("Running in test mode, no upload or download will be performed.")
+        config.upload_enabled = False
+        config.download_enabled = False
+
     # Check for and get an updated mask
-    if config.mask_download_permissive:
+    if config.download_enabled:
         downloadNewMask(config)
 
     # If the duration of capture was given, capture right away for a specified time
