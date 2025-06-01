@@ -475,6 +475,9 @@ class Config:
         # Flag determining if uploading is enabled or not
         self.upload_enabled = True
 
+        # Flag determining if downloading is enabled or not
+        self.download_enabled = True
+
         # Delay upload after files are added to the queue by the given number of minutes
         self.upload_delay = 0
 
@@ -817,10 +820,11 @@ def parse(path, strict=True):
         raise RuntimeError('Unknown config file name: {}'.format(os.path.basename(path)))
 
 
-    # Disable upload if the default station name is used
+    # Disable upload and deownload if the default station name is used
     if config.stationID == "XX0001":
-        print("Disabled upload because the default station code is used!")
+        print("Disabled upload and download because the default station code is used!")
         config.upload_enabled = False
+        config.download_enabled = False
     
 
     return config
@@ -1305,6 +1309,10 @@ def parseUpload(config, parser):
     # Enable/disable upload
     if parser.has_option(section, "upload_enabled"):
         config.upload_enabled = parser.getboolean(section, "upload_enabled")
+
+    # Enable/disable download
+    if parser.has_option(section, "download_enabled"):
+        config.download_enabled = parser.getboolean(section, "download_enabled")
 
     # Address of the upload server
     if parser.has_option(section, "hostname"):
