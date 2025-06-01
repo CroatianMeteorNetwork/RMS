@@ -1289,7 +1289,7 @@ def fluxBatch(
 
     # Apply the diurnal correction to the flux
     comb_flux_nodiurnal = comb_flux.copy()
-    if diurnal_correction:
+    if diurnal_correction and (len(comb_sol) > 0):
         
         # Filter the nominal flux
         comb_flux_new = stftNotchFilter(
