@@ -837,7 +837,7 @@ def processIncompleteCaptures(config, upload_manager):
                                                                      skip_authentications=skip_authentications)
 
             # Upload the archive, if upload is enabled
-            if upload_manager is not None:
+            if upload_manager is not None and not skip_authentications:
                 log.info("Adding file to upload list: {:s}".format(archive_name))
                 upload_manager.addFiles([archive_name])
                 log.info("File added...")
