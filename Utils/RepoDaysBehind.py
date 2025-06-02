@@ -17,16 +17,11 @@
 
 from __future__ import print_function, division, absolute_import
 
-
 import os
 import subprocess
-
 from datetime import datetime, timezone
 import shutil
 import RMS.ConfigReader as cr
-
-
-
 
 def updateCommitHistoryDirectory(remote_urls, target_directory):
 
@@ -90,9 +85,6 @@ def getCommit(repo):
 
     return commit
 
-
-
-
 def getDateOfCommit(repo, commit):
 
     """
@@ -102,7 +94,7 @@ def getDateOfCommit(repo, commit):
         commit: commit hash
 
     Returns:
-        python datetime object of the date of that commit
+        python datetime object of the time and date of that commit
     """
 
     if commit is None:
@@ -131,7 +123,6 @@ def getRemoteUrls(repo):
             if not [remote, url] in url_remote_list_to_return:
                 url_remote_list_to_return.append([remote, url])
     return url_remote_list_to_return
-
 
 def getBranchOfCommit(repo, commit):
 
