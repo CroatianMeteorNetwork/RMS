@@ -673,7 +673,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
             # Save detection to disk and archive detection
             night_archive_dir, archive_name, _ = processNight(night_data_dir, config, \
-                detection_results=detection_results, nodetect=nodetect)
+                detection_results=detection_results, nodetect=nodetect, skip_authentications=skip_authentications)
 
 
             # Put the archive up for upload
@@ -833,7 +833,8 @@ def processIncompleteCaptures(config, upload_manager):
         try:
 
             # Reprocess the night
-            night_archive_dir, archive_name, detector = processNight(captured_dir_path, config)
+            night_archive_dir, archive_name, detector = processNight(captured_dir_path, config,
+                                                                     skip_authentications=skip_authentications)
 
             # Upload the archive, if upload is enabled
             if upload_manager is not None:
