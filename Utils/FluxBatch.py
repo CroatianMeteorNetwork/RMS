@@ -1905,9 +1905,9 @@ def stftNotchFilter(
 
     """
 
-    # If the input flux is empty, return an empty array
-    if len(flux) == 0:
-        return np.array([])
+    # If input is too small or has no variation, skip filtering
+    if len(sol_lon) < 2 or len(np.unique(sol_lon)) < 2:
+        return flux.copy()
 
     # Create uniform samples in solar longitude (keep in mind that sol is periodic and wraps around)
     min_sol = np.min(sol_lon)
@@ -1931,29 +1931,40 @@ def stftNotchFilter(
     sol_lon_uniform = sol_lon_uniform[mask]
     flux_uniform = flux_uniform[mask]
 
+    # After interpolation, if there are no valid points, skip filtering
+    if len(sol_lon_uniform) == 0:
+        return flux.copy()
+
     # Define the sampling frequency based on the time array
     fs = 1/np.median(np.diff(sol_lon_uniform))
+
 
     # Scale the minimum npreseg based on the number of samples in the uniform grid
     # This ensures that the STFT window size is appropriate for the data length
     # and the desired frequency resolution.
     # Round to the nearest power of 2 for better performance in STFT (celing to the next power of 2)
-    exp = np.ceil(np.log2(len(sol_lon_uniform)/10) + 1)   # this is a numpy.float64
-    exp = int(exp)                                        # now a built-in Python int
-    min_perseg = 2**exp                                 # Python int to non-negative int or float if exp < 0
-    min_perseg = max(min_perseg, 32)  # Ensure minimum segment length is at least 32 samples
 
-    # Define the base frequency for the 1× harmonic
-    nperseg = min(min_perseg, len(sol_lon_uniform))
+    # Choose nperseg / noverlap based on the size of sol_lon_uniform
+    if len(sol_lon_uniform) < 32:
+        
+        # Too few points -> use the entire length as the window
+        nperseg = len(sol_lon_uniform)
+        noverlap = int(0.75*nperseg)
 
-    # Calculate the number of overlapping samples
-    noverlap = int(nperseg*0.75)
+    else:
+        # Enough points to choose a power-of-2 window (>= 32)
+        raw_exp = np.log2(len(sol_lon_uniform)/10.0) + 1.0  # numpy.float64
+        raw_exp = np.ceil(raw_exp)                          # still numpy.float64
+        exp_i = int(raw_exp)                                # Python int
+        min_perseg = max(2**exp_i, 32)                      # Python int >= 32
+        nperseg = min(min_perseg, len(sol_lon_uniform))
+        noverlap = int(0.75*nperseg)
 
     # Calculate the STFT of the flux data
     f_stft, t_stft, Zxx = scipy.signal.stft(
-                                            flux_uniform,
-                                            fs=fs, nperseg=nperseg, noverlap=noverlap, boundary='zeros'
-                                            )
+        flux_uniform,
+        fs=fs, nperseg=nperseg, noverlap=noverlap, boundary='zeros'
+        )
 
     # Calculate the frequencies for the harmonics
     notch_mask = np.zeros_like(f_stft, dtype=bool)
