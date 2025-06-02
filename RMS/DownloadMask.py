@@ -5,7 +5,7 @@ This section can be added to the .config file in the Calibration section
 ; Mask
 ; ----
 ; Permit remote mask download
-mask_download_permissive: true
+download_enabled: true
 ; Name of the new platepar file on the server
 mask_remote_name: mask_latest.bmp
 ; Name of the directory on the server which contains masks
@@ -40,7 +40,7 @@ log = logging.getLogger("logger")
 def downloadNewMask(config):
     """ Connect to the central server and download a new mask file, if available. """
 
-    if config.mask_download_permissive:
+    if config.download_enabled:
         log.info("Mask download enabled")
     else:
         log.info("Mask download disabled")
