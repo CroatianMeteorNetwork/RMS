@@ -1938,7 +1938,9 @@ def stftNotchFilter(
     # This ensures that the STFT window size is appropriate for the data length
     # and the desired frequency resolution.
     # Round to the nearest power of 2 for better performance in STFT (celing to the next power of 2)
-    min_perseg = 2**np.ceil(np.log2(len(sol_lon_uniform)/10) + 1).astype(int)
+    exp = np.ceil(np.log2(len(sol_lon_uniform)/10) + 1)   # this is a numpy.float64
+    exp = int(exp)                                        # now a built-in Python int
+    min_perseg = 2**exp                                 # Python int to non-negative int or float if exp < 0
     min_perseg = max(min_perseg, 32)  # Ensure minimum segment length is at least 32 samples
 
     # Define the base frequency for the 1× harmonic
