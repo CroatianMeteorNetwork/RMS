@@ -50,7 +50,7 @@ log = getLogger("logger")
 
 
 
-def getPlatepar(config, night_data_dir):
+def getPlatepar(config, night_data_dir, skip_authentications = False):
     """ Downloads a new platepar from the server or uses an existing one.
     
     Arguments:  
@@ -63,7 +63,8 @@ def getPlatepar(config, night_data_dir):
 
 
     # Download a new platepar from the server, if present  
-    downloadNewPlatepar(config)
+    if not skip_authentications:
+        downloadNewPlatepar(config)
 
 
     # Construct path to the platepar in the night directory
