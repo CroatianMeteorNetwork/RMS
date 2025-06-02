@@ -62,8 +62,9 @@ def getPlatepar(config, night_data_dir):
     """
 
 
-    # Download a new platepar from the server, if present  
-    downloadNewPlatepar(config)
+    # Download a new platepar from the server, if present
+    if config.download_enabled:
+        downloadNewPlatepar(config)
 
 
     # Construct path to the platepar in the night directory
