@@ -1001,7 +1001,7 @@ if __name__ == "__main__":
 
 
         upload_manager = None
-        if config.upload_enabled:
+        if config.upload_enabled and not skip_authentications:
 
             # Init the upload manager
             log.info('Starting the upload manager...')
