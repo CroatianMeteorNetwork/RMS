@@ -1975,7 +1975,7 @@ def stftNotchFilter(
     # Calculate the magnitude of the STFT
     Zxx_mag = np.abs(Zxx)
 
-    # or each frequency bin in your notch_mask, compute the local background
+    # For each frequency bin in your notch_mask, compute the local background
     Zxx_filtered = Zxx.copy()
     attenuation_factor = np.ones_like(Zxx_mag)
 
@@ -1983,11 +1983,18 @@ def stftNotchFilter(
         if not notch_mask[i]:
             continue
 
-        # Define a background window (e.g., ±5 bins excluding the notch itself)
-        window = np.r_[max(i-10,0):i-2, i+3:min(i+10, len(f_stft))]
+        # Define a small "window" of bins around i (exclude i itself)
+        start_lo = max(i - 10, 0)
+        end_lo = max(i - 2, 0)
+        start_hi = min(i + 3, len(f_stft))
+        end_hi = min(i + 10, len(f_stft))
+        window = np.r_[start_lo:end_lo, start_hi:end_hi]
+
+        # If window is empty, skip attenuation for this bin
+        if window.size == 0:
+            continue
 
         # Compute the local background magnitude
-        #local_background = np.median(Zxx_mag[window, :], axis=0)
         local_background = np.percentile(Zxx_mag[window, :], 25, axis=0)
         
         # Compute gain: bring magnitude toward the background level
