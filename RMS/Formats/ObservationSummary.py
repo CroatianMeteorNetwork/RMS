@@ -59,7 +59,7 @@ import socket
 import struct
 import sys
 import time
-
+from Utils.RepoDaysBehind import daysBehind
 
 def getObsDBConn(config, force_delete=False):
     """ Creates the Observation Summary database. Tries only once.
@@ -157,6 +157,7 @@ def startObservationSummaryReport(config, duration, force_delete=False):
     addObsParam(conn, "start_time", datetime.datetime.utcnow() - datetime.timedelta(seconds=1))
     addObsParam(conn, "duration", duration)
     addObsParam(conn, "stationID", sanitise(config.stationID, space_substitution=""))
+    addObsParam(conn, "daysBehindAtStartOfObservation", daysBehind(config))
 
     if isRaspberryPi():
         with open('/sys/firmware/devicetree/base/model', 'r') as m:
@@ -318,6 +319,7 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
     addObsParam(obs_db_conn, "total_fits", fits_count)
     addObsParam(obs_db_conn, "fits_file_shortfall", fits_file_shortfall)
     addObsParam(obs_db_conn, "fits_file_shortfall_as_time", fits_file_shortfall_as_time)
+    addObsParam(obs_db_conn, "daysBehindAtEndOfObservation", daysBehind(config))
     obs_db_conn.close()
 
     writeToFile(config, getRMSStyleFileName(night_data_dir, "observation_summary.txt"))
