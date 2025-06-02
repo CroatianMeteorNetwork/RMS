@@ -945,7 +945,7 @@ if __name__ == "__main__":
 
     # Check to see if we should be skipping actions requiring authentication
 
-    if cml_args.skip_authentications:
+    if cml_args.skip_authentications or config.stationID.startswith("XX"):
         skip_authentications = True
         log.info("Skipping any actions requiring authentication")
     else:
