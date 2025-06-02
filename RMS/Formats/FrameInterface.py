@@ -28,7 +28,7 @@ from RMS.Formats.FFfile import getMiddleTimeFF, selectFFFrames
 from RMS.Formats.FRbin import read as readFR, validFRName
 from RMS.Formats.Vid import readFrame as readVidFrame
 from RMS.Formats.Vid import VidStruct
-from RMS.EGM96GeoidHeight import wgs84toMSLHeight
+from RMS.GeoidHeightEGM96 import wgs84toMSLHeight
 from RMS.Routines import Image
 from RMS.Routines.GstreamerCapture import GstVideoFile
 
