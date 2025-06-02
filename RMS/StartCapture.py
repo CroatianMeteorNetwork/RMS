@@ -330,7 +330,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         downloadNewMask(config)
 
     # Get the platepar file
-    platepar, platepar_path, platepar_fmt = getPlatepar(config, night_data_dir, skip_authentications)
+    platepar, platepar_path, platepar_fmt = getPlatepar(config, night_data_dir, skip_authentications = skip_authentications)
 
     # If the platepar is not none, set the FOV from it
     if platepar is not None:
