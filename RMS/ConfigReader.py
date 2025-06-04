@@ -432,7 +432,7 @@ class Config:
         self.png_compression = 3
 
         # Set the time interval for saving video frames (s) aligned on reference epoch (not exposed in .config)
-        self.frame_save_aligned_interval = 5
+        self.frame_save_aligned_interval = 5.0
 
         # Set whether to delete, archive, or leave saved frames after making timelapse ('delete', 'tar', 'none')
         self.frame_cleanup = 'delete'
@@ -1239,7 +1239,7 @@ def parseCapture(config, parser):
 
     # Load the interval for saving video frame
     if parser.has_option(section, "frame_save_aligned_interval"):
-        config.frame_save_aligned_interval = parser.getint(section, "frame_save_aligned_interval")
+        config.frame_save_aligned_interval = parser.getfloat(section, "frame_save_aligned_interval")
 
     # Set whether to delete, archive, or leave saved frames after making timelapse ('delete', 'tar', 'none')
     if parser.has_option(section, "frame_cleanup"):
