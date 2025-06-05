@@ -17,8 +17,7 @@ import paramiko
 logging.getLogger("paramiko.transport").setLevel(logging.CRITICAL)
 logging.getLogger("paramiko.auth_handler").setLevel(logging.CRITICAL)
 
-from multiprocessing import Queue
-from multiprocessing import Lock
+from multiprocessing import Manager
 
 try:
     from queue import Empty  # Python 3
@@ -487,8 +486,14 @@ class UploadManager(multiprocessing.Process):
 
         self.config = config
 
-        self.file_queue = Queue()
-        self.file_queue_lock = Lock()
+        # These will be defined in .run()
+        self._mgr = Manager()
+        self.file_queue      = self._mgr.Queue()
+        self.file_queue_lock = self._mgr.Lock()
+
+        # Construct the path to the queue backup file
+        self.upload_queue_file_path = os.path.join(self.config.data_dir, self.config.upload_queue_file)
+
         self.exit = multiprocessing.Event()
         self.upload_in_progress = multiprocessing.Value(ctypes.c_bool, False)
 
@@ -500,12 +505,7 @@ class UploadManager(multiprocessing.Process):
         self.next_runtime = None
         self.next_runtime_lock = multiprocessing.Lock() 
 
-        # Construct the path to the queue backup file
-        self.upload_queue_file_path = os.path.join(self.config.data_dir, self.config.upload_queue_file)
-
-        # Load the list of files to upload, and have not yet been uploaded
-        self.loadQueue()
-
+        
 
 
     def start(self):
@@ -592,11 +592,9 @@ class UploadManager(multiprocessing.Process):
             return None
 
 
-        # Load the existing items in the queue (can't be under lock, as it would block the queue)
-        existing_items = set(self.getFileList())
-
-        # Read the queue file
-        with self.file_queue_lock:
+        # Phase 1: read file from disk without holding the lock
+        filenames = []
+        if os.path.exists(self.upload_queue_file_path):
 
             with open(self.upload_queue_file_path) as f:
                 
@@ -614,10 +612,19 @@ class UploadManager(multiprocessing.Process):
                         log.warning("Skipping it...")
                         continue
 
+                    # Add the file name to the list
+                    filenames.append(file_name)
 
-                    # Add the file if it was not already in the queue
-                    if not file_name in existing_items:
-                        self.file_queue.put(file_name)
+
+        # Phase 2: compare with what’s already in the queue
+        existing = set(self.getFileList())   # getFileList briefly acquires + releases the lock
+        to_enqueue = [fn for fn in filenames if fn not in existing]
+
+        # Phase 3: add only missing files under the lock
+        if to_enqueue:
+            with self.file_queue_lock:
+                for fn in to_enqueue:
+                    self.file_queue.put(fn)
 
 
 
@@ -759,6 +766,9 @@ class UploadManager(multiprocessing.Process):
 
     def run(self):
         """ Try uploading the files every 15 minutes. """
+
+        # Load the file queue from disk
+        self.loadQueue()
 
         with self.last_runtime_lock:
             self.last_runtime = None
