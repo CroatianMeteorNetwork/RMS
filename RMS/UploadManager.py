@@ -524,11 +524,23 @@ class UploadManager(multiprocessing.Process):
 
         self.exit.set()
         self.join(timeout)
+        if not self.is_alive():
+            log.info("UploadManager stopped successfully.")
+            return
+        
+        log.warning("UploadManager did not stop within the timeout period of {} seconds.".format(timeout))
+        self.terminate()
 
+        short_wait = 5
+        self.join(short_wait)
         if self.is_alive():
-            log.warning("UploadManager did not stop in time. Forcing termination.")
-            self.terminate()
-            self.join()
+            log.error(
+                "UploadManager still alive after terminate() & %d more seconds. "
+                "It may be stuck in a non-interruptible blocking call.",
+                short_wait
+            )
+        else:
+            log.info("UploadManager terminated (after forced terminate).")
 
 
 
