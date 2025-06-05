@@ -318,6 +318,7 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
     addObsParam(obs_db_conn, "total_fits", fits_count)
     addObsParam(obs_db_conn, "fits_file_shortfall", fits_file_shortfall)
     addObsParam(obs_db_conn, "fits_file_shortfall_as_time", fits_file_shortfall_as_time)
+    addObsParam(obs_db_conn, "star_catalog_file", config.star_catalog_file)
     obs_db_conn.close()
 
     writeToFile(config, getRMSStyleFileName(night_data_dir, "observation_summary.txt"))
