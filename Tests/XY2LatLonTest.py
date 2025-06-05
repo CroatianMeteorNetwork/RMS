@@ -139,7 +139,7 @@ if __name__ == "__main__":
     pp.loadFromDict(json.loads(pp_json))
 
     # Reference height
-    ht = 10_000 # m
+    ht = 10000 # m
 
     # Get the edges of the FOV
     x_vert, y_vert, ra_vert, dec_vert = fovEdgePolygon(pp, J2000_JD.days)
