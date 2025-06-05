@@ -616,7 +616,7 @@ class UploadManager(multiprocessing.Process):
                     filenames.append(file_name)
 
 
-        # Phase 2: compare with what’s already in the queue
+        # Phase 2: compare with what's already in the queue
         existing = set(self.getFileList())   # getFileList briefly acquires + releases the lock
         to_enqueue = [fn for fn in filenames if fn not in existing]
 
