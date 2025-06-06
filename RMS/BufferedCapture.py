@@ -1436,7 +1436,6 @@ class BufferedCapture(Process):
         del self.shared_raw_array_base
         del self.shared_raw_array
         del self.shared_raw_array_base2
-        del self.shared_raw_array2
 
 
     def initRawFrameArrays(self, frame_shape):
@@ -2117,6 +2116,9 @@ if __name__ == "__main__":
 
         # Init the BufferedCapture object
         bc = BufferedCapture(sharedArray, startTime, sharedArray, startTime, config)
+
+        from gi.repository import Gst
+        Gst.init(None)
 
         device = bc.createGstreamDevice('BGR', video_file_dir=None, segment_duration_sec=config.raw_video_duration)
 
