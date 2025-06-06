@@ -1443,6 +1443,7 @@ class BufferedCapture(Process):
         del self.shared_raw_array_base
         del self.shared_raw_array
         del self.shared_raw_array_base2
+        del self.shared_raw_array2
 
 
     def initRawFrameArrays(self, frame_shape):
