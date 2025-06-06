@@ -169,6 +169,7 @@ class BufferedCapture(Process):
         # initialise last_calculated_fps to something sensible for edge case when only one sample is collected
         self.last_calculated_fps = self.config.fps
         self.last_calculated_fps_n = self.config.fps
+        self.reset_count = 0
 
     def startCapture(self, cameraID=0):
         """ Start capture using specified camera.
