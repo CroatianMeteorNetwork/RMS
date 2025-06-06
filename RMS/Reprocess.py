@@ -50,7 +50,7 @@ log = getLogger("logger")
 
 
 
-def getPlatepar(config, night_data_dir):
+def getPlatepar(config, night_data_dir, skip_authentications = False):
     """ Downloads a new platepar from the server or uses an existing one.
     
     Arguments:  
@@ -63,8 +63,8 @@ def getPlatepar(config, night_data_dir):
 
 
     # Download a new platepar from the server, if present  
-    downloadNewPlatepar(config)
-
+    if not skip_authentications:
+        downloadNewPlatepar(config)
 
     # Construct path to the platepar in the night directory
     platepar_night_dir_path = os.path.join(night_data_dir, config.platepar_name)
@@ -152,7 +152,7 @@ def getPlatepar(config, night_data_dir):
 
 
 
-def processNight(night_data_dir, config, detection_results=None, nodetect=False):
+def processNight(night_data_dir, config, detection_results=None, nodetect=False, skip_authentications = False):
     """ Given the directory with FF files, run detection and archiving.  
     
     Arguments:  
@@ -218,7 +218,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         obs_db_conn.close()
 
         # Get the platepar file
-        platepar, platepar_path, platepar_fmt = getPlatepar(config, night_data_dir)
+        platepar, platepar_path, platepar_fmt = getPlatepar(config, night_data_dir, skip_authentications)
 
 
         # Run calibration check and auto astrometry refinement

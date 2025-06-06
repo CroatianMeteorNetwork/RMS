@@ -326,11 +326,11 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         log.debug('Could not generate config audit report:' + repr(e))
 
     # Check for and get an updated mask
-    if config.mask_download_permissive:
+    if config.mask_download_permissive and not skip_authentications:
         downloadNewMask(config)
 
     # Get the platepar file
-    platepar, platepar_path, platepar_fmt = getPlatepar(config, night_data_dir)
+    platepar, platepar_path, platepar_fmt = getPlatepar(config, night_data_dir, skip_authentications = skip_authentications)
 
     # If the platepar is not none, set the FOV from it
     if platepar is not None:
@@ -673,7 +673,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
             # Save detection to disk and archive detection
             night_archive_dir, archive_name, _ = processNight(night_data_dir, config, \
-                detection_results=detection_results, nodetect=nodetect)
+                detection_results=detection_results, nodetect=nodetect, skip_authentications=skip_authentications)
 
 
             # Put the archive up for upload
@@ -833,10 +833,11 @@ def processIncompleteCaptures(config, upload_manager):
         try:
 
             # Reprocess the night
-            night_archive_dir, archive_name, detector = processNight(captured_dir_path, config)
+            night_archive_dir, archive_name, detector = processNight(captured_dir_path, config,
+                                                                     skip_authentications=skip_authentications)
 
             # Upload the archive, if upload is enabled
-            if upload_manager is not None:
+            if upload_manager is not None and not skip_authentications:
                 log.info("Adding file to upload list: {:s}".format(archive_name))
                 upload_manager.addFiles([archive_name])
                 log.info("File added...")
@@ -896,6 +897,10 @@ if __name__ == "__main__":
     arg_parser.add_argument('-e', '--detectend', action="store_true", help="""Detect stars and meteors at the
         end of the night, after capture finishes. """)
 
+    arg_parser.add_argument('-s', '--skip_authentications', action="store_true",
+        help="""Skip any actions requiring authentication """)
+
+
     arg_parser.add_argument('-r', '--resume', action="store_true", \
         help="""Resume capture into the last night directory in CapturedFiles. """)
     
@@ -939,6 +944,13 @@ if __name__ == "__main__":
 
     log.info("Program version: {:s}, {:s}".format(commit_time, sha))
 
+    # Check to see if we should be skipping actions requiring authentication
+
+    if cml_args.skip_authentications or config.stationID.startswith("XX"):
+        skip_authentications = True
+        log.info("Skipping any actions requiring authentication")
+    else:
+        skip_authentications = False
 
     # Set the number of cores to use if given
     if cml_args.num_cores is not None:
@@ -960,8 +972,10 @@ if __name__ == "__main__":
     mkdirP(os.path.join(root_dir, config.captured_dir))
     mkdirP(os.path.join(root_dir, config.archived_dir))
 
+
+
     # Check for and get an updated mask
-    if config.mask_download_permissive:
+    if config.mask_download_permissive and not skip_authentications:
         downloadNewMask(config)
 
     # If the duration of capture was given, capture right away for a specified time
@@ -988,7 +1002,7 @@ if __name__ == "__main__":
 
 
         upload_manager = None
-        if config.upload_enabled:
+        if config.upload_enabled and not skip_authentications:
 
             # Init the upload manager
             log.info('Starting the upload manager...')
@@ -1035,7 +1049,7 @@ if __name__ == "__main__":
         sys.exit()
 
     upload_manager = None
-    if config.upload_enabled:
+    if config.upload_enabled and not skip_authentications:
 
         # Init the upload manager
         log.info('Starting the upload manager...')
