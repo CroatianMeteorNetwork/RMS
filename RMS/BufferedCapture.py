@@ -166,6 +166,9 @@ class BufferedCapture(Process):
         # handle for the Gst bus-poller thread
         self._bus_thread = None
 
+        # initialise last_calculated_fps to something sensible for edge case when only one sample is collected
+        self.last_calculated_fps = self.config.fps
+
 
     def startCapture(self, cameraID=0):
         """ Start capture using specified camera.
