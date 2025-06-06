@@ -1011,7 +1011,6 @@ if __name__ == "__main__":
             if upload_manager.is_alive():
                 log.info('Closing upload manager...')
                 upload_manager.stop()
-                del upload_manager
 
 
         sys.exit()
