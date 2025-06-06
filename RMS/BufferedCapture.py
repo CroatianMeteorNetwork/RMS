@@ -166,6 +166,13 @@ class BufferedCapture(Process):
         # handle for the Gst bus-poller thread
         self._bus_thread = None
 
+        # initialise variables to something sensible for edge case when only one sample is collected
+        self.last_calculated_fps = 0
+        self.last_calculated_fps_n = 0
+        self.reset_count = -1
+        self.startup_flag = True
+        self.video_device_type = None
+        self.device = None
 
     def startCapture(self, cameraID=0):
         """ Start capture using specified camera.
@@ -2117,6 +2124,9 @@ if __name__ == "__main__":
 
         # Init the BufferedCapture object
         bc = BufferedCapture(sharedArray, startTime, sharedArray, startTime, config)
+
+        from gi.repository import Gst
+        Gst.init(None)
 
         device = bc.createGstreamDevice('BGR', video_file_dir=None, segment_duration_sec=config.raw_video_duration)
 
