@@ -164,7 +164,7 @@ if __name__ == "__main__":
     arg_parser.add_argument('-l', '--flip_text', dest='flip_text', default=False, action="store_true",
                             help="Flip text so it is never upside down.")
 
-    arg_parser.add_argument('-o', '--output_file_name', dest='output_file_name', default="fov_sky_map.png",
+    arg_parser.add_argument('-o', '--output_file_name', dest='output_file_name', default=["fov_sky_map.png"],
                             nargs=1, help="Output filename and path")
 
 
