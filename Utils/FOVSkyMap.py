@@ -7,7 +7,7 @@ from RMS.Astrometry.Conversions import latLonAlt2ECEF, ECEF2AltAz
 
 
 def plotFOVSkyMap(platepars, out_dir, north_up=False, show_pointing=False, show_fov=False,
-                  rotate_text = False, masks=None, output_file_name="fov_sky_map.png"):
+                  rotate_text = False, flip_text = False, masks=None, output_file_name="fov_sky_map.png"):
     """ Plot all given platepar files on an Alt/Az sky map.
 
 
@@ -92,12 +92,12 @@ def plotFOVSkyMap(platepars, out_dir, north_up=False, show_pointing=False, show_
 
             if north_up:
                 rot = 0 - pp.az_centre
-                if -270 < rot < -90:
+                if -270 < rot < -90 and flip_text:
                     rot += 180
 
             else:
                 rot = 90 + pp.az_centre
-                if  90 < rot < 270:
+                if  90 < rot < 270 and flip_text:
                     rot -= 180
 
         if show_pointing:
@@ -161,8 +161,12 @@ if __name__ == "__main__":
     arg_parser.add_argument('-r', '--rotate', dest='rotate', default=False, action="store_true",
                             help="Rotate text in line with camera pointing.")
 
+    arg_parser.add_argument('-l', '--flip_text', dest='flip_text', default=False, action="store_true",
+                            help="Flip text so it is never upside down.")
+
     arg_parser.add_argument('-o', '--output_file_name', dest='output_file_name', default="fov_sky_map.png",
                             nargs=1, help="Output filename and path")
+
 
 
     ###
@@ -210,7 +214,8 @@ if __name__ == "__main__":
     # Plot all platepars on an alt/az sky map
     plotFOVSkyMap(platepars, cml_args.dir_path, north_up=cml_args.north_up,
                   show_pointing=cml_args.pointing, show_fov = cml_args.fov,
-                  rotate_text = cml_args.rotate, masks=masks, output_file_name = output_file_name)
+                  rotate_text = cml_args.rotate, masks=masks,
+                  flip_text = cml_args.flip_text, output_file_name = output_file_name)
 
 
 
