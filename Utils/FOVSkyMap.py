@@ -6,7 +6,8 @@ from RMS.Routines.FOVArea import fovArea
 from RMS.Astrometry.Conversions import latLonAlt2ECEF, ECEF2AltAz
 
 
-def plotFOVSkyMap(platepars, out_dir, north_up=False, show_pointing=False, show_fov=False, rotate_text = False, masks=None):
+def plotFOVSkyMap(platepars, out_dir, north_up=False, show_pointing=False, show_fov=False,
+                  rotate_text = False, masks=None, output_file_name="fov_sky_map.png"):
     """ Plot all given platepar files on an Alt/Az sky map.
 
 
@@ -122,7 +123,7 @@ def plotFOVSkyMap(platepars, out_dir, north_up=False, show_pointing=False, show_
 
 
     # Save the plot to disk
-    plot_file_name = "fov_sky_map.png"
+    plot_file_name = output_file_name
     plot_path = os.path.expanduser(os.path.join(out_dir, plot_file_name))
     print(plot_path)
     plt.savefig(plot_path, dpi=150)
@@ -159,6 +160,10 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-r', '--rotate', dest='rotate', default=False, action="store_true",
                             help="Rotate text in line with camera pointing.")
+
+    arg_parser.add_argument('-o', '--output_file_name', dest='output_file_name', default="fov_sky_map.png",
+                            nargs=1, help="Output filename and path")
+
 
     ###
 
@@ -201,11 +206,11 @@ if __name__ == "__main__":
                 masks[pp.station_code] = loadMask(os.path.join(dir_path, config.mask_file))
                 print("Loaded the mask too!")
 
-
+    output_file_name = os.path.join(os.path.abspath('.'), os.path.expanduser(cml_args.output_file_name[0]))
     # Plot all platepars on an alt/az sky map
     plotFOVSkyMap(platepars, cml_args.dir_path, north_up=cml_args.north_up,
                   show_pointing=cml_args.pointing, show_fov = cml_args.fov,
-                  rotate_text = cml_args.rotate, masks=masks)
+                  rotate_text = cml_args.rotate, masks=masks, output_file_name = output_file_name)
 
 
 
