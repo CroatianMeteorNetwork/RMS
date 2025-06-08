@@ -148,7 +148,7 @@ class Compressor(multiprocessing.Process):
 
         else:
             # Python 3 code
-            dt = UTCFromTimestamp.utcfromtimestamp(startTime, tz=datetime.timezone.utc)
+            dt = UTCFromTimestamp.utcfromtimestamp(startTime)
             ff.starttime = dt.isoformat(timespec='microseconds')
         
         # Write the FF file
