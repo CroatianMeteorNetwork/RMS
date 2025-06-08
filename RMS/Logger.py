@@ -10,8 +10,7 @@ import multiprocessing
 import datetime
 import threading
 import atexit
-
-from RMS.Misc import UTCFromTimestamp
+import time
 
 
 try:
@@ -173,6 +172,41 @@ class RmsDateTime:
             return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
 
+# Reproduced from RMS.Misc due to circular import issue
+
+class UTCFromTimestamp:
+    """Cross-version helper to convert Unix timestamps to naive UTC datetime objects.
+
+    - Python 2.7–3.11: uses datetime.utcfromtimestamp()
+    - Python 3.12+: uses datetime.fromtimestamp(..., tz=timezone.utc).replace(tzinfo=None)
+    """
+
+    @staticmethod
+    def utcfromtimestamp(timestamp):
+        if sys.version_info >= (3, 12):
+            # Use aware datetime then strip tzinfo to make it naive
+            return datetime.datetime.fromtimestamp(
+                timestamp, tz=UTCFromTimestamp._get_utc_timezone()
+            ).replace(tzinfo=None)
+        else:
+            return datetime.datetime.utcfromtimestamp(timestamp)
+
+    @staticmethod
+    def _get_utc_timezone():
+        """Safely provide UTC tzinfo across Python versions."""
+        try:
+            # Python 3.2+
+            from datetime import timezone
+            return timezone.utc
+        except ImportError:
+            # Python 2: no timezone support
+            raise NotImplementedError(
+                "timezone-aware fromtimestamp() is not supported in Python < 3.2. "
+                "Use Python >= 3.12 or fallback to utcfromtimestamp()."
+            )
+
+
+
 def gstDebugLogger(category, level, file, function, line, obj, message, user_data):
     """ Maps GStreamer debug levels to Python logging levels and logs
         the message directly through the logging system.
@@ -320,6 +354,7 @@ def _listener_process(queue, config, log_file_prefix, safedir):
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
     # Configure the listener process
+    logging.Formatter.converter = time.gmtime
     _listener_configurer(config, log_file_prefix, safedir)
 
     # Start queue listener
