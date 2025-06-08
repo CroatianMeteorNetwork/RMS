@@ -90,7 +90,7 @@ def plotFOVSkyMap(platepars, out_dir, north_up=False,  masks=None):
 
     ax.grid(True, color='0.98')
     ax.set_xlabel("Azimuth (deg)")
-    ax.yaxis.set_major_formatter(StrMethodFormatter(u"{x:.0f}°"))
+    ax.yaxis.set_major_formatter(StrMethodFormatter(u"{x:.0f}\u00b0"))
     ax.tick_params(axis='y', which='major', labelsize=8, direction='out')
 
     plt.tight_layout()
