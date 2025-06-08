@@ -260,7 +260,7 @@ class BufferedCapture(Process):
                 if GST_IMPORTED:
 
                     # Use a 10-second timeout to avoid indefinite blocking while checking if the device is in the PLAYING state
-                    state = self.device.get_state(Gst.SECOND*10).state
+                    state = self.device.get_state(Gst.SECOND * 10).state
 
                     if state == Gst.State.PLAYING:
                         return True
@@ -503,7 +503,7 @@ class BufferedCapture(Process):
             if GST_IMPORTED and (self.config.media_backend == 'gst') and (not self.media_backend_override):
 
                 # Pull a frame from the GStreamer pipeline with a .5 sec timeout
-                sample = self.device.emit("try-pull-sample", 500*Gst.MSECOND)
+                sample = self.device.emit("try-pull-sample", 500 * Gst.MSECOND)
                 if not sample:
                     log.info("GStreamer pipeline did not emit a sample.")
                     return False, None, None
@@ -540,7 +540,7 @@ class BufferedCapture(Process):
             else:
                 ret, frame = self.device.read()
                 if ret:
-                    timestamp = RmsDateTime.utcnow()
+                    timestamp = time.time()
 
             # Check if frame contains color information
             if check_color:
@@ -780,7 +780,7 @@ class BufferedCapture(Process):
 
         # Segment name is based on timestamp recorded during last segment save
         segment_time = datetime.datetime.fromtimestamp(self.last_segment_savetime)
-        self.last_segment_savetime = RmsDateTime.utcnow()
+        self.last_segment_savetime = time.time()
         segment_filename = segment_time.strftime("{}_%Y%m%d_%H%M%S_video.mkv".format(self.config.stationID))
         segment_subpath = os.path.join(self.config.data_dir, self.config.video_dir, segment_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
 
@@ -837,11 +837,11 @@ class BufferedCapture(Process):
 
                 # Capture time just before camera starts capture
                 if state == Gst.State.PAUSED:
-                    start_time = RmsDateTime.utcnow()
+                    start_time = time.time()
 
                 # Request state change and wait for completion
                 ret = pipeline.set_state(state)
-                ret, new_state, pending = pipeline.get_state(Gst.SECOND*timeout)
+                ret, new_state, pending = pipeline.get_state(Gst.SECOND * timeout)
                 
                 # Both SUCCESS and NO_PREROLL are valid (NO_PREROLL happens with live sources)
                 if ret not in (Gst.StateChangeReturn.SUCCESS, Gst.StateChangeReturn.NO_PREROLL):
@@ -1451,10 +1451,10 @@ class BufferedCapture(Process):
 
             # Calculate buffer size based on actual dimensions
             if len(frame_shape) == 3:
-                buffer_size = self.num_raw_frames*frame_shape[0]*frame_shape[1]*frame_shape[2]
+                buffer_size = self.num_raw_frames * frame_shape[0] * frame_shape[1] * frame_shape[2]
                 array_shape = (self.num_raw_frames, frame_shape[0], frame_shape[1], frame_shape[2])
             else:
-                buffer_size = self.num_raw_frames*frame_shape[0]*frame_shape[1]
+                buffer_size = self.num_raw_frames * frame_shape[0] * frame_shape[1]
                 array_shape = (self.num_raw_frames, frame_shape[0], frame_shape[1])
 
             log.debug("Creating shared arrays with shape: {}".format(array_shape))
@@ -1554,11 +1554,11 @@ class BufferedCapture(Process):
             if self.config.save_frame_times:
                 self.timestamp_buffer = []
                 # For testing ft files
-                # self.ft_test_time = RmsDateTime.utcnow()
+                # self.ft_test_time = time.time()
 
             # Initialize segment saving time for raw video saving
             if self.config.raw_video_save:
-                self.last_segment_savetime = RmsDateTime.utcnow()
+                self.last_segment_savetime = time.time()
 
             log.debug("Process-specific initialization complete")
 
@@ -1693,7 +1693,7 @@ class BufferedCapture(Process):
             t_frame = 0
             t_assignment = 0
             t_convert = 0
-            t_block = RmsDateTime.utcnow()
+            t_block = time.time()
             max_frame_interval_normalized = 0.0
             max_frame_age_seconds = 0.0
             first_frame_timestamp = None
@@ -1726,9 +1726,9 @@ class BufferedCapture(Process):
                 )
 
                 # Read the frame (keep track how long it took to grab it), and check for color if saving raw frame
-                t1_frame = RmsDateTime.utcnow()
+                t1_frame = time.time()
                 ret, frame, frame_timestamp = self.read(check_color=save_this_frame)
-                t_frame = RmsDateTime.utcnow() - t1_frame
+                t_frame = time.time() - t1_frame
 
                 # If the video device was disconnected, wait for reconnection
                 if (self.video_file is None) and (not ret):
@@ -1878,7 +1878,7 @@ class BufferedCapture(Process):
                 # If GStreamer:
                 else:
                     # Calculate the time difference between the current time and the frame's timestamp
-                    frame_age_seconds = RmsDateTime.utcnow() - frame_timestamp
+                    frame_age_seconds = time.time() - frame_timestamp
                     # Update max_frame_age_seconds for this cycles
                     max_frame_age_seconds = max(max_frame_age_seconds, frame_age_seconds)
                     sum_frame_age_seconds += frame_age_seconds
@@ -1913,7 +1913,7 @@ class BufferedCapture(Process):
                 ### Convert the frame to grayscale ###  (Not to be done in case of daytime mode)
                 if not self.daytime_mode.value:
 
-                    t1_convert = RmsDateTime.utcnow()
+                    t1_convert = time.time()
 
                     # Convert the frame to grayscale
                     #gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -1943,7 +1943,7 @@ class BufferedCapture(Process):
                         self.config.roi_left:self.config.roi_right]
 
                     # Track time for frame conversion
-                    t_convert = RmsDateTime.utcnow() - t1_convert
+                    t_convert = time.time() - t1_convert
 
 
                     ### ###
@@ -1953,13 +1953,13 @@ class BufferedCapture(Process):
 
                     # Assign the frame to shared memory (track time to do so)
   
-                    t1_assign = RmsDateTime.utcnow()
+                    t1_assign = time.time()
                     if buffer_one:
                         self.array1[i, :gray.shape[0], :gray.shape[1]] = gray
                     else:
                         self.array2[i, :gray.shape[0], :gray.shape[1]] = gray
 
-                    t_assignment = RmsDateTime.utcnow() - t1_assign
+                    t_assignment = time.time() - t1_assign
 
 
 
@@ -2000,7 +2000,7 @@ class BufferedCapture(Process):
             # Switch the frame block buffer flags
             buffer_one = not buffer_one
             if self.config.report_dropped_frames:
-                log.info('Estimated FPS: {:.3f}'.format(block_frames/(RmsDateTime.utcnow() - t_block)))
+                log.info('Estimated FPS: {:.3f}'.format(block_frames/(time.time() - t_block)))
         
 
             # Save current timestamp buffer to ft file
