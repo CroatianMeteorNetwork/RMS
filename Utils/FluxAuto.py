@@ -366,7 +366,7 @@ Information about the data is provided in a section below: <a href="#about">Abou
     
     <li>Vida, D., Erskine, R.C.B., Brown, P.G., Kambulow, J., Campbell-Brown, M. and Mazur, M.J., 2022. Computing optical meteor flux using global meteor network data. <i>Monthly Notices of the Royal Astronomical Society</i>, in press. <a href="https://doi.org/10.1093/mnras/stac1766" target="_blank">MNRAS</a>, <a href="https://arxiv.org/abs/2206.11365" target="_blank">arxiv</a>.</li>
     
-    <li>Vida, D., Segon, D., Gural, P.S., Brown, P.G., McIntyre, M.J., Dijkema, T.J., Pavletic, L., Kukic, P., Mazur, M.J., Eschman, P. and Roggemans, P., 2021. The Global Meteor Network - Methodology and first results. <i>Monthly Notices of the Royal Astronomical Society</i>, 506(4), pp.5046-5074. <a href="https://academic.oup.com/mnras/article-abstract/506/4/5046/6347233" target="_blank">MNRAS</a>, <a href="https://arxiv.org/abs/2107.12335" target="_blank">arxiv</a>.</li>
+    <li>Vida, D., Segon, D., Gural, P.S., Brown, P.G., McIntyre, M.J., Dijkema, T.J., Pavletic, L., Kukic, P., Mazur, M.J., Eschman, P., Roggemans, P., Merlak, A. and Zubovic, D., 2021. The Global Meteor Network - Methodology and first results. <i>Monthly Notices of the Royal Astronomical Society</i>, 506(4), pp.5046-5074. <a href="https://academic.oup.com/mnras/article-abstract/506/4/5046/6347233" target="_blank">MNRAS</a>, <a href="https://arxiv.org/abs/2107.12335" target="_blank">arxiv</a>.</li>
     </ul>
 </div>
 <br>
