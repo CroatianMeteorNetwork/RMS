@@ -17,7 +17,7 @@ import ephem
 from RMS.CaptureDuration import captureDuration
 from RMS.ConfigReader import loadConfigFromDirectory
 from RMS.Logger import initLogging, getLogger
-from RMS.Misc import RmsDateTime
+from RMS.Misc import RmsDateTime, UTCFromTimestamp
 
 # Get the logger from the main module
 log = getLogger("logger")
@@ -260,7 +260,7 @@ def objectsToDeleteByTime(top_level_dir, directories_list, quota_gb=0):
         if accumulated_size > quota_gb:
             accumulated_deletion_size += file_date_path_size[2] / (1024 ** 3)
             if not logged_deletion_start_time:
-                log.info("Deleting files before {}".format(datetime.datetime.fromtimestamp(file_date_path_size[0]).strftime('%Y%m%d_%H%M%S')))
+                log.info("Deleting files before {}".format(UTCFromTimestamp.utcfromtimestamp(file_date_path_size[0]).strftime('%Y%m%d_%H%M%S')))
                 logged_deletion_start_time = True
             objects_to_delete.append(file_date_path_size[1])
         pass

@@ -11,6 +11,8 @@ import datetime
 import threading
 import atexit
 
+from RMS.Misc import UTCFromTimestamp
+
 
 try:
     from logging.handlers import QueueHandler  # Python 3.2+
@@ -215,7 +217,7 @@ class CustomHandler(logging.handlers.TimedRotatingFileHandler):
         
         # Calculate time range for the log file
         start_time = datetime.datetime.strptime(start_time_str, "%Y%m%d_%H%M%S")
-        end_time = datetime.datetime.fromtimestamp(self.rolloverAt)
+        end_time = UTCFromTimestamp.utcfromtimestamp(self.rolloverAt)
         
         # Format the new filename with time range
         start_str = start_time.strftime("%d_%H%M")
