@@ -40,7 +40,7 @@ from RMS.Misc import obfuscatePassword
 from RMS.Routines.GstreamerCapture import GstVideoFile
 from RMS.Formats.ObservationSummary import getObsDBConn, addObsParam
 from RMS.RawFrameSave import RawFrameSaver
-from RMS.Misc import RmsDateTime, mkdirP
+from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp
 from RMS.Formats import FTfile, FTStruct
 from RMS.Logger import getLogger, gstDebugLogger
 from RMS.CaptureModeSwitcher import switchCameraMode
@@ -779,7 +779,7 @@ class BufferedCapture(Process):
         """
 
         # Segment name is based on timestamp recorded during last segment save
-        segment_time = datetime.datetime.fromtimestamp(self.last_segment_savetime)
+        segment_time = UTCFromTimestamp.utcfromtimestamp(self.last_segment_savetime)
         self.last_segment_savetime = time.time()
         segment_filename = segment_time.strftime("{}_%Y%m%d_%H%M%S_video.mkv".format(self.config.stationID))
         segment_subpath = os.path.join(self.config.data_dir, self.config.video_dir, segment_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
@@ -1019,7 +1019,7 @@ class BufferedCapture(Process):
                     self.start_timestamp = start_time - (self.config.camera_buffer/self.config.fps + self.config.camera_latency)
 
                 # Log start time
-                start_time_str = (datetime.datetime.fromtimestamp(self.start_timestamp)
+                start_time_str = (UTCFromTimestamp.utcfromtimestamp(self.start_timestamp)
                                     .strftime('%Y-%m-%d %H:%M:%S.%f'))
 
                 log.info("Start time is {:s}".format(start_time_str))
@@ -2012,7 +2012,7 @@ class BufferedCapture(Process):
                 # Clear the timestamp buffer list                
                 del self.timestamp_buffer[:]
 
-                base_time = datetime.datetime.fromtimestamp(first_frame_timestamp)
+                base_time = UTCFromTimestamp.utcfromtimestamp(first_frame_timestamp)
                 ft_filename = base_time.strftime("FT_{}_%Y%m%d_%H%M%S.bin".format(self.config.stationID))
                 ft_subpath = os.path.join(self.config.data_dir, self.config.times_dir, base_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
 

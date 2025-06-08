@@ -10,7 +10,9 @@ import multiprocessing
 import datetime
 import threading
 import atexit
+import time
 
+import RMS.Misc
 
 try:
     from logging.handlers import QueueHandler  # Python 3.2+
@@ -133,43 +135,6 @@ class LoggerWriter:
         pass
 
 
-# Reproduced from RMS.Misc due to circular import issue
-def mkdirP(path):
-    """ Makes a directory and handles all errors.
-    
-    Arguments:
-        path: [str] Directory path to create
-        
-    Return:
-        [bool] True if successful, False otherwise
-    """
-    try:
-        os.makedirs(path)
-        return True
-    except OSError as exc:
-        if exc.errno == errno.EEXIST:
-            return True
-        else:
-            print("Error creating directory: " + str(exc))
-            return False
-    except Exception as e:
-        print("Error creating directory: " + str(e))
-        return False
-
-
-# Reproduced from RMS.Misc due to circular import issue
-class RmsDateTime:
-    """ Use Python-version-specific UTC retrieval.
-    """
-    if sys.version_info[0] < 3:
-        @staticmethod
-        def utcnow():
-            return datetime.datetime.utcnow()
-    else:
-        @staticmethod
-        def utcnow():
-            return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
-
 
 def gstDebugLogger(category, level, file, function, line, obj, message, user_data):
     """ Maps GStreamer debug levels to Python logging levels and logs
@@ -215,7 +180,7 @@ class CustomHandler(logging.handlers.TimedRotatingFileHandler):
         
         # Calculate time range for the log file
         start_time = datetime.datetime.strptime(start_time_str, "%Y%m%d_%H%M%S")
-        end_time = datetime.datetime.fromtimestamp(self.rolloverAt)
+        end_time = RMS.Misc.UTCFromTimestamp.utcfromtimestamp(self.rolloverAt)
         
         # Format the new filename with time range
         start_str = start_time.strftime("%d_%H%M")
@@ -255,10 +220,10 @@ def _listener_configurer(config, log_file_prefix, safedir):
 
     # Make directories
     print("Creating directory: " + config.data_dir)
-    data_dir_status = mkdirP(config.data_dir)
+    data_dir_status = RMS.Misc.mkdirP(config.data_dir)
     print("   Success: {}".format(data_dir_status))
     print("Creating directory: " + log_path)
-    log_path_status = mkdirP(log_path)
+    log_path_status = RMS.Misc.mkdirP(log_path)
     print("   Success: {}".format(log_path_status))
 
     # If the log directory doesn't exist or is not writable, use the safe directory
@@ -272,10 +237,10 @@ def _listener_configurer(config, log_file_prefix, safedir):
         if not os.path.exists(log_path) or not os.access(log_path, os.W_OK):
             root_logger.debug("Log directory not writable, using safedir: %s", safedir)
             log_path = safedir
-            mkdirP(log_path)
+            RMS.Misc.mkdirP(log_path)
 
     # Generate log filename with timestamp
-    start_time_str = RmsDateTime.utcnow().strftime("%Y%m%d_%H%M%S")
+    start_time_str = RMS.Misc.RmsDateTime.utcnow().strftime("%Y%m%d_%H%M%S")
     logfile_name = "{}log_{}_{}.log".format(log_file_prefix, config.stationID, start_time_str)
     full_path = os.path.join(log_path, logfile_name)
 
@@ -318,6 +283,7 @@ def _listener_process(queue, config, log_file_prefix, safedir):
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
     # Configure the listener process
+    logging.Formatter.converter = time.gmtime
     _listener_configurer(config, log_file_prefix, safedir)
 
     # Start queue listener

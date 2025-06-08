@@ -40,6 +40,7 @@ import numpy as np
 import scipy.optimize
 
 from RMS.Math import vectMag, vectNorm
+from RMS.Misc import UTCFromTimestamp
 
 # Import Cython functions
 import pyximport
@@ -114,7 +115,7 @@ def unixTime2Date(ts, tu, dt_obj=False):
     """
 
     # Convert the UNIX timestamp to datetime object
-    dt = datetime.utcfromtimestamp(float(ts) + float(tu)/1000000)
+    dt = UTCFromTimestamp.utcfromtimestamp(float(ts) + float(tu)/1000000)
 
     if dt_obj:
         return dt
