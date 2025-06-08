@@ -97,6 +97,9 @@ def captureModeSwitcher(config, daytime_mode, camera_mode_switch_trigger):
                     log.info("Next event is a sunset ({}), switching to daytime mode".format(next_set))
 
                     if config.switch_camera_modes:
+                        # Delay before switching camera modes to prevent multiple cameras 
+                        # from switching simultaneously (avoids power spikes)
+                        # Initial run already has startup delay, so skip additional wait
                         if not is_first_switch:
                             time.sleep(config.capture_wait_seconds)
                         camera_mode_switch_trigger.value = True
@@ -108,6 +111,9 @@ def captureModeSwitcher(config, daytime_mode, camera_mode_switch_trigger):
                     log.info("Next event is a sunrise ({}), switching to nighttime mode".format(next_rise))
 
                     if config.switch_camera_modes:
+                        # Delay before switching camera modes to prevent multiple cameras 
+                        # from switching simultaneously (avoids power spikes)
+                        # Initial run already has startup delay, so skip additional wait
                         if not is_first_switch:
                             time.sleep(config.capture_wait_seconds)
                         camera_mode_switch_trigger.value = True
@@ -120,8 +126,8 @@ def captureModeSwitcher(config, daytime_mode, camera_mode_switch_trigger):
             except ephem.AlwaysUpError:
 
                 if config.switch_camera_modes:
-                    if not is_first_switch:
-                        time.sleep(config.capture_wait_seconds)
+                    # Switch immediately in polar day conditions
+                    # No sunset to wait for, and startup delay already applied
                     camera_mode_switch_trigger.value = True
 
                 daytime_mode.value = True
@@ -132,8 +138,8 @@ def captureModeSwitcher(config, daytime_mode, camera_mode_switch_trigger):
             except ephem.NeverUpError:
 
                 if config.switch_camera_modes:
-                    if not is_first_switch:
-                        time.sleep(config.capture_wait_seconds)
+                    # Switch immediately in polar night conditions
+                    # No sunrise to wait for, and startup delay already applied
                     camera_mode_switch_trigger.value = True
 
                 daytime_mode.value = False
@@ -181,7 +187,10 @@ def lastNightToDaySwitch(config, whenUtc=None):
 
     sun = ephem.Sun()
     try:
-        return obs.previous_rising(sun).datetime()
+        # Account for programmed delay in mode switching
+        wait = timedelta(seconds=config.capture_wait_seconds)
+        previous_sunrise = obs.previous_rising(sun).datetime()
+        return previous_sunrise + wait
     
     except (ephem.AlwaysUpError, ephem.NeverUpError):
         # Fallback: last midnight before whenUtc
