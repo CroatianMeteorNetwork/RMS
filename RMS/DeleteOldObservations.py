@@ -731,25 +731,27 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     log.info('clearing down old data')
     deleteOldDirs(data_dir, config)
 
-    # calculate the captured directory allowance and print to log
-    if (config.rms_data_quota is None or
-        config.arch_dir_quota is None or
-        config.bz2_files_quota is None or
-        config.continuous_capture_quota is None or
-        config.log_files_quota is None):
-        log.info("Deleting files by space quota is not enabled, some quota is None.")
-    else:
-        capt_dir_quota = config.rms_data_quota
-        capt_dir_quota -= config.arch_dir_quota
-        capt_dir_quota -= config.bz2_files_quota
-        capt_dir_quota -= config.continuous_capture_quota
-        capt_dir_quota -= config.log_files_quota
 
-        if capt_dir_quota <= 0:
-            log.warning("No quota allocation remains for captured directories, please increase rms_data_quota")
-            capt_dir_quota = 0
+    if config.quota_management_enabled:
+        # calculate the captured directory allowance and print to log
+        if (config.rms_data_quota is None or
+            config.arch_dir_quota is None or
+            config.bz2_files_quota is None or
+            config.continuous_capture_quota is None or
+            config.log_files_quota is None):
+            log.info("Deleting files by space quota is not enabled, some quota is None.")
+        else:
+            capt_dir_quota = config.rms_data_quota
+            capt_dir_quota -= config.arch_dir_quota
+            capt_dir_quota -= config.bz2_files_quota
+            capt_dir_quota -= config.continuous_capture_quota
+            capt_dir_quota -= config.log_files_quota
 
-        deleteByQuota(archived_dir, capt_dir_quota, captured_dir, config)
+            if capt_dir_quota <= 0:
+                log.warning("No quota allocation remains for captured directories, please increase rms_data_quota")
+                capt_dir_quota = 0
+
+            deleteByQuota(archived_dir, capt_dir_quota, captured_dir, config)
 
     # Calculate the approximate needed disk space for the next night
 
