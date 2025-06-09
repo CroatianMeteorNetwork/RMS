@@ -1067,6 +1067,8 @@ class BufferedCapture(Process):
         # Use a device as the video source
         else:
 
+            reprobe = False
+
             # If an analog camera is used, skip the probe
             if "rtsp" in str(self.config.deviceID):
                 success, probe_result = self.probeRtspService()
