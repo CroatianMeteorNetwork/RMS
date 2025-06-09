@@ -31,7 +31,7 @@ import os
 import subprocess
 
 
-from RMS.Misc import niceFormat, isRaspberryPi, sanitise, getRMSStyleFileName, getRmsRootDir
+from RMS.Misc import niceFormat, isRaspberryPi, sanitise, getRMSStyleFileName, getRmsRootDir, UTCFromTimestamp
 import re
 import sqlite3
 from RMS.ConfigReader import parse
@@ -171,7 +171,7 @@ def startObservationSummaryReport(config, duration, force_delete=False):
         repo = git.Repo(repo_path)
         if repo:
             addObsParam(conn, "commit_date",
-                        datetime.datetime.fromtimestamp(repo.head.object.committed_date).strftime('%Y%m%d_%H%M%S'))
+                        UTCFromTimestamp.utcfromtimestamp(repo.head.object.committed_date).strftime('%Y%m%d_%H%M%S'))
             addObsParam(conn, "commit_hash", repo.head.object.hexsha)
         else:
             print("RMS Git repository not found. Skipping Git-related information.")

@@ -30,6 +30,7 @@ from RMS.VideoExtraction import Extractor
 from RMS.Formats import FFfile, FFStruct
 from RMS.Formats import FieldIntensities
 from RMS.Logger import getLogger
+from RMS.Misc import UTCFromTimestamp
 from RMS.Routines.Image import saveImage
 
 # Import Cython functions
@@ -142,12 +143,12 @@ class Compressor(multiprocessing.Process):
 
         if sys.version_info[0] == 2:
             # Python 2 code
-            dt = datetime.datetime.utcfromtimestamp(startTime)
+            dt = UTCFromTimestamp.utcfromtimestamp(startTime)
             ff.starttime = dt.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
 
         else:
             # Python 3 code
-            dt = datetime.datetime.fromtimestamp(startTime, tz=datetime.timezone.utc)
+            dt = UTCFromTimestamp.utcfromtimestamp(startTime)
             ff.starttime = dt.isoformat(timespec='microseconds')
         
         # Write the FF file
