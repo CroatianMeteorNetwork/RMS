@@ -352,7 +352,8 @@ def rmList(delete_list, dummy_run=True, log_deletions=True):
         full_path = os.path.expanduser(full_path)
         try:
             if dummy_run:
-                log.info("Config setting inhibited deletion of {}".format(os.path.basename(full_path)))
+                if log_deletions:
+                    log.info("Config setting inhibited deletion of {}".format(os.path.basename(full_path)))
             else:
                 if os.path.exists(full_path):
                     if os.path.isdir(full_path):
