@@ -20,6 +20,7 @@ import math
 import os
 import sys
 from RMS.Misc import getRmsRootDir
+from Utils.GenerateTimelapse import isFfmpegWorking
 
 # Consolidated version-specific imports and definitions
 if sys.version_info[0] == 3:
@@ -1214,7 +1215,10 @@ def parseCapture(config, parser):
 
     # Enable/disable saving video frames
     if parser.has_option(section, "save_frames"):
-        config.save_frames = parser.getboolean(section, "save_frames")
+        if isFfmpegWorking:
+            config.save_frames = parser.getboolean(section, "save_frames")
+        else:
+            config.save_frames = False
 
     if parser.has_option(section, "frame_file_type"):
         config.frame_file_type = parser.get(section, "frame_file_type")
