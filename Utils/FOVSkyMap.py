@@ -125,7 +125,6 @@ def plotFOVSkyMap(platepars, out_dir, north_up=False, show_pointing=False, show_
     # Save the plot to disk
     plot_file_name = output_file_name
     plot_path = os.path.expanduser(os.path.join(out_dir, plot_file_name))
-    print(plot_path)
     plt.savefig(plot_path, dpi=150)
     print("FOV sky map saved to: {:s}".format(plot_path))
 
