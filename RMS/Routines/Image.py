@@ -9,6 +9,7 @@ import time
 
 import numpy as np
 import scipy.misc
+import scipy.ndimage
 import cv2
 
 from PIL import Image, ImageFont, ImageDraw 
@@ -40,6 +41,63 @@ import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 import RMS.Routines.MorphCy as morph
 from RMS.Routines.BinImageCy import binImage as binImageCy
+
+
+
+class CoordinateFilter:
+    def __init__(self, image_shape, mask, border):
+        """
+        Initializes the CoordinateFilter with image properties and computes the distance map.
+
+        Arguments:
+            image_shape: [tuple] Shape of the image (height, width).
+            mask: [np.ndarray] Binary mask where black (0) = masked out, white (255) = clear.
+            border: [float] Distance threshold in pixels.
+        """
+        self.image_shape = image_shape
+        self.mask = mask
+        self.border = border
+
+        h, w = image_shape
+
+        # Create a binary mask for borders
+        border_mask = np.zeros(image_shape, dtype=bool)
+
+        # Define the border mask using floating-point precision
+        y_indices, x_indices = np.indices(image_shape)
+        border_mask |= (x_indices < border) | (x_indices > (w - border))
+        border_mask |= (y_indices < border) | (y_indices > (h - border))
+
+        # Combine the border mask with the given mask
+        if mask is None:
+            self.combined_mask = border_mask
+        else:
+            self.combined_mask = (mask == 0) | border_mask
+
+        # Compute Manhattan distance from the clear (non-masked) regions
+        self.distance_map = scipy.ndimage.distance_transform_cdt(~self.combined_mask, 
+                                                                metric='taxicab').astype(float)
+
+    def filterCoordinates(self, coords):
+        """
+        Filters out coordinates based on the precomputed distance map and border thresholds.
+
+        Arguments:
+            coords: [array-like] List of (x, y) coordinates to filter.
+
+        Returns:
+            (filtered_coords, valid_flags):
+                - np.ndarray: Filtered array of coordinates.
+                - np.ndarray: Boolean flags indicating which coordinates are valid.
+        """
+        
+        coords_test = np.array(coords).astype(int)
+        valid_flags = np.array([self.distance_map[y, x] > 0 for x, y in coords_test])
+
+        filtered_coords = coords[valid_flags]
+
+        return filtered_coords, valid_flags
+
 
 
 def loadRaw(img_path):
@@ -85,7 +143,22 @@ def loadImage(img_path, flatten=-1):
     else:
 
         try:
-            img = imread(img_path, as_gray=bool(flatten))
+            img = imread(img_path)
+
+            # Convert to grayscale
+            if flatten == -1:
+
+                # Convert RGB images to grayscale
+                if img.ndim == 3:
+                    img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+
+                # Handle 16 bit images
+                elif (img.ndim == 2) and ((img.dtype == np.uint16) or (img.dtype == np.int32)):
+                    img = img.astype(np.uint16)
+
+                # Otherwise, just convert the time to 8 bit
+                else:
+                    img = img.astype(np.uint8)
 
         except TypeError:
             

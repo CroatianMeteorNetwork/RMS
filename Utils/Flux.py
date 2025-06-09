@@ -1186,7 +1186,8 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
     for calstars_file in file_list:
         if ('CALSTARS' in calstars_file) and calstars_file.endswith('.txt'):
             break
-    star_list = readCALSTARS(dir_path, calstars_file)
+    calstars_data = readCALSTARS(dir_path, calstars_file)
+    calstars_list, ff_frames = calstars_data
     print('CALSTARS file: {:s} loaded!'.format(calstars_file))
 
 
@@ -1194,7 +1195,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
     starting_time = None
     recorded_files = []
     bin_used = -1
-    for ff_file_name, _ in star_list:
+    for ff_file_name, _ in calstars_list:
         date = FFfile.filenameToDatetime(ff_file_name)
         if starting_time is None:
             starting_time = date
@@ -1236,7 +1237,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         recalibrated_platepars = recalibrateSelectedFF(
             dir_path,
             recorded_files,
-            star_list,
+            calstars_data,
             config,
             stellarLMModel(platepar.mag_lev),
             config.platepars_flux_recalibrated_name,
@@ -1800,27 +1801,34 @@ def sensorCharacterization(config, flux_config, dir_path, meteor_data, default_f
     found_good_calstars = False
     for cal_file in os.listdir(dir_path):
 
-        if ('CALSTARS' in cal_file) and ('.txt' in cal_file) and (not found_good_calstars):
+        if cal_file.startswith("CALSTARS") and cal_file.endswith(".txt") and (not found_good_calstars):
 
             # Load the calstars file
-            calstars_list = CALSTARS.readCALSTARS(dir_path, cal_file)
+            calstars_data = CALSTARS.readCALSTARS(dir_path, cal_file)
+            calstars_list, _ = calstars_data
 
             # Check that at least one image has good FWHM measurements
             for ff_name, star_data in calstars_list:
 
-                if len(star_data) > 0 and star_data[0][4] > -1:  # if stars were detected
+                if (len(star_data) > 0) and (star_data[0][4] > -1):  # if stars were detected
+
                     star_data = np.array(star_data)
 
                     # Check if the calstars file have FWHM information
                     fwhm = star_data[:, 4]
 
                     # Check that FWHM values have been computed well
-                    if np.all(fwhm > 1):
+                    if np.all(fwhm > 0):
                         found_good_calstars = True
                         print('CALSTARS file: ' + cal_file + ' loaded!')
                         break
 
+                    else:
+                        print("Bad FWHM values in {:s}!".format(cal_file))
+                
+                # If there are no FWHM entries, but the FF files exist, use the default FWHM
                 elif not exists_FF_files and (len(star_data) > 0) and (star_data[0][4] == -1):
+
                     if default_fwhm is not None:
                         found_good_calstars = True
                         print('CALSTARS file: ' + cal_file + ' loaded!')
@@ -1837,6 +1845,9 @@ def sensorCharacterization(config, flux_config, dir_path, meteor_data, default_f
                         #     'CALSTARS file does not have fwhm and FF files do not exist in'
                         #     'directory. You must give a fwhm value with "--fwhm 3"'
                         # )
+
+                else:
+                    print("No stars with good FWHM values detected for file {:s}!".format(ff_name))
 
     # If the FWHM information is not present, run the star extraction
     if not found_good_calstars and exists_FF_files:

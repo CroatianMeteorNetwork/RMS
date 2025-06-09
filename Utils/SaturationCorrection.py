@@ -111,7 +111,7 @@ if __name__ == "__main__":
             # Go though all meteor centroids
             for line in meteor_meas:
 
-                frame_n, x, y, ra, dec, azim, elev, inten, mag = line
+                frame_n, x, y, ra, dec, azim, elev, inten, mag, background, snr, saturated_count = line
 
                 # Compute the photometric offset
                 photom_offset = mag + 2.5*np.log10(inten)
@@ -142,7 +142,7 @@ if __name__ == "__main__":
                 unsaturated_inten = round(10**((photom_offset - mag)/2.5), 0)
 
                 corrected_meteor_meas.append([frame_n, x, y, ra, dec, azim, elev, unsaturated_inten, 
-                    unsaturated_mag])
+                    unsaturated_mag, background, snr, saturated_count])
 
 
 

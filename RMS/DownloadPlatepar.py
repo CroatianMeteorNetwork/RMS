@@ -9,7 +9,7 @@ from os.path import exists as file_exists
 import paramiko
 
 
-from RMS.UploadManager import _agentAuth
+from RMS.UploadManager import getSSHAndSFTP
 from RMS.Misc import RmsDateTime
 
 # Get the logger from the main module
@@ -26,68 +26,70 @@ def downloadNewPlatepar(config):
         log.debug("Can't contact the server: RSA private key file not found.")
         return False
 
-    log.debug('Establishing SSH connection to: ' + config.hostname + ':' + str(config.host_port) + '...')
+    ssh = None
+    sftp = None
 
     try:
         # Connect to host
-        t = paramiko.Transport((config.hostname, config.host_port))
-        t.start_client()
+        # Connect with timeouts
+        ssh, sftp = getSSHAndSFTP(
+            config.hostname,
+            port=config.host_port,
+            username=config.stationID.lower(),
+            key_filename=config.rsa_private_key,
+            timeout=60,
+            banner_timeout=60,
+            auth_timeout=60
+        )
 
-        # Authenticate the connection
-        auth_status = _agentAuth(t, config.stationID.lower(), config.rsa_private_key)
-        if not auth_status:
+        # Check that the remote directory exists
+        try:
+            sftp.stat(config.remote_dir)
+
+        except Exception as e:
+            log.error("Remote directory '" + config.remote_dir + "' does not exist!")
             return False
 
-        # Open new SFTP connection
-        sftp = paramiko.SFTPClient.from_transport(t)
 
-    except:
-        log.error('Connecting to server failed!')
-        return False
+        # Construct path to remote platepar directory
+        remote_platepar_path = config.remote_dir + '/' + config.remote_platepar_dir + '/'
 
-
-    # Check that the remote directory exists
-    try:
-        sftp.stat(config.remote_dir)
-
-    except Exception as e:
-        log.error("Remote directory '" + config.remote_dir + "' does not exist!")
-        return False
+        # Change the directory into file
+        remote_platepar = remote_platepar_path + config.platepar_remote_name
 
 
-    # Construct path to remote platepar directory
-    remote_platepar_path = config.remote_dir + '/' + config.remote_platepar_dir + '/'
-
-    # Change the directory into file
-    remote_platepar = remote_platepar_path + config.platepar_remote_name
-
-
-    # Check if the remote platepar file exists
-    try:
-        sftp.lstat(remote_platepar)
-    
-    except IOError as e:
-        log.info('No new platepar on the server!')
-        return False
+        # Check if the remote platepar file exists
+        try:
+            sftp.lstat(remote_platepar)
+        
+        except IOError as e:
+            log.info('No new platepar on the server!')
+            return False
 
 
-    # Download the remote platepar
-    sftp.get(remote_platepar, os.path.join(config.config_file_path, config.platepar_name))
+        # Download the remote platepar
+        sftp.get(remote_platepar, os.path.join(config.config_file_path, config.platepar_name))
 
-    log.info('Latest platepar downloaded!')
+        log.info('Latest platepar downloaded!')
 
 
-    ### Rename the downloaded platepar file, add a timestamp of download
+        ### Rename the downloaded platepar file, add a timestamp of download
 
-    # Construct a new name with the time of the download included
-    dl_pp_name = remote_platepar_path + 'platepar_dl_' \
-        + RmsDateTime.utcnow().strftime('%Y%m%d_%H%M%S.%f') + '.cal'
+        # Construct a new name with the time of the download included
+        dl_pp_name = remote_platepar_path + 'platepar_dl_' \
+            + RmsDateTime.utcnow().strftime('%Y%m%d_%H%M%S.%f') + '.cal'
 
-    sftp.posix_rename(remote_platepar, dl_pp_name)
+        sftp.posix_rename(remote_platepar, dl_pp_name)
 
-    log.info('Remote platepar renamed to: ' + dl_pp_name)
+        log.info('Remote platepar renamed to: ' + dl_pp_name)
 
-    ### ###
+    finally:
+        if sftp:
+            log.debug("Closing SFTP channel")
+            sftp.close()
+        if ssh:
+            log.debug("Closing SSH client connection")
+            ssh.close()
 
     return True
 

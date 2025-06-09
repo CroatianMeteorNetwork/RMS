@@ -3,19 +3,19 @@
 
 import os
 import sys
-import logging
 import traceback
 
 
 from RMS.Formats.FFfile import validFFName
-from RMS.Misc import archiveDir
+from RMS.Logger import getLogger
+from RMS.Misc import archiveDir, tarWithProgress
 from RMS.Routines import MaskImage
 from Utils.GenerateThumbnails import generateThumbnails
 from Utils.StackFFs import stackFFs
 
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 def selectFiles(config, dir_path, ff_detected):
@@ -264,6 +264,74 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         return archive_name
 
     return None
+
+
+def archiveFrameTimelapse(frames_root,
+                          video_json_pairs,
+                          remove_source=False):
+    """Tar-up each (mp4, json) pair **without compression**.
+
+    Arguments:
+        frames_root: [str] Directory where the archives will be placed.
+        video_json_pairs: [list[tuple[str, str] | None]] Output from
+            generateTimelapseFromFrameBlocks; each element is either
+            (mp4_path, json_path) or None if that block failed.
+
+    Keyword arguments:
+        remove_source: [bool] If True, delete the mp4 and json after a verified
+            archive is created. False by default.
+
+    Return:
+        archive_paths: [list[str]] Paths of archives successfully created.
+    """
+    archive_paths = []
+
+    for pair in video_json_pairs:
+        if not pair:
+            continue
+
+        mp4_path, json_path = pair
+        if not (os.path.isfile(mp4_path) and os.path.isfile(json_path)):
+            log.warning("Skipping archive: missing file(s) %s  %s",
+                        mp4_path, json_path)
+            continue
+
+        # Build archive name: strip suffix, keep in same root, plain .tar
+        base_name = os.path.basename(mp4_path).replace(".mp4", ".tar")
+        archive_path = os.path.join(frames_root, base_name)
+        tmp_archive = archive_path + ".tmp"
+
+        log.info("Archiving %s and %s to %s",
+                 os.path.basename(mp4_path),
+                 os.path.basename(json_path),
+                 os.path.basename(archive_path))
+
+        try:
+            success = tarWithProgress(
+                None,
+                tmp_archive,
+                None,                  # None = no gzip/bz2 compression for mp4
+                remove_source,
+                file_list=[mp4_path, json_path]
+            )
+
+            if success:
+                if os.path.exists(archive_path):
+                    os.remove(archive_path)
+                os.rename(tmp_archive, archive_path)
+                archive_paths.append(archive_path)
+                log.info("Archive created: %s", archive_path)
+            else:
+                log.warning("Archive verification failed: %s", archive_path)
+                if os.path.exists(tmp_archive):
+                    os.remove(tmp_archive)
+
+        except Exception as exc:
+            log.error("Archiving error for %s: %s", mp4_path, exc)
+            if os.path.exists(tmp_archive):
+                os.remove(tmp_archive)
+
+    return archive_paths
 
 
 

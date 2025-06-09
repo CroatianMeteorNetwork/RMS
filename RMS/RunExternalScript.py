@@ -8,12 +8,12 @@ import sys
 import importlib
 import multiprocessing
 import traceback
-import logging
 
 import RMS.ConfigReader as cr
+from RMS.Logger import getLogger
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 def runExternalScript(captured_night_dir, archived_night_dir, config):
@@ -89,9 +89,7 @@ if __name__ == "__main__":
 
     ######
     # Start log to stdout
-    log = logging.getLogger("logger")
-    out_hdlr = logging.StreamHandler(sys.stdout)
-    log.addHandler(out_hdlr)
+    log = getLogger("logger", stdout=True)
 
     # Load config file
     config = cr.parse(".config")

@@ -40,6 +40,7 @@ import numpy as np
 import scipy.optimize
 
 from RMS.Math import vectMag, vectNorm
+from RMS.Misc import UTCFromTimestamp
 
 # Import Cython functions
 import pyximport
@@ -114,7 +115,7 @@ def unixTime2Date(ts, tu, dt_obj=False):
     """
 
     # Convert the UNIX timestamp to datetime object
-    dt = datetime.utcfromtimestamp(float(ts) + float(tu)/1000000)
+    dt = UTCFromTimestamp.utcfromtimestamp(float(ts) + float(tu)/1000000)
 
     if dt_obj:
         return dt
@@ -674,8 +675,7 @@ def AEGeoidH2LatLonAlt(azim, elev, h, lat, lon, alt):
         alt: [float] Altitude of observer in meters.
 
     Return:
-        (lat, lon): [tuple of floats] range in meteors, latitude and longitude in degrees, 
-            WGS84 elevation in meters
+        (lat, lon): [tuple of floats] latitude and longitude in degrees
 
     """
 
@@ -692,7 +692,7 @@ def AEGeoidH2LatLonAlt(azim, elev, h, lat, lon, alt):
     los_vector_enu = np.array([
         np.cos(elev)*np.sin(azim),  # East component
         np.cos(elev)*np.cos(azim),  # North component
-        np.sin(elev)                 # Up component
+        np.sin(elev)                # Up component
     ])
 
     # Transform ENU to ECEF coordinates
@@ -704,12 +704,8 @@ def AEGeoidH2LatLonAlt(azim, elev, h, lat, lon, alt):
 
     los_vector = np.dot(R_enu2ecef, los_vector_enu)
 
-    # Initial guess for the range
-    r0 = (h - alt)/np.sin(elev)
-    
-    # Initial guess for the range
-    r0 = (h-alt)/np.sin(elev)
-    r = r0
+    # Compute the range to the point
+    r = (h - alt)/np.sin(elev)
     
     # Find the target ECEF coordinates using the optimized range
     target_x = obs_x + r*los_vector[0]

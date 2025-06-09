@@ -15,6 +15,7 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+import scipy.optimize
 import pyqtgraph as pg
 import random
 
@@ -41,7 +42,7 @@ from RMS.Misc import decimalDegreesToSexHours
 from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
 from RMS.Routines.CustomPyqtgraphClasses import *
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle, greatCirclePhase
-from RMS.Routines.Image import signalToNoise
+from RMS.Routines.Image import signalToNoise, applyDark, applyFlat
 from RMS.Routines.MaskImage import getMaskFile
 from RMS.Routines import RollingShutterCorrection
 from RMS.Routines.MaskImage import loadMask, MaskStructure, getMaskFile
@@ -2729,6 +2730,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 print(self.input_path)
 
+        # Update the possibly missing params
+        if not hasattr(self, "dark"):
+            self.dark = None
 
         # Update the possibly missing params
         if not hasattr(self, "fit_only_pointing"):
@@ -2767,6 +2771,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # If SNR and saturation flags are missing in the pick list, add them
         for _, pick in self.pick_list.items():
+            if 'background_intensity' not in pick:
+                pick['background_intensity'] = 0.0
             if 'snr' not in pick:
                 pick['snr'] = 1.0
             if 'saturated' not in pick:
@@ -4517,7 +4523,7 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
 
             # Load the calstars file
-            calstars_list = CALSTARS.readCALSTARS(self.dir_path, calstars_file)
+            calstars_list, _ = CALSTARS.readCALSTARS(self.dir_path, calstars_file)
 
             print('CALSTARS file: ' + calstars_file + ' loaded!')
 
@@ -4879,7 +4885,8 @@ class PlateTool(QtWidgets.QMainWindow):
         return dark_file, dark
 
 
-    def addCentroid(self, frame, x_centroid, y_centroid, mode=1, snr=1, saturated=False):
+    def addCentroid(self, frame, x_centroid, y_centroid, mode=1, 
+                    background_intensity=0, snr=1, saturated=False):
         """
         Adds or modifies a pick marker at given frame to self.pick_list with given information
 
@@ -4890,6 +4897,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         Keyword arguments:
             mode: [0 or 1] The mode of the pick, 0 is yellow, 1 is red.
+            background_intensity: [float] Background intensity of the pick.
             snr: [float] Signal to noise ratio of the pick.
             saturated: [bool] Whether the pick is saturated.
 
@@ -4908,6 +4916,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     'mode': mode,
                     'intensity_sum': 1,
                     'photometry_pixels': None,
+                    'background_intensity': background_intensity,
                     'snr': snr,
                     'saturated': saturated}
             self.pick_list[frame] = pick
@@ -5020,7 +5029,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # If 10 or more pixels are saturated (within 2% of the maximum value), mark the pick as saturated
 
         # Compute the saturation threshold
-        saturation_threshold = int(0.98*(2**self.config.bit_depth))
+        saturation_threshold = int(round(0.98*(2**self.config.bit_depth - 1)))
 
         # Count the number of pixels above the saturation threshold (original non-gramma corrected image)
         # Apply the mask to only include the pixels within the star aperture radius
@@ -5038,8 +5047,7 @@ class PlateTool(QtWidgets.QMainWindow):
         ######################################################################################################
 
 
-
-        ### Calculate the centroid ###
+        ### Calculate the centroid using a center of mass method ###
         ######################################################################################################
         x_acc = 0
         y_acc = 0
@@ -5072,42 +5080,113 @@ class PlateTool(QtWidgets.QMainWindow):
 
         ### Calculate the FWHM ###
 
-        # Second pass: compute flux-weighted second moment for FWHM
-        moment_sum = 0.0
+        # Convert centroid to cropped image coordinates
+        x_centroid_crop = x_centroid - x_min
+        y_centroid_crop = y_centroid - y_min
+
+        # Initialize moment accumulators
+        moment_x = 0.0
+        moment_y = 0.0
+        total_flux = 0.0
+
         for i in range(img_crop.shape[0]):
             for j in range(img_crop.shape[1]):
-                
-                # Compute distance of pixel from centre of the cropped image
-                i_rel = i - img_crop.shape[0]/2
-                j_rel = j - img_crop.shape[1]/2
+                i_rel = i - img_crop.shape[0] / 2
+                j_rel = j - img_crop.shape[1] / 2
                 pix_dist = math.sqrt(i_rel**2 + j_rel**2)
 
-                # Take only those pixels within the star aperture radius
                 if pix_dist <= self.star_aperture_radius:
-                    
                     net_flux = img_crop[i, j] - bg_median
-
-                    # If the next flux is negative, set it to zero
                     if net_flux > 0:
-                    
-                        # Compute radial distance from the computed centroid (account for the offset from x_min, y_min)
-                        r = math.sqrt((i + x_min - x_centroid)**2 + (j + y_min - y_centroid)**2)
-                        moment_sum += net_flux*(r**2)
+                        dx = i - x_centroid_crop
+                        dy = j - y_centroid_crop
+                        moment_x += net_flux * dx**2
+                        moment_y += net_flux * dy**2
+                        total_flux += net_flux
 
-        # Compute the standard deviation and the FWHM
-        sigma = 0
-        fwhm = 0
-        if source_intens > 0:
+        # Compute sigma and FWHM
+        fwhm_x = fwhm_y = fwhm = 0
+        if total_flux > 0:
 
-            # Compute the variance
-            variance = moment_sum/source_intens
+            # Compute the standard deviations in x and y directions
+            sigma_x = math.sqrt(moment_x/total_flux)
+            sigma_y = math.sqrt(moment_y/total_flux)
 
-            # Make sure the variance is positive
-            if variance > 0:
-                sigma = math.sqrt(variance)
-                fwhm = 2.355*sigma
+            # Compute the circular sigma
+            sigma = math.sqrt((moment_x + moment_y) / (2 * total_flux))
+
+            # Compute a circular FWHM
+            fwhm = 2.355 * sigma
 
         ######################################################################################################
+
+
+        # ######################################################################################################
+
+        # # Left - image, right - horizontal profile of the star
+        # plt.figure(figsize=(12, 6))
+
+        # # Plot the image
+        # plt.subplot(1, 2, 1)
+
+        # # Plot a background-subtracted cropped image (colormap red for above zero and blue for below zero)
+        # img_ax = plt.imshow(img_crop - bg_median, cmap='bwr')
+
+        # # Plot a circle with the radius of the star aperture
+        # circle = plt.Circle((img_crop.shape[1]/2, img_crop.shape[0]/2), self.star_aperture_radius, color='black', fill=False, label='Aperture')
+        # plt.gca().add_artist(circle)
+
+        # # Plot the centroid location
+        # plt.scatter(y_centroid - y_min, x_centroid - x_min, color='black', s=100, marker='x', label='Centroid')
+
+        # # Plot the sigma as the radius around the centroid
+        # circle = plt.Circle((y_centroid - y_min, x_centroid - x_min), sigma, color='orange', fill=False, label='1 Sigma')
+        # plt.gca().add_artist(circle)
+
+        # # Plot the FWHM as the radius around the centroid
+        # circle = plt.Circle((y_centroid - y_min, x_centroid - x_min), fwhm/2, color='green', fill=False, label='FWHM')
+        # plt.gca().add_artist(circle)
+
+        # plt.legend()
+
+        # # Add a colorbar on the brightness of the image
+        # plt.colorbar(img_ax, label='Brightness')
+
+        # plt.gca().invert_yaxis()
+        # plt.gca().invert_xaxis()
+
+
+        # # Plot the horizontal profile of the star
+        # plt.subplot(1, 2, 2)
+
+        # # Compute the horizontal profile of the star
+        # # Cut the image horizontally at the centroid (y_centroid)
+        # horizontal_profile = img_crop[int(round(x_centroid - x_min)), :]
+        # plt.plot(horizontal_profile - bg_median, label='Horizontal profile')
+
+        # # Plot the background level
+        # plt.axhline(y=0, color='black', linestyle='--', label='Background level')
+
+        # # Plot the centroid location
+        # plt.axvline(x=y_centroid - y_min, color='black', linestyle=':', label='Centroid')
+
+        # # Plot the FWHM as the radius around the centroid
+        # plt.axvline(x=y_centroid - y_min - fwhm/2, color='green', linestyle=':', label='FWHM')
+        # plt.axvline(x=y_centroid - y_min + fwhm/2, color='green', linestyle=':')
+
+        # # Plot the sigma as the radius around the centroid
+        # plt.axvline(x=y_centroid - y_min - sigma, color='orange', linestyle=':', label='1 Sigma')
+        # plt.axvline(x=y_centroid - y_min + sigma, color='orange', linestyle=':')
+
+        # plt.legend()
+
+
+        # plt.show()
+
+        # ######################################################################################################
+
+
+
 
         # Compute the SNR using the "CCD equation" (Howell et al., 1989)
         snr = signalToNoise(source_intens, source_px_count, bg_median, bg_std)
@@ -5759,6 +5838,9 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute the median background
             background_lvl = np.ma.median(crop_bg)
 
+            # Store the background intensity in the pick
+            pick['background_intensity'] = background_lvl
+
 
             # If the DFN image is used and a dark has been applied (i.e. the previous image is subtracted),
             #   assume that the background is zero
@@ -5791,8 +5873,16 @@ class PlateTool(QtWidgets.QMainWindow):
             # Subtract the background using the avepixel
             else:
 
-                # Subtract the avepixel image from the crop
+                # Get the avepixel image and apply a dark and flat to it if needed
                 avepixel = self.img_handle.ff.avepixel.T
+
+                if self.dark is not None:
+                    avepixel = applyDark(avepixel, self.dark)
+                if self.flat_struct is not None:
+                    avepixel = applyFlat(avepixel, self.flat_struct)
+
+                
+                # Mask out the colored in pixels
                 avepixel_masked = np.ma.masked_array(avepixel, mask_img)
                 avepixel_crop = avepixel_masked[x_min:x_max, y_min:y_max]
 
@@ -6010,7 +6100,9 @@ class PlateTool(QtWidgets.QMainWindow):
                     'y_centroid': None,
                     'mode': None,
                     'intensity_sum': None,
+                    'background_intensity': None,
                     'snr': 1.0,
+                    'saturated': False,
                     'photometry_pixels': photometry_pixels}
 
             self.pick_list[frame] = pick
@@ -6157,7 +6249,11 @@ class PlateTool(QtWidgets.QMainWindow):
             if np.ma.is_masked(pick['intensity_sum']):
                 pick['intensity_sum'] = 1
 
-            centroids.append([frame_no, pick['x_centroid'], pick['y_centroid'], pick['intensity_sum']])
+            centroids.append([
+                frame_no, 
+                pick['x_centroid'], pick['y_centroid'], 
+                pick['intensity_sum'], pick['background_intensity'], pick['snr'], pick['saturated']
+                ])
 
         # If there are no centroids, don't save anything
         if len(centroids) == 0:
@@ -6273,10 +6369,12 @@ class PlateTool(QtWidgets.QMainWindow):
 # - {name: x_image, unit: pix, datatype: float64}
 # - {name: y_image, unit: pix, datatype: float64}
 # - {name: integrated_pixel_value, datatype: int64}
+# - {name: background_pixel_value, datatype: int64}
 # - {name: saturated_pixels, datatype: bool}
 # - {name: mag_data, datatype: float64}
 # - {name: err_minus_mag, datatype: float64}
 # - {name: err_plus_mag, datatype: float64}
+# - {name: snr, datatype: float64}
 # delimiter: ','
 # meta: !!omap
 """
@@ -6294,7 +6392,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         out_str += "# schema: astropy-2.0\n"
-        out_str += "datetime,ra,dec,azimuth,altitude,x_image,y_image,integrated_pixel_value,saturated_pixels,mag_data,err_minus_mag,err_plus_mag\n"
+        out_str += "datetime,ra,dec,azimuth,altitude,x_image,y_image,integrated_pixel_value,background_pixel_value,saturated_pixels,mag_data,err_minus_mag,err_plus_mag,snr\n"
 
         # Add the data (sort by frame)
         for frame, pick in sorted(self.pick_list.items(), key=lambda x: x[0]):
@@ -6377,8 +6475,10 @@ class PlateTool(QtWidgets.QMainWindow):
                 "{:10.6f}".format(azim), "{:+10.6f}".format(alt),
                 "{:9.3f}".format(pick['x_centroid']), "{:9.3f}".format(pick['y_centroid']), 
                 "{:10d}".format(int(pick['intensity_sum'])),
+                "{:10d}".format(int(pick['background_intensity'])),
                 "{:5s}".format(str(pick['saturated'])),
-                "{:+7.2f}".format(mag), "{:+6.2f}".format(-mag_err_total), "{:+6.2f}".format(mag_err_total)
+                "{:+7.2f}".format(mag), "{:+6.2f}".format(-mag_err_total), "{:+6.2f}".format(mag_err_total),
+                "{:10.2f}".format(pick['snr'])
                 ]
 
             out_str += ",".join(entry) + "\n"

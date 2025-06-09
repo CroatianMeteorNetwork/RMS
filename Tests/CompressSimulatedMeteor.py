@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 
 
 from RMS.Formats import FieldIntensities
-from RMS.ExtractStars import twoDGaussian
+from RMS.Math import twoDGaussian
 
 from RMS.Compression import Compressor
 import RMS.ConfigReader as cr
