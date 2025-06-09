@@ -550,7 +550,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
         shower = flux_showers.showerObjectFromCode(shower_code)
 
         if shower is None:
-            print("The shower {:s} could not be found in the list of showers for flux!")
+            print("The shower {:s} could not be found in the list of showers for flux!".format(shower_code))
             sys.exit()
 
 
