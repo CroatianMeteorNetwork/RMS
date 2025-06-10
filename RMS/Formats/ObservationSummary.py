@@ -500,6 +500,7 @@ def retrieveObservationData(conn, obs_start_time, ordering=None):
     """
 
     if ordering is None:
+        # Be sure to add a comma after each list entry, IDE will not pick up this error
         ordering = ['stationID',
                     'start_time', 'duration', 'photometry_good',
                     'commit_date', 'commit_hash','media_backend',
@@ -513,9 +514,11 @@ def retrieveObservationData(conn, obs_start_time, ordering=None):
                     'time_first_fits_file', 'time_last_fits_file', 'total_expected_fits','total_fits',
                     'fits_files_from_duration','fits_file_shortfall', 'fits_file_shortfall_as_time',
                     'capture_duration_from_fits',
-                    'detections_after_ml'
+                    'detections_after_ml',
                     'media_backend','jitter_quality','dropped_frame_rate']
 
+    # use this print call to check the ordering
+    #print("Ordering {}".format(ordering))
 
     sql_statement = ""
     sql_statement += "SELECT Key, Value from records \n"
@@ -524,6 +527,7 @@ def retrieveObservationData(conn, obs_start_time, ordering=None):
     sql_statement += "           ORDER BY \n "
     sql_statement += "              CASE Key \n"
 
+    # This SQL applies an ordering to all the keys in the ordering list. Any extra keys will be at the end.
     count = 1
     for ordering_key in ordering:
         sql_statement += "                  WHEN '{:s}' THEN {:03d} \n".format(ordering_key,count)
