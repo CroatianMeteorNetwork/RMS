@@ -500,9 +500,10 @@ def retrieveObservationData(conn, obs_start_time, ordering=None):
     """
 
     if ordering is None:
-        # Be sure to add a comma after each list entry, IDE will not pick up this error
+        # Be sure to add a comma after each list entry, IDE will not pick up this error as Python will concatenate
+        # the two items into one.
+
         ordering = ['stationID',
-                    'start_time', 'duration', 'photometry_good',
                     'commit_date', 'commit_hash','media_backend',
                     'hardware_version',
                     'captured_directories',
@@ -511,6 +512,7 @@ def retrieveObservationData(conn, obs_start_time, ordering=None):
                     'camera_pointing_alt','camera_pointing_az',
                     'camera_information',
                     'clock_error_seconds', 'clock_synchronized',
+                    'start_time', 'duration', 'photometry_good',
                     'time_first_fits_file', 'time_last_fits_file', 'total_expected_fits','total_fits',
                     'fits_files_from_duration','fits_file_shortfall', 'fits_file_shortfall_as_time',
                     'capture_duration_from_fits',
@@ -535,6 +537,8 @@ def retrieveObservationData(conn, obs_start_time, ordering=None):
 
     sql_statement += "                  ELSE {:03d} \n".format(count)
     sql_statement += "              END"
+
+    #print(sql_statement)
 
     return conn.cursor().execute(sql_statement).fetchall()
 
