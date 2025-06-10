@@ -525,8 +525,8 @@ def retrieveObservationData(conn, obs_start_time, ordering=None):
     sql_statement = ""
     sql_statement += "SELECT Key, Value from records \n"
     sql_statement += "           WHERE TimeStamp >= '{}' \n".format(obs_start_time)
-    sql_statement += "           GROUP BY KEY \n "
-    sql_statement += "           ORDER BY \n "
+    sql_statement += "           GROUP BY KEY \n"
+    sql_statement += "           ORDER BY \n"
     sql_statement += "              CASE Key \n"
 
     # This SQL applies an ordering to all the keys in the ordering list. Any extra keys will be at the end.
