@@ -421,6 +421,8 @@ if __name__ == "__main__":
             except Exception as e:
                 print("ERROR: Update failed: {}".format(e))
                 sys.exit(1)
+        else:
+            print("\nSaved new config to: {}".format(out_file_name))
 
     if not args.update:
         print(
