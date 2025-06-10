@@ -542,6 +542,15 @@ def retrieveObservationData(conn, obs_start_time, ordering=None):
 
     return conn.cursor().execute(sql_statement).fetchall()
 
+def truncateTo(value, no):
+
+    if value == round(value):
+        return str(value)
+    else:
+        value = round(value * (10 ** no))
+        value = value / (10 ** no)
+        return str(value)
+
 
 def serialize(config, format_nicely=True, as_json=False):
     """ Returns the data from the most recent observation session as either colon
@@ -571,7 +580,7 @@ def serialize(config, format_nicely=True, as_json=False):
             # handle as float
             try:
                 value_as_float = float(value)
-                output += "{}:{:.3f} \n".format(key, value_as_float)
+                output += "{}:{:s} \n".format(key, truncateTo(value_as_float, 3))
             except:
                 pass
         else:
@@ -651,6 +660,8 @@ def unserialize(self):
 if __name__ == "__main__":
 
     config = parse(os.path.expanduser("~/source/RMS/.config"))
+
+
 
     timeSyncStatus(config)
     obs_db_conn = getObsDBConn(config)
