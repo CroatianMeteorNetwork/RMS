@@ -486,20 +486,51 @@ def getLastStartTime(conn):
 
     return result[0]
 
-def retrieveObservationData(conn, obs_start_time):
+def retrieveObservationData(conn, obs_start_time, ordering=None):
     """ Query the database to get the data more recent than the time passed in.
         Usually this will be the start of the most recent observation session
+        If no ordering is passed, then a default ordering is returned
+
             arguments:
                     conn: connection to database
+                    ordering: optional, default None, sequence to order the keys.
 
             returns:
                     key value pairs committed to the database since the obs_start_time
     """
 
+    if ordering is None:
+        ordering = ['stationID',
+                    'start_time', 'duration', 'photometry_good',
+                    'commit_date', 'commit_hash','media_backend',
+                    'hardware_version',
+                    'captured_directories',
+                    'storage_used_gb', 'storage_free_gb', 'storage_total_gb',
+                    'camera_lens','camera_fov_h','camera_fov_v',
+                    'camera_pointing_alt','camera_pointing_az',
+                    'camera_information',
+                    'clock_error_seconds', 'clock_synchronized',
+                    'time_first_fits_file', 'time_last_fits_file', 'total_expected_fits','total_fits',
+                    'fits_files_from_duration','fits_file_shortfall', 'fits_file_shortfall_as_time',
+                    'capture_duration_from_fits',
+                    'detections_after_ml'
+                    'media_backend','jitter_quality','dropped_frame_rate']
+
+
     sql_statement = ""
     sql_statement += "SELECT Key, Value from records \n"
     sql_statement += "           WHERE TimeStamp >= '{}' \n".format(obs_start_time)
-    sql_statement += "           GROUP BY Key \n"
+    sql_statement += "           GROUP BY KEY \n "
+    sql_statement += "           ORDER BY \n "
+    sql_statement += "              CASE Key \n"
+
+    count = 1
+    for ordering_key in ordering:
+        sql_statement += "                  WHEN '{:s}' THEN {:03d} \n".format(ordering_key,count)
+        count += 1
+
+    sql_statement += "                  ELSE {:03d} \n".format(count)
+    sql_statement += "              END"
 
     return conn.cursor().execute(sql_statement).fetchall()
 
