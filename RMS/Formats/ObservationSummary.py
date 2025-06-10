@@ -29,7 +29,7 @@ from __future__ import print_function, division, absolute_import
 import sys
 import os
 import subprocess
-
+from time import strftime
 
 from RMS.Misc import niceFormat, isRaspberryPi, sanitise, getRMSStyleFileName, getRmsRootDir, UTCFromTimestamp
 import re
@@ -42,6 +42,7 @@ import shutil
 import time
 import glob
 import json
+import dateutil
 
 from RMS.Formats.FFfits import filenameToDatetimeStr
 import datetime
@@ -526,7 +527,29 @@ def serialize(config, format_nicely=True, as_json=False):
 
     output = ""
     for key,value in data:
-        output += "{}:{} \n".format(key,value)
+        #does this look like a float
+        if not re.match(r'^-?\d+(?:\.\d+)$', value) is None:
+            # handle as float
+            try:
+                value_as_float = float(value)
+                output += "{}:{:.3f} \n".format(key, value_as_float)
+            except:
+                pass
+        else:
+            try:
+                # convert to a time
+                time_object = time.strptime(value, "%Y-%m-%d %H:%M:%S.%f")
+                value_as_time = strftime("%Y-%m-%d %H:%M:%S", time_object)
+                output += "{}:{:s} \n".format(key, value_as_time)
+
+            except:
+                print()
+                # if it didn't work, then handle as a string
+                try:
+                    output += "{}:{:s} \n".format(key, value)
+                except:
+                    # if we can't output as a string, then move on
+                    pass
 
     if format_nicely:
         return niceFormat(output)
