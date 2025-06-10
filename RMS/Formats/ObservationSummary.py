@@ -542,7 +542,7 @@ def retrieveObservationData(conn, obs_start_time, ordering=None):
 
     return conn.cursor().execute(sql_statement).fetchall()
 
-def truncateTo(value, no):
+def roundWithoutTrailingZero(value, no):
 
     value = round(value,3)
     return str("{0:g}".format(value))
@@ -576,7 +576,7 @@ def serialize(config, format_nicely=True, as_json=False):
             # handle as float
             try:
                 value_as_float = float(value)
-                output += "{}:{:s} \n".format(key, truncateTo(value_as_float, 3))
+                output += "{}:{:s} \n".format(key, roundWithoutTrailingZero(value_as_float, 3))
             except:
                 pass
         else:
