@@ -544,12 +544,8 @@ def retrieveObservationData(conn, obs_start_time, ordering=None):
 
 def truncateTo(value, no):
 
-    if value == round(value):
-        return str(value)
-    else:
-        value = round(value * (10 ** no))
-        value = value / (10 ** no)
-        return str(value)
+    value = round(value,3)
+    return str("0:g".format(value))
 
 
 def serialize(config, format_nicely=True, as_json=False):
