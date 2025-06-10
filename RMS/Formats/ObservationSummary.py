@@ -544,7 +544,7 @@ def retrieveObservationData(conn, obs_start_time, ordering=None):
 
 def roundWithoutTrailingZero(value, no):
 
-    value = round(value,3)
+    value = round(value,no)
     return str("{0:g}".format(value))
 
 
