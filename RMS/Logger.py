@@ -411,7 +411,7 @@ def initLogging(config, log_file_prefix="", safedir=None, level=logging.DEBUG):
 
     # Set DEBUG on root logger in main process
     main_logger = logging.getLogger()
-    main_logger.setLevel(logging.DEBUG) # Keep root permissive
+    main_logger.setLevel(level=level) # Keep root permissive
 
     # Configure queue handler for main process
     qh = logging.handlers.QueueHandler(_rms_logging_queue)
