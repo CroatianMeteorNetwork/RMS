@@ -65,8 +65,9 @@ import argparse
 import json
 import pprint
 import re
+
 import RMS.ConfigReader as cr
-from RMS.Logger import getLogger
+from RMS.Logger import getLogger, initLogging
 from time import sleep
 import datetime
 
@@ -80,6 +81,7 @@ else:
 
 # Get the logger from the main module
 log = getLogger("logger")
+
 
 def rebootCamera(cam):
     """Reboot the Camera
@@ -913,12 +915,14 @@ if __name__ == '__main__':
     else:
         opts = ''
 
+    # Load the config file
+    config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
+    # initialise a logger, when running in standalone mode, to avoid DVRip's excessive debug messages
+    logger = initLogging(config, log_file_prefix='camControl_')
+    
     if cmd not in cmd_list:
         log.info('Error: command "%s" not supported', cmd)
         exit(1)
-
-    # Load the config file
-    config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
 
     cameraControlV2(config, cmd, opts)
 
