@@ -65,7 +65,8 @@ except ImportError:
 # Set GStreamer debug level. Use '2' for warnings in production environments.
 # Level 4 and above are overwhelming the log
 # If higher verbosity is needed, disable in client scripts
-os.environ['GST_DEBUG'] = '2'
+if not os.getenv('GST_DEBUG', default=None):
+    os.environ['GST_DEBUG'] = '2'
 
 _rms_logging_queue = None
 _rms_listener_process = None
