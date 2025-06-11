@@ -215,6 +215,8 @@ def timestampFromNTP(addr='0.us.pool.ntp.org'):
 
     """
     refer https://stackoverflow.com/questions/36500197/how-to-get-time-from-an-ntp-server
+    and also https://github.com/CroatianMeteorNetwork/RMS/issues/624
+
 
     Args:
         addr: optional, address of ntp server to use
@@ -229,20 +231,40 @@ def timestampFromNTP(addr='0.us.pool.ntp.org'):
     client.settimeout(5)
     data = b'\x1b' + 47 * b'\0'
     try:
+        local_clock_transmit_timestamp = time.time()
         client.sendto(data, (addr, 123))
         data, address = client.recvfrom(1024)
+        local_clock_receive_timestamp = time.time()
     except socket.timeout:
         print("NTP request timed out")
-        return None
+        return None, None
     except Exception as e:
         print("NTP request failed: {}".format(e))
-        return None
+        return None, None
     if data:
-        t = struct.unpack('!12I', data)[10]
-        t -= REF_TIME_1970
-        return t
+        fractional_second_factor = ( 1 / 2 ** 32)
+        remote_clock_time_receive_timestamp_seconds = struct.unpack('!12I', data)[8] - REF_TIME_1970
+        remote_clock_time_receive_timestamp_fractional_seconds = struct.unpack('!12I', data)[9] * fractional_second_factor
+        remote_clock_time_receive_timestamp = remote_clock_time_receive_timestamp_seconds + remote_clock_time_receive_timestamp_fractional_seconds
+        remote_clock_time_transmit_timestamp_seconds = struct.unpack('!12I', data)[10] - REF_TIME_1970
+        remote_clock_time_transmit_timestamp_fractional_seconds = struct.unpack('!12I', data)[9] * fractional_second_factor
+        remote_clock_time_transmit_timestamp = remote_clock_time_transmit_timestamp_seconds + remote_clock_time_transmit_timestamp_fractional_seconds
+        local_clock_measured_response_time = (local_clock_receive_timestamp - local_clock_transmit_timestamp)
+        remote_clock_measured_processing_time = (remote_clock_time_transmit_timestamp - remote_clock_time_receive_timestamp)
+
+        # next calculation assumes that remote and local clock are running at identical rates
+        estimated_network_delay = local_clock_measured_response_time - remote_clock_measured_processing_time
+        if estimated_network_delay < 0:
+            return None, None
+
+        # now calculate estimated clock offsets
+        clock_offset_out_leg = remote_clock_time_receive_timestamp - local_clock_transmit_timestamp
+        clock_offset_return_leg = remote_clock_time_transmit_timestamp - local_clock_receive_timestamp
+        estimated_offset = (clock_offset_out_leg + clock_offset_return_leg) / 2
+        adjusted_time = remote_clock_time_transmit_timestamp + estimated_offset
+        return adjusted_time, estimated_network_delay
     else:
-        return None
+        return None, None
 
 def timeSyncStatus(config):
 
@@ -258,13 +280,13 @@ def timeSyncStatus(config):
         Approximate time error in seconds
     """
 
-    remote_time_query = timestampFromNTP()
+    remote_time_query, uncertainty = timestampFromNTP()
     if remote_time_query is not None:
         local_time_query = (datetime.datetime.utcnow() - datetime.datetime(1970, 1, 1)).total_seconds()
         time_error_seconds = round(abs(local_time_query - remote_time_query),1)
-        print("Approximate time error is {}".format(time_error_seconds))
+        print("Approximate time error is {} seconds with uncertainty {} seconds".format(time_error_seconds, uncertainty))
     else:
-        time_error_seconds = "Unknown"
+        time_error_seconds, uncertainty = "Unknown", "Unknown"
 
     result_list = subprocess.run(['timedatectl','status'], capture_output = True).stdout.splitlines()
     #print(result_list)
@@ -274,6 +296,7 @@ def timeSyncStatus(config):
             conn = getObsDBConn(config)
             addObsParam(conn, "clock_synchronized", result.split(":")[1].strip())
             addObsParam(conn, "clock_error_seconds", time_error_seconds)
+            addObsParam(conn, "clock_error_uncertainty", uncertainty)
             conn.close()
 
     return time_error_seconds
@@ -511,7 +534,7 @@ def retrieveObservationData(conn, obs_start_time, ordering=None):
                     'camera_lens','camera_fov_h','camera_fov_v',
                     'camera_pointing_alt','camera_pointing_az',
                     'camera_information',
-                    'clock_error_seconds', 'clock_synchronized',
+                    'clock_error_seconds', 'clock_error_uncertainty', 'clock_synchronized',
                     'start_time', 'duration', 'photometry_good',
                     'time_first_fits_file', 'time_last_fits_file', 'total_expected_fits','total_fits',
                     'fits_files_from_duration','fits_file_shortfall', 'fits_file_shortfall_as_time',
