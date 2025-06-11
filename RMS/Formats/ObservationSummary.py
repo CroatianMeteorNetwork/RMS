@@ -222,7 +222,8 @@ def timestampFromNTP(addr='time.cloudflare.com'):
         addr: optional, address of ntp server to use
 
     Returns:
-        [int]: time in seconds since epoch
+        [float]: time in seconds since epoch
+        [float]: estimated network delay (average of outgoing and return legs)
     """
 
 
