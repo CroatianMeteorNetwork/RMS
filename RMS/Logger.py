@@ -112,7 +112,7 @@ def _inside(path, root):
     """
     Return True if *path* lies inside *root* (string-prefix test).
 
-    We normalise *root* to end with the platform separator so that
+    We normalize *root* to end with the platform separator so that
     “/opt/RMS_data” does **not** count as inside “/opt/RMS”.
     Works on both Python 2.7 and 3.x.
     """
@@ -207,7 +207,7 @@ class RmsDateTime:
 class UTCFromTimestamp:
     """Cross-version helper to convert Unix timestamps to naive UTC datetime objects.
 
-    - Python 2.7–3.11: uses datetime.utcfromtimestamp()
+    - Python 2.7-3.11: uses datetime.utcfromtimestamp()
     - Python 3.12+: uses datetime.fromtimestamp(..., tz=timezone.utc).replace(tzinfo=None)
     """
 
