@@ -211,7 +211,7 @@ def startObservationSummaryReport(config, duration, force_delete=False):
 
     return "Opening a new observations summary for duration {} seconds".format(duration)
 
-def timestampFromNTP(addr='0.us.pool.ntp.org'):
+def timestampFromNTP(addr='time.cloudflare.com'):
 
     """
     refer https://stackoverflow.com/questions/36500197/how-to-get-time-from-an-ntp-server
