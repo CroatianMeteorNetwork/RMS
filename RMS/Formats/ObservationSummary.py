@@ -279,8 +279,7 @@ def timeSyncStatus(config):
 
     """
 
-    Determine approximate time sync error and report on status. Any error of fewer than ten seconds
-    may be caused by imprecision in the remote time query
+    Determine approximate time sync error and report on status.
 
     Args:
         config: configuration object
