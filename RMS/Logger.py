@@ -110,7 +110,7 @@ _default_handler.setFormatter(_default_formatter)
 _default_handler.addFilter(PreInitNoiseFilter())
 _pre_init_logger = logging.getLogger()
 _pre_init_logger.addHandler(_default_handler)
-_pre_init_logger.setLevel(logging.DEBUG)
+_pre_init_logger.setLevel(logging.INFO)
 
 # This handler will be removed when proper logging is initialized
 
