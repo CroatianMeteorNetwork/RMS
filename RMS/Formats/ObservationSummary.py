@@ -242,16 +242,25 @@ def timestampFromNTP(addr='0.us.pool.ntp.org'):
         print("NTP request failed: {}".format(e))
         return None, None
     if data:
+
+        # for NTP the fractional seconds is a 32 bit counter
         fractional_second_factor = ( 1 / 2 ** 32)
+
+
+        # unpack data
         remote_clock_time_receive_timestamp_seconds = struct.unpack('!12I', data)[8] - REF_TIME_1970
         remote_clock_time_receive_timestamp_fractional_seconds = struct.unpack('!12I', data)[9] * fractional_second_factor
-        remote_clock_time_receive_timestamp = remote_clock_time_receive_timestamp_seconds + remote_clock_time_receive_timestamp_fractional_seconds
+
         remote_clock_time_transmit_timestamp_seconds = struct.unpack('!12I', data)[10] - REF_TIME_1970
-        remote_clock_time_transmit_timestamp_fractional_seconds = struct.unpack('!12I', data)[9] * fractional_second_factor
+        remote_clock_time_transmit_timestamp_fractional_seconds = struct.unpack('!12I', data)[11] * fractional_second_factor
+
+        remote_clock_time_receive_timestamp = remote_clock_time_receive_timestamp_seconds + remote_clock_time_receive_timestamp_fractional_seconds
         remote_clock_time_transmit_timestamp = remote_clock_time_transmit_timestamp_seconds + remote_clock_time_transmit_timestamp_fractional_seconds
+
         local_clock_measured_response_time = (local_clock_receive_timestamp - local_clock_transmit_timestamp)
         remote_clock_measured_processing_time = (remote_clock_time_transmit_timestamp - remote_clock_time_receive_timestamp)
 
+        print("Rx Fractional {}, Tx fractional {}".format(remote_clock_time_receive_timestamp_fractional_seconds, remote_clock_time_transmit_timestamp_fractional_seconds))
         # next calculation assumes that remote and local clock are running at identical rates
         estimated_network_delay = local_clock_measured_response_time - remote_clock_measured_processing_time
         if estimated_network_delay < 0:
