@@ -177,7 +177,7 @@ class RmsDateTime:
 class UTCFromTimestamp:
     """Cross-version helper to convert Unix timestamps to naive UTC datetime objects.
 
-    - Python 2.7–3.11: uses datetime.utcfromtimestamp()
+    - Python 2.7-3.11: uses datetime.utcfromtimestamp()
     - Python 3.12+: uses datetime.fromtimestamp(..., tz=timezone.utc).replace(tzinfo=None)
     """
 
