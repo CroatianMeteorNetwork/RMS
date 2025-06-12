@@ -307,7 +307,7 @@ def timeSyncStatus(config):
             addObsParam(conn, "clock_error_uncertainty_ms", uncertainty * 1000)
             conn.close()
 
-    return time_error_seconds
+    return time_ahead_seconds
 
 def finalizeObservationSummary(config, night_data_dir, platepar=None):
 
