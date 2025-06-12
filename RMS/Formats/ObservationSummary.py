@@ -29,7 +29,7 @@ from __future__ import print_function, division, absolute_import
 import sys
 import os
 import subprocess
-
+from time import strftime
 
 from RMS.Misc import niceFormat, isRaspberryPi, sanitise, getRMSStyleFileName, getRmsRootDir, UTCFromTimestamp
 import re
@@ -39,9 +39,10 @@ from datetime import datetime
 import platform
 import git
 import shutil
-import time
+
 import glob
 import json
+
 
 from RMS.Formats.FFfits import filenameToDatetimeStr
 import datetime
@@ -210,16 +211,19 @@ def startObservationSummaryReport(config, duration, force_delete=False):
 
     return "Opening a new observations summary for duration {} seconds".format(duration)
 
-def timestampFromNTP(addr='0.us.pool.ntp.org'):
+def timestampFromNTP(addr='time.cloudflare.com'):
 
     """
     refer https://stackoverflow.com/questions/36500197/how-to-get-time-from-an-ntp-server
+    and also https://github.com/CroatianMeteorNetwork/RMS/issues/624
+
 
     Args:
         addr: optional, address of ntp server to use
 
     Returns:
-        [int]: time in seconds since epoch
+        [float]: time in seconds since epoch
+        [float]: estimated network delay (average of outgoing and return legs)
     """
 
 
@@ -228,27 +232,55 @@ def timestampFromNTP(addr='0.us.pool.ntp.org'):
     client.settimeout(5)
     data = b'\x1b' + 47 * b'\0'
     try:
+        local_clock_transmit_timestamp = time.time()
         client.sendto(data, (addr, 123))
         data, address = client.recvfrom(1024)
+        local_clock_receive_timestamp = time.time()
     except socket.timeout:
         print("NTP request timed out")
-        return None
+        return None, None
     except Exception as e:
         print("NTP request failed: {}".format(e))
-        return None
+        return None, None
     if data:
-        t = struct.unpack('!12I', data)[10]
-        t -= REF_TIME_1970
-        return t
+
+        # for NTP the fractional seconds is a 32 bit counter
+        fractional_second_factor = ( 1 / 2 ** 32)
+
+
+        # unpack data
+        remote_clock_time_receive_timestamp_seconds = struct.unpack('!12I', data)[8] - REF_TIME_1970
+        remote_clock_time_receive_timestamp_fractional_seconds = struct.unpack('!12I', data)[9] * fractional_second_factor
+
+        remote_clock_time_transmit_timestamp_seconds = struct.unpack('!12I', data)[10] - REF_TIME_1970
+        remote_clock_time_transmit_timestamp_fractional_seconds = struct.unpack('!12I', data)[11] * fractional_second_factor
+
+        remote_clock_time_receive_timestamp = remote_clock_time_receive_timestamp_seconds + remote_clock_time_receive_timestamp_fractional_seconds
+        remote_clock_time_transmit_timestamp = remote_clock_time_transmit_timestamp_seconds + remote_clock_time_transmit_timestamp_fractional_seconds
+
+        local_clock_measured_response_time = (local_clock_receive_timestamp - local_clock_transmit_timestamp)
+        remote_clock_measured_processing_time = (remote_clock_time_transmit_timestamp - remote_clock_time_receive_timestamp)
+
+        # print("Rx Fractional {}, Tx fractional {}".format(remote_clock_time_receive_timestamp_fractional_seconds, remote_clock_time_transmit_timestamp_fractional_seconds))
+        # next calculation assumes that remote and local clock are running at identical rates
+        estimated_network_delay = local_clock_measured_response_time - remote_clock_measured_processing_time
+        if estimated_network_delay < 0:
+            return None, None
+
+        # now calculate estimated clock offsets
+        clock_offset_out_leg = remote_clock_time_receive_timestamp - local_clock_transmit_timestamp
+        clock_offset_return_leg = remote_clock_time_transmit_timestamp - local_clock_receive_timestamp
+        estimated_offset = (clock_offset_out_leg + clock_offset_return_leg) / 2
+        adjusted_time = remote_clock_time_transmit_timestamp + estimated_offset
+        return adjusted_time, estimated_network_delay
     else:
-        return None
+        return None, None
 
 def timeSyncStatus(config):
 
     """
 
-    Determine approximate time sync error and report on status. Any error of fewer than ten seconds
-    may be caused by imprecision in the remote time query
+    Determine approximate time sync error and report on status.
 
     Args:
         config: configuration object
@@ -257,13 +289,12 @@ def timeSyncStatus(config):
         Approximate time error in seconds
     """
 
-    remote_time_query = timestampFromNTP()
+    remote_time_query, uncertainty = timestampFromNTP()
     if remote_time_query is not None:
         local_time_query = (datetime.datetime.utcnow() - datetime.datetime(1970, 1, 1)).total_seconds()
-        time_error_seconds = round(abs(local_time_query - remote_time_query),1)
-        print("Approximate time error is {}".format(time_error_seconds))
+        time_ahead_seconds = local_time_query - remote_time_query
     else:
-        time_error_seconds = "Unknown"
+        time_error_seconds, uncertainty = "Unknown", "Unknown"
 
     result_list = subprocess.run(['timedatectl','status'], capture_output = True).stdout.splitlines()
     #print(result_list)
@@ -272,10 +303,11 @@ def timeSyncStatus(config):
         if "synchronized" in result:
             conn = getObsDBConn(config)
             addObsParam(conn, "clock_synchronized", result.split(":")[1].strip())
-            addObsParam(conn, "clock_error_seconds", time_error_seconds)
+            addObsParam(conn, "clock_ahead_ms", time_ahead_seconds * 1000)
+            addObsParam(conn, "clock_error_uncertainty_ms", uncertainty * 1000)
             conn.close()
 
-    return time_error_seconds
+    return time_ahead_seconds
 
 def finalizeObservationSummary(config, night_data_dir, platepar=None):
 
@@ -485,22 +517,66 @@ def getLastStartTime(conn):
 
     return result[0]
 
-def retrieveObservationData(conn, obs_start_time):
+def retrieveObservationData(conn, obs_start_time, ordering=None):
     """ Query the database to get the data more recent than the time passed in.
         Usually this will be the start of the most recent observation session
+        If no ordering is passed, then a default ordering is returned
+
             arguments:
                     conn: connection to database
+                    ordering: optional, default None, sequence to order the keys.
 
             returns:
                     key value pairs committed to the database since the obs_start_time
     """
 
+    if ordering is None:
+        # Be sure to add a comma after each list entry, IDE will not pick up this error as Python will concatenate
+        # the two items into one.
+
+        ordering = ['stationID',
+                    'commit_date', 'commit_hash','media_backend',
+                    'hardware_version',
+                    'captured_directories',
+                    'storage_used_gb', 'storage_free_gb', 'storage_total_gb',
+                    'camera_lens','camera_fov_h','camera_fov_v',
+                    'camera_pointing_alt','camera_pointing_az',
+                    'camera_information',
+                    'clock_ahead_ms', 'clock_error_uncertainty_ms', 'clock_synchronized',
+                    'start_time', 'duration', 'photometry_good',
+                    'time_first_fits_file', 'time_last_fits_file', 'total_expected_fits','total_fits',
+                    'fits_files_from_duration','fits_file_shortfall', 'fits_file_shortfall_as_time',
+                    'capture_duration_from_fits',
+                    'detections_after_ml',
+                    'media_backend','jitter_quality','dropped_frame_rate']
+
+    # use this print call to check the ordering
+    #print("Ordering {}".format(ordering))
+
     sql_statement = ""
     sql_statement += "SELECT Key, Value from records \n"
     sql_statement += "           WHERE TimeStamp >= '{}' \n".format(obs_start_time)
-    sql_statement += "           GROUP BY Key \n"
+    sql_statement += "           GROUP BY KEY \n"
+    sql_statement += "           ORDER BY \n"
+    sql_statement += "              CASE Key \n"
+
+    # This SQL applies an ordering to all the keys in the ordering list. Any extra keys will be at the end.
+    count = 1
+    for ordering_key in ordering:
+        sql_statement += "                  WHEN '{:s}' THEN {:03d} \n".format(ordering_key,count)
+        count += 1
+
+    sql_statement += "                  ELSE {:03d} \n".format(count)
+    sql_statement += "              END"
+
+    #print(sql_statement)
 
     return conn.cursor().execute(sql_statement).fetchall()
+
+def roundWithoutTrailingZero(value, no):
+
+    value = round(value,no)
+    return str("{0:g}".format(value))
 
 
 def serialize(config, format_nicely=True, as_json=False):
@@ -526,7 +602,35 @@ def serialize(config, format_nicely=True, as_json=False):
 
     output = ""
     for key,value in data:
-        output += "{}:{} \n".format(key,value)
+        #does this look like a float
+        if not re.match(r'^-?\d+(?:\.\d+)$', value) is None:
+            # handle as float
+            try:
+                value_as_float = float(value)
+                output += "{}:{:s} \n".format(key, roundWithoutTrailingZero(value_as_float, 3))
+            except:
+                pass
+        else:
+            try:
+                # convert to a time
+                time_object = time.strptime(value, "%Y-%m-%d %H:%M:%S.%f")
+                value_as_time = strftime("%Y-%m-%d %H:%M:%S", time_object)
+                output += "{}:{:s} \n".format(key, value_as_time)
+
+            except:
+                try:
+                # convert to a time
+                    time_object = time.strptime(value, "%H:%M:%S.%f")
+                    value_as_time = strftime("%H:%M:%S", time_object)
+                    output += "{}:{:s} \n".format(key, value_as_time)
+                    # if it didn't work, then handle as a string
+                except:
+                    pass
+                    try:
+                        output += "{}:{:s} \n".format(key, value)
+                    except:
+                        # if we can't output as a string, then move on
+                        pass
 
     if format_nicely:
         return niceFormat(output)
@@ -583,6 +687,8 @@ def unserialize(self):
 if __name__ == "__main__":
 
     config = parse(os.path.expanduser("~/source/RMS/.config"))
+
+
 
     timeSyncStatus(config)
     obs_db_conn = getObsDBConn(config)
