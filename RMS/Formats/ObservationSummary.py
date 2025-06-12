@@ -261,7 +261,7 @@ def timestampFromNTP(addr='time.cloudflare.com'):
         local_clock_measured_response_time = (local_clock_receive_timestamp - local_clock_transmit_timestamp)
         remote_clock_measured_processing_time = (remote_clock_time_transmit_timestamp - remote_clock_time_receive_timestamp)
 
-        print("Rx Fractional {}, Tx fractional {}".format(remote_clock_time_receive_timestamp_fractional_seconds, remote_clock_time_transmit_timestamp_fractional_seconds))
+        # print("Rx Fractional {}, Tx fractional {}".format(remote_clock_time_receive_timestamp_fractional_seconds, remote_clock_time_transmit_timestamp_fractional_seconds))
         # next calculation assumes that remote and local clock are running at identical rates
         estimated_network_delay = local_clock_measured_response_time - remote_clock_measured_processing_time
         if estimated_network_delay < 0:
@@ -292,8 +292,7 @@ def timeSyncStatus(config):
     remote_time_query, uncertainty = timestampFromNTP()
     if remote_time_query is not None:
         local_time_query = (datetime.datetime.utcnow() - datetime.datetime(1970, 1, 1)).total_seconds()
-        time_error_seconds = local_time_query - remote_time_query
-        print("Approximate time error is {} seconds with uncertainty {} seconds".format(time_error_seconds, uncertainty))
+        time_ahead_seconds = local_time_query - remote_time_query
     else:
         time_error_seconds, uncertainty = "Unknown", "Unknown"
 
@@ -304,7 +303,7 @@ def timeSyncStatus(config):
         if "synchronized" in result:
             conn = getObsDBConn(config)
             addObsParam(conn, "clock_synchronized", result.split(":")[1].strip())
-            addObsParam(conn, "clock_error_ms", time_error_seconds * 1000)
+            addObsParam(conn, "clock_ahead_ms", time_ahead_seconds * 1000)
             addObsParam(conn, "clock_error_uncertainty_ms", uncertainty * 1000)
             conn.close()
 
@@ -543,7 +542,7 @@ def retrieveObservationData(conn, obs_start_time, ordering=None):
                     'camera_lens','camera_fov_h','camera_fov_v',
                     'camera_pointing_alt','camera_pointing_az',
                     'camera_information',
-                    'clock_error_ms', 'clock_error_uncertainty_ms', 'clock_synchronized',
+                    'clock_ahead_ms', 'clock_error_uncertainty_ms', 'clock_synchronized',
                     'start_time', 'duration', 'photometry_good',
                     'time_first_fits_file', 'time_last_fits_file', 'total_expected_fits','total_fits',
                     'fits_files_from_duration','fits_file_shortfall', 'fits_file_shortfall_as_time',
