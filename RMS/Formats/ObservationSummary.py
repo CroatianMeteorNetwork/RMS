@@ -39,10 +39,10 @@ from datetime import datetime
 import platform
 import git
 import shutil
-import time
+
 import glob
 import json
-import dateutil
+
 
 from RMS.Formats.FFfits import filenameToDatetimeStr
 import datetime
@@ -292,7 +292,7 @@ def timeSyncStatus(config):
     remote_time_query, uncertainty = timestampFromNTP()
     if remote_time_query is not None:
         local_time_query = (datetime.datetime.utcnow() - datetime.datetime(1970, 1, 1)).total_seconds()
-        time_error_seconds = round(abs(local_time_query - remote_time_query),1)
+        time_error_seconds = local_time_query - remote_time_query
         print("Approximate time error is {} seconds with uncertainty {} seconds".format(time_error_seconds, uncertainty))
     else:
         time_error_seconds, uncertainty = "Unknown", "Unknown"
@@ -304,8 +304,8 @@ def timeSyncStatus(config):
         if "synchronized" in result:
             conn = getObsDBConn(config)
             addObsParam(conn, "clock_synchronized", result.split(":")[1].strip())
-            addObsParam(conn, "clock_error_seconds", time_error_seconds)
-            addObsParam(conn, "clock_error_uncertainty", uncertainty)
+            addObsParam(conn, "clock_error_ms", time_error_seconds * 1000)
+            addObsParam(conn, "clock_error_uncertainty_ms", uncertainty * 1000)
             conn.close()
 
     return time_error_seconds
@@ -543,7 +543,7 @@ def retrieveObservationData(conn, obs_start_time, ordering=None):
                     'camera_lens','camera_fov_h','camera_fov_v',
                     'camera_pointing_alt','camera_pointing_az',
                     'camera_information',
-                    'clock_error_seconds', 'clock_error_uncertainty', 'clock_synchronized',
+                    'clock_error_ms', 'clock_error_uncertainty_ms', 'clock_synchronized',
                     'start_time', 'duration', 'photometry_good',
                     'time_first_fits_file', 'time_last_fits_file', 'total_expected_fits','total_fits',
                     'fits_files_from_duration','fits_file_shortfall', 'fits_file_shortfall_as_time',
