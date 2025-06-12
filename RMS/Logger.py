@@ -71,7 +71,8 @@ else:
 # Set GStreamer debug level. Use '2' for warnings in production environments.
 # Level 4 and above are overwhelming the log
 # If higher verbosity is needed, disable in client scripts
-os.environ['GST_DEBUG'] = '2'
+if not os.getenv('GST_DEBUG', default=None):
+    os.environ['GST_DEBUG'] = '2'
 
 _rms_logging_queue = None
 _rms_listener_process = None
@@ -84,7 +85,10 @@ _default_formatter = logging.Formatter('%(message)s')
 _default_handler.setFormatter(_default_formatter)
 _pre_init_logger = logging.getLogger()
 _pre_init_logger.addHandler(_default_handler)
-_pre_init_logger.setLevel(logging.DEBUG)
+_pre_init_logger.setLevel(logging.INFO)
+
+# Initialize set of directories to filter in
+ALLOWED_DIRS = set()
 
 # This handler will be removed when proper logging is initialized
 
@@ -132,9 +136,13 @@ class InRmsFilter(logging.Filter):
     """
     def filter(self, record):
         p = os.path.realpath(record.pathname)
+
+        # reject std-lib / third-party
         if any(_inside(p, sd) for sd in SITE_DIRS):
-            return False                    # third-party / std-lib
-        return _inside(p, RMS_ROOT)         # keep only RMS tree
+            return False
+
+        # accept RMS tree **or** external scripts directory
+        return any(_inside(p, root) for root in ALLOWED_DIRS)
 
 
 # Reproduced from RMS.Misc due to circular import issue
@@ -408,9 +416,20 @@ def initLogging(config, log_file_prefix="", safedir=None, level=logging.DEBUG):
         level: [int] Logging level for the main logger (defaults to DEBUG)
     """
     global _rms_logging_queue, _rms_listener_process, _rms_logger_initialized
-    global RMS_ROOT, SITE_DIRS
+    global RMS_ROOT, SITE_DIRS, ALLOWED_DIRS
 
+    # White-list RMS root and external script directories
     RMS_ROOT = os.path.realpath(getRmsRootDir())
+    ALLOWED_DIRS = {RMS_ROOT}
+
+    ext = config.external_script_path
+    if ext:
+        ext_root = os.path.realpath(ext)
+        if not os.path.isdir(ext_root):          # it’s a *.py*
+            ext_root = os.path.dirname(ext_root)  # grab its dir
+        ALLOWED_DIRS.add(ext_root)
+
+    # Black-list site-packages directories
     SITE_DIRS = {os.path.realpath(p) for p in site.getsitepackages()}
     SITE_DIRS.add(os.path.realpath(site.getusersitepackages()))
 
