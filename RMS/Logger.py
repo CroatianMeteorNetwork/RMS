@@ -3,6 +3,7 @@ from __future__ import print_function, division, absolute_import
 
 import os
 import sys
+import site
 import errno
 import logging
 import logging.handlers
@@ -56,6 +57,11 @@ except ImportError:
     # Inject into logging.handlers for consistency
     logging.handlers.QueueListener = QueueListener
 
+# Import for getRmsRootDir() function.
+if sys.version_info[0] < 3:
+    import pkgutil
+else:
+    import importlib.util
 
 
 ##############################################################################
@@ -65,52 +71,24 @@ except ImportError:
 # Set GStreamer debug level. Use '2' for warnings in production environments.
 # Level 4 and above are overwhelming the log
 # If higher verbosity is needed, disable in client scripts
-os.environ['GST_DEBUG'] = '2'
+if not os.getenv('GST_DEBUG', default=None):
+    os.environ['GST_DEBUG'] = '2'
 
 _rms_logging_queue = None
 _rms_listener_process = None
 _rms_init_lock = threading.Lock()
 _rms_logger_initialized = False
 
-
-class PreInitNoiseFilter(logging.Filter):
-    """ Filter out noisy messages from specific patterns before logger initialization.
-        C/C++ level libraries messages cannot be removed.
-        These filters will be removed when proper logging is initialized
-    """
-    def __init__(self):
-        super(PreInitNoiseFilter, self).__init__()
-
-        self.noisy_patterns = [
-            "Unable to register",
-            "Creating converter",
-            "CACHEDIR",
-            "No `name` configuration",
-            "running build_ext",
-            "skipping 'RMS",
-            "extension (up-to-date)"
-        ]
-
-    def filter(self, record):
-        # Check if message contains any noisy pattern
-        try:
-            message = record.getMessage()
-            if any(pattern in message for pattern in self.noisy_patterns):
-                return False
-        except:
-            pass  # If getMessage() fails, continue with module check
-
-        return True
-
-
 # Add a default stderr handler for pre-initialization log messages
 _default_handler = logging.StreamHandler(sys.stderr)
 _default_formatter = logging.Formatter('%(message)s')
 _default_handler.setFormatter(_default_formatter)
-_default_handler.addFilter(PreInitNoiseFilter())
 _pre_init_logger = logging.getLogger()
 _pre_init_logger.addHandler(_default_handler)
-_pre_init_logger.setLevel(logging.DEBUG)
+_pre_init_logger.setLevel(logging.INFO)
+
+# Initialize set of directories to filter in
+ALLOWED_DIRS = set()
 
 # This handler will be removed when proper logging is initialized
 
@@ -132,78 +110,6 @@ class LoggerWriter:
 
     def flush(self):
         pass
-
-
-# Reproduced from RMS.Misc due to circular import issue
-def mkdirP(path):
-    """ Makes a directory and handles all errors.
-    
-    Arguments:
-        path: [str] Directory path to create
-        
-    Return:
-        [bool] True if successful, False otherwise
-    """
-    try:
-        os.makedirs(path)
-        return True
-    except OSError as exc:
-        if exc.errno == errno.EEXIST:
-            return True
-        else:
-            print("Error creating directory: " + str(exc))
-            return False
-    except Exception as e:
-        print("Error creating directory: " + str(e))
-        return False
-
-
-# Reproduced from RMS.Misc due to circular import issue
-class RmsDateTime:
-    """ Use Python-version-specific UTC retrieval.
-    """
-    if sys.version_info[0] < 3:
-        @staticmethod
-        def utcnow():
-            return datetime.datetime.utcnow()
-    else:
-        @staticmethod
-        def utcnow():
-            return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
-
-
-# Reproduced from RMS.Misc due to circular import issue
-
-class UTCFromTimestamp:
-    """Cross-version helper to convert Unix timestamps to naive UTC datetime objects.
-
-    - Python 2.7-3.11: uses datetime.utcfromtimestamp()
-    - Python 3.12+: uses datetime.fromtimestamp(..., tz=timezone.utc).replace(tzinfo=None)
-    """
-
-    @staticmethod
-    def utcfromtimestamp(timestamp):
-        if sys.version_info >= (3, 12):
-            # Use aware datetime then strip tzinfo to make it naive
-            return datetime.datetime.fromtimestamp(
-                timestamp, tz=UTCFromTimestamp._get_utc_timezone()
-            ).replace(tzinfo=None)
-        else:
-            return datetime.datetime.utcfromtimestamp(timestamp)
-
-    @staticmethod
-    def _get_utc_timezone():
-        """Safely provide UTC tzinfo across Python versions."""
-        try:
-            # Python 3.2+
-            from datetime import timezone
-            return timezone.utc
-        except ImportError:
-            # Python 2: no timezone support
-            raise NotImplementedError(
-                "timezone-aware fromtimestamp() is not supported in Python < 3.2. "
-                "Use Python >= 3.12 or fallback to utcfromtimestamp()."
-            )
 
 
 
@@ -265,19 +171,6 @@ class CustomHandler(logging.handlers.TimedRotatingFileHandler):
 # LISTENER SIDE
 ##############################################################################
 
-class NoiseFilter(logging.Filter):
-    """ Filter out noisy messages from specific modules.
-    """
-    def __init__(self):
-        super(NoiseFilter, self).__init__()
-        self.noisy_modules = {'font_manager', 'ticker', 'transport', 'sftp', 'dvrip', 'channel', 'cmd', 'PngImagePlugin'}
-
-    def filter(self, record):
-        if record.levelno in (logging.DEBUG, logging.INFO) and record.module in self.noisy_modules:
-            return False
-        return True
-
-
 def _listener_configurer(config, log_file_prefix, safedir):
     """ Set up the root logger with a TimedRotatingFileHandler. 
     This runs in the separate listener process.
@@ -326,9 +219,9 @@ def _listener_configurer(config, log_file_prefix, safedir):
     )
     console = logging.StreamHandler(sys.stdout)
 
-    # Add noise filters to both handlers
-    handler.addFilter(NoiseFilter())
-    console.addFilter(NoiseFilter())
+    # Add filters to both handlers
+    handler.addFilter(InRmsFilter())
+    console.addFilter(InRmsFilter())
 
     # Set common formatter for both handlers
     formatter = logging.Formatter(
@@ -381,7 +274,7 @@ def _listener_process(queue, config, log_file_prefix, safedir):
 ##############################################################################
 
 def initLogging(config, log_file_prefix="", safedir=None, level=logging.DEBUG):
-    """ Called once in the MAIN process (e.g. StartCapture.py). 
+    """ Called once in the MAIN process (e.g. StartCapture.py).
     Spawns the listener process and configures logging.
 
     Arguments:
@@ -391,37 +284,63 @@ def initLogging(config, log_file_prefix="", safedir=None, level=logging.DEBUG):
         level: [int] Logging level for the main logger (defaults to DEBUG)
     """
     global _rms_logging_queue, _rms_listener_process, _rms_logger_initialized
+    global RMS_ROOT, SITE_DIRS, ALLOWED_DIRS
+
+    # Whitelist RMS root and external script directories
+    RMS_ROOT = os.path.realpath(getRmsRootDir())
+    ALLOWED_DIRS = {RMS_ROOT}
+    ext = config.external_script_path
+    if ext:
+        ext_root = os.path.realpath(ext)
+        if not os.path.isdir(ext_root):          # it's a .py file
+            ext_root = os.path.dirname(ext_root)
+        ALLOWED_DIRS.add(ext_root)
+
+    # Blacklist site-packages directories (with Py2 fallback)
+    try:
+        site_packages = site.getsitepackages()
+        user_site    = site.getusersitepackages()
+    except (AttributeError, IOError):
+        from distutils.sysconfig import get_python_lib
+        site_packages = [get_python_lib()]
+        user_site     = getattr(site, 'USER_SITE',
+                                 get_python_lib(prefix=sys.prefix))
+
+    SITE_DIRS = set(os.path.realpath(p) for p in site_packages)
+    SITE_DIRS.add(os.path.realpath(user_site))
+
+    # Ensure we only init once
     with _rms_init_lock:
         if _rms_logger_initialized:
             return
 
-    # Remove the default handler if it exists
+    # Remove any default handlers
     main_logger = logging.getLogger()
-    for handler in main_logger.handlers[:]:  # [:] makes a copy of the list
+    for handler in main_logger.handlers[:]:
         main_logger.removeHandler(handler)
-            
-    # Create logging infrastructure
+
+    # Spawn listener process
     _rms_logging_queue = multiprocessing.Queue(-1)
     _rms_listener_process = multiprocessing.Process(
         target=_listener_process,
         args=(_rms_logging_queue, config, log_file_prefix, safedir)
     )
-    _rms_listener_process.daemon = True  # Set daemon attribute manually (for Python 2 compatibility)
+    _rms_listener_process.daemon = True
     _rms_listener_process.start()
 
     # Set DEBUG on root logger in main process
     main_logger = logging.getLogger()
-    main_logger.setLevel(level=level) # Keep root permissive
+    main_logger.setLevel(logging.DEBUG) # Keep root permissive
 
     # Configure queue handler for main process
     qh = logging.handlers.QueueHandler(_rms_logging_queue)
     qh.setFormatter(logging.Formatter('%(message)s'))
-    
-    # Set up root logger with queue handler
-    main_logger.handlers = []
-    main_logger.addHandler(qh)
+    qh.addFilter(InRmsFilter())
 
-    # Redirect standard streams
+    # Replace root handlers with our queue handler
+    main_logger.handlers = [qh]
+
+    # Redirect standard streams into the logger
     sys.stderr = LoggerWriter(main_logger, logging.WARNING)
     if config.log_stdout:
         sys.stdout = LoggerWriter(main_logger, logging.INFO)
@@ -429,7 +348,10 @@ def initLogging(config, log_file_prefix="", safedir=None, level=logging.DEBUG):
     main_logger.propagate = False
     _rms_logger_initialized = True
     main_logger.debug("initLogging completed; queue listener started.")
+
+    # Ensure clean shutdown
     atexit.register(shutdownLogging)
+
 
 
 def shutdownLogging():

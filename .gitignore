@@ -1,6 +1,7 @@
 # Sublime files
 *.sublime-project
 *.sublime-workspace
+*.code-workspace
 
 # Recorded BIN/FITS files
 FF*.bin
