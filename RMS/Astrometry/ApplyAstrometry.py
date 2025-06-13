@@ -34,8 +34,8 @@ import shutil
 import sys
 
 import numpy as np
-# Import Cython functions
-import pyximport
+
+
 import RMS.Formats.Platepar
 import scipy.optimize
 from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
@@ -54,6 +54,8 @@ from RMS.Math import angularSeparation, cartesianToPolar, polarToCartesian
 from RMS.Misc import RmsDateTime
 from RMS.Routines.SphericalPolygonCheck import sphericalPolygonCheck
 
+# Import Cython functions
+import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import (cyraDecToXY, cyTrueRaDec2ApparentAltAz,
                                         cyXYToRADec,
