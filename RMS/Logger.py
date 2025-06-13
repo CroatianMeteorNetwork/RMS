@@ -117,10 +117,10 @@ def _inside(path, root):
     Return True if *path* lies inside *root* (string-prefix test).
 
     We normalize *root* to end with the platform separator so that
-    “/opt/RMS_data” does **not** count as inside “/opt/RMS”.
+    "/opt/RMS_data" does **not** count as inside "/opt/RMS".
     Works on both Python 2.7 and 3.x.
     """
-    root = root.rstrip(os.sep) + os.sep   # ensure “…/RMS/” not “…/RMS”
+    root = root.rstrip(os.sep) + os.sep   # ensure ".../RMS/" not ".../RMS"
     return os.path.commonprefix([path, root]) == root
 
 
@@ -425,7 +425,7 @@ def initLogging(config, log_file_prefix="", safedir=None, level=logging.DEBUG):
     ext = config.external_script_path
     if ext:
         ext_root = os.path.realpath(ext)
-        if not os.path.isdir(ext_root):          # it’s a *.py*
+        if not os.path.isdir(ext_root):          # it's a *.py*
             ext_root = os.path.dirname(ext_root)  # grab its dir
         ALLOWED_DIRS.add(ext_root)
 
