@@ -112,6 +112,138 @@ class LoggerWriter:
         pass
 
 
+def _inside(path, root):
+    """
+    Return True if *path* lies inside *root* (string-prefix test).
+
+    We normalize *root* to end with the platform separator so that
+    "/opt/RMS_data" does **not** count as inside "/opt/RMS".
+    Works on both Python 2.7 and 3.x.
+    """
+    root = root.rstrip(os.sep) + os.sep   # ensure ".../RMS/" not ".../RMS"
+    return os.path.commonprefix([path, root]) == root
+
+
+class InRmsFilter(logging.Filter):
+    """
+    Logging filter that keeps only records whose source file lives
+    inside the RMS repository tree *and* outside any site-packages
+    directory.
+
+    - Records from third-party or standard-library modules (which
+      reside under site-packages) are discarded.
+    - Records from RMS codebase are allowed through.
+    """
+    def filter(self, record):
+        p = os.path.realpath(record.pathname)
+
+        # reject std-lib / third-party
+        if any(_inside(p, sd) for sd in SITE_DIRS):
+            return False
+
+        # accept RMS tree **or** external scripts directory
+        return any(_inside(p, root) for root in ALLOWED_DIRS)
+
+
+# Reproduced from RMS.Misc due to circular import issue
+def getRmsRootDir():
+    """
+        Return the path to the RMS root directory without importing the whole
+        codebase
+    """
+    if sys.version_info[0] == 3:
+        # Python 3.x: Use importlib to find the RMS module
+        rms_spec = importlib.util.find_spec('RMS')
+        if rms_spec is None or rms_spec.origin is None:
+            raise ImportError("RMS module not found.")
+
+        # Get the absolute path to the RMS root directory
+        return os.path.abspath(os.path.dirname(os.path.dirname(rms_spec.origin)))
+    else:
+        # Python 2.7: Use pkgutil (deprecated) to locate the RMS module
+        loader = pkgutil.get_loader('RMS')
+        if loader is None:
+            raise ImportError("RMS module not found.")
+
+        # Get the filename associated with the loader
+        rms_file = loader.get_filename()
+
+        # Get the absolute path to the RMS root directory
+        return os.path.abspath(os.path.dirname(os.path.dirname(rms_file)))
+
+
+# Reproduced from RMS.Misc due to circular import issue
+def mkdirP(path):
+    """ Makes a directory and handles all errors.
+    
+    Arguments:
+        path: [str] Directory path to create
+        
+    Return:
+        [bool] True if successful, False otherwise
+    """
+    try:
+        os.makedirs(path)
+        return True
+    except OSError as exc:
+        if exc.errno == errno.EEXIST:
+            return True
+        else:
+            print("Error creating directory: " + str(exc))
+            return False
+    except Exception as e:
+        print("Error creating directory: " + str(e))
+        return False
+
+
+# Reproduced from RMS.Misc due to circular import issue
+class RmsDateTime:
+    """ Use Python-version-specific UTC retrieval.
+    """
+    if sys.version_info[0] < 3:
+        @staticmethod
+        def utcnow():
+            return datetime.datetime.utcnow()
+    else:
+        @staticmethod
+        def utcnow():
+            return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
+
+# Reproduced from RMS.Misc due to circular import issue
+
+class UTCFromTimestamp:
+    """Cross-version helper to convert Unix timestamps to naive UTC datetime objects.
+
+    - Python 2.7-3.11: uses datetime.utcfromtimestamp()
+    - Python 3.12+: uses datetime.fromtimestamp(..., tz=timezone.utc).replace(tzinfo=None)
+    """
+
+    @staticmethod
+    def utcfromtimestamp(timestamp):
+        if sys.version_info >= (3, 12):
+            # Use aware datetime then strip tzinfo to make it naive
+            return datetime.datetime.fromtimestamp(
+                timestamp, tz=UTCFromTimestamp._get_utc_timezone()
+            ).replace(tzinfo=None)
+        else:
+            return datetime.datetime.utcfromtimestamp(timestamp)
+
+    @staticmethod
+    def _get_utc_timezone():
+        """Safely provide UTC tzinfo across Python versions."""
+        try:
+            # Python 3.2+
+            from datetime import timezone
+            return timezone.utc
+        except ImportError:
+            # Python 2: no timezone support
+            raise NotImplementedError(
+                "timezone-aware fromtimestamp() is not supported in Python < 3.2. "
+                "Use Python >= 3.12 or fallback to utcfromtimestamp()."
+            )
+
+
 
 def gstDebugLogger(category, level, file, function, line, obj, message, user_data):
     """ Maps GStreamer debug levels to Python logging levels and logs
@@ -328,12 +460,25 @@ def initLogging(config, log_file_prefix="", safedir=None, level=logging.DEBUG):
     _rms_listener_process.daemon = True
     _rms_listener_process.start()
 
-    # Set DEBUG on root logger in main process
-    main_logger = logging.getLogger()
-    main_logger.setLevel(logging.DEBUG) # Keep root permissive
+    # Keep root logger permissive
+    main_logger.setLevel(level)
 
-    # Configure queue handler for main process
-    qh = logging.handlers.QueueHandler(_rms_logging_queue)
+    # Configure queue handler (backport for Py2)
+    try:
+        QueueHandler = logging.handlers.QueueHandler
+    except AttributeError:
+        class QueueHandler(logging.Handler):
+            """Minimal backport of Python3's QueueHandler."""
+            def __init__(self, queue):
+                super(QueueHandler, self).__init__()
+                self.queue = queue
+            def emit(self, record):
+                try:
+                    self.queue.put(record)
+                except Exception:
+                    self.handleError(record)
+
+    qh = QueueHandler(_rms_logging_queue)
     qh.setFormatter(logging.Formatter('%(message)s'))
     qh.addFilter(InRmsFilter())
 
