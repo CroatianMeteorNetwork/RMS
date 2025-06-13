@@ -406,7 +406,7 @@ def _listener_process(queue, config, log_file_prefix, safedir):
 ##############################################################################
 
 def initLogging(config, log_file_prefix="", safedir=None, level=logging.DEBUG):
-    """ Called once in the MAIN process (e.g. StartCapture.py). 
+    """ Called once in the MAIN process (e.g. StartCapture.py).
     Spawns the listener process and configures logging.
 
     Arguments:
@@ -418,53 +418,74 @@ def initLogging(config, log_file_prefix="", safedir=None, level=logging.DEBUG):
     global _rms_logging_queue, _rms_listener_process, _rms_logger_initialized
     global RMS_ROOT, SITE_DIRS, ALLOWED_DIRS
 
-    # White-list RMS root and external script directories
+    # Whitelist RMS root and external script directories
     RMS_ROOT = os.path.realpath(getRmsRootDir())
     ALLOWED_DIRS = {RMS_ROOT}
-
     ext = config.external_script_path
     if ext:
         ext_root = os.path.realpath(ext)
-        if not os.path.isdir(ext_root):          # it's a *.py*
-            ext_root = os.path.dirname(ext_root)  # grab its dir
+        if not os.path.isdir(ext_root):          # it's a .py file
+            ext_root = os.path.dirname(ext_root)
         ALLOWED_DIRS.add(ext_root)
 
-    # Black-list site-packages directories
-    SITE_DIRS = {os.path.realpath(p) for p in site.getsitepackages()}
-    SITE_DIRS.add(os.path.realpath(site.getusersitepackages()))
+    # Blacklist site-packages directories (with Py2 fallback)
+    try:
+        site_packages = site.getsitepackages()
+        user_site    = site.getusersitepackages()
+    except (AttributeError, IOError):
+        from distutils.sysconfig import get_python_lib
+        site_packages = [get_python_lib()]
+        user_site     = getattr(site, 'USER_SITE',
+                                 get_python_lib(prefix=sys.prefix))
 
+    SITE_DIRS = set(os.path.realpath(p) for p in site_packages)
+    SITE_DIRS.add(os.path.realpath(user_site))
+
+    # Ensure we only init once
     with _rms_init_lock:
         if _rms_logger_initialized:
             return
 
-    # Remove the default handler if it exists
+    # Remove any default handlers
     main_logger = logging.getLogger()
-    for handler in main_logger.handlers[:]:  # [:] makes a copy of the list
+    for handler in main_logger.handlers[:]:
         main_logger.removeHandler(handler)
-            
-    # Create logging infrastructure
+
+    # Spawn listener process
     _rms_logging_queue = multiprocessing.Queue(-1)
     _rms_listener_process = multiprocessing.Process(
         target=_listener_process,
         args=(_rms_logging_queue, config, log_file_prefix, safedir)
     )
-    _rms_listener_process.daemon = True  # Set daemon attribute manually (for Python 2 compatibility)
+    _rms_listener_process.daemon = True
     _rms_listener_process.start()
 
-    # Set DEBUG on root logger in main process
-    main_logger = logging.getLogger()
-    main_logger.setLevel(level=level) # Keep root permissive
+    # Keep root logger permissive
+    main_logger.setLevel(level)
 
-    # Configure queue handler for main process
-    qh = logging.handlers.QueueHandler(_rms_logging_queue)
+    # Configure queue handler (backport for Py2)
+    try:
+        QueueHandler = logging.handlers.QueueHandler
+    except AttributeError:
+        class QueueHandler(logging.Handler):
+            """Minimal backport of Python3's QueueHandler."""
+            def __init__(self, queue):
+                super(QueueHandler, self).__init__()
+                self.queue = queue
+            def emit(self, record):
+                try:
+                    self.queue.put(record)
+                except Exception:
+                    self.handleError(record)
+
+    qh = QueueHandler(_rms_logging_queue)
     qh.setFormatter(logging.Formatter('%(message)s'))
     qh.addFilter(InRmsFilter())
 
-    # Set up root logger with queue handler
-    main_logger.handlers = []
-    main_logger.addHandler(qh)
+    # Replace root handlers with our queue handler
+    main_logger.handlers = [qh]
 
-    # Redirect standard streams
+    # Redirect standard streams into the logger
     sys.stderr = LoggerWriter(main_logger, logging.WARNING)
     if config.log_stdout:
         sys.stdout = LoggerWriter(main_logger, logging.INFO)
@@ -472,7 +493,10 @@ def initLogging(config, log_file_prefix="", safedir=None, level=logging.DEBUG):
     main_logger.propagate = False
     _rms_logger_initialized = True
     main_logger.debug("initLogging completed; queue listener started.")
+
+    # Ensure clean shutdown
     atexit.register(shutdownLogging)
+
 
 
 def shutdownLogging():
