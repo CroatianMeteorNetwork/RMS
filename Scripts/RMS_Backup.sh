@@ -26,18 +26,14 @@ if [ ! -f $CONFIG_FILE ]; then
     exit 1
 fi
 
+MASK_FILE="${RMS_DIR}/mask.bmp"
+PLATEPAR_FILE="${RMS_DIR}/platepar_cmn2010.cal"
+
+STATIONS="${HOME}/source/Stations"
+
+RSA="${HOME}/.ssh"
+
 cd $(dirname $CONFIG_FILE)
-
-RSA_PRIV_FILE=$(read_property "rsa_private_key")
-RSA_PRIV_FILE="${RSA_PRIV_FILE/#\~/$HOME}"
-
-RSA_PUB_FILE=${RSA_PRIV_FILE}.pub
-
-PLATEPAR_FILE=$(read_property "platepar_name")
-PLATEPAR_FILE=$(realpath "${PLATEPAR_FILE/#\~/$HOME}")
-
-MASK_FILE=$(read_property "mask")
-MASK_FILE=$(realpath "${MASK_FILE/#\~/$HOME}")
 
 STATION_ID=$(read_property "stationID")
 TIMESTAMP=$(date +%Y-%m-%d)
@@ -48,15 +44,15 @@ echo "----------"
 echo
 echo "Station ID:....: " $STATION_ID
 echo "RMS config.....: " $CONFIG_FILE
-echo "RSA private key: " $RSA_PRIV_FILE
-echo "RSA public key.: " $RSA_PUB_FILE
-echo "Platepar.......: " $PLATEPAR_FILE
 echo "Mask...........: " $MASK_FILE
+echo "Platepar.......: " $PLATEPAR_FILE
+echo "RSA ...........: " $RSA
+echo "Stations.......: " $STATIONS
 echo
 echo "Compressing files..."
 
+zip -q -r $BACKUP_FILE $CONFIG_FILE $MASK_$PLATEPAR_FILE FILE $RSA $STATIONS
 
-zip -q --junk-paths $BACKUP_FILE $CONFIG_FILE $RSA_PRIV_FILE $RSA_PUB_FILE $PLATEPAR_FILE $MASK_FILE
 echo "Backup saved to: $BACKUP_FILE"
 
 exit 0
