@@ -393,12 +393,19 @@ class QueuedPool(object):
         if cores is not None:
             self.cores.set(cores)
 
+        # Get the value once and use it locally
+        core_value = self.cores.value()
+        if core_value < 1:
+            self.printAndLog('WARNING: Core count was {:d}, using minimum of 1'.format(core_value))
+            num_cores = 1
+        else:
+            num_cores = core_value
 
-        self.printAndLog('Using {:d} cores'.format(self.cores.value()))
+        self.printAndLog('Using {:d} cores'.format(num_cores))
 
         # Initialize the pool of workers with the given number of worker cores
         # Comma in the argument list is a must!
-        self.pool = multiprocessing.Pool(self.cores.value(), self._workerFunc, (self.func, ))
+        self.pool = multiprocessing.Pool(num_cores, self._workerFunc, (self.func, ))
 
 
 
