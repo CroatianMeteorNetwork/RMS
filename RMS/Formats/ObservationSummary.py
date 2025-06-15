@@ -589,7 +589,7 @@ def retrieveObservationData(conn, obs_start_time, ordering=None):
         # the two items into one.
 
         ordering = ['stationID',
-                    'commit_date', 'commit_hash','media_backend',
+                    'commit_date', 'commit_hash','media_backend','star_catalog_file',
                     'hardware_version',
                     'captured_directories',
                     'storage_used_gb', 'storage_free_gb', 'storage_total_gb',
@@ -597,12 +597,12 @@ def retrieveObservationData(conn, obs_start_time, ordering=None):
                     'camera_pointing_alt','camera_pointing_az',
                     'camera_information',
                     'clock_measurement_source', 'clock_synchronized', 'clock_ahead_ms', 'clock_error_uncertainty_ms',
-                    'start_time', 'duration', 'photometry_good',
+                    'start_time', 'duration', 'photometry_good', 'star_catalog_file',
                     'time_first_fits_file', 'time_last_fits_file', 'total_expected_fits','total_fits',
                     'fits_files_from_duration','fits_file_shortfall', 'fits_file_shortfall_as_time',
                     'capture_duration_from_fits',
                     'detections_after_ml',
-                    'media_backend','jitter_quality','dropped_frame_rate']
+                    'media_backend','protocol_in_use','jitter_quality','dropped_frame_rate']
 
     # use this print call to check the ordering
     #print("Ordering {}".format(ordering))
@@ -834,6 +834,8 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
     addObsParam(obs_db_conn, "total_fits", fits_count)
     addObsParam(obs_db_conn, "fits_file_shortfall", fits_file_shortfall)
     addObsParam(obs_db_conn, "fits_file_shortfall_as_time", fits_file_shortfall_as_time)
+    addObsParam(obs_db_conn, "protocol_in_use", config.protocol)
+    addObsParam(obs_db_conn, "star_catalog_file", config.star_catalog_file)
     obs_db_conn.close()
 
     writeToFile(config, getRMSStyleFileName(night_data_dir, "observation_summary.txt"))
