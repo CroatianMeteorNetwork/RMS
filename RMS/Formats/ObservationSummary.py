@@ -30,12 +30,12 @@ import sys
 import os
 import subprocess
 from time import strftime
-
+from datetime import datetime, timezone
 from RMS.Misc import niceFormat, isRaspberryPi, sanitise, getRMSStyleFileName, getRmsRootDir, UTCFromTimestamp
 import re
 import sqlite3
 from RMS.ConfigReader import parse
-from datetime import datetime, timezone
+
 import platform
 import git
 import shutil
@@ -732,7 +732,9 @@ def startObservationSummaryReport(config, duration, force_delete=False):
 
 
     conn = getObsDBConn(config, force_delete=force_delete)
-    addObsParam(conn, "start_time", (datetime.datetime.now(timezone.utc) - datetime.timedelta(seconds=1)).replace(tzinfo=timezone.utc))
+    start_time_object = (datetime.datetime.now(timezone.utc) - datetime.timedelta(seconds=1)).replace(tzinfo=timezone.utc)
+    start_time_object_rounded = start_time_object.replace(microsecond=0)
+    addObsParam(conn, "start_time", start_time_object_rounded)
     addObsParam(conn, "duration", duration)
     addObsParam(conn, "stationID", sanitise(config.stationID, space_substitution=""))
 
