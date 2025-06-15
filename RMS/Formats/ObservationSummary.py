@@ -29,6 +29,7 @@ from __future__ import print_function, division, absolute_import
 import sys
 import os
 import subprocess
+from multiprocessing.sharedctypes import synchronized
 from time import strftime
 
 from RMS.Misc import niceFormat, isRaspberryPi, sanitise, getRMSStyleFileName, getRmsRootDir, UTCFromTimestamp
@@ -60,6 +61,25 @@ import socket
 import struct
 import sys
 import time
+
+
+def getTimeClient():
+
+
+    clients = {
+        'systemd-timesyncd': ['systemctl', 'is-active', 'systemd-timesyncd'],
+        'chronyd': ['systemctl', 'is-active', 'chronyd'],
+        'ntpd': ['systemctl', 'is-active', 'ntp']
+    }
+
+    for name, cmd in clients.items():
+        try:
+            output = subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode().strip()
+            if output == 'active':
+                return name
+        except subprocess.CalledProcessError:
+            pass  # Not active or not installed
+    return "Not recognized"
 
 
 def getObsDBConn(config, force_delete=False):
@@ -276,7 +296,93 @@ def timestampFromNTP(addr='time.cloudflare.com'):
     else:
         return None, None
 
-def timeSyncStatus(config):
+def getNTPUncertainty():
+
+    try:
+        cmd = ["ntpstat"]
+        lines = subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode().strip().splitlines()
+
+        # ntpstat uses the UK spelling of synchronised.
+        synchronized = False
+        if lines[0].startswith("synchronised"):
+            synchronized = True
+        else:
+            synchronized = False
+        # ntpstat return milliseconds rather than base units, do not multiply 1000
+        uncertainty_ms = float(lines[1].split()[4])
+        return synchronized, uncertainty_ms, "Unknown"
+    except:
+        pass
+
+    try:
+        cmd = ["ntpq", '-p']
+        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode().strip()
+        lines = output.splitlines()
+        for line in lines:
+            if line[0] == "*":
+                fields = line.split()
+                uncertainty =  float(fields[7]) + float(fields[8]) + float(fields[9])
+                return "True", uncertainty, "Unknown"
+    except:
+        pass
+
+    return "Unknown", "Unknown", "Unknown"
+
+    pass
+
+def getChronyUncertainty():
+
+    # uncertainty implementation is taken from
+    # https://chrony-project.org/doc/3.3/chronyc.html
+
+    # Root dispersion
+    #
+    #     This is the total dispersion accumulated through all the computers back to the
+    #     stratum-1 computer from which the computer is ultimately synchronised. Dispersion is due
+    #     to system clock resolution, statistical measurement variations, etc.
+    #
+    #     An absolute bound on the computer’s clock accuracy (assuming the stratum-1 computer is correct) is given by:
+    #
+    #     clock_error <= |system_time_offset| + root_dispersion + (0.5 * root_delay)
+
+    # This is very high at initial synchronisation, as root dispersion dominates.
+
+    synchronized = False
+    try:
+        cmd = ["chronyc", "tracking"]
+        lines = subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode().strip().splitlines()
+        print(lines)
+        ahead_ms = "Unknown"
+        for line in lines:
+            if line.startswith("Last offset"):
+                system_time_offset = float(line.split(":")[1].strip().split()[0])
+            if line.startswith("Root dispersion"):
+                root_dispersion = float(line.split(":")[1].strip().split()[0])
+            if line.startswith("Root delay"):
+                root_delay = float(line.split(":")[1].strip().split()[0])
+            if line.startswith("System time"):
+                if "slow" in line:
+                    ahead_ms = 0 - float(line.split(":")[1].strip().split()[0]) * 1000
+                else:
+                    ahead_ms = 0 + float(line.split(":")[1].strip().split()[0]) * 1000
+            if line.startswith("Leap status"):
+                if "Not synchronised" in line:
+                    synchronized = False
+                else:
+                    synchronized = True
+        if synchronized:
+            uncertainty_ms = (abs(system_time_offset) + root_dispersion + (0.5 * root_delay)) * 1000
+        else:
+            uncertainty_ms = "Unknown"
+            ahead_ms = "Unknown"
+        return synchronized, ahead_ms, uncertainty_ms
+
+    except:
+        return "False", "Unknown", "Unknown"
+
+
+
+def timeSyncStatus(config, conn):
 
     """
 
@@ -288,26 +394,48 @@ def timeSyncStatus(config):
     Returns:
         Approximate time error in seconds
     """
+    time_client = getTimeClient()
 
-    remote_time_query, uncertainty = timestampFromNTP()
-    if remote_time_query is not None:
-        local_time_query = (datetime.datetime.utcnow() - datetime.datetime(1970, 1, 1)).total_seconds()
-        time_ahead_seconds = local_time_query - remote_time_query
+    if time_client =="ntpd":
+        synchronized, uncertainty, ahead_ms = getNTPUncertainty()
+        addObsParam(conn, "time_client", "ntp")
+        addObsParam(conn, "clock_synchronized", synchronized)
+        addObsParam(conn, "clock_ahead_ms", ahead_ms)
+        addObsParam(conn, "clock_error_uncertainty_ms", uncertainty)
+
+    elif time_client == "chronyd":
+        synchronized, ahead_ms, uncertainty_ms = getChronyUncertainty()
+        addObsParam(conn, "time_client", "chrony")
+        addObsParam(conn, "clock_synchronized", synchronized)
+        addObsParam(conn, "clock_ahead_ms", ahead_ms)
+        addObsParam(conn, "clock_error_uncertainty_ms", uncertainty_ms)
+
     else:
-        time_error_seconds, uncertainty = "Unknown", "Unknown"
-
-    result_list = subprocess.run(['timedatectl','status'], capture_output = True).stdout.splitlines()
-    #print(result_list)
-    for raw_result in result_list:
-        result = raw_result.decode('ascii')
-        if "synchronized" in result:
-            conn = getObsDBConn(config)
-            addObsParam(conn, "clock_synchronized", result.split(":")[1].strip())
-            addObsParam(conn, "clock_ahead_ms", time_ahead_seconds * 1000)
+        addObsParam(conn, "time_client", "Not detected")
+        remote_time_query, uncertainty = timestampFromNTP()
+        if remote_time_query is not None:
+            local_time_query = (datetime.datetime.utcnow() - datetime.datetime(1970, 1, 1)).total_seconds()
+            ahead_ms = (local_time_query - remote_time_query) * 1000
             addObsParam(conn, "clock_error_uncertainty_ms", uncertainty * 1000)
-            conn.close()
 
-    return time_ahead_seconds
+        else:
+            ahead_ms, uncertainty = "Unknown", "Unknown"
+            addObsParam(conn, "clock_error_uncertainty_ms", uncertainty)
+        addObsParam(conn, "clock_ahead_ms", ahead_ms)
+
+        result_list = subprocess.run(['timedatectl','status'], capture_output = True).stdout.splitlines()
+        #print(result_list)
+        for raw_result in result_list:
+            result = raw_result.decode('ascii')
+            if "synchronized" in result:
+                conn = getObsDBConn(config)
+                if result.split(":")[1].strip() == "no":
+                    addObsParam(conn, "clock_synchronized", False)
+                else:
+                    addObsParam(conn, "clock_synchronized", True)
+
+
+    return ahead_ms
 
 def finalizeObservationSummary(config, night_data_dir, platepar=None):
 
@@ -326,12 +454,15 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
     capture_duration_from_fits, fits_count, fits_file_shortfall, fits_file_shortfall_as_time, time_first_fits_file, \
         time_last_fits_file, total_expected_fits = nightSummaryData(config, night_data_dir)
 
+
+
+    obs_db_conn = getObsDBConn(config)
+
     try:
-        timeSyncStatus(config)
+        timeSyncStatus(config, obs_db_conn)
     except Exception as e:
         print(repr(e))
 
-    obs_db_conn = getObsDBConn(config)
     platepar_path = os.path.join(config.config_file_path, config.platepar_name)
     if os.path.exists(platepar_path):
         platepar = Platepar()
@@ -416,7 +547,7 @@ def addObsParam(conn, key, value):
 
             """
 
-
+    print(key,value)
     sql_statement = ""
     sql_statement += "INSERT INTO records \n"
     sql_statement += "(\n"
@@ -542,7 +673,7 @@ def retrieveObservationData(conn, obs_start_time, ordering=None):
                     'camera_lens','camera_fov_h','camera_fov_v',
                     'camera_pointing_alt','camera_pointing_az',
                     'camera_information',
-                    'clock_ahead_ms', 'clock_error_uncertainty_ms', 'clock_synchronized',
+                    'time_client', 'clock_synchronized', 'clock_ahead_ms', 'clock_error_uncertainty_ms',
                     'start_time', 'duration', 'photometry_good',
                     'time_first_fits_file', 'time_last_fits_file', 'total_expected_fits','total_fits',
                     'fits_files_from_duration','fits_file_shortfall', 'fits_file_shortfall_as_time',
@@ -688,9 +819,6 @@ if __name__ == "__main__":
 
     config = parse(os.path.expanduser("~/source/RMS/.config"))
 
-
-
-    timeSyncStatus(config)
     obs_db_conn = getObsDBConn(config)
     startObservationSummaryReport(config, 100, force_delete=False)
     pp = Platepar()
