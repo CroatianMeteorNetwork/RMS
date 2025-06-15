@@ -398,20 +398,20 @@ def timeSyncStatus(config, conn):
 
     if time_client =="ntpd":
         synchronized, uncertainty, ahead_ms = getNTPUncertainty()
-        addObsParam(conn, "time_client", "ntp")
+        addObsParam(conn, "clock_measurement_source", "ntp")
         addObsParam(conn, "clock_synchronized", synchronized)
         addObsParam(conn, "clock_ahead_ms", ahead_ms)
         addObsParam(conn, "clock_error_uncertainty_ms", uncertainty)
 
     elif time_client == "chronyd":
         synchronized, ahead_ms, uncertainty_ms = getChronyUncertainty()
-        addObsParam(conn, "time_client", "chrony")
+        addObsParam(conn, "clock_measurement_source", "chrony")
         addObsParam(conn, "clock_synchronized", synchronized)
         addObsParam(conn, "clock_ahead_ms", ahead_ms)
         addObsParam(conn, "clock_error_uncertainty_ms", uncertainty_ms)
 
     else:
-        addObsParam(conn, "time_client", "Not detected")
+        addObsParam(conn, "clock_measurement_source", "Not detected")
         remote_time_query, uncertainty = timestampFromNTP()
         if remote_time_query is not None:
             local_time_query = (datetime.datetime.utcnow() - datetime.datetime(1970, 1, 1)).total_seconds()
@@ -673,7 +673,7 @@ def retrieveObservationData(conn, obs_start_time, ordering=None):
                     'camera_lens','camera_fov_h','camera_fov_v',
                     'camera_pointing_alt','camera_pointing_az',
                     'camera_information',
-                    'time_client', 'clock_synchronized', 'clock_ahead_ms', 'clock_error_uncertainty_ms',
+                    'clock_measurement_source', 'clock_synchronized', 'clock_ahead_ms', 'clock_error_uncertainty_ms',
                     'start_time', 'duration', 'photometry_good',
                     'time_first_fits_file', 'time_last_fits_file', 'total_expected_fits','total_fits',
                     'fits_files_from_duration','fits_file_shortfall', 'fits_file_shortfall_as_time',
