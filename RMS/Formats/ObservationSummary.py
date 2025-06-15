@@ -245,8 +245,8 @@ def getChronyUncertainty():
     try:
         cmd = ["chronyc", "tracking"]
         lines = subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode().strip().splitlines()
-        print(lines)
         ahead_ms = "Unknown"
+
         for line in lines:
             if line.startswith("Last offset"):
                 system_time_offset = float(line.split(":")[1].strip().split()[0])
@@ -264,11 +264,13 @@ def getChronyUncertainty():
                     synchronized = False
                 else:
                     synchronized = True
+
         if synchronized:
             uncertainty_ms = (abs(system_time_offset) + root_dispersion + (0.5 * root_delay)) * 1000
         else:
             uncertainty_ms = "Unknown"
             ahead_ms = "Unknown"
+
         return synchronized, ahead_ms, uncertainty_ms
 
     except:
@@ -406,7 +408,7 @@ def addObsParam(conn, key, value):
 
             """
 
-    print(key,value)
+
     sql_statement = ""
     sql_statement += "INSERT INTO records \n"
     sql_statement += "(\n"
@@ -847,7 +849,6 @@ if __name__ == "__main__":
     config = parse(os.path.expanduser("~/source/RMS/.config"))
 
     obs_db_conn = getObsDBConn(config)
-    print(timeSyncStatus(config, obs_db_conn))
     startObservationSummaryReport(config, 100, force_delete=False)
     pp = Platepar()
     pp.read(os.path.expanduser(os.path.join(config.rms_root_dir, "platepar_cmn2010.cal")))
