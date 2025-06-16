@@ -605,7 +605,7 @@ def retrieveObservationData(conn, obs_start_time, ordering=None):
                     'media_backend','protocol_in_use','jitter_quality','dropped_frame_rate']
 
     # use this print call to check the ordering
-    #print("Ordering {}".format(ordering))
+    print("Ordering {}".format(ordering))
 
     sql_statement = ""
     sql_statement += "SELECT Key, Value from records \n"
