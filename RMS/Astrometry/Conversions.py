@@ -480,75 +480,83 @@ def ECEF2AltAz(s_vect, p_vect):
 def addECEFVectortoLatLonEle(lat, lon, ele_egm96, x ,y, z, config, radians=False):
     """
 
+    Add an ECEF vector to a latitude, longitude and elevation.
+
     Given a latitude and longitude in degrees, optionally radians, wgs84 and elevation in egm96 in meters
     and an ECEF vector, return a new position in latitude and longitude in degrees, optionally radians,
     and an elevation in egm96 in meters.
 
 
-    Args:
-        [float] lat_deg: latitude in degrees
-        [float] lon_deg: longitude in degrees
-        [float] ele_egm96: elevation in meters egm96 basis
-        [float] x: x component of ECEF coordinate vector
-        [float] y: y component of ECEF coordinate vector
-        [float] z: z component of ECEF coordinate vector
-        [float] config: optional station config file required for the path of elevation conversion data
-        [bool] radians: optional, default False
+    Arguments:
+        lat_: [float] latitude wgs84 degrees, optionally radians
+        lon_: [float] longitude wgs84 degrees, optionally radians
+        ele_egm96: [float] elevation in meters egm96 basis
+        x: [float] component of ECEF coordinate vector in meters
+        y: [float]  component of ECEF coordinate vector in meters
+        z: [float]  component of ECEF coordinate vector in meters
+        config: Config instance with the path to EGM96 coefficients
 
-    Returns:
-        [float] latitude in degrees
-        [float] longitude in degrees
-        [float] elevation in meters egm96 basis
+    Keyword arguments:
+        radians: [bool] optional, default False
+
+    Return:
+        lat_: [float] latitude wgs84 degrees, optionally radians
+        lon_: [float] longitude wgs84, optionally radians
+        ele_egm96_: [float]  in meters egm96 basis
     """
 
     if not radians:
-        #convert to radians and elevation and elevation in egm96 to altitude in wgs84
+        # Convert to radians and elevation and elevation in egm96 to altitude in wgs84
         lat_rads, lon_rads = np.radians(lat), np.radians(lon)
     else:
-        # pass through as rads
+        # Pass through as radians
         lat_rads, lon_rads = lat, lon
 
-    # convert elevation in egm96 to altitude in wgs84
+    # Convert elevation in egm96 to altitude in wgs84
     alt_wgs84 = mslToWGS84Height(lat_rads, lon_rads, ele_egm96, config)
 
-    # compute ecef coordinates
+    # Compute ecef coordinates
     ecef_x, ecef_y, ecef_z = latLonAlt2ECEF(lat_rads, lon_rads, alt_wgs84)
 
-    # add the ecef vector to the original position
+    # Add the ecef vector to the original position
     ecef_x_, ecef_y_, ecef_z_ = x + ecef_x, y + ecef_y, z + ecef_z
 
-    # convert back to latitude and longitude in radians, altitude wgs84
+    # Convert back to latitude and longitude in radians, altitude wgs84
     lat_rads_, lon_rads_, alt_wgs84_ = ecef2LatLonAlt(ecef_x_, ecef_y_, ecef_z_)
 
-    # convert wgs84 altitude to egm96 elevation at the new position
+    # Convert wgs84 altitude to egm96 elevation at the new position
     ele_egm96_ = wgs84toMSLHeight(lat_rads_, lon_rads_, alt_wgs84_, config)
 
     if not radians:
-        # convert to degrees
+        # Convert to degrees
         lat_, lon_ = np.degrees(lat_rads_), np.degrees(lon_rads_)
     else:
-        # pass through as rads
+        # Pass through as rads
         lat_, lon_ = lat_rads_, lon_rads_
 
-    # return computed values
+    # Return computed values
     return lat_, lon_, ele_egm96_
 
 def getECEFVectorBetweenGeoPoints(lat_1, lon_1, ele_1_egm96, lat_2, lon_2, ele_2_egm96, config, radians=False):
     """
+    Compute ECEF vector between two points.
+
     From a pair of lat, lon in degrees, optionally radians, and elevation in egm96 basis
     compute the ECEF vector between the two points.
 
-    Point 2 is the end of the vector, Point 1 is the start of the vector
+    Point 2 is the end of the vector, Point 1 is the start of the vector.
 
-    Args:
-        [float] lat_1: latitude in degrees optionally radians
-        [float] lon_1: longitude in degrees optionally radians
-        [float] ele_1_egm96: elevation in meters egm96 basis
-        [float] lat_2: latitude in degrees optionally radians
-        [float] lon_2: longitude in degrees optionally radians
-        [float] ele_2_egm96: elevation in meters egm96 basis
-        [float] config: RMS config file
-        [bool] radians: optional default False
+    Arguments:
+        lat_1: [float] latitude in degrees optionally radians
+        lon_1: [float] longitude in degrees optionally radians
+        ele_1_egm96: [float] elevation in meters egm96 basis
+        lat_2: [float] latitude in degrees optionally radians
+        lon_2: [float] longitude in degrees optionally radians
+        ele_2_egm96: [float] elevation in meters egm96 basis
+        config: Config instance with the path to EGM96 coefficients
+
+    Keyword arguments:
+        radians: [bool] optional default False
 
     Returns:
         [float] ecef vector x component
@@ -557,26 +565,26 @@ def getECEFVectorBetweenGeoPoints(lat_1, lon_1, ele_1_egm96, lat_2, lon_2, ele_2
     """
 
     if not radians:
-        # convert to degrees
+        # Convert to degrees
         lat_1_rads, lon_1_rads = np.radians(lat_1), np.radians(lon_1)
         lat_2_rads, lon_2_rads = np.radians(lat_2), np.radians(lon_2)
     else:
-        # pass through as rads
+        # Pass through as radians
         lat_1_rads, lon_1_rads = lat_1, lon_1
         lat_2_rads, lon_2_rads = lat_2, lon_2
 
-    # compute wgs84 elevations
+    # Compute wgs84 elevations
     alt_1_wgs84 = mslToWGS84Height(lat_1_rads, lon_1_rads, ele_1_egm96, config)
     alt_2_wgs84 = mslToWGS84Height(lat_2_rads, lon_2_rads, ele_2_egm96, config)
 
-    # compute ecef coordinates
+    # Compute ecef coordinates
     ecef_x_1, ecef_y_1, ecef_z_1 = latLonAlt2ECEF(lat_1_rads, lon_1_rads, alt_1_wgs84)
     ecef_x_2, ecef_y_2, ecef_z_2 = latLonAlt2ECEF(lat_2_rads, lon_2_rads, alt_2_wgs84)
 
-    # compute vector
+    # Compute vector
     x_, y_, z_ = ecef_x_2 - ecef_x_1, ecef_y_2 - ecef_y_1, ecef_z_2 - ecef_z_1
 
-    # return computed values
+    # Return computed values
     return x_, y_, z_
 
 def AER2ECEF(azim, elev, r, lat, lon, alt):
