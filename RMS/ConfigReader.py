@@ -989,13 +989,38 @@ def parseCapture(config, parser):
         config.logdays_to_keep = int(parser.get(section, "logdays_to_keep"))
 
     if parser.has_option(section, "console_log_level"):
-        config.console_log_level = parser.get(section, "console_log_level")
-
-    if parser.has_option(section, "console_log_level"):
-        config.console_log_level = parser.get(section, "console_log_level")
+        config.console_log_level = parser.getint(section, "console_log_level")
+        if config.console_log_level < 0:
+            config.console_log_level = 'INFO'
+        elif config.console_log_level > 5:
+            config.console_log_level = 'DEBUG'
+        elif config.console_log_level == 0:
+            config.console_log_level = 'CRITICAL'
+        elif config.console_log_level == 1:
+            config.console_log_level = 'ERROR'
+        elif config.console_log_level == 2:
+            config.console_log_level = 'WARNING'
+        elif config.console_log_level == 3:
+            config.console_log_level = 'INFO'
+        elif config.console_log_level == 4:
+            config.console_log_level = 'DEBUG'
 
     if parser.has_option(section, "log_file_log_level"):
-        config.log_file_log_level = parser.getboolean(section, "log_file_log_level")
+        config.log_file_log_level = parser.getint(section, "log_file_log_level")
+        if config.log_file_log_level < 0:
+            config.log_file_log_level = 'INFO'
+        elif config.log_file_log_level > 5:
+            config.log_file_log_level = 'DEBUG'
+        elif config.log_file_log_level == 0:
+            config.log_file_log_level = 'CRITICAL'
+        elif config.log_file_log_level == 1:
+            config.log_file_log_level = 'ERROR'
+        elif config.log_file_log_level == 2:
+            config.log_file_log_level = 'WARNING'
+        elif config.log_file_log_level == 3:
+            config.log_file_log_level = 'INFO'
+        elif config.log_file_log_level == 4:
+            config.log_file_log_level = 'DEBUG'
 
     if parser.has_option(section, "arch_dirs_to_keep"):
         config.arch_dirs_to_keep = int(parser.get(section, "arch_dirs_to_keep"))
