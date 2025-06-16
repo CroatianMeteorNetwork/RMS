@@ -488,8 +488,8 @@ def addECEFVectortoLatLonEle(lat, lon, ele_egm96, x ,y, z, config, radians=False
 
 
     Arguments:
-        lat_: [float] latitude wgs84 degrees, optionally radians
-        lon_: [float] longitude wgs84 degrees, optionally radians
+        lat: [float] latitude wgs84 degrees, optionally radians
+        lon: [float] longitude wgs84 degrees, optionally radians
         ele_egm96: [float] elevation in meters egm96 basis
         x: [float] component of ECEF coordinate vector in meters
         y: [float]  component of ECEF coordinate vector in meters
