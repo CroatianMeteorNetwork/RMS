@@ -508,7 +508,7 @@ def addECEFVectortoLatLonEle(lat, lon, ele_egm96, x ,y, z, config, radians=False
         # pass through as rads
         lat_rads, lon_rads = lat, lon
 
-    # convert elevation in egm96 to altitude in wgs94
+    # convert elevation in egm96 to altitude in wgs84
     alt_wgs84 = mslToWGS84Height(lat_rads, lon_rads, ele_egm96, config)
 
     # compute ecef coordinates
