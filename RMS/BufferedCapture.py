@@ -49,12 +49,12 @@ import Utils.CameraControl as cc
 # Get the logger from the main module
 log = getLogger("logger")
 
-try:
-    # py3
-    from urllib.parse import urlparse
-except ImportError:
+if sys.version_info[0] < 3:
     # py2
     from urlparse import urlparse
+else:
+    # py3
+    from urllib.parse import urlparse
 
 
 GST_IMPORTED = False
@@ -1906,7 +1906,7 @@ class BufferedCapture(Process):
                     
                     # For GStreamer, show elapsed time since frame capture to assess sink fill level
                     else:
-                        log.info("Block's max frame age: {:.3f} seconds. Run's dropped frames: {}"
+                        log.debug("Block's max frame age: {:.3f} seconds. Run's dropped frames: {}"
                                  .format(max_frame_age_seconds, self.dropped_frames.value))
 
                 last_frame_timestamp = frame_timestamp
@@ -1995,7 +1995,7 @@ class BufferedCapture(Process):
                 else:
                     self.start_time2.value = first_frame_timestamp
 
-                log.info('New block of raw frames available for compression with starting time: {:s}'
+                log.debug('New block of raw frames available for compression with starting time: {:s}'
                          .format(str(first_frame_timestamp)))
 
             
@@ -2020,7 +2020,7 @@ class BufferedCapture(Process):
 
                 mkdirP(ft_subpath)
                 FTfile.write(ft, ft_subpath, ft_filename)
-                log.info("Created FT file {} for block starting at {}".format(os.path.join(ft_subpath, ft_filename), first_frame_timestamp))
+                log.debug("Created FT file {} for block starting at {}".format(os.path.join(ft_subpath, ft_filename), first_frame_timestamp))
 
                 # For Testing: 
                 # Print first and last 10 timestamps, array length, average time difference and time difference from last block

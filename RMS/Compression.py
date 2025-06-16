@@ -354,7 +354,7 @@ class Compressor(multiprocessing.Process):
 
                 # Add the file to the detector queue
                 self.detector.addJob([self.data_dir, filename, self.config])
-                log.info('Added file for detection: {:s}'.format(filename))
+                log.debug('Added file for detection: {:s}'.format(filename))
 
 
 
