@@ -60,7 +60,7 @@ import socket
 import struct
 import sys
 import time
-
+import tempfile
 
 def roundWithoutTrailingZero(value, no):
 
@@ -571,6 +571,211 @@ def nightSummaryData(config, night_data_dir):
     return capture_duration_from_fits, fits_count, fits_file_shortfall, fits_file_shortfall_as_time, \
                         time_first_fits_file, time_last_fits_file, total_expected_fits
 
+
+def updateCommitHistoryDirectory(remote_urls, target_directory):
+
+    """
+
+    Clone only the commit history of a remote repository.
+
+    Args:
+        remote_urls: the remote url to be cloned
+        target_directory: the directory into which to clone
+
+    Returns:
+        directory of the repository
+
+    """
+
+
+    if os.path.exists(target_directory):
+        shutil.rmtree(target_directory)
+
+    os.makedirs(target_directory)
+    first_remote = True
+    for remote_url in remote_urls:
+        local_name, url = remote_url[0], remote_url[1]
+
+        if first_remote:
+            first_remote = False
+            p = subprocess.Popen(["git", "clone", url, "--filter=blob:none", "--no-checkout"], cwd=target_directory,
+                             stdout=subprocess.PIPE)
+            p.wait()
+            # this first remote might have been pulled in with the wrong local_name so rename it
+            commit_repo_directory = os.path.join(target_directory, os.listdir(target_directory)[0])
+            downloaded_remote_name = subprocess.check_output(["git", "remote"], cwd = commit_repo_directory).strip().decode('utf-8')
+            print(downloaded_remote_name)
+            if downloaded_remote_name != local_name:
+                p = subprocess.Popen(["git", "remote", "rename", downloaded_remote_name, local_name], cwd = commit_repo_directory)
+                p.wait()
+
+        else:
+            # this is not the first remote so add another remote
+
+            p = subprocess.Popen(["git", "remote", "add", local_name, url], cwd = commit_repo_directory)
+            p.wait()
+            p = subprocess.Popen(["git", "fetch", "--filter=blob:none", local_name], cwd = commit_repo_directory)
+            p.wait()
+    return commit_repo_directory
+
+def getCommit(repo):
+
+    """
+
+    Args:
+        repo:file location of a repository
+
+    Returns:
+        latest commit in that repository
+    """
+
+    commit = subprocess.check_output(["git", "log", "-n 1", "--pretty=format:%H"], cwd=repo).decode(
+        "utf-8")
+
+    return commit
+
+def getDateOfCommit(repo, commit):
+
+    """
+
+    Args:
+        repo: directory of repository
+        commit: commit hash
+
+    Returns:
+        python datetime object of the time and date of that commit
+    """
+
+    if commit is None:
+        return datetime.datetime.strptime("2000-01-01 00:00:00 +00:00", "%Y-%m-%d %H:%M:%S %z")
+    commit_date  = subprocess.check_output(["git", "show", "-s", "--format=%ci", commit], cwd=repo).decode('utf8').replace("\n","")
+    return datetime.datetime.strptime(commit_date, "%Y-%m-%d %H:%M:%S %z")
+
+def getRemoteUrls(repo):
+
+    """
+
+    Args:
+        repo: directory of repository
+
+    Returns:
+        return a list of [remote, url] where remote is the local name of a remote and URL is the URL of the remote
+    """
+
+    urls_and_remotes = subprocess.check_output(["git", "remote", "-v"], cwd=repo).decode("utf-8").split("\n")
+    url_remote_list_to_return = []
+    for url_and_remote in urls_and_remotes:
+        url_and_remote = url_and_remote.split("\t")
+        if len(url_and_remote) == 2:
+            remote, url = [url_and_remote[0], url_and_remote[1]]
+            url = url.split(" ")[0]
+            if not [remote, url] in url_remote_list_to_return:
+                url_remote_list_to_return.append([remote, url])
+    return url_remote_list_to_return
+
+def getBranchOfCommit(repo, commit):
+
+    """
+
+    Args:
+        repo: directory of repository
+        commit: commit hash
+
+    Returns:
+        A branch where a commit exists. There may be several branches, only one will be returned.
+    """
+
+    local_branch = subprocess.check_output(["git", "branch", "-a", "--contains", commit], cwd=repo).decode(
+         "utf-8").split("\n")[0].replace("*", "").strip()
+    return local_branch
+
+def getLatestCommit(repo, commit_branch):
+
+    """
+
+    Args:
+        repo:repository directory
+        commit_branch: branch
+
+    Returns:
+        the hash of the latest commit on commit_branch in repository
+    """
+
+    if commit_branch.startswith("remotes/"):
+        commit_branch = commit_branch[len("remotes/"):]
+
+    commit_list = subprocess.check_output(["git", "branch", "-r", "-v"], cwd=repo).decode("utf-8").split("\n")
+    commit = None
+    for branch in commit_list:
+
+        branch_list = branch.split()
+        if len(branch_list) > 1:
+            remote_branch = branch_list[0]
+            remote_commit = branch_list[1]
+
+            if commit_branch == remote_branch:
+                commit = remote_commit
+                break
+    return commit
+
+def getRemoteBranchNameForCommit(repo, commit):
+
+    """
+
+    Get the remote branch name for a commit on a local branch. If the commit does not exist on the remote,
+    returns None.
+
+    Args:
+        repo: directory of repository
+        commit: commit hash
+
+    Returns:
+        the full name of the remote branch where commit exists, or None if commit does not exist
+    """
+
+    local_branch_list = []
+    try:
+        local_branch_list = subprocess.check_output(["git", "branch", "-a", "--contains", commit], cwd=repo).decode(
+            "utf-8").split("\n")
+    except:
+        pass
+
+    remote_branch_name = None
+    for branch in local_branch_list:
+        branch_stripped = branch.strip()
+        if branch_stripped.startswith("remotes/"):
+            remote_branch_name = branch_stripped
+
+    return remote_branch_name
+
+def daysBehind(syscon):
+
+    """
+
+    Args:
+        syscon: RMS config object
+
+    Returns:
+        number of days behind the latest remote commit that the latest local commit is on the active branch
+    """
+
+
+    latest_local_commit = getCommit(os.getcwd())
+    latest_local_date = getDateOfCommit(os.getcwd(), latest_local_commit)
+    target_directory_obj = tempfile.TemporaryDirectory()
+    target_directory = target_directory_obj.name
+    remote_urls = getRemoteUrls(os.getcwd())
+    commit_repo_directory = updateCommitHistoryDirectory(remote_urls, target_directory)
+    remote_branch_of_commit = getRemoteBranchNameForCommit(commit_repo_directory, latest_local_commit)
+    if not remote_branch_of_commit is None:
+        latest_remote_date = getDateOfCommit(commit_repo_directory, remote_branch_of_commit)
+        days_behind = (latest_remote_date - latest_local_date).total_seconds() / (60 * 60 * 24)
+        target_directory_obj.cleanup()
+        return days_behind
+    else:
+        target_directory_obj.cleanup()
+        return "Unable to determine"
+
 def retrieveObservationData(conn, obs_start_time, ordering=None):
     """ Query the database to get the data more recent than the time passed in.
         Usually this will be the start of the most recent observation session
@@ -589,7 +794,8 @@ def retrieveObservationData(conn, obs_start_time, ordering=None):
         # the two items into one.
 
         ordering = ['stationID',
-                    'commit_date', 'commit_hash','media_backend','star_catalog_file',
+                    'commit_date', 'commit_hash', 'days_behind',
+                    'media_backend','star_catalog_file',
                     'hardware_version',
                     'captured_directories',
                     'storage_used_gb', 'storage_free_gb', 'storage_total_gb',
@@ -836,6 +1042,10 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
     addObsParam(obs_db_conn, "fits_file_shortfall_as_time", fits_file_shortfall_as_time)
     addObsParam(obs_db_conn, "protocol_in_use", config.protocol)
     addObsParam(obs_db_conn, "star_catalog_file", config.star_catalog_file)
+    try:
+        addObsParam(obs_db_conn, "repository_lagging_days", daysBehind(config))
+    except:
+        addObsParam(obs_db_conn, "repository_lagging_days", "Not determined")
     obs_db_conn.close()
 
     writeToFile(config, getRMSStyleFileName(night_data_dir, "observation_summary.txt"))
