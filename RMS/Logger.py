@@ -96,6 +96,15 @@ ALLOWED_DIRS = set()
 ##############################################################################
 # HELPERS
 ##############################################################################
+class LevelRespectingQueueListener(logging.handlers.QueueListener):
+    """QueueListener that respects individual handler levels."""
+    def handle(self, record):
+        """Override to check handler levels before handling."""
+        record = self.prepare(record)
+        for handler in self.handlers:
+            if record.levelno >= handler.level:  # Check handler level
+                handler.handle(record)
+
 
 class LoggerWriter:
     """ Used to redirect stdout/stderr to the log.
@@ -303,14 +312,14 @@ class CustomHandler(logging.handlers.TimedRotatingFileHandler):
 # LISTENER SIDE
 ##############################################################################
 
-def _listener_configurer(config, log_file_prefix, safedir):
+def _listener_configurer(config, log_file_prefix, safedir, console_level=logging.INFO, file_level=logging.DEBUG):
     """ Set up the root logger with a TimedRotatingFileHandler. 
     This runs in the separate listener process.
     """
     # Set DEBUG on root logger - this is the master filter for all handlers
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.DEBUG)
-
+    
     # Set up log directory
     log_path = os.path.join(config.data_dir, config.log_dir)
 
@@ -351,6 +360,10 @@ def _listener_configurer(config, log_file_prefix, safedir):
     )
     console = logging.StreamHandler(sys.stdout)
 
+    # Set different levels for each handler
+    handler.setLevel(file_level)
+    console.setLevel(console_level)
+    
     # Add filters to both handlers
     handler.addFilter(InRmsFilter())
     console.addFilter(InRmsFilter())
@@ -371,7 +384,7 @@ def _listener_configurer(config, log_file_prefix, safedir):
     root_logger.debug("Log listener configured. Current file: %s", full_path)
 
 
-def _listener_process(queue, config, log_file_prefix, safedir):
+def _listener_process(queue, config, log_file_prefix, safedir, console_level=logging.INFO, file_level=logging.DEBUG):
     """ Target function for the logging listener process.
     Ignores SIGINT and runs QueueListener for async logging.
     """
@@ -380,11 +393,11 @@ def _listener_process(queue, config, log_file_prefix, safedir):
 
     # Configure the listener process
     logging.Formatter.converter = time.gmtime
-    _listener_configurer(config, log_file_prefix, safedir)
+    _listener_configurer(config, log_file_prefix, safedir, console_level, file_level)
 
-    # Start queue listener
+    # Start queue listener with our custom listener
     main_logger = logging.getLogger()
-    queue_listener = logging.handlers.QueueListener(queue, *main_logger.handlers)
+    queue_listener = LevelRespectingQueueListener(queue, *main_logger.handlers)
     queue_listener.start()
 
     # Keep the process alive
@@ -405,7 +418,7 @@ def _listener_process(queue, config, log_file_prefix, safedir):
 # PUBLIC ENTRY POINT
 ##############################################################################
 
-def initLogging(config, log_file_prefix="", safedir=None, level=logging.DEBUG):
+def initLogging(config, log_file_prefix="", safedir=None, console_level=None, file_level=None):
     """ Called once in the MAIN process (e.g. StartCapture.py).
     Spawns the listener process and configures logging.
 
@@ -413,10 +426,32 @@ def initLogging(config, log_file_prefix="", safedir=None, level=logging.DEBUG):
         config: [object] RMS config object
         log_file_prefix: [str] Optional prefix for log filenames
         safedir: [str] Fallback directory if normal log_path is unwritable
-        level: [int] Logging level for the main logger (defaults to DEBUG)
+        console_level: [int] Logging level for console output (defaults to WARNING)
+        file_level: [int] Logging level for file output (defaults to DEBUG)
     """
     global _rms_logging_queue, _rms_listener_process, _rms_logger_initialized
     global RMS_ROOT, SITE_DIRS, ALLOWED_DIRS
+
+    # Helper function to get logging level
+    def get_log_level(level_str, default=logging.INFO):
+        """Convert string level to logging constant."""
+        level_map = {
+            "DEBUG": logging.DEBUG,
+            "INFO": logging.INFO,
+            "WARNING": logging.WARNING,
+            "ERROR": logging.ERROR,
+            "CRITICAL": logging.CRITICAL
+        }
+        return level_map.get(level_str.upper(), default)
+
+    # Get levels from config if not explicitly passed
+    if console_level is None:
+        console_level_str = config.console_log_level
+        console_level = get_log_level(console_level_str, logging.INFO)
+    
+    if file_level is None:
+        file_level_str =config.log_file_log_level
+        file_level = get_log_level(file_level_str, logging.DEBUG)
 
     # Whitelist RMS root and external script directories
     RMS_ROOT = os.path.realpath(getRmsRootDir())
@@ -455,13 +490,13 @@ def initLogging(config, log_file_prefix="", safedir=None, level=logging.DEBUG):
     _rms_logging_queue = multiprocessing.Queue(-1)
     _rms_listener_process = multiprocessing.Process(
         target=_listener_process,
-        args=(_rms_logging_queue, config, log_file_prefix, safedir)
+        args=(_rms_logging_queue, config, log_file_prefix, safedir, console_level, file_level)
     )
     _rms_listener_process.daemon = True
     _rms_listener_process.start()
 
     # Keep root logger permissive
-    main_logger.setLevel(level)
+    main_logger.setLevel(min(console_level, file_level))
 
     # Configure queue handler (backport for Py2)
     try:
