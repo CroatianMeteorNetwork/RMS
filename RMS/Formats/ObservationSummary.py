@@ -362,7 +362,12 @@ def getObsDBConn(config, force_delete=False):
     if not os.path.exists(os.path.dirname(observation_records_db_path)):
         # Handle the very rare case where this could run before any observation sessions
         # and RMS_data does not exist
-        os.makedirs(os.path.dirname(observation_records_db_path))
+        try:
+            # can the required directory be created
+            os.makedirs(os.path.dirname(observation_records_db_path))
+        except:
+            # if not then return
+            return None
 
     try:
         conn = sqlite3.connect(observation_records_db_path)
@@ -420,15 +425,18 @@ def addObsParam(conn, key, value):
     sql_statement += "CURRENT_TIMESTAMP,'{}','{}'   \n".format(key, value)
     sql_statement += ")"
 
-    try:
-        cursor = conn.cursor()
-        cursor.execute(sql_statement)
-        conn.commit()
+    if conn is None:
+        return
+    else:
+        try:
+            cursor = conn.cursor()
+            cursor.execute(sql_statement)
+            conn.commit()
 
-    except:
+        except:
 
-        if EM_RAISE:
-            raise
+            if EM_RAISE:
+                raise
 
 def estimateLens(fov_h):
 
@@ -967,10 +975,15 @@ def startObservationSummaryReport(config, duration, force_delete=False):
     # Get the disk usage info (only in Python 3.3+)
     if (sys.version_info.major > 2) and (sys.version_info.minor > 2):
 
-        storage_total, storage_used, storage_free = shutil.disk_usage("/")
-        addObsParam(conn, "storage_total_gb", round(storage_total/(1024**3), 2))
-        addObsParam(conn, "storage_used_gb", round(storage_used/(1024**3), 2))
-        addObsParam(conn, "storage_free_gb", round(storage_free/(1024**3), 2))
+        try:
+            storage_total, storage_used, storage_free = shutil.disk_usage(config.data_dir)
+            addObsParam(conn, "storage_total_gb", round(storage_total/(1024**3), 2))
+            addObsParam(conn, "storage_used_gb", round(storage_used/(1024**3), 2))
+            addObsParam(conn, "storage_free_gb", round(storage_free/(1024**3), 2))
+        except:
+            addObsParam(conn, "storage_total_gb", "Not available")
+            addObsParam(conn, "storage_used_gb", "Not available")
+            addObsParam(conn, "storage_free_gb", "Not available")
 
     captured_directories = captureDirectories(os.path.join(config.data_dir, config.captured_dir), config.stationID)
     addObsParam(conn, "captured_directories", captured_directories)
@@ -992,7 +1005,8 @@ def startObservationSummaryReport(config, duration, force_delete=False):
     
     addObsParam(conn, "fits_files_from_duration", fits_files_from_duration)
 
-    conn.close()
+    if not conn is None:
+        conn.close()
 
     return "Opening a new observations summary for duration {} seconds".format(duration)
 
