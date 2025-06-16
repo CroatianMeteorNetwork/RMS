@@ -481,7 +481,7 @@ def addECEFVectortoLatLonEle(lat, lon, ele_egm96, x ,y, z, config, radians=False
     """
 
     Given a latitude and longitude in degrees, optionally radians, wgs84 and elevation in egm96 in meters
-    and an ECEF vector, return a new position in latitude and longitude in degrees, optionally radions,
+    and an ECEF vector, return a new position in latitude and longitude in degrees, optionally radians,
     and an elevation in egm96 in meters.
 
 
