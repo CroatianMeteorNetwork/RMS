@@ -202,12 +202,12 @@ class InputTypeFRFF(InputType):
         self.byteswap = False
 
         if self.single_ff:
-            log.debug('Using file:', self.dir_path)
+            log.debug('Using file: {}'.format(self.dir_path))
         else:
             if use_fr_files:
-                log.debug('Using FF and/or FR files from:', self.dir_path)
+                log.debug('Using FF and/or FR files from: {}'.format(self.dir_path))
             else:
-                log.debug('Using FF files from:', self.dir_path)
+                log.debug('Using FF files from: {}'.format(self.dir_path))
 
 
         # List of FF and FR file names
