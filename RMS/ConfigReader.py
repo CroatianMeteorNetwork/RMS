@@ -353,6 +353,12 @@ class Config:
         # days of logfiles to keep
         self.logdays_to_keep = 30
 
+        # Console logging level
+        self.console_log_level = 'INFO'
+
+        # Log file logging level
+        self.log_file_log_level = 'DEBUG'
+
         # Toggle logging stdout messages
         self.log_stdout = False
 
@@ -982,8 +988,14 @@ def parseCapture(config, parser):
     if parser.has_option(section, "logdays_to_keep"):
         config.logdays_to_keep = int(parser.get(section, "logdays_to_keep"))
 
-    if parser.has_option(section, "log_stdout"):
-        config.log_stdout = parser.getboolean(section, "log_stdout")
+    if parser.has_option(section, "console_log_level"):
+        config.console_log_level = parser.get(section, "console_log_level")
+
+    if parser.has_option(section, "console_log_level"):
+        config.console_log_level = parser.get(section, "console_log_level")
+
+    if parser.has_option(section, "log_file_log_level"):
+        config.log_file_log_level = parser.getboolean(section, "log_file_log_level")
 
     if parser.has_option(section, "arch_dirs_to_keep"):
         config.arch_dirs_to_keep = int(parser.get(section, "arch_dirs_to_keep"))
