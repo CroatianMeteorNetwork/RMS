@@ -31,6 +31,10 @@ from RMS.Formats.Vid import VidStruct
 from RMS.GeoidHeightEGM96 import wgs84toMSLHeight
 from RMS.Routines import Image
 from RMS.Routines.GstreamerCapture import GstVideoFile
+from RMS.Logger import getLogger
+
+# Get the logger from the main module
+log = getLogger("logger")
 
 
 # If there is not display, messagebox will simply print to the console
@@ -198,12 +202,12 @@ class InputTypeFRFF(InputType):
         self.byteswap = False
 
         if self.single_ff:
-            print('Using file:', self.dir_path)
+            log.debug('Using file:', self.dir_path)
         else:
             if use_fr_files:
-                print('Using FF and/or FR files from:', self.dir_path)
+                log.debug('Using FF and/or FR files from:', self.dir_path)
             else:
-                print('Using FF files from:', self.dir_path)
+                log.debug('Using FF files from:', self.dir_path)
 
 
         # List of FF and FR file names
@@ -2464,7 +2468,7 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
         # If FR files are not used, only check for FF files
         if not use_fr_files:
             if not any([validFFName(ff_file) for ff_file in os.listdir(input_dir)]):
-                print("No FF files found in directory!")
+                log.info("No FF files found in directory!")
                 return None
 
 
