@@ -51,7 +51,7 @@ echo "Stations.......: " $STATIONS
 echo
 echo "Compressing files..."
 
-zip -q -r $BACKUP_FILE $CONFIG_FILE $MASK_$PLATEPAR_FILE FILE $RSA $STATIONS
+zip -q -r $BACKUP_FILE $CONFIG_FILE $MASK_FILE $PLATEPAR_FILE FILE $RSA $STATIONS
 
 echo "Backup saved to: $BACKUP_FILE"
 
