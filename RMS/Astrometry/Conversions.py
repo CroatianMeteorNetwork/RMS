@@ -1176,6 +1176,11 @@ def geocentricToApparentRadiantAndVelocity(ra_g, dec_g, vg, lat, lon, elev, jd, 
 
 
 if __name__ == "__main__":
+
+    # required for testing getECEFVectorBetweenGeoPoints and addECEFVectortoLatLonEle
+    import os
+    import RMS.ConfigReader as cr
+
     # Test the geocentric to apparent radiant function
     ra_g = 108.67522
     dec_g = 31.91152
@@ -1217,9 +1222,6 @@ if __name__ == "__main__":
 
 
     # Test of getECEFVectorBetweenGeoPoints and addECEFVectortoLatLonEle
-
-    import os
-    import RMS.ConfigReader as cr
 
     config = cr.loadConfigFromDirectory(".config", os.path.abspath('.'))
     # location one
