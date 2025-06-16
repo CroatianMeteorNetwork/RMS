@@ -493,7 +493,7 @@ def addECEFVectortoLatLonEle(lat, lon, ele_egm96, x ,y, z, config, radians=False
         [float] y: y component of ECEF coordinate vector
         [float] z: z component of ECEF coordinate vector
         [float] config: optional station config file required for the path of elevation conversion data
-        [bool] degrees: optional, default True
+        [bool] radians: optional, default False
 
     Returns:
         [float] latitude in degrees
@@ -548,7 +548,7 @@ def getECEFVectorBetweenGeoPoints(lat_1, lon_1, ele_1_egm96, lat_2, lon_2, ele_2
         [float] lon_2: longitude in degrees optionally radians
         [float] ele_2_egm96: elevation in meters egm96 basis
         [float] config: RMS config file
-        [float] degrees: boolean, optional default True
+        [bool] radians: optional default False
 
     Returns:
         [float] ecef vector x component
