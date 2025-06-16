@@ -397,6 +397,7 @@ class QueuedPool(object):
         core_value = self.cores.value()
         if core_value < 1:
             self.printAndLog('WARNING: Core count was {:d}, using minimum of 1'.format(core_value))
+            self.cores.set(1)
             num_cores = 1
         else:
             num_cores = core_value
