@@ -794,7 +794,7 @@ def retrieveObservationData(conn, obs_start_time, ordering=None):
         # the two items into one.
 
         ordering = ['stationID',
-                    'commit_date', 'commit_hash', 'days_behind',
+                    'commit_date', 'commit_hash', 'repository_lag_remote_days',
                     'media_backend','star_catalog_file',
                     'hardware_version',
                     'captured_directories',
@@ -1043,9 +1043,9 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
     addObsParam(obs_db_conn, "protocol_in_use", config.protocol)
     addObsParam(obs_db_conn, "star_catalog_file", config.star_catalog_file)
     try:
-        addObsParam(obs_db_conn, "repository_lag_days", daysBehind(config))
+        addObsParam(obs_db_conn, "repository_lag_remote_days", daysBehind(config))
     except:
-        addObsParam(obs_db_conn, "repository_lag_days", "Not determined")
+        addObsParam(obs_db_conn, "repository_lag_remote_days", "Not determined")
     obs_db_conn.close()
 
     writeToFile(config, getRMSStyleFileName(night_data_dir, "observation_summary.txt"))
