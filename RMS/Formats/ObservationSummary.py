@@ -29,8 +29,8 @@ from __future__ import print_function, division, absolute_import
 import sys
 import os
 import subprocess
-from time import strftime
-from datetime import datetime, timezone
+import time
+import datetime
 from RMS.Misc import niceFormat, isRaspberryPi, sanitise, getRMSStyleFileName, getRmsRootDir, UTCFromTimestamp
 import re
 import sqlite3
@@ -147,7 +147,9 @@ def timeSyncStatus(config, conn, force_client=None):
         addObsParam(conn, "clock_measurement_source", "Not detected")
         remote_time_query, uncertainty = timestampFromNTP()
         if remote_time_query is not None:
-            local_time_query = (datetime.datetime.now(timezone.utc) - datetime.datetime(1970, 1, 1).replace(tzinfo=timezone.utc)).total_seconds()
+            local_time_query = (datetime.datetime.now(datetime.timezone.utc)
+                                - datetime.datetime(1970, 1, 1)
+                                        .replace(tzinfo=datetime.timezone.utc)).total_seconds()
             ahead_ms = (local_time_query - remote_time_query) * 1000
             addObsParam(conn, "clock_error_uncertainty_ms", uncertainty * 1000)
 
@@ -176,6 +178,9 @@ def getNTPStatistics():
     Acquire the statistics of the ntp client.
 
     Tries to use ntpstat, if not available, falls back to ntpq, if not available returns Unknown.
+
+    Argyments:
+        None
 
     Returns:
         synchronized: [bool] true if reported as synchronised.
@@ -236,6 +241,9 @@ def getChronyUncertainty():
 
         Uncertainty is very high at initial synchronisation, as root dispersion dominates.
 
+        Arguments:
+
+            None
 
         Returns:
             synchronized: [bool] true if reported as synchronized.
@@ -289,6 +297,7 @@ def timestampFromNTP(addr='time.cloudflare.com'):
 
 
     Arguments:
+        None
 
     Keyword arguments:
         addr: optional, address of ntp server to use.
@@ -350,13 +359,13 @@ def timestampFromNTP(addr='time.cloudflare.com'):
 def getObsDBConn(config, force_delete=False):
     """ Creates the Observation Summary database. Tries only once.
 
-    arguments:
+    Arguments:
         config: [config] config instance.
 
-    keyword arguments:
+    Keyword arguments:
         force_delete: [bool] default false, if set then deletes the database before recreating.
 
-    returns:
+    Return:
         conn: [connection] connection to database if success else None.
 
     """
@@ -410,15 +419,15 @@ def addObsParam(conn, key, value):
 
     """ Add a single key value pair into the database.
 
-            arguments:
-                conn [connection]: the connection to the database
-                key [str]: the key for the value to be added
-                value [str]: the value to be added
+    Arguments:
+        conn [connection]: the connection to the database
+        key [str]: the key for the value to be added
+        value [str]: the value to be added
 
-            returns:
-                Nothing
+    Return:
+        Nothing
 
-            """
+    """
 
 
     sql_statement = ""
@@ -447,13 +456,13 @@ def addObsParam(conn, key, value):
 
 def estimateLens(fov_h):
 
-    """ Estimate the focal length of the lens in use
+    """ Estimate the focal length of the lens in use.
 
-        arguments:
-                fov_h: [float] horizontal field of view
+    Arguments:
+        fov_h: [float] horizontal field of view.
 
-        returns:
-                lens_type: [str] The focal length of the lens in mm
+    Feturns:
+        lens_type: [str] The focal length of the lens in mm.
 
     """
 
@@ -468,11 +477,11 @@ def getLastStartTime(conn):
     """
     Query the database to discover the previous start time.
 
-        arguments:
-                conn: [connection] connection to database
+    Arguments:
+        conn: [connection] connection to database.
 
-        returns:
-                result: [string] the previous start time
+    Return:
+        result: [string] the previous start time.
 
     """
 
@@ -498,18 +507,18 @@ def gatherCameraInformation(config, attempts=6, delay=10, sock_timeout=3):
     """ Gather information about the sensor in use.
         Retry the DVRIP handshake until it works, or we exhaust attempts.
 
-        arguments:
-            config: [config] config object.
+    Arguments:
+        config: [config] config object.
 
-        keyword arguments:
-            attempts: [int] optional, default 6, number of attempts to connect
-            delay: [float] optional, default 10, delay between attempts
-            sock_timeout: [float] optional, default 3, socket timeout in seconds
+    Keyword arguments:
+        attempts: [int] optional, default 6, number of attempts to connect.
+        delay: [float] optional, default 10, delay between attempts.
+        sock_timeout: [float] optional, default 3, socket timeout in seconds.
 
-                returns:
-                    sensor type string
+    Return:
+        sensor type: [string] sensor type.
 
-                """
+    """
 
     ip = re.search(r'(?:\d{1,3}\.){3}\d{1,3}', config.deviceID).group()
     for _ in range(attempts):
@@ -527,14 +536,14 @@ def gatherCameraInformation(config, attempts=6, delay=10, sock_timeout=3):
     return "Unavailable"
 
 def captureDirectories(captured_dir, stationID):
-    """ Counts the captured directories
+    """ Counts the captured directories.
 
-        arguments:
-            captured_dir: path to the captured directories
-            stationID: stationID to identify only relevant directories
-
-        returns:
-            conn: count of directories
+    Arguments:
+        captured_dir: [path] to the captured directories.
+        stationID: [str] stationID to identify only relevant directories.
+.
+    Return:
+        capture_directories: [int] count of directories.
 
         """
 
@@ -552,22 +561,23 @@ def captureDirectories(captured_dir, stationID):
     return capture_directories
 
 def nightSummaryData(config, night_data_dir):
-    """ Calculate the summary data for the night. This is based on work by others
-        and translated from the original source code
+    """ Calculate the summary data for the night.
 
-                arguments:
-                    config: config file
-                    night_data_dir: the directory of captured files
+    This is based on work by others and translated from the original source code.
+
+    Arguments:
+        config: [config] RMS config instance.
+        night_data_dir: [path] the directory of captured files.
 
 
-                returns:
-                    capture_duration_from_fits: the duration from the start of first fits to the end of the last
-                    fits_count: the count of *.fits files in the directory
-                    fits_file_shortfall: the number of expected fits expected vs the number actually found
-                    fits_file_shortfall_as_time: this shortfall expressed in seconds, never negative
-                    time_first_fits_file: the time of the first fits file
-                    time_last_fits_file: the time of the last fits file
-                    total_expected_fits: the number of fits files expected
+    Returns:
+        capture_duration_from_fits: [int] the duration from the start of first fits to the end of the last.
+        fits_count: [int] the count of *.fits files in the directory.
+        fits_file_shortfall: [int] the number of expected fits expected less the number actually found.
+        fits_file_shortfall_as_time: [int] this shortfall expressed in seconds, never negative.
+        time_first_fits_file: [str] the time of the first fits file.
+        time_last_fits_file: [str] the time of the last fits file.
+        total_expected_fits: [int] the number of fits files expected.
 
                 """
 
@@ -597,12 +607,12 @@ def updateCommitHistoryDirectory(remote_urls, target_directory):
 
     Clone only the commit history of a remote repository.
 
-    Args:
-        remote_urls: the remote url to be cloned
-        target_directory: the directory into which to clone
+    Arguments:
+        remote_urls: [url] the remote url to be cloned/
+        target_directory: [path] the directory into which to clone.
 
-    Returns:
-        directory of the repository
+    Return:
+        commit_repo_directory: [path] directory of the repository
 
     """
 
@@ -640,12 +650,13 @@ def updateCommitHistoryDirectory(remote_urls, target_directory):
 def getCommit(repo):
 
     """
+    Get the most recent commit from the local repository's active branch.
 
-    Args:
-        repo:file location of a repository
+    Arguments:
+        repo: [path] file location of a repository.
 
     Returns:
-        latest commit in that repository
+        commit: [string] latest commit hash
     """
 
     commit = subprocess.check_output(["git", "log", "-n 1", "--pretty=format:%H"], cwd=repo).decode(
@@ -655,14 +666,14 @@ def getCommit(repo):
 
 def getDateOfCommit(repo, commit):
 
-    """
+    """Get the date of a commit
 
-    Args:
-        repo: directory of repository
-        commit: commit hash
+    Argumentss:
+        repo: [path] directory of repository.
+        commit: [string] commit hash.
 
     Returns:
-        python datetime object of the time and date of that commit
+        commit_time : [datetime object] python datetime object of the time and date of that commit
     """
 
     if commit is None:
@@ -672,13 +683,12 @@ def getDateOfCommit(repo, commit):
 
 def getRemoteUrls(repo):
 
-    """
+    """Get the urls of the remotes for the local repository.
+    Arguments:
+        repo: directory of repository.
 
-    Args:
-        repo: directory of repository
-
-    Returns:
-        return a list of [remote, url] where remote is the local name of a remote and URL is the URL of the remote
+    Return:
+        list of [remote, url] where remote is the local name of a remote and URL is the URL of the remote
     """
 
     urls_and_remotes = subprocess.check_output(["git", "remote", "-v"], cwd=repo).decode("utf-8").split("\n")
@@ -694,14 +704,16 @@ def getRemoteUrls(repo):
 
 def getBranchOfCommit(repo, commit):
 
-    """
+    """Find a branch where a commit exists.
 
-    Args:
-        repo: directory of repository
-        commit: commit hash
+    This troublesome, because a commit may exist on many branches.
+
+    Arguements:
+        repo: [path] directory of repository.
+        commit: [str] commit hash
 
     Returns:
-        A branch where a commit exists. There may be several branches, only one will be returned.
+        local_branch: [str] A local branch where a commit exists.
     """
 
     local_branch = subprocess.check_output(["git", "branch", "-a", "--contains", commit], cwd=repo).decode(
@@ -710,14 +722,14 @@ def getBranchOfCommit(repo, commit):
 
 def getLatestCommit(repo, commit_branch):
 
-    """
+    """Get the latest commit on a specific branch on the local repository.
 
-    Args:
-        repo:repository directory
-        commit_branch: branch
+    Arguments:
+        repo: [path] repository directory.
+        commit_branch: [str] branch.
 
-    Returns:
-        the hash of the latest commit on commit_branch in repository
+    Return:
+        commit: [str] the hash of the latest commit on commit_branch in repository
     """
 
     if commit_branch.startswith("remotes/"):
@@ -739,17 +751,14 @@ def getLatestCommit(repo, commit_branch):
 
 def getRemoteBranchNameForCommit(repo, commit):
 
-    """
+    """Get the remote branch name for a commit on a local branch.
 
-    Get the remote branch name for a commit on a local branch. If the commit does not exist on the remote,
-    returns None.
+    Arguments:
+        repo: [path] directory of repository.
+        commit: [str] commit hash.
 
-    Args:
-        repo: directory of repository
-        commit: commit hash
-
-    Returns:
-        the full name of the remote branch where commit exists, or None if commit does not exist
+    Return:
+        remote_branch_name: [str] the full name of the remote branch where commit exists.
     """
 
     local_branch_list = []
@@ -767,15 +776,16 @@ def getRemoteBranchNameForCommit(repo, commit):
 
     return remote_branch_name
 
-def daysBehind(syscon):
+def daysBehind():
 
-    """
+    """Measure how far behind the latest commit on the active branch is behind a branch with that commit on the remote
+    repository.
 
-    Args:
-        syscon: RMS config object
+    Arguments:
+        syscon: [config] RMS config object.
 
-    Returns:
-        number of days behind the latest remote commit that the latest local commit is on the active branch
+    Return:
+        number of days behind the latest remote commit that the latest local commit is on the active branch.
     """
 
 
@@ -797,15 +807,17 @@ def daysBehind(syscon):
 
 def retrieveObservationData(conn, obs_start_time, ordering=None):
     """ Query the database to get the data more recent than the time passed in.
-        Usually this will be the start of the most recent observation session
-        If no ordering is passed, then a default ordering is returned
 
-            arguments:
-                    conn: connection to database
-                    ordering: optional, default None, sequence to order the keys.
+        Usually this will be the start of the most recent observation session.
+        If no ordering is passed, then a default ordering is returned.
 
-            returns:
-                    key value pairs committed to the database since the obs_start_time
+    Arguments:
+            conn:  [object] connection to database.
+            obs_start_time: [datetime] start time of the observation session.
+            ordering: [list] optional, default None, sequence to order the keys.
+
+    return:
+            key value pairs committed to the database since the obs_start_time.
     """
 
     if ordering is None:
@@ -829,8 +841,8 @@ def retrieveObservationData(conn, obs_start_time, ordering=None):
                     'detections_after_ml',
                     'media_backend','protocol_in_use','jitter_quality','dropped_frame_rate']
 
-    # use this print call to check the ordering
-    #print("Ordering {}".format(ordering))
+    # Use this print call to check the ordering
+    # print("Ordering {}".format(ordering))
 
     sql_statement = ""
     sql_statement += "SELECT Key, Value from records \n"
@@ -848,23 +860,22 @@ def retrieveObservationData(conn, obs_start_time, ordering=None):
     sql_statement += "                  ELSE {:03d} \n".format(count)
     sql_statement += "              END"
 
-    #print(sql_statement)
+    # print(sql_statement)
 
     return conn.cursor().execute(sql_statement).fetchall()
 
 def serialize(config, format_nicely=True, as_json=False):
     """ Returns the data from the most recent observation session as either colon
-        delimited text file, ar as a json
-                arguments:
-                        config: station config file
-                        format_nicely: optional, default true, present the data with
-                                        delimiter characters aligned
-                        as_json: optional, default false, return the data as a json
+        delimited text file, ar as a json.
 
-                returns:
-                        string of key value pairs committed to the database since the
-                        start of the previous observation session
-        """
+    Arguments:
+        config: [config] station config file.
+        format_nicely: [bool] optional, default true, present the data with delimiter characters aligned.
+        as_json: [bool] optional, default false, return the data as a json.
+
+    Return:
+        string of key value pairs committed to the database since the start of the previous observation session
+    """
 
     conn = getObsDBConn(config)
     data = retrieveObservationData(conn, getLastStartTime(conn))
@@ -875,9 +886,9 @@ def serialize(config, format_nicely=True, as_json=False):
 
     output = ""
     for key,value in data:
-        #does this look like a float
+        # Does this look like a float
         if not re.match(r'^-?\d+(?:\.\d+)$', value) is None:
-            # handle as float
+            # Handle as float
             try:
                 value_as_float = float(value)
                 output += "{}:{:s} \n".format(key, roundWithoutTrailingZero(value_as_float, 3))
@@ -885,16 +896,16 @@ def serialize(config, format_nicely=True, as_json=False):
                 pass
         else:
             try:
-                # convert to a time
+                # Convert to a time
                 time_object = time.strptime(value, "%Y-%m-%d %H:%M:%S.%f")
-                value_as_time = strftime("%Y-%m-%d %H:%M:%S", time_object)
+                value_as_time = time.strftime("%Y-%m-%d %H:%M:%S", time_object)
                 output += "{}:{:s} \n".format(key, value_as_time)
 
             except:
                 try:
-                # convert to a time
+                # Convert to a time
                     time_object = time.strptime(value, "%H:%M:%S.%f")
-                    value_as_time = strftime("%H:%M:%S", time_object)
+                    value_as_time = time.strftime("%H:%M:%S", time_object)
                     output += "{}:{:s} \n".format(key, value_as_time)
                     # if it didn't work, then handle as a string
                 except:
@@ -902,7 +913,7 @@ def serialize(config, format_nicely=True, as_json=False):
                     try:
                         output += "{}:{:s} \n".format(key, value)
                     except:
-                        # if we can't output as a string, then move on
+                        # If we can't output as a string, then move on
                         pass
 
     if format_nicely:
@@ -912,14 +923,15 @@ def serialize(config, format_nicely=True, as_json=False):
     return output
 
 def writeToFile(config, file_path_and_name):
-    """Write colon delimited text to file
-                arguments:
-                        config: station config file
-                        file_path_and_name: full path to the target file
 
-                returns:
-                        string of key value pairs committed to the database since the
-                        start of the previous observation session
+    """Write colon delimited text to file.
+
+    Arguments:
+        config: [config] station config file.
+        file_path_and_name: [path full path to the target file.
+
+    Return:
+        [string] string of key value pairs committed to the database since the start of the observation session.
         """
 
 
@@ -929,35 +941,39 @@ def writeToFile(config, file_path_and_name):
 
 
 def writeToJSON(config, file_path_and_name):
-    """Write as a json
-                    arguments:
-                            config: station config file
-                            file_path_and_name: full path to the target file
 
-                    returns:
-                            string of key value pairs committed to the database since the
-                            start of the previous observation session
-            """
+    """Write as a json.
+    Arguments:
+        config: [config] station config file.
+        file_path_and_name: [path] full path to the target file.
+
+    Return:
+        Nothing
+    """
+
     with open(file_path_and_name, "w") as summary_file_handle:
         as_ascii = serialize(config, as_json=True).encode("ascii", errors="ignore").decode("ascii")
         summary_file_handle.write(as_ascii)
 
 def startObservationSummaryReport(config, duration, force_delete=False):
-    """ Enters the parameters known at the start of observation into the database
+    """ Enters the parameters known at the start of observation into the database.
 
-        arguments:
-            config: config file
-            duration: the initially calculated duration
-            force_delete: forces deletion of the observation summary database, default False
+    Arguments:
+            config: [config] config file.
+            duration: [int]the initially calculated duration seconds
 
-        returns:
-            conn: [connection] connection to database
+    Keyword arguments:
+            force_delete: [bool] forces deletion of the observation summary database, default False
 
-        """
+    Return:
+            [str] human readable message about session
+
+    """
 
 
     conn = getObsDBConn(config, force_delete=force_delete)
-    start_time_object = (datetime.datetime.now(timezone.utc) - datetime.timedelta(seconds=1)).replace(tzinfo=timezone.utc)
+    start_time_object = (datetime.datetime.now(datetime.timezone.utc) -
+                         datetime.timedelta(seconds=1)).replace(tzinfo=datetime.timezone.utc)
     start_time_object_rounded = start_time_object.replace(microsecond=0)
     addObsParam(conn, "start_time", start_time_object_rounded)
     addObsParam(conn, "duration", duration)
@@ -983,7 +999,7 @@ def startObservationSummaryReport(config, duration, force_delete=False):
     except:
         print("Error getting Git information. Skipping Git-related information.")
     
-    # Get the disk usage info (only in Python 3.3+)
+    # Get the disk usage info (only in Python 3.3+) for the data_dir disc
     if (sys.version_info.major > 2) and (sys.version_info.minor > 2):
 
         try:
@@ -1023,16 +1039,18 @@ def startObservationSummaryReport(config, duration, force_delete=False):
 
 def finalizeObservationSummary(config, night_data_dir, platepar=None):
 
-    """ Enters the parameters known at the end of observation into the database
+    """ Enters the parameters known at the end of observation into the database.
 
-            arguments:
-                config: config file
-                night_data_dir: the directory of captured files
-                platepar: optional, default None
+    Arguments:
+        config: [config] config file.
+        night_data_dir: [path] the directory of captured files.
 
-            returns:
-                conn: [connection] connection to database if success else None
+    Keyword arguments:
+        platepar: [object] optional, default None.
 
+    Return:
+        [str] filename of text file.
+        [str] filename of json.
             """
 
     capture_duration_from_fits, fits_count, fits_file_shortfall, fits_file_shortfall_as_time, time_first_fits_file, \
@@ -1068,7 +1086,7 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
     addObsParam(obs_db_conn, "protocol_in_use", config.protocol)
     addObsParam(obs_db_conn, "star_catalog_file", config.star_catalog_file)
     try:
-        addObsParam(obs_db_conn, "repository_lag_remote_days", daysBehind(config))
+        addObsParam(obs_db_conn, "repository_lag_remote_days", daysBehind())
     except:
         addObsParam(obs_db_conn, "repository_lag_remote_days", "Not determined")
     obs_db_conn.close()
