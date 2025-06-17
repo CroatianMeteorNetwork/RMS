@@ -19,9 +19,9 @@ logging.getLogger("paramiko.auth_handler").setLevel(logging.CRITICAL)
 
 from multiprocessing import Manager
 
-try:
+if sys.version_info >= (3, 3):
     from queue import Empty  # Python 3
-except ImportError:
+else:
     from Queue import Empty  # Python 2
 
 QueueEmpty = Empty
