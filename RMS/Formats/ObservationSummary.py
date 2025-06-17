@@ -71,7 +71,7 @@ def roundWithoutTrailingZero(value, no):
         value: [float] value.
         no: [integer] number of decimal places to round.
 
-    Returns:
+    Return:
         string: [string]: value rounded number of decimal places without trailing zero.
     """
 
@@ -85,7 +85,7 @@ def getTimeClient():
 
     This function is aware of systemd-timesyncd, chronyd, ntpd.
 
-    Returns:
+    Return:
         name: [string] Name of the time client.
 
     """
@@ -118,7 +118,7 @@ def timeSyncStatus(config, conn, force_client=None):
     Keyword arguments:
         force_client: [string] optional, string to force resolution by ntpd, chrony, or a query on a remote server.
 
-    Returns:
+    Return:
         ahead_ms: [float] time local clock ahead (+ve) milliseconds, or "Unknown" if delta cannot be determined.
     """
 
@@ -182,8 +182,8 @@ def getNTPStatistics():
     Argyments:
         None
 
-    Returns:
-        synchronized: [bool] true if reported as synchronised.
+    Return:
+        synchronized: [bool] true if reported as synchronized.
         uncertainty_ms: [float] uncertainty in milliseconds.
         time_error_ms: [str] always Unknown, unable to discern actual time error using ntp tools.
 
@@ -245,7 +245,7 @@ def getChronyUncertainty():
 
             None
 
-        Returns:
+        Return:
             synchronized: [bool] true if reported as synchronized.
             ahead_ms: [str] time in milliseconds that computer clock is reported to be ahead of superior reference.
             uncertainty_ms: [float] uncertainty in milliseconds.
@@ -302,7 +302,7 @@ def timestampFromNTP(addr='time.cloudflare.com'):
     Keyword arguments:
         addr: optional, address of ntp server to use.
 
-    Returns:
+    Return:
         adjusted_time: [float] time in seconds since epoch.
         estimated_network_delay: [float] estimated network delay (average of outgoing and return legs).
     """
@@ -570,7 +570,7 @@ def nightSummaryData(config, night_data_dir):
         night_data_dir: [path] the directory of captured files.
 
 
-    Returns:
+    Return:
         capture_duration_from_fits: [int] the duration from the start of first fits to the end of the last.
         fits_count: [int] the count of *.fits files in the directory.
         fits_file_shortfall: [int] the number of expected fits expected less the number actually found.
@@ -655,7 +655,7 @@ def getCommit(repo):
     Arguments:
         repo: [path] file location of a repository.
 
-    Returns:
+    Return:
         commit: [string] latest commit hash
     """
 
@@ -672,7 +672,7 @@ def getDateOfCommit(repo, commit):
         repo: [path] directory of repository.
         commit: [string] commit hash.
 
-    Returns:
+    Return:
         commit_time : [datetime object] python datetime object of the time and date of that commit
     """
 
@@ -712,7 +712,7 @@ def getBranchOfCommit(repo, commit):
         repo: [path] directory of repository.
         commit: [str] commit hash
 
-    Returns:
+    Return:
         local_branch: [str] A local branch where a commit exists.
     """
 
@@ -874,7 +874,7 @@ def serialize(config, format_nicely=True, as_json=False):
         as_json: [bool] optional, default false, return the data as a json.
 
     Return:
-        string of key value pairs committed to the database since the start of the previous observation session
+        string of key value pairs committed to the database since the start of the previous observation session.
     """
 
     conn = getObsDBConn(config)
@@ -960,13 +960,13 @@ def startObservationSummaryReport(config, duration, force_delete=False):
 
     Arguments:
             config: [config] config file.
-            duration: [int]the initially calculated duration seconds
+            duration: [int]the initially calculated duration seconds.
 
     Keyword arguments:
-            force_delete: [bool] forces deletion of the observation summary database, default False
+            force_delete: [bool] forces deletion of the observation summary database, default False.
 
     Return:
-            [str] human readable message about session
+            [str] message about session.
 
     """
 
