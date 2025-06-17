@@ -400,7 +400,8 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                                     formatSize(tracker.uploaded_bytes),
                                     formatSize(tracker.total_bytes),
                                     transfer_rate_str,
-                                    time_str
+                                    time_str,
+                                    end=''
                                 ))
                             else:
                                 # At 100%, show "complete" instead of remaining time
@@ -417,7 +418,8 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                                         os.path.basename(local_file),
                                         formatSize(tracker.uploaded_bytes),
                                         formatSize(tracker.total_bytes),
-                                        transfer_rate_str
+                                        transfer_rate_str,
+                                        end=''
                                     ))
                         
                         else:
@@ -425,7 +427,8 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                                 percent_complete,
                                 os.path.basename(local_file),
                                 formatSize(tracker.uploaded_bytes),
-                                formatSize(tracker.total_bytes)
+                                formatSize(tracker.total_bytes), 
+                                end=''
                             ))
                         
                         tracker.last_percent = percent_complete

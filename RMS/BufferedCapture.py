@@ -1906,7 +1906,7 @@ class BufferedCapture(Process):
                     
                     # For GStreamer, show elapsed time since frame capture to assess sink fill level
                     else:
-                        log.debug("Block's max frame age: {:.3f} seconds. Run's dropped frames: {}"
+                        log.info("Block's max frame age: {:.3f} seconds. Run's dropped frames: {}"
                                  .format(max_frame_age_seconds, self.dropped_frames.value))
 
                 last_frame_timestamp = frame_timestamp
