@@ -174,7 +174,7 @@ def findCoefficients(line_list):
         # length of velocity vector
         total = sqrt(slopeXZ**2 + slopeYZ**2)
         
-        print('Fireball slope:', total)
+        #print('Fireball slope:', total)
 
         # ignore line if too fast
         # TODO: this limit should be read from config file and calculated for FOV
