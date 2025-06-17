@@ -89,7 +89,7 @@ def rebootCamera(cam):
     Args:
         cam : The camera
     """
-    log.info('rebooting, please wait....')
+    log.info('Camera rebooting, please wait....')
     cam.reboot()
     retry = 0
     while retry < 5:
