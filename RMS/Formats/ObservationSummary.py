@@ -65,14 +65,14 @@ import tempfile
 def roundWithoutTrailingZero(value, no):
 
     """
-    Given a float, round to specified number of decimal places, then remove trailing zeroes
+    Given a float, round to specified number of decimal places, then remove trailing zeroes.
 
-    Args:
-        value: float value
-        no: number of decimal places to round to
+    Arguments:
+        value: [float] value.
+        no: [integer] number of decimal places to round.
 
     Returns:
-        [string]: value rounded number of decimal places without trailing zero
+        string: [string]: value rounded number of decimal places without trailing zero.
     """
 
     value = round(value,no)
@@ -81,11 +81,12 @@ def roundWithoutTrailingZero(value, no):
 def getTimeClient():
 
     """
-    Attempt to identify which time service client, if any is providing sync service, or Not recognized.
-    Aware of systemd-timesyncd, chronyd, ntpd
+    Attempt to identify which time service client, if any is providing a service.
+
+    This function is aware of systemd-timesyncd, chronyd, ntpd.
 
     Returns:
-        [string]: Name of the time client
+        name: [string] Name of the time client.
 
     """
 
@@ -101,22 +102,24 @@ def getTimeClient():
             if output == 'active':
                 return name
         except subprocess.CalledProcessError:
-            pass  # Not active or not installed
+            # Not active or not recognised
+            pass
     return "Not recognized"
 
 def timeSyncStatus(config, conn, force_client=None):
 
     """
-    Add timeSyncStatus to the database, and return howe far the machine clock
-    is ahead of reference time in milliseconds
+    Add time sync information to the observation summary.
 
-    Args:
-        config:rms config file
-        conn: database connection
-        force_client: optional, string to force resolution by ntpd, chrony, or a query on a remote server
+    Arguments:
+        config: [Config] Configuration object.
+        conn: [Connection] database connection.
+
+    Keyword arguments:
+        force_client: [string] optional, string to force resolution by ntpd, chrony, or a query on a remote server.
 
     Returns:
-        time local clock ahead (+ve) milliseconds, or "Unknown" if delta cannot be determined
+        ahead_ms: [float] time local clock ahead (+ve) milliseconds, or "Unknown" if delta cannot be determined.
     """
 
     time_client = getTimeClient()
@@ -171,12 +174,13 @@ def getNTPStatistics():
 
     """
     Acquire the statistics of the ntp client.
-    Tries to use ntpstat, if not available, falls back to ntpq, if not available returns Unknown
+
+    Tries to use ntpstat, if not available, falls back to ntpq, if not available returns Unknown.
 
     Returns:
-        [bool]: true if reported as synchronised
-        [float]: uncertainty in milliseconds
-        [str]: always Unknown, unable to discern actual time error using ntp tools
+        synchronized: [bool] true if reported as synchronised.
+        uncertainty_ms: [float] uncertainty in milliseconds.
+        time_error_ms: [str] always Unknown, unable to discern actual time error using ntp tools.
 
     """
 
@@ -215,8 +219,7 @@ def getNTPStatistics():
 def getChronyUncertainty():
 
     """
-        Acquire the statistics of the ntp client.
-        Tries to use ntpstat, if not available, falls back to ntpq, if not available returns Unknown
+        Acquire the statistics of the chrony ntp client.
 
         uncertainty implementation is taken from
         https://chrony-project.org/doc/3.3/chronyc.html
@@ -228,16 +231,16 @@ def getChronyUncertainty():
             to system clock resolution, statistical measurement variations, etc.
 
             An absolute bound on the computers clock accuracy (assuming the stratum-1 computer is correct) is given by:
-            clock_error <= |system_time_offset| + root_dispersion + (0.5 * root_delay)
+            clock_error <= |system_time_offset| + root_dispersion + (0.5 * root_delay).
 
-            This is very high at initial synchronisation, as root dispersion dominates.
+
+        Uncertainty is very high at initial synchronisation, as root dispersion dominates.
 
 
         Returns:
-            [bool]: true if reported as synchronised
-            [float]: uncertainty in milliseconds
-            [str]: time in milliseconds that computer clock is reported to be ahead of superior reference
-
+            synchronized: [bool] true if reported as synchronized.
+            ahead_ms: [str] time in milliseconds that computer clock is reported to be ahead of superior reference.
+            uncertainty_ms: [float] uncertainty in milliseconds.
         """
 
     synchronized = False
@@ -279,16 +282,20 @@ def getChronyUncertainty():
 def timestampFromNTP(addr='time.cloudflare.com'):
 
     """
+    Get the timestamp from the NTP server by a direct query.
+
     refer https://stackoverflow.com/questions/36500197/how-to-get-time-from-an-ntp-server
     and also https://github.com/CroatianMeteorNetwork/RMS/issues/624
 
 
-    Args:
-        addr: optional, address of ntp server to use
+    Arguments:
+
+    Keyword arguments:
+        addr: optional, address of ntp server to use.
 
     Returns:
-        [float]: time in seconds since epoch
-        [float]: estimated network delay (average of outgoing and return legs)
+        adjusted_time: [float] time in seconds since epoch.
+        estimated_network_delay: [float] estimated network delay (average of outgoing and return legs).
     """
 
 
@@ -309,11 +316,10 @@ def timestampFromNTP(addr='time.cloudflare.com'):
         return None, None
     if data:
 
-        # for NTP the fractional seconds is a 32 bit counter
+        # For NTP the fractional seconds is a 32 bit counter
         fractional_second_factor = ( 1 / 2 ** 32)
 
-
-        # unpack data
+        # Unpack data
         remote_clock_time_receive_timestamp_seconds = struct.unpack('!12I', data)[8] - REF_TIME_1970
         remote_clock_time_receive_timestamp_fractional_seconds = struct.unpack('!12I', data)[9] * fractional_second_factor
 
@@ -327,12 +333,12 @@ def timestampFromNTP(addr='time.cloudflare.com'):
         remote_clock_measured_processing_time = (remote_clock_time_transmit_timestamp - remote_clock_time_receive_timestamp)
 
         # print("Rx Fractional {}, Tx fractional {}".format(remote_clock_time_receive_timestamp_fractional_seconds, remote_clock_time_transmit_timestamp_fractional_seconds))
-        # next calculation assumes that remote and local clock are running at identical rates
+        # Next calculation assumes that remote and local clock are running at identical rates
         estimated_network_delay = local_clock_measured_response_time - remote_clock_measured_processing_time
         if estimated_network_delay < 0:
             return None, None
 
-        # now calculate estimated clock offsets
+        # Now calculate estimated clock offsets
         clock_offset_out_leg = remote_clock_time_receive_timestamp - local_clock_transmit_timestamp
         clock_offset_return_leg = remote_clock_time_transmit_timestamp - local_clock_receive_timestamp
         estimated_offset = (clock_offset_out_leg + clock_offset_return_leg) / 2
@@ -345,11 +351,13 @@ def getObsDBConn(config, force_delete=False):
     """ Creates the Observation Summary database. Tries only once.
 
     arguments:
-        config: config file
-        force_delete: if set then deletes the database before recreating
+        config: [config] config instance.
+
+    keyword arguments:
+        force_delete: [bool] default false, if set then deletes the database before recreating.
 
     returns:
-        conn: [connection] connection to database if success else None
+        conn: [connection] connection to database if success else None.
 
     """
 
@@ -363,10 +371,9 @@ def getObsDBConn(config, force_delete=False):
         # Handle the very rare case where this could run before any observation sessions
         # and RMS_data does not exist
         try:
-            # can the required directory be created
+            # Create the required directory
             os.makedirs(os.path.dirname(observation_records_db_path))
         except:
-            # if not then return
             return None
 
     try:
@@ -401,15 +408,15 @@ def getObsDBConn(config, force_delete=False):
 
 def addObsParam(conn, key, value):
 
-    """ Add a single key value pair into the database
+    """ Add a single key value pair into the database.
 
             arguments:
-                conn: the connection to the database
-                key: the key for the value to be added
-                value: the value to be added
+                conn [connection]: the connection to the database
+                key [str]: the key for the value to be added
+                value [str]: the value to be added
 
             returns:
-                conn: [connection] connection to database if success else None
+                Nothing
 
             """
 
@@ -443,27 +450,29 @@ def estimateLens(fov_h):
     """ Estimate the focal length of the lens in use
 
         arguments:
-                fov_h: horizontal field of view
+                fov_h: [float] horizontal field of view
 
         returns:
-                an estimate of the focal length of the lens
+                lens_type: [str] The focal length of the lens in mm
 
     """
 
     lens_types = ["25mm", "16mm", "8mm", "6mm", "4mm"]
     lens_fov_h = [15, 30, 45, 60, 90]
-    for type, fov in zip(lens_types, lens_fov_h):
+    for lens_type, fov in zip(lens_types, lens_fov_h):
         if fov_h < fov:
-            return type
+            return lens_type
     return None
 
 def getLastStartTime(conn):
-    """ Query the database to discover the previous start time
+    """
+    Query the database to discover the previous start time.
+
         arguments:
-                conn: connection to database
+                conn: [connection] connection to database
 
         returns:
-                the previous start time
+                result: [string] the previous start time
 
     """
 
@@ -486,14 +495,16 @@ def getLastStartTime(conn):
 
 def gatherCameraInformation(config, attempts=6, delay=10, sock_timeout=3):
 
-    """ Gather information about the sensor in use
+    """ Gather information about the sensor in use.
         Retry the DVRIP handshake until it works, or we exhaust attempts.
 
-                arguments:
-                    config: config object
-                    attempts: optional, default 6, number of attempts to connect
-                    delay: optional, default 10, delay between attempts
-                    sock_timeout: optional, default 3, socket timeout in seconds
+        arguments:
+            config: [config] config object.
+
+        keyword arguments:
+            attempts: [int] optional, default 6, number of attempts to connect
+            delay: [float] optional, default 10, delay between attempts
+            sock_timeout: [float] optional, default 3, socket timeout in seconds
 
                 returns:
                     sensor type string
