@@ -67,7 +67,7 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
             # Load the flat
             flat = loadFlat(flat_path, flat_file)
 
-            log.debug('Loaded flat:', flat_full_path)
+            log.debug('Loaded flat: {}'.format(flat_full_path))
 
 
     first_img = True
