@@ -742,7 +742,7 @@ def updateCommitHistoryDirectory(remote_urls, target_directory):
             # this first remote might have been pulled in with the wrong local_name so rename it
             commit_repo_directory = os.path.join(target_directory, os.listdir(target_directory)[0])
             downloaded_remote_name = subprocess.check_output(["git", "remote"], cwd = commit_repo_directory).strip().decode('utf-8')
-            print(downloaded_remote_name)
+
             if downloaded_remote_name != local_name:
                 p = subprocess.Popen(["git", "remote", "rename", downloaded_remote_name, local_name], cwd = commit_repo_directory)
                 p.wait()
