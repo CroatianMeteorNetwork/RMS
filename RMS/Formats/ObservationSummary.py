@@ -29,23 +29,23 @@ from __future__ import print_function, division, absolute_import
 import sys
 import os
 import subprocess
-import time
-import datetime
-from RMS.Misc import niceFormat, isRaspberryPi, sanitise, getRMSStyleFileName, getRmsRootDir, UTCFromTimestamp
-import re
-import sqlite3
-from RMS.ConfigReader import parse
-
 import platform
 import git
 import shutil
-
 import glob
 import json
-
-
-from RMS.Formats.FFfits import filenameToDatetimeStr
+import re
+import sqlite3
 import datetime
+import socket
+import struct
+import sys
+import time
+import tempfile
+
+from RMS.ConfigReader import parse
+from RMS.Misc import niceFormat, isRaspberryPi, sanitise, getRMSStyleFileName, getRmsRootDir, UTCFromTimestamp
+from RMS.Formats.FFfits import filenameToDatetimeStr
 from RMS.Formats.Platepar import Platepar
 
 if sys.version_info.major > 2:
@@ -56,11 +56,6 @@ else:
 
 EM_RAISE = True
 
-import socket
-import struct
-import sys
-import time
-import tempfile
 
 def roundWithoutTrailingZero(value, no):
 
