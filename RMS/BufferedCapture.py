@@ -49,12 +49,12 @@ import Utils.CameraControl as cc
 # Get the logger from the main module
 log = getLogger("logger")
 
-try:
-    # py3
-    from urllib.parse import urlparse
-except ImportError:
+if sys.version_info[0] < 3:
     # py2
     from urlparse import urlparse
+else:
+    # py3
+    from urllib.parse import urlparse
 
 
 GST_IMPORTED = False
@@ -1373,10 +1373,8 @@ class BufferedCapture(Process):
                     self.pipeline.set_state(Gst.State.NULL)
                     self.pipeline = None
 
-                if abs(self.last_calculated_fps - self.config.fps) > 0.0005 and self.last_calculated_fps_n > 25*60*60:
-                    log.info('Config file fps appears to be inaccurate. Consider updating the config file!')
 
-                log.info("Last calculated FPS: {:.6f} at frame {}, config FPS: {}, resets: {}, startup status: {}"
+                log.debug("Last calculated FPS: {:.6f} at frame {}, config FPS: {}, resets: {}, startup status: {}"
                          .format(self.last_calculated_fps, self.last_calculated_fps_n, self.config.fps, self.reset_count, self.startup_flag))
 
                 log.info('GStreamer Video device released!')
@@ -1995,7 +1993,7 @@ class BufferedCapture(Process):
                 else:
                     self.start_time2.value = first_frame_timestamp
 
-                log.info('New block of raw frames available for compression with starting time: {:s}'
+                log.debug('New block of raw frames available for compression with starting time: {:s}'
                          .format(str(first_frame_timestamp)))
 
             
@@ -2020,7 +2018,7 @@ class BufferedCapture(Process):
 
                 mkdirP(ft_subpath)
                 FTfile.write(ft, ft_subpath, ft_filename)
-                log.info("Created FT file {} for block starting at {}".format(os.path.join(ft_subpath, ft_filename), first_frame_timestamp))
+                log.debug("Created FT file {} for block starting at {}".format(os.path.join(ft_subpath, ft_filename), first_frame_timestamp))
 
                 # For Testing: 
                 # Print first and last 10 timestamps, array length, average time difference and time difference from last block
