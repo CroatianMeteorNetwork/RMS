@@ -26,10 +26,13 @@
 from __future__ import print_function, division, absolute_import
 
 
-import sys
+
 import os
+import sys
+import socket
 import subprocess
 import platform
+
 import git
 import shutil
 import glob
@@ -37,9 +40,8 @@ import json
 import re
 import sqlite3
 import datetime
-import socket
+
 import struct
-import sys
 import time
 import tempfile
 
