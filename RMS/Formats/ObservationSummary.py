@@ -108,24 +108,19 @@ def getObservationDurationContinuous(conn, config):
             config: [object] RMS configuration instance.
 
         Return:
-            duration: [float] duration of observation in seconds.
+            duration: [float] duration of observation in seconds. If cannot be computed, return 0.
         """
     # Initialize sun and observer
     o = ephem.Observer()
-    o.lat, o.long  = str(config.latitude), str(config.longitude)
-    s, o.horizon, o.elevation = ephem.Sun(), SWITCH_HORIZON_DEG, config.elevation
-    s.compute()
+    o.lat, o.long, o.elevation  = str(config.latitude), str(config.longitude), config.elevation
+    s, o.horizon, o.date = ephem.Sun(), SWITCH_HORIZON_DEG, getLastStartTime(conn, tz_naive=True)
 
-    # Set the evaluation time as when capture last started
-    evaluation_time = getLastStartTime(conn, tz_naive=True)
-
-    # Work backwards through time until the next event is a sunrise, this gives us
-    # the approximate time that the last capture session should have ended
-    o.date = evaluation_time
-    next_rise = o.next_rising(s).datetime()
-
-
-    duration = (next_rise - evaluation_time).total_seconds()
+    # Compute
+    try:
+        s.compute()
+        duration = (o.next_rising(s).datetime() - o.date).total_seconds()
+    except:
+        duration = 0
 
     return duration
 
