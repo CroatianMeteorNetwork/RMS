@@ -116,24 +116,16 @@ def getObservationDurationContinuous(conn, config):
     s, o.horizon, o.elevation = ephem.Sun(), SWITCH_HORIZON_DEG, config.elevation
     s.compute()
 
-    # Set the evaluation time as now
-    evaluation_time = RmsDateTime.utcnow()
+    # Set the evaluation time as when capture last started
+    evaluation_time = getLastStartTime(conn, tz_naive=True)
 
     # Work backwards through time until the next event is a sunrise, this gives us
     # the approximate time that the last capture session should have ended
+    o.date = evaluation_time
+    next_rise = o.next_rising(s).datetime()
 
-    while True:
-        o.date = evaluation_time
-        next_rise = o.next_rising(s).datetime()
-        next_set = o.next_setting(s).datetime()
 
-        if next_set < next_rise:
-            evaluation_time -= datetime.timedelta(minutes=1)
-        else:
-            last_rise = next_rise
-            break
-
-    duration = (last_rise - getLastStartTime(conn, tz_naive=True)).total_seconds()
+    duration = (next_rise - evaluation_time).total_seconds()
 
     return duration
 
