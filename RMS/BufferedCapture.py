@@ -1373,10 +1373,8 @@ class BufferedCapture(Process):
                     self.pipeline.set_state(Gst.State.NULL)
                     self.pipeline = None
 
-                if abs(self.last_calculated_fps - self.config.fps) > 0.0005 and self.last_calculated_fps_n > 25*60*60:
-                    log.info('Config file fps appears to be inaccurate. Consider updating the config file!')
 
-                log.info("Last calculated FPS: {:.6f} at frame {}, config FPS: {}, resets: {}, startup status: {}"
+                log.debug("Last calculated FPS: {:.6f} at frame {}, config FPS: {}, resets: {}, startup status: {}"
                          .format(self.last_calculated_fps, self.last_calculated_fps_n, self.config.fps, self.reset_count, self.startup_flag))
 
                 log.info('GStreamer Video device released!')
