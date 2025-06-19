@@ -594,13 +594,12 @@ def getNextStartTime(conn, time_point, tz_naive=True):
     # print(result_list)
     if len(result_list) > 2:
         result = result_list[1]
+        return result[0]
     else:
         result = datetime.datetime.now(tz=datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         return result
 
-
-
-    return result[0]
+    return result
 
 def gatherCameraInformation(config, attempts=6, delay=10, sock_timeout=3):
 
@@ -983,7 +982,7 @@ def retrieveObservationData(conn, config, night_directory=None, ordering=None):
     # Use this print call to check the ordering
     # print("Ordering {}".format(ordering))
 
-    next_start_time = getNextStartTime(conn, obs_start_time)
+    next_start_time = getNextStartTime(conn, obs_end_time)
     # print("Observation start time was {}".format(obs_start_time))
     # print("Next start time was {}".format(next_start_time))
 
@@ -1004,7 +1003,7 @@ def retrieveObservationData(conn, config, night_directory=None, ordering=None):
     sql_statement += "                  ELSE {:03d} \n".format(count)
     sql_statement += "              END"
 
-    # print(sql_statement)
+    print(sql_statement)
 
     return conn.cursor().execute(sql_statement).fetchall()
 
@@ -1265,12 +1264,12 @@ if __name__ == "__main__":
     dir_list.sort(reverse=True)
     latest_dir = os.path.join(capture_directory, dir_list[0])
     start_time, duration, end_time = getEphemTimesFromCaptureDirectory(config, latest_dir)
-    print("For directory {}".format(capture_directory))
+    print("For directory {}".format(latest_dir))
     print("Start time was {}".format(start_time))
     print("Duration time was {}".format(duration))
     print("End time was {}".format(end_time))
 
-    print(getNextStartTime(obs_db_conn, start_time))
+
 
     # startObservationSummaryReport(config, 100, force_delete=False)
     pp = Platepar()
