@@ -1199,7 +1199,6 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
 
             """
 
-    start_ephem, duration_ephem, end_ephem = getEphemTimesFromCaptureDirectory(night_data_dir)
     capture_duration_from_fits, capture_duration_from_ephemeris, \
     fits_count, \
     fits_file_shortfall, fits_file_shortfall_ephemeris, \
