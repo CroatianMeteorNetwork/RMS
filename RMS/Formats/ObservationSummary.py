@@ -590,7 +590,7 @@ def getLastStartTime(conn, config, tz_naive = False):
     if tz_naive:
         last_start_time_db = result[0].replace(":","")
 
-        # Initialise with something sensible whilst debugging
+        # Initialise with something sensible as a worst case fallback
         last_start_time_tz_aware = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours = 8)
 
         try:
