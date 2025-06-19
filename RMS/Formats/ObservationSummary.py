@@ -558,7 +558,9 @@ def estimateLens(fov_h):
 
 def getEphemTimesFromCaptureDirectory(capture_directory):
 
+
     capture_directory_start_time = filenameToDatetimeStr(os.path.basename(capture_directory))
+    config = parse(os.path.join(capture_directory, ".config"))
     capture_directory_full_path = os.path.join(config.data_dir, config.captured_dir, capture_directory)
     # print("Capture directory: {}".format(capture_directory_full_path))
     night_config = parse(os.path.join(capture_directory_full_path,".config"))
@@ -1262,7 +1264,7 @@ if __name__ == "__main__":
     dir_list.sort(reverse=True)
     latest_dir = os.path.join(capture_directory, dir_list[0])
 
-    start_time, duration, end_time = getEphemTimesFromCaptureDirectory(latest_dir)
+    start_time, duration, end_time = getEphemTimesFromCaptureDirectory(config, latest_dir)
     print("For directory {}".format(capture_directory))
     print("Start time was {}".format(start_time))
     print("Duration time was {}".format(duration))
