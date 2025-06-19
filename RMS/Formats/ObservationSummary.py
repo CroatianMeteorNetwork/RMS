@@ -557,15 +557,8 @@ def estimateLens(fov_h):
             return lens_type
     return None
 
-def getEphemTimesFromCaptureDirectory(capture_directory):
+def getEphemTimesFromCaptureDirectory(config, capture_directory):
 
-
-    capture_directory_start_time = filenameToDatetimeStr(os.path.basename(capture_directory))
-
-    time.sleep(30)
-    config_path = os.path.join(capture_directory,".config")
-    print("Load .config from {}".format(config_path))
-    config = cr.parse(config_path)
     capture_directory_full_path = os.path.join(config.data_dir, config.captured_dir, capture_directory)
     # print("Capture directory: {}".format(capture_directory_full_path))
     night_config = parse(os.path.join(capture_directory_full_path,".config"))
@@ -954,7 +947,7 @@ def retrieveObservationData(conn, config, night_directory=None, ordering=None):
                 break
 
 
-    obs_start_time, obs_duration, obs_end_time = getEphemTimesFromCaptureDirectory(night_directory)
+    obs_start_time, obs_duration, obs_end_time = getEphemTimesFromCaptureDirectory(config, night_directory)
 
     # print("Night directory was {}".format(night_directory))
     # print("Observation start time was {}".format(obs_start_time))
