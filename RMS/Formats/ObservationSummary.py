@@ -585,8 +585,7 @@ def getNextStartTime(conn, obs_start_time, tz_naive=True):
     sql_statement += "      ORDER BY TimeStamp asc \n"
 
     result = conn.cursor().execute(sql_statement).fetchone()
-    print("Previous start time was : {}".format(obs_start_time))
-    print("Next start time was : {}".format(result[0]))
+
 
     if result is None:
         result = []
