@@ -1193,12 +1193,14 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
     time_first_fits_file, time_last_fits_file, \
     total_expected_fits, total_expected_fits_ephemeris = nightSummaryData(config, night_data_dir)
 
+    obs_db_conn = getObsDBConn(config)
+
     try:
         timeSyncStatus(config, obs_db_conn)
     except Exception as e:
         print(repr(e))
 
-    obs_db_conn = getObsDBConn(config)
+
     platepar_path = os.path.join(config.config_file_path, config.platepar_name)
     if os.path.exists(platepar_path):
         platepar = Platepar()
