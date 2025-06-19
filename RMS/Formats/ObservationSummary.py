@@ -80,7 +80,9 @@ def roundWithoutTrailingZero(value, no):
     return str("{0:g}".format(value))
 
 
-def getObservationDurationNightTime(conn, config):
+
+
+def getObservationDurationNightTime(config, start_time):
     """
     Get the duration of an observation session not in nighttime only mode.
 
@@ -93,12 +95,13 @@ def getObservationDurationNightTime(conn, config):
         duration: [float] duration of observation in seconds.
     """
 
-    _, duration = captureDuration(config.latitude, config.longitude, config.elevation,
-                           getLastStartTime(conn, config, tz_naive=True))
+    _, duration = captureDuration(config.latitude, config.longitude, config.elevation,start_time)
 
-    return duration
+    end_time = start_time + datetime.timedelta(seconds=duration)
 
-def getObservationDurationContinuous(conn, config):
+    return start_time, duration, end_time
+
+def getObservationDurationContinuous(config, start_time):
     """
         Get the duration of an observation session in continuous capture mode.
 
@@ -106,8 +109,8 @@ def getObservationDurationContinuous(conn, config):
         than an arbitrary time during the previous capture session.
 
         Arguments:
-            conn: [object] database connection instance.
             config: [object] RMS configuration instance.
+            start_time: [object] time within, but near to the start of the observation session
 
         Return:
             duration: [float] duration of observation in seconds. If cannot be computed, return 0.
@@ -116,19 +119,23 @@ def getObservationDurationContinuous(conn, config):
 
     o = ephem.Observer()
     o.lat, o.long, o.elevation  = str(config.latitude), str(config.longitude), config.elevation
-    s, o.horizon, o.date = ephem.Sun(), SWITCH_HORIZON_DEG, getLastStartTime(conn, config, tz_naive=True)
+    s, o.horizon, o.date = ephem.Sun(), SWITCH_HORIZON_DEG, start_time
 
     # Compute duration
     try:
         s.compute()
         print()
-        duration = (o.next_rising(s).datetime() - o.date.datetime()).total_seconds()
+        start_time = o.previous_setting(s).datetime()
+        end_time = o.next_rising(s).datetime()
+        duration = (end_time - start_time).total_seconds()
     except:
+        start_time = None
         duration = 0
+        end_time = None
 
-    return duration
+    return start_time, duration, end_time
 
-def getObservationDuration(conn, config):
+def getObservationDuration(config, start_time):
 
     """ Get the duration of the observation session.
 
@@ -139,8 +146,8 @@ def getObservationDuration(conn, config):
     instance.
 
     Arguments:
-        conn: [object] Database connection instance.
         config: [object] RMS configuration instance.
+        start_time: [object] A time during the observation session.
 
     Return:
 
@@ -149,11 +156,11 @@ def getObservationDuration(conn, config):
     """
 
     if config.continuous_capture:
-        duration = getObservationDurationContinuous(conn, config)
+        start_time, duration, end_time = getObservationDurationContinuous(config, start_time)
     else:
-        duration = getObservationDurationNightTime(conn, config)
+        start_time, duration, end_time = getObservationDurationNightTime(config, start_time)
 
-    return duration
+    return start_time, duration, end_time
 
 def getTimeClient():
 
@@ -549,7 +556,16 @@ def estimateLens(fov_h):
             return lens_type
     return None
 
-def getLastStartTime(conn, config, tz_naive = False):
+def getEphemTimesFromCaptureDirectory(capture_directory):
+
+    capture_directory_start_time = filenameToDatetimeStr(os.path.basename(capture_directory))
+    capture_directory_full_path = os.path.join(config.data_dir, config.captured_dir, capture_directory)
+    night_config = parse(os.path.join(capture_directory_full_path,".config"))
+    start_time, duration, end_time = getObservationDuration(night_config, capture_directory_start_time)
+
+    return start_time, duration, end_time
+
+def getNextStartTime(conn, obs_start_time, tz_naive=True):
     """
     Query the database to discover the previous start time.
 
@@ -565,30 +581,19 @@ def getLastStartTime(conn, config, tz_naive = False):
     sql_statement = ""
     sql_statement += "SELECT Value from records \n"
     sql_statement += "      WHERE Key = 'start_time' \n"
-    sql_statement += "      ORDER BY TimeStamp desc \n"
+    sql_statement += "      AND Value > '{}'\n".format(obs_start_time)
+    sql_statement += "      ORDER BY TimeStamp asc \n"
 
     result = conn.cursor().execute(sql_statement).fetchone()
+    print("Previous start time was : {}".format(obs_start_time))
+    print("Next start time was : {}".format(result[0]))
 
-    if result is None:
-        sql_statement = ""
-        sql_statement += "SELECT Timestamp from records \n"
-        sql_statement += "  ORDER BY Timestamp asc \n"
-
-        result =  conn.cursor().execute(sql_statement).fetchone()
-
-    # if database is empty find the first fits file
     if result is None:
         result = []
-        captured_data_dir = os.path.join(config.data_dir, config.captured_dir)
-        night_dir_list = os.listdir(captured_data_dir)
-        night_dir_list.reverse()
-        fits_files_list = glob.glob(os.path.join(captured_data_dir, night_dir_list[0], "*.fits"))
-        fits_files_list.sort()
-        print(filenameToDatetimeStr(os.path.basename(fits_files_list[0])))
-        result.append(filenameToDatetimeStr(os.path.basename(fits_files_list[0])))
+        result.append(datetime.datetime.now(tz=None))
+
 
     if tz_naive:
-        last_start_time_db = result[0].replace(":","")
 
         # Initialise with something sensible as a worst case fallback
         last_start_time_tz_aware = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours = 8)
@@ -607,6 +612,25 @@ def getLastStartTime(conn, config, tz_naive = False):
 
         last_start_time_naive = last_start_time_tz_aware.replace(tzinfo=None)
         return last_start_time_naive
+
+    else:
+
+        # Initialise with something sensible as a worst case fallback
+        last_start_time_tz_aware = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours = 8)
+
+        try:
+            last_start_time_tz_aware = datetime.datetime.strptime(last_start_time_db, "%Y-%m-%d %H%M%S.%f")
+        except:
+            return last_start_time_tz_aware
+
+
+        try:
+            last_start_time_tz_aware = datetime.datetime.strptime(last_start_time_db, "%Y-%m-%d %H%M%S%z")
+        except:
+            return last_start_time_tz_aware
+
+        return last_start_time_tz_aware
+
 
 
     return result[0]
@@ -716,15 +740,15 @@ def nightSummaryData(config, night_data_dir):
     fits_file_shortfall_as_time = str(datetime.timedelta(seconds=fits_file_shortfall * duration_one_fits_file))
 
     # Compute key values from the ephemeris values
-    conn = getObsDBConn(config)
-    capture_duration_from_ephemeris = getObservationDuration(conn, config)
-    total_expected_fits_ephemeris = round(capture_duration_from_ephemeris / duration_one_fits_file)
+
+    start_ephem, duration_ephem, end_ephem = getObservationDuration(config, time_first_fits_file)
+    total_expected_fits_ephemeris = round(duration_ephem / duration_one_fits_file)
     fits_file_shortfall_ephemeris = total_expected_fits_ephemeris - fits_count
     fits_file_shortfall_ephemeris = 0 if fits_file_shortfall_ephemeris < 1 else fits_file_shortfall_ephemeris
     fits_file_shortfall_as_time_ephemeris = str(datetime.timedelta(seconds=fits_file_shortfall_ephemeris * duration_one_fits_file))
 
 
-    return  capture_duration_from_fits, capture_duration_from_ephemeris, \
+    return  capture_duration_from_fits, duration_ephem, \
             fits_count, \
             fits_file_shortfall, fits_file_shortfall_ephemeris, \
             fits_file_shortfall_as_time, fits_file_shortfall_as_time_ephemeris, \
@@ -932,7 +956,7 @@ def daysBehind():
         target_directory_obj.cleanup()
         return "Unable to determine"
 
-def retrieveObservationData(conn, obs_start_time, ordering=None):
+def retrieveObservationData(conn, night_directory=None, ordering=None):
     """ Query the database to get the data more recent than the time passed in.
 
         Usually this will be the start of the most recent observation session.
@@ -940,12 +964,30 @@ def retrieveObservationData(conn, obs_start_time, ordering=None):
 
     Arguments:
             conn:  [object] connection to database.
-            obs_start_time: [datetime] start time of the observation session.
+
+    Keyword arguments:
+            night_directory: [str] optional, directory of night directory if none, assume most recent
             ordering: [list] optional, default None, sequence to order the keys.
 
     return:
             key value pairs committed to the database since the obs_start_time.
     """
+
+    if night_directory is None:
+        captured_data_dir = os.path.join(config.data_dir, config.captured_dir)
+        night_dir_list = os.listdir(captured_data_dir)
+        night_dir_list.sort(reverse=False)
+
+        for night_dir in night_dir_list:
+            if night_dir.startswith(config.stationID) and os.path.isdir(os.path.join(captured_data_dir, night_dir)):
+                break
+
+
+    obs_start_time, obs_duration, obs_end_time = getEphemTimesFromCaptureDirectory(night_dir)
+
+    print("Observation start time was {}".format(obs_start_time))
+    print("Observation duration was {}".format(obs_duration))
+    print("Observation end time was {}".format(obs_end_time))
 
     if ordering is None:
         # Be sure to add a comma after each list entry, IDE will not pick up this error as Python will concatenate
@@ -973,9 +1015,12 @@ def retrieveObservationData(conn, obs_start_time, ordering=None):
     # Use this print call to check the ordering
     # print("Ordering {}".format(ordering))
 
+    next_start_time = getNextStartTime(conn, obs_start_time)
+
     sql_statement = ""
     sql_statement += "SELECT Key, Value from records \n"
     sql_statement += "           WHERE TimeStamp >= '{}' \n".format(obs_start_time)
+    sql_statement += "           AND   TimeStamp <= '{}' \n".format(next_start_time)
     sql_statement += "           GROUP BY KEY \n"
     sql_statement += "           ORDER BY \n"
     sql_statement += "              CASE Key \n"
@@ -993,7 +1038,7 @@ def retrieveObservationData(conn, obs_start_time, ordering=None):
 
     return conn.cursor().execute(sql_statement).fetchall()
 
-def serialize(config, format_nicely=True, as_json=False):
+def serialize(config, format_nicely=True, as_json=False, night_directory = None):
     """ Returns the data from the most recent observation session as either colon
         delimited text file, ar as a json.
 
@@ -1007,7 +1052,7 @@ def serialize(config, format_nicely=True, as_json=False):
     """
 
     conn = getObsDBConn(config)
-    data = retrieveObservationData(conn, getLastStartTime(conn, config))
+    data = retrieveObservationData(conn, night_directory)
     conn.close()
 
     if as_json:
@@ -1184,8 +1229,10 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
     Return:
         [str] filename of text file.
         [str] filename of json.
+
             """
 
+    start_ephem, duration_ephem, end_ephem = getEphemTimesFromCaptureDirectory(night_data_dir)
     capture_duration_from_fits, capture_duration_from_ephemeris, \
     fits_count, \
     fits_file_shortfall, fits_file_shortfall_ephemeris, \
@@ -1242,14 +1289,14 @@ if __name__ == "__main__":
     config = parse(os.path.expanduser("~/source/RMS/.config"))
 
     obs_db_conn = getObsDBConn(config)
-    config.continuous_capture = False
-    duration_night_time_only = getObservationDuration(obs_db_conn, config)
-    # print("Duration night time only: {} hours".format(duration_night_time_only / 3600))
 
+    capture_directory = "AU001A_20250603_095642_638695"
+    start_time, duration, end_time = getEphemTimesFromCaptureDirectory(capture_directory)
+    print("For directory {}".format(capture_directory))
+    print("Start time was {}".format(start_time))
+    print("Duration time was {}".format(duration))
+    print("End time was {}".format(end_time))
 
-    config.continuous_capture = True
-    duration_continuous = getObservationDuration(obs_db_conn, config)
-    # print("Duration continuous: {} hours".format(duration_continuous / 3600))
 
     # startObservationSummaryReport(config, 100, force_delete=False)
     pp = Platepar()
