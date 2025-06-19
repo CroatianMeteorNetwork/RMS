@@ -94,7 +94,7 @@ def getObservationDurationNightTime(conn, config):
     """
 
     _, duration = captureDuration(config.latitude, config.longitude, config.elevation,
-                           getLastStartTime(conn, tz_naive=True))
+                           getLastStartTime(conn, config, tz_naive=True))
 
     return duration
 
@@ -113,14 +113,16 @@ def getObservationDurationContinuous(conn, config):
             duration: [float] duration of observation in seconds. If cannot be computed, return 0.
         """
     # Initialize sun and observer
+
     o = ephem.Observer()
     o.lat, o.long, o.elevation  = str(config.latitude), str(config.longitude), config.elevation
-    s, o.horizon, o.date = ephem.Sun(), SWITCH_HORIZON_DEG, getLastStartTime(conn, tz_naive=True)
+    s, o.horizon, o.date = ephem.Sun(), SWITCH_HORIZON_DEG, getLastStartTime(conn, config, tz_naive=True)
 
-    # Compute
+    # Compute duration
     try:
         s.compute()
-        duration = (o.next_rising(s).datetime() - o.date).total_seconds()
+        print()
+        duration = (o.next_rising(s).datetime() - o.date.datetime()).total_seconds()
     except:
         duration = 0
 
@@ -547,7 +549,7 @@ def estimateLens(fov_h):
             return lens_type
     return None
 
-def getLastStartTime(conn, tz_naive = False):
+def getLastStartTime(conn, config, tz_naive = False):
     """
     Query the database to discover the previous start time.
 
@@ -574,23 +576,38 @@ def getLastStartTime(conn, tz_naive = False):
 
         result =  conn.cursor().execute(sql_statement).fetchone()
 
+    # if database is empty find the first fits file
+    if result is None:
+        result = []
+        captured_data_dir = os.path.join(config.data_dir, config.captured_dir)
+        night_dir_list = os.listdir(captured_data_dir)
+        night_dir_list.reverse()
+        fits_files_list = glob.glob(os.path.join(captured_data_dir, night_dir_list[0], "*.fits"))
+        fits_files_list.sort()
+        print(filenameToDatetimeStr(os.path.basename(fits_files_list[0])))
+        result.append(filenameToDatetimeStr(os.path.basename(fits_files_list[0])))
+
     if tz_naive:
         last_start_time_db = result[0].replace(":","")
+
         # Initialise with something sensible whilst debugging
         last_start_time_tz_aware = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours = 8)
 
         try:
             last_start_time_tz_aware = datetime.datetime.strptime(last_start_time_db, "%Y-%m-%d %H%M%S.%f")
         except:
-            pass
+            last_start_time_naive = last_start_time_tz_aware.replace(tzinfo=None)
+            return last_start_time_naive
 
         try:
             last_start_time_tz_aware = datetime.datetime.strptime(last_start_time_db, "%Y-%m-%d %H%M%S%z")
         except:
-            pass
+            last_start_time_naive = last_start_time_tz_aware.replace(tzinfo=None)
+            return last_start_time_naive
 
         last_start_time_naive = last_start_time_tz_aware.replace(tzinfo=None)
         return last_start_time_naive
+
 
     return result[0]
 
@@ -990,7 +1007,7 @@ def serialize(config, format_nicely=True, as_json=False):
     """
 
     conn = getObsDBConn(config)
-    data = retrieveObservationData(conn, getLastStartTime(conn))
+    data = retrieveObservationData(conn, getLastStartTime(conn, config))
     conn.close()
 
     if as_json:
