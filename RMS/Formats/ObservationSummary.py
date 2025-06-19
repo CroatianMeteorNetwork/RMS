@@ -45,7 +45,6 @@ import struct
 import time
 import tempfile
 import ephem
-import RMS.ConfigReader as cr
 
 from RMS.ConfigReader import parse
 from RMS.Misc import niceFormat, isRaspberryPi, sanitise, getRMSStyleFileName, getRmsRootDir, UTCFromTimestamp
@@ -53,7 +52,7 @@ from RMS.Formats.FFfits import filenameToDatetimeStr
 from RMS.Formats.Platepar import Platepar
 from RMS.CaptureDuration import captureDuration
 from RMS.CaptureModeSwitcher import SWITCH_HORIZON_DEG
-from RMS.Misc import RmsDateTime
+
 
 if sys.version_info.major > 2:
     import dvrip as dvr
