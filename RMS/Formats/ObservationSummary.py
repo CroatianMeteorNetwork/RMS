@@ -1198,6 +1198,7 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
     except Exception as e:
         print(repr(e))
 
+    obs_db_conn = getObsDBConn(config)
     platepar_path = os.path.join(config.config_file_path, config.platepar_name)
     if os.path.exists(platepar_path):
         platepar = Platepar()
