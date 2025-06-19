@@ -922,7 +922,7 @@ def daysBehind():
         target_directory_obj.cleanup()
         return "Unable to determine"
 
-def retrieveObservationData(conn, night_directory=None, ordering=None):
+def retrieveObservationData(conn, config, night_directory=None, ordering=None):
     """ Query the database to get the data more recent than the time passed in.
 
         Usually this will be the start of the most recent observation session.
@@ -1021,7 +1021,7 @@ def serialize(config, format_nicely=True, as_json=False, night_directory = None)
     """
 
     conn = getObsDBConn(config)
-    data = retrieveObservationData(conn, night_directory)
+    data = retrieveObservationData(conn, config, night_directory)
     conn.close()
 
     if as_json:
