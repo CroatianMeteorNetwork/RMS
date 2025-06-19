@@ -26,27 +26,33 @@
 from __future__ import print_function, division, absolute_import
 
 
-import sys
-import os
-import subprocess
-import time
-import datetime
-from RMS.Misc import niceFormat, isRaspberryPi, sanitise, getRMSStyleFileName, getRmsRootDir, UTCFromTimestamp
-import re
-import sqlite3
-from RMS.ConfigReader import parse
 
+import os
+import sys
+import socket
+import subprocess
 import platform
+
 import git
 import shutil
-
 import glob
 import json
-
-
-from RMS.Formats.FFfits import filenameToDatetimeStr
+import re
+import sqlite3
 import datetime
+
+import struct
+import time
+import tempfile
+import ephem
+
+from RMS.ConfigReader import parse
+from RMS.Misc import niceFormat, isRaspberryPi, sanitise, getRMSStyleFileName, getRmsRootDir, UTCFromTimestamp
+from RMS.Formats.FFfits import filenameToDatetimeStr
 from RMS.Formats.Platepar import Platepar
+from RMS.CaptureDuration import captureDuration
+from RMS.CaptureModeSwitcher import SWITCH_HORIZON_DEG
+from RMS.Misc import RmsDateTime
 
 if sys.version_info.major > 2:
     import dvrip as dvr
@@ -56,11 +62,6 @@ else:
 
 EM_RAISE = True
 
-import socket
-import struct
-import sys
-import time
-import tempfile
 
 def roundWithoutTrailingZero(value, no):
 
@@ -77,6 +78,82 @@ def roundWithoutTrailingZero(value, no):
 
     value = round(value,no)
     return str("{0:g}".format(value))
+
+
+def getObservationDurationNightTime(conn, config):
+    """
+    Get the duration of an observation session not in nighttime only mode.
+
+
+    Arguments:
+        conn: [object] database connection instance.
+        config: [object] RMS configuration instance.
+
+    Return:
+        duration: [float] duration of observation in seconds.
+    """
+
+    _, duration = captureDuration(config.latitude, config.longitude, config.elevation,
+                           getLastStartTime(conn, config, tz_naive=True))
+
+    return duration
+
+def getObservationDurationContinuous(conn, config):
+    """
+        Get the duration of an observation session in continuous capture mode.
+
+        o.date is initialised to the start time of the observation session, rather
+        than an arbitrary time during the previous capture session.
+
+        Arguments:
+            conn: [object] database connection instance.
+            config: [object] RMS configuration instance.
+
+        Return:
+            duration: [float] duration of observation in seconds. If cannot be computed, return 0.
+        """
+    # Initialize sun and observer
+
+    o = ephem.Observer()
+    o.lat, o.long, o.elevation  = str(config.latitude), str(config.longitude), config.elevation
+    s, o.horizon, o.date = ephem.Sun(), SWITCH_HORIZON_DEG, getLastStartTime(conn, config, tz_naive=True)
+
+    # Compute duration
+    try:
+        s.compute()
+        print()
+        duration = (o.next_rising(s).datetime() - o.date.datetime()).total_seconds()
+    except:
+        duration = 0
+
+    return duration
+
+def getObservationDuration(conn, config):
+
+    """ Get the duration of the observation session.
+
+    Capture can operate in two modes. Continuous capture, where the capture runs all day,
+    and nighttime only mode. The duration of the observation sessions is computed in a
+    slightly different way in these two cases. This function calls the correct function
+    to compute the duration of the observation session, based on the RMS configuration
+    instance.
+
+    Arguments:
+        conn: [object] Database connection instance.
+        config: [object] RMS configuration instance.
+
+    Return:
+
+        duration: [int] duration of the observation session in seconds.
+
+    """
+
+    if config.continuous_capture:
+        duration = getObservationDurationContinuous(conn, config)
+    else:
+        duration = getObservationDurationNightTime(conn, config)
+
+    return duration
 
 def getTimeClient():
 
@@ -242,7 +319,6 @@ def getChronyUncertainty():
         Uncertainty is very high at initial synchronisation, as root dispersion dominates.
 
         Arguments:
-
             None
 
         Return:
@@ -473,7 +549,7 @@ def estimateLens(fov_h):
             return lens_type
     return None
 
-def getLastStartTime(conn):
+def getLastStartTime(conn, config, tz_naive = False):
     """
     Query the database to discover the previous start time.
 
@@ -499,6 +575,39 @@ def getLastStartTime(conn):
         sql_statement += "  ORDER BY Timestamp asc \n"
 
         result =  conn.cursor().execute(sql_statement).fetchone()
+
+    # if database is empty find the first fits file
+    if result is None:
+        result = []
+        captured_data_dir = os.path.join(config.data_dir, config.captured_dir)
+        night_dir_list = os.listdir(captured_data_dir)
+        night_dir_list.reverse()
+        fits_files_list = glob.glob(os.path.join(captured_data_dir, night_dir_list[0], "*.fits"))
+        fits_files_list.sort()
+        print(filenameToDatetimeStr(os.path.basename(fits_files_list[0])))
+        result.append(filenameToDatetimeStr(os.path.basename(fits_files_list[0])))
+
+    if tz_naive:
+        last_start_time_db = result[0].replace(":","")
+
+        # Initialise with something sensible as a worst case fallback
+        last_start_time_tz_aware = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours = 8)
+
+        try:
+            last_start_time_tz_aware = datetime.datetime.strptime(last_start_time_db, "%Y-%m-%d %H%M%S.%f")
+        except:
+            last_start_time_naive = last_start_time_tz_aware.replace(tzinfo=None)
+            return last_start_time_naive
+
+        try:
+            last_start_time_tz_aware = datetime.datetime.strptime(last_start_time_db, "%Y-%m-%d %H%M%S%z")
+        except:
+            last_start_time_naive = last_start_time_tz_aware.replace(tzinfo=None)
+            return last_start_time_naive
+
+        last_start_time_naive = last_start_time_tz_aware.replace(tzinfo=None)
+        return last_start_time_naive
+
 
     return result[0]
 
@@ -572,40 +681,59 @@ def nightSummaryData(config, night_data_dir):
 
     Return:
         capture_duration_from_fits: [int] the duration from the start of first fits to the end of the last.
+        capture_duration_from_ephemeris: [int] the duration from the start of first fits to the end of the last.
         fits_count: [int] the count of *.fits files in the directory.
         fits_file_shortfall: [int] the number of expected fits expected less the number actually found.
+        fits_file_shortfall_ephemeris: [int] the number of expected fits expected less the number actually found,
+                                             from the ephemeris computed duration
         fits_file_shortfall_as_time: [int] this shortfall expressed in seconds, never negative.
+        fits_file_shortfall_as_time_ephemeris: [int] this shortfall expressed in seconds, never negative,
+                                            from the ephemeris computed duration.
         time_first_fits_file: [str] the time of the first fits file.
         time_last_fits_file: [str] the time of the last fits file.
         total_expected_fits: [int] the number of fits files expected.
-
-                """
+        total_expected_fits_ephermeris: [int] the number of fits files expected from the
+                                                ephemeris computed duration
+    """
 
     duration_one_fits_file = 256 / config.fps
     fits_files_list = glob.glob(os.path.join(night_data_dir, "*.fits"))
     fits_files_list.sort()
     fits_count = len(fits_files_list)
     if fits_count < 1:
-        return 0,0,0,0,0,0,0
+        return 0,0,0,0,0,0,0,0,0,0,0
 
     time_first_fits_file = datetime.datetime.strptime(filenameToDatetimeStr(os.path.basename(fits_files_list[0])),
                                                       "%Y-%m-%d %H:%M:%S.%f")
     time_last_fits_file = datetime.datetime.strptime(filenameToDatetimeStr(
         os.path.basename(fits_files_list[-1])), "%Y-%m-%d %H:%M:%S.%f")
+
+    # Compute key values using the first and last fits files to mark the start and end of observations
     capture_duration_from_fits = (time_last_fits_file - time_first_fits_file).total_seconds() + duration_one_fits_file
     total_expected_fits = round(capture_duration_from_fits / duration_one_fits_file)
     fits_file_shortfall = total_expected_fits - fits_count
     fits_file_shortfall = 0 if fits_file_shortfall < 1 else fits_file_shortfall
     fits_file_shortfall_as_time = str(datetime.timedelta(seconds=fits_file_shortfall * duration_one_fits_file))
-    return capture_duration_from_fits, fits_count, fits_file_shortfall, fits_file_shortfall_as_time, \
-                        time_first_fits_file, time_last_fits_file, total_expected_fits
+
+    # Compute key values from the ephemeris values
+    conn = getObsDBConn(config)
+    capture_duration_from_ephemeris = getObservationDuration(conn, config)
+    total_expected_fits_ephemeris = round(capture_duration_from_ephemeris / duration_one_fits_file)
+    fits_file_shortfall_ephemeris = total_expected_fits_ephemeris - fits_count
+    fits_file_shortfall_ephemeris = 0 if fits_file_shortfall_ephemeris < 1 else fits_file_shortfall_ephemeris
+    fits_file_shortfall_as_time_ephemeris = str(datetime.timedelta(seconds=fits_file_shortfall_ephemeris * duration_one_fits_file))
+
+
+    return  capture_duration_from_fits, capture_duration_from_ephemeris, \
+            fits_count, \
+            fits_file_shortfall, fits_file_shortfall_ephemeris, \
+            fits_file_shortfall_as_time, fits_file_shortfall_as_time_ephemeris, \
+            time_first_fits_file, time_last_fits_file, total_expected_fits, total_expected_fits_ephemeris
 
 
 def updateCommitHistoryDirectory(remote_urls, target_directory):
 
-    """
-
-    Clone only the commit history of a remote repository.
+    """ Clone only the commit history of a remote repository.
 
     Arguments:
         remote_urls: [url] the remote url to be cloned/
@@ -613,7 +741,6 @@ def updateCommitHistoryDirectory(remote_urls, target_directory):
 
     Return:
         commit_repo_directory: [path] directory of the repository
-
     """
 
 
@@ -633,7 +760,7 @@ def updateCommitHistoryDirectory(remote_urls, target_directory):
             # this first remote might have been pulled in with the wrong local_name so rename it
             commit_repo_directory = os.path.join(target_directory, os.listdir(target_directory)[0])
             downloaded_remote_name = subprocess.check_output(["git", "remote"], cwd = commit_repo_directory).strip().decode('utf-8')
-            print(downloaded_remote_name)
+
             if downloaded_remote_name != local_name:
                 p = subprocess.Popen(["git", "remote", "rename", downloaded_remote_name, local_name], cwd = commit_repo_directory)
                 p.wait()
@@ -838,6 +965,8 @@ def retrieveObservationData(conn, obs_start_time, ordering=None):
                     'time_first_fits_file', 'time_last_fits_file', 'total_expected_fits','total_fits',
                     'fits_files_from_duration','fits_file_shortfall', 'fits_file_shortfall_as_time',
                     'capture_duration_from_fits',
+                    'capture_duration_from_ephemeris', 'total_expected_fits_ephemeris', 'fits_file_shortfall_ephemeris',
+                    'fits_file_shortfall_as_time_ephemeris',
                     'detections_after_ml',
                     'media_backend','protocol_in_use','jitter_quality','dropped_frame_rate']
 
@@ -878,7 +1007,7 @@ def serialize(config, format_nicely=True, as_json=False):
     """
 
     conn = getObsDBConn(config)
-    data = retrieveObservationData(conn, getLastStartTime(conn))
+    data = retrieveObservationData(conn, getLastStartTime(conn, config))
     conn.close()
 
     if as_json:
@@ -1025,17 +1154,21 @@ def startObservationSummaryReport(config, duration, force_delete=False):
     # Calculate the number of fits files expected for the duration
     fps = config.fps
 
+
+    # Testing running without this code
+    """
     if duration is None:
         fits_files_from_duration = "None (Continuous Capture)"
     else:
         fits_files_from_duration = duration*fps/no_of_frames_per_fits_file
     
     addObsParam(conn, "fits_files_from_duration", fits_files_from_duration)
+    """
 
     if not conn is None:
         conn.close()
 
-    return "Opening a new observations summary for duration {} seconds".format(duration)
+    return "Opening a new observations summary"
 
 def finalizeObservationSummary(config, night_data_dir, platepar=None):
 
@@ -1053,12 +1186,12 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
         [str] filename of json.
             """
 
-    capture_duration_from_fits, fits_count, fits_file_shortfall, fits_file_shortfall_as_time, time_first_fits_file, \
-        time_last_fits_file, total_expected_fits = nightSummaryData(config, night_data_dir)
-
-
-
-    obs_db_conn = getObsDBConn(config)
+    capture_duration_from_fits, capture_duration_from_ephemeris, \
+    fits_count, \
+    fits_file_shortfall, fits_file_shortfall_ephemeris, \
+    fits_file_shortfall_as_time, fits_file_shortfall_as_time_ephemeris, \
+    time_first_fits_file, time_last_fits_file, \
+    total_expected_fits, total_expected_fits_ephemeris = nightSummaryData(config, night_data_dir)
 
     try:
         timeSyncStatus(config, obs_db_conn)
@@ -1072,17 +1205,21 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
         addObsParam(obs_db_conn, "camera_pointing_az", format("{:.2f} degrees".format(platepar.az_centre)))
         addObsParam(obs_db_conn, "camera_pointing_alt", format("{:.2f} degrees".format(platepar.alt_centre)))
         addObsParam(obs_db_conn, "camera_fov_h","{:.2f}".format(platepar.fov_h))
-        addObsParam(obs_db_conn, "camera_fov_v","{:2f}".format(platepar.fov_v))
+        addObsParam(obs_db_conn, "camera_fov_v","{:.2f}".format(platepar.fov_v))
         addObsParam(obs_db_conn, "camera_lens", estimateLens(platepar.fov_h))
 
 
     addObsParam(obs_db_conn, "time_first_fits_file", time_first_fits_file)
     addObsParam(obs_db_conn, "time_last_fits_file", time_last_fits_file)
     addObsParam(obs_db_conn, "capture_duration_from_fits", capture_duration_from_fits)
+    addObsParam(obs_db_conn, "capture_duration_from_ephemeris", capture_duration_from_ephemeris)
     addObsParam(obs_db_conn, "total_expected_fits", round(total_expected_fits))
+    addObsParam(obs_db_conn, "total_expected_fits_ephemeris", round(total_expected_fits_ephemeris))
     addObsParam(obs_db_conn, "total_fits", fits_count)
     addObsParam(obs_db_conn, "fits_file_shortfall", fits_file_shortfall)
+    addObsParam(obs_db_conn, "fits_file_shortfall_ephemeris", fits_file_shortfall_ephemeris)
     addObsParam(obs_db_conn, "fits_file_shortfall_as_time", fits_file_shortfall_as_time)
+    addObsParam(obs_db_conn, "fits_file_shortfall_as_time_ephemeris", fits_file_shortfall_as_time_ephemeris)
     addObsParam(obs_db_conn, "protocol_in_use", config.protocol)
     addObsParam(obs_db_conn, "star_catalog_file", config.star_catalog_file)
     try:
@@ -1097,16 +1234,21 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
     return getRMSStyleFileName(night_data_dir, "observation_summary.txt"), \
                 getRMSStyleFileName(night_data_dir, "observation_summary.json")
 
-
-
-
-
 if __name__ == "__main__":
 
     config = parse(os.path.expanduser("~/source/RMS/.config"))
 
     obs_db_conn = getObsDBConn(config)
-    startObservationSummaryReport(config, 100, force_delete=False)
+    config.continuous_capture = False
+    duration_night_time_only = getObservationDuration(obs_db_conn, config)
+    # print("Duration night time only: {} hours".format(duration_night_time_only / 3600))
+
+
+    config.continuous_capture = True
+    duration_continuous = getObservationDuration(obs_db_conn, config)
+    # print("Duration continuous: {} hours".format(duration_continuous / 3600))
+
+    # startObservationSummaryReport(config, 100, force_delete=False)
     pp = Platepar()
     pp.read(os.path.expanduser(os.path.join(config.rms_root_dir, "platepar_cmn2010.cal")))
     night_data_dir = os.path.join(config.data_dir, config.captured_dir)

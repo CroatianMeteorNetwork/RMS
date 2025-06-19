@@ -812,7 +812,7 @@ if __name__ == "__main__":
             log.info("Using all available cores for detection.")
 
 
-    duration, _,_,_,_,_,_, = nightSummaryData(config, cml_args.dir_path[0])
+    duration, _,_,_,_,_,_,_,_,_,_ = nightSummaryData(config, cml_args.dir_path[0])
     log.info(startObservationSummaryReport(config, duration, force_delete=False))
     # Process the night
     _, archive_name, detector = processNight(cml_args.dir_path[0], config)
