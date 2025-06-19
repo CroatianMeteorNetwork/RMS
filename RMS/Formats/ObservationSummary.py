@@ -124,7 +124,7 @@ def getObservationDurationContinuous(config, start_time):
     # Compute duration
     try:
         s.compute()
-        print()
+
         start_time = o.previous_setting(s).datetime()
         end_time = o.next_rising(s).datetime()
         duration = (end_time - start_time).total_seconds()
