@@ -45,6 +45,7 @@ import struct
 import time
 import tempfile
 import ephem
+import RMS.ConfigReader as cr
 
 from RMS.ConfigReader import parse
 from RMS.Misc import niceFormat, isRaspberryPi, sanitise, getRMSStyleFileName, getRmsRootDir, UTCFromTimestamp
