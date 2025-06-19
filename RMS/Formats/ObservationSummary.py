@@ -565,15 +565,16 @@ def getEphemTimesFromCaptureDirectory(capture_directory):
 
     return start_time, duration, end_time
 
-def getNextStartTime(conn, obs_start_time, tz_naive=True):
+def getNextStartTime(conn, time_point, tz_naive=True):
     """
-    Query the database to discover the previous start time.
+    Query the database to discover the next start time.
 
     Arguments:
         conn: [connection] connection to database.
+        obs_time: [datetime] A time before an observation session.
 
     Return:
-        result: [string] the previous start time.
+        result: [string] the first entry in the next observation.
 
     """
 
@@ -581,7 +582,7 @@ def getNextStartTime(conn, obs_start_time, tz_naive=True):
     sql_statement = ""
     sql_statement += "SELECT Value from records \n"
     sql_statement += "      WHERE Key = 'start_time' \n"
-    sql_statement += "      AND Value > '{}'\n".format(obs_start_time)
+    sql_statement += "      AND Value > '{}'\n".format(time_point)
     sql_statement += "      ORDER BY TimeStamp asc \n"
 
     result = conn.cursor().execute(sql_statement).fetchone()
@@ -598,16 +599,15 @@ def getNextStartTime(conn, obs_start_time, tz_naive=True):
         last_start_time_tz_aware = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours = 8)
 
         try:
-            last_start_time_tz_aware = datetime.datetime.strptime(last_start_time_db, "%Y-%m-%d %H%M%S.%f")
+            last_start_time_tz_aware = datetime.datetime.strptime(result[0], "%Y-%m-%d %H:%M:%S.%f")
         except:
-            last_start_time_naive = last_start_time_tz_aware.replace(tzinfo=None)
-            return last_start_time_naive
+            pass
 
         try:
-            last_start_time_tz_aware = datetime.datetime.strptime(last_start_time_db, "%Y-%m-%d %H%M%S%z")
+            last_start_time_tz_aware = datetime.datetime.strptime(result[0], "%Y-%m-%d %H%M%S%z")
         except:
-            last_start_time_naive = last_start_time_tz_aware.replace(tzinfo=None)
-            return last_start_time_naive
+            pass
+
 
         last_start_time_naive = last_start_time_tz_aware.replace(tzinfo=None)
         return last_start_time_naive
@@ -977,13 +977,14 @@ def retrieveObservationData(conn, night_directory=None, ordering=None):
         night_dir_list = os.listdir(captured_data_dir)
         night_dir_list.sort(reverse=True)
 
-        for night_dir in night_dir_list:
-            if night_dir.startswith(config.stationID) and os.path.isdir(os.path.join(captured_data_dir, night_dir)):
+        for night_directory in night_dir_list:
+            if night_directory.startswith(config.stationID) and os.path.isdir(os.path.join(captured_data_dir, night_directory)):
                 break
 
 
-    obs_start_time, obs_duration, obs_end_time = getEphemTimesFromCaptureDirectory(night_dir)
+    obs_start_time, obs_duration, obs_end_time = getEphemTimesFromCaptureDirectory(night_directory)
 
+    print("Night directory was {}".format(night_directory))
     print("Observation start time was {}".format(obs_start_time))
     print("Observation duration was {}".format(obs_duration))
     print("Observation end time was {}".format(obs_end_time))
@@ -1033,7 +1034,7 @@ def retrieveObservationData(conn, night_directory=None, ordering=None):
     sql_statement += "                  ELSE {:03d} \n".format(count)
     sql_statement += "              END"
 
-    # print(sql_statement)
+    #print(sql_statement)
 
     return conn.cursor().execute(sql_statement).fetchall()
 
@@ -1296,9 +1297,11 @@ if __name__ == "__main__":
     print("Duration time was {}".format(duration))
     print("End time was {}".format(end_time))
 
+    print(getNextStartTime(obs_db_conn, start_time))
 
     # startObservationSummaryReport(config, 100, force_delete=False)
     pp = Platepar()
+    print(serialize(config, night_directory = "AU001A_20250618_220639_590188"))
     pp.read(os.path.expanduser(os.path.join(config.rms_root_dir, "platepar_cmn2010.cal")))
     night_data_dir = os.path.join(config.data_dir, config.captured_dir)
     target = os.path.join(night_data_dir, os.listdir(night_data_dir)[-1])
