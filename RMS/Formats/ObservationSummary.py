@@ -565,7 +565,7 @@ def getEphemTimesFromCaptureDirectory(capture_directory):
     time.sleep(30)
     config_path = os.path.join(capture_directory,".config")
     print("Load .config from {}".format(config_path))
-    config = cr.loadConfigFromDirectory(config_path, ".")
+    config = cr.parse(config_path)
     capture_directory_full_path = os.path.join(config.data_dir, config.captured_dir, capture_directory)
     # print("Capture directory: {}".format(capture_directory_full_path))
     night_config = parse(os.path.join(capture_directory_full_path,".config"))
