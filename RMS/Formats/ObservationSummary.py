@@ -976,7 +976,7 @@ def retrieveObservationData(conn, night_directory=None, ordering=None):
     if night_directory is None:
         captured_data_dir = os.path.join(config.data_dir, config.captured_dir)
         night_dir_list = os.listdir(captured_data_dir)
-        night_dir_list.sort(reverse=False)
+        night_dir_list.sort(reverse=True)
 
         for night_dir in night_dir_list:
             if night_dir.startswith(config.stationID) and os.path.isdir(os.path.join(captured_data_dir, night_dir)):
