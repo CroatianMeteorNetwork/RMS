@@ -102,6 +102,8 @@ def getObservationDurationContinuous(conn, config):
     """
         Get the duration of an observation session in continuous capture mode.
 
+        o.date is initialised to the start time of the observation session, rather
+        than an arbitrary time during the previous capture session.
 
         Arguments:
             conn: [object] database connection instance.
@@ -574,7 +576,19 @@ def getLastStartTime(conn, tz_naive = False):
 
     if tz_naive:
         last_start_time_db = result[0].replace(":","")
-        last_start_time_tz_aware = datetime.datetime.strptime(last_start_time_db, "%Y-%m-%d %H%M%S.%f")
+        # Initialise with something sensible whilst debugging
+        last_start_time_tz_aware = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours = 8)
+
+        try:
+            last_start_time_tz_aware = datetime.datetime.strptime(last_start_time_db, "%Y-%m-%d %H%M%S.%f")
+        except:
+            pass
+
+        try:
+            last_start_time_tz_aware = datetime.datetime.strptime(last_start_time_db, "%Y-%m-%d %H%M%S%z")
+        except:
+            pass
+
         last_start_time_naive = last_start_time_tz_aware.replace(tzinfo=None)
         return last_start_time_naive
 
