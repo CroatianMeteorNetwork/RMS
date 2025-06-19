@@ -563,7 +563,7 @@ def getEphemTimesFromCaptureDirectory(capture_directory):
     capture_directory_start_time = filenameToDatetimeStr(os.path.basename(capture_directory))
     print("Load .config from {}".format(capture_directory))
     time.sleep(30)
-    config = cr.loadConfigFromDirectory(capture_directory)
+    config = cr.loadConfigFromDirectory([capture_directory], ".")
     capture_directory_full_path = os.path.join(config.data_dir, config.captured_dir, capture_directory)
     # print("Capture directory: {}".format(capture_directory_full_path))
     night_config = parse(os.path.join(capture_directory_full_path,".config"))
@@ -1266,7 +1266,6 @@ if __name__ == "__main__":
     dir_list = os.listdir(capture_directory)
     dir_list.sort(reverse=True)
     latest_dir = os.path.join(capture_directory, dir_list[0])
-
     start_time, duration, end_time = getEphemTimesFromCaptureDirectory(config, latest_dir)
     print("For directory {}".format(capture_directory))
     print("Start time was {}".format(start_time))
