@@ -562,6 +562,7 @@ def getEphemTimesFromCaptureDirectory(config, capture_directory):
     capture_directory_full_path = os.path.join(config.data_dir, config.captured_dir, capture_directory)
     # print("Capture directory: {}".format(capture_directory_full_path))
     night_config = parse(os.path.join(capture_directory_full_path,".config"))
+    capture_directory_start_time = filenameToDatetimeStr(capture_directory)
     start_time, duration, end_time = getObservationDuration(night_config, capture_directory_start_time)
 
     return start_time, duration, end_time
