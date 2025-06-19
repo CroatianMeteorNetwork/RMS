@@ -560,6 +560,7 @@ def getEphemTimesFromCaptureDirectory(capture_directory):
 
     capture_directory_start_time = filenameToDatetimeStr(os.path.basename(capture_directory))
     capture_directory_full_path = os.path.join(config.data_dir, config.captured_dir, capture_directory)
+    # print("Capture directory: {}".format(capture_directory_full_path))
     night_config = parse(os.path.join(capture_directory_full_path,".config"))
     start_time, duration, end_time = getObservationDuration(night_config, capture_directory_start_time)
 
@@ -585,50 +586,14 @@ def getNextStartTime(conn, time_point, tz_naive=True):
     sql_statement += "      AND Value > '{}'\n".format(time_point)
     sql_statement += "      ORDER BY TimeStamp asc \n"
 
-    result = conn.cursor().execute(sql_statement).fetchone()
-
-
-    if result is None:
-        result = []
-        result.append(datetime.datetime.now(tz=None))
-
-
-    if tz_naive:
-
-        # Initialise with something sensible as a worst case fallback
-        last_start_time_tz_aware = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours = 8)
-
-        try:
-            last_start_time_tz_aware = datetime.datetime.strptime(result[0], "%Y-%m-%d %H:%M:%S.%f")
-        except:
-            pass
-
-        try:
-            last_start_time_tz_aware = datetime.datetime.strptime(result[0], "%Y-%m-%d %H%M%S%z")
-        except:
-            pass
-
-
-        last_start_time_naive = last_start_time_tz_aware.replace(tzinfo=None)
-        return last_start_time_naive
-
+    # print(sql_statement)
+    result_list = conn.cursor().execute(sql_statement).fetchall()
+    # print(result_list)
+    if len(result_list) > 2:
+        result = result_list[1]
     else:
-
-        # Initialise with something sensible as a worst case fallback
-        last_start_time_tz_aware = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours = 8)
-
-        try:
-            last_start_time_tz_aware = datetime.datetime.strptime(last_start_time_db, "%Y-%m-%d %H%M%S.%f")
-        except:
-            return last_start_time_tz_aware
-
-
-        try:
-            last_start_time_tz_aware = datetime.datetime.strptime(last_start_time_db, "%Y-%m-%d %H%M%S%z")
-        except:
-            return last_start_time_tz_aware
-
-        return last_start_time_tz_aware
+        result = datetime.datetime.now(tz=datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        return result
 
 
 
@@ -984,10 +949,10 @@ def retrieveObservationData(conn, night_directory=None, ordering=None):
 
     obs_start_time, obs_duration, obs_end_time = getEphemTimesFromCaptureDirectory(night_directory)
 
-    print("Night directory was {}".format(night_directory))
-    print("Observation start time was {}".format(obs_start_time))
-    print("Observation duration was {}".format(obs_duration))
-    print("Observation end time was {}".format(obs_end_time))
+    # print("Night directory was {}".format(night_directory))
+    # print("Observation start time was {}".format(obs_start_time))
+    # print("Observation duration was {}".format(obs_duration))
+    # print("Observation end time was {}".format(obs_end_time))
 
     if ordering is None:
         # Be sure to add a comma after each list entry, IDE will not pick up this error as Python will concatenate
@@ -1016,6 +981,8 @@ def retrieveObservationData(conn, night_directory=None, ordering=None):
     # print("Ordering {}".format(ordering))
 
     next_start_time = getNextStartTime(conn, obs_start_time)
+    # print("Observation start time was {}".format(obs_start_time))
+    # print("Next start time was {}".format(next_start_time))
 
     sql_statement = ""
     sql_statement += "SELECT Key, Value from records \n"
@@ -1034,7 +1001,7 @@ def retrieveObservationData(conn, night_directory=None, ordering=None):
     sql_statement += "                  ELSE {:03d} \n".format(count)
     sql_statement += "              END"
 
-    #print(sql_statement)
+    # print(sql_statement)
 
     return conn.cursor().execute(sql_statement).fetchall()
 
@@ -1096,7 +1063,7 @@ def serialize(config, format_nicely=True, as_json=False, night_directory = None)
 
     return output
 
-def writeToFile(config, file_path_and_name):
+def writeToFile(config, file_path_and_name, night_dir):
 
     """Write colon delimited text to file.
 
@@ -1110,11 +1077,11 @@ def writeToFile(config, file_path_and_name):
 
 
     with open(file_path_and_name, "w") as summary_file_handle:
-        as_ascii = serialize(config).encode("ascii", errors="ignore").decode("ascii")
+        as_ascii = serialize(config, night_directory=night_dir).encode("ascii", errors="ignore").decode("ascii")
         summary_file_handle.write(as_ascii)
 
 
-def writeToJSON(config, file_path_and_name):
+def writeToJSON(config, file_path_and_name, night_dir):
 
     """Write as a json.
     Arguments:
@@ -1126,7 +1093,7 @@ def writeToJSON(config, file_path_and_name):
     """
 
     with open(file_path_and_name, "w") as summary_file_handle:
-        as_ascii = serialize(config, as_json=True).encode("ascii", errors="ignore").decode("ascii")
+        as_ascii = serialize(config, as_json=True, night_directory=night_dir).encode("ascii", errors="ignore").decode("ascii")
         summary_file_handle.write(as_ascii)
 
 def startObservationSummaryReport(config, duration, force_delete=False):
@@ -1278,8 +1245,8 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
         addObsParam(obs_db_conn, "repository_lag_remote_days", "Not determined")
     obs_db_conn.close()
 
-    writeToFile(config, getRMSStyleFileName(night_data_dir, "observation_summary.txt"))
-    writeToJSON(config, getRMSStyleFileName(night_data_dir, "observation_summary.json"))
+    writeToFile(config, getRMSStyleFileName(night_data_dir, "observation_summary.txt"), night_data_dir)
+    writeToJSON(config, getRMSStyleFileName(night_data_dir, "observation_summary.json"), night_data_dir)
 
     return getRMSStyleFileName(night_data_dir, "observation_summary.txt"), \
                 getRMSStyleFileName(night_data_dir, "observation_summary.json")
@@ -1290,8 +1257,13 @@ if __name__ == "__main__":
 
     obs_db_conn = getObsDBConn(config)
 
-    capture_directory = "AU001A_20250603_095642_638695"
-    start_time, duration, end_time = getEphemTimesFromCaptureDirectory(capture_directory)
+    capture_directory = os.path.join(config.data_dir, config.captured_dir)
+
+    dir_list = os.listdir(capture_directory)
+    dir_list.sort(reverse=True)
+    latest_dir = os.path.join(capture_directory, dir_list[0])
+
+    start_time, duration, end_time = getEphemTimesFromCaptureDirectory(latest_dir)
     print("For directory {}".format(capture_directory))
     print("Start time was {}".format(start_time))
     print("Duration time was {}".format(duration))
@@ -1301,15 +1273,8 @@ if __name__ == "__main__":
 
     # startObservationSummaryReport(config, 100, force_delete=False)
     pp = Platepar()
-    print(serialize(config, night_directory = "AU001A_20250618_220639_590188"))
-    pp.read(os.path.expanduser(os.path.join(config.rms_root_dir, "platepar_cmn2010.cal")))
-    night_data_dir = os.path.join(config.data_dir, config.captured_dir)
-    target = os.path.join(night_data_dir, os.listdir(night_data_dir)[-1])
-    finalizeObservationSummary(config, target , pp)
-    output_directory = os.path.join(os.path.expanduser(config.data_dir), os.listdir(night_data_dir)[-1])
-    writeToFile(config, output_directory)
-    writeToJSON(config, output_directory)
+    finalizeObservationSummary(config, latest_dir , pp)
     print("Summary as colon delimited text")
-    print(serialize(config, as_json=False))
+    print(serialize(config, as_json=False, night_directory=latest_dir))
     print("Summary as json")
-    print(serialize(config, as_json=True))
+    print(serialize(config, as_json=True, night_directory=latest_dir))
