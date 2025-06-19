@@ -560,6 +560,7 @@ def getEphemTimesFromCaptureDirectory(capture_directory):
 
 
     capture_directory_start_time = filenameToDatetimeStr(os.path.basename(capture_directory))
+    print("Load .config from {}".format(capture_directory))
     config = parse(os.path.join(capture_directory, ".config"))
     capture_directory_full_path = os.path.join(config.data_dir, config.captured_dir, capture_directory)
     # print("Capture directory: {}".format(capture_directory_full_path))
