@@ -61,6 +61,7 @@ else:
     import Utils.CameraControl27 as dvr
 
 EM_RAISE = True
+DEBUG_PRINT = True
 
 
 def roundWithoutTrailingZero(value, no):
@@ -115,25 +116,51 @@ def getObservationDurationContinuous(config, start_time):
         Return:
             duration: [float] duration of observation in seconds. If cannot be computed, return 0.
         """
+
+    # convert start_time to a python object
+    if DEBUG_PRINT:
+        print("Passed a start time of {}".format(start_time))
+
+
+
     # Initialize sun and observer
+
 
     o = ephem.Observer()
     o.lat, o.long, o.elevation  = str(config.latitude), str(config.longitude), config.elevation
     s, o.horizon, o.date = ephem.Sun(), SWITCH_HORIZON_DEG, start_time
 
+    # Is this start time during night time capture hours
+
+    s.compute()
+    while o.next_setting(s).datetime() < o.next_rising(s).datetime():
+        if DEBUG_PRINT:
+            print("{} is not at night time".format(start_time))
+        start_time +=datetime.timedelta(minutes=1)
+        o.date = start_time
+        s.compute()
+    if DEBUG_PRINT:
+        print("Advanced time to {}".format(o.date))
+
     # Compute duration
     try:
         s.compute()
 
-        start_time = o.previous_setting(s).datetime()
-        end_time = o.next_rising(s).datetime()
-        duration = (end_time - start_time).total_seconds()
+        start_time_ephem = o.previous_setting(s).datetime()
+        end_time_ephem = o.next_rising(s).datetime()
+        duration_ephem = (end_time_ephem - start_time_ephem).total_seconds()
     except:
-        start_time = None
-        duration = 0
-        end_time = None
+        start_time_ephem = None
+        duration_ephem = 0
+        end_time_ephem = None
 
-    return start_time, duration, end_time
+    if DEBUG_PRINT:
+        print("start_time_ephem {}".format(start_time_ephem))
+        print("duration_ephem {:.1f} hours".format(duration_ephem / 3600))
+        print("end_time_ephem {}".format(end_time_ephem))
+
+
+    return start_time_ephem, duration_ephem, end_time_ephem
 
 def getObservationDuration(config, start_time):
 
@@ -156,11 +183,11 @@ def getObservationDuration(config, start_time):
     """
 
     if config.continuous_capture:
-        start_time, duration, end_time = getObservationDurationContinuous(config, start_time)
+        start_time_ephem, duration_ephem, end_time_ephem = getObservationDurationContinuous(config, start_time)
     else:
-        start_time, duration, end_time = getObservationDurationNightTime(config, start_time)
+        start_time_ephem, duration_ephem, end_time_ephem = getObservationDurationNightTime(config, start_time)
 
-    return start_time, duration, end_time
+    return start_time_ephem, duration_ephem, end_time_ephem
 
 def getTimeClient():
 
@@ -424,7 +451,8 @@ def timestampFromNTP(addr='time.cloudflare.com'):
         local_clock_measured_response_time = (local_clock_receive_timestamp - local_clock_transmit_timestamp)
         remote_clock_measured_processing_time = (remote_clock_time_transmit_timestamp - remote_clock_time_receive_timestamp)
 
-        # print("Rx Fractional {}, Tx fractional {}".format(remote_clock_time_receive_timestamp_fractional_seconds, remote_clock_time_transmit_timestamp_fractional_seconds))
+        if DEBUG_PRINT:
+            print("Rx Fractional {}, Tx fractional {}".format(remote_clock_time_receive_timestamp_fractional_seconds, remote_clock_time_transmit_timestamp_fractional_seconds))
         # Next calculation assumes that remote and local clock are running at identical rates
         estimated_network_delay = local_clock_measured_response_time - remote_clock_measured_processing_time
         if estimated_network_delay < 0:
@@ -560,10 +588,18 @@ def getEphemTimesFromCaptureDirectory(config, capture_directory):
 
 
     capture_directory_full_path = os.path.join(config.data_dir, config.captured_dir, capture_directory)
-    print("Capture directory full path: {}".format(capture_directory_full_path))
+    if DEBUG_PRINT:
+        print("Capture directory full path: {}".format(capture_directory_full_path))
     night_config = parse(os.path.join(capture_directory_full_path,".config"))
-    print("Making a time from {}".format(capture_directory))
+    if DEBUG_PRINT:
+        print("Making a time from {}".format(capture_directory))
     capture_directory_start_time = filenameToDatetimeStr(os.path.basename(capture_directory))
+    if DEBUG_PRINT:
+        print("Capture directory start time: {}".format(capture_directory_start_time))
+        print("Type is {}".format(type(capture_directory_start_time)))
+    capture_directory_start_time = datetime.datetime.strptime(capture_directory_start_time, "%Y-%m-%d %H:%M:%S.%f")
+    if DEBUG_PRINT:
+        print("Capture directory start time: {}".format(capture_directory_start_time))
     start_time, duration, end_time = getObservationDuration(night_config, capture_directory_start_time)
 
     return start_time, duration, end_time
@@ -969,7 +1005,8 @@ def retrieveObservationData(conn, config, night_directory=None, ordering=None):
                     'camera_pointing_alt','camera_pointing_az',
                     'camera_information',
                     'clock_measurement_source', 'clock_synchronized', 'clock_ahead_ms', 'clock_error_uncertainty_ms',
-                    'start_time', 'duration', 'photometry_good', 'star_catalog_file',
+                    'start_time', 'duration_from_start_of_observation', 'continuous_capture',
+                    'photometry_good', 'star_catalog_file',
                     'time_first_fits_file', 'time_last_fits_file', 'total_expected_fits','total_fits',
                     'fits_files_from_duration','fits_file_shortfall', 'fits_file_shortfall_as_time',
                     'capture_duration_from_fits',
@@ -1118,7 +1155,7 @@ def startObservationSummaryReport(config, duration, force_delete=False):
                          datetime.timedelta(seconds=1)).replace(tzinfo=datetime.timezone.utc)
     start_time_object_rounded = start_time_object.replace(microsecond=0)
     addObsParam(conn, "start_time", start_time_object_rounded)
-    addObsParam(conn, "duration", duration)
+    addObsParam(conn, "duration_from_start_of_observation", duration)
     addObsParam(conn, "stationID", sanitise(config.stationID, space_substitution=""))
 
     if isRaspberryPi():
@@ -1225,7 +1262,7 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
         addObsParam(obs_db_conn, "camera_fov_v","{:.2f}".format(platepar.fov_v))
         addObsParam(obs_db_conn, "camera_lens", estimateLens(platepar.fov_h))
 
-
+    addObsParam(obs_db_conn, "continuous_capture", config.continuous_capture)
     addObsParam(obs_db_conn, "time_first_fits_file", time_first_fits_file)
     addObsParam(obs_db_conn, "time_last_fits_file", time_last_fits_file)
     addObsParam(obs_db_conn, "capture_duration_from_fits", capture_duration_from_fits)
@@ -1258,6 +1295,8 @@ if __name__ == "__main__":
     obs_db_conn = getObsDBConn(config)
 
     capture_directory = os.path.join(config.data_dir, config.captured_dir)
+    start_time = datetime.datetime.strptime("2025-06-19 08:03:37", "%Y-%m-%d %H:%M:%S")
+    start_time, duration, end_time = getObservationDurationContinuous(config, start_time)
 
     dir_list = os.listdir(capture_directory)
     dir_list.sort(reverse=True)
@@ -1265,7 +1304,7 @@ if __name__ == "__main__":
     start_time, duration, end_time = getEphemTimesFromCaptureDirectory(config, latest_dir)
     print("For directory {}".format(latest_dir))
     print("Start time was {}".format(start_time))
-    print("Duration time was {}".format(duration))
+    print("Duration time was {:.2f} hours".format(duration/3600))
     print("End time was {}".format(end_time))
 
 
