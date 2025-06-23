@@ -192,9 +192,6 @@ fi
 echo "Removing the build directory..."
 rm -rf build
 
-echo "Removing the cython build directory..."
-rm -rf ~/.pyxbld/*
-
 echo "Cleaning up Python bytecode files..."
 if command -v pyclean >/dev/null 2>&1; then
     pyclean . -v --debris all
