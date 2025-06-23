@@ -125,7 +125,7 @@ def captureModeSwitcher(config, daytime_mode, camera_mode_switch_trigger):
                     
                     # Refresh the current time after the stagger wait
                     now = RmsDateTime.utcnow()
-                    time_to_wait = max(0, (next_rise - now).total_seconds())
+                    time_to_wait = max(0, (next_set - now).total_seconds())
 
 
             # If the day last more than 24 hours, continue daytime capture for the whole day
