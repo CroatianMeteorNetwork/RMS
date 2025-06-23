@@ -6409,6 +6409,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # If SNR is None, then set the random error to 0
             if pick['snr'] is None:
                 mag_err_random = 0
+                pick['snr'] = 1.0
 
             else:
                 mag_err_random = 2.5*np.log10(1 + 1/pick['snr'])
