@@ -16,12 +16,24 @@ def plotFOVSkyMap(platepars, configs, out_dir, north_up=False, show_pointing=Fal
 
     Arguments:
         platepars: [dict] A dictionary of Platepar objects where keys are station codes.
+        configs: [dics] A dictionary of RMS config objects where keys are station codes.
         out_dir: [str] Path to where the graph will be saved.
+
+    Keyword arguments:
+        north_up: [bool] If true, plot the north upward.
+        show_pointing: [bool] If true, annotate plot with azimuth and elevation per camera
+        show_fov: [bool] If true, annotate plot with field of view per camera
+        rotate_text: [bool] If true, rotate text so that is normal to the camera
+        flip_text: [bool] If true, flip text so that it is never upside down
+        show_ip: [bool] If true, annotate plot with address of camera
+        show_coordinates: [bool] If true, annotate plot with coordinates
+        masks:
 
     Keyword arguments:
         masks: [dict] A dictionary of mask objects where keys are station codes.
 
     """
+
 
     # Change plotting style
     plt.style.use('ggplot')
@@ -145,6 +157,11 @@ def plotFOVSkyMap(platepars, configs, out_dir, north_up=False, show_pointing=Fal
     plt.tight_layout()
 
 
+    if output_file_name is None:
+        output_file_name = os.path.join(out_dir, "fov_sky_map.png")
+    else:
+        output_file_name = os.path.join(os.path.abspath('.'), os.path.expanduser(output_file_name))
+
     # Save the plot to disk
     plot_path = os.path.expanduser(output_file_name)
     if os.path.isdir(plot_path):
@@ -248,15 +265,12 @@ if __name__ == "__main__":
                 print("Loaded mask for     {:s}: {:s}".format(pp.station_code, pp_path))
 
 
-    if cml_args.output_file_name is None:
-        output_file_name = os.path.join(cml_args.dir_path, "fov_sky_map.png")
-    else:
-        output_file_name = os.path.join(os.path.abspath('.'), os.path.expanduser(cml_args.output_file_name[0]))
+
     # Plot all platepars on an alt/az sky map
     plotFOVSkyMap(platepars, configs, cml_args.dir_path, north_up=cml_args.north_up,
                   show_pointing=cml_args.pointing, show_fov=cml_args.fov,
                   rotate_text=cml_args.rotate, masks=masks,
-                  flip_text=cml_args.flip_text, output_file_name=output_file_name,
+                  flip_text=cml_args.flip_text, output_file_name=cml_args.output_file_name[0],
                   show_ip=cml_args.show_ip, show_coordinates=cml_args.show_coordinates)
 
 
