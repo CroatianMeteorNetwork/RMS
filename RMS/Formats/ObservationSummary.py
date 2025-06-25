@@ -65,9 +65,7 @@ DEBUG_PRINT = True
 
 
 def roundWithoutTrailingZero(value, no):
-
-    """
-    Given a float, round to specified number of decimal places, then remove trailing zeroes.
+    """Given a float, round to specified number of decimal places, then remove trailing zeroes.
 
     Arguments:
         value: [float] value.
@@ -81,8 +79,7 @@ def roundWithoutTrailingZero(value, no):
     return str("{0:g}".format(value))
 
 def getObservationDurationNightTime(config, start_time):
-    """
-    Get the duration of an observation session not in nighttime only mode.
+    """Get the duration of an observation session not in continuous capture mode.
 
 
     Arguments:
@@ -100,8 +97,7 @@ def getObservationDurationNightTime(config, start_time):
     return start_time, duration, end_time
 
 def getObservationDurationContinuous(config, start_time):
-    """
-        Get the duration of an observation session in continuous capture mode.
+    """Get the duration of an observation session in continuous capture mode.
 
         o.date is initialised to the start time of the observation session, rather
         than an arbitrary time during the previous capture session.
@@ -154,8 +150,7 @@ def getObservationDurationContinuous(config, start_time):
     return start_time_ephem, duration_ephem, end_time_ephem
 
 def getObservationDuration(config, start_time):
-
-    """ Get the duration of the observation session.
+    """Get the duration of the observation session.
 
     Capture can operate in two modes. Continuous capture, where the capture runs all day,
     and nighttime only mode. The duration of the observation sessions is computed in a
@@ -168,7 +163,6 @@ def getObservationDuration(config, start_time):
         start_time: [object] A time during the observation session.
 
     Return:
-
         duration: [int] duration of the observation session in seconds.
 
     """
@@ -181,15 +175,12 @@ def getObservationDuration(config, start_time):
     return start_time_ephem, duration_ephem, end_time_ephem
 
 def getTimeClient():
-
-    """
-    Attempt to identify which time service client, if any is providing a service.
+    """Attempt to identify which time service client, if any is providing a service.
 
     This function is aware of systemd-timesyncd, chronyd, ntpd.
 
     Return:
         name: [string] Name of the time client.
-
     """
 
     clients = {
@@ -274,9 +265,7 @@ def timeSyncStatus(config, conn, force_client=None):
     return ahead_ms
 
 def getNTPStatistics():
-
-    """
-    Acquire the statistics of the ntp client.
+    """Acquire the statistics of the ntp client.
 
     Tries to use ntpstat, if not available, falls back to ntpq, if not available returns Unknown.
 
@@ -287,7 +276,6 @@ def getNTPStatistics():
         synchronized: [bool] true if reported as synchronized.
         uncertainty_ms: [float] uncertainty in milliseconds.
         time_error_ms: [str] always Unknown, unable to discern actual time error using ntp tools.
-
     """
 
     try:
@@ -321,9 +309,7 @@ def getNTPStatistics():
     return "Unknown", "Unknown", "Unknown"
 
 def getChronyUncertainty():
-
-    """
-        Acquire the statistics of the chrony ntp client.
+    """Acquire the statistics of the chrony ntp client.
 
         uncertainty implementation is taken from
         https://chrony-project.org/doc/3.3/chronyc.html
@@ -340,14 +326,14 @@ def getChronyUncertainty():
 
         Uncertainty is very high at initial synchronisation, as root dispersion dominates.
 
-        Arguments:
-            None
+    Arguments:
+        None
 
-        Return:
-            synchronized: [bool] true if reported as synchronized.
-            ahead_ms: [str] time in milliseconds that computer clock is reported to be ahead of superior reference.
-            uncertainty_ms: [float] uncertainty in milliseconds.
-        """
+    Return:
+        synchronized: [bool] true if reported as synchronized.
+        ahead_ms: [str] time in milliseconds that computer clock is reported to be ahead of superior reference.
+        uncertainty_ms: [float] uncertainty in milliseconds.
+    """
 
     synchronized = False
     system_time_offset, root_dispersion, root_delay = 0, 0, 0
@@ -386,9 +372,7 @@ def getChronyUncertainty():
         return "False", "Unknown", "Unknown"
 
 def timestampFromNTP(addr='time.cloudflare.com'):
-
-    """
-    Get the timestamp from the NTP server by a direct query.
+    """Get the timestamp from the NTP server by a direct query.
 
     refer https://stackoverflow.com/questions/36500197/how-to-get-time-from-an-ntp-server
     and also https://github.com/CroatianMeteorNetwork/RMS/issues/624
@@ -456,7 +440,7 @@ def timestampFromNTP(addr='time.cloudflare.com'):
         return None, None
 
 def getObsDBConn(config, force_delete=False):
-    """ Creates the Observation Summary database. Tries only once.
+    """Creates the Observation Summary database. Tries only once.
 
     Arguments:
         config: [config] config instance.
@@ -515,8 +499,7 @@ def getObsDBConn(config, force_delete=False):
     return conn
 
 def addObsParam(conn, key, value):
-
-    """ Add a single key value pair into the database.
+    """Add a single key value pair into the database.
 
     Arguments:
         conn [connection]: the connection to the database
@@ -553,8 +536,7 @@ def addObsParam(conn, key, value):
                 raise
 
 def estimateLens(fov_h):
-
-    """ Estimate the focal length of the lens in use.
+    """Estimate the focal length of the lens in use.
 
     Arguments:
         fov_h: [float] horizontal field of view.
@@ -572,22 +554,21 @@ def estimateLens(fov_h):
     return None
 
 def getEphemTimesFromCaptureDirectory(config, capture_directory):
-    """
-        Examine config file in a capture directory to determine start, duration, end.
+    """Examine config file in a capture directory to determine start, duration, end.
 
         Reads config file to use the correct calculation for continuous capture
         or night time only.
 
-        Arguments:
-            conn: [connection] connection to database.
-            obs_time: [datetime] A time before an observation session.
+    Arguments:
+        conn: [connection] connection to database.
+        obs_time: [datetime] A time before an observation session.
 
-        Return:
-            start_time: [datetime] The start time of the observation session.
-            duration: [integer]  seconds The duration of the observation session.
-            end_time: [datetime] The end time of the observation session.
+    Return:
+        start_time: [datetime] The start time of the observation session.
+        duration: [integer]  seconds The duration of the observation session.
+        end_time: [datetime] The end time of the observation session.
 
-        """
+    """
 
     capture_directory_full_path = os.path.join(config.data_dir, config.captured_dir, capture_directory)
     if DEBUG_PRINT:
@@ -607,8 +588,7 @@ def getEphemTimesFromCaptureDirectory(config, capture_directory):
     return start_time, duration, end_time
 
 def getNextStartTime(conn, time_point, tz_naive=True):
-    """
-    Query the database to discover the next start time.
+    """Query the database to discover the next start time.
 
     Arguments:
         conn: [connection] connection to database.
@@ -639,7 +619,6 @@ def getNextStartTime(conn, time_point, tz_naive=True):
     return result
 
 def gatherCameraInformation(config, attempts=6, delay=10, sock_timeout=3):
-
     """ Gather information about the sensor in use.
         Retry the DVRIP handshake until it works, or we exhaust attempts.
 
@@ -672,7 +651,7 @@ def gatherCameraInformation(config, attempts=6, delay=10, sock_timeout=3):
     return "Unavailable"
 
 def captureDirectories(captured_dir, stationID):
-    """ Counts the captured directories.
+    """Counts the captured directories.
 
     Arguments:
         captured_dir: [path] to the captured directories.
@@ -802,9 +781,7 @@ def updateCommitHistoryDirectory(remote_urls, target_directory):
     return commit_repo_directory
 
 def getCommit(repo):
-
-    """
-    Get the most recent commit from the local repository's active branch.
+    """Get the most recent commit from the local repository's active branch.
 
     Arguments:
         repo: [path] file location of a repository.
@@ -819,10 +796,9 @@ def getCommit(repo):
     return commit
 
 def getDateOfCommit(repo, commit):
-
     """Get the date of a commit
 
-    Argumentss:
+    Arguments:
         repo: [path] directory of repository.
         commit: [string] commit hash.
 
@@ -836,7 +812,6 @@ def getDateOfCommit(repo, commit):
     return datetime.datetime.strptime(commit_date, "%Y-%m-%d %H:%M:%S %z")
 
 def getRemoteUrls(repo):
-
     """Get the urls of the remotes for the local repository.
     Arguments:
         repo: directory of repository.
@@ -857,12 +832,9 @@ def getRemoteUrls(repo):
     return url_remote_list_to_return
 
 def getBranchOfCommit(repo, commit):
-
     """Find a branch where a commit exists.
 
-    This troublesome, because a commit may exist on many branches.
-
-    Arguements:
+    Arguments:
         repo: [path] directory of repository.
         commit: [str] commit hash
 
@@ -875,7 +847,6 @@ def getBranchOfCommit(repo, commit):
     return local_branch
 
 def getLatestCommit(repo, commit_branch):
-
     """Get the latest commit on a specific branch on the local repository.
 
     Arguments:
@@ -904,7 +875,6 @@ def getLatestCommit(repo, commit_branch):
     return commit
 
 def getRemoteBranchNameForCommit(repo, commit):
-
     """Get the remote branch name for a commit on a local branch.
 
     Arguments:
@@ -931,7 +901,6 @@ def getRemoteBranchNameForCommit(repo, commit):
     return remote_branch_name
 
 def daysBehind():
-
     """Measure how far behind the latest commit on the active branch is behind a branch with that commit on the remote
     repository.
 
@@ -941,7 +910,6 @@ def daysBehind():
     Return:
         number of days behind the latest remote commit that the latest local commit is on the active branch.
     """
-
 
     latest_local_commit = getCommit(os.getcwd())
     latest_local_date = getDateOfCommit(os.getcwd(), latest_local_commit)
@@ -984,7 +952,6 @@ def retrieveObservationData(conn, config, night_directory=None, ordering=None):
         for night_directory in night_dir_list:
             if night_directory.startswith(config.stationID) and os.path.isdir(os.path.join(captured_data_dir, night_directory)):
                 break
-
 
     obs_start_time, obs_duration, obs_end_time = getEphemTimesFromCaptureDirectory(config, night_directory)
 
@@ -1140,14 +1107,14 @@ def startObservationSummaryReport(config, duration, force_delete=False):
     """ Enters the parameters known at the start of observation into the database.
 
     Arguments:
-            config: [config] config file.
-            duration: [int]the initially calculated duration seconds.
+        config: [config] config file.
+        duration: [int]the initially calculated duration seconds.
 
     Keyword arguments:
-            force_delete: [bool] forces deletion of the observation summary database, default False.
+        force_delete: [bool] forces deletion of the observation summary database, default False.
 
     Return:
-            [str] message about session.
+        [str] message about session.
 
     """
 
