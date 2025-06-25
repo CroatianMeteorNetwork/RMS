@@ -18,6 +18,9 @@ import matplotlib.gridspec as gridspec
 import scipy.optimize
 import pyqtgraph as pg
 import random
+import tempfile
+import tarfile
+import shutil
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
@@ -6498,6 +6501,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
 
+
     def getRollingShutterCorrectedFrameNo(self, frame, pick):
         """ Given a pick object, return rolling shutter corrected (or not, depending on the config) frame
             number.
@@ -6564,10 +6568,16 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         def getMarkedStars(include_unsuitable=True):
+            """Returns: a list of stars which are either marked as paired, or bad in image coordinates.
 
-            """
+            Arguments:
 
-            Returns: a list of stars which are either marked as paired, or bad in image coordinates
+            Keyword Arguments:
+                include_unsuitable: [bool] Include stars marked as unsuitable.
+
+            Return
+                marked_x: [list] of x coordinates.
+                marked_y: [list] of y coordindates.
 
             """
 
@@ -6588,17 +6598,19 @@ class PlateTool(QtWidgets.QMainWindow):
 
         def isDouble(x,y, reference_x_list, reference_y_list, min_separation=5):
 
-            """
-            Are x,y coordinates which are very close to, but distinct from all coordinates in reference list
+            """ Are x,y coordinates which are very close to, but distinct from all coordinates in reference list.
 
-            Args:
-                x: image coordinates of star
-                y: image coordinates of star
-                reference_x_list: list of x image coordinates
-                reference_y_list: list of y image coordinates
+            Arguments:
+                x: [int] Image coordinates of star.
+                y: [int] Image coordinates of star.
+                reference_x_list: [list] List of x image coordinates.
+                reference_y_list: [list] List of y image coordinates.
 
-            Returns:
-                [bool] True if star is within min_separation of another star
+            Keyword Arguments:
+                min_separation: [int] Minimum separation not to be considered a double star.
+
+            Return:
+                [bool] True if star is within min_separation of another star.
             """
 
             for reference_x, reference_y in zip(reference_x_list, reference_y_list):
@@ -6615,17 +6627,19 @@ class PlateTool(QtWidgets.QMainWindow):
 
             """
             From the catalogue of filtered stars return a lists of coordinates stars which are not marked,
-            and another list which is the distance to the nearest marked star
+            and another list which is the distance to the nearest marked star.
 
-            Args:
-                marked_x_list: list of marked star x coordinates
-                marked_y_list: list of marked star y coordinates
-                min_separation: minimum separation to be regarded as a different stra
+            Arguments:
+                marked_x_list: [list] list of marked star x coordinates.
+                marked_y_list: [list] list of marked star y coordinates.
+
+            Keyword Arguments
+                min_separation: [int] Minimum seperation not be regarded as a double star.
 
             Returns:
-                unmarked_x_list: list of unmarked star x coordinates
-                unmarked_y_list: list of unmarked star x coordinates
-                dist_nearest_marked_list: distance of the nearest marked star for returned star coordinates
+                unmarked_x_list: list of unmarked star x coordinates.
+                unmarked_y_list: list of unmarked star x coordinates.
+                dist_nearest_marked_list: distance of the nearest marked star for returned star coordinates.
 
 
             """
@@ -6725,7 +6739,55 @@ class PlateTool(QtWidgets.QMainWindow):
 
         return unmarked_x_list[next_star_index], unmarked_y_list[next_star_index], max_distance_between_paired
 
+def handleBZ2(bz2_path):
+    """Passed a path to a bz2 file, unpack and prepare a working area for PlateTool, and launch.
 
+    Arguments:
+        bz2_path: [path] Path to a bz2 file.
+
+    Returns:
+        working_dir: [path] Path to a directory containing .config, fits files and if available, a mask.
+    """
+
+    bz2_path = os.path.expanduser(bz2_path)
+    bz2_basename = os.path.basename(bz2_path)
+    stationID = bz2_basename.split("_")[0]
+
+    with tempfile.TemporaryDirectory() as working_dir:
+        print("Extracting {}".format(bz2_basename))
+        with tarfile.open(bz2_path, 'r:bz2') as tar:
+            tar.extractall(path=working_dir)
+            config_path = os.path.join(working_dir, ".config")
+            if os.path.exists(config_path):
+                config = cr.parse(config_path)
+            else:
+                print("No config file found in {}".format(bz2_basename))
+                print("Quitting")
+                exit()
+            mask_path = os.path.join(working_dir, config.mask_file)
+            if os.path.exists(mask_path):
+                mask = getMaskFile(".", config)
+
+            # If the dimensions of the mask do not match the config file, ignore the mask
+            if (mask is not None) and (not mask.checkResolution(config.width, config.height)):
+                print(
+                    "Mask resolution ({:d}, {:d}) does not match the image resolution ({:d}, {:d}). Ignoring the mask.".format(
+                        mask.width, mask.height, config.width, config.height))
+                mask = None
+
+            # Init SkyFit
+            plate_tool = PlateTool(working_dir, config, beginning_time=beginning_time, fps=cml_args.fps, \
+                gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints,
+                mask=mask, nobg=cml_args.nobg, peribg=cml_args.peribg, flipud=cml_args.flipud,
+                flatbiassub=cml_args.flatbiassub)
+
+            # Run the GUI app
+            a = app.exec_()
+            temp_platepar_location = os.path.join(working_dir, config.platepar_name)
+            platepar_destination = os.path.join(os.getcwd(), "{}.cal".format(config.stationID.lower()))
+            print("Writing modified platepar to {}".format(platepar_destination))
+            shutil.copy2(temp_platepar_location, platepar_destination)
+            sys.exit(a)
 
 
 if __name__ == '__main__':
@@ -6735,7 +6797,8 @@ if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser(description="Tool for fitting astrometry plates and photometric calibration.")
 
     arg_parser.add_argument('input_path', metavar='INPUT_PATH', type=str,
-                            help='Path to the folder with FF or image files, path to a video file, or to a state file.'
+                            help='Path to the folder with FF or image files, path to a video file, '
+                                 '  to a state file, or an RMS bz2 file.'
                                  ' If images or videos are given, their names must be in the format: YYYYMMDD_hhmmss.uuuuuu')
 
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
@@ -6842,6 +6905,9 @@ if __name__ == '__main__':
             mask = None
 
         plate_tool.loadState(dir_path, state_name, beginning_time=beginning_time, mask=mask)
+
+    elif cml_args.input_path.endswith('.bz2'):
+        handleBZ2(cml_args.input_path)
 
     else:
 
