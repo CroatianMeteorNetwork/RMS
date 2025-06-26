@@ -21,6 +21,8 @@ import random
 import tempfile
 import tarfile
 import shutil
+import paramiko
+
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
@@ -6789,6 +6791,55 @@ def handleBZ2(bz2_path):
             shutil.copy2(temp_platepar_location, platepar_destination)
             sys.exit(a)
 
+
+def lsRemote(host, username, port, remote_path):
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # Accept unknown host keys
+    ssh.connect(hostname=host, port=port, username=username)
+
+    try:
+        sftp = ssh.open_sftp()
+        files = sftp.listdir(remote_path)
+        return files
+    finally:
+        sftp.close()
+        ssh.close()
+
+
+def downloadFile(host, username, port, remote_path, local_path):
+
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # Accept unknown host keys
+    try:
+        ssh.connect(hostname=host, port=port, username=username)
+    except:
+        print("Login to {}@{} failed. You need to add your keys to remote using ssh-copy-id.".format(username,host))
+
+    try:
+        sftp = ssh.open_sftp()
+        print("Downloading {} to {}".format(remote_path, local_path))
+        sftp.get(remote_path, local_path)
+
+    finally:
+        sftp.close()
+        ssh.close()
+
+def uploadFile(host, username, port, local_path, remote_path):
+
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # Accept unknown host keys
+    try:
+        ssh.connect(hostname=host, port=port, username=username)
+    except:
+        print("Login to {}@{} failed. You need to add your keys to remote using ssh-copy-id.".format(username,host))
+
+    try:
+        sftp = ssh.open_sftp()
+        sftp.put(local_path, remote_path)
+        print("Uploaded {} to {}".format(local_path, remote_path))
+    finally:
+        sftp.close()
+        ssh.close()
 
 if __name__ == '__main__':
     ### COMMAND LINE ARGUMENTS
