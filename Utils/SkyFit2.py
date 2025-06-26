@@ -6841,6 +6841,146 @@ def uploadFile(host, username, port, local_path, remote_path):
         sftp.close()
         ssh.close()
 
+
+
+def isLoginPath(path):
+    """Passed a path see if it is a path to a remote RMS installation
+
+        Arguments:
+            path: [str] String to be tested
+
+        Returns:
+            is_login_path: [bool] True if a network path, else false
+        """
+
+    pattern_port = r'^([\w.-]+)@([\w.-]+):(\d+):(.*)$'
+    pattern = r'^[^@:\s]+@[^@:\s]+:[^\s]+$'
+    is_login_path = re.match(pattern, path) or re.match(pattern_port, path)
+
+    return is_login_path
+
+def getUserHostPortPath(path):
+    """Passed a user@host:path, return components
+
+        Arguments:
+            path: [str] path to be broken appart
+
+        Returns:
+            user: [str] e.g. rms
+            host: [str] e.g. raspberrypi
+            port: [str] e.g. 22
+            path: [str] e.g. 192.168.1.2
+        """
+
+
+
+
+    pattern_port = r'^([\w.-]+)@([\w.-]+):(\d+):(.*)$'
+    match_port = re.match(pattern_port, path)
+
+    if match_port:
+        user, host, port, path = match_port.groups()
+        return user, host, port, path
+
+    pattern = r'^([^@:\s]+)@([^@:\s]+):([^\s]+)$'
+    match = re.match(pattern, path)
+
+    if match:
+        user, host, path = match.groups()
+        return user, host, 22, path
+
+
+    return None, None, None, None
+
+def getFiles(host, user, port, remote_path, local_path, files_list):
+
+    local_target_list = []
+    for f in files_list:
+        local_target = os.path.join(local_path, f)
+        remote_target = os.path.join(remote_path, f)
+        downloadFile(host, user, port, remote_target, local_target)
+        local_target_list.append(local_target)
+    return local_target_list
+
+
+def getRemoteCapturedDirsPath(rc):
+    len_local_home_directory = len(os.path.expanduser("~")) + len("/")
+    return os.path.join(rc.data_dir[len_local_home_directory:], rc.captured_dir)
+
+def getLatestCapturedDirectory(r, host, user, port):
+
+    remote_captured_directory_list = lsRemote(host, user, port, getRemoteCapturedDirsPath(r))
+    remote_captured_directory_list = [d for d in remote_captured_directory_list if d.startswith(r.stationID)]
+    remote_captured_directory_list.sort(reverse=True)
+    return remote_captured_directory_list[0]
+
+def putFiles(host, user, port, local_path, remote_path, files_list):
+
+    local_target_list = []
+    for f in files_list:
+        local_target = os.path.join(local_path, f)
+        remote_target = os.path.join(remote_path, f)
+        uploadFile(host, user, port, local_target, remote_target)
+        local_target_list.append(local_target)
+    return local_target_list
+
+def handleLoginPath(login_path):
+
+    user, host, port, remote_path = getUserHostPortPath(login_path)
+    config_file_name = ('.config')
+    if remote_path.endswith(config_file_name):
+        remote_path = remote_path[:-len(config_file_name)]
+    print("Working on {}@{}:{}:{}".format(user, host, port, remote_path))
+    # Create temporary directory
+    with tempfile.TemporaryDirectory() as local_path:
+
+        # First get the .config file
+        files_list = ['.config']
+        remote_config = cr.parse(getFiles(host, user, port, remote_path, local_path, files_list)[0])
+
+        files_list = [remote_config.platepar_name, remote_config.mask_file]
+        getFiles(host, user, port, remote_path, local_path, files_list)
+        latest_cap_dir = os.path.join(getRemoteCapturedDirsPath(remote_config), getLatestCapturedDirectory(remote_config, host, user, port))
+        latest_captured_files = lsRemote(host, user, port, latest_cap_dir)
+        fits_files = [f for f in latest_captured_files if f.endswith(".fits") and f.startswith("FF_{}".format(remote_config.stationID))]
+        fits_files.sort(reverse=True)
+        num_fits_files = len(fits_files)
+        gap = int(num_fits_files / 5)
+        fits_to_download = []
+        fits_to_download.append(fits_files[1 * gap])
+        fits_to_download.append(fits_files[2 * gap])
+        fits_to_download.append(fits_files[3 * gap])
+
+        # Ignore the latest file, might still be being written, but get the two before
+        getFiles(host, user, port, latest_cap_dir, local_path, fits_to_download)
+
+        mask_path = os.path.join(local_path, remote_config.mask_file)
+        if os.path.exists(mask_path):
+            mask = getMaskFile(".", remote_config)
+
+        # If the dimensions of the mask do not match the config file, ignore the mask
+        if (mask is not None) and (not mask.checkResolution(remote_config.width, remote_config.height)):
+            print(
+                "Mask resolution ({:d}, {:d}) does not match the image resolution ({:d}, {:d}). Ignoring the mask.".format(
+                    mask.width, mask.height, remote_config.width, remote_config.height))
+            mask = None
+
+        # Init SkyFit
+        plate_tool = PlateTool(local_path, remote_config, beginning_time=beginning_time, fps=cml_args.fps, \
+                               gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints,
+                               mask=mask, nobg=cml_args.nobg, peribg=cml_args.peribg, flipud=cml_args.flipud,
+                               flatbiassub=cml_args.flatbiassub)
+
+        # Run the GUI app
+        a = app.exec_()
+        files_list = [remote_config.platepar_name]
+        putFiles(host, user, port, local_path, remote_path, files_list)
+        sys.exit(a)
+
+
+        pass
+
+
 if __name__ == '__main__':
     ### COMMAND LINE ARGUMENTS
 
@@ -6959,6 +7099,9 @@ if __name__ == '__main__':
 
     elif cml_args.input_path.endswith('.bz2'):
         handleBZ2(cml_args.input_path)
+
+    elif isLoginPath(cml_args.input_path):
+        handleLoginPath(cml_args.input_path)
 
     else:
 
