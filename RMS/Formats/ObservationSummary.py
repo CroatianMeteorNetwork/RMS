@@ -61,7 +61,7 @@ else:
     import Utils.CameraControl27 as dvr
 
 EM_RAISE = True
-DEBUG_PRINT = True
+DEBUG_PRINT = False
 
 
 def roundWithoutTrailingZero(value, no):
@@ -730,7 +730,7 @@ def nightSummaryData(config, night_data_dir):
     fits_file_shortfall_as_time_ephemeris = str(datetime.timedelta(seconds=fits_file_shortfall_ephemeris * duration_one_fits_file))
 
 
-    return  capture_duration_from_fits, duration_ephem, \
+    return  capture_duration_from_fits, start_ephem, duration_ephem, end_ephem, \
             fits_count, \
             fits_file_shortfall, fits_file_shortfall_ephemeris, \
             fits_file_shortfall_as_time, fits_file_shortfall_as_time_ephemeris, \
@@ -922,7 +922,7 @@ def daysBehind():
         latest_remote_date = getDateOfCommit(commit_repo_directory, remote_branch_of_commit)
         days_behind = (latest_remote_date - latest_local_date).total_seconds() / (60 * 60 * 24)
         target_directory_obj.cleanup()
-        return days_behind
+        return days_behind, remote_branch_of_commit
     else:
         target_directory_obj.cleanup()
         return "Unable to determine"
@@ -976,7 +976,9 @@ def retrieveObservationData(conn, config, night_directory=None, ordering=None):
                     'clock_measurement_source', 'clock_synchronized', 'clock_ahead_ms', 'clock_error_uncertainty_ms',
                     'start_time', 'duration_from_start_of_observation', 'continuous_capture',
                     'photometry_good', 'star_catalog_file',
-                    'time_first_fits_file', 'time_last_fits_file', 'total_expected_fits','total_fits',
+                    'time_start_ephem', 'time_first_fits_file',
+                    'time_end_ephem', 'time_last_fits_file',
+                    'total_expected_fits','total_fits',
                     'fits_files_from_duration','fits_file_shortfall', 'fits_file_shortfall_as_time',
                     'capture_duration_from_fits',
                     'capture_duration_from_ephemeris', 'total_expected_fits_ephemeris', 'fits_file_shortfall_ephemeris',
@@ -1008,7 +1010,7 @@ def retrieveObservationData(conn, config, night_directory=None, ordering=None):
     sql_statement += "                  ELSE {:03d} \n".format(count)
     sql_statement += "              END"
 
-    print(sql_statement)
+    # print(sql_statement)
 
     return conn.cursor().execute(sql_statement).fetchall()
 
@@ -1206,7 +1208,7 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
 
             """
 
-    capture_duration_from_fits, capture_duration_from_ephemeris, \
+    capture_duration_from_fits, start_ephem, capture_duration_from_ephemeris, end_ephem, \
     fits_count, \
     fits_file_shortfall, fits_file_shortfall_ephemeris, \
     fits_file_shortfall_as_time, fits_file_shortfall_as_time_ephemeris, \
@@ -1232,7 +1234,9 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
         addObsParam(obs_db_conn, "camera_lens", estimateLens(platepar.fov_h))
 
     addObsParam(obs_db_conn, "continuous_capture", config.continuous_capture)
+    addObsParam(obs_db_conn, "time_start_ephem", start_ephem)
     addObsParam(obs_db_conn, "time_first_fits_file", time_first_fits_file)
+    addObsParam(obs_db_conn, "time_end_ephem", end_ephem)
     addObsParam(obs_db_conn, "time_last_fits_file", time_last_fits_file)
     addObsParam(obs_db_conn, "capture_duration_from_fits", capture_duration_from_fits)
     addObsParam(obs_db_conn, "capture_duration_from_ephemeris", capture_duration_from_ephemeris)
@@ -1246,7 +1250,9 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
     addObsParam(obs_db_conn, "protocol_in_use", config.protocol)
     addObsParam(obs_db_conn, "star_catalog_file", config.star_catalog_file)
     try:
-        addObsParam(obs_db_conn, "repository_lag_remote_days", daysBehind())
+        days_behind, remote_branch = daysBehind()
+        addObsParam(obs_db_conn, "repository_lag_remote_days", days_behind)
+        addObsParam(obs_db_conn, "repository_lag_remote_branch", remote_branch)
     except:
         addObsParam(obs_db_conn, "repository_lag_remote_days", "Not determined")
     obs_db_conn.close()
@@ -1264,7 +1270,7 @@ if __name__ == "__main__":
     obs_db_conn = getObsDBConn(config)
 
     capture_directory = os.path.join(config.data_dir, config.captured_dir)
-    start_time = datetime.datetime.strptime("2025-06-19 08:03:37", "%Y-%m-%d %H:%M:%S")
+    start_time = datetime.datetime.strptime("2025-06-25 08:03:37", "%Y-%m-%d %H:%M:%S")
     start_time, duration, end_time = getObservationDurationContinuous(config, start_time)
 
     dir_list = os.listdir(capture_directory)
