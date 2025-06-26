@@ -6825,6 +6825,19 @@ def downloadFile(host, username, port, remote_path, local_path):
         ssh.close()
 
 def uploadFile(host, username, port, local_path, remote_path):
+    """Upload a single file.
+
+    Arguments:
+        host: [str] hostname of remote machine.
+        username: [str] username of remote machine.
+        port: [str] port.
+        local_path: [path] full path to file to be uploaded.
+        remote_path: [path] full path to destination.
+
+    Return:
+        Nothing.
+    """
+
 
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # Accept unknown host keys
@@ -6844,13 +6857,13 @@ def uploadFile(host, username, port, local_path, remote_path):
 
 
 def isLoginPath(path):
-    """Passed a path see if it is a path to a remote RMS installation
+    """Passed a path see if it is a path to a remote RMS installation.
 
-        Arguments:
-            path: [str] String to be tested
+    Arguments:
+        path: [str] String to be tested.
 
-        Returns:
-            is_login_path: [bool] True if a network path, else false
+    Return:
+        is_login_path: [bool] True if a network path, else false.
         """
 
     pattern_port = r'^([\w.-]+)@([\w.-]+):(\d+):(.*)$'
@@ -6860,20 +6873,17 @@ def isLoginPath(path):
     return is_login_path
 
 def getUserHostPortPath(path):
-    """Passed a user@host:path, return components
+    """Passed a user@host:port:path, or user@host:path return components, assuming port 22
 
-        Arguments:
-            path: [str] path to be broken appart
+    Arguments:
+        path: [str] path to be broken apart.
 
-        Returns:
-            user: [str] e.g. rms
-            host: [str] e.g. raspberrypi
-            port: [str] e.g. 22
-            path: [str] e.g. 192.168.1.2
-        """
-
-
-
+    Return:
+        user: [str] e.g. rms
+        host: [str] e.g. raspberrypi
+        port: [str] e.g. 22
+        path: [str] e.g. 192.168.1.2
+    """
 
     pattern_port = r'^([\w.-]+)@([\w.-]+):(\d+):(.*)$'
     match_port = re.match(pattern_port, path)
@@ -6893,21 +6903,55 @@ def getUserHostPortPath(path):
     return None, None, None, None
 
 def getFiles(host, user, port, remote_path, local_path, files_list):
+    """Passed a list of files, get from remote path and put in local path.
+
+    Arguments:
+        host: [str] hostname.
+        user: [str] user account.
+        port: [str] port.
+        remote_path: [str] remote path to get files from.
+        local_path: [str] local path to put files in.
+
+    Return:
+        local_target_list: [list] list of retrieved files.
+    """
 
     local_target_list = []
     for f in files_list:
-        local_target = os.path.join(local_path, f)
-        remote_target = os.path.join(remote_path, f)
+        local_target, remote_target = os.path.join(local_path, f), os.path.join(remote_path, f)
         downloadFile(host, user, port, remote_target, local_target)
         local_target_list.append(local_target)
     return local_target_list
 
 
 def getRemoteCapturedDirsPath(rc):
+    """Passed a config, get the path to the captured files on the remote machine.
+
+    config parser will expond the ~ in any remote path as though it is on the local machine.
+    This function strips off the local ~ and joins the remote ~
+
+    Arguments:
+        rc: [config] the remote RMS config instance.
+
+    Return:
+        [path] path to remote captured files.
+    """
+
     len_local_home_directory = len(os.path.expanduser("~")) + len("/")
     return os.path.join(rc.data_dir[len_local_home_directory:], rc.captured_dir)
 
 def getLatestCapturedDirectory(r, host, user, port):
+    """Get the latest captured directory from the remote machine.
+
+    Arguments:
+        r: [config] the remote RMS config instance.
+        host: [str] remote host.
+        user: [str] remote user.
+        port: [str] remote port.
+
+    Return:
+        [path] path to remote captured files directory.
+    """
 
     remote_captured_directory_list = lsRemote(host, user, port, getRemoteCapturedDirsPath(r))
     remote_captured_directory_list = [d for d in remote_captured_directory_list if d.startswith(r.stationID)]
@@ -6915,16 +6959,37 @@ def getLatestCapturedDirectory(r, host, user, port):
     return remote_captured_directory_list[0]
 
 def putFiles(host, user, port, local_path, remote_path, files_list):
+    """Passed a list of files, put from local_path to remote path.
+
+    Arguments:
+        host: [str] hostname.
+        user: [str] user account.
+        port: [str] port.
+        local_path: [str] local path to get files from.
+        remote_path: [str] remote path to put files in.
+
+
+    Return:
+        local_target_list: [list] list of retrieved files.
+    """
 
     local_target_list = []
     for f in files_list:
-        local_target = os.path.join(local_path, f)
-        remote_target = os.path.join(remote_path, f)
+        local_target, remote_target = os.path.join(local_path, f), os.path.join(remote_path, f)
         uploadFile(host, user, port, local_target, remote_target)
         local_target_list.append(local_target)
     return local_target_list
 
 def handleLoginPath(login_path):
+    """Passed a login path, retrieve necessary files and start the platetool.
+
+    Arguments:
+       login_path: [str] user@host:port:path/to/.config or user@host:path/to/.config
+
+
+    Return:
+        Nothing.
+    """
 
     user, host, port, remote_path = getUserHostPortPath(login_path)
     config_file_name = ('.config')
@@ -6976,9 +7041,6 @@ def handleLoginPath(login_path):
         files_list = [remote_config.platepar_name]
         putFiles(host, user, port, local_path, remote_path, files_list)
         sys.exit(a)
-
-
-        pass
 
 
 if __name__ == '__main__':
