@@ -965,7 +965,7 @@ def retrieveObservationData(conn, config, night_directory=None, ordering=None):
         # the two items into one.
 
         ordering = ['stationID',
-                    'commit_date', 'commit_hash', 'repository_lag_remote_days',
+                    'commit_date', 'commit_hash', 'remote_branch', 'repository_lag_remote_days',
                     'media_backend','star_catalog_file',
                     'hardware_version',
                     'captured_directories',
@@ -1249,10 +1249,11 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
     addObsParam(obs_db_conn, "fits_file_shortfall_as_time_ephemeris", fits_file_shortfall_as_time_ephemeris)
     addObsParam(obs_db_conn, "protocol_in_use", config.protocol)
     addObsParam(obs_db_conn, "star_catalog_file", config.star_catalog_file)
+
     try:
         days_behind, remote_branch = daysBehind()
         addObsParam(obs_db_conn, "repository_lag_remote_days", days_behind)
-        addObsParam(obs_db_conn, "repository_lag_remote_branch", remote_branch)
+        addObsParam(obs_db_conn, "remote_branch", os.path.basename(remote_branch))
     except:
         addObsParam(obs_db_conn, "repository_lag_remote_days", "Not determined")
     obs_db_conn.close()
@@ -1284,7 +1285,7 @@ if __name__ == "__main__":
 
 
 
-    # startObservationSummaryReport(config, 100, force_delete=False)
+    startObservationSummaryReport(config, 100, force_delete=False)
     pp = Platepar()
     finalizeObservationSummary(config, latest_dir , pp)
     print("Summary as colon delimited text")
