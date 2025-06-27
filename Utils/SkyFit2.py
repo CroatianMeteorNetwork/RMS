@@ -6934,7 +6934,8 @@ def getFiles(host, user, port, remote_path, local_path, files_list, number=None)
         print(text, end='\r')
         downloadFile(host, user, port, remote_target, local_target)
         local_target_list.append(local_target)
-    print()
+    text = highlight("Downloading ", files_list, f, all_done = True)
+    print(text)
     return local_target_list
 
 def uploadFile(host, username, port, local_path, remote_path):
@@ -7021,7 +7022,7 @@ def getUserHostPortPath(path):
 
     return None, None, None, None
 
-def highlight(custom_text, list, highlight):
+def highlight(custom_text, list, highlight, all_done=False):
 
     HEADER = '\033[95m'
     OKBLUE = '\033[94m'
@@ -7037,14 +7038,20 @@ def highlight(custom_text, list, highlight):
     if len(list) > 5:
         output += "\n"
     i = 0
+    highlight_passed = False
     for item in list:
         i += 1
-        if item == highlight:
+        if item == highlight and not all_done:
+            highlight_passed = True
             output += WARNING
             output += "{}".format(item)
             output += ENDC + " "
-        else:
+        elif highlight_passed == True and not all_done:
             output += OKBLUE
+            output += "{}".format(item)
+            output += ENDC + " "
+        else:
+            output += OKGREEN
             output += "{}".format(item)
             output += ENDC + " "
 
