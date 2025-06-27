@@ -22,6 +22,7 @@ import tempfile
 import tarfile
 import shutil
 import paramiko
+import subprocess
 
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
@@ -6807,6 +6808,29 @@ def lsRemote(host, username, port, remote_path):
 
 
 def downloadFile(host, username, port, remote_path, local_path):
+    """Download a single file try compressed rsync first, then fall back to Paramiko
+
+    Arguments:
+        host: [str] hostname of remote machine.
+        username: [str] username for remote machine.
+        port: [str] port.
+        remote_path: [path] full path to destination.
+        local_path: [path] full path of local target.
+
+    Return:
+        Nothing.
+    """
+
+    try:
+
+        remote = "{}@{}:{}".format(username, host, remote_path)
+        result = subprocess.run(['rsync', '-z', remote, local_path], capture_output=True, text=True)
+        if not os.path.exists(os.path.expanduser(local_path)):
+            print("Login to {}@{} failed. You need to add your keys to remote using ssh-copy-id.".format(username,host))
+            quit()
+        return
+    except:
+        pass
 
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # Accept unknown host keys
@@ -6814,22 +6838,22 @@ def downloadFile(host, username, port, remote_path, local_path):
         ssh.connect(hostname=host, port=port, username=username)
     except:
         print("Login to {}@{} failed. You need to add your keys to remote using ssh-copy-id.".format(username,host))
-
+        quit()
     try:
         sftp = ssh.open_sftp()
-        print("Downloading {} to {}".format(remote_path, local_path))
         sftp.get(remote_path, local_path)
 
     finally:
         sftp.close()
         ssh.close()
 
+    return
 def uploadFile(host, username, port, local_path, remote_path):
     """Upload a single file.
 
     Arguments:
         host: [str] hostname of remote machine.
-        username: [str] username of remote machine.
+        username: [str] username for remote machine.
         port: [str] port.
         local_path: [path] full path to file to be uploaded.
         remote_path: [path] full path to destination.
@@ -6837,7 +6861,6 @@ def uploadFile(host, username, port, local_path, remote_path):
     Return:
         Nothing.
     """
-
 
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # Accept unknown host keys
@@ -6902,9 +6925,18 @@ def getUserHostPortPath(path):
 
     return None, None, None, None
 
-def getFiles(host, user, port, remote_path, local_path, files_list):
-    """Passed a list of files, get from remote path and put in local path.
+def rsyncAvailable(path):
 
+    try:
+        result = subprocess.run(['rsync', '-l'], capture_output=True, text=True)
+        return True
+    except:
+        return False
+
+
+def getFiles(host, user, port, remote_path, local_path, files_list, number = None):
+    """Passed a list of files, get from remote path and put in local path. 
+    
     Arguments:
         host: [str] hostname.
         user: [str] user account.
@@ -6912,16 +6944,70 @@ def getFiles(host, user, port, remote_path, local_path, files_list):
         remote_path: [str] remote path to get files from.
         local_path: [str] local path to put files in.
 
+    Keyword Arguments:
+        number: [int] Optional, default None. The number of files to download from the list. If none,
+        or more than the number of files in the list, download all. If 1, download penultimate, if 0,
+        download middle.
+
+
     Return:
         local_target_list: [list] list of retrieved files.
     """
 
+
+
+    files_list.sort()
+    if number == 0:
+        # Pick approximately the middle from the fil
+        files_list = [files_list[len(files_list) // 2]]
+    else:
+        files_list = nItemsFromList(number, files_list, drop_last=True, sort=True)
     local_target_list = []
     for f in files_list:
         local_target, remote_target = os.path.join(local_path, f), os.path.join(remote_path, f)
+        text = highlight("Downloading ", files_list, f)
+        print(text , end='\r')
         downloadFile(host, user, port, remote_target, local_target)
         local_target_list.append(local_target)
+    print()
     return local_target_list
+
+def highlight(custom_text, list, highlight):
+
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+    output = HEADER + custom_text + OKBLUE
+    if len(list) > 5:
+        output += "\n"
+    i = 0
+    for item in list:
+        i += 1
+        if item == highlight:
+            output += WARNING
+            output += "{}".format(item)
+            output += ENDC + " "
+        else:
+            output += OKBLUE
+            output += "{}".format(item)
+            output += ENDC + " "
+
+        if i % 6 == 0:
+            output += "\n" + " " * (len(custom_text) + 2)
+    output += ENDC
+
+    return output
+
+
+
+
 
 
 def getRemoteCapturedDirsPath(rc):
@@ -6980,7 +7066,53 @@ def putFiles(host, user, port, local_path, remote_path, files_list):
         local_target_list.append(local_target)
     return local_target_list
 
-def handleLoginPath(login_path):
+def nItemsFromList(number, input_list, drop_first=False, drop_last=False, sort=True):
+    """Return a list of length number, containing equally spaced items from input list.
+
+
+
+    Arguments:
+       number: [int] Number of list items to return. Can be more than the length of the input list,
+                    in which case items will be duplicated to pad to length.
+        input_list: [list] Input list.
+
+    Keyword arguments:
+        drop_first: [bool] If true, remove the first item from the list.
+        drop_last: [bool] If true, remove the last item from the list.
+
+    Return:
+        output_list: [list] list of length number
+    """
+
+    if number is None:
+        return input_list
+
+    # Avoid divide by zero error
+    if number < 1:
+        return []
+
+    # Avoid working on empty list
+
+    if len(input_list) < 1:
+        return[]
+
+    # Truncate as required
+    input_list = input_list[1:] if drop_first else input_list
+    input_list = input_list[:-1] if drop_last else input_list
+
+    # Sort the list
+    if sort:
+        input_list.sort()
+
+    output_list, n, gap = [], 0, (len(input_list)) / (number)
+    for i in range(0, number):
+        output_list.append(input_list[round(n)])
+        n += gap
+
+    return output_list
+
+
+def handleLoginPath(login_path, number_of_fits=None):
     """Passed a login path, retrieve necessary files and start the platetool.
 
     Arguments:
@@ -6990,35 +7122,28 @@ def handleLoginPath(login_path):
     Return:
         Nothing.
     """
-
+    number_of_fits = 1 if number_of_fits is None else int(number_of_fits)
     user, host, port, remote_path = getUserHostPortPath(login_path)
     config_file_name = ('.config')
     if remote_path.endswith(config_file_name):
         remote_path = remote_path[:-len(config_file_name)]
-    print("Working on {}@{}:{}:{}".format(user, host, port, remote_path))
+    print("Getting .config from {}@{}:{}:{}".format(user, host, port, remote_path))
     # Create temporary directory
     with tempfile.TemporaryDirectory() as local_path:
 
         # First get the .config file
         files_list = ['.config']
+        time_started_getting_files = datetime.datetime.now(datetime.timezone.utc)
         remote_config = cr.parse(getFiles(host, user, port, remote_path, local_path, files_list)[0])
-
-        files_list = [remote_config.platepar_name, remote_config.mask_file]
-        getFiles(host, user, port, remote_path, local_path, files_list)
+        platepar_mask_list = [remote_config.platepar_name, remote_config.mask_file]
+        getFiles(host, user, port, remote_path, local_path, platepar_mask_list)
         latest_cap_dir = os.path.join(getRemoteCapturedDirsPath(remote_config), getLatestCapturedDirectory(remote_config, host, user, port))
         latest_captured_files = lsRemote(host, user, port, latest_cap_dir)
         fits_files = [f for f in latest_captured_files if f.endswith(".fits") and f.startswith("FF_{}".format(remote_config.stationID))]
-        fits_files.sort(reverse=True)
-        num_fits_files = len(fits_files)
-        gap = int(num_fits_files / 5)
-        fits_to_download = []
-        fits_to_download.append(fits_files[1 * gap])
-        fits_to_download.append(fits_files[2 * gap])
-        fits_to_download.append(fits_files[3 * gap])
-
-        # Ignore the latest file, might still be being written, but get the two before
-        getFiles(host, user, port, latest_cap_dir, local_path, fits_to_download)
-
+        getFiles(host, user, port, latest_cap_dir, local_path, fits_files, number=number_of_fits)
+        time_finished_getting_files = datetime.datetime.now(datetime.timezone.utc)
+        time_taken = (time_finished_getting_files - time_started_getting_files).total_seconds()
+        print("Files retrieved in {:.1f} seconds".format(time_taken))
         mask_path = os.path.join(local_path, remote_config.mask_file)
         if os.path.exists(mask_path):
             mask = getMaskFile(".", remote_config)
@@ -7051,15 +7176,15 @@ if __name__ == '__main__':
 
     arg_parser.add_argument('input_path', metavar='INPUT_PATH', type=str,
                             help='Path to the folder with FF or image files, path to a video file, '
-                                 '  to a state file, or an RMS bz2 file.'
+                                 '  to a state file, an RMS bz2 file, or user@host:path/to/config/ .'
                                  ' If images or videos are given, their names must be in the format: YYYYMMDD_hhmmss.uuuuuu')
+
 
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
                             help="Path to a config file which will be used instead of the default one."
                                  " To load the .config file in the given data directory, write '.' (dot).")
 
-    arg_parser.add_argument('-r', '--fr', action="store_true", \
-        help="""Use FR files. """)
+    arg_parser.add_argument('-r', '--fr', action="store_true",  help="""Use FR files. """)
 
     arg_parser.add_argument('-t', '--timebeg', nargs=1, metavar='TIME', type=str,
                             help="The beginning time of the video file in the YYYYMMDD_hhmmss.uuuuuu format.")
@@ -7093,10 +7218,16 @@ if __name__ == '__main__':
 
     arg_parser.add_argument('-m', '--mask', metavar='MASK_PATH', type=str,
                             help="Path to a mask file which will be applied to the star catalog")
-    
+
+    arg_parser.add_argument('-u', '--number_of_fits', metavar='NUMBER_OF_FITS', type=int,
+                            help="When working remotely, number of fits files to download. \n"
+                                    "1 - Pick the penultimate file by time. \n"
+                                    "0 - Pick the file in the approximate middle of most recent capture session. \n")
+
+
+
     arg_parser.add_argument('--flatbiassub', action="store_true", \
         help="Subtract the bias from the flat. False by default.")
-
 
 
     # Parse the command line arguments
@@ -7163,7 +7294,7 @@ if __name__ == '__main__':
         handleBZ2(cml_args.input_path)
 
     elif isLoginPath(cml_args.input_path):
-        handleLoginPath(cml_args.input_path)
+        handleLoginPath(cml_args.input_path, cml_args.number_of_fits)
 
     else:
 
