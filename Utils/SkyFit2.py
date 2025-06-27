@@ -6742,6 +6742,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         return unmarked_x_list[next_star_index], unmarked_y_list[next_star_index], max_distance_between_paired
 
+
+
 def handleBZ2(bz2_path):
     """Passed a path to a bz2 file, unpack and prepare a working area for PlateTool, and launch.
 
@@ -6792,7 +6794,6 @@ def handleBZ2(bz2_path):
             shutil.copy2(temp_platepar_location, platepar_destination)
             sys.exit(a)
 
-
 def lsRemote(host, username, port, remote_path):
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # Accept unknown host keys
@@ -6805,7 +6806,6 @@ def lsRemote(host, username, port, remote_path):
     finally:
         sftp.close()
         ssh.close()
-
 
 def downloadFile(host, username, port, remote_path, local_path):
     """Download a single file try compressed rsync first, then fall back to Paramiko
@@ -6824,9 +6824,14 @@ def downloadFile(host, username, port, remote_path, local_path):
     try:
 
         remote = "{}@{}:{}".format(username, host, remote_path)
-        result = subprocess.run(['rsync', '-z', remote, local_path], capture_output=True, text=True)
+        result = subprocess.run(['rsync', '-z', remote], capture_output=True, text=True)
+        if "No such file or directory" in result.stderr :
+            print("Remote file {} was not found.".format(os.path.basename(remote)))
+            return
+        else:
+            result = subprocess.run(['rsync', '-z', remote, local_path], capture_output=True, text=True)
         if not os.path.exists(os.path.expanduser(local_path)):
-            print("Login to {}@{} failed. You need to add your keys to remote using ssh-copy-id.".format(username,host))
+            print("Download of {} from {}@{} failed. You need to add your keys to remote using ssh-copy-id.".format(remote_path, username,host))
             quit()
         return
     except:
@@ -6841,230 +6846,15 @@ def downloadFile(host, username, port, remote_path, local_path):
         quit()
     try:
         sftp = ssh.open_sftp()
-        sftp.get(remote_path, local_path)
+        remote_file_list = sftp.listdir(remote_path)
+        if remote_file_list:
+            sftp.get(remote_path, local_path)
 
     finally:
         sftp.close()
         ssh.close()
 
     return
-def uploadFile(host, username, port, local_path, remote_path):
-    """Upload a single file.
-
-    Arguments:
-        host: [str] hostname of remote machine.
-        username: [str] username for remote machine.
-        port: [str] port.
-        local_path: [path] full path to file to be uploaded.
-        remote_path: [path] full path to destination.
-
-    Return:
-        Nothing.
-    """
-
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # Accept unknown host keys
-    try:
-        ssh.connect(hostname=host, port=port, username=username)
-    except:
-        print("Login to {}@{} failed. You need to add your keys to remote using ssh-copy-id.".format(username,host))
-
-    try:
-        sftp = ssh.open_sftp()
-        sftp.put(local_path, remote_path)
-        print("Uploaded {} to {}".format(local_path, remote_path))
-    finally:
-        sftp.close()
-        ssh.close()
-
-
-
-def isLoginPath(path):
-    """Passed a path see if it is a path to a remote RMS installation.
-
-    Arguments:
-        path: [str] String to be tested.
-
-    Return:
-        is_login_path: [bool] True if a network path, else false.
-        """
-
-    pattern_port = r'^([\w.-]+)@([\w.-]+):(\d+):(.*)$'
-    pattern = r'^[^@:\s]+@[^@:\s]+:[^\s]+$'
-    is_login_path = re.match(pattern, path) or re.match(pattern_port, path)
-
-    return is_login_path
-
-def getUserHostPortPath(path):
-    """Passed a user@host:port:path, or user@host:path return components, assuming port 22
-
-    Arguments:
-        path: [str] path to be broken apart.
-
-    Return:
-        user: [str] e.g. rms
-        host: [str] e.g. raspberrypi
-        port: [str] e.g. 22
-        path: [str] e.g. 192.168.1.2
-    """
-
-    pattern_port = r'^([\w.-]+)@([\w.-]+):(\d+):(.*)$'
-    match_port = re.match(pattern_port, path)
-
-    if match_port:
-        user, host, port, path = match_port.groups()
-        return user, host, port, path
-
-    pattern = r'^([^@:\s]+)@([^@:\s]+):([^\s]+)$'
-    match = re.match(pattern, path)
-
-    if match:
-        user, host, path = match.groups()
-        return user, host, 22, path
-
-
-    return None, None, None, None
-
-def rsyncAvailable(path):
-
-    try:
-        result = subprocess.run(['rsync', '-l'], capture_output=True, text=True)
-        return True
-    except:
-        return False
-
-
-def getFiles(host, user, port, remote_path, local_path, files_list, number = None):
-    """Passed a list of files, get from remote path and put in local path. 
-    
-    Arguments:
-        host: [str] hostname.
-        user: [str] user account.
-        port: [str] port.
-        remote_path: [str] remote path to get files from.
-        local_path: [str] local path to put files in.
-
-    Keyword Arguments:
-        number: [int] Optional, default None. The number of files to download from the list. If none,
-        or more than the number of files in the list, download all. If 1, download penultimate, if 0,
-        download middle.
-
-
-    Return:
-        local_target_list: [list] list of retrieved files.
-    """
-
-
-
-    files_list.sort()
-    if number == 0:
-        # Pick approximately the middle from the fil
-        files_list = [files_list[len(files_list) // 2]]
-    else:
-        files_list = nItemsFromList(number, files_list, drop_last=True, sort=True)
-    local_target_list = []
-    for f in files_list:
-        local_target, remote_target = os.path.join(local_path, f), os.path.join(remote_path, f)
-        text = highlight("Downloading ", files_list, f)
-        print(text , end='\r')
-        downloadFile(host, user, port, remote_target, local_target)
-        local_target_list.append(local_target)
-    print()
-    return local_target_list
-
-def highlight(custom_text, list, highlight):
-
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKCYAN = '\033[96m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
-
-    output = HEADER + custom_text + OKBLUE
-    if len(list) > 5:
-        output += "\n"
-    i = 0
-    for item in list:
-        i += 1
-        if item == highlight:
-            output += WARNING
-            output += "{}".format(item)
-            output += ENDC + " "
-        else:
-            output += OKBLUE
-            output += "{}".format(item)
-            output += ENDC + " "
-
-        if i % 6 == 0:
-            output += "\n" + " " * (len(custom_text) + 2)
-    output += ENDC
-
-    return output
-
-
-
-
-
-
-def getRemoteCapturedDirsPath(rc):
-    """Passed a config, get the path to the captured files on the remote machine.
-
-    config parser will expond the ~ in any remote path as though it is on the local machine.
-    This function strips off the local ~ and joins the remote ~
-
-    Arguments:
-        rc: [config] the remote RMS config instance.
-
-    Return:
-        [path] path to remote captured files.
-    """
-
-    len_local_home_directory = len(os.path.expanduser("~")) + len("/")
-    return os.path.join(rc.data_dir[len_local_home_directory:], rc.captured_dir)
-
-def getLatestCapturedDirectory(r, host, user, port):
-    """Get the latest captured directory from the remote machine.
-
-    Arguments:
-        r: [config] the remote RMS config instance.
-        host: [str] remote host.
-        user: [str] remote user.
-        port: [str] remote port.
-
-    Return:
-        [path] path to remote captured files directory.
-    """
-
-    remote_captured_directory_list = lsRemote(host, user, port, getRemoteCapturedDirsPath(r))
-    remote_captured_directory_list = [d for d in remote_captured_directory_list if d.startswith(r.stationID)]
-    remote_captured_directory_list.sort(reverse=True)
-    return remote_captured_directory_list[0]
-
-def putFiles(host, user, port, local_path, remote_path, files_list):
-    """Passed a list of files, put from local_path to remote path.
-
-    Arguments:
-        host: [str] hostname.
-        user: [str] user account.
-        port: [str] port.
-        local_path: [str] local path to get files from.
-        remote_path: [str] remote path to put files in.
-
-
-    Return:
-        local_target_list: [list] list of retrieved files.
-    """
-
-    local_target_list = []
-    for f in files_list:
-        local_target, remote_target = os.path.join(local_path, f), os.path.join(remote_path, f)
-        uploadFile(host, user, port, local_target, remote_target)
-        local_target_list.append(local_target)
-    return local_target_list
 
 def nItemsFromList(number, input_list, drop_first=False, drop_last=False, sort=True):
     """Return a list of length number, containing equally spaced items from input list.
@@ -7111,6 +6901,208 @@ def nItemsFromList(number, input_list, drop_first=False, drop_last=False, sort=T
 
     return output_list
 
+def getFiles(host, user, port, remote_path, local_path, files_list, number=None):
+    """Passed a list of files, get from remote path and put in local path.
+
+    Arguments:
+        host: [str] hostname.
+        user: [str] user account.
+        port: [str] port.
+        remote_path: [str] remote path to get files from.
+        local_path: [str] local path to put files in.
+
+    Keyword Arguments:
+        number: [int] Optional, default None. The number of files to download from the list. If none,
+        or more than the number of files in the list, download all. If 1, download penultimate, if 0,
+        download middle.
+
+
+    Return:
+        local_target_list: [list] list of retrieved files.
+    """
+
+    files_list.sort()
+    if number == 0:
+        # Pick approximately the middle from the fil
+        files_list = [files_list[len(files_list) // 2]]
+    else:
+        files_list = nItemsFromList(number, files_list, drop_last=True, sort=True)
+    local_target_list = []
+    for f in files_list:
+        local_target, remote_target = os.path.join(local_path, f), os.path.join(remote_path, f)
+        text = highlight("Downloading ", files_list, f)
+        print(text, end='\r')
+        downloadFile(host, user, port, remote_target, local_target)
+        local_target_list.append(local_target)
+    print()
+    return local_target_list
+
+def uploadFile(host, username, port, local_path, remote_path):
+    """Upload a single file.
+
+    Arguments:
+        host: [str] hostname of remote machine.
+        username: [str] username for remote machine.
+        port: [str] port.
+        local_path: [path] full path to file to be uploaded.
+        remote_path: [path] full path to destination.
+
+    Return:
+        Nothing.
+    """
+
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # Accept unknown host keys
+    try:
+        ssh.connect(hostname=host, port=port, username=username)
+    except:
+        print("Login to {}@{} failed. You need to add your keys to remote using ssh-copy-id.".format(username,host))
+
+    try:
+        sftp = ssh.open_sftp()
+        sftp.put(local_path, remote_path)
+        print("Uploaded {} to {}".format(local_path, remote_path))
+    finally:
+        sftp.close()
+        ssh.close()
+
+def putFiles(host, user, port, local_path, remote_path, files_list):
+    """Passed a list of files, put from local_path to remote path.
+
+    Arguments:
+        host: [str] hostname.
+        user: [str] user account.
+        port: [str] port.
+        local_path: [str] local path to get files from.
+        remote_path: [str] remote path to put files in.
+
+
+    Return:
+        local_target_list: [list] list of retrieved files.
+    """
+
+    local_target_list = []
+    for f in files_list:
+        local_target, remote_target = os.path.join(local_path, f), os.path.join(remote_path, f)
+        if os.path.exists(local_target):
+            uploadFile(host, user, port, local_target, remote_target)
+            local_target_list.append(local_target)
+        else:
+            print("Upload target {} not found on local.".format(local_target))
+    return local_target_list
+
+def getUserHostPortPath(path):
+    """Passed a user@host:port:path, or user@host:path return components, assuming port 22
+
+    Arguments:
+        path: [str] path to be broken apart.
+
+    Return:
+        user: [str] e.g. rms
+        host: [str] e.g. raspberrypi
+        port: [str] e.g. 22
+        path: [str] e.g. 192.168.1.2
+    """
+
+    pattern_port = r'^([\w.-]+)@([\w.-]+):(\d+):(.*)$'
+    match_port = re.match(pattern_port, path)
+
+    if match_port:
+        user, host, port, path = match_port.groups()
+        return user, host, port, path
+
+    pattern = r'^([^@:\s]+)@([^@:\s]+):([^\s]+)$'
+    match = re.match(pattern, path)
+
+    if match:
+        user, host, path = match.groups()
+        return user, host, 22, path
+
+
+    return None, None, None, None
+
+def highlight(custom_text, list, highlight):
+
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+    output = HEADER + custom_text + OKBLUE
+    if len(list) > 5:
+        output += "\n"
+    i = 0
+    for item in list:
+        i += 1
+        if item == highlight:
+            output += WARNING
+            output += "{}".format(item)
+            output += ENDC + " "
+        else:
+            output += OKBLUE
+            output += "{}".format(item)
+            output += ENDC + " "
+
+        if i % 6 == 0:
+            output += "\n" + " " * (len(custom_text) + 2)
+    output += ENDC
+
+    return output
+
+def getRemoteCapturedDirsPath(rc):
+    """Passed a config, get the path to the captured files on the remote machine.
+
+    config parser will expond the ~ in any remote path as though it is on the local machine.
+    This function strips off the local ~ and joins the remote ~
+
+    Arguments:
+        rc: [config] the remote RMS config instance.
+
+    Return:
+        [path] path to remote captured files.
+    """
+
+    len_local_home_directory = len(os.path.expanduser("~")) + len("/")
+    return os.path.join(rc.data_dir[len_local_home_directory:], rc.captured_dir)
+
+def getLatestCapturedDirectory(r, host, user, port):
+    """Get the latest captured directory from the remote machine.
+
+    Arguments:
+        r: [config] the remote RMS config instance.
+        host: [str] remote host.
+        user: [str] remote user.
+        port: [str] remote port.
+
+    Return:
+        [path] path to remote captured files directory.
+    """
+
+    remote_captured_directory_list = lsRemote(host, user, port, getRemoteCapturedDirsPath(r))
+    remote_captured_directory_list = [d for d in remote_captured_directory_list if d.startswith(r.stationID)]
+    remote_captured_directory_list.sort(reverse=True)
+    return remote_captured_directory_list[0]
+
+def isLoginPath(path):
+    """Passed a path see if it is a path to a remote RMS installation.
+
+    Arguments:
+        path: [str] String to be tested.
+
+    Return:
+        is_login_path: [bool] True if a network path, else false.
+        """
+
+    pattern_port = r'^([\w.-]+)@([\w.-]+):(\d+):(.*)$'
+    pattern = r'^[^@:\s]+@[^@:\s]+:[^\s]+$'
+    is_login_path = re.match(pattern, path) or re.match(pattern_port, path)
+
+    return is_login_path
 
 def handleLoginPath(login_path, number_of_fits=None):
     """Passed a login path, retrieve necessary files and start the platetool.
