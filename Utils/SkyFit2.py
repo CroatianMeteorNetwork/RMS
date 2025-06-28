@@ -6404,13 +6404,20 @@ class PlateTool(QtWidgets.QMainWindow):
             # Only store real picks, and not gaps
             if pick['mode'] == 0:
                 continue
+            
+            # Read the SNR and make sure it is not None
+            snr = pick['snr']
+            if snr is None:
 
+                # If SNR is None, then set it to 0
+                snr = 0.0
 
-            # If SNR is None, then set the random error to 0
-            if pick['snr'] is None:
+                # If SNR is None, then set the random error to 0
                 mag_err_random = 0
 
             else:
+
+                # Compute the random error based on the SNR
                 mag_err_random = 2.5*np.log10(1 + 1/pick['snr'])
 
             # Compute the magnitude errors
@@ -6478,7 +6485,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 "{:10d}".format(int(pick['background_intensity'])),
                 "{:5s}".format(str(pick['saturated'])),
                 "{:+7.2f}".format(mag), "{:+6.2f}".format(-mag_err_total), "{:+6.2f}".format(mag_err_total),
-                "{:10.2f}".format(pick['snr'])
+                "{:10.2f}".format(snr)
                 ]
 
             out_str += ",".join(entry) + "\n"
