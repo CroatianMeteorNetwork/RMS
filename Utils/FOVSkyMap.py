@@ -162,6 +162,11 @@ def plotFOVSkyMap(platepars, configs, out_dir, north_up=False, show_pointing=Fal
     else:
         output_file_name = os.path.join(os.path.abspath('.'), os.path.expanduser(output_file_name))
 
+    if os.path.isdir(output_file_name):
+        output_file_name = os.path.join(output_file_name, "fov_sky_map.png")
+
+
+
     # Save the plot to disk
     plot_path = os.path.expanduser(output_file_name)
     if os.path.isdir(plot_path):
@@ -229,6 +234,22 @@ if __name__ == "__main__":
     masks = {}
     configs = {}
 
+    cml_args.dir_path = os.path.expanduser(cml_args.dir_path)
+    if not os.path.isdir(cml_args.dir_path):
+        print("Input directory {:s} does not exist, quitting.".format(cml_args.dir_path))
+        quit()
+
+    if cml_args.output_file_name is None:
+        output_file_name = cml_args.dir_path
+    else:
+        output_file_name = cml_args.output_file_name[0]
+
+    if not os.path.isdir(output_file_name) and not os.path.isdir(os.path.dirname(output_file_name)):
+        print("Output directory {:s} does not exist, quitting.".format(os.path.dirname(output_file_name)))
+        quit()
+
+
+
     for entry in os.walk(os.path.expanduser(cml_args.dir_path), topdown=True):
 
         dir_path, dirs , file_list = entry
@@ -270,7 +291,7 @@ if __name__ == "__main__":
     plotFOVSkyMap(platepars, configs, cml_args.dir_path, north_up=cml_args.north_up,
                   show_pointing=cml_args.pointing, show_fov=cml_args.fov,
                   rotate_text=cml_args.rotate, masks=masks,
-                  flip_text=cml_args.flip_text, output_file_name=cml_args.output_file_name[0],
+                  flip_text=cml_args.flip_text, output_file_name=output_file_name,
                   show_ip=cml_args.show_ip, show_coordinates=cml_args.show_coordinates)
 
 
