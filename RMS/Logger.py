@@ -134,15 +134,22 @@ class InRmsFilter(logging.Filter):
       reside under site-packages) are discarded.
     - Records from RMS codebase are allowed through.
     """
+    def __init__(self, config):
+        super(InRmsFilter, self).__init__()
+        self.config = config
+
+        # Initialize allowed directories
+        self.allowed_dirs, self.site_dirs = getWhiteAndBlackLists(self.config)
+
     def filter(self, record):
         p = os.path.realpath(record.pathname)
 
         # reject std-lib / third-party
-        if any(_inside(p, sd) for sd in SITE_DIRS):
+        if any(_inside(p, sd) for sd in self.site_dirs):
             return False
 
         # accept RMS tree **or** external scripts directory
-        return any(_inside(p, root) for root in ALLOWED_DIRS)
+        return any(_inside(p, root) for root in self.allowed_dirs)
 
 
 # Reproduced from RMS.Misc due to circular import issue
@@ -352,8 +359,8 @@ def _listener_configurer(config, log_file_prefix, safedir):
     console = logging.StreamHandler(sys.stdout)
 
     # Add filters to both handlers
-    handler.addFilter(InRmsFilter())
-    console.addFilter(InRmsFilter())
+    handler.addFilter(InRmsFilter(config))
+    console.addFilter(InRmsFilter(config))
 
     # Set common formatter for both handlers
     formatter = logging.Formatter(
@@ -405,6 +412,39 @@ def _listener_process(queue, config, log_file_prefix, safedir):
 # PUBLIC ENTRY POINT
 ##############################################################################
 
+def getWhiteAndBlackLists(config):
+    """ Returns the whitelisted RMS root and external script directories,
+        and the blacklisted site-packages directories.
+        
+    Return:
+        (set, set) Tuple of whitelisted and blacklisted directories
+    """
+
+    # Whitelist RMS root and external script directories
+    rms_root = os.path.realpath(getRmsRootDir())
+    allowed_dirs = {rms_root}
+    ext = config.external_script_path
+    if ext:
+        ext_root = os.path.realpath(ext)
+        if not os.path.isdir(ext_root):          # it's a .py file
+            ext_root = os.path.dirname(ext_root)
+        allowed_dirs.add(ext_root)
+
+    # Blacklist site-packages directories (with Py2 fallback)
+    try:
+        site_packages = site.getsitepackages()
+        user_site    = site.getusersitepackages()
+    except (AttributeError, IOError):
+        from distutils.sysconfig import get_python_lib
+        site_packages = [get_python_lib()]
+        user_site     = getattr(site, 'USER_SITE',
+                                 get_python_lib(prefix=sys.prefix))
+
+    site_dirs = set(os.path.realpath(p) for p in site_packages)
+    site_dirs.add(os.path.realpath(user_site))
+
+    return allowed_dirs, site_dirs
+
 def initLogging(config, log_file_prefix="", safedir=None, level=logging.DEBUG):
     """ Called once in the MAIN process (e.g. StartCapture.py).
     Spawns the listener process and configures logging.
@@ -420,26 +460,7 @@ def initLogging(config, log_file_prefix="", safedir=None, level=logging.DEBUG):
 
     # Whitelist RMS root and external script directories
     RMS_ROOT = os.path.realpath(getRmsRootDir())
-    ALLOWED_DIRS = {RMS_ROOT}
-    ext = config.external_script_path
-    if ext:
-        ext_root = os.path.realpath(ext)
-        if not os.path.isdir(ext_root):          # it's a .py file
-            ext_root = os.path.dirname(ext_root)
-        ALLOWED_DIRS.add(ext_root)
-
-    # Blacklist site-packages directories (with Py2 fallback)
-    try:
-        site_packages = site.getsitepackages()
-        user_site    = site.getusersitepackages()
-    except (AttributeError, IOError):
-        from distutils.sysconfig import get_python_lib
-        site_packages = [get_python_lib()]
-        user_site     = getattr(site, 'USER_SITE',
-                                 get_python_lib(prefix=sys.prefix))
-
-    SITE_DIRS = set(os.path.realpath(p) for p in site_packages)
-    SITE_DIRS.add(os.path.realpath(user_site))
+    ALLOWED_DIRS, SITE_DIRS = getWhiteAndBlackLists(config)
 
     # Ensure we only init once
     with _rms_init_lock:
@@ -480,7 +501,7 @@ def initLogging(config, log_file_prefix="", safedir=None, level=logging.DEBUG):
 
     qh = QueueHandler(_rms_logging_queue)
     qh.setFormatter(logging.Formatter('%(message)s'))
-    qh.addFilter(InRmsFilter())
+    qh.addFilter(InRmsFilter(config))
 
     # Replace root handlers with our queue handler
     main_logger.handlers = [qh]
