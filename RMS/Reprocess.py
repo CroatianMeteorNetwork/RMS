@@ -206,7 +206,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
         obs_db_conn = getObsDBConn(config)
         # Filter out detections using machine learning
-        if config.ml_filter > 0:
+        if config.ml_filter > 0 and ftpdetectinfo_name is not None:
 
             log.info("Filtering out detections using machine learning...")
 
@@ -644,18 +644,18 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                     night_data_dir, cams_code_formatted, fps, calibration=cal_file_name, \
                     celestial_coords_given=(platepar is not None))
 
+
     try:
         observation_summary_path_file_name, observation_summary_json_path_file_name = (
                 finalizeObservationSummary(config, night_data_dir))
         log.info("\n\nObservation Summary\n===================\n\n" + serialize(config) + "\n\n")
+        extra_files.append(observation_summary_path_file_name)
+        extra_files.append(observation_summary_json_path_file_name)
 
     except Exception as e:
         log.debug('Generating Observation Summary failed with message:\n' + repr(e))
         log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
-
-    extra_files.append(observation_summary_path_file_name)
-    extra_files.append(observation_summary_json_path_file_name)
     night_archive_dir = os.path.join(os.path.abspath(config.data_dir), config.archived_dir,
         night_data_dir_name)
 

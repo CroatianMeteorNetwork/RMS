@@ -222,33 +222,36 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         log.error('Generating captured stack failed with error:' + repr(e))
         log.error("".join(traceback.format_exception(*sys.exc_info())))
 
+    if ff_detected is not None:
+        log.info('Generating a stack of {:d} detections...'.format(len(ff_detected)))
 
-    log.info('Generating a stack of {:d} detections...'.format(len(ff_detected)))
 
-    try:
+        try:
 
-        # Make a co-added image of all detections. Filter out possible clouds
-        detected_stack_path, _ = stackFFs(captured_path, 'jpg', deinterlace=(config.deinterlace_order > 0), 
-            subavg=True, filter_bright=True, file_list=sorted(ff_detected), mask=mask)
+            # Make a co-added image of all detections. Filter out possible clouds
+            detected_stack_path, _ = stackFFs(captured_path, 'jpg', deinterlace=(config.deinterlace_order > 0),
+                subavg=True, filter_bright=True, file_list=sorted(ff_detected), mask=mask)
 
-        if detected_stack_path is not None:
+            if detected_stack_path is not None:
 
-            log.info("Detected stack saved to: {:s}".format(detected_stack_path))
+                log.info("Detected stack saved to: {:s}".format(detected_stack_path))
 
-            # Extract the name of the stack image
-            stack_file = os.path.basename(detected_stack_path)
+                # Extract the name of the stack image
+                stack_file = os.path.basename(detected_stack_path)
             
-            # Add the stack path to the list of files to put in the archive
-            file_list.append(stack_file)
+                # Add the stack path to the list of files to put in the archive
+                file_list.append(stack_file)
 
-        else:
-            log.info("Detected stack could not be saved!")
+            else:
+                log.info("Detected stack could not be saved!")
 
 
-    except Exception as e:
-        log.error('Generating stack failed with error:' + repr(e))
-        log.error("".join(traceback.format_exception(*sys.exc_info())))
+        except Exception as e:
+            log.error('Generating stack failed with error:' + repr(e))
+            log.error("".join(traceback.format_exception(*sys.exc_info())))
 
+    else:
+        log.info('No detections to stack')
 
 
     if file_list:
