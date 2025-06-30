@@ -97,8 +97,7 @@ backup_files() {
     # Backup .config
     if [ -f "$CURRENT_CONFIG" ]; then
         if ! retry_cp "$CURRENT_CONFIG" "$BACKUP_CONFIG"; then
-            echo "Critical Error: Could not back up .config file. Aborting."
-            exit 1
+            echo "Critical Error: Could not back up .config file."
         fi
     else
         echo "No original .config found. Generic config will be used."
@@ -107,8 +106,7 @@ backup_files() {
     # Backup mask.bmp
     if [ -f "$CURRENT_MASK" ]; then
         if ! retry_cp "$CURRENT_MASK" "$BACKUP_MASK"; then
-            echo "Critical Error: Could not back up mask.bmp file. Aborting."
-            exit 1
+            echo "Critical Error: Could not back up mask.bmp file."
         fi
     else
         echo "No original mask.bmp found. Blank mask will be used."
@@ -117,8 +115,7 @@ backup_files() {
     # Backup camera_settings.json
     if [ -f "$CURRENT_CAMERA_SETTINGS" ]; then
         if ! retry_cp "$CURRENT_CAMERA_SETTINGS" "$BACKUP_CAMERA_SETTINGS"; then
-            echo "Critical Error: Could not back up camera_settings.json file. Aborting."
-            exit 1
+            echo "Critical Error: Could not back up camera_settings.json file."
         fi
     else
         echo "No original camera_settings.json found. Blank mask will be used."
@@ -132,8 +129,7 @@ restore_files() {
     # Restore .config
     if [ -f "$BACKUP_CONFIG" ]; then
         if ! retry_cp "$BACKUP_CONFIG" "$CURRENT_CONFIG"; then
-            echo "Critical Error: Failed to restore .config. Aborting."
-            exit 1
+            echo "Critical Error: Failed to restore .config."
         fi
     else
         echo "No backup .config found - a new one will be created by the installation."
@@ -142,8 +138,7 @@ restore_files() {
     # Restore mask.bmp
     if [ -f "$BACKUP_MASK" ]; then
         if ! retry_cp "$BACKUP_MASK" "$CURRENT_MASK"; then
-            echo "Critical Error: Failed to restore mask.bmp. Aborting."
-            exit 1
+            echo "Critical Error: Failed to restore mask.bmp."
         fi
     else
         echo "No backup mask.bmp found - a new blank mask will be created by the installation."
@@ -152,13 +147,36 @@ restore_files() {
     # Restore camera_settings.json
     if [ -f "$BACKUP_CAMERA_SETTINGS" ]; then
         if ! retry_cp "$BACKUP_CAMERA_SETTINGS" "$CURRENT_CAMERA_SETTINGS"; then
-            echo "Critical Error: Failed to restore camera_settings.json. Aborting."
-            exit 1
+            echo "Critical Error: Failed to restore camera_settings.json."
         fi
     else
         echo "No backup camera_settings.json found - a new default settings file will be created by the installation."
     fi
 }
+
+
+
+recover_git_repo_gracefully() {
+    echo "Gracefully recovering RMS Git repository..."
+
+    backup_files
+
+    echo "Removing corrupted .git directory..."
+    rm -rf .git
+
+    echo "Reinitializing Git repository..."
+    git init
+    git remote add origin https://github.com/CroatianMeteorNetwork/RMS.git
+    git fetch
+    git reset --hard origin/master
+
+    restore_files
+
+    echo "Git recovery complete."
+}
+
+
+
 # Ensure the backup directory exists
 mkdir -p "$RMSBACKUPDIR"
 
@@ -214,15 +232,20 @@ echo "1" > "$UPDATEINPROGRESSFILE"
 # Stash any local changes
 echo "Stashing local changes..."
 if ! git stash; then
-    echo "Error: git stash failed. Attempting to restore backed up files..."
+    echo "Error: git stash failed - possible repository corruption."
+
+    echo "Attempting to restore backed up files..."
     if restore_files; then
         echo "Files restored successfully."
         echo "0" > "$UPDATEINPROGRESSFILE"
     else
         echo "Critical: File restore failed. Leaving update flag set."
     fi
-    echo "Update aborted due to git stash failure. Exiting."
-    exit 1
+
+
+    echo "Attempting graceful Git recovery..."
+    recover_git_repo_gracefully
+
 fi
 
 # Pull the latest code from GitHub
@@ -235,8 +258,6 @@ if ! git pull; then
     else
         echo "Critical: File restore failed. Leaving update flag set."
     fi
-    echo "Update aborted. Exiting."
-    exit 1
 fi
 
 # Create template from the current default config file
