@@ -706,23 +706,33 @@ def nightSummaryData(config, night_data_dir):
     fits_files_list = glob.glob(os.path.join(night_data_dir, "*.fits"))
     fits_files_list.sort()
     fits_count = len(fits_files_list)
-    if fits_count < 1:
-        return 0,0,0,0,0,0,0,0,0,0,0
 
-    time_first_fits_file = datetime.datetime.strptime(filenameToDatetimeStr(os.path.basename(fits_files_list[0])),
+    if fits_count != 0:
+        time_first_fits_file = datetime.datetime.strptime(filenameToDatetimeStr(os.path.basename(fits_files_list[0])),
                                                       "%Y-%m-%d %H:%M:%S.%f")
-    time_last_fits_file = datetime.datetime.strptime(filenameToDatetimeStr(
-        os.path.basename(fits_files_list[-1])), "%Y-%m-%d %H:%M:%S.%f")
+        time_last_fits_file = datetime.datetime.strptime(filenameToDatetimeStr(
+            os.path.basename(fits_files_list[-1])), "%Y-%m-%d %H:%M:%S.%f")
 
     # Compute key values using the first and last fits files to mark the start and end of observations
-    capture_duration_from_fits = (time_last_fits_file - time_first_fits_file).total_seconds() + duration_one_fits_file
-    total_expected_fits = round(capture_duration_from_fits / duration_one_fits_file)
-    fits_file_shortfall = total_expected_fits - fits_count
-    fits_file_shortfall = 0 if fits_file_shortfall < 1 else fits_file_shortfall
-    fits_file_shortfall_as_time = str(datetime.timedelta(seconds=fits_file_shortfall * duration_one_fits_file))
+        capture_duration_from_fits = (time_last_fits_file - time_first_fits_file).total_seconds() + duration_one_fits_file
+        total_expected_fits = round(capture_duration_from_fits / duration_one_fits_file)
+        fits_file_shortfall = total_expected_fits - fits_count
+        fits_file_shortfall = 0 if fits_file_shortfall < 1 else fits_file_shortfall
+        fits_file_shortfall_as_time = str(datetime.timedelta(seconds=fits_file_shortfall * duration_one_fits_file))
+
+    else:
+        print(night_data_dir)
+        dir_name = os.path.basename(night_data_dir)
+        dir_d, dir_t = dir_name.split("_")[1], dir_name.split("_")[2]
+        y, m, d = int(dir_d[0:4]), int(dir_d[4:6]), int(dir_d[6:8])
+        hr, min, sec = int(dir_t[0:2]), int(dir_t[2:4]), int(dir_t[4:6])
+        time_first_fits_file = datetime.datetime(year = y, month = m, day = d, hour = hr, minute = min, second = sec)
+        time_first_fits_file += datetime.timedelta(seconds = 10)
+        capture_duration_from_fits, total_expected_fits = 0, 0
+        fits_file_shortfall, fits_file_shortfall_as_time, time_last_fits_file = 0, 0, 0
+
 
     # Compute key values from the ephemeris values
-
     start_ephem, duration_ephem, end_ephem = getObservationDuration(config, time_first_fits_file)
     total_expected_fits_ephemeris = round(duration_ephem / duration_one_fits_file)
     fits_file_shortfall_ephemeris = total_expected_fits_ephemeris - fits_count

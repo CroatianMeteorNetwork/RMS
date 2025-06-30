@@ -302,6 +302,8 @@ def readFTPdetectinfo(ff_directory, file_name, ret_input_format=False):
         [tuple]: Two options, see ret_input_format.
     """
 
+    if file_name is None:
+        return []
     ff_name = ''
 
 
