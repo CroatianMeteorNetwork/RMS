@@ -27,6 +27,7 @@ else:
 
 
 import numpy as np
+import itertools
 
 from matplotlib import scale as mscale
 from matplotlib import transforms as mtransforms
@@ -937,3 +938,197 @@ def tarWithProgress(source_dir, tar_path, compression='bz2', remove_source=False
         log.error("Error creating archive: {}".format(e))
         log.error("".join(traceback.format_exception(*sys.exc_info())))
         return False
+
+def querySplit(query):
+    """ For a query in an arbitrarily ranged domain, return a pair of queries.
+
+    For example, for degrees of longitude 0-360.
+    [340, 380, 0, 360] returns [[340, 360], [0, 20]]
+
+    For degrees of latitude -90, + 90.
+    [70, 120, -90, 90] returns [[70, 90], [-90, -60]]
+
+    Arguments:
+        query:[list] query_low, query_high, domain_minimum, domain_maximum
+
+    Return:
+        [list]: a pair of queries
+    """
+
+
+    query_low, query_high, range_min, range_max = query[0], query[1], query[2], query[3]
+
+    if query_high <= query_low:
+        return [[query_low, query_high]]
+
+    # Compensate for range_mins
+    span = range_max - range_min
+    query_low, query_high = (query_low - range_min) % span, (query_high - range_min) % span
+
+    # No work to do
+    if query_low < query_high:
+        # Decompensate and return
+        return [[range_min + query_low, range_min + query_high]]
+
+    # Case where query_high was on the maximum range limit, avoid returning two overlapping queries
+    if query_low > query_high and query_high == range_min:
+        # Decompensate and return
+        return [[range_min + query_low, range_max]]
+
+    # Case where query_high was on the minimum range limit, avoid returning two overlapping queries
+    if query_low > query_high and query_high == 0:
+        # Decompensate and return
+        return [[range_min + query_low, range_max]]
+
+    # Case where one end was outside of range, return two queries
+    elif query_low > query_high:
+        q1 = [range_min + query_low, range_max]
+        q2 = [range_min, range_min + query_high]
+        return [q1, q2]
+
+    # Finally return query range for the case where the full range was specified
+    else:
+        return [[range_min, range_max]]
+
+def nDimensionQuerySplit(query_list):
+    """
+    For an arbitrary number of dimension, return a cartesian product of split queries.
+
+    For example a query between:
+        340 and 380 degrees of longitude (0 - 360),
+        80 and 110 degrees of latitude (-90 + 90) and
+        2300 and 0100 the next day would be passed as
+
+        [[340, 380, 0, 360], [80, 110, -90, +90], [23, 25, 0, 24]]
+
+    and would return
+
+        [[340, 360], [80, 90], [0, 1]]
+        [[340, 360], [-90, -70], [23, 24]]
+        [[340, 360], [-90, -70], [0, 1]]
+        [[0, 20], [80, 90], [23, 24]]
+        [[0, 20], [80, 90], [0, 1]]
+        [[0, 20], [-90, -70], [23, 24]]
+        [[0, 20], [-90, -70], [0, 1]]
+        [[340, 360], [0, 20]]
+        [[70, 90], [-90, -60]]
+
+    Only the minimum number of queries are returned. In this case the degrees of longitude
+    does not wrap around, so only 6 queries are required for complete coverage.
+
+        [[340, 350, 0, 360], [80, 110, -90, +90], [23, 25, 0, 24]]
+
+
+        [[340, 350], [80, 90], [23, 24]]
+        [[340, 350], [80, 90], [0, 1]]
+        [[340, 350], [-90, -70], [23, 24]]
+        [[340, 350], [-90, -70], [0, 1]]
+        [[340, 360], [0, 20]]
+        [[70, 90], [-90, -60]]
+
+    Args:
+        query_list: List of queries in the form [[query_low, query_high], [range_min, range_max], ... ]
+
+    Return:
+        list: Cartesian product of split queries as a list.
+    """
+
+    # Compute the split queries for each dimension
+    split_queries = []
+    for query in query_list:
+        split_queries.append(querySplit(query))
+
+    # Produce the cartesian product across all result dimensions
+    result_list = list(itertools.product(*split_queries))
+
+    # Convert to a list
+    queries = []
+    for result in result_list:
+        queries.append(list(result))
+
+
+    return queries
+
+def splitRadec(radec):
+    """
+    For a radec query, in degrees ra 0-360, and dec -90,+90 compute
+    the queries required to cover a search space.
+
+
+
+    Arguments:
+        radec: [list] of coordinates [[ra_low, ra_high], [dec_low, dec_high]]
+
+    Return:
+        [list] of queries required to cover a search space.
+    """
+
+    query = []
+    query.append([radec[0][0], radec[0][1], 0, 360])
+    query.append([radec[1][0], radec[1][1], -90, +90])
+
+    return nDimensionQuerySplit(query)
+
+
+if __name__ == '__main__':
+
+
+    # Test code - should produce no output
+    test_data, results = [], []
+    test_data.append([[340, 380, 0, 360], [80, 110, -90, +90], [23, 25, 0, 24]])
+    results.append([[[340, 360], [80, 90], [23, 24]],
+                    [[340, 360], [80, 90], [0, 1]],
+                    [[340, 360], [-90, -70], [23, 24]],
+                    [[340, 360], [-90, -70], [0, 1]],
+                    [[0, 20], [80, 90], [23, 24]],
+                    [[0, 20], [80, 90], [0, 1]],
+                    [[0, 20], [-90, -70], [23, 24]],
+                    [[0, 20], [-90, -70], [0, 1]]])
+
+    test_data.append([[340, 350, 0, 360], [80, 110, -90, +90], [23, 25, 0, 24]])
+    results.append([[[340, 350], [80, 90], [23, 24]],
+                    [[340, 350], [80, 90], [0, 1]],
+                    [[340, 350], [-90, -70], [23, 24]],
+                    [[340, 350], [-90, -70], [0, 1]]])
+
+
+    for test, expected_result in zip(test_data, results):
+        result = nDimensionQuerySplit(test)
+        if expected_result != result:
+            print("nDimQuerySplit() failed. {} retuned {} rather than {}".format(test, result, expected_result))
+
+    test_data = []
+    test_data.append([[355,362],[[355,360],[0,2]]])
+    test_data.append([[-20, +40], [[340, 360], [0, 40]]])
+    test_data.append([[+370, -10], [[370,-10]]])
+    test_data.append([[+370, +380], [[10,20]]])
+    test_data.append([[+380, +370], [[380, 370]]])
+    test_data.append([[+380, +10], [[380, 10]]])
+    test_data.append([[+355, +360], [[355, 360]]])
+    test_data.append([[-10, 0], [[350, 360]]])
+    test_data.append([[359, 360], [[359, 360]]])
+    test_data.append([[359 * 2, 360 * 2], [[358, 360]]])
+    test_data.append([[0,360], [[0,360]]])
+
+
+    for test in test_data:
+        pass
+        result = querySplit(test[0] + [0,360])
+        if result != test[1]:
+            print("Test {} failed returned {} instead of {}".format(test[0], result, test[1]))
+
+    radec_test = []
+
+    radec = [[[355, 365],[0, 10]],
+             [[[355, 360], [0, 10]], [[0, 5], [0, 10]]]]
+    radec_test.append(radec)
+
+    radec = [[[355, 365], [80, 100]],
+                     [[[355, 360], [80, 90]], [[355, 360], [-90, -80]], [[0, 5], [80, 90]], [[0, 5], [-90, -80]]]]
+    radec_test.append(radec)
+
+    for test in radec_test:
+        result = splitRadec(test[0])
+        if result != test[1]:
+            print("Test {} failed returned {} instead of {}".format(test[0], result, test[1]))
+
