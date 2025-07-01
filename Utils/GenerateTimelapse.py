@@ -17,6 +17,7 @@ import json
 from datetime import datetime, timedelta
 
 from PIL import ImageFont
+from pyqtgraph.examples.colorMapsLinearized import cm_list
 
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName, filenameToDatetime
@@ -949,8 +950,10 @@ def main():
     if not args.image_files:
 
         try:
+            keep_images = False if args.cleanup == 'None' or args.cleanup == '' else True
+
             generateTimelapse(dir_path=args.input_dir,
-                              keep_images=args.cleanup,
+                              keep_images=False,
                               fps=args.fps,
                               output_file=args.output,
                               hires=args.hires
