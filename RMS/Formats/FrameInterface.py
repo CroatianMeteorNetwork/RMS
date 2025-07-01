@@ -1459,7 +1459,7 @@ class InputTypeImages(object):
         self.fripon_header = None
         self.cabernet_status = False
 
-        img_types = ['.png', '.jpg', '.bmp', '.fit', '.fits', '.tif']
+        img_types = ['.png', '.jpg', '.jpeg', '.bmp', '.fit', '.fits', '.tif']
 
         # Add raw formats if rawpy is installed
         if 'rawpy' in sys.modules:
@@ -2235,9 +2235,9 @@ class InputTypeDFN(InputType):
 
         if 'rawpy' in sys.modules:
             ### Find images in the given folder ###
-            img_types = ['.png', '.jpg', '.bmp', '.tif', '.fits', '.nef', '.cr2']
+            img_types = ['.png', '.jpg', '.jpeg', '.bmp', '.tif', '.fits', '.nef', '.cr2']
         else:
-            img_types = ['.png', '.jpg', '.bmp', '.tif', '.fits']
+            img_types = ['.png', '.jpg', '.jpeg', '.bmp', '.tif', '.fits']
 
         self.beginning_datetime = beginning_time
 
@@ -2444,7 +2444,7 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
     """
 
     ### Find images in the given folder ###
-    img_types = ['.png', '.jpg', '.bmp', '.fit', '.tif', '.fits']
+    img_types = ['.png', '.jpg', '.jpeg', '.bmp', '.fit', '.tif', '.fits']
 
     if 'rawpy' in sys.modules:
         img_types += ['.nef', '.cr2']
