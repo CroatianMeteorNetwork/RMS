@@ -197,6 +197,10 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
 		
     log.info("Total time: %s", RmsDateTime.utcnow() - t1)
 
+    #Delete temporary directory and files inside
+    if os.path.exists(dir_tmp_path) and not keep_images:
+        shutil.rmtree(dir_tmp_path)
+        print("Deleted temporary directory : " + dir_tmp_path)
 
 # --------------------------------------------------------------------
 #  Timelapse generation from image files (Contrails)
@@ -911,12 +915,13 @@ def main():
                       help='Cleanup mode after processing (default: none)')
     parser.add_argument('--compression', choices=['bz2', 'gz'], default='bz2',
                       help='Compression method for tar (default: bz2)')
-    parser.add_argument('--grayscale', action='store_true', 
-                      help='Create grayscale video instead of color')
-    parser.add_argument('--hires', action="store_true", \
-                            help='Make a higher resolution timelapse. The video file will be larger.')
-    parser.add_argument('--image_files', action="store_true", \
+    parser.add_argument('--image_files', action="store_true",
                         help='Use image files instead of fits files.')
+    parser.add_argument('--grayscale', action='store_true', 
+                      help='When using image files create grayscale video instead of color')
+    parser.add_argument('--hires', action="store_true",
+                            help='Make a higher resolution timelapse. The video file will be larger.')
+
 
     
     args = parser.parse_args()
