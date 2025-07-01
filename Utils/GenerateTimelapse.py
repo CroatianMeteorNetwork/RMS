@@ -10,6 +10,8 @@ import re
 import platform
 import subprocess
 import shutil
+from logging import exception
+
 import cv2
 import json
 from datetime import datetime, timedelta
@@ -911,6 +913,8 @@ def main():
                       help='Compression method for tar (default: bz2)')
     parser.add_argument('--grayscale', action='store_true', 
                       help='Create grayscale video instead of color')
+    parser.add_argument('--hires', action="store_true", \
+                            help='Make a higher resolution timelapse. The video file will be larger.')
     
     args = parser.parse_args()
     
@@ -934,7 +938,25 @@ def main():
     start_time = datetime.now()
     print("Starting process at: {}".format(start_time))
     
+
+
+
     # Generate the timelapse
+
+    try:
+        generateTimelapse(dir_path=args.input_dir,
+                          keep_images=args.cleanup,
+                          fps=args.fps,
+                          output_file=args.output,
+                          hires=args.hires
+        )
+
+    except Exception as e:
+        print("Error generating timelapse: {}".format(e))
+        import traceback
+        traceback.print_exc()
+        return 1
+
     try:
         video_path, json_path = generateTimelapseFromDir(
             dir_path=args.input_dir,
