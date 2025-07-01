@@ -197,10 +197,6 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
 		
     log.info("Total time: %s", RmsDateTime.utcnow() - t1)
 
-    #Delete temporary directory and files inside
-    if os.path.exists(dir_tmp_path) and not keep_images:
-        shutil.rmtree(dir_tmp_path)
-        print("Deleted temporary directory : " + dir_tmp_path)
 
 # --------------------------------------------------------------------
 #  Timelapse generation from image files (Contrails)
