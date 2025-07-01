@@ -915,6 +915,9 @@ def main():
                       help='Create grayscale video instead of color')
     parser.add_argument('--hires', action="store_true", \
                             help='Make a higher resolution timelapse. The video file will be larger.')
+    parser.add_argument('--image_files', action="store_true", \
+                        help='Use image files instead of fits files.')
+
     
     args = parser.parse_args()
     
@@ -942,59 +945,62 @@ def main():
 
 
     # Generate the timelapse
+    if not args.image_files:
 
-    try:
-        generateTimelapse(dir_path=args.input_dir,
-                          keep_images=args.cleanup,
-                          fps=args.fps,
-                          output_file=args.output,
-                          hires=args.hires
-        )
+        try:
+            generateTimelapse(dir_path=args.input_dir,
+                              keep_images=args.cleanup,
+                              fps=args.fps,
+                              output_file=args.output,
+                              hires=args.hires
+            )
 
-    except Exception as e:
-        print("Error generating timelapse: {}".format(e))
-        import traceback
-        traceback.print_exc()
-        return 1
+        except Exception as e:
+            print("Error generating timelapse: {}".format(e))
+            import traceback
+            traceback.print_exc()
+            return 1
 
-    try:
-        video_path, json_path = generateTimelapseFromDir(
-            dir_path=args.input_dir,
-            video_path=args.output,
-            fps=args.fps,
-            base_crf=args.crf,
-            cleanup_mode=args.cleanup,
-            compression=args.compression,
-            use_color=not args.grayscale,
-        )
+    else:
 
-        # Record and print completion time and duration
-        end_time = datetime.now()
-        duration = end_time - start_time
-        print("Process completed at: {}".format(end_time))
-        print("Total processing time: {}".format(duration))
-        
-        # Print file sizes if successful
-        if video_path and os.path.exists(video_path):
-            video_size = os.path.getsize(video_path) / (1024 * 1024)
-            
-            print("Output video size: {:.2f} MB".format(video_size))
-            
-            # Check if tar was created
-            if args.cleanup == 'tar':
-                ext = '.tar.bz2' if args.compression == 'bz2' else '.tar.gz'
-                base_name = os.path.basename(args.output).replace('_timelapse.mp4', '')
-                tar_path = os.path.join(os.path.dirname(args.output), base_name + ext)
-                
-                if os.path.exists(tar_path):
-                    tar_size = os.path.getsize(tar_path) / (1024 * 1024)  # Convert to MB
-                    print("Archive size: {:.2f} MB".format(tar_size))
-        
-    except Exception as e:
-        print("Error generating timelapse: {}".format(e))
-        import traceback
-        traceback.print_exc()
-        return 1
+        try:
+            video_path, json_path = generateTimelapseFromDir(
+                dir_path=args.input_dir,
+                video_path=args.output,
+                fps=args.fps,
+                base_crf=args.crf,
+                cleanup_mode=args.cleanup,
+                compression=args.compression,
+                use_color=not args.grayscale,
+            )
+
+            # Record and print completion time and duration
+            end_time = datetime.now()
+            duration = end_time - start_time
+            print("Process completed at: {}".format(end_time))
+            print("Total processing time: {}".format(duration))
+
+            # Print file sizes if successful
+            if video_path and os.path.exists(video_path):
+                video_size = os.path.getsize(video_path) / (1024 * 1024)
+
+                print("Output video size: {:.2f} MB".format(video_size))
+
+                # Check if tar was created
+                if args.cleanup == 'tar':
+                    ext = '.tar.bz2' if args.compression == 'bz2' else '.tar.gz'
+                    base_name = os.path.basename(args.output).replace('_timelapse.mp4', '')
+                    tar_path = os.path.join(os.path.dirname(args.output), base_name + ext)
+
+                    if os.path.exists(tar_path):
+                        tar_size = os.path.getsize(tar_path) / (1024 * 1024)  # Convert to MB
+                        print("Archive size: {:.2f} MB".format(tar_size))
+
+        except Exception as e:
+            print("Error generating timelapse: {}".format(e))
+            import traceback
+            traceback.print_exc()
+            return 1
     
     return 0
 
