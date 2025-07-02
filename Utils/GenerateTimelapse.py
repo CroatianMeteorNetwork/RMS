@@ -912,7 +912,7 @@ def main():
                       help='Cleanup mode after processing (default: none)')
     parser.add_argument('--compression', choices=['bz2', 'gz'], default='bz2',
                       help='Compression method for tar (default: bz2)')
-    parser.add_argument('--image_files', action="store_true",
+    parser.add_argument('--image-files', action="store_true",
                         help='Use image files instead of fits files.')
     parser.add_argument('--grayscale', action='store_true', 
                       help='When using image files create grayscale video instead of color')
@@ -953,7 +953,7 @@ def main():
             keep_images = False if args.cleanup == 'None' or args.cleanup == '' else True
 
             generateTimelapse(dir_path=args.input_dir,
-                              keep_images=False,
+                              keep_images=keep_images,
                               fps=args.fps,
                               output_file=args.output,
                               hires=args.hires
