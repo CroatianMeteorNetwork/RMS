@@ -2107,7 +2107,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update the values in the platepar tab in the GUI
         self.tab.param_manager.updatePlatepar()
 
-        if self.selected_stars_visible:
+        if self.selected_stars_visible and (len(star_coords) > 0):
 
             # Plot photometry deviations on the main plot as colour coded rings
             star_coords = np.array(star_coords)
