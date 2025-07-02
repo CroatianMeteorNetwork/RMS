@@ -939,60 +939,60 @@ def tarWithProgress(source_dir, tar_path, compression='bz2', remove_source=False
         log.error("".join(traceback.format_exception(*sys.exc_info())))
         return False
 
-def querySplit(query):
-    """ For a query in an arbitrarily ranged domain, return a pair of queries.
+def domainWrapping(query_min, query_max, range_min, range_max):
+    """ For a query in an arbitrarily ranged domain, return a query, or a pair of queries.
 
     For example, for degrees of longitude 0-360.
-    [340, 380, 0, 360] returns [[340, 360], [0, 20]]
+    340, 380, 0, 360 returns [[340, 360], [0, 20]]
 
     For degrees of latitude -90, + 90.
-    [70, 120, -90, 90] returns [[70, 90], [-90, -60]]
+    70, 120, -90, 90 returns [[70, 90], [-90, -60]]
 
     Arguments:
-        query:[list] query_low, query_high, domain_minimum, domain_maximum
+        query_min: [float] Lower bound of query range.
+        query_max: [float] Upper bound of query range.
+        range_min: [float] Lower bound of domain range.
+        range_max: [float] Upper bound of domain range.
 
     Return:
-        [list]: a pair of queries
+        [list]: a query, or a pair of queries
     """
 
-
-    query_low, query_high, range_min, range_max = query[0], query[1], query[2], query[3]
-
-    if query_high <= query_low:
-        return [[query_low, query_high]]
+    if query_max < query_min:
+        return [[query_min, query_max]]
 
     # Compensate for range_mins
     span = range_max - range_min
-    query_low, query_high = (query_low - range_min) % span, (query_high - range_min) % span
+    query_min, query_max = (query_min - range_min) % span, (query_max - range_min) % span
 
     # No work to do
-    if query_low < query_high:
+    if query_min < query_max:
         # Decompensate and return
-        return [[range_min + query_low, range_min + query_high]]
+        return [[range_min + query_min, range_min + query_max]]
 
     # Case where query_high was on the maximum range limit, avoid returning two overlapping queries
-    if query_low > query_high and query_high == range_min:
+    if query_min > query_max and query_max == range_min:
         # Decompensate and return
-        return [[range_min + query_low, range_max]]
+        return [[range_min + query_min, range_max]]
 
     # Case where query_high was on the minimum range limit, avoid returning two overlapping queries
-    if query_low > query_high and query_high == 0:
+    if query_min > query_max and query_max == 0:
         # Decompensate and return
-        return [[range_min + query_low, range_max]]
+        return [[range_min + query_min, range_max]]
 
     # Case where one end was outside of range, return two queries
-    elif query_low > query_high:
-        q1 = [range_min + query_low, range_max]
-        q2 = [range_min, range_min + query_high]
+    elif query_min > query_max:
+        q1 = [range_min + query_min, range_max]
+        q2 = [range_min, range_min + query_max]
         return [q1, q2]
 
     # Finally return query range for the case where the full range was specified
     else:
         return [[range_min, range_max]]
 
-def nDimensionQuerySplit(query_list):
+def nDimensionDomainSplit(query_list):
     """
-    For an arbitrary number of dimension, return a cartesian product of split queries.
+    For an arbitrary number of dimension, return a cartesian product of split wrapped_queries.
 
     For example a query between:
         160 and 200 degrees of longitude (-180 +180),
@@ -1012,8 +1012,8 @@ def nDimensionQuerySplit(query_list):
          [[-180, -160], [-90, -70], [23, 24]],
          [[-180, -160], [-90, -70], [0, 1]]]
 
-    Only the minimum number of queries are returned. In this case the degrees of longitude
-    does not wrap around, so only 6 queries are required for complete coverage.
+    Only the minimum number of wrapped_queries are returned. In this case the degrees of longitude
+    does not wrap around, so only 6 wrapped_queries are required for complete coverage.
 
         [[340, 350, 0, 360], [80, 110, -90, +90], [23, 25, 0, 24]]
 
@@ -1025,48 +1025,59 @@ def nDimensionQuerySplit(query_list):
         [[340, 360], [0, 20]]
         [[70, 90], [-90, -60]]
 
-    Args:
-        query_list: List of queries in the form [[query_low, query_high], [range_min, range_max], ... ]
+    Arguments:
+        query_list: List of wrapped_queries in the form [[query_min, query_max], [range_min, range_max], ... ]
 
     Return:
-        list: Cartesian product of split queries as a list.
+        list: Cartesian product of split wrapped_queries as a list.
     """
 
-    # Compute the split queries for each dimension
-    split_queries = []
+    # Compute the split wrapped_queries for each dimension
+    wrapped_queries = []
     for query in query_list:
-        split_queries.append(querySplit(query))
+        query_min, query_max = query[0], query[1]
+        domain_low, domain_high = query[2], query[3]
+        wrapped_queries.append(domainWrapping(query_min, query_max, domain_low, domain_high))
 
     # Produce the cartesian product across all result dimensions
-    result_list = list(itertools.product(*split_queries))
+    wrapped_query_list = list(itertools.product(*wrapped_queries))
 
     # Convert to a list
-    queries = []
-    for result in result_list:
-        queries.append(list(result))
+    wrapped_queries = []
+    for result in wrapped_query_list:
+        wrapped_queries.append(list(result))
 
 
-    return queries
+    return wrapped_queries
 
-def splitRadec(radec):
+def sphericalDomainWrapping(ra_min, ra_max, dec_min, dec_max,
+                            ra_range_min=0, ra_range_max=360, dec_range_min=-90, dec_range_max=+90):
     """
-    For a radec query, in degrees ra 0-360, and dec -90,+90 compute
+    For a query in a spherical domain, in domain of default degrees ra 0-360, and dec -90,+90 compute
     the queries required to cover a search space.
 
 
 
     Arguments:
-        radec: [list] of coordinates [[ra_low, ra_high], [dec_low, dec_high]]
+        ra_min: [float] right ascension in degrees
+        ra_max: [float] right ascension in degrees
+
+    Keyword arguments:
+        ra_range_min: [float] optional, default 0 right ascension in degrees domain minimum
+        ra_range_max: [float] optional, default 360 right ascension in degrees domain maximum
+        dec_range_min: [float] optional, default -90 right ascension in degrees domain minimum
+        dec_range_max: [float] optional, default 90 right ascension in degrees domain maximum
+
 
     Return:
-        [list] of queries required to cover a search space.
+        [list] of queries required to cover a spherical search space
     """
 
     query = []
-    query.append([radec[0][0], radec[0][1], 0, 360])
-    query.append([radec[1][0], radec[1][1], -90, +90])
+    query.append([ra_min, ra_max, ra_range_min, ra_range_max])
+    query.append([dec_min, dec_max, dec_range_min, dec_range_max])
 
-    return nDimensionQuerySplit(query)
+    return nDimensionDomainSplit(query)
 
 
 if __name__ == '__main__':
@@ -1093,7 +1104,7 @@ if __name__ == '__main__':
 
 
     for test, expected_result in zip(test_data, results):
-        result = nDimensionQuerySplit(test)
+        result = nDimensionDomainSplit(test)
         if expected_result != result:
             print("nDimQuerySplit() failed. {} retuned {} rather than {}".format(test, result, expected_result))
 
@@ -1113,7 +1124,8 @@ if __name__ == '__main__':
 
     for test in test_data:
         pass
-        result = querySplit(test[0] + [0,360])
+        query_min, query_max = test[0][0], test[0][1]
+        result = domainWrapping(query_min, query_max, 0, 360)
         if result != test[1]:
             print("Test {} failed returned {} instead of {}".format(test[0], result, test[1]))
 
@@ -1128,7 +1140,9 @@ if __name__ == '__main__':
     radec_test.append(radec)
 
     for test in radec_test:
-        result = splitRadec(test[0])
+        ra_min, ra_max = test[0][0][0], test[0][0][1]
+        dec_min, dec_max = test[0][1][0], test[0][1][1]
+        result = sphericalDomainWrapping(ra_min, ra_max, dec_min, dec_max)
         if result != test[1]:
             print("Test {} failed returned {} instead of {}".format(test[0], result, test[1]))
 
