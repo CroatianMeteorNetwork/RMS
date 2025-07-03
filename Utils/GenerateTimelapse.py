@@ -949,8 +949,8 @@ def main():
     if not args.image_files:
 
         try:
-            keep_images = True if args.cleanup == 'keep' else False
-            print("Keeping images {}".format(keep_images))
+            keep_images = True if args.cleanup == 'keep-jpg' else False
+
             generateTimelapse(dir_path=args.input_dir,
                               keep_images=keep_images,
                               fps=args.fps,
