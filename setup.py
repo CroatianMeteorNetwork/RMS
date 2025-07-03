@@ -65,10 +65,9 @@ if not isPackageInstalled('tensorflow'):
 # Read requirements file
 with open('requirements.txt') as f:
     requirements = f.read().splitlines()
-# drop unsupported git refs for install_requires https://github.com/pypa/setuptools/issues/1052
-for requirement in requirements:
-    if requirement.startswith("git+"):
-        requirements.remove(requirement)
+
+# Drop unsupported git refs for install_requires https://github.com/pypa/setuptools/issues/1052
+requirements = [req for req in requirements if not req.startswith("git+")]
 
 ### Add rawpy is running on Windows or Linux (not the Pi) ###
 
@@ -120,7 +119,14 @@ platepar_templates = [
         if os.path.isfile(os.path.join(dir_path, 'share', 'platepar_templates', file_name))
         ]
 
-setup(name = "RMS",
+
+# Print the requirements to be installed
+print("Requirements to be installed:")
+for req in requirements:
+    print(" - {}".format(req))
+
+
+setup (name = "RMS",
         version = "0.1",
         description = "Raspberry Pi Meteor Station",
         setup_requires=["numpy", 
@@ -131,5 +137,6 @@ setup(name = "RMS",
         data_files=[('Catalogs', catalog_files), ('share', share_files), ('share/platepar_templates', platepar_templates)],
         ext_modules = [kht_module] + cythonize(cython_modules),
         packages=find_packages_func(),
-        include_package_data=True
+        include_package_data=True,
+        include_dirs=[numpy.get_include()]
         )
