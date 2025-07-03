@@ -955,7 +955,7 @@ def domainWrapping(query_min, query_max, range_min, range_max):
         range_max: [float] Upper bound of domain range.
 
     Return:
-        [list]: a query, or a pair of queries
+        [list]: a query, or a pair of queries.
     """
 
     if query_max < query_min:
@@ -991,8 +991,7 @@ def domainWrapping(query_min, query_max, range_min, range_max):
         return [[range_min, range_max]]
 
 def nDimensionDomainSplit(query_list):
-    """
-    For an arbitrary number of dimension, return a cartesian product of split wrapped_queries.
+    """For an arbitrary number of dimensions, return a cartesian product of domain wrap queries.
 
     For example a query between:
         160 and 200 degrees of longitude (-180 +180),
@@ -1031,7 +1030,6 @@ def nDimensionDomainSplit(query_list):
     Return:
         list: Cartesian product of split wrapped_queries as a list.
     """
-
     # Compute the split wrapped_queries for each dimension
     wrapped_queries = []
     for query in query_list:
@@ -1046,35 +1044,27 @@ def nDimensionDomainSplit(query_list):
     wrapped_queries = []
     for result in wrapped_query_list:
         wrapped_queries.append(list(result))
-
-
     return wrapped_queries
 
 def sphericalDomainWrapping(ra_min, ra_max, dec_min, dec_max,
                             ra_range_min=0, ra_range_max=360, dec_range_min=-90, dec_range_max=+90):
-    """
-    For a query in a spherical domain, in domain of default degrees ra 0-360, and dec -90,+90 compute
-    the queries required to cover a search space.
-
-
+    """ For a query in a spherical domain, compute the queries required to cover a search space.
 
     Arguments:
-        ra_min: [float] right ascension in degrees
-        ra_max: [float] right ascension in degrees
+        ra_min: [float] right ascension in degrees.
+        ra_max: [float] right ascension in degrees.
 
     Keyword arguments:
-        ra_range_min: [float] optional, default 0 right ascension in degrees domain minimum
-        ra_range_max: [float] optional, default 360 right ascension in degrees domain maximum
-        dec_range_min: [float] optional, default -90 right ascension in degrees domain minimum
-        dec_range_max: [float] optional, default 90 right ascension in degrees domain maximum
-
+        ra_range_min: [float] optional, default 0 right ascension in degrees domain minimum.
+        ra_range_max: [float] optional, default 360 right ascension in degrees domain maximum.
+        dec_range_min: [float] optional, default -90 right ascension in degrees domain minimum.
+        dec_range_max: [float] optional, default 90 right ascension in degrees domain maximum.
 
     Return:
-        [list] of queries required to cover a spherical search space
+        [list] of queries required to cover a spherical search space.
     """
 
     query = []
     query.append([ra_min, ra_max, ra_range_min, ra_range_max])
     query.append([dec_min, dec_max, dec_range_min, dec_range_max])
-
     return nDimensionDomainSplit(query)
