@@ -950,7 +950,7 @@ def main():
     if not args.image_files:
 
         try:
-            keep_images = False if args.cleanup == 'None' or args.cleanup == '' else True
+            keep_images = False if args.cleanup == 'none' or args.cleanup == '' else True
 
             generateTimelapse(dir_path=args.input_dir,
                               keep_images=keep_images,
