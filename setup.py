@@ -62,15 +62,19 @@ if not isPackageInstalled('tensorflow'):
         # If tflite-runtime fails, install TensorFlow
         attemptInstall('tensorflow')
 
-# Read requirements file
+# Read requirements file, filtering out comments and empty lines
+requirements = []
 with open('requirements.txt') as f:
-    requirements = f.read().splitlines()
+    for line in f:
+        # Remove whitespace from the beginning and end of the line
+        stripped_line = line.strip()
 
-# Drop unsupported git refs for install_requires https://github.com/pypa/setuptools/issues/1052
-requirements = [req for req in requirements if not req.startswith("git+")]
+        # Ignore comments and empty lines
+        if stripped_line and not stripped_line.startswith('#'):
+            requirements.append(stripped_line)
+
 
 ### Add rawpy is running on Windows or Linux (not the Pi) ###
-
 # Check if running on Windows
 if 'win' in sys.platform and "darwin" not in sys.platform:
     requirements.append("rawpy")
@@ -84,6 +88,8 @@ else:
 
     else:
         requirements.append("rawpy")
+
+### ###
 
 # Cython modules which will be compiled on setup
 cython_modules = [
@@ -137,6 +143,5 @@ setup (name = "RMS",
         data_files=[('Catalogs', catalog_files), ('share', share_files), ('share/platepar_templates', platepar_templates)],
         ext_modules = [kht_module] + cythonize(cython_modules),
         packages=find_packages_func(),
-        include_package_data=True,
-        include_dirs=[numpy.get_include()]
+        include_package_data=True
         )
