@@ -10,7 +10,10 @@ import re
 import platform
 import subprocess
 import shutil
+import traceback
+
 from logging import exception
+
 
 import cv2
 import json
@@ -900,6 +903,8 @@ def main():
     import argparse
     import os
     from datetime import datetime
+
+
     
     # Set up command line argument parsing
     parser = argparse.ArgumentParser(description='Generate a timelapse video from image frames.')
@@ -960,7 +965,6 @@ def main():
 
         except Exception as e:
             print("Error generating timelapse: {}".format(e))
-            import traceback
             traceback.print_exc()
             return 1
 
@@ -1001,7 +1005,6 @@ def main():
 
         except Exception as e:
             print("Error generating timelapse: {}".format(e))
-            import traceback
             traceback.print_exc()
             return 1
     
