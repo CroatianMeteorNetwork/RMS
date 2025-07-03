@@ -5,15 +5,15 @@
 from __future__ import print_function, division, absolute_import
 
 import sys
-import os
 import re
 import platform
 import subprocess
 import shutil
 import traceback
+import argparse
+import os
 
 from logging import exception
-
 
 import cv2
 import json
@@ -900,12 +900,7 @@ def main():
     Return:
         exit_code: [int] 0 on success, non-zero on failure.
     """
-    import argparse
-    import os
-    from datetime import datetime
 
-
-    
     # Set up command line argument parsing
     parser = argparse.ArgumentParser(description='Generate a timelapse video from image frames.')
     parser.add_argument('input_dir', help='Directory containing image frames organized in hour subdirectories')
