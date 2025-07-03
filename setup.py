@@ -120,7 +120,7 @@ platepar_templates = [
         if os.path.isfile(os.path.join(dir_path, 'share', 'platepar_templates', file_name))
         ]
 
-setup (name = "RMS",
+setup(name = "RMS",
         version = "0.1",
         description = "Raspberry Pi Meteor Station",
         setup_requires=["numpy", 
@@ -131,6 +131,5 @@ setup (name = "RMS",
         data_files=[('Catalogs', catalog_files), ('share', share_files), ('share/platepar_templates', platepar_templates)],
         ext_modules = [kht_module] + cythonize(cython_modules),
         packages=find_packages_func(),
-        include_package_data=True,
-        include_dirs=[numpy.get_include()]
+        include_package_data=True
         )
