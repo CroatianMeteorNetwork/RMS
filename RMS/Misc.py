@@ -1057,8 +1057,8 @@ def sphericalDomainWrapping(ra_min, ra_max, dec_min, dec_max,
     Keyword arguments:
         ra_range_min: [float] optional, default 0 right ascension in degrees domain minimum.
         ra_range_max: [float] optional, default 360 right ascension in degrees domain maximum.
-        dec_range_min: [float] optional, default -90 right ascension in degrees domain minimum.
-        dec_range_max: [float] optional, default 90 right ascension in degrees domain maximum.
+        dec_range_min: [float] optional, default -90 declination in degrees domain minimum.
+        dec_range_max: [float] optional, default 90 declination in degrees domain maximum.
 
     Return:
         [list] of queries required to cover a spherical search space.
