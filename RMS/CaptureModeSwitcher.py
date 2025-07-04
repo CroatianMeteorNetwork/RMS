@@ -105,7 +105,10 @@ def captureModeSwitcher(config, daytime_mode, camera_mode_switch_trigger):
                         camera_mode_switch_trigger.value = True
 
                     daytime_mode.value = True
-                    time_to_wait = (next_set - current_time).total_seconds()
+
+                    # Refresh the current time after the stagger wait
+                    now = RmsDateTime.utcnow()
+                    time_to_wait = max(0, (next_set - now).total_seconds())
 
                 else:
                     log.info("Next event is a sunrise ({}), switching to nighttime mode".format(next_rise))
@@ -119,7 +122,10 @@ def captureModeSwitcher(config, daytime_mode, camera_mode_switch_trigger):
                         camera_mode_switch_trigger.value = True
 
                     daytime_mode.value = False
-                    time_to_wait = (next_rise - current_time).total_seconds()
+                    
+                    # Refresh the current time after the stagger wait
+                    now = RmsDateTime.utcnow()
+                    time_to_wait = max(0, (next_rise - now).total_seconds())
 
 
             # If the day last more than 24 hours, continue daytime capture for the whole day

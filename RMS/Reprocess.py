@@ -39,7 +39,7 @@ from Utils.PlotFieldsums import plotFieldsums
 from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
 from Utils.ShowerAssociation import showerAssociation
 from Utils.PlotTimeIntervals import plotFFTimeIntervals
-from RMS.Formats.ObservationSummary import addObsParam, getObsDBConn, nightSummaryData
+from RMS.Formats.ObservationSummary import addObsParam, getObsDBConn
 from RMS.Formats.ObservationSummary import serialize, startObservationSummaryReport, finalizeObservationSummary
 from Utils.AuditConfig import compareConfigs
 from RMS.Misc import RmsDateTime, tarWithProgress
@@ -811,9 +811,6 @@ if __name__ == "__main__":
 
             log.info("Using all available cores for detection.")
 
-
-    duration, _,_,_,_,_,_, = nightSummaryData(config, cml_args.dir_path[0])
-    log.info(startObservationSummaryReport(config, duration, force_delete=False))
     # Process the night
     _, archive_name, detector = processNight(cml_args.dir_path[0], config)
 
