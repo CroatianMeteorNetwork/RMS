@@ -207,7 +207,7 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
 
 #  Output-naming helpers - one place to tweak naming scheme
 FNAME_TEMPLATE = (
-    "{station}_{doy_start:03d}_{start:%Y%m%d-%H%M%S}_to_{end:%Y%m%d-%H%M%S}_{suffix}"
+    "{station}_{start:%Y%m%d-%H%M%S}_to_{end:%Y%m%d-%H%M%S}_{suffix}"
 )
 
 MP4_SUFFIX = "frames_timelapse.mp4"

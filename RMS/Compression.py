@@ -317,14 +317,14 @@ class Compressor(multiprocessing.Process):
             # Cut out the compressed frames to the proper size
             compressed = compressed[:, :self.config.height, :self.config.width]
             
-            log.debug("Compression time: {:.3f} s".format(time.time() - t))
+            log.info("Compression time: {:.3f} s".format(time.time() - t))
             t = time.time()
             
             # Save the compressed image
             filename_millis, filename_micros = self.saveFF(compressed, startTime, n*256)
             n += 1
             
-            log.debug("Saving time: {:.3f} s".format(time.time() - t))
+            log.info("Saving time: {:.3f} s".format(time.time() - t))
 
 
             # Save a live.jpg file to the data directory
@@ -354,7 +354,7 @@ class Compressor(multiprocessing.Process):
 
                 # Add the file to the detector queue
                 self.detector.addJob([self.data_dir, filename, self.config])
-                log.info('Added file for detection: {:s}'.format(filename))
+                log.debug('Added file for detection: {:s}'.format(filename))
 
 
 
