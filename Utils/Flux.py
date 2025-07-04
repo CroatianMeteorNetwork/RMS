@@ -793,7 +793,7 @@ def calculateFixedBins(all_time_intervals, dir_list, shower, atomic_bin_duration
                         "!!! {:s} CSV in {:s} and {:s} don't match solar longitude values".format( \
                             FIXED_BINS_NAME, dirs_with_found_files[0], dir_name)
                     )
-                    log.warning('\tSolar longitude difference:', np.abs(goal - val))
+                    log.warning('\tSolar longitude difference: %s', np.abs(goal - val))
                     failed = True
 
             if failed:
