@@ -7145,7 +7145,7 @@ def handleLoginPath(login_path, number_of_fits=None):
         print("Files retrieved in {:.1f} seconds".format(time_taken))
         mask_path = os.path.join(local_path, remote_config.mask_file)
         if os.path.exists(mask_path):
-            mask = getMaskFile(".", remote_config)
+            mask = getMaskFile(mask_path, remote_config)
 
         # If the dimensions of the mask do not match the config file, ignore the mask
         if (mask is not None) and (not mask.checkResolution(remote_config.width, remote_config.height)):
