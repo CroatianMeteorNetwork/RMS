@@ -6878,8 +6878,8 @@ def nItemsFromList(number, input_list, drop_first=False, drop_last=False, sort=T
         return input_list
 
     # Avoid divide by zero error
-    if number < 1:
-        return []
+    if number == 1:
+        return input_list[-1]
 
     # Avoid working on empty list
 
@@ -7019,6 +7019,14 @@ def getUserHostPortPath(path):
         user, host, path = match.groups()
         return user, host, 22, path
 
+    pattern = r'^([\w\.-]+)@([\w\.-]+)$'
+    match_username_hostname = re.match(pattern, path)
+
+    if match_username_hostname:
+        print(match_username_hostname.groups())
+        user, host = match_username_hostname.groups()
+        return user, host, 22, "source/RMS/"
+
 
     return None, None, None, None
 
@@ -7104,10 +7112,10 @@ def isLoginPath(path):
     Return:
         is_login_path: [bool] True if a network path, else false.
         """
-
+    pattern_username_hostname = r'\b[\w\.-]+@[\w\.-]+\b'
     pattern_port = r'^([\w.-]+)@([\w.-]+):(\d+):(.*)$'
     pattern = r'^[^@:\s]+@[^@:\s]+:[^\s]+$'
-    is_login_path = re.match(pattern, path) or re.match(pattern_port, path)
+    is_login_path = re.match(pattern, path) or re.match(pattern_port, path) or re.match(pattern_username_hostname, path)
 
     return is_login_path
 
@@ -7121,8 +7129,12 @@ def handleLoginPath(login_path, number_of_fits=None):
     Return:
         Nothing.
     """
+    # If no argyment was passsed then set as one, return approximiate middle file
     number_of_fits = 1 if number_of_fits is None else int(number_of_fits)
     user, host, port, remote_path = getUserHostPortPath(login_path)
+
+    # If no config path passed in then assume ~/source/RMS for .config
+    remote_path = "source/RMS" if not len(remote_path) else remote_path
     config_file_name = ('.config')
     if remote_path.endswith(config_file_name):
         remote_path = remote_path[:-len(config_file_name)]
@@ -7132,20 +7144,39 @@ def handleLoginPath(login_path, number_of_fits=None):
 
         # First get the .config file
         files_list = ['.config']
+
+        # Record a start time
         time_started_getting_files = datetime.datetime.now(datetime.timezone.utc)
+
+        # Parse the remote configuration
         remote_config = cr.parse(getFiles(host, user, port, remote_path, local_path, files_list)[0])
+
+        # Start making a list of files to get; the platepar, and the mask
         platepar_mask_list = [remote_config.platepar_name, remote_config.mask_file]
+
+        # Get the platepar and and the mask
         getFiles(host, user, port, remote_path, local_path, platepar_mask_list)
+
+        # Now get the remote paths of the remote directories of interest
         latest_cap_dir = os.path.join(getRemoteCapturedDirsPath(remote_config), getLatestCapturedDirectory(remote_config, host, user, port))
         latest_captured_files = lsRemote(host, user, port, latest_cap_dir)
+
+        # Filter only for fits files for the remote station
         fits_files = [f for f in latest_captured_files if f.endswith(".fits") and f.startswith("FF_{}".format(remote_config.stationID))]
+
+        # Get the files
         getFiles(host, user, port, latest_cap_dir, local_path, fits_files, number=number_of_fits)
+
+        # Record and print the time taken
         time_finished_getting_files = datetime.datetime.now(datetime.timezone.utc)
         time_taken = (time_finished_getting_files - time_started_getting_files).total_seconds()
         print("Files retrieved in {:.1f} seconds".format(time_taken))
+
+        # Load the mask structure
         mask_path = os.path.join(local_path, remote_config.mask_file)
         if os.path.exists(mask_path):
-            mask = getMaskFile(mask_path, remote_config)
+            mask_dir = os.path.dirname(mask_path)
+            mask = getMaskFile(mask_dir, remote_config)
 
         # If the dimensions of the mask do not match the config file, ignore the mask
         if (mask is not None) and (not mask.checkResolution(remote_config.width, remote_config.height)):
@@ -7175,7 +7206,8 @@ if __name__ == '__main__':
 
     arg_parser.add_argument('input_path', metavar='INPUT_PATH', type=str,
                             help='Path to the folder with FF or image files, path to a video file, '
-                                 '  to a state file, an RMS bz2 file, or user@host:path/to/config/ .'
+                                 '  to a state file, an RMS bz2 file, or user@host:path/to/config/ . for remote platepar fitting'
+                                 '  if no path is given, the .config is assumedd to be at ~/source/RMS/.config'
                                  ' If images or videos are given, their names must be in the format: YYYYMMDD_hhmmss.uuuuuu')
 
 
@@ -7220,6 +7252,7 @@ if __name__ == '__main__':
 
     arg_parser.add_argument('-u', '--number_of_fits', metavar='NUMBER_OF_FITS', type=int,
                             help="When working remotely, number of fits files to download. \n"
+                                    "If not specified, then pick the middle file"
                                     "1 - Pick the penultimate file by time. \n"
                                     "0 - Pick the file in the approximate middle of most recent capture session. \n")
 
