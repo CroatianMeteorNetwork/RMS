@@ -235,6 +235,11 @@ class BufferedCapture(Process):
                 log.error("Error during graceful shutdown: {}".format(e))
                 log.info("Falling back to terminate()")
                 self.terminate()
+                self.join()  # Always join after terminate to reap zombie
+            
+            # Clean up raw frame arrays after process termination
+            if hasattr(self, 'raw_frame_saver') and self.raw_frame_saver:
+                self.releaseRawArrays()
 
         return self.dropped_frames.value
 

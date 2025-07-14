@@ -225,6 +225,7 @@ class Compressor(multiprocessing.Process):
                 if self.is_alive():
                     log.warning("Compression process still alive after interrupt, forcing termination")
                     self.terminate()
+                    self.join()  # Always join after terminate to reap zombie
                 else:
                     log.info("Compression process exited gracefully after interrupt")
                     
@@ -251,6 +252,13 @@ class Compressor(multiprocessing.Process):
     def run(self):
         """ Retrieve frames from list, convert, compress and save them.
         """
+        
+        # Set up signal handler for graceful shutdown
+        def _sigint_handler(sig, frame):
+            log.info("Compression process received SIGINT, initiating graceful shutdown...")
+            self.exit.set()
+        
+        signal.signal(signal.SIGINT, _sigint_handler)
         
         n = 0
         
