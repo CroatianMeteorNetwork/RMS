@@ -241,8 +241,7 @@ class BufferedCapture(Process):
             # Always join to reap zombie (returns instantly if already dead)
             self.join()
             
-            # Force close any remaining RTSP connections after process exit
-            self.forceCloseRTSPConnections()
+            # Note: RTSP connections are cleaned up by releaseResources() in the child process
             
             # Clean up raw frame arrays after process termination
             if hasattr(self, 'raw_frame_saver') and self.raw_frame_saver:
@@ -1903,8 +1902,7 @@ class BufferedCapture(Process):
 
                     log.info('Frame grabbing failed, video device is probably disconnected!')
                     self.releaseResources()
-                    # Force close any lingering RTSP connections before reconnection
-                    self.forceCloseRTSPConnections()
+                    # Note: releaseResources() now includes proper RTSP cleanup with fallback force close
                     wait_for_reconnect = True
                     break
 
