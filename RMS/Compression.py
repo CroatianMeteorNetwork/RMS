@@ -225,7 +225,6 @@ class Compressor(multiprocessing.Process):
                 if self.is_alive():
                     log.warning("Compression process still alive after interrupt, forcing termination")
                     self.terminate()
-                    self.join()  # Always join after terminate to reap zombie
                 else:
                     log.info("Compression process exited gracefully after interrupt")
                     
@@ -235,6 +234,9 @@ class Compressor(multiprocessing.Process):
                 log.error("Error during graceful compression shutdown: {}".format(e))
                 log.info("Falling back to terminate()")
                 self.terminate()
+            
+            # Always join to reap zombie (returns instantly if already dead)
+            self.join()
 
         # Return the detector and live viewer objects because they were updated in this namespace
         return self.detector

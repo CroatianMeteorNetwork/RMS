@@ -235,7 +235,9 @@ class BufferedCapture(Process):
                 log.error("Error during graceful shutdown: {}".format(e))
                 log.info("Falling back to terminate()")
                 self.terminate()
-                self.join()  # Always join after terminate to reap zombie
+            
+            # Always join to reap zombie (returns instantly if already dead)
+            self.join()
             
             # Clean up raw frame arrays after process termination
             if hasattr(self, 'raw_frame_saver') and self.raw_frame_saver:
@@ -1481,10 +1483,11 @@ class BufferedCapture(Process):
         # Clean up array resources
         self.current_raw_frame_shape = None
         self.shared_raw_array = None
-        del self.shared_raw_array_base
-        del self.shared_raw_array
-        del self.shared_raw_array_base2
-        del self.shared_raw_array2
+        
+        # Safely delete shared memory arrays
+        for name in ("shared_raw_array_base", "shared_raw_array", "shared_raw_array_base2", "shared_raw_array2"):
+            if hasattr(self, name):
+                delattr(self, name)
 
 
     def initRawFrameArrays(self, frame_shape):
