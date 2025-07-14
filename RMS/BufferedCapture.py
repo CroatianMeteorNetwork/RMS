@@ -1397,7 +1397,7 @@ class BufferedCapture(Process):
                     self._bus_thread.join(timeout=2)
                     # If thread didn't exit cleanly, it's likely stuck - don't wait forever
                     if self._bus_thread.is_alive():
-                        log.warning("Bus thread failed to exit cleanly after 2 seconds")
+                        log.debug("Bus thread failed to exit cleanly after 2 seconds (known issue with some GStreamer versions)")
                     self._bus_thread = None
                     
             except Exception as e:
