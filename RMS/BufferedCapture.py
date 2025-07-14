@@ -211,32 +211,66 @@ class BufferedCapture(Process):
         else:
             log.info("Timed out after waiting {} seconds, capture thread still alive".format(seconds_waited))
             log.info("This is a known issue with GStreamer pipelines not releasing all threads")
+            
+            # IMPORTANT: Clean up shared memory BEFORE terminating the process
+            # Otherwise the memory will be leaked when the process is killed
+            log.debug('Cleaning up shared memory before termination...')
+            try:
+                # Note: These deletions only remove the Python references in the parent process
+                # The actual shared memory cleanup happens in the child process cleanup handler
+                # But we still delete references here to allow garbage collection
+                del self.array1
+                del self.array2
+
+                if self.config.save_frames:
+                    del self.shared_timestamps_base
+                    del self.shared_timestamps_base2
+
+                    if hasattr(self, 'shared_raw_array_base'):
+                        del self.shared_raw_array_base
+                        del self.shared_raw_array_base2
+                        del self.shared_raw_array
+                        del self.shared_raw_array2
+
+                log.debug('Parent process references cleaned up')
+            except Exception as e:
+                log.error('Error cleaning up before termination: {}'.format(e))
+            
             log.info('Terminating capture...')
             self.terminate()
+            
+            # Give the process a moment to clean up after termination
+            time.sleep(0.5)
+        
+        # If process exited cleanly, also clean up shared memory references
+        # This handles the normal shutdown case
+        if not self.is_alive():
+            try:
+                log.debug('Freeing shared memory resources...')
+                # Frame buffers
+                if hasattr(self, 'array1'):
+                    del self.array1
+                if hasattr(self, 'array2'):
+                    del self.array2
 
-        # Clean up shared memory resources
-        try:
-            log.debug('Freeing shared memory resources...')
-            # Frame buffers
-            del self.array1
-            del self.array2
+                # Raw frame and timestamp buffers if they exist
+                if self.config.save_frames:
+                    if hasattr(self, 'shared_timestamps_base'):
+                        del self.shared_timestamps_base
+                    if hasattr(self, 'shared_timestamps_base2'):
+                        del self.shared_timestamps_base2
 
-            # Raw frame and timestamp buffers if they exist
-            if self.config.save_frames:
-                del self.shared_timestamps_base
-                del self.shared_timestamps_base2
+                    if hasattr(self, 'shared_raw_array_base'):
+                        del self.shared_raw_array_base
+                        del self.shared_raw_array_base2
+                        del self.shared_raw_array
+                        del self.shared_raw_array2
 
-                if hasattr(self, 'shared_raw_array_base'):
-                    del self.shared_raw_array_base
-                    del self.shared_raw_array_base2
-                    del self.shared_raw_array
-                    del self.shared_raw_array2
+                log.debug('Shared memory resources freed successfully')
 
-            log.debug('Shared memory resources freed successfully')
-
-        except Exception as e:
-            log.error('Error freeing shared memory: {}'.format(e))
-            log.debug(repr(traceback.format_exception(*sys.exc_info())))
+            except Exception as e:
+                log.error('Error freeing shared memory: {}'.format(e))
+                log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
         return self.dropped_frames.value
 
@@ -527,14 +561,17 @@ class BufferedCapture(Process):
                     log.info("GStreamer Buffer did not contain a frame.")
                     return False, None, None
 
-                # Convert to np.ndarray
-                frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
+                try:
+                    # Convert to np.ndarray
+                    frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
 
-                # Smooth raw pts and calculate actual timestamp
-                smoothed_pts = self.smoothPTS(gst_timestamp_ns)
-                timestamp = self.start_timestamp + (smoothed_pts/1e9)
+                    # Smooth raw pts and calculate actual timestamp
+                    smoothed_pts = self.smoothPTS(gst_timestamp_ns)
+                    timestamp = self.start_timestamp + (smoothed_pts/1e9)
 
-                buffer.unmap(map_info)
+                finally:
+                    # Always unmap buffer to prevent memory leaks
+                    buffer.unmap(map_info)
 
             # OpenCV
             else:
@@ -1035,6 +1072,14 @@ class BufferedCapture(Process):
             
             except Exception as e:
                 log.error("Attempt {} failed: {}".format(attempt + 1, str(e)))
+                # Clean up any partial pipeline that was created
+                if hasattr(self, 'pipeline') and self.pipeline:
+                    try:
+                        self.pipeline.set_state(Gst.State.NULL)
+                        self.pipeline = None
+                    except Exception as cleanup_e:
+                        log.error("Error cleaning up failed pipeline: {}".format(cleanup_e))
+                        
                 if attempt < max_retries - 1:
                     log.info("Waiting {} seconds before next attempt...".format(retry_interval))
                     time.sleep(retry_interval)
@@ -1248,8 +1293,10 @@ class BufferedCapture(Process):
                     self.video_device_type = "gst"
 
                     conn = getObsDBConn(self.config)
-                    addObsParam(conn, "media_backend", self.video_device_type)
-                    conn.close()
+                    try:
+                        addObsParam(conn, "media_backend", self.video_device_type)
+                    finally:
+                        conn.close()
 
                     return True
 
@@ -1259,8 +1306,10 @@ class BufferedCapture(Process):
                     self.releaseResources()
 
                     conn = getObsDBConn(self.config)
-                    addObsParam(conn, "media_backend", self.video_device_type)
-                    conn.close()
+                    try:
+                        addObsParam(conn, "media_backend", self.video_device_type)
+                    finally:
+                        conn.close()
 
             if self.config.media_backend == 'v4l2':
                 try:
@@ -1320,20 +1369,13 @@ class BufferedCapture(Process):
                 src = self.pipeline.get_by_name('src')
 
                 if src:
-                    log.debug("Stopping RTSP source...")
-
-                    # Force sync before changing source state
-                    if not src.sync_state_with_parent():
-                        log.warning("Source sync with parent failed")
+                    log.debug("Flushing RTSP source...")
 
                     # Flush any pending data to prevent hanging on network operations
                     src.send_event(Gst.Event.new_flush_start())
-
-                    ret = src.set_state(Gst.State.NULL)
-                    if ret == Gst.StateChangeReturn.ASYNC:
-                        # If state change is async, wait up to 1 second for it to complete
-                        ret, state, pending = src.get_state(Gst.SECOND)
-                        log.debug("RTSP source final state: {}, pending: {}".format(state, pending))
+                    
+                    # Note: Not setting source state to NULL - let pipeline handle it
+                    # This avoids blocking on RTSP TEARDOWN when camera is disconnected
 
                 else:
                     log.debug("NO RTSP source found.")
@@ -1353,6 +1395,9 @@ class BufferedCapture(Process):
                 # make sure poller thread exits
                 if self._bus_thread and self._bus_thread.is_alive():
                     self._bus_thread.join(timeout=2)
+                    # If thread didn't exit cleanly, it's likely stuck - don't wait forever
+                    if self._bus_thread.is_alive():
+                        log.warning("Bus thread failed to exit cleanly after 2 seconds")
                     self._bus_thread = None
                     
             except Exception as e:
@@ -1361,11 +1406,20 @@ class BufferedCapture(Process):
                 if self.pipeline:
                     self.pipeline.set_state(Gst.State.NULL)
                     self.pipeline = None
+                
+                # Emergency bus thread cleanup
+                if self._bus_thread and self._bus_thread.is_alive():
+                    self._bus_thread.join(timeout=1)
+                    if self._bus_thread.is_alive():
+                        log.warning("Bus thread stuck during emergency cleanup")
+                    self._bus_thread = None
                     
                 # Log to database
                 conn = getObsDBConn(self.config)
-                addObsParam(conn, "media_backend", "gst not successfully released")
-                conn.close()
+                try:
+                    addObsParam(conn, "media_backend", "gst not successfully released")
+                finally:
+                    conn.close()
 
             finally:
                 # If failed to stop the source first, use brute force to stop the pipeline
@@ -1374,15 +1428,19 @@ class BufferedCapture(Process):
                     self.pipeline.set_state(Gst.State.NULL)
                     self.pipeline = None
 
+                if abs(self.last_calculated_fps - self.config.fps) > 0.0005 and self.last_calculated_fps_n > 25*60*60:
+                    log.info('Config file fps appears to be inaccurate. Consider updating the config file!')
 
-                log.debug("Last calculated FPS: {:.6f} at frame {}, config FPS: {}, resets: {}, startup status: {}"
+                log.info("Last calculated FPS: {:.6f} at frame {}, config FPS: {}, resets: {}, startup status: {}"
                          .format(self.last_calculated_fps, self.last_calculated_fps_n, self.config.fps, self.reset_count, self.startup_flag))
 
                 log.info('GStreamer Video device released!')
 
                 conn = getObsDBConn(self.config)
-                addObsParam(conn, "media_backend", self.video_device_type)
-                conn.close()
+                try:
+                    addObsParam(conn, "media_backend", self.video_device_type)
+                finally:
+                    conn.close()
 
         # Release the CV2 device (stream or video file)
         if self.device:
@@ -1396,8 +1454,10 @@ class BufferedCapture(Process):
             except Exception as e:
                 log.error('Error releasing OpenCV device: {}'.format(e))
                 conn = getObsDBConn(self.config)
-                addObsParam(conn, "media_backend", "OpenCV not successfully released")
-                conn.close()
+                try:
+                    addObsParam(conn, "media_backend", "OpenCV not successfully released")
+                finally:
+                    conn.close()
             finally:
                 self.device = None  # Reset device to None after releasing
 
@@ -1777,6 +1837,11 @@ class BufferedCapture(Process):
                             self.start_raw_time1.value = first_raw_frame_timestamp
                         else:
                             self.start_raw_time2.value = first_raw_frame_timestamp
+
+                        # Clean up existing frame saver before creating a new one
+                        if hasattr(self, 'raw_frame_saver') and self.raw_frame_saver:
+                            log.info("Cleaning up existing raw frame saver before mode change")
+                            self.releaseRawArrays()
 
                         if not self.initRawFrameArrays(frame.shape):
                             log.error("Failed to reinitialize arrays after mode change")
