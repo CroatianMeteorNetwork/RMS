@@ -28,6 +28,8 @@ import copy
 import os.path
 from multiprocessing import Process, Event, Value, Array
 import threading
+import os
+import signal
 
 import cv2
 import numpy as np
@@ -211,66 +213,28 @@ class BufferedCapture(Process):
         else:
             log.info("Timed out after waiting {} seconds, capture thread still alive".format(seconds_waited))
             log.info("This is a known issue with GStreamer pipelines not releasing all threads")
+            log.info("Sending interrupt signal for graceful shutdown...")
             
-            # IMPORTANT: Clean up shared memory BEFORE terminating the process
-            # Otherwise the memory will be leaked when the process is killed
-            log.debug('Cleaning up shared memory before termination...')
             try:
-                # Note: These deletions only remove the Python references in the parent process
-                # The actual shared memory cleanup happens in the child process cleanup handler
-                # But we still delete references here to allow garbage collection
-                del self.array1
-                del self.array2
-
-                if self.config.save_frames:
-                    del self.shared_timestamps_base
-                    del self.shared_timestamps_base2
-
-                    if hasattr(self, 'shared_raw_array_base'):
-                        del self.shared_raw_array_base
-                        del self.shared_raw_array_base2
-                        del self.shared_raw_array
-                        del self.shared_raw_array2
-
-                log.debug('Parent process references cleaned up')
+                # Send SIGINT to allow child process to clean up gracefully
+                if self.pid:
+                    os.kill(self.pid, signal.SIGINT)
+                
+                # Wait a few seconds for graceful shutdown
+                self.join(5)
+                
+                if self.is_alive():
+                    log.warning("Process still alive after interrupt, forcing termination")
+                    self.terminate()
+                else:
+                    log.info("Process exited gracefully after interrupt")
+                    
+            except ProcessLookupError:
+                log.info("Process already terminated")
             except Exception as e:
-                log.error('Error cleaning up before termination: {}'.format(e))
-            
-            log.info('Terminating capture...')
-            self.terminate()
-            
-            # Give the process a moment to clean up after termination
-            time.sleep(0.5)
-        
-        # If process exited cleanly, also clean up shared memory references
-        # This handles the normal shutdown case
-        if not self.is_alive():
-            try:
-                log.debug('Freeing shared memory resources...')
-                # Frame buffers
-                if hasattr(self, 'array1'):
-                    del self.array1
-                if hasattr(self, 'array2'):
-                    del self.array2
-
-                # Raw frame and timestamp buffers if they exist
-                if self.config.save_frames:
-                    if hasattr(self, 'shared_timestamps_base'):
-                        del self.shared_timestamps_base
-                    if hasattr(self, 'shared_timestamps_base2'):
-                        del self.shared_timestamps_base2
-
-                    if hasattr(self, 'shared_raw_array_base'):
-                        del self.shared_raw_array_base
-                        del self.shared_raw_array_base2
-                        del self.shared_raw_array
-                        del self.shared_raw_array2
-
-                log.debug('Shared memory resources freed successfully')
-
-            except Exception as e:
-                log.error('Error freeing shared memory: {}'.format(e))
-                log.debug(repr(traceback.format_exception(*sys.exc_info())))
+                log.error("Error during graceful shutdown: {}".format(e))
+                log.info("Falling back to terminate()")
+                self.terminate()
 
         return self.dropped_frames.value
 
@@ -1636,6 +1600,9 @@ class BufferedCapture(Process):
             # Continue with main capture loop
             self.captureFrames()
 
+        except KeyboardInterrupt:
+            log.info("Capture process received interrupt signal. Shutting down gracefully...")
+            self.exit.set()
         except Exception as e:
             log.error("Error in capture process: {}".format(e))
             log.debug(repr(traceback.format_exception(*sys.exc_info())))
