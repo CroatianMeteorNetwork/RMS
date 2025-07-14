@@ -252,11 +252,10 @@ class Compressor(multiprocessing.Process):
         """ Retrieve frames from list, convert, compress and save them.
         """
         
-        try:
-            n = 0
-            
-            # Repeat until the compressor is killed from the outside
-            while not self.exit.is_set():
+        n = 0
+        
+        # Repeat until the compressor is killed from the outside
+        while not self.exit.is_set():
 
             # Block until frames are available
             while (self.start_time1.value == 0) and (self.start_time2.value == 0):
@@ -371,18 +370,8 @@ class Compressor(multiprocessing.Process):
 
 
 
-            log.debug('Compression run exit')
-            time.sleep(1.0)
-            self.run_exited.set()
-
-        except KeyboardInterrupt:
-            log.info("Compression process received interrupt signal. Shutting down gracefully...")
-            self.exit.set()
-            self.run_exited.set()
-        except Exception as e:
-            log.error("Error in compression process: {}".format(e))
-            log.debug(repr(traceback.format_exception(*sys.exc_info())))
-            self.exit.set()
-            self.run_exited.set()
+        log.debug('Compression run exit')
+        time.sleep(1.0)
+        self.run_exited.set()
 
 
