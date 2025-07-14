@@ -7110,7 +7110,9 @@ def getLatestCapturedDirectory(r, host, user, port):
         [path] path to remote captured files directory.
     """
 
-    remote_captured_directory_list = lsRemote(host, user, port, getRemoteCapturedDirsPath(r))
+    remote_directory = getRemoteCapturedDirsPath(r)
+    print("Getting directory list of {}@{}:{}:{}".format(user, host, port, remote_directory))
+    remote_captured_directory_list = lsRemote(host, user, port, remote_directory)
     remote_captured_directory_list = [d for d in remote_captured_directory_list if d.startswith(r.stationID)]
     remote_captured_directory_list.sort(reverse=True)
     return remote_captured_directory_list[0]
