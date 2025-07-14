@@ -30,7 +30,6 @@ from multiprocessing import Process, Event, Value, Array
 import threading
 import os
 import signal
-import socket
 import subprocess
 import shutil
 from contextlib import suppress
@@ -1002,6 +1001,7 @@ class BufferedCapture(Process):
                     self.releaseResources()
 
                 # Parse and create the pipeline
+                self._bus_should_exit = False
                 self.pipeline = Gst.parse_launch(pipeline_str)
                 if not self.pipeline:
                     raise ValueError("Could not create pipeline")
@@ -1393,41 +1393,39 @@ class BufferedCapture(Process):
         if self.pipeline:
             bus = self.pipeline.get_bus()
             self.pipeline.send_event(Gst.Event.new_eos())
-            bus.timed_pop_filtered(
-                2 * Gst.SECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR)
+            bus.timed_pop_filtered(2*Gst.SECOND,
+                                Gst.MessageType.EOS | Gst.MessageType.ERROR)
 
             self.pipeline.set_state(Gst.State.NULL)
             self.pipeline.get_state(Gst.SECOND)
 
-            # wake bus-poller once more so the thread exits immediately
+            # wake poller
             if bus:
                 bus.post(Gst.Message.new_eos(None))
 
-            self.pipeline.unref()
-            self.pipeline = None
+            # move ‘self.pipeline = None’ until after the thread join ↓↓↓
+            pipe = self.pipeline
+        else:
+            pipe = None
 
         # 3) shut down the poller
         if self._bus_thread and self._bus_thread.is_alive():
             self._bus_should_exit = True
             self._bus_thread.join(timeout=6)
-            if self._bus_thread.is_alive():
-                log.debug("Bus thread still alive after wake-up (will be abandoned)")
         self._bus_thread = None
+
+        # only now drop the last reference
+        if pipe:
+            pipe.unref()
+        self.pipeline = None
 
         # 4) brute-force clean-up
         self.forceCloseRTSPConnections()
 
-        # 5) OpenCV device
+        # 5) OpenCV
         if self.video_device_type == "cv2" and self.device:
             self.device.release()
             self.device = None
-
-        # 6) only one global deinit needed
-        if GST_IMPORTED:
-            try:
-                Gst.deinit()
-            except Exception:
-                pass
 
 
     def releaseRawArrays(self):
