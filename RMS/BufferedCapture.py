@@ -30,6 +30,8 @@ from multiprocessing import Process, Event, Value, Array
 import threading
 import os
 import signal
+import socket
+import subprocess
 
 import cv2
 import numpy as np
@@ -238,6 +240,9 @@ class BufferedCapture(Process):
             
             # Always join to reap zombie (returns instantly if already dead)
             self.join()
+            
+            # Force close any remaining RTSP connections after process exit
+            self.forceCloseRTSPConnections()
             
             # Clean up raw frame arrays after process termination
             if hasattr(self, 'raw_frame_saver') and self.raw_frame_saver:
@@ -1310,6 +1315,60 @@ class BufferedCapture(Process):
 
         return False
 
+    def forceCloseRTSPConnections(self):
+        """Force close any active RTSP connections by this process.
+        This is a brute-force cleanup method for when GStreamer doesn't properly close connections.
+        """
+        if not hasattr(self, 'config') or not self.config:
+            return
+            
+        try:
+            # Extract camera IP from deviceID if it's an RTSP URL
+            if "rtsp://" in str(self.config.deviceID):
+                import re
+                # Extract IP address from RTSP URL
+                match = re.search(r'rtsp://(?:[^:]+:?[^@]*@)?([^:/]+)', str(self.config.deviceID))
+                if match:
+                    camera_ip = match.group(1)
+                    log.info("Force closing RTSP connections to camera IP: {}".format(camera_ip))
+                    
+                    # Use netstat to find active connections to the camera IP on RTSP port (554)
+                    try:
+                        # Get our process ID
+                        pid = os.getpid()
+                        
+                        # Find connections from our process to the camera
+                        cmd = ["netstat", "-anp", "2>/dev/null"]
+                        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                        
+                        for line in result.stdout.split('\n'):
+                            if (str(pid) in line and 
+                                camera_ip in line and 
+                                (":554 " in line or ":rtsp " in line) and
+                                "ESTABLISHED" in line):
+                                
+                                log.warning("Found active RTSP connection: {}".format(line.strip()))
+                                
+                                # Extract local port to force close the connection
+                                parts = line.split()
+                                if len(parts) >= 4:
+                                    local_addr = parts[3]
+                                    if ':' in local_addr:
+                                        local_port = local_addr.split(':')[-1]
+                                        log.info("Attempting to force close local port: {}".format(local_port))
+                                        
+                                        try:
+                                            # Use ss command to kill the connection
+                                            subprocess.run(["ss", "-K", "sport", "=", local_port], 
+                                                         timeout=2, capture_output=True)
+                                        except Exception as e:
+                                            log.debug("ss command failed: {}".format(e))
+                                            
+                    except Exception as e:
+                        log.debug("netstat connection cleanup failed: {}".format(e))
+                        
+        except Exception as e:
+            log.error("Error in forceCloseRTSPConnections: {}".format(e))
 
     def releaseResources(self):
         """Releases resources for GStreamer and OpenCV devices."""
@@ -1319,34 +1378,66 @@ class BufferedCapture(Process):
 
             try:
                                 
-                # 1. Post EOS and monitor
+                # 1. Post EOS and wait for completion
 
                 # Force sync all children states before EOS
                 if not self.pipeline.sync_children_states():
                     log.warning("Initial children sync failed")
 
                 # Send EOS (End of Stream) to initiate graceful shutdown
-                self.pipeline.send_event(Gst.Event.new_eos())
-                time.sleep(0.1)
+                log.debug("Sending EOS to pipeline...")
+                if not self.pipeline.send_event(Gst.Event.new_eos()):
+                    log.warning("Failed to send EOS to pipeline")
                 
-                # 2. Stop RTSP source
+                # Wait for EOS to be processed (with timeout)
+                bus = self.pipeline.get_bus()
+                if bus:
+                    # Wait up to 1 second for EOS message
+                    msg = bus.timed_pop_filtered(Gst.SECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR)
+                    if msg:
+                        if msg.type == Gst.MessageType.EOS:
+                            log.debug("EOS received, pipeline ready for shutdown")
+                        elif msg.type == Gst.MessageType.ERROR:
+                            log.warning("Error during EOS: {}".format(msg.parse_error()))
+                    else:
+                        log.debug("EOS timeout, proceeding with shutdown anyway")
+                
+                # 2. Properly shutdown RTSP source
 
                 # Sync again before accessing source - pipeline state might have changed after EOS
                 if not self.pipeline.sync_children_states():
                     log.warning("Pre-source children sync failed")
 
                 # Get RTSP source element by name - 'src' is the name given to RTSP source when pipeline was created
-                # We need direct access to source element for proper RTSP cleanup (network disconnect)
                 src = self.pipeline.get_by_name('src')
 
                 if src:
-                    log.debug("Flushing RTSP source...")
+                    log.debug("Properly shutting down RTSP source...")
 
-                    # Flush any pending data to prevent hanging on network operations
+                    # 1. First try to flush any pending data
                     src.send_event(Gst.Event.new_flush_start())
+                    src.send_event(Gst.Event.new_flush_stop(False))
                     
-                    # Note: Not setting source state to NULL - let pipeline handle it
-                    # This avoids blocking on RTSP TEARDOWN when camera is disconnected
+                    # 2. Set RTSP connection-timeout to very low value to prevent hanging
+                    try:
+                        src.set_property("connection-speed", 0)  # Force immediate timeout
+                        src.set_property("tcp-timeout", 500000)  # 0.5 second timeout
+                    except Exception as e:
+                        log.debug("Could not set RTSP timeout properties: {}".format(e))
+                    
+                    # 3. Properly transition RTSP source to NULL with timeout
+                    log.debug("Transitioning RTSP source to NULL state...")
+                    ret = src.set_state(Gst.State.NULL)
+                    
+                    # Give RTSP source limited time to send TEARDOWN and close
+                    ret, state, pending = src.get_state(500 * Gst.MSECOND)  # 500ms timeout
+                    
+                    if ret == Gst.StateChangeReturn.SUCCESS:
+                        log.debug("RTSP source cleanly stopped")
+                    elif ret == Gst.StateChangeReturn.ASYNC:
+                        log.debug("RTSP source stopping asynchronously (timeout)")
+                    else:
+                        log.warning("RTSP source failed to stop cleanly: {}".format(ret))
 
                 else:
                     log.debug("NO RTSP source found.")
@@ -1363,6 +1454,26 @@ class BufferedCapture(Process):
                  # Clear pipeline reference to allow proper cleanup   
                 self.pipeline = None
 
+                # Only force close RTSP connections if we suspect they're still open
+                # Check if RTSP cleanup was successful by seeing if connections still exist
+                time.sleep(0.1)  # Brief pause for cleanup to complete
+                if "rtsp://" in str(self.config.deviceID):
+                    # Quick check if RTSP connections might still be active
+                    try:
+                        import re
+                        match = re.search(r'rtsp://(?:[^:]+:?[^@]*@)?([^:/]+)', str(self.config.deviceID))
+                        if match:
+                            camera_ip = match.group(1)
+                            # Simple check for active connections to camera IP
+                            result = subprocess.run(["netstat", "-an"], capture_output=True, text=True, timeout=2)
+                            if camera_ip in result.stdout and ":554 " in result.stdout and "ESTABLISHED" in result.stdout:
+                                log.warning("RTSP connections still detected, applying force cleanup")
+                                self.forceCloseRTSPConnections()
+                            else:
+                                log.debug("No lingering RTSP connections detected")
+                    except Exception as e:
+                        log.debug("Could not check for lingering connections: {}".format(e))
+
                 # make sure poller thread exits
                 if self._bus_thread and self._bus_thread.is_alive():
                     self._bus_thread.join(timeout=2)
@@ -1377,6 +1488,9 @@ class BufferedCapture(Process):
                 if self.pipeline:
                     self.pipeline.set_state(Gst.State.NULL)
                     self.pipeline = None
+                
+                # Emergency RTSP connection cleanup
+                self.forceCloseRTSPConnections()
                 
                 # Emergency bus thread cleanup
                 if self._bus_thread and self._bus_thread.is_alive():
@@ -1789,6 +1903,8 @@ class BufferedCapture(Process):
 
                     log.info('Frame grabbing failed, video device is probably disconnected!')
                     self.releaseResources()
+                    # Force close any lingering RTSP connections before reconnection
+                    self.forceCloseRTSPConnections()
                     wait_for_reconnect = True
                     break
 
