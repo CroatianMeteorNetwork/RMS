@@ -6750,7 +6750,7 @@ def handleBZ2(bz2_path):
     Arguments:
         bz2_path: [path] Path to a bz2 file.
 
-    Returns:
+    Return:
         working_dir: [path] Path to a directory containing .config, fits files and if available, a mask.
     """
 
@@ -6795,6 +6795,18 @@ def handleBZ2(bz2_path):
             sys.exit(a)
 
 def lsRemote(host, username, port, remote_path):
+    """Return the files in a remote directory.
+
+    Arguments:
+        host: [str] remote host.
+        username: [str] user account to use.
+        port: [int] remote port number.
+        remote_pat: [str] path of remote directory to list.
+
+    Return:
+        files: [list of strings] Names of remote files.
+    """
+
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # Accept unknown host keys
     ssh.connect(hostname=host, port=port, username=username)
@@ -6879,7 +6891,7 @@ def nItemsFromList(number, input_list, drop_first=False, drop_last=False, sort=T
 
     # Avoid divide by zero error
     if number == 1:
-        return input_list[-1]
+        return [input_list[-1]]
 
     # Avoid working on empty list
 
@@ -6993,7 +7005,8 @@ def putFiles(host, user, port, local_path, remote_path, files_list):
     return local_target_list
 
 def getUserHostPortPath(path):
-    """Passed a user@host:port:path, or user@host:path return components, assuming port 22
+    """Passed a user@host:port:path, or user@host:path return components, assuming port 22, and
+    if no path, assume source/RMS/
 
     Arguments:
         path: [str] path to be broken apart.
@@ -7023,7 +7036,6 @@ def getUserHostPortPath(path):
     match_username_hostname = re.match(pattern, path)
 
     if match_username_hostname:
-        print(match_username_hostname.groups())
         user, host = match_username_hostname.groups()
         return user, host, 22, "source/RMS/"
 
