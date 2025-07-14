@@ -570,6 +570,8 @@ class BufferedCapture(Process):
                     timestamp = self.start_timestamp + (smoothed_pts/1e9)
 
                 finally:
+                    # Signal successful frame retrieval
+                    ret = True
                     # Always unmap buffer to prevent memory leaks
                     buffer.unmap(map_info)
 
