@@ -21,6 +21,7 @@ import sys
 import traceback
 import time
 import multiprocessing
+import signal
 from math import floor
 
 import cv2
@@ -186,8 +187,9 @@ class RawFrameSaver(multiprocessing.Process):
         """ Retrieve raw frames from shared array and save them.
         """
 
-        # Repeat until the raw frame saver is killed from the outside
-        while not self.exit.is_set():
+        try:
+            # Repeat until the raw frame saver is killed from the outside
+            while not self.exit.is_set():
 
             # Block until the raw frames are available
             while (self.start_time1.value == 0) and (self.start_time2.value == 0):
@@ -250,8 +252,18 @@ class RawFrameSaver(multiprocessing.Process):
 
             log.debug("Raw frame block saving time: {:.3f} s".format(time.time() - t))
 
-        log.debug('Raw frame saver run exit')
-        time.sleep(1.0)
-        self.run_exited.set()
+            log.debug('Raw frame saver run exit')
+            time.sleep(1.0)
+            self.run_exited.set()
+
+        except KeyboardInterrupt:
+            log.info("RawFrameSaver process received interrupt signal. Shutting down gracefully...")
+            self.exit.set()
+            self.run_exited.set()
+        except Exception as e:
+            log.error("Error in RawFrameSaver process: {}".format(e))
+            log.debug(repr(traceback.format_exception(*sys.exc_info())))
+            self.exit.set()
+            self.run_exited.set()
 
 

@@ -1449,9 +1449,27 @@ class BufferedCapture(Process):
                 self.raw_frame_saver.stop()
                 self.raw_frame_saver.join(5)
                 if self.raw_frame_saver.is_alive():
-                    log.warning("RawFrameSaver still busy. Terminating")
-                    self.raw_frame_saver.terminate()
-                    self.raw_frame_saver.join()
+                    log.warning("RawFrameSaver still busy. Sending interrupt signal...")
+                    try:
+                        if self.raw_frame_saver.pid:
+                            os.kill(self.raw_frame_saver.pid, signal.SIGINT)
+                        
+                        # Wait for graceful shutdown
+                        self.raw_frame_saver.join(3)
+                        
+                        if self.raw_frame_saver.is_alive():
+                            log.warning("RawFrameSaver still alive after interrupt, forcing termination")
+                            self.raw_frame_saver.terminate()
+                            self.raw_frame_saver.join()
+                        else:
+                            log.info("RawFrameSaver exited gracefully after interrupt")
+                            
+                    except ProcessLookupError:
+                        log.info("RawFrameSaver already terminated")
+                    except Exception as e:
+                        log.error("Error during graceful RawFrameSaver shutdown: {}".format(e))
+                        self.raw_frame_saver.terminate()
+                        self.raw_frame_saver.join()
             finally:
                 self.raw_frame_saver = None
 
