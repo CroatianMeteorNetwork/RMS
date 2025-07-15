@@ -2119,7 +2119,6 @@ class EventMonitor(multiprocessing.Process):
 
         """
 
-
         # Delay to allow capture to check existing folders - keep the logs tidy
 
 

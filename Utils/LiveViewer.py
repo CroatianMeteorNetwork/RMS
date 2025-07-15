@@ -9,7 +9,6 @@ import os
 import time
 import platform
 import multiprocessing
-import signal
 
 import cv2
 import numpy as np
@@ -266,12 +265,6 @@ class LiveViewer(multiprocessing.Process):
     def run(self):
         """ Main processing loop. """
 
-        # Set up signal handler for graceful shutdown
-        def _sigint_handler(sig, frame):
-            print("LiveViewer process received SIGINT, initiating graceful shutdown...")
-            self.exit.set()
-        
-        signal.signal(signal.SIGINT, _sigint_handler)
 
         # Try setting the process niceness (available only on Unix systems)
         try:
