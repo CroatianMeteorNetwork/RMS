@@ -255,7 +255,6 @@ class Compressor(multiprocessing.Process):
         """ Retrieve frames from list, convert, compress and save them.
         """
         
-        
         n = 0
         
         # Repeat until the compressor is killed from the outside

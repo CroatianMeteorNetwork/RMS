@@ -265,7 +265,6 @@ class LiveViewer(multiprocessing.Process):
     def run(self):
         """ Main processing loop. """
 
-
         # Try setting the process niceness (available only on Unix systems)
         try:
             os.nice(20)
