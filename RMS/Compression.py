@@ -255,12 +255,6 @@ class Compressor(multiprocessing.Process):
         """ Retrieve frames from list, convert, compress and save them.
         """
         
-        # Set up signal handler for graceful shutdown
-        def _sigint_handler(sig, frame):
-            log.info("Compression process received SIGINT, initiating graceful shutdown...")
-            self.exit.set()
-        
-        signal.signal(signal.SIGINT, _sigint_handler)
         
         n = 0
         

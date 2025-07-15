@@ -20,7 +20,6 @@ from __future__ import print_function, division, absolute_import
 import os
 import sys
 import shutil
-import signal
 
 import datetime
 import time
@@ -2120,12 +2119,6 @@ class EventMonitor(multiprocessing.Process):
 
         """
 
-        # Set up signal handler for graceful shutdown
-        def _sigint_handler(sig, frame):
-            log.info("EventMonitor process received SIGINT, initiating graceful shutdown...")
-            self.exit.set()
-        
-        signal.signal(signal.SIGINT, _sigint_handler)
 
         # Delay to allow capture to check existing folders - keep the logs tidy
 

@@ -9,7 +9,6 @@ import multiprocessing
 import time
 import datetime
 import logging
-import signal
 
 import binascii
 import paramiko
@@ -785,13 +784,6 @@ class UploadManager(multiprocessing.Process):
 
     def run(self):
         """ Try uploading the files every 15 minutes. """
-
-        # Set up signal handler for graceful shutdown
-        def _sigint_handler(sig, frame):
-            log.info("UploadManager process received SIGINT, initiating graceful shutdown...")
-            self.exit.set()
-        
-        signal.signal(signal.SIGINT, _sigint_handler)
 
         # Load the file queue from disk
         self.loadQueue()
