@@ -213,7 +213,6 @@ class BufferedCapture(Process):
             log.info("Capture joined successfully after {} seconds".format(seconds_waited))
         else:
             log.info("Timed out after waiting {} seconds, capture thread still alive".format(seconds_waited))
-            log.info("This is a known issue with GStreamer pipelines not releasing all threads")
             log.info("Sending interrupt signal for graceful shutdown...")
             
             try:
