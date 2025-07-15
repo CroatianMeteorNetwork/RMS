@@ -7,10 +7,7 @@ import os
 import ctypes
 import multiprocessing
 import time
-import datetime
 import logging
-
-import binascii
 import paramiko
 
 # Suppress Paramiko internal errors before they appear in logs
@@ -27,7 +24,7 @@ else:
 QueueEmpty = Empty
 
 
-from RMS.Misc import mkdirP, RmsDateTime
+from RMS.Misc import mkdirP, UTCFromTimestamp
 
 # Map FileNotFoundError to IOError in Python 2 as it does not exist
 if sys.version_info[0] < 3:
@@ -500,12 +497,25 @@ class UploadManager(multiprocessing.Process):
         self.exit = multiprocessing.Event()
         self.upload_in_progress = multiprocessing.Value(ctypes.c_bool, False)
 
+        # These timing variables must be shared between processes using multiprocessing.Value() because
+        # 
+        # - When upload_manager.start() is called, it creates a NEW process with its own memory space
+        # - The parent process (StartCapture) and child process (UploadManager) have separate instances
+        # - Parent calls addFiles() and delayNextUpload() to control timing
+        # - Child runs the upload loop and checks these timing variables
+        # - Without shared memory, parent's timing changes are invisible to child process
+        # - This caused upload delays to be ignored and coordination issues during shutdown
+        #
+        # Using multiprocessing.Value() creates shared memory that both processes can access
+        # Value format: 'd' = double precision float (for timestamp storage)
+        # Convention: 0.0 = None/not set, >0.0 = unix timestamp
+        
         # Time when the upload was run last
-        self.last_runtime = None
+        self.last_runtime = multiprocessing.Value('d', 0.0)
         self.last_runtime_lock = multiprocessing.Lock()
 
         # Time when the next upload should be run (used for delaying the upload)
-        self.next_runtime = None
+        self.next_runtime = multiprocessing.Value('d', 0.0)
         self.next_runtime_lock = multiprocessing.Lock() 
 
         
@@ -570,7 +580,7 @@ class UploadManager(multiprocessing.Process):
 
             # Make sure the data gets uploaded right away
             with self.last_runtime_lock:
-                self.last_runtime = None
+                self.last_runtime.value = 0.0
 
 
     def getFileList(self):
@@ -768,14 +778,15 @@ class UploadManager(multiprocessing.Process):
 
         # Set the next run time using a delay
         with self.next_runtime_lock:
-            self.next_runtime = RmsDateTime.utcnow() + datetime.timedelta(seconds=delay)
+            self.next_runtime.value = time.time() + delay
 
             if delay > 0:
                 # Log the delay
-                log.info("Upload delayed for {:.1f} min until {:s}".format(delay/60, str(self.next_runtime)))
+                next_time_str = UTCFromTimestamp.utcfromtimestamp(self.next_runtime.value).strftime('%Y-%m-%d %H:%M:%S')
+                log.info("Upload delayed for {:.1f} min until {:s} UTC".format(delay/60, next_time_str))
             else:
                 # Log that the upload will run immediately
-                log.info("Upload will run immediately at {:s}".format(str(self.next_runtime)))
+                log.info("Upload will run immediately")
 
 
 
@@ -786,28 +797,28 @@ class UploadManager(multiprocessing.Process):
         self.loadQueue()
 
         with self.last_runtime_lock:
-            self.last_runtime = None
+            self.last_runtime.value = 0.0
 
         while not self.exit.is_set():
 
             with self.last_runtime_lock:
 
                 # Check if the upload should be run (if 15 minutes are up)
-                if self.last_runtime is not None:
-                    if (RmsDateTime.utcnow() - self.last_runtime).total_seconds() < 15*60:
+                if self.last_runtime.value > 0:
+                    if (time.time() - self.last_runtime.value) < 15*60:
                         time.sleep(1)
                         continue
 
             with self.next_runtime_lock:
 
                 # Check if the upload delay is up
-                if self.next_runtime is not None:
-                    if (RmsDateTime.utcnow() - self.next_runtime).total_seconds() < 0:
+                if self.next_runtime.value > 0:
+                    if time.time() < self.next_runtime.value:
                         time.sleep(1)
                         continue
 
             with self.last_runtime_lock:
-                self.last_runtime = RmsDateTime.utcnow()
+                self.last_runtime.value = time.time()
 
             # Run the upload procedure
             self.uploadData()
