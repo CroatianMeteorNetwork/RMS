@@ -1336,8 +1336,8 @@ class BufferedCapture(Process):
                 ["netstat", "-anp"],
                 capture_output=True, text=True, timeout=5
             )
-            log.info("netstat (first 30 lines):\n%s",
-                    "\n".join(ns.stdout.splitlines()[:30]))
+            # log.debug("netstat (first 30 lines):\n%s",
+            #         "\n".join(ns.stdout.splitlines()[:30]))
 
             # --- iterate lines to find sockets that belong to *this* pid --
             for line in ns.stdout.splitlines():
@@ -1386,10 +1386,10 @@ class BufferedCapture(Process):
     def releaseResources(self):
         """Tear everything down in the right order so no FD survives."""
 
-        # 1) stop frame-saver children
+        # stop frame-saver children
         self.releaseRawArrays()
 
-        # 2) gracefully drain & stop the pipeline
+        # gracefully drain & stop the pipeline
         if self.pipeline:
             bus = self.pipeline.get_bus()
             self.pipeline.send_event(Gst.Event.new_eos())
@@ -1403,12 +1403,11 @@ class BufferedCapture(Process):
             if bus:
                 bus.post(Gst.Message.new_eos(None))
 
-            # move ‘self.pipeline = None’ until after the thread join ↓↓↓
             pipe = self.pipeline
         else:
             pipe = None
 
-        # 3) shut down the poller
+        # shut down the poller
         if self._bus_thread and self._bus_thread.is_alive():
             self._bus_should_exit = True
             self._bus_thread.join(timeout=6)
@@ -1419,10 +1418,10 @@ class BufferedCapture(Process):
             pipe.unref()
         self.pipeline = None
 
-        # 4) brute-force clean-up
+        # brute-force clean-up
         self.forceCloseRTSPConnections()
 
-        # 5) OpenCV
+        # OpenCV
         if self.video_device_type == "cv2" and self.device:
             self.device.release()
             self.device = None
@@ -1768,7 +1767,7 @@ class BufferedCapture(Process):
 
                     log.info('Frame grabbing failed, video device is probably disconnected!')
                     self.releaseResources()
-                    # Note: releaseResources() now includes proper RTSP cleanup with fallback force close
+                    # Note: releaseResources() includes proper RTSP cleanup with fallback force close
                     wait_for_reconnect = True
                     break
 
