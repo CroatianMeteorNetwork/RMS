@@ -30,9 +30,6 @@ from multiprocessing import Process, Event, Value, Array
 import threading
 import os
 import signal
-import subprocess
-import shutil
-from contextlib import suppress
 
 import cv2
 import numpy as np
