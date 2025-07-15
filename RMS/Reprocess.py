@@ -647,6 +647,10 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     try:
         observation_summary_path_file_name, observation_summary_json_path_file_name = (
                 finalizeObservationSummary(config, night_data_dir))
+        
+        extra_files.append(observation_summary_path_file_name)
+        extra_files.append(observation_summary_json_path_file_name)
+        
         log.info("\n\nObservation Summary\n===================\n\n" + serialize(config) + "\n\n")
 
     except Exception as e:
@@ -654,8 +658,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
 
-    extra_files.append(observation_summary_path_file_name)
-    extra_files.append(observation_summary_json_path_file_name)
+
     night_archive_dir = os.path.join(os.path.abspath(config.data_dir), config.archived_dir,
         night_data_dir_name)
 
