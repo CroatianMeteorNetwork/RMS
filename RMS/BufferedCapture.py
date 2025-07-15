@@ -986,7 +986,7 @@ class BufferedCapture(Process):
         # Obfuscate the password in the pipeline string before logging
         obfuscated_pipeline_str = obfuscatePassword(pipeline_str)
 
-        log.debug("GStreamer pipeline string: {:s}".format(obfuscated_pipeline_str))
+        log.info("GStreamer pipeline string: {:s}".format(obfuscated_pipeline_str))
 
         # Set the pipeline to PLAYING state with retries
         for attempt in range(max_retries):
