@@ -1311,78 +1311,6 @@ class BufferedCapture(Process):
 
         return False
 
-    def forceCloseRTSPConnections(self):
-        """Force close any active RTSP connections by this process.
-        This is a brute-force cleanup method for when GStreamer doesn't properly close connections.
-        """
-        if not hasattr(self, 'config') or not self.config:
-                return
-
-        if "rtsp://" not in str(self.config.deviceID):
-            return
-
-        m = re.search(r'rtsp://(?:[^:@]+:[^@]+@)?([^/:]+)', str(self.config.deviceID))
-        if not m:
-            return
-
-        camera_ip = m.group(1)
-        pid = os.getpid()
-
-        log.info("Scanning for lingering RTSP connections to %s (pid %d)…", camera_ip, pid)
-
-        try:
-            # --- dump netstat so we can see what we matched ---------------
-            ns = subprocess.run(
-                ["netstat", "-anp"],
-                capture_output=True, text=True, timeout=5
-            )
-            # log.debug("netstat (first 30 lines):\n%s",
-            #         "\n".join(ns.stdout.splitlines()[:30]))
-
-            # --- iterate lines to find sockets that belong to *this* pid --
-            for line in ns.stdout.splitlines():
-                # strict “<spaces>12345/” so we don’t match “512345”
-                if not re.search(rf"\s{pid}/", line):
-                    continue
-                if camera_ip not in line:
-                    continue
-                if ":554" not in line and ":rtsp" not in line:
-                    continue
-                if "ESTABLISHED" not in line:
-                    continue
-
-                log.warning("Found active RTSP connection: %s", line.strip())
-
-                parts = line.split()
-                if len(parts) < 4:
-                    continue
-
-                local_addr = parts[3]
-                if ':' not in local_addr:
-                    continue
-                local_port = local_addr.rsplit(':', 1)[1]
-
-                # ----------------------------------------------------------
-                # try to kill with ss -K (needs NET_ADMIN)
-                # ----------------------------------------------------------
-                cmd = ["ss", "-K", "sport", "=", local_port]
-                use_sudo = os.geteuid() != 0 and shutil.which("sudo")
-                if use_sudo:
-                    cmd.insert(0, "sudo")
-
-                proc = subprocess.run(
-                    cmd, capture_output=True, text=True
-                )
-                if proc.returncode:
-                    log.warning("ss -K returned %d: %s", proc.returncode,
-                                proc.stderr.strip())
-                else:
-                    log.debug("ss -K succeeded for port %s", local_port)
-
-        except Exception as e:
-            log.error("forceCloseRTSPConnections() failed: %s", e)
-
-
     def releaseResources(self):
         """Tear everything down in the right order so no FD survives."""
 
@@ -1417,9 +1345,6 @@ class BufferedCapture(Process):
         if pipe:
             pipe.unref()
         self.pipeline = None
-
-        # brute-force clean-up
-        self.forceCloseRTSPConnections()
 
         # OpenCV
         if self.video_device_type == "cv2" and self.device:
