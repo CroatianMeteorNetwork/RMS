@@ -276,37 +276,82 @@ def gstDebugLogger(category, level, file, function, line, obj, message, user_dat
 ##############################################################################
 
 class CustomHandler(logging.handlers.TimedRotatingFileHandler):
-    """ Custom handler for rotating log files.
-    
-    The live file: log_XX0000_20241229_112347.log
-    On rollover: log_XX0000_20241229_112347-[29_1123-to-30_1123].log
     """
-    def __init__(self, station_id, start_time_str, *args, **kwargs):
+    Custom handler for rotating log files where the new file's name
+    reflects the start time of the new logging period, without renaming old files.
+    
+    On rollover, it closes the current log file and creates a new one with a
+    filename timestamped to the beginning of the new logging interval.
+    """
+    def __init__(self, station_id, log_file_prefix, filename, when='H', interval=24, utc=True, **kwargs):
+        """
+        Initializes the handler.
+        
+        Args:
+            station_id (str): The station ID to embed in the filename.
+            log_file_prefix (str): A prefix for the log filename.
+            filename (str): The initial full path to the log file.
+            when, interval, utc, **kwargs: Standard TimedRotatingFileHandler arguments.
+        """
         self.station_id = station_id
-        self.start_time_str = start_time_str
-        super(CustomHandler, self).__init__(*args, **kwargs)
-        self.suffix = "%Y%m%d_%H%M%S"
-        self.namer = self._rename_on_rollover
+        self.log_file_prefix = log_file_prefix
 
-    def _rename_on_rollover(self, default_name):
-        # Parse the default filename
-        base_dir, base_file = os.path.split(default_name)
-        base_noext, dot, start_time_str = base_file.rpartition('.')
-        
-        if base_noext.endswith('.log'):
-            base_noext = base_noext[:-4]
-        
-        # Calculate time range for the log file
-        start_time = datetime.datetime.strptime(start_time_str, "%Y%m%d_%H%M%S")
-        end_time = UTCFromTimestamp.utcfromtimestamp(self.rolloverAt)
-        
-        # Format the new filename with time range
-        start_str = start_time.strftime("%d_%H%M")
-        end_str = end_time.strftime("%d_%H%M")
-        new_name = "{}-[{}-to-{}].log".format(base_noext, start_str, end_str)
-        
-        return os.path.join(base_dir, new_name)
+        # The namer/rotator attributes are not used since we override doRollover.
+        super(CustomHandler, self).__init__(
+            filename=filename, when=when, interval=interval, utc=utc, **kwargs
+        )
 
+    def doRollover(self):
+        """
+        Handles rollover by closing the current file and opening a new one with an
+        updated timestamp in its name.
+        """
+        # Close the current file stream
+        if self.stream:
+            self.stream.close()
+            self.stream = None
+
+        # The 'rolloverAt' time is the scheduled time for the rollover, which is
+        # the exact start time for the new log file.
+        rollover_time_s = self.rolloverAt
+        
+        if self.utc:
+            time_tuple = time.gmtime(rollover_time_s)
+        else:
+            time_tuple = time.localtime(rollover_time_s)
+        
+        # Format the time for the new filename
+        new_time_str = time.strftime("%Y%m%d_%H%M%S", time_tuple)
+
+        # Construct the new base filename in the same directory.
+        # This is the crucial step that changes the name of the NEXT log file.
+        self.baseFilename = os.path.join(
+            os.path.dirname(self.baseFilename),
+            "{}log_{}_{}.log".format(self.log_file_prefix, self.station_id, new_time_str)
+        )
+        
+        # Open the new log file stream using the updated baseFilename.
+        self.stream = self._open()
+
+        # Calculate the time for the next rollover.
+        # This logic is adapted from the standard library to ensure correctness.
+        currentTime = int(time.time())
+        newRolloverAt = self.computeRollover(currentTime)
+        while newRolloverAt <= currentTime:
+            newRolloverAt = newRolloverAt + self.interval
+
+        # Handle potential Daylight Saving Time shifts for certain rollover schedules
+        if (self.when == 'MIDNIGHT' or self.when.startswith('W')) and not self.utc:
+            dstNow = time.localtime(currentTime)[-1]
+            dstAtRollover = time.localtime(newRolloverAt)[-1]
+            if dstNow != dstAtRollover:
+                if not dstNow:
+                    addend = -3600
+                else:
+                    addend = 3600
+                newRolloverAt += addend
+        
+        self.rolloverAt = newRolloverAt
 
 ##############################################################################
 # LISTENER SIDE
@@ -349,13 +394,20 @@ def _listener_configurer(config, log_file_prefix, safedir, console_level=logging
     logfile_name = "{}log_{}_{}.log".format(log_file_prefix, config.stationID, start_time_str)
     full_path = os.path.join(log_path, logfile_name)
 
+    # If RMS is to reboot daily, set the rollover time to 25 hours to prevent log fracturing before a new
+    # capture session starts
+    if config.reboot_after_processing:
+        rollover_interval = 25
+    else:
+        rollover_interval = 24
+
     # Initialize file and console handlers
     handler = CustomHandler(
         station_id=config.stationID,
-        start_time_str=start_time_str,
+        log_file_prefix=log_file_prefix,
         filename=full_path,
         when='H',
-        interval=24,
+        interval=rollover_interval,
         utc=True
     )
     console = logging.StreamHandler(sys.stdout)
