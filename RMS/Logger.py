@@ -94,15 +94,6 @@ class LevelRespectingQueueListener(logging.handlers.QueueListener):
             if record.levelno >= handler.level:  # Check handler level
                 handler.handle(record)
 
-class LevelRespectingQueueListener(logging.handlers.QueueListener):
-    """QueueListener that respects individual handler levels."""
-    def handle(self, record):
-        """Override to check handler levels before handling."""
-        record = self.prepare(record)
-        for handler in self.handlers:
-            if record.levelno >= handler.level:  # Check handler level
-                handler.handle(record)
-
 
 class LoggerWriter:
     """ Used to redirect stdout/stderr to the log.
@@ -385,6 +376,22 @@ class LoggingManager:
 
         """
 
+        # Helper function to get logging level from a string
+        def get_log_level(level_str, default=logging.INFO):
+            level_map = {
+                "DEBUG": logging.DEBUG, "INFO": logging.INFO, "WARNING": logging.WARNING,
+                "ERROR": logging.ERROR, "CRITICAL": logging.CRITICAL
+            }
+            return level_map.get(str(level_str).upper(), default)
+
+        # If levels are not passed as arguments, get them from the config file
+        if console_level is None:
+            console_level = get_log_level(config.console_log_level, logging.INFO)
+        
+        if file_level is None:
+            file_level = get_log_level(config.log_file_log_level, logging.DEBUG)
+
+
         with self.init_lock:
             if self.is_initialized:
                 return
@@ -562,53 +569,31 @@ def _listener_process(queue, config, log_file_prefix, safedir, console_level=log
 ##############################################################################
 
 def getWhiteAndBlackLists(config):
-    """ Returns the whitelisted RMS root and external script directories,
-        and the blacklisted site-packages directories.
-        
+    """ 
+    Returns the whitelisted RMS root and external script directories, and the blacklisted 
+    site-packages directories.
+    
     Return:
         (set, set) Tuple of whitelisted and blacklisted directories
     """
-
-    # Helper function to get logging level
-    def get_log_level(level_str, default=logging.INFO):
-        """Convert string level to logging constant."""
-        level_map = {
-            "DEBUG": logging.DEBUG,
-            "INFO": logging.INFO,
-            "WARNING": logging.WARNING,
-            "ERROR": logging.ERROR,
-            "CRITICAL": logging.CRITICAL
-        }
-        return level_map.get(level_str.upper(), default)
-
-    # Get levels from config if not explicitly passed
-    if console_level is None:
-        console_level_str = config.console_log_level
-        console_level = get_log_level(console_level_str, logging.INFO)
-    
-    if file_level is None:
-        file_level_str =config.log_file_log_level
-        file_level = get_log_level(file_level_str, logging.DEBUG)
-
     # Whitelist RMS root and external script directories
     rms_root = os.path.realpath(getRmsRootDir())
     allowed_dirs = {rms_root}
     ext = config.external_script_path
     if ext:
         ext_root = os.path.realpath(ext)
-        if not os.path.isdir(ext_root):          # it's a .py file
+        if not os.path.isdir(ext_root):
             ext_root = os.path.dirname(ext_root)
         allowed_dirs.add(ext_root)
 
     # Blacklist site-packages directories (with Py2 fallback)
     try:
         site_packages = site.getsitepackages()
-        user_site    = site.getusersitepackages()
+        user_site     = site.getusersitepackages()
     except (AttributeError, IOError):
         from distutils.sysconfig import get_python_lib
         site_packages = [get_python_lib()]
-        user_site     = getattr(site, 'USER_SITE',
-                                 get_python_lib(prefix=sys.prefix))
+        user_site     = getattr(site, 'USER_SITE', get_python_lib(prefix=sys.prefix))
 
     site_dirs = set(os.path.realpath(p) for p in site_packages)
     site_dirs.add(os.path.realpath(user_site))
