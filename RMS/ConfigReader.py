@@ -35,14 +35,18 @@ TFLITE_AVAILABLE = False
 
 # Used to determine detection parameters which will change in ML filtering is available
 try:
-    from tflite_runtime.interpreter import Interpreter
+    from ai_edge_litert.interpreter import Interpreter       # 1 – new LiteRT
     TFLITE_AVAILABLE = True
 except ImportError:
     try:
-        from tensorflow.lite.python.interpreter import Interpreter
+        from tflite_runtime.interpreter import Interpreter    # 2 – legacy wheel
         TFLITE_AVAILABLE = True
     except ImportError:
-        TFLITE_AVAILABLE = False
+        try:
+            from tensorflow.lite.python.interpreter import Interpreter  # 3 – full TF
+            TFLITE_AVAILABLE = True
+        except ImportError:
+            pass
 
 
 def choosePlatform(win_conf, rpi_conf, linux_pc_conf):
@@ -352,6 +356,12 @@ class Config:
 
         # days of logfiles to keep
         self.logdays_to_keep = 30
+
+        # Console logging level
+        self.console_log_level = 'INFO'
+
+        # Log file logging level
+        self.log_file_log_level = 'DEBUG'
 
         # Toggle logging stdout messages
         self.log_stdout = False
@@ -982,8 +992,20 @@ def parseCapture(config, parser):
     if parser.has_option(section, "logdays_to_keep"):
         config.logdays_to_keep = int(parser.get(section, "logdays_to_keep"))
 
-    if parser.has_option(section, "log_stdout"):
-        config.log_stdout = parser.getboolean(section, "log_stdout")
+    if parser.has_option(section, "console_log_level"):
+        config.console_log_level = parser.getint(section, "console_log_level")
+        log_level_mapping = {
+            0: 'CRITICAL',
+            1: 'ERROR',
+            2: 'WARNING',
+            3: 'INFO',
+            4: 'DEBUG'
+        }
+        config.console_log_level = log_level_mapping[min(max(config.console_log_level, 0), 4)]
+
+    if parser.has_option(section, "log_file_log_level"):
+        config.log_file_log_level = parser.getint(section, "log_file_log_level")
+        config.log_file_log_level = log_level_mapping[min(max(config.log_file_log_level, 0), 4)]
 
     if parser.has_option(section, "arch_dirs_to_keep"):
         config.arch_dirs_to_keep = int(parser.get(section, "arch_dirs_to_keep"))

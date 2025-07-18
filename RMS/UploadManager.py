@@ -20,9 +20,9 @@ getLogger("paramiko.auth_handler").setLevel(logging.CRITICAL)
 
 from multiprocessing import Manager
 
-try:
+if sys.version_info >= (3, 3):
     from queue import Empty  # Python 3
-except ImportError:
+else:
     from Queue import Empty  # Python 2
 
 QueueEmpty = Empty
@@ -146,8 +146,8 @@ def getSSHClient(hostname,
     Handles key-based authentication first, then falls back to the SSH agent.
     Returns an SSH client or None.
     """
-    log.info("Paramiko version: {}".format(paramiko.__version__))
-    log.info("Establishing SSH connection to: {}:{}...".format(hostname, port))
+    log.debug("Paramiko version: {}".format(paramiko.__version__))
+    log.debug("Establishing SSH connection to: {}:{}...".format(hostname, port))
 
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -165,12 +165,12 @@ def getSSHClient(hostname,
                 auth_timeout=auth_timeout,
                 look_for_keys=False
             )
-            log.info("SSHClient connected successfully (key file).")
+            log.debug("SSHClient connected successfully (key file).")
 
             transport = ssh.get_transport()
             if transport and keepalive_interval > 0:
                 transport.set_keepalive(keepalive_interval)
-                log.info("Keepalive set to {} seconds".format(keepalive_interval))
+                log.debug("Keepalive set to {} seconds".format(keepalive_interval))
 
             return ssh
 
@@ -196,7 +196,7 @@ def getSSHClient(hostname,
             banner_timeout=banner_timeout,
             auth_timeout=auth_timeout
         )
-        log.info("SSHClient connected via agent fallback.")
+        log.debug("SSHClient connected via agent fallback.")
         return ssh
 
     except paramiko.AuthenticationException:
@@ -227,7 +227,7 @@ def getSFTPClient(ssh):
         # sftp = await asyncio.wait_for(open_sftp_async(ssh), timeout=30)
 
         sftp = ssh.open_sftp()
-        log.info("SFTP connection established.")
+        log.debug("SFTP connection established.")
         return sftp
 
     except Exception as e:
@@ -314,7 +314,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
 
         # Optionally ensure remote directory exists
         if allow_dir_creation:
-            log.info("Checking/creating remote dir '{}'".format(dir_remote))
+            log.debug("Checking/creating remote dir '{}'".format(dir_remote))
             if not existsRemoteDirectory(sftp, dir_remote):
                 createRemoteDirectory(sftp, dir_remote)
 
@@ -343,7 +343,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                 
                 # If the remote and the local file are of the same size, skip it
                 if local_file_size == remote_info.st_size:
-                    log.info("The file '{}' already exists on the server and is the same size. Skipping.".format(remote_file))
+                    log.debug("The file '{}' already exists on the server and is the same size. Skipping.".format(remote_file))
                     continue
             
             except IOError as e:
@@ -401,7 +401,8 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                                     formatSize(tracker.uploaded_bytes),
                                     formatSize(tracker.total_bytes),
                                     transfer_rate_str,
-                                    time_str
+                                    time_str,
+                                    end=''
                                 ))
                             else:
                                 # At 100%, show "complete" instead of remaining time
@@ -418,7 +419,8 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                                         os.path.basename(local_file),
                                         formatSize(tracker.uploaded_bytes),
                                         formatSize(tracker.total_bytes),
-                                        transfer_rate_str
+                                        transfer_rate_str,
+                                        end=''
                                     ))
                         
                         else:
@@ -426,7 +428,8 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                                 percent_complete,
                                 os.path.basename(local_file),
                                 formatSize(tracker.uploaded_bytes),
-                                formatSize(tracker.total_bytes)
+                                formatSize(tracker.total_bytes), 
+                                end=''
                             ))
                         
                         tracker.last_percent = percent_complete
@@ -435,7 +438,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
             log.info('Starting upload of ' \
                      + local_file + ' ({}) to '.format(formatSize(local_file_size)) + remote_file)
             sftp.put(local_file, remote_file, callback=progressCallback)
-            log.info("Upload completed, verifying...")
+            log.debug("Upload completed, verifying...")
 
             # Check that the size of the remote file is correct, indicating a successful upload
             remote_info = sftp.lstat(remote_file)
@@ -446,7 +449,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                     formatSize(local_file_size), formatSize(remote_info.st_size)))
                 return False
 
-            log.info("File upload verified: {:s}".format(remote_file))
+            log.debug("File upload verified: {:s}".format(remote_file))
             
         return True
 
@@ -457,10 +460,10 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
     finally:
         # Close SFTP and SSH if open
         if sftp is not None:
-            log.info("Closing SFTP channel")
+            log.debug("Closing SFTP channel")
             sftp.close()
         if ssh is not None:
-            log.info("Closing SSH client connection")
+            log.debug("Closing SSH client connection")
             ssh.close()
 
 # Helper function to format file sizes in human-readable format
@@ -542,6 +545,9 @@ class UploadManager(multiprocessing.Process):
             )
         else:
             log.info("UploadManager terminated (after forced terminate).")
+
+        # Always join to reap zombie (returns instantly if already dead)
+        self.join()
 
 
 

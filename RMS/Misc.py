@@ -27,6 +27,7 @@ else:
 
 
 import numpy as np
+import itertools
 
 from matplotlib import scale as mscale
 from matplotlib import transforms as mtransforms
@@ -937,3 +938,133 @@ def tarWithProgress(source_dir, tar_path, compression='bz2', remove_source=False
         log.error("Error creating archive: {}".format(e))
         log.error("".join(traceback.format_exception(*sys.exc_info())))
         return False
+
+def domainWrapping(query_min, query_max, range_min, range_max):
+    """ For a query in an arbitrarily ranged domain, return a query, or a pair of queries.
+
+    For example, for degrees of longitude 0-360.
+    340, 380, 0, 360 returns [[340, 360], [0, 20]]
+
+    For degrees of latitude -90, + 90.
+    70, 120, -90, 90 returns [[70, 90], [-90, -60]]
+
+    Arguments:
+        query_min: [float] Lower bound of query range.
+        query_max: [float] Upper bound of query range.
+        range_min: [float] Lower bound of domain range.
+        range_max: [float] Upper bound of domain range.
+
+    Return:
+        [list]: a query, or a pair of queries.
+    """
+
+    if query_max < query_min:
+        return [[query_min, query_max]]
+
+    # Compensate for range_mins
+    span = range_max - range_min
+    query_min, query_max = (query_min - range_min) % span, (query_max - range_min) % span
+
+    # No work to do
+    if query_min < query_max:
+        # Decompensate and return
+        return [[range_min + query_min, range_min + query_max]]
+
+    # Case where query_high was on the maximum range limit, avoid returning two overlapping queries
+    if query_min > query_max and query_max == range_min:
+        # Decompensate and return
+        return [[range_min + query_min, range_max]]
+
+    # Case where query_high was on the minimum range limit, avoid returning two overlapping queries
+    if query_min > query_max and query_max == 0:
+        # Decompensate and return
+        return [[range_min + query_min, range_max]]
+
+    # Case where one end was outside of range, return two queries
+    elif query_min > query_max:
+        q1 = [range_min + query_min, range_max]
+        q2 = [range_min, range_min + query_max]
+        return [q1, q2]
+
+    # Finally return query range for the case where the full range was specified
+    else:
+        return [[range_min, range_max]]
+
+def nDimensionDomainSplit(query_list):
+    """For an arbitrary number of dimensions, return a cartesian product of domain wrap queries.
+
+    For example a query between:
+        160 and 200 degrees of longitude (-180 +180),
+        80 and 110 degrees of latitude (-90 + 90) and
+        2300 and 0100 the next day would be passed as
+
+        [[160, 200, -180, +180], [80, 110, -90, +90], [23, 25, 0, 24]]
+
+    and would return
+
+        [[[160, 180], [80, 90], [23, 24]],
+         [[160, 180], [80, 90], [0, 1]],
+         [[160, 180], [-90, -70], [23, 24]],
+         [[160, 180], [-90, -70], [0, 1]],
+         [[-180, -160], [80, 90], [23, 24]],
+         [[-180, -160], [80, 90], [0, 1]],
+         [[-180, -160], [-90, -70], [23, 24]],
+         [[-180, -160], [-90, -70], [0, 1]]]
+
+    Only the minimum number of wrapped_queries are returned. In this case the degrees of longitude
+    does not wrap around, so only 6 wrapped_queries are required for complete coverage.
+
+        [[340, 350, 0, 360], [80, 110, -90, +90], [23, 25, 0, 24]]
+
+
+        [[340, 350], [80, 90], [23, 24]]
+        [[340, 350], [80, 90], [0, 1]]
+        [[340, 350], [-90, -70], [23, 24]]
+        [[340, 350], [-90, -70], [0, 1]]
+        [[340, 360], [0, 20]]
+        [[70, 90], [-90, -60]]
+
+    Arguments:
+        query_list: List of wrapped_queries in the form [[query_min, query_max], [range_min, range_max], ... ]
+
+    Return:
+        list: Cartesian product of split wrapped_queries as a list.
+    """
+    # Compute the split wrapped_queries for each dimension
+    wrapped_queries = []
+    for query in query_list:
+        query_min, query_max = query[0], query[1]
+        domain_low, domain_high = query[2], query[3]
+        wrapped_queries.append(domainWrapping(query_min, query_max, domain_low, domain_high))
+
+    # Produce the cartesian product across all result dimensions
+    wrapped_query_list = list(itertools.product(*wrapped_queries))
+
+    # Convert to a list
+    wrapped_queries = []
+    for result in wrapped_query_list:
+        wrapped_queries.append(list(result))
+    return wrapped_queries
+
+def sphericalDomainWrapping(ra_min, ra_max, dec_min, dec_max,
+                            ra_range_min=0, ra_range_max=360, dec_range_min=-90, dec_range_max=+90):
+    """ For a query in a spherical domain, compute the queries required to cover a search space.
+
+    Arguments:
+        ra_min: [float] right ascension in degrees.
+        ra_max: [float] right ascension in degrees.
+
+    Keyword arguments:
+        ra_range_min: [float] optional, default 0 right ascension in degrees domain minimum.
+        ra_range_max: [float] optional, default 360 right ascension in degrees domain maximum.
+        dec_range_min: [float] optional, default -90 declination in degrees domain minimum.
+        dec_range_max: [float] optional, default 90 declination in degrees domain maximum.
+
+    Return:
+        [list] of queries required to cover a spherical search space.
+    """
+
+    query = []
+    query.append([ra_min, ra_max, ra_range_min, ra_range_max])
+    query.append([dec_min, dec_max, dec_range_min, dec_range_max])
+    return nDimensionDomainSplit(query)

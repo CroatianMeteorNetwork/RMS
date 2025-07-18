@@ -94,6 +94,15 @@ class LevelRespectingQueueListener(logging.handlers.QueueListener):
             if record.levelno >= handler.level:  # Check handler level
                 handler.handle(record)
 
+class LevelRespectingQueueListener(logging.handlers.QueueListener):
+    """QueueListener that respects individual handler levels."""
+    def handle(self, record):
+        """Override to check handler levels before handling."""
+        record = self.prepare(record)
+        for handler in self.handlers:
+            if record.levelno >= handler.level:  # Check handler level
+                handler.handle(record)
+
 
 class LoggerWriter:
     """ Used to redirect stdout/stderr to the log.
@@ -559,6 +568,27 @@ def getWhiteAndBlackLists(config):
     Return:
         (set, set) Tuple of whitelisted and blacklisted directories
     """
+
+    # Helper function to get logging level
+    def get_log_level(level_str, default=logging.INFO):
+        """Convert string level to logging constant."""
+        level_map = {
+            "DEBUG": logging.DEBUG,
+            "INFO": logging.INFO,
+            "WARNING": logging.WARNING,
+            "ERROR": logging.ERROR,
+            "CRITICAL": logging.CRITICAL
+        }
+        return level_map.get(level_str.upper(), default)
+
+    # Get levels from config if not explicitly passed
+    if console_level is None:
+        console_level_str = config.console_log_level
+        console_level = get_log_level(console_level_str, logging.INFO)
+    
+    if file_level is None:
+        file_level_str =config.log_file_log_level
+        file_level = get_log_level(file_level_str, logging.DEBUG)
 
     # Whitelist RMS root and external script directories
     rms_root = os.path.realpath(getRmsRootDir())
