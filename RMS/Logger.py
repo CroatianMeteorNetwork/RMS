@@ -397,7 +397,7 @@ def _listener_configurer(config, log_file_prefix, safedir, console_level=logging
     # If RMS is to reboot daily, set the rollover time to 25 hours to prevent log fracturing before a new
     # capture session starts
     if config.reboot_after_processing:
-        rollover_interval = 25
+        rollover_interval = 30
     else:
         rollover_interval = 24
 
