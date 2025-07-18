@@ -42,7 +42,7 @@ from RMS.Formats.ObservationSummary import getObsDBConn, addObsParam
 from RMS.RawFrameSave import RawFrameSaver
 from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp
 from RMS.Formats import FTfile, FTStruct
-from RMS.Logger import getLogger, gstDebugLogger
+from RMS.Logger import LoggingManager, getLogger, gstDebugLogger
 from RMS.CaptureModeSwitcher import switchCameraMode
 import Utils.CameraControl as cc
 
@@ -2050,7 +2050,6 @@ if __name__ == "__main__":
     import multiprocessing
 
     import RMS.ConfigReader as cr
-    from RMS.Logger import initLogging
 
     ###
 
@@ -2072,7 +2071,8 @@ if __name__ == "__main__":
     config = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath('.'))
 
     # Initialize the logger
-    initLogging(config)
+    log_manager = LoggingManager()
+    log_manager.initLogging(config)
 
     # Get the logger handle
     log = getLogger("logger")

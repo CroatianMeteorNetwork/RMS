@@ -28,7 +28,7 @@ from RMS.Formats.FFfile import getMiddleTimeFF
 from RMS.Formats import Platepar
 from RMS.Formats import StarCatalog
 from RMS.Math import rotatePoint
-from RMS.Logger import initLogging, getLogger
+from RMS.Logger import LoggingManager, getLogger
 
 # Import Cython functions
 import pyximport
@@ -384,7 +384,8 @@ if __name__ == "__main__":
     config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
     # Initialize the logger
-    initLogging(config, 'fftalign_')
+    log_manager = LoggingManager()
+    log_manager.initLogging(config, 'fftalign_')
 
     # Get the logger handle
     log = getLogger("logger", level="INFO")

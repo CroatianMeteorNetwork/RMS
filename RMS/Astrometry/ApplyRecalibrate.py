@@ -34,7 +34,7 @@ from RMS.Astrometry.FFTalign import alignPlatepar
 from RMS.Formats import CALSTARS, FFfile, FTPdetectinfo, Platepar, StarCatalog
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, validDefaultFTPdetectinfo
 from RMS.Math import angularSeparation
-from RMS.Logger import initLogging, getLogger
+from RMS.Logger import LoggingManager, getLogger
 from RMS.Misc import RmsDateTime
 
 # Neighbourhood size around individual FFs with detections which will be takes for recalibration
@@ -1255,7 +1255,8 @@ if __name__ == "__main__":
     config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
     # Initialize the logger
-    initLogging(config, 'recalibrate_', safedir=dir_path)
+    log_manager = LoggingManager()
+    log_manager.initLogging(config, 'recalibrate_', safedir=dir_path)
 
     # Get the logger handle
     log = getLogger("logger", level="INFO")

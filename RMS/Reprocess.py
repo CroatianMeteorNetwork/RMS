@@ -24,7 +24,7 @@ from RMS.Formats.FFfile import validFFName
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
 from RMS.Formats.Platepar import Platepar
 from RMS.Formats import CALSTARS
-from RMS.Logger import getLogger
+from RMS.Logger import LoggingManager, getLogger
 from RMS.MLFilter import filterFTPdetectinfoML
 from RMS.UploadManager import UploadManager
 from RMS.Routines.Image import saveImage
@@ -793,9 +793,8 @@ if __name__ == "__main__":
 
     
     ### Init the logger
-
-    from RMS.Logger import initLogging
-    initLogging(config, 'reprocess_')
+    log_manager = LoggingManager()
+    log_manager.initLogging(config, 'reprocess_')
 
     log = getLogger("logger")
 

@@ -35,7 +35,7 @@ except ImportError:
 
 from RMS.Formats import FFfile
 from RMS.Formats import FTPdetectinfo
-from RMS.Logger import initLogging, getLogger
+from RMS.Logger import LoggingManager, getLogger
 import RMS.ConfigReader as cr
 
 # Get the logger from the main module
@@ -610,7 +610,8 @@ if __name__ == "__main__":
     config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
     ### Init the logger
-    initLogging(config, 'reprocess_')
+    log_manager = LoggingManager()
+    log_manager.initLogging(config, 'reprocess_')
     log = getLogger("logger")
 
     #########################
