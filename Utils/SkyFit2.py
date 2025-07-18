@@ -6813,7 +6813,7 @@ def lsRemote(host, username, port, remote_path):
 
     try:
         sftp = ssh.open_sftp()
-        files = sftp.listdir(os.path.basname(remote_path))
+        files = sftp.listdir(remote_path)
         return files
     finally:
         sftp.close()
@@ -6858,7 +6858,7 @@ def downloadFile(host, username, port, remote_path, local_path):
         quit()
     try:
         sftp = ssh.open_sftp()
-        remote_file_list = sftp.listdir(remote_path)
+        remote_file_list = sftp.listdir(os.path.dirname(remote_path))
         if remote_file_list:
             sftp.get(remote_path, local_path)
 
