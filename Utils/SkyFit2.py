@@ -6813,6 +6813,7 @@ def lsRemote(host, username, port, remote_path):
 
     try:
         sftp = ssh.open_sftp()
+        print("Remote path {}".format(remote_path))
         files = sftp.listdir(remote_path)
         return files
     finally:
