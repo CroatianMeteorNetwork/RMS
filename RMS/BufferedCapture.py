@@ -28,6 +28,8 @@ import copy
 import os.path
 from multiprocessing import Process, Event, Value, Array
 import threading
+import os
+import signal
 
 import cv2
 import numpy as np
@@ -40,7 +42,7 @@ from RMS.Misc import obfuscatePassword
 from RMS.Routines.GstreamerCapture import GstVideoFile
 from RMS.Formats.ObservationSummary import getObsDBConn, addObsParam
 from RMS.RawFrameSave import RawFrameSaver
-from RMS.Misc import RmsDateTime, mkdirP
+from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp
 from RMS.Formats import FTfile, FTStruct
 from RMS.Logger import getLogger, gstDebugLogger
 from RMS.CaptureModeSwitcher import switchCameraMode
@@ -49,12 +51,12 @@ import Utils.CameraControl as cc
 # Get the logger from the main module
 log = getLogger("logger")
 
-try:
-    # py3
-    from urllib.parse import urlparse
-except ImportError:
+if sys.version_info[0] < 3:
     # py2
     from urlparse import urlparse
+else:
+    # py3
+    from urllib.parse import urlparse
 
 
 GST_IMPORTED = False
@@ -168,6 +170,7 @@ class BufferedCapture(Process):
         self.sync_tick_reference = 0  # reference epoch for sync ticks
 
         # handle for the Gst bus-poller thread
+        self._bus_should_exit = False
         self._bus_thread = None
 
 
@@ -214,33 +217,37 @@ class BufferedCapture(Process):
             log.info("Capture joined successfully after {} seconds".format(seconds_waited))
         else:
             log.info("Timed out after waiting {} seconds, capture thread still alive".format(seconds_waited))
-            log.info("This is a known issue with GStreamer pipelines not releasing all threads")
-            log.info('Terminating capture...')
-            self.terminate()
-
-        # Clean up shared memory resources
-        try:
-            log.debug('Freeing shared memory resources...')
-            # Frame buffers
-            del self.array1
-            del self.array2
-
-            # Raw frame and timestamp buffers if they exist
-            if self.config.save_frames:
-                del self.shared_timestamps_base
-                del self.shared_timestamps_base2
-
-                if hasattr(self, 'shared_raw_array_base'):
-                    del self.shared_raw_array_base
-                    del self.shared_raw_array_base2
-                    del self.shared_raw_array
-                    del self.shared_raw_array2
-
-            log.debug('Shared memory resources freed successfully')
-
-        except Exception as e:
-            log.error('Error freeing shared memory: {}'.format(e))
-            log.debug(repr(traceback.format_exception(*sys.exc_info())))
+            log.info("Sending interrupt signal for graceful shutdown...")
+            
+            try:
+                # Send SIGINT to allow child process to clean up gracefully
+                if self.pid:
+                    os.kill(self.pid, signal.SIGINT)
+                
+                # Wait a few seconds for graceful shutdown
+                self.join(5)
+                
+                if self.is_alive():
+                    log.warning("Process still alive after interrupt, forcing termination")
+                    self.terminate()
+                else:
+                    log.info("Process exited gracefully after interrupt")
+                    
+            except ProcessLookupError:
+                log.info("Process already terminated")
+            except Exception as e:
+                log.error("Error during graceful shutdown: {}".format(e))
+                log.info("Falling back to terminate()")
+                self.terminate()
+            
+            # Always join to reap zombie (returns instantly if already dead)
+            self.join()
+            
+            # Note: RTSP connections are cleaned up by releaseResources() in the child process
+            
+            # Clean up raw frame arrays after process termination
+            if hasattr(self, 'raw_frame_saver') and self.raw_frame_saver:
+                self.releaseRawArrays()
 
         return self.dropped_frames.value
 
@@ -349,7 +356,7 @@ class BufferedCapture(Process):
                         self.b = y - m*x
                         self.m_jump_error = 0
 
-                        log.info("Check config FPS! Startup sequence exited early probably due to inaccurate FPS value. "
+                        log.debug("Check config FPS! Startup sequence exited early probably due to inaccurate FPS value. "
                                  "Startup is disabled for the remainder of the run")
 
                     # On normal exit, calculate residual error for smooth transition to calculate m
@@ -358,7 +365,7 @@ class BufferedCapture(Process):
                         # calculate the jump error
                         self.m_jump_error = x*(m - self.expected_m) # ns
 
-                    log.info("Exiting startup logic at {:.1f}% of startup sequence, Expected fps: {:.6f}, "
+                    log.debug("Exiting startup logic at {:.1f}% of startup sequence, Expected fps: {:.6f}, "
                              "calculated fps at this point: {:.6f}, residual m error: {:.1f} ns, sample interval: {}"
                              .format(100*x/self.startup_frames, 1e9/self.expected_m, 1e9/m, m_err, sample_interval))
 
@@ -531,14 +538,17 @@ class BufferedCapture(Process):
                     log.info("GStreamer Buffer did not contain a frame.")
                     return False, None, None
 
-                # Convert to np.ndarray
-                frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
+                try:
+                    # Convert to np.ndarray
+                    frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
 
-                # Smooth raw pts and calculate actual timestamp
-                smoothed_pts = self.smoothPTS(gst_timestamp_ns)
-                timestamp = self.start_timestamp + (smoothed_pts/1e9)
+                    # Smooth raw pts and calculate actual timestamp
+                    smoothed_pts = self.smoothPTS(gst_timestamp_ns)
+                    timestamp = self.start_timestamp + (smoothed_pts/1e9)
 
-                buffer.unmap(map_info)
+                finally:
+                    # Always unmap buffer to prevent memory leaks
+                    buffer.unmap(map_info)
 
             # OpenCV
             else:
@@ -778,7 +788,7 @@ class BufferedCapture(Process):
         """
 
         # Segment name is based on timestamp recorded during last segment save
-        segment_time = datetime.datetime.fromtimestamp(self.last_segment_savetime)
+        segment_time = UTCFromTimestamp.utcfromtimestamp(self.last_segment_savetime)
         self.last_segment_savetime = time.time()
         segment_filename = segment_time.strftime("{}_%Y%m%d_%H%M%S_video.mkv".format(self.config.stationID))
         segment_subpath = os.path.join(self.config.data_dir, self.config.video_dir, segment_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
@@ -906,23 +916,17 @@ class BufferedCapture(Process):
         bus = self.pipeline.get_bus()
         mask = Gst.MessageType.ANY
 
-        while True:
-            # exit as soon as pipeline ref is cleared
-            if self.pipeline is None:
-                break
-            
-            # pop messages from bus every 5 seconds
-            msg = bus.timed_pop_filtered(5*Gst.SECOND, mask)
+        while not self._bus_should_exit:
+            msg = bus.timed_pop_filtered(5 * Gst.SECOND, mask)
             if not msg:
                 continue
 
             if msg.type == Gst.MessageType.ERROR:
-                err, _dbg = msg.parse_error()
+                err, dbg = msg.parse_error()
                 log.error("GST ERROR from %s: %s", msg.src.get_name(), err)
             elif msg.type == Gst.MessageType.WARNING:
-                warn, _dbg = msg.parse_warning()
+                warn, dbg = msg.parse_warning()
                 log.warning("GST WARN  from %s: %s", msg.src.get_name(), warn)
-            # all other msgs just pop & vanish
 
 
     def createGstreamDevice(self, video_format, gst_decoder='decodebin', 
@@ -987,6 +991,7 @@ class BufferedCapture(Process):
             # queue2 smooths out the writes, but doesn't wait until the buffers fill up for writing
             storage_branch = (
                 "t. ! queue2 max-size-buffers=150 max-size-bytes=2097152 max-size-time=5000000000 ! "
+                "h264parse ! "
                 "splitmuxsink name=splitmuxsink0 max-size-time={:d} muxer-factory=matroskamux"
                 ).format(int(segment_duration_sec*1e9))
 
@@ -1000,7 +1005,7 @@ class BufferedCapture(Process):
         # Obfuscate the password in the pipeline string before logging
         obfuscated_pipeline_str = obfuscatePassword(pipeline_str)
 
-        log.debug("GStreamer pipeline string: {:s}".format(obfuscated_pipeline_str))
+        log.info("GStreamer pipeline string: {:s}".format(obfuscated_pipeline_str))
 
         # Set the pipeline to PLAYING state with retries
         for attempt in range(max_retries):
@@ -1012,6 +1017,7 @@ class BufferedCapture(Process):
                     self.releaseResources()
 
                 # Parse and create the pipeline
+                self._bus_should_exit = False
                 self.pipeline = Gst.parse_launch(pipeline_str)
                 if not self.pipeline:
                     raise ValueError("Could not create pipeline")
@@ -1039,7 +1045,7 @@ class BufferedCapture(Process):
                     self.start_timestamp = start_time - (self.config.camera_buffer/self.config.fps + self.config.camera_latency)
 
                 # Log start time
-                start_time_str = (datetime.datetime.fromtimestamp(self.start_timestamp)
+                start_time_str = (UTCFromTimestamp.utcfromtimestamp(self.start_timestamp)
                                     .strftime('%Y-%m-%d %H:%M:%S.%f'))
 
                 log.info("Start time is {:s}".format(start_time_str))
@@ -1054,6 +1060,14 @@ class BufferedCapture(Process):
             
             except Exception as e:
                 log.error("Attempt {} failed: {}".format(attempt + 1, str(e)))
+                # Clean up any partial pipeline that was created
+                if hasattr(self, 'pipeline') and self.pipeline:
+                    try:
+                        self.pipeline.set_state(Gst.State.NULL)
+                        self.pipeline = None
+                    except Exception as cleanup_e:
+                        log.error("Error cleaning up failed pipeline: {}".format(cleanup_e))
+                        
                 if attempt < max_retries - 1:
                     log.info("Waiting {} seconds before next attempt...".format(retry_interval))
                     time.sleep(retry_interval)
@@ -1086,6 +1100,8 @@ class BufferedCapture(Process):
 
         # Use a device as the video source
         else:
+
+            reprobe = False
 
             # If an analog camera is used, skip the probe
             if "rtsp" in str(self.config.deviceID):
@@ -1265,8 +1281,10 @@ class BufferedCapture(Process):
                     self.video_device_type = "gst"
 
                     conn = getObsDBConn(self.config)
-                    addObsParam(conn, "media_backend", self.video_device_type)
-                    conn.close()
+                    try:
+                        addObsParam(conn, "media_backend", self.video_device_type)
+                    finally:
+                        conn.close()
 
                     return True
 
@@ -1276,8 +1294,10 @@ class BufferedCapture(Process):
                     self.releaseResources()
 
                     conn = getObsDBConn(self.config)
-                    addObsParam(conn, "media_backend", self.video_device_type)
-                    conn.close()
+                    try:
+                        addObsParam(conn, "media_backend", self.video_device_type)
+                    finally:
+                        conn.close()
 
             if self.config.media_backend == 'v4l2':
                 try:
@@ -1307,134 +1327,45 @@ class BufferedCapture(Process):
 
         return False
 
-
     def releaseResources(self):
-        """Releases resources for GStreamer and OpenCV devices."""
+        """Tear everything down in the right order so no FD survives."""
 
-        # Stop and release the GStreamer pipeline
+        # stop frame-saver children
+        self.releaseRawArrays()
+
+        # gracefully drain & stop the pipeline
         if self.pipeline:
+            bus = self.pipeline.get_bus()
+            self.pipeline.send_event(Gst.Event.new_eos())
+            bus.timed_pop_filtered(2*Gst.SECOND,
+                                Gst.MessageType.EOS | Gst.MessageType.ERROR)
 
-            try:
-                                
-                # 1. Post EOS and monitor
+            self.pipeline.set_state(Gst.State.NULL)
+            self.pipeline.get_state(Gst.SECOND)
 
-                # Force sync all children states before EOS
-                if not self.pipeline.sync_children_states():
-                    log.warning("Initial children sync failed")
+            # wake poller
+            if bus:
+                bus.post(Gst.Message.new_eos(None))
 
-                # Send EOS (End of Stream) to initiate graceful shutdown
-                self.pipeline.send_event(Gst.Event.new_eos())
-                time.sleep(0.1)
-                
-                # 2. Stop RTSP source
+            pipe = self.pipeline
+        else:
+            pipe = None
 
-                # Sync again before accessing source - pipeline state might have changed after EOS
-                if not self.pipeline.sync_children_states():
-                    log.warning("Pre-source children sync failed")
+        # shut down the poller
+        if self._bus_thread and self._bus_thread.is_alive():
+            self._bus_should_exit = True
+            self._bus_thread.join(timeout=6)
+        self._bus_thread = None
 
-                # Get RTSP source element by name - 'src' is the name given to RTSP source when pipeline was created
-                # We need direct access to source element for proper RTSP cleanup (network disconnect)
-                src = self.pipeline.get_by_name('src')
+        # only now drop the last reference
+        if pipe:
+            pipe.unref()
+        self.pipeline = None
 
-                if src:
-                    log.debug("Stopping RTSP source...")
-
-                    # Force sync before changing source state
-                    if not src.sync_state_with_parent():
-                        log.warning("Source sync with parent failed")
-
-                    # Flush any pending data to prevent hanging on network operations
-                    src.send_event(Gst.Event.new_flush_start())
-
-                    ret = src.set_state(Gst.State.NULL)
-                    if ret == Gst.StateChangeReturn.ASYNC:
-                        # If state change is async, wait up to 1 second for it to complete
-                        ret, state, pending = src.get_state(Gst.SECOND)
-                        log.debug("RTSP source final state: {}, pending: {}".format(state, pending))
-
-                else:
-                    log.debug("NO RTSP source found.")
-
-                # 3. Stop pipeline
-                log.debug("Stopping pipeline...")
-                # Set entire pipeline to NULL - this stops everything
-                ret = self.pipeline.set_state(Gst.State.NULL)
-
-                # Wait up to 1 second for pipeline to stop completely
-                ret, final_state, pending = self.pipeline.get_state(Gst.SECOND)
-                log.debug("Pipeline final state: {}".format(final_state))
-
-                 # Clear pipeline reference to allow proper cleanup   
-                self.pipeline = None
-
-                # make sure poller thread exits
-                if self._bus_thread and self._bus_thread.is_alive():
-                    self._bus_thread.join(timeout=2)
-                    self._bus_thread = None
-                    
-            except Exception as e:
-                log.error("Error releasing GStreamer pipeline: {}".format(str(e)))
-                # Emergency cleanup
-                if self.pipeline:
-                    self.pipeline.set_state(Gst.State.NULL)
-                    self.pipeline = None
-                    
-                # Log to database
-                conn = getObsDBConn(self.config)
-                addObsParam(conn, "media_backend", "gst not successfully released")
-                conn.close()
-
-            finally:
-                # If failed to stop the source first, use brute force to stop the pipeline
-                if self.pipeline:
-                    log.error("Attempting to brute force the GStreamer pipeline to NULL")
-                    self.pipeline.set_state(Gst.State.NULL)
-                    self.pipeline = None
-
-                if abs(self.last_calculated_fps - self.config.fps) > 0.0005 and self.last_calculated_fps_n > 25*60*60:
-                    log.info('Config file fps appears to be inaccurate. Consider updating the config file!')
-
-                log.info("Last calculated FPS: {:.6f} at frame {}, config FPS: {}, resets: {}, startup status: {}"
-                         .format(self.last_calculated_fps, self.last_calculated_fps_n, self.config.fps, self.reset_count, self.startup_flag))
-
-                log.info('GStreamer Video device released!')
-
-                conn = getObsDBConn(self.config)
-                addObsParam(conn, "media_backend", self.video_device_type)
-                conn.close()
-
-        # Release the CV2 device (stream or video file)
-        if self.device:
-
-            try:
-
-                if self.video_device_type == "cv2":
-                    self.device.release()
-                    log.info('OpenCV Video device released!')
-
-            except Exception as e:
-                log.error('Error releasing OpenCV device: {}'.format(e))
-                conn = getObsDBConn(self.config)
-                addObsParam(conn, "media_backend", "OpenCV not successfully released")
-                conn.close()
-            finally:
-                self.device = None  # Reset device to None after releasing
-
-
-        # Release the video device if running Gstreamer
-        if self.video_file is not None:
-
-            if GST_IMPORTED and (self.config.media_backend == 'gst'):
-
-                try:
-                    self.device.release()
-                    log.info('GStreamer Video device released!')
-
-                except Exception as e:
-                    log.error('Error releasing GStreamer device: {}'.format(e))
-
-                finally:
-                    self.device = None
+        # OpenCV
+        if self.video_device_type == "cv2" and self.device:
+            self.device.release()
+            self.device = None
 
 
     def releaseRawArrays(self):
@@ -1444,19 +1375,38 @@ class BufferedCapture(Process):
                 self.raw_frame_saver.stop()
                 self.raw_frame_saver.join(5)
                 if self.raw_frame_saver.is_alive():
-                    log.warning("RawFrameSaver still busy. Terminating")
-                    self.raw_frame_saver.terminate()
-                    self.raw_frame_saver.join()
+                    log.warning("RawFrameSaver still busy. Sending interrupt signal...")
+                    try:
+                        if self.raw_frame_saver.pid:
+                            os.kill(self.raw_frame_saver.pid, signal.SIGINT)
+                        
+                        # Wait for graceful shutdown
+                        self.raw_frame_saver.join(3)
+                        
+                        if self.raw_frame_saver.is_alive():
+                            log.warning("RawFrameSaver still alive after interrupt, forcing termination")
+                            self.raw_frame_saver.terminate()
+                            self.raw_frame_saver.join()
+                        else:
+                            log.info("RawFrameSaver exited gracefully after interrupt")
+                            
+                    except ProcessLookupError:
+                        log.info("RawFrameSaver already terminated")
+                    except Exception as e:
+                        log.error("Error during graceful RawFrameSaver shutdown: {}".format(e))
+                        self.raw_frame_saver.terminate()
+                        self.raw_frame_saver.join()
             finally:
                 self.raw_frame_saver = None
 
         # Clean up array resources
         self.current_raw_frame_shape = None
         self.shared_raw_array = None
-        del self.shared_raw_array_base
-        del self.shared_raw_array
-        del self.shared_raw_array_base2
-        del self.shared_raw_array2
+        
+        # Safely delete shared memory arrays
+        for name in ("shared_raw_array_base", "shared_raw_array", "shared_raw_array_base2", "shared_raw_array2"):
+            if hasattr(self, name):
+                delattr(self, name)
 
 
     def initRawFrameArrays(self, frame_shape):
@@ -1595,6 +1545,9 @@ class BufferedCapture(Process):
             # Continue with main capture loop
             self.captureFrames()
 
+        except KeyboardInterrupt:
+            log.info("Capture process received interrupt signal. Shutting down gracefully...")
+            self.exit.set()
         except Exception as e:
             log.error("Error in capture process: {}".format(e))
             log.debug(repr(traceback.format_exception(*sys.exc_info())))
@@ -1748,6 +1701,7 @@ class BufferedCapture(Process):
                 if (self.video_file is None) and (not ret):
                     log.info('Frame grabbing failed, video device is probably disconnected!')
                     self.releaseResources()
+                    # Note: releaseResources() includes proper RTSP cleanup with fallback force close
                     wait_for_reconnect = True
                     break
 
@@ -1803,6 +1757,11 @@ class BufferedCapture(Process):
                             self.start_raw_time1.value = first_raw_frame_timestamp
                         else:
                             self.start_raw_time2.value = first_raw_frame_timestamp
+
+                        # Clean up existing frame saver before creating a new one
+                        if hasattr(self, 'raw_frame_saver') and self.raw_frame_saver:
+                            log.info("Cleaning up existing raw frame saver before mode change")
+                            self.releaseRawArrays()
 
                         if not self.initRawFrameArrays(frame.shape):
                             log.error("Failed to reinitialize arrays after mode change")
@@ -2020,7 +1979,7 @@ class BufferedCapture(Process):
                 else:
                     self.start_time2.value = first_frame_timestamp
 
-                log.info('New block of raw frames available for compression with starting time: {:s}'
+                log.debug('New block of raw frames available for compression with starting time: {:s}'
                          .format(str(first_frame_timestamp)))
 
             
@@ -2039,13 +1998,13 @@ class BufferedCapture(Process):
                 # Clear the timestamp buffer list                
                 del self.timestamp_buffer[:]
 
-                base_time = datetime.datetime.fromtimestamp(first_frame_timestamp)
+                base_time = UTCFromTimestamp.utcfromtimestamp(first_frame_timestamp)
                 ft_filename = base_time.strftime("FT_{}_%Y%m%d_%H%M%S.bin".format(self.config.stationID))
                 ft_subpath = os.path.join(self.config.data_dir, self.config.times_dir, base_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
 
                 mkdirP(ft_subpath)
                 FTfile.write(ft, ft_subpath, ft_filename)
-                log.info("Created FT file {} for block starting at {}".format(os.path.join(ft_subpath, ft_filename), first_frame_timestamp))
+                log.debug("Created FT file {} for block starting at {}".format(os.path.join(ft_subpath, ft_filename), first_frame_timestamp))
 
                 # For Testing: 
                 # Print first and last 10 timestamps, array length, average time difference and time difference from last block

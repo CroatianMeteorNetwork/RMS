@@ -20,6 +20,7 @@ import math
 import os
 import sys
 from RMS.Misc import getRmsRootDir
+from Utils.GenerateTimelapse import isFfmpegWorking
 
 # Consolidated version-specific imports and definitions
 if sys.version_info[0] == 3:
@@ -34,14 +35,18 @@ TFLITE_AVAILABLE = False
 
 # Used to determine detection parameters which will change in ML filtering is available
 try:
-    from tflite_runtime.interpreter import Interpreter
+    from ai_edge_litert.interpreter import Interpreter       # 1 – new LiteRT
     TFLITE_AVAILABLE = True
 except ImportError:
     try:
-        from tensorflow.lite.python.interpreter import Interpreter
+        from tflite_runtime.interpreter import Interpreter    # 2 – legacy wheel
         TFLITE_AVAILABLE = True
     except ImportError:
-        TFLITE_AVAILABLE = False
+        try:
+            from tensorflow.lite.python.interpreter import Interpreter  # 3 – full TF
+            TFLITE_AVAILABLE = True
+        except ImportError:
+            pass
 
 
 def choosePlatform(win_conf, rpi_conf, linux_pc_conf):
@@ -351,6 +356,12 @@ class Config:
 
         # days of logfiles to keep
         self.logdays_to_keep = 30
+
+        # Console logging level
+        self.console_log_level = 'INFO'
+
+        # Log file logging level
+        self.log_file_log_level = 'DEBUG'
 
         # Toggle logging stdout messages
         self.log_stdout = False
@@ -978,8 +989,20 @@ def parseCapture(config, parser):
     if parser.has_option(section, "logdays_to_keep"):
         config.logdays_to_keep = int(parser.get(section, "logdays_to_keep"))
 
-    if parser.has_option(section, "log_stdout"):
-        config.log_stdout = parser.getboolean(section, "log_stdout")
+    if parser.has_option(section, "console_log_level"):
+        config.console_log_level = parser.getint(section, "console_log_level")
+        log_level_mapping = {
+            0: 'CRITICAL',
+            1: 'ERROR',
+            2: 'WARNING',
+            3: 'INFO',
+            4: 'DEBUG'
+        }
+        config.console_log_level = log_level_mapping[min(max(config.console_log_level, 0), 4)]
+
+    if parser.has_option(section, "log_file_log_level"):
+        config.log_file_log_level = parser.getint(section, "log_file_log_level")
+        config.log_file_log_level = log_level_mapping[min(max(config.log_file_log_level, 0), 4)]
 
     if parser.has_option(section, "arch_dirs_to_keep"):
         config.arch_dirs_to_keep = int(parser.get(section, "arch_dirs_to_keep"))
@@ -1208,10 +1231,16 @@ def parseCapture(config, parser):
     # Toggle saving of frame time files (FT files) to times_dir
     if parser.has_option(section, "save_frame_times"):
         config.save_frame_times = parser.getboolean(section, "save_frame_times")
-
-    # Enable/disable saving video frames
+    
+    # Enable/disable saving video frames - automatically off if FFmpeg is missing
+    ffmpeg_ok = isFfmpegWorking()
     if parser.has_option(section, "save_frames"):
-        config.save_frames = parser.getboolean(section, "save_frames")
+        save_requested = parser.getboolean(section, "save_frames")
+        config.save_frames = save_requested and ffmpeg_ok
+        if save_requested and not ffmpeg_ok:
+            print("save_frames requested but FFmpeg not available - disabling.")
+    else:
+        config.save_frames = False
 
     if parser.has_option(section, "frame_file_type"):
         config.frame_file_type = parser.get(section, "frame_file_type")

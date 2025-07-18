@@ -46,7 +46,7 @@ from RMS.Compression import Compressor
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
 from RMS.Formats.FFfile import validFFName
-from RMS.Misc import mkdirP, RmsDateTime
+from RMS.Misc import mkdirP, RmsDateTime, UTCFromTimestamp
 from RMS.QueuedPool import QueuedPool
 from RMS.Reprocess import getPlatepar, processNight, processFramesFiles
 from RMS.RunExternalScript import runExternalScript
@@ -931,7 +931,7 @@ if __name__ == "__main__":
         repo = git.Repo(search_parent_directories=True)
         commit_unix_time = repo.head.object.committed_date
         sha = repo.head.object.hexsha
-        commit_time = datetime.datetime.fromtimestamp(commit_unix_time).strftime('%Y%m%d_%H%M%S')
+        commit_time = UTCFromTimestamp.utcfromtimestamp(commit_unix_time).strftime('%Y%m%d_%H%M%S')
 
     except:
         commit_time = ""
@@ -1011,7 +1011,6 @@ if __name__ == "__main__":
             if upload_manager.is_alive():
                 log.info('Closing upload manager...')
                 upload_manager.stop()
-                del upload_manager
 
 
         sys.exit()

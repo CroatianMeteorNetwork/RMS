@@ -293,6 +293,7 @@ class LiveViewer(multiprocessing.Process):
 
     def stop(self):
         self.exit.set()
+        self.join()
 
 
 
