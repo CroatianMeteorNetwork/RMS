@@ -545,6 +545,9 @@ class UploadManager(multiprocessing.Process):
         else:
             log.info("UploadManager terminated (after forced terminate).")
 
+        # Always join to reap zombie (returns instantly if already dead)
+        self.join()
+
 
 
     def addFiles(self, file_list):
