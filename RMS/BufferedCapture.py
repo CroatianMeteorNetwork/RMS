@@ -165,6 +165,10 @@ class BufferedCapture(Process):
         # Flag for process control
         self.exit = Event()
 
+        # Initialize sync tick
+        self.last_sync_tick = -1
+        self.sync_tick_reference = 0  # reference epoch for sync ticks
+
         # handle for the Gst bus-poller thread
         self._bus_should_exit = False
         self._bus_thread = None
@@ -485,7 +489,7 @@ class BufferedCapture(Process):
         return smoothed_pts
 
 
-    def read(self, check_color=False):
+    def read(self):
         """ Retrieve frames and timestamp.
 
         Arguments:
@@ -551,13 +555,6 @@ class BufferedCapture(Process):
                 ret, frame = self.device.read()
                 if ret:
                     timestamp = time.time()
-
-            # Check if frame contains color information
-            if check_color:
-                self.convert_to_gray = self.isGrayscale(frame)
-
-            # Handling for grayscale conversion
-            frame = self.handleGrayscaleConversion(frame)
 
         return ret, frame, timestamp
 
@@ -713,7 +710,9 @@ class BufferedCapture(Process):
         Returns:
             bool: True if all sampled channels match (or frame is single-channel), otherwise False.
         """
-
+        if frame is None:
+            raise ValueError("isGrayscale() called with frame=None")
+        
         # We don't explicitly check frame.shape first; instead we rely on an IndexError
         # if 'frame' is single-channel (which is inherently grayscale).
         # This is faster than an extra dimension check for most BGR GMN stations 
@@ -871,6 +870,27 @@ class BufferedCapture(Process):
             import traceback
             log.debug(traceback.format_exc())
             return False, None
+
+
+    def shouldSaveFrame(self, ts):
+        """
+        Return True for the first frame that lies within half a frame of
+        each universal sync tick (ref + k·dt).
+
+        Arguments:
+            ts : [float]  epoch timestamp of current frame (seconds)
+        """
+        dt   = self.config.frame_save_aligned_interval  # seconds
+        ref  = self.sync_tick_reference                 # epoch offset
+        tol  = 0.5 / self.config.fps                    # half-frame
+
+        tick = int((ts - ref) / dt + 0.5)
+        tick_time = ref + tick * dt
+
+        if abs(ts - tick_time) <= tol and tick != self.last_sync_tick:
+            self.last_sync_tick = tick
+            return True
+        return False
 
 
     def _busPoller(self):
@@ -1630,12 +1650,13 @@ class BufferedCapture(Process):
 
                     # Read the frame
                     log.info("Reading frame...")
-                    ret, _, _ = self.read(check_color=True)
+                    ret, frame, _ = self.read()
                     log.info("Frame read!")
 
                     # If the connection was made and the frame was retrieved, continue with the capture
                     if ret:
                         log.info('Video device reconnected successfully!')
+                        self.convert_to_gray = self.isGrayscale(frame)
                         wait_for_reconnect = False
                         break
 
@@ -1671,26 +1692,32 @@ class BufferedCapture(Process):
             log.info('Grabbing a new block of {:d} frames...'.format(block_frames))
             for i in range(block_frames):
 
-                # Set flag to save a raw frame
-                save_this_frame = (
-                self.config.save_frames and
-                self.video_file is None and
-                total_frames % self.config.frame_save_interval_count == 0
-                )
-
                 # Read the frame (keep track how long it took to grab it), and check for color if saving raw frame
                 t1_frame = time.time()
-                ret, frame, frame_timestamp = self.read(check_color=save_this_frame)
+                ret, frame, frame_timestamp = self.read()
                 t_frame = time.time() - t1_frame
 
                 # If the video device was disconnected, wait for reconnection
                 if (self.video_file is None) and (not ret):
-
                     log.info('Frame grabbing failed, video device is probably disconnected!')
                     self.releaseResources()
                     # Note: releaseResources() includes proper RTSP cleanup with fallback force close
                     wait_for_reconnect = True
                     break
+
+                # Set flag to save a raw frame
+                save_this_frame = (self.config.save_frames and
+                                   self.video_file is None and
+                                   self.shouldSaveFrame(frame_timestamp)
+                                   )
+
+                # Check if frame contains color information
+                if save_this_frame:
+                    self.convert_to_gray = self.isGrayscale(frame)
+
+                # Handling for grayscale conversion
+                frame = self.handleGrayscaleConversion(frame)
+
 
 
                 # If a video file is used, compute the time using the time from the file timestamp
