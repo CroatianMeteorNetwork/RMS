@@ -50,7 +50,7 @@ def xyHt2Geo(platepar, x, y, area_ht, indicate_limit=False, elev_limit=5):
 
     # Compute the geo location of the point along the line of sight
     p_r, p_lat, p_lon, p_ht = AEH2LatLonAlt(azim, elev, area_ht, platepar.lat, platepar.lon, \
-        platepar.elev)
+        platepar.height_wgs84)
 
 
     # If the elevation limit was hit, and the indicate flag is True, set the elevation to -1
