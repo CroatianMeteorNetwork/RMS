@@ -4,7 +4,7 @@ import sys
 import traceback
 import subprocess
 from RMS.CaptureDuration import captureDuration
-from RMS.Logger import initLogging, getLogger
+from RMS.Logger import LoggingManager, getLogger
 from RMS.Misc import isRaspberryPi, RmsDateTime
 
 
@@ -20,7 +20,8 @@ def rmsExternal(captured_night_dir, archived_night_dir, config):
 
 
     # Initialize the logger
-    initLogging(config, 'iStream_')
+    log_manager = LoggingManager()
+    log_manager.initLogging(config, 'iStream_')
     log = getLogger("logger")
     log.info('iStream external script started')
 

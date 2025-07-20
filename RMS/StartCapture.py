@@ -38,7 +38,7 @@ import numpy as np
 from Utils.LiveViewer import LiveViewer
 
 import RMS.ConfigReader as cr
-from RMS.Logger import initLogging, getLogger
+from RMS.Logger import LoggingManager, getLogger
 from RMS.BufferedCapture import BufferedCapture
 from RMS.CaptureDuration import captureDuration
 from RMS.CaptureModeSwitcher import captureModeSwitcher
@@ -46,9 +46,9 @@ from RMS.Compression import Compressor
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
 from RMS.Formats.FFfile import validFFName
-from RMS.Misc import mkdirP, RmsDateTime
+from RMS.Misc import mkdirP, RmsDateTime, UTCFromTimestamp
 from RMS.QueuedPool import QueuedPool
-from RMS.Reprocess import getPlatepar, processNight
+from RMS.Reprocess import getPlatepar, processNight, processFramesFiles
 from RMS.RunExternalScript import runExternalScript
 from RMS.UploadManager import UploadManager
 from RMS.EventMonitor import EventMonitor
@@ -157,7 +157,7 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
 
 
 def runCapture(config, duration=None, video_file=None, nodetect=False, detect_end=False, \
-    upload_manager=None, eventmonitor=None, resume_capture=False, daytime_mode=None):
+    upload_manager=None, eventmonitor=None, resume_capture=False, daytime_mode=None, camera_mode_switch_trigger=None):
     """ Run capture and compression for the given time.given
     
     Arguments:
@@ -269,10 +269,26 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         + "_|____    /__.-'|_|--|_|          ______|__\n")
     print("################################################################")
 
+    # Add a note about deceased members
+    print()
+    print("In memory of Global Meteor Network members:")
+    print("- Dr. Daniel A. Klinglesmith III (d. 2019)")
+    print("- Martin Richmond-Hardy (d. 2023)")
+    print("- Rajko Susanj (d. 2023)")
+    print("- Zoran Dragic (d. 2025)")
+    print("- Romke Schievink (d. 2025)")
+    print()
+    print("Memento mori")
+    print("Each of us, a fleeting flame")
+    print("Yet our paths remain.")
+    print()
+    print("################################################################")
+
     # Make a directory for the night - if currently in night capture mode
-    if (not config.continuous_capture) or (not daytime_mode.value):
+    in_night_capture = (daytime_mode is None) or (not daytime_mode.value)
+    if (not config.continuous_capture) or in_night_capture:
         mkdirP(night_data_dir)
-        log.info('Data directory: ' + night_data_dir)
+        log.info('Data directory: {}'.format(night_data_dir))
 
     # Make a directory for the time files if configured
     if config.save_frame_times:
@@ -290,7 +306,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         log.info('Saved videos directory: {}'.format(saved_video_dir))
 
     # Copy the used config file to the capture directory
-    if os.path.isfile(config.config_file_name):
+    if os.path.isfile(config.config_file_name) and os.path.isdir(night_data_dir):
         try:
             # Get the name of the originating config file
             config_file_name = os.path.basename(config.config_file_name)
@@ -344,14 +360,15 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     sharedArrayBase2 = multiprocessing.Array(ctypes.c_uint8, 256*(config.width + array_pad)*(config.height + array_pad))
     sharedArray2 = np.ctypeslib.as_array(sharedArrayBase2.get_obj())
     sharedArray2 = sharedArray2.reshape(256, (config.height + array_pad), (config.width + array_pad))
-    startTime2 = multiprocessing.Value('d', 0.0)
+    start_time2 = multiprocessing.Value('d', 0.0)
 
     log.info('Initializing frame buffers done!')
 
 
     # Initialize buffered capture
-    bc = BufferedCapture(sharedArray, startTime, sharedArray2, startTime2, config, video_file=video_file,
-                         night_data_dir=night_data_dir, saved_frames_dir=saved_frames_dir, daytime_mode=daytime_mode)
+    bc = BufferedCapture(sharedArray, startTime, sharedArray2, start_time2, config, video_file=video_file,
+                         night_data_dir=night_data_dir, saved_frames_dir=saved_frames_dir, 
+                         daytime_mode=daytime_mode, camera_mode_switch_trigger=camera_mode_switch_trigger)
     bc.startCapture()
 
     # To track and make new directories every iteration
@@ -359,6 +376,12 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
     # To handle control flow in case of disk space issues
     disk_full = False
+
+    # Keep track of which state we started at
+    daytime_mode_prev = False
+
+    # Initialize the detector
+    detector = None
 
     # Loop to handle both continuous and standard capture modes
     while True:
@@ -376,7 +399,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             # Make a directory for the next capture
             mkdirP(night_data_dir)
 
-            log.info('New data directory: ' + night_data_dir)
+            log.info('New data directory: {}'.format(night_data_dir))
 
             # Copy the used config file to the capture directory
             if os.path.isfile(config.config_file_name):
@@ -487,7 +510,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
             # Initialize compression
-            compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, startTime2, config,
+            compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, start_time2, config,
                 detector=detector)
 
             # Open the observation summary report
@@ -560,10 +583,13 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             if not nodetect:
 
                 try:
-                    log.info('Finishing up the detection, ' + str(detector.input_queue.qsize()) \
+                    if detector is None:
+                        log.info('No detection queued')
+                    else:
+                        log.info('Finishing up the detection, ' + str(detector.input_queue.qsize()) \
                         + ' files to process...')
-                except:
-                    print('Finishing up the detection... error when getting input queue size!')
+                except Exception:
+                    log.exception('Finishing up the detection... error when getting input queue size!')
 
 
                 # Reset the Ctrl+C to KeyboardInterrupt
@@ -594,7 +620,10 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                     log.info('Waiting for the detection to finish...')
 
                     # Wait for the detector to finish and close it
-                    detector.closePool()
+                    try:
+                        detector.closePool()
+                    except Exception:
+                        log.exception('Detector closePool() raised; continuing with shutdown')
 
                     log.info('Detection finished!')
 
@@ -649,52 +678,38 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
             # Put the archive up for upload
             if upload_manager is not None:
-                log.info('Adding file to upload list: ' + archive_name)
+                log.info("Adding file to upload list: %s", archive_name)
                 upload_manager.addFiles([archive_name])
-                log.info('File added...')
+                log.info("File added.")
 
-                # Delay the upload, if the delay is given
+                # optional delay (minutes in .config, converted to seconds)
                 upload_manager.delayNextUpload(delay=60*config.upload_delay)
-
 
             # Delete detector backup files
             if detector is not None:
                 detector.deleteBackupFiles()
 
 
-            # !!! Currently under testing
-            # # If the capture was run for a limited time, run the upload right away
-            # if fixed_duration and (upload_manager is not None):
+            # frames -> timelapse(s) -> archive(s) -> upload
+            if config.timelapse_generate_from_frames:
+                try:
+                    log.info("Processing frame files...")
+                    archive_paths = processFramesFiles(config)          # may return None
+                    log.info("Processing frame files done.")
 
-            if upload_manager is not None: # temporary code, will make the script upload after each capture
+                except Exception:
+                    log.exception("An error occurred when processing frame files!")
+                    archive_paths = None
 
-                # Check if the upload delay is set
-                with upload_manager.next_runtime_lock:
+                # -- enqueue & upload -----------------------------------------
+                if archive_paths and upload_manager:
+                    try:
+                        log.info("Adding file to upload list: %s", archive_paths)
+                        upload_manager.addFiles(archive_paths)
+                        log.info("File added.")
 
-                    # Check if the upload delay is up
-                    if upload_manager.next_runtime is not None:
-
-                        # Wait for the upload delay to pass
-                        sleep_time = None
-                        while (RmsDateTime.utcnow() - upload_manager.next_runtime).total_seconds() < 0:
-                            
-                            wait_time = (RmsDateTime.utcnow() - upload_manager.next_runtime).total_seconds()
-                            log.info("Waiting for upload delay to pass: {:.1f} seconds...".format(abs(wait_time)))
-
-                            # Sleep for a short interval between 1 and 30 seconds
-                            if sleep_time is None:
-
-                                sleep_time = wait_time/10
-
-                                if sleep_time < 1:
-                                    sleep_time = 1
-                                elif sleep_time > 30:
-                                    sleep_time = 30
-
-                            time.sleep(sleep_time)
-
-                log.info('Uploading data before exiting...')
-                upload_manager.uploadData()
+                    except Exception:
+                        log.exception("Frames upload failed")
 
 
             # Run the external script
@@ -901,7 +916,8 @@ if __name__ == "__main__":
 
 
     # Initialize the logger
-    initLogging(config)
+    log_manager = LoggingManager()
+    log_manager.initLogging(config)
 
     # Get the logger handle
     log = getLogger("logger")
@@ -916,7 +932,7 @@ if __name__ == "__main__":
         repo = git.Repo(search_parent_directories=True)
         commit_unix_time = repo.head.object.committed_date
         sha = repo.head.object.hexsha
-        commit_time = datetime.datetime.fromtimestamp(commit_unix_time).strftime('%Y%m%d_%H%M%S')
+        commit_time = UTCFromTimestamp.utcfromtimestamp(commit_unix_time).strftime('%Y%m%d_%H%M%S')
 
     except:
         commit_time = ""
@@ -996,7 +1012,6 @@ if __name__ == "__main__":
             if upload_manager.is_alive():
                 log.info('Closing upload manager...')
                 upload_manager.stop()
-                del upload_manager
 
 
         sys.exit()
@@ -1314,9 +1329,10 @@ if __name__ == "__main__":
             
             # Setup shared value to communicate day/night switch between processes.
             daytime_mode = multiprocessing.Value(ctypes.c_bool, False)
+            camera_mode_switch_trigger = multiprocessing.Value(ctypes.c_bool, True)
 
             # Setup the capture mode switcher on another thread
-            capture_switcher = threading.Thread(target=captureModeSwitcher, args=(config, daytime_mode))
+            capture_switcher = threading.Thread(target=captureModeSwitcher, args=(config, daytime_mode, camera_mode_switch_trigger))
             
             # To make sure the capture switcher thread exits automatically at the end
             capture_switcher.daemon = True
@@ -1338,13 +1354,14 @@ if __name__ == "__main__":
 
         else:
             daytime_mode = None
+            camera_mode_switch_trigger = None
             log.info('Starting capture for {:.2f} hours'.format(duration/60/60))
 
 
         # Run capture and compression
         night_archive_dir = runCapture(config, duration=duration, nodetect=cml_args.nodetect, \
             upload_manager=upload_manager, eventmonitor=eventmonitor, detect_end=(cml_args.detectend or config.postprocess_at_end), \
-            resume_capture=cml_args.resume, daytime_mode=daytime_mode)
+            resume_capture=cml_args.resume, daytime_mode=daytime_mode, camera_mode_switch_trigger=camera_mode_switch_trigger)
         cml_args.resume = False
 
         # Indicate that the capture was done once

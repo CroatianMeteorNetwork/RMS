@@ -8,8 +8,10 @@ RMSSOURCEDIR=~/source/RMS
 RMSBACKUPDIR=~/.rms_backup
 CURRENT_CONFIG="$RMSSOURCEDIR/.config"
 CURRENT_MASK="$RMSSOURCEDIR/mask.bmp"
+CURRENT_CAMERA_SETTINGS="$RMSSOURCEDIR/camera_settings.json"
 BACKUP_CONFIG="$RMSBACKUPDIR/.config"
 BACKUP_MASK="$RMSBACKUPDIR/mask.bmp"
+BACKUP_CAMERA_SETTINGS="$RMSBACKUPDIR/camera_settings.json"
 SYSTEM_PACKAGES="$RMSSOURCEDIR/system_packages.txt"
 UPDATEINPROGRESSFILE=$RMSBACKUPDIR/update_in_progress
 LOCKFILE="$RMSBACKUPDIR/update.lock"
@@ -95,8 +97,7 @@ backup_files() {
     # Backup .config
     if [ -f "$CURRENT_CONFIG" ]; then
         if ! retry_cp "$CURRENT_CONFIG" "$BACKUP_CONFIG"; then
-            echo "Critical Error: Could not back up .config file. Aborting."
-            exit 1
+            echo "Critical Error: Could not back up .config file."
         fi
     else
         echo "No original .config found. Generic config will be used."
@@ -105,11 +106,19 @@ backup_files() {
     # Backup mask.bmp
     if [ -f "$CURRENT_MASK" ]; then
         if ! retry_cp "$CURRENT_MASK" "$BACKUP_MASK"; then
-            echo "Critical Error: Could not back up mask.bmp file. Aborting."
-            exit 1
+            echo "Critical Error: Could not back up mask.bmp file."
         fi
     else
         echo "No original mask.bmp found. Blank mask will be used."
+    fi
+
+    # Backup camera_settings.json
+    if [ -f "$CURRENT_CAMERA_SETTINGS" ]; then
+        if ! retry_cp "$CURRENT_CAMERA_SETTINGS" "$BACKUP_CAMERA_SETTINGS"; then
+            echo "Critical Error: Could not back up camera_settings.json file."
+        fi
+    else
+        echo "No original camera_settings.json found. Blank mask will be used."
     fi
 }
 
@@ -120,8 +129,7 @@ restore_files() {
     # Restore .config
     if [ -f "$BACKUP_CONFIG" ]; then
         if ! retry_cp "$BACKUP_CONFIG" "$CURRENT_CONFIG"; then
-            echo "Critical Error: Failed to restore .config. Aborting."
-            exit 1
+            echo "Critical Error: Failed to restore .config."
         fi
     else
         echo "No backup .config found - a new one will be created by the installation."
@@ -130,13 +138,45 @@ restore_files() {
     # Restore mask.bmp
     if [ -f "$BACKUP_MASK" ]; then
         if ! retry_cp "$BACKUP_MASK" "$CURRENT_MASK"; then
-            echo "Critical Error: Failed to restore mask.bmp. Aborting."
-            exit 1
+            echo "Critical Error: Failed to restore mask.bmp."
         fi
     else
         echo "No backup mask.bmp found - a new blank mask will be created by the installation."
     fi
+
+    # Restore camera_settings.json
+    if [ -f "$BACKUP_CAMERA_SETTINGS" ]; then
+        if ! retry_cp "$BACKUP_CAMERA_SETTINGS" "$CURRENT_CAMERA_SETTINGS"; then
+            echo "Critical Error: Failed to restore camera_settings.json."
+        fi
+    else
+        echo "No backup camera_settings.json found - a new default settings file will be created by the installation."
+    fi
 }
+
+
+
+recover_git_repo_gracefully() {
+    echo "Gracefully recovering RMS Git repository..."
+
+    backup_files
+
+    echo "Removing corrupted .git directory..."
+    rm -rf .git
+
+    echo "Reinitializing Git repository..."
+    git init
+    git remote add origin https://github.com/CroatianMeteorNetwork/RMS.git
+    git fetch
+    git reset --hard origin/master
+
+    restore_files
+
+    echo "Git recovery complete."
+}
+
+
+
 # Ensure the backup directory exists
 mkdir -p "$RMSBACKUPDIR"
 
@@ -192,15 +232,32 @@ echo "1" > "$UPDATEINPROGRESSFILE"
 # Stash any local changes
 echo "Stashing local changes..."
 if ! git stash; then
-    echo "Error: git stash failed. Aborting update."
-    exit 1
+    echo "Error: git stash failed - possible repository corruption."
+
+    echo "Attempting to restore backed up files..."
+    if restore_files; then
+        echo "Files restored successfully."
+        echo "0" > "$UPDATEINPROGRESSFILE"
+    else
+        echo "Critical: File restore failed. Leaving update flag set."
+    fi
+
+
+    echo "Attempting graceful Git recovery..."
+    recover_git_repo_gracefully
+
 fi
 
 # Pull the latest code from GitHub
 echo "Pulling latest code from GitHub..."
 if ! git pull; then
-    echo "Error: git pull failed. Aborting update."
-    exit 1
+    echo "Error: git pull failed. Attempting to restore backed up files..."
+    if restore_files; then
+        echo "Files restored successfully."
+        echo "0" > "$UPDATEINPROGRESSFILE"
+    else
+        echo "Critical: File restore failed. Leaving update flag set."
+    fi
 fi
 
 # Create template from the current default config file
@@ -213,6 +270,19 @@ if [ -f "$CURRENT_CONFIG" ]; then
         echo "Warning: Failed to verify config template creation"
     else
         echo "Config template created successfully"
+    fi
+fi
+
+# Create template from the current default camera_settings file
+if [ -f "$CURRENT_CAMERA_SETTINGS" ]; then
+    echo "Creating camera_settings template..."
+    mv "$CURRENT_CAMERA_SETTINGS" "$RMSSOURCEDIR/camera_settings_template.json"
+    
+    # Verify the move worked
+    if [ ! -f "$RMSSOURCEDIR/camera_settings_template.json" ]; then
+        echo "Warning: Failed to verify camera settings template creation"
+    else
+        echo "Camera settings template created successfully"
     fi
 fi
 
@@ -229,7 +299,7 @@ install_missing_dependencies() {
     # -----------------------------------------------------------------------------
     # We store system-level dependencies in a separate file (system_packages.txt)
     # so that when RMS_Update pulls new code (including a potentially updated list of packages),
-    # we can read those new dependencies during the same run — no need to run the update
+    # we can read those new dependencies during the same run - no need to run the update
     # script twice. Because the main script is loaded into memory, changing it mid-run
     # won't reload it. But updating this separate file allows us to immediately pick
     # up any added or changed packages without requiring a second pass.

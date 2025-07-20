@@ -31,6 +31,10 @@ from RMS.Formats.Vid import VidStruct
 from RMS.GeoidHeightEGM96 import wgs84toMSLHeight
 from RMS.Routines import Image
 from RMS.Routines.GstreamerCapture import GstVideoFile
+from RMS.Logger import getLogger
+
+# Get the logger from the main module
+log = getLogger("logger")
 
 
 # If there is not display, messagebox will simply print to the console
@@ -198,12 +202,12 @@ class InputTypeFRFF(InputType):
         self.byteswap = False
 
         if self.single_ff:
-            print('Using file:', self.dir_path)
+            log.debug('Using file: {}'.format(self.dir_path))
         else:
             if use_fr_files:
-                print('Using FF and/or FR files from:', self.dir_path)
+                log.debug('Using FF and/or FR files from: {}'.format(self.dir_path))
             else:
-                print('Using FF files from:', self.dir_path)
+                log.debug('Using FF files from: {}'.format(self.dir_path))
 
 
         # List of FF and FR file names
@@ -1459,7 +1463,7 @@ class InputTypeImages(object):
         self.fripon_header = None
         self.cabernet_status = False
 
-        img_types = ['.png', '.jpg', '.bmp', '.fit', '.fits', '.tif']
+        img_types = ['.png', '.jpg', '.jpeg', '.bmp', '.fit', '.fits', '.tif']
 
         # Add raw formats if rawpy is installed
         if 'rawpy' in sys.modules:
@@ -2235,9 +2239,9 @@ class InputTypeDFN(InputType):
 
         if 'rawpy' in sys.modules:
             ### Find images in the given folder ###
-            img_types = ['.png', '.jpg', '.bmp', '.tif', '.fits', '.nef', '.cr2']
+            img_types = ['.png', '.jpg', '.jpeg', '.bmp', '.tif', '.fits', '.nef', '.cr2']
         else:
-            img_types = ['.png', '.jpg', '.bmp', '.tif', '.fits']
+            img_types = ['.png', '.jpg', '.jpeg', '.bmp', '.tif', '.fits']
 
         self.beginning_datetime = beginning_time
 
@@ -2444,7 +2448,7 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
     """
 
     ### Find images in the given folder ###
-    img_types = ['.png', '.jpg', '.bmp', '.fit', '.tif', '.fits']
+    img_types = ['.png', '.jpg', '.jpeg', '.bmp', '.fit', '.tif', '.fits']
 
     if 'rawpy' in sys.modules:
         img_types += ['.nef', '.cr2']
@@ -2464,7 +2468,7 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
         # If FR files are not used, only check for FF files
         if not use_fr_files:
             if not any([validFFName(ff_file) for ff_file in os.listdir(input_dir)]):
-                print("No FF files found in directory!")
+                log.info("No FF files found in directory!")
                 return None
 
 

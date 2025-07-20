@@ -153,7 +153,7 @@ def loadImage(img_path, flatten=-1):
                     img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
 
                 # Handle 16 bit images
-                elif (img.ndim == 2) and (img.dtype == np.uint16):
+                elif (img.ndim == 2) and ((img.dtype == np.uint16) or (img.dtype == np.int32)):
                     img = img.astype(np.uint16)
 
                 # Otherwise, just convert the time to 8 bit

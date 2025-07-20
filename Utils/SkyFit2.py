@@ -2066,302 +2066,300 @@ class PlateTool(QtWidgets.QMainWindow):
             elevation_list.append(alt)
 
 
-        # Make sure there are at least 2 stars picked which are not saturated
         self.residual_text.clear()
-        if (len(px_intens_list) - np.sum(saturation_list)) >= 2:
 
-            # Compute apparent magnitude corrected for extinction
-            catalog_mags = extinctionCorrectionTrueToApparent(catalog_mags, catalog_ra, catalog_dec,
-                                                              date2JD(*self.img_handle.currentTime()),
-                                                              self.platepar)
+        # Compute apparent magnitude corrected for extinction
+        catalog_mags = extinctionCorrectionTrueToApparent(catalog_mags, catalog_ra, catalog_dec,
+                                                            date2JD(*self.img_handle.currentTime()),
+                                                            self.platepar)
 
 
-            # Determine if the vignetting should be kept fixed. Only if:
-            # a) Explicitly kept fixed
-            # b) The flat is used, then the vignetting coeff is zero
-            fixed_vignetting = None
-            if self.flat_struct is not None:
-                fixed_vignetting = 0.0
+        # Determine if the vignetting should be kept fixed. Only if:
+        # a) Explicitly kept fixed
+        # b) The flat is used, then the vignetting coeff is zero
+        fixed_vignetting = None
+        if self.flat_struct is not None:
+            fixed_vignetting = 0.0
 
-            elif self.platepar.vignetting_fixed:
-                fixed_vignetting = self.platepar.vignetting_coeff
+        elif self.platepar.vignetting_fixed:
+            fixed_vignetting = self.platepar.vignetting_coeff
 
+        
+        # Set the fit weights so that everyting with SNR > 10 is weighted the maximum value
+        weights = np.clip(snr_list, 0, 10)/10.0
+
+        # Fit the photometric offset (disable vignetting fit if a flat is used)
+        # The fit is going to be weighted by the signal to noise ratio to reduce the influence of
+        #  faint stars with large errors
+        # Saturated stars are excluded from the fit
+        photom_params, self.photom_fit_stddev, self.photom_fit_resids = photometryFit(
+            px_intens_list, radius_list, catalog_mags, fixed_vignetting=fixed_vignetting,
+            weights=weights, exclude_list=saturation_list)
+
+        photom_offset, vignetting_coeff = photom_params
+
+        # Set photometry parameters
+        self.platepar.mag_0 = -2.5
+        self.platepar.mag_lev = photom_offset
+        self.platepar.mag_lev_stddev = self.photom_fit_stddev
+        self.platepar.vignetting_coeff = vignetting_coeff
+
+        # Update the values in the platepar tab in the GUI
+        self.tab.param_manager.updatePlatepar()
+
+        if self.selected_stars_visible and (len(star_coords) > 0):
+
+            # Plot photometry deviations on the main plot as colour coded rings
+            star_coords = np.array(star_coords)
+            star_coords_x, star_coords_y = star_coords.T
+
+            std = np.std(self.photom_fit_resids)
+            for star_x, star_y, fit_diff, star_mag, snr in zip(star_coords_x, star_coords_y,
+                                                            self.photom_fit_resids, catalog_mags,
+                                                            self.paired_stars.snr()
+                                                            ):
+
+                photom_resid_txt = "{:.2f}".format(fit_diff)
+
+                snr_txt = "S/N\n{:.1f}".format(snr)
+
+                # Determine the size of the residual text, larger the residual, larger the text
+                photom_resid_size = int(8 + np.abs(fit_diff)/(np.max(np.abs(self.photom_fit_resids))/5.0))
+
+                # Determine the RGB color of the SNR text.
+                # SNR > 10 is green, SNR < 10 is yellow, SNR < 5 is orange, SNR < 3 is red
+                if snr > 10:
+                    # Green
+                    snr_color = QtGui.QColor(0, 255, 0)
+                elif (snr < 10) and (snr >= 5):
+                    # Yellow
+                    snr_color = QtGui.QColor(255, 255, 0)
+                elif (snr < 5) and (snr >= 3):
+                    # Orange
+                    snr_color = QtGui.QColor(255, 165, 0)
+                else:
+                    # Red
+                    snr_color = QtGui.QColor(255, 0, 0)
+
+                if self.stdev_text_filter*std <= abs(fit_diff):
+
+                    # Add the photometric residual text below the star
+                    text_resid = TextItem(photom_resid_txt, anchor=(0.5, -0.5))
+                    text_resid.setPos(star_x, star_y)
+                    text_resid.setFont(QtGui.QFont('Arial', photom_resid_size))
+                    text_resid.setColor(QtGui.QColor(255, 255, 255))
+                    text_resid.setAlign(QtCore.Qt.AlignCenter)
+                    self.residual_text.addTextItem(text_resid)
+
+                    # Add the star magnitude above the star
+                    text_mag = TextItem("{:+6.2f}".format(star_mag), anchor=(0.5, 1.5))
+                    text_mag.setPos(star_x, star_y)
+                    text_mag.setFont(QtGui.QFont('Arial', 10))
+                    text_mag.setColor(QtGui.QColor(0, 255, 0))
+                    text_mag.setAlign(QtCore.Qt.AlignCenter)
+                    self.residual_text.addTextItem(text_mag)
+
+                    # Add SNR to the right of the star
+                    text_snr = TextItem(snr_txt, anchor=(-0.25, 0.5))
+                    text_snr.setPos(star_x, star_y)
+                    text_snr.setFont(QtGui.QFont('Arial', 8))
+                    text_snr.setColor(snr_color)
+                    text_snr.setAlign(QtCore.Qt.AlignCenter)
+                    self.residual_text.addTextItem(text_snr)
+
+
+
+            self.residual_text.update()
+
+        # Show the photometry fit plot
+        if show_plot:
+
+            ### PLOT PHOTOMETRY FIT ###
+            # Note: An almost identical code exists in Utils.CalibrationReport
+
+            # # Init plot for photometry
+            # fig_p, (ax_p, ax_r, ax_e) = plt.subplots(nrows=3, facecolor=None, figsize=(6.4, 8),
+            #                                    gridspec_kw={'height_ratios': [3, 1, 1]})
+
+            # Init plot for photometry
+            fig_p = plt.figure(figsize=(10, 5))  # Adjust the figure size as needed
+
+            # Create a grid with 2 columns and 2 rows
+            gs = gridspec.GridSpec(2, 2, width_ratios=[1, 1], height_ratios=[1, 1])
+
+            # Large plot on the left
+            ax_p = fig_p.add_subplot(gs[:, 0])
+
+            # Two smaller plots on the right, one on top of the other
+            ax_r = fig_p.add_subplot(gs[0, 1])
+            ax_e = fig_p.add_subplot(gs[1, 1])
+
+            # Set photometry window title
+            try:
+                fig_p.canvas.set_window_title('Photometry')
+
+            except AttributeError:
+                fig_p.canvas.manager.window.setWindowTitle('Photometry')
             
-            # Set the fit weights so that everyting with SNR > 10 is weighted the maximum value
-            weights = np.clip(snr_list, 0, 10)/10.0
+            except:
+                print("Warning: Could not set window title for photometry plot.")
 
-            # Fit the photometric offset (disable vignetting fit if a flat is used)
-            # The fit is going to be weighted by the signal to noise ratio to reduce the influence of
-            #  faint stars with large errors
-            # Saturated stars are excluded from the fit
-            photom_params, self.photom_fit_stddev, self.photom_fit_resids = photometryFit(
-                px_intens_list, radius_list, catalog_mags, fixed_vignetting=fixed_vignetting,
-                weights=weights, exclude_list=saturation_list)
+            # Plot catalog magnitude vs. raw logsum of pixel intensities
+            lsp_arr = np.log10(np.array(px_intens_list))
+            ax_p.scatter(-2.5*lsp_arr, catalog_mags, s=5, c='r', zorder=3, alpha=0.5,
+                            label="Raw (extinction corrected)")
 
-            photom_offset, vignetting_coeff = photom_params
+            # Circle saturated stars in red empty circles
+            saturation_label_set = False
+            for lsp, cat_mag, sat in zip(lsp_arr, catalog_mags, saturation_list):
 
-            # Set photometry parameters
-            self.platepar.mag_0 = -2.5
-            self.platepar.mag_lev = photom_offset
-            self.platepar.mag_lev_stddev = self.photom_fit_stddev
-            self.platepar.vignetting_coeff = vignetting_coeff
+                if sat:
 
-            # Update the values in the platepar tab in the GUI
-            self.tab.param_manager.updatePlatepar()
-
-            if self.selected_stars_visible:
-
-                # Plot photometry deviations on the main plot as colour coded rings
-                star_coords = np.array(star_coords)
-                star_coords_x, star_coords_y = star_coords.T
-
-                std = np.std(self.photom_fit_resids)
-                for star_x, star_y, fit_diff, star_mag, snr in zip(star_coords_x, star_coords_y,
-                                                              self.photom_fit_resids, catalog_mags,
-                                                              self.paired_stars.snr()
-                                                              ):
-
-                    photom_resid_txt = "{:.2f}".format(fit_diff)
-
-                    snr_txt = "S/N\n{:.1f}".format(snr)
-
-                    # Determine the size of the residual text, larger the residual, larger the text
-                    photom_resid_size = int(8 + np.abs(fit_diff)/(np.max(np.abs(self.photom_fit_resids))/5.0))
-
-                    # Determine the RGB color of the SNR text.
-                    # SNR > 10 is green, SNR < 10 is yellow, SNR < 5 is orange, SNR < 3 is red
-                    if snr > 10:
-                        # Green
-                        snr_color = QtGui.QColor(0, 255, 0)
-                    elif (snr < 10) and (snr >= 5):
-                        # Yellow
-                        snr_color = QtGui.QColor(255, 255, 0)
-                    elif (snr < 5) and (snr >= 3):
-                        # Orange
-                        snr_color = QtGui.QColor(255, 165, 0)
+                    # Set the label only once
+                    if not saturation_label_set:
+                        saturation_label = "Saturated"
+                        saturation_label_set = True
                     else:
-                        # Red
-                        snr_color = QtGui.QColor(255, 0, 0)
+                        saturation_label = None
 
-                    if self.stdev_text_filter*std <= abs(fit_diff):
+                    ax_p.scatter(-2.5*lsp, cat_mag, s=30, zorder=3, edgecolor='r',
+                                    facecolor='none', label=saturation_label)
 
-                        # Add the photometric residual text below the star
-                        text_resid = TextItem(photom_resid_txt, anchor=(0.5, -0.5))
-                        text_resid.setPos(star_x, star_y)
-                        text_resid.setFont(QtGui.QFont('Arial', photom_resid_size))
-                        text_resid.setColor(QtGui.QColor(255, 255, 255))
-                        text_resid.setAlign(QtCore.Qt.AlignCenter)
-                        self.residual_text.addTextItem(text_resid)
+            # Plot catalog magnitude vs. raw logsum of pixel intensities (only when no flat is used)
+            if self.flat_struct is None:
+                lsp_corr_arr = np.log10(correctVignetting(np.array(px_intens_list),
+                                                            np.array(radius_list),
+                                                            self.platepar.vignetting_coeff))
 
-                        # Add the star magnitude above the star
-                        text_mag = TextItem("{:+6.2f}".format(star_mag), anchor=(0.5, 1.5))
-                        text_mag.setPos(star_x, star_y)
-                        text_mag.setFont(QtGui.QFont('Arial', 10))
-                        text_mag.setColor(QtGui.QColor(0, 255, 0))
-                        text_mag.setAlign(QtCore.Qt.AlignCenter)
-                        self.residual_text.addTextItem(text_mag)
+                ax_p.scatter(-2.5*lsp_corr_arr, catalog_mags, s=5, c='b', zorder=3, alpha=0.5,
+                                label="Corrected for vignetting")
 
-                        # Add SNR to the right of the star
-                        text_snr = TextItem(snr_txt, anchor=(-0.25, 0.5))
-                        text_snr.setPos(star_x, star_y)
-                        text_snr.setFont(QtGui.QFont('Arial', 8))
-                        text_snr.setColor(snr_color)
-                        text_snr.setAlign(QtCore.Qt.AlignCenter)
-                        self.residual_text.addTextItem(text_snr)
+            x_min, x_max = ax_p.get_xlim()
+            y_min, y_max = ax_p.get_ylim()
 
+            x_min_w = x_min - 3
+            x_max_w = x_max + 3
+            y_min_w = y_min - 3
+            y_max_w = y_max + 3
 
+            # Plot fit info
+            fit_info = "{:+.1f}*LSP + {:.2f} $\\pm$ {:.2f} mag".format(self.platepar.mag_0,
+                                                                        self.platepar.mag_lev,
+                                                                        self.photom_fit_stddev) \
+                        + "\nVignetting coeff = {:.5f} rad/px".format(self.platepar.vignetting_coeff) \
+                        + "\nGamma = {:.2f}".format(self.platepar.gamma)
 
-                self.residual_text.update()
+            print()
+            print('Photometric fit:')
+            print(fit_info)
+            print()
 
-            # Show the photometry fit plot
-            if show_plot:
+            # Plot the line fit
+            logsum_arr = np.linspace(x_min_w, x_max_w, 10)
+            ax_p.plot(
+                logsum_arr,
+                photomLine((10**(logsum_arr/(-2.5)), np.zeros_like(logsum_arr)), photom_offset,
+                            self.platepar.vignetting_coeff),
+                label=fit_info, linestyle='--', color='k', alpha=0.5, zorder=3)
 
-                ### PLOT PHOTOMETRY FIT ###
-                # Note: An almost identical code exists in Utils.CalibrationReport
+            ax_p.legend()
 
-                # # Init plot for photometry
-                # fig_p, (ax_p, ax_r, ax_e) = plt.subplots(nrows=3, facecolor=None, figsize=(6.4, 8),
-                #                                    gridspec_kw={'height_ratios': [3, 1, 1]})
+            ax_p.set_ylabel("Catalog magnitude ({:s})".format(self.mag_band_string))
+            ax_p.set_xlabel("Uncalibrated magnitude")
 
-                # Init plot for photometry
-                fig_p = plt.figure(figsize=(10, 5))  # Adjust the figure size as needed
+            # Set wider axis limits
+            ax_p.set_xlim(x_min_w, x_max_w)
+            ax_p.set_ylim(y_min_w, y_max_w)
 
-                # Create a grid with 2 columns and 2 rows
-                gs = gridspec.GridSpec(2, 2, width_ratios=[1, 1], height_ratios=[1, 1])
+            ax_p.invert_yaxis()
+            ax_p.invert_xaxis()
 
-                # Large plot on the left
-                ax_p = fig_p.add_subplot(gs[:, 0])
+            # Force equal aspect ratio
+            ax_p.set_aspect('equal', adjustable='box')
 
-                # Two smaller plots on the right, one on top of the other
-                ax_r = fig_p.add_subplot(gs[0, 1])
-                ax_e = fig_p.add_subplot(gs[1, 1])
+            ax_p.grid()
 
-                # Set photometry window title
-                try:
-                    fig_p.canvas.set_window_title('Photometry')
+            ###
 
-                except AttributeError:
-                    fig_p.canvas.manager.window.setWindowTitle('Photometry')
+            ### PLOT MAG DIFFERENCE BY RADIUS
+
+            img_diagonal = np.hypot(self.platepar.X_res/2, self.platepar.Y_res/2)
+
+            # Plot radius from centre vs. fit residual (including vignetting)
+            ax_r.scatter(radius_list, self.photom_fit_resids, s=10, c='b', alpha=0.5, zorder=3)
+
+            # Plot a zero line
+            ax_r.plot(np.linspace(0, img_diagonal, 10), np.zeros(10), linestyle='dashed', alpha=0.5,
+                        color='k')
+
+            # Plot the vignetting curve (only when no flat is used)
+            if self.flat_struct is None:
+
+                # Plot radius from centre vs. fit residual (excluding vignetting
+                fit_resids_novignetting = catalog_mags - photomLine((np.array(px_intens_list), \
+                                                                        np.array(radius_list)), \
+                                                                        photom_offset, 0.0)
+                ax_r.scatter(radius_list, fit_resids_novignetting, s=5, c='r', alpha=0.5, zorder=3)
+
+                px_sum_tmp = 1000
+                radius_arr_tmp = np.linspace(0, img_diagonal, 50)
+
+                # Plot the vignetting curve
+                vignetting_loss = 2.5*np.log10(px_sum_tmp) \
+                                    - 2.5*np.log10(correctVignetting(px_sum_tmp, radius_arr_tmp,
+                                                                    self.platepar.vignetting_coeff))
+
+                ax_r.plot(radius_arr_tmp, vignetting_loss, linestyle='dotted', alpha=0.5, color='k',
+                            label='Vignetting model')
                 
-                except:
-                    print("Warning: Could not set window title for photometry plot.")
+                ax_r.legend()
 
-                # Plot catalog magnitude vs. raw logsum of pixel intensities
-                lsp_arr = np.log10(np.array(px_intens_list))
-                ax_p.scatter(-2.5*lsp_arr, catalog_mags, s=5, c='r', zorder=3, alpha=0.5,
-                             label="Raw (extinction corrected)")
+            ax_r.grid()
 
-                # Circle saturated stars in red empty circles
-                saturation_label_set = False
-                for lsp, cat_mag, sat in zip(lsp_arr, catalog_mags, saturation_list):
+            ax_r.set_ylabel("Fit res. (mag)")
+            ax_r.set_xlabel("Radius from centre (px)")
 
-                    if sat:
+            ax_r.set_xlim(0, img_diagonal)
 
-                        # Set the label only once
-                        if not saturation_label_set:
-                            saturation_label = "Saturated"
-                            saturation_label_set = True
-                        else:
-                            saturation_label = None
+            ### PLOT MAG DIFFERENCE BY ELEVATION
 
-                        ax_p.scatter(-2.5*lsp, cat_mag, s=30, zorder=3, edgecolor='r',
-                                     facecolor='none', label=saturation_label)
+            # Plot elevation vs. fit residual
+            ax_e.scatter(elevation_list, self.photom_fit_resids, s=10, c='b', alpha=0.5, zorder=3)
 
-                # Plot catalog magnitude vs. raw logsum of pixel intensities (only when no flat is used)
-                if self.flat_struct is None:
-                    lsp_corr_arr = np.log10(correctVignetting(np.array(px_intens_list),
-                                                              np.array(radius_list),
-                                                              self.platepar.vignetting_coeff))
-
-                    ax_p.scatter(-2.5*lsp_corr_arr, catalog_mags, s=5, c='b', zorder=3, alpha=0.5,
-                                 label="Corrected for vignetting")
-
-                x_min, x_max = ax_p.get_xlim()
-                y_min, y_max = ax_p.get_ylim()
-
-                x_min_w = x_min - 3
-                x_max_w = x_max + 3
-                y_min_w = y_min - 3
-                y_max_w = y_max + 3
-
-                # Plot fit info
-                fit_info = "{:+.1f}*LSP + {:.2f} $\\pm$ {:.2f} mag".format(self.platepar.mag_0,
-                                                                          self.platepar.mag_lev,
-                                                                          self.photom_fit_stddev) \
-                           + "\nVignetting coeff = {:.5f} rad/px".format(self.platepar.vignetting_coeff) \
-                           + "\nGamma = {:.2f}".format(self.platepar.gamma)
-
-                print()
-                print('Photometric fit:')
-                print(fit_info)
-                print()
-
-                # Plot the line fit
-                logsum_arr = np.linspace(x_min_w, x_max_w, 10)
-                ax_p.plot(
-                    logsum_arr,
-                    photomLine((10**(logsum_arr/(-2.5)), np.zeros_like(logsum_arr)), photom_offset,
-                               self.platepar.vignetting_coeff),
-                    label=fit_info, linestyle='--', color='k', alpha=0.5, zorder=3)
-
-                ax_p.legend()
-
-                ax_p.set_ylabel("Catalog magnitude ({:s})".format(self.mag_band_string))
-                ax_p.set_xlabel("Uncalibrated magnitude")
-
-                # Set wider axis limits
-                ax_p.set_xlim(x_min_w, x_max_w)
-                ax_p.set_ylim(y_min_w, y_max_w)
-
-                ax_p.invert_yaxis()
-                ax_p.invert_xaxis()
-
-                # Force equal aspect ratio
-                ax_p.set_aspect('equal', adjustable='box')
-
-                ax_p.grid()
-
-                ###
-
-                ### PLOT MAG DIFFERENCE BY RADIUS
-
-                img_diagonal = np.hypot(self.platepar.X_res/2, self.platepar.Y_res/2)
-
-                # Plot radius from centre vs. fit residual (including vignetting)
-                ax_r.scatter(radius_list, self.photom_fit_resids, s=10, c='b', alpha=0.5, zorder=3)
-
-                # Plot a zero line
-                ax_r.plot(np.linspace(0, img_diagonal, 10), np.zeros(10), linestyle='dashed', alpha=0.5,
-                          color='k')
-
-                # Plot the vignetting curve (only when no flat is used)
-                if self.flat_struct is None:
-
-                    # Plot radius from centre vs. fit residual (excluding vignetting
-                    fit_resids_novignetting = catalog_mags - photomLine((np.array(px_intens_list), \
-                                                                         np.array(radius_list)), \
-                                                                         photom_offset, 0.0)
-                    ax_r.scatter(radius_list, fit_resids_novignetting, s=5, c='r', alpha=0.5, zorder=3)
-
-                    px_sum_tmp = 1000
-                    radius_arr_tmp = np.linspace(0, img_diagonal, 50)
-
-                    # Plot the vignetting curve
-                    vignetting_loss = 2.5*np.log10(px_sum_tmp) \
-                                      - 2.5*np.log10(correctVignetting(px_sum_tmp, radius_arr_tmp,
-                                                                       self.platepar.vignetting_coeff))
-
-                    ax_r.plot(radius_arr_tmp, vignetting_loss, linestyle='dotted', alpha=0.5, color='k',
-                              label='Vignetting model')
-                    
-                    ax_r.legend()
-
-                ax_r.grid()
-
-                ax_r.set_ylabel("Fit res. (mag)")
-                ax_r.set_xlabel("Radius from centre (px)")
-
-                ax_r.set_xlim(0, img_diagonal)
-
-                ### PLOT MAG DIFFERENCE BY ELEVATION
-
-                # Plot elevation vs. fit residual
-                ax_e.scatter(elevation_list, self.photom_fit_resids, s=10, c='b', alpha=0.5, zorder=3)
-
-                # Compute the fit residuals without extinction
-                fit_resids_noext = \
-                    self.photom_fit_resids + self.platepar.extinction_scale*atmosphericExtinctionCorrection(
-                        np.array(elevation_list), self.platepar.elev)
-                
-                # Plot elevation vs. fit residual (excluding extinction)
-                ax_e.scatter(elevation_list, fit_resids_noext, s=5, c='k', alpha=0.5, zorder=3,
-                             label="No extinction, vig. included")
+            # Compute the fit residuals without extinction
+            fit_resids_noext = \
+                self.photom_fit_resids + self.platepar.extinction_scale*atmosphericExtinctionCorrection(
+                    np.array(elevation_list), self.platepar.elev)
+            
+            # Plot elevation vs. fit residual (excluding extinction)
+            ax_e.scatter(elevation_list, fit_resids_noext, s=5, c='k', alpha=0.5, zorder=3,
+                            label="No extinction, vig. included")
 
 
-                # Compute the extinction model
-                elev_arr = np.linspace(np.min(elevation_list), np.max(elevation_list), 100)
-                extinction_model = self.platepar.extinction_scale*atmosphericExtinctionCorrection(
-                    elev_arr, self.platepar.elev)
-                
-                # Plot the extinction model
-                ax_e.plot(elev_arr, extinction_model, linestyle='dotted', alpha=0.5, color='k', 
-                          label='Extinction model')
-                
+            # Compute the extinction model
+            elev_arr = np.linspace(np.min(elevation_list), np.max(elevation_list), 100)
+            extinction_model = self.platepar.extinction_scale*atmosphericExtinctionCorrection(
+                elev_arr, self.platepar.elev)
+            
+            # Plot the extinction model
+            ax_e.plot(elev_arr, extinction_model, linestyle='dotted', alpha=0.5, color='k', 
+                        label='Extinction model')
+            
 
-                # Plot a zero line
-                ax_e.plot(elev_arr, np.zeros_like(elev_arr), linestyle='dashed', alpha=0.5, color='k')
-                
-                
-                ax_e.grid()
-                ax_e.legend()
+            # Plot a zero line
+            ax_e.plot(elev_arr, np.zeros_like(elev_arr), linestyle='dashed', alpha=0.5, color='k')
+            
+            
+            ax_e.grid()
+            ax_e.legend()
 
-                ax_e.set_ylabel("Fit res. (mag)")
-                ax_e.set_xlabel("Elevation (deg)")
+            ax_e.set_ylabel("Fit res. (mag)")
+            ax_e.set_xlabel("Elevation (deg)")
 
-                ###
+            ###
 
-                fig_p.tight_layout()
-                fig_p.show()
+            fig_p.tight_layout()
+            fig_p.show()
 
 
     def changeDistortionType(self):
@@ -2730,6 +2728,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 print(self.input_path)
 
+        # Update the possibly missing params
+        if not hasattr(self, "dark"):
+            self.dark = None
 
         # Update the possibly missing params
         if not hasattr(self, "fit_only_pointing"):
@@ -4322,6 +4323,11 @@ class PlateTool(QtWidgets.QMainWindow):
                         message_type="error")
 
             return None
+        
+
+        # Reset the lens distortion parameters
+        self.platepar.resetDistortionParameters()
+
 
         # Extract the parameters
         ra, dec, rot_standard, scale, fov_w, fov_h, star_data = solution
@@ -4339,10 +4345,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.updateRefRADec(skip_rot_update=True)
 
         self.platepar.pos_angle_ref = rotationWrtStandardToPosAngle(self.platepar, rot_standard)
-
-
-        # # Reset the distortion parameters
-        # self.platepar.resetDistortionParameters()
 
         # Print estimated parameters
         print()
@@ -6400,13 +6402,21 @@ class PlateTool(QtWidgets.QMainWindow):
             # Only store real picks, and not gaps
             if pick['mode'] == 0:
                 continue
+            
+            # Read the SNR and make sure it is not None
+            snr = pick['snr']
+            if snr is None:
 
+                # If SNR is None, then set it to 0
+                snr = 0.0
 
-            # If SNR is None, then set the random error to 0
-            if pick['snr'] is None:
+                # If SNR is None, then set the random error to 0
                 mag_err_random = 0
+                pick['snr'] = 1.0
 
             else:
+
+                # Compute the random error based on the SNR
                 mag_err_random = 2.5*np.log10(1 + 1/pick['snr'])
 
             # Compute the magnitude errors
@@ -6474,7 +6484,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 "{:10d}".format(int(pick['background_intensity'])),
                 "{:5s}".format(str(pick['saturated'])),
                 "{:+7.2f}".format(mag), "{:+6.2f}".format(-mag_err_total), "{:+6.2f}".format(mag_err_total),
-                "{:10.2f}".format(pick['snr'])
+                "{:10.2f}".format(snr)
                 ]
 
             out_str += ",".join(entry) + "\n"

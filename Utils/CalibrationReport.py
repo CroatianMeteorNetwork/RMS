@@ -5,6 +5,7 @@ from __future__ import print_function, division, absolute_import
 
 import os
 import json
+import datetime
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -18,7 +19,7 @@ from RMS.Formats.CALSTARS import readCALSTARS
 from RMS.Formats.FFfile import validFFName, getMiddleTimeFF
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.Platepar import Platepar
-from RMS.Formats import StarCatalog
+from RMS.Formats import StarCatalog, FFfile
 from RMS.Routines import Image
 from RMS.Routines.AddCelestialGrid import addEquatorialGrid
 
@@ -59,6 +60,10 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
     calstars_data = readCALSTARS(night_dir_path, calstars_file)
     calstars_list, ff_frames = calstars_data
 
+    # If there are no CALSTARS entries, abort the report generation
+    if not calstars_list:
+        print('Calibration report: CALSTARS list is empty - nothing to process.')
+        return None
 
     ### Load recalibrated platepars, if they exist ###
 
@@ -110,10 +115,21 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
     # Go one mag deeper than in the config
     lim_mag = config.catalog_mag_limit + 1
 
+    ts = FFfile.getMiddleTimeFF(calstars_list[0][0], fps=config.fps, ret_milliseconds=True, dt_obj=True)
+
+    J2000 = datetime.datetime(2000, 1, 1, 12, 0, 0)
+
+    # Compute the number of years from J2000
+    years_from_J2000 = (ts - J2000).total_seconds()/(365.25*24*3600)
+
     # Load catalog stars (load one magnitude deeper)
-    catalog_stars, mag_band_str, config.star_catalog_band_ratios = StarCatalog.readStarCatalog(\
-        config.star_catalog_path, config.star_catalog_file, lim_mag=lim_mag, \
-        mag_band_ratios=config.star_catalog_band_ratios)
+    catalog_stars, mag_band_str, config.star_catalog_band_ratios = StarCatalog.readStarCatalog(
+        config.star_catalog_path,
+        config.star_catalog_file,
+        years_from_J2000=years_from_J2000,
+        lim_mag=lim_mag,
+        mag_band_ratios=config.star_catalog_band_ratios
+    )
 
 
     ### Take only those CALSTARS entires for which FF files exist in the folder ###
