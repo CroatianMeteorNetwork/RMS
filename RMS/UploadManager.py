@@ -697,12 +697,12 @@ class UploadManager(multiprocessing.Process):
 
 
 
-    def uploadData(self, retries=8):
+    def uploadData(self, retries=5):
         """ Pulls the upload list from a file, tries to upload the file, and if it fails it saves the list of 
             failed files to disk. 
 
         Keyword arguments:
-            retries: [int] Number of tried to upload a file before giving up. Default is 8.
+            retries: [int] Number of tried to upload a file before giving up. Default is 5.
         """
 
         # Skip uploading if the upload is already in progress
@@ -757,8 +757,8 @@ class UploadManager(multiprocessing.Process):
                     with self.file_queue_lock:
                         self.file_queue.put(file_name)
 
-                    # Progressive retry delay: 30s * 2^(attempt-1), capped at 64 minutes
-                    delay = min(30*(2**(tries - 1)), 3840)
+                    # Progressive retry delay: 15s * 2^(attempt-1), capped at 8 minutes
+                    delay = min(15*(2**(tries - 1)), 480)
                     log.info('Waiting {:.1f} minutes before next retry...'.format(delay/60))
                     time.sleep(delay)
 
