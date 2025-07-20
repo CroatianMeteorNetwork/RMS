@@ -1327,45 +1327,99 @@ class BufferedCapture(Process):
 
         return False
 
+
     def releaseResources(self):
         """Tear everything down in the right order so no FD survives."""
+        
+        log.debug("releaseResources: Starting")
+
+        def _timedCall(fn, timeout_s=2):
+            """Run *fn()* in a daemon thread and wait *timeout_s*.
+            Returns True if the call finished in time."""
+            th = threading.Thread(target=fn, daemon=True)
+            th.start()
+            th.join(timeout_s)
+            return not th.is_alive()
+
 
         # stop frame-saver children
+        log.debug("releaseResources: Calling releaseRawArrays()")
         self.releaseRawArrays()
+        log.debug("releaseResources: releaseRawArrays() completed")
 
         # gracefully drain & stop the pipeline
         if self.pipeline:
+            log.debug("releaseResources: Pipeline exists, starting shutdown")
             bus = self.pipeline.get_bus()
+            
+            log.debug("releaseResources: Sending EOS event")
             self.pipeline.send_event(Gst.Event.new_eos())
-            bus.timed_pop_filtered(2*Gst.SECOND,
+            
+            log.debug("releaseResources: Waiting for EOS/ERROR (2 second timeout)")
+            msg = bus.timed_pop_filtered(2*Gst.SECOND,
                                 Gst.MessageType.EOS | Gst.MessageType.ERROR)
+            log.debug(f"releaseResources: timed_pop_filtered returned: {msg}")
 
-            self.pipeline.set_state(Gst.State.NULL)
-            self.pipeline.get_state(Gst.SECOND)
+            log.debug("releaseResources: Setting pipeline to NULL state")
+            ret = self.pipeline.set_state(Gst.State.NULL)
+            log.debug(f"releaseResources: set_state returned: {ret}")
+            
+            log.debug("releaseResources: Getting pipeline state (1 second timeout)")
+            ret, state, pending = self.pipeline.get_state(Gst.SECOND)
+            log.debug(f"releaseResources: get_state returned: ret={ret}, state={state}, pending={pending}")
 
             # wake poller
             if bus:
+                log.debug("releaseResources: Posting EOS to wake poller")
                 bus.post(Gst.Message.new_eos(None))
 
             pipe = self.pipeline
         else:
+            log.debug("releaseResources: No pipeline to shutdown")
             pipe = None
 
         # shut down the poller
         if self._bus_thread and self._bus_thread.is_alive():
+            log.debug(f"releaseResources: Bus thread is alive (thread={self._bus_thread})")
             self._bus_should_exit = True
+            
+            log.debug("releaseResources: Joining bus thread (6 second timeout)")
             self._bus_thread.join(timeout=6)
+            
+            if self._bus_thread.is_alive():
+                log.debug("releaseResources: WARNING - Bus thread still alive after timeout!")
+            else:
+                log.debug("releaseResources: Bus thread joined successfully")
         self._bus_thread = None
 
         # only now drop the last reference
         if pipe:
+            log.debug("releaseResources: Unreffing pipeline")
             pipe.unref()
         self.pipeline = None
 
-        # OpenCV
-        if self.video_device_type == "cv2" and self.device:
-            self.device.release()
-            self.device = None
+        # device section
+        if self.device:
+            log.debug("releaseResources: Releasing %s", type(self.device).__name__)
+
+            try:
+                if hasattr(self.device, "release"):                      # OpenCV branch
+                    if not _timedCall(self.device.release):
+                        log.warning("releaseResources: cap.release() hung - fd dropped")
+
+                elif hasattr(self.device, "set_state"):                  # GStreamer branch
+                    try:
+                        self.device.set_state(Gst.State.NULL)
+                    except Exception as exc:
+                        log.warning("releaseResources: Gst set_state(NULL) failed: %s", exc)
+
+                else:                                                    # Fallback
+                    log.debug("releaseResources: Unknown device type - just dropping ref")
+
+            finally:
+                self.device = None
+
+        log.debug("releaseResources: Completed")
 
 
     def releaseRawArrays(self):
