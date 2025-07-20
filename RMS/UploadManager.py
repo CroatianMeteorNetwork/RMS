@@ -759,7 +759,10 @@ class UploadManager(multiprocessing.Process):
 
                     # Progressive retry delay: 15s * 2^(attempt-1), capped at 8 minutes
                     delay = min(15*(2**(tries - 1)), 480)
-                    log.info('Waiting {:.1f} minutes before next retry...'.format(delay/60))
+                    if delay < 60:
+                        log.info("Waiting %.0f s before next retry...", delay)
+                    else:
+                        log.info("Waiting %.1f min before next retry...", delay/60)
                     time.sleep(delay)
 
                 # Check if the upload was tried too many times
