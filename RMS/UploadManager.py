@@ -2,20 +2,21 @@
 
 from __future__ import print_function, division, absolute_import
 
+import logging
 import sys
 import os
 import ctypes
 import multiprocessing
 import time
 import datetime
-import logging
-
 import binascii
 import paramiko
 
+from RMS.Logger import LoggingManager, getLogger
+
 # Suppress Paramiko internal errors before they appear in logs
-logging.getLogger("paramiko.transport").setLevel(logging.CRITICAL)
-logging.getLogger("paramiko.auth_handler").setLevel(logging.CRITICAL)
+getLogger("paramiko.transport").setLevel(logging.CRITICAL)
+getLogger("paramiko.auth_handler").setLevel(logging.CRITICAL)
 
 from multiprocessing import Manager
 
@@ -822,8 +823,6 @@ class UploadManager(multiprocessing.Process):
 
 if __name__ == "__main__":
 
-    from RMS.Logger import initLogging
-
     # Set up a fake config file
     class FakeConf(object):
         def __init__(self):
@@ -872,7 +871,8 @@ if __name__ == "__main__":
     ### Test the upload manager ###
 
     # Init the logger
-    initLogging(config)
+    log_manager = LoggingManager()
+    log_manager.initLogging(config)
 
     up = UploadManager(config)
     up.start()

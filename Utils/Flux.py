@@ -25,7 +25,7 @@ from matplotlib import scale as mscale
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.stats
-from RMS.Logger import getLogger
+from RMS.Logger import LoggingManager, getLogger
 
 
 # Get the logger from the main module
@@ -3819,8 +3819,8 @@ if __name__ == "__main__":
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
-    from RMS.Logger import initLogging
-    initLogging(config, 'flux_')
+    log_manager = LoggingManager()
+    log_manager.initLogging(config, 'flux_')
 
     if not os.path.isfile(ftpdetectinfo_path):
         log.warning("The FTPdetectinfo file does not exist:", ftpdetectinfo_path)
