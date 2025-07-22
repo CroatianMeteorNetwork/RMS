@@ -24,7 +24,7 @@ from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
 from RMS.Astrometry.FFTalign import alignPlatepar
 from RMS.Formats import CALSTARS, FFfile, Platepar, StarCatalog
 from RMS.Math import angularSeparation
-from RMS.Logger import initLogging, getLogger
+from RMS.Logger import LoggingManager, getLogger
 
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import matchStars, subsetCatalog
@@ -719,7 +719,8 @@ if __name__ == "__main__":
     config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
     # Initialize the logger
-    initLogging(config, 'checkfit_', safedir=dir_path)
+    log_manager = LoggingManager()
+    log_manager.initLogging(config, 'checkfit_', safedir=dir_path)
 
     # Get the logger handle
     log = getLogger("logger", level="INFO")

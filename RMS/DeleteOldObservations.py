@@ -16,7 +16,7 @@ import ephem
 
 from RMS.CaptureDuration import captureDuration
 from RMS.ConfigReader import loadConfigFromDirectory
-from RMS.Logger import initLogging, getLogger
+from RMS.Logger import LoggingManager, getLogger
 from RMS.Misc import RmsDateTime, UTCFromTimestamp
 
 # Get the logger from the main module
@@ -1157,7 +1157,8 @@ if __name__ == '__main__':
     config = loadConfigFromDirectory(cfg_file, cfg_path)
 
     # Initialize the logger
-    initLogging(config)
+    log_manager = LoggingManager()
+    log_manager.initLogging(config)
     log = getLogger("logger")
 
     if not os.path.isdir(config.data_dir):

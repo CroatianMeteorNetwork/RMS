@@ -5,6 +5,7 @@ import RMS.ConfigReader as cr
 from matplotlib.ticker import StrMethodFormatter
 
 from RMS.Routines.FOVArea import fovArea
+from RMS.Routines.FOVSkyArea import fovSkyArea
 from RMS.Astrometry.Conversions import latLonAlt2ECEF, ECEF2AltAz
 
 
@@ -90,6 +91,8 @@ def plotFOVSkyMap(platepars, configs, out_dir, north_up=False, show_pointing=Fal
             azims.append(azims[0])
             alts.append(alts[0])
 
+        # Compute the area of the FOV polygon in square degrees
+        fov_area = fovSkyArea(pp, mask=mask)
 
         # Plot the FOV alt/az
         line_handle, = ax.plot(np.radians(azims), alts, alpha=0.75)
@@ -120,7 +123,7 @@ def plotFOVSkyMap(platepars, configs, out_dir, north_up=False, show_pointing=Fal
             label_size -= 1
 
         if show_fov:
-            fov_label += "\n hor:{:.1f} ver:{:.1f}".format(pp.fov_h, pp.fov_v)
+            fov_label += "\n{:.1f} x {:.1f}, {:.1f} sq deg".format(pp.fov_h, pp.fov_v, fov_area)
             label_size -= 1
 
 

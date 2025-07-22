@@ -21,6 +21,7 @@ import traceback
 import time
 import datetime
 import multiprocessing
+import signal
 from math import floor
 import numpy as np
 import cv2
@@ -211,17 +212,31 @@ class Compressor(multiprocessing.Process):
 
         log.debug('Compression joined!')
 
-        self.terminate()
-        self.join()
-
-        # Free shared memory after the compressor is done
-        try:
-            log.debug('Freeing frame buffers in Compressor...')
-            del self.array1
-            del self.array2
-        except Exception as e:
-            log.debug('Freeing frame buffers failed with error:' + repr(e))
-            log.debug(repr(traceback.format_exception(*sys.exc_info())))
+        # If process didn't exit cleanly, send graceful interrupt
+        if self.is_alive():
+            log.info("Compression process still alive, sending interrupt signal...")
+            try:
+                if self.pid:
+                    os.kill(self.pid, signal.SIGINT)
+                
+                # Wait for graceful shutdown
+                self.join(5)
+                
+                if self.is_alive():
+                    log.warning("Compression process still alive after interrupt, forcing termination")
+                    self.terminate()
+                else:
+                    log.info("Compression process exited gracefully after interrupt")
+                    
+            except ProcessLookupError:
+                log.info("Compression process already terminated")
+            except Exception as e:
+                log.error("Error during graceful compression shutdown: {}".format(e))
+                log.info("Falling back to terminate()")
+                self.terminate()
+            
+            # Always join to reap zombie (returns instantly if already dead)
+            self.join()
 
         # Return the detector and live viewer objects because they were updated in this namespace
         return self.detector
