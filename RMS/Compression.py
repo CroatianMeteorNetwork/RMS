@@ -256,9 +256,25 @@ class Compressor(multiprocessing.Process):
         """
         
         n = 0
+        exit_wait_start = None
         
         # Repeat until the compressor is killed from the outside
-        while not self.exit.is_set():
+        while True:
+            # graceful-exit check
+            if self.exit.is_set():
+                if self.start_time1.value == 0 and self.start_time2.value == 0:
+                    break
+                # Start timeout counter on first exit request
+                if exit_wait_start is None:
+                    exit_wait_start = time.time()
+                    log.info("Waiting for compression to finish before exit...")
+                # Force exit after 30 seconds
+                elif time.time() - exit_wait_start > 30:
+                    log.warning("Forced exit after 30s timeout - frames may be lost")
+                    break
+                # Sleep briefly to avoid busy-waiting
+                time.sleep(0.1)
+                continue
 
             # Block until frames are available
             while (self.start_time1.value == 0) and (self.start_time2.value == 0):
