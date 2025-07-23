@@ -149,6 +149,12 @@ class BufferedCapture(Process):
         self.start_time2.value = 0
 
         # Initialize shared values for raw frame saving (these are designed for multiprocessing)
+
+        # Raw-frame infrastructure: always create, even if save_frames=False
+        self.raw_frame_saver = None    # avoids AttributeError in releaseRawArrays
+        self.shared_raw_array = None   # primary raw-frame buffer
+        self.shared_raw_array2 = None  # secondary raw-frame buffer
+
         if self.config.save_frames:
 
             # Frame saving block size - these many raw frames are written to buffer before saving to disk
