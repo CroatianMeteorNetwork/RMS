@@ -629,3 +629,48 @@ def getLogger(name=None, level="DEBUG", stdout=False):
         logger.addHandler(out_hdlr)
 
     return logger
+
+
+##############################################################################
+# BACKWARD COMPATIBILITY WITH OLD initLogging FUNCTION
+##############################################################################
+
+# Create a global instance of LoggingManager for backward compatibility
+_global_logging_manager = LoggingManager()
+
+def initLogging(config, log_file_prefix="", safedir=None, level=logging.DEBUG):
+    """
+    Backward compatibility wrapper for the old initLogging function.
+    
+    This function maintains the same interface as the old initLogging but delegates
+    to the new LoggingManager implementation.
+    
+    Arguments:
+        config: [object] RMS config object
+        log_file_prefix: [str] Optional prefix for log filenames
+        safedir: [str] Fallback directory if normal log_path is unwritable
+        level: [int] Logging level for the main logger (defaults to DEBUG)
+    """
+    # The old implementation used a single level parameter for both console and file
+    # For backward compatibility, we'll use the provided level for both
+    console_level = level
+    file_level = level
+    
+    # Check if config has the new log level attributes
+    # If so, use them; otherwise fall back to the provided level
+    if hasattr(config, 'console_log_level'):
+        # The new initLogging will handle parsing these from config
+        console_level = None
+    
+    if hasattr(config, 'log_file_log_level'):
+        # The new initLogging will handle parsing these from config
+        file_level = None
+    
+    # Call the new implementation through the global manager instance
+    _global_logging_manager.initLogging(
+        config=config,
+        log_file_prefix=log_file_prefix,
+        safedir=safedir,
+        console_level=console_level,
+        file_level=file_level
+    )
