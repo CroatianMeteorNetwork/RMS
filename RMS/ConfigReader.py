@@ -1221,7 +1221,7 @@ def parseCapture(config, parser):
         if save_requested and not ffmpeg_ok:
             print("save_frames requested but FFmpeg not available - disabling.")
     else:
-        config.save_frames = ffmpeg_ok
+        config.save_frames = False
 
     if parser.has_option(section, "frame_file_type"):
         config.frame_file_type = parser.get(section, "frame_file_type")
