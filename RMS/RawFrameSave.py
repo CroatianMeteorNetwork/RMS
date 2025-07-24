@@ -163,6 +163,16 @@ class RawFrameSaver(multiprocessing.Process):
         self.exit.set()
         log.debug('Raw frame saver exit flag set')
 
+        # flush any frames whose TS array still has data
+        leftovers = []
+        for frame, ts in zip(self.array1, self.timeStamps1):
+            if ts: leftovers.append((frame.copy(), float(ts)))
+        for frame, ts in zip(self.array2, self.timeStamps2):
+            if ts: leftovers.append((frame.copy(), float(ts)))
+        if leftovers:
+            log.info("Flushing %d tail-end raw frames before shutdown", len(leftovers))
+            self.saveFramesToDisk(leftovers, self.daytime_mode)
+
         # Free shared memory after the raw frame saver is done
         try:
             log.debug('Freeing frame buffers in raw frame saver...')
