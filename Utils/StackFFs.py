@@ -13,7 +13,11 @@ from RMS.Formats.FFfile import validFFName
 from RMS.Formats.FTPdetectinfo import validDefaultFTPdetectinfo, readFTPdetectinfo
 from RMS.Routines.Image import deinterlaceBlend, blendLighten, loadFlat, applyFlat, adjustLevels, saveImage
 from RMS.Routines import MaskImage
+from RMS.Logger import getLogger
 
+
+# Get the logger from the main module
+log = getLogger("logger")
 
 
 def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_bright=False, flat_path=None,
@@ -63,7 +67,7 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
             # Load the flat
             flat = loadFlat(flat_path, flat_file)
 
-            print('Loaded flat:', flat_full_path)
+            log.debug('Loaded flat: {}'.format(flat_full_path))
 
 
     first_img = True
@@ -120,7 +124,7 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
                 # Preserve images with very bright detections
                 if (median > 10) and (top_brightness < (2**(8*img.itemsize) - 10)):
                     if print_progress:
-                        print('Skipping: ', ff_name, 'median:', median, 'top brightness:', top_brightness)
+                        log.info('Skipping: {} median: {} top brightness {}'.format(ff_name, median, top_brightness))
                     continue
 
 
@@ -138,7 +142,7 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
                 continue
 
             if print_progress:
-                print('Stacking: ', ff_name)
+                log.info('Stacking: {}'.format(ff_name))
 
             # Blend images 'if lighter'
             merge_img = blendLighten(merge_img, img)
@@ -169,7 +173,7 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
     stack_path = os.path.join(dir_path, night_dir + filename_suffix + file_format)
 
     if print_progress:
-        print("Saving stack to:", stack_path)
+        log.info('Saving stack to: {}'.format(stack_path))
 
     # Stretch the levels
     merge_img = adjustLevels(merge_img, np.percentile(merge_img, 0.5), 1.3, np.percentile(merge_img, 99.9))

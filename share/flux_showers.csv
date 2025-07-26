@@ -42,6 +42,6 @@
    18|oAND2023|Andromedids                  |245  |250  |255  | 29.0| 0.07| 47.0 | 0.85|16.0|-0.08|2023  |250.0  | 100|0.2  |0.2  |2.5 | 91.7|   5.0|{'yearly': {'min_tap': 100, 'min_meteors': 100, 'min_bin_duration':   2, 'max_bin_duration': 48}}
  9999|oWir2023|Wirtanenids                  |259.5|259.8|260.5|  7.5| 0.00|-38.8 | 0.00|10.2| 0.00|2023  |259.8  |   5|0.2  |0.2  |3.0 | 84.5|   3.0|{'yearly': {'min_tap':  15, 'min_meteors':  10, 'min_bin_duration':   1, 'max_bin_duration': 24}}
  9998|oM2024H1|M2024H1                      | 37.5| 37.8| 38.0|261.1| 0.00| 47.28| 0.00|35.6| 0.00|2024  | 37.8  |  50|10   |10   |2.5 | 98.0|   3.0|{'yearly': {'min_tap':   5, 'min_meteors':  10, 'min_bin_duration':   0.25, 'max_bin_duration': 2}}
-  446|oDPC2024|December phi-Cassiopeiids    |245.5|250.0|260.0| 21.0|-0.19| 54.0 | 1.07|16.1| 0.00|2024  |250.0  |   5|0.2  |0.2  |2.5 | 90.1|   3.0|{'yearly': {'min_tap': 100, 'min_meteors': 100, 'min_bin_duration':   2, 'max_bin_duration': 48}}
+  446|oDPC2024|December phi-Cassiopeiids    |245.5|250.0|253.0| 21.0|-0.19| 54.0 | 1.07|16.1| 0.00|2024  |250.0  |   5|0.2  |0.2  |2.5 | 90.1|   3.0|{'yearly': {'min_tap': 100, 'min_meteors': 100, 'min_bin_duration':   2, 'max_bin_duration': 48}}
 # An outburst in a certain year can be defined as e.g.:
 #   9|oDRA2011|Draconids 2011 Outburst      |192.2|195  |197.1|262.9| 0.34| 55.7|-0.05|20.7| 0.00|2011  |195.438|200 |7.225|0    |2.5 | -1  |   3.0|

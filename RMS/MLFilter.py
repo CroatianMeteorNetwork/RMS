@@ -17,25 +17,49 @@ import traceback
 import datetime
 import shutil
 
+# --- TensorFlow-Lite import cascade -----------------------------------------
+#
+# 1.  ai-edge-litert      <- new LiteRT wheels
+# 2.  tflite_runtime      <- legacy stand-alone wheels
+# 3.  tensorflow          <- TF proper, last-ditch fallback
+#
+# After the block you have:
+#   • Interpreter   – the class to instantiate
+#   • TFLITE_BACKEND – "litert" | "tflite_runtime" | "tf_full" | "none"
+#   • TFLITE_AVAILABLE – bool
+
+
 TFLITE_AVAILABLE = False
-USING_FULL_TF = False
+TFLITE_BACKEND   = "none"        # use for log messages or debugging
 
 try:
-    from tflite_runtime.interpreter import Interpreter
+    from ai_edge_litert.interpreter import Interpreter  # 1 preferred
     TFLITE_AVAILABLE = True
+    TFLITE_BACKEND   = "litert"
+
 except ImportError:
     try:
-        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-        from tensorflow.lite.python.interpreter import Interpreter
+        from tflite_runtime.interpreter import Interpreter  # 2 fallback
         TFLITE_AVAILABLE = True
-        USING_FULL_TF = True
+        TFLITE_BACKEND   = "tflite_runtime"
+
     except ImportError:
-        TFLITE_AVAILABLE = False
+        try:
+            os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # silence TF spam
+            from tensorflow.lite.python.interpreter import Interpreter  # 3 last resort
+            TFLITE_AVAILABLE = True
+            TFLITE_BACKEND   = "tf_full"
+
+        except ImportError:
+            Interpreter = None
+
+# ---------------------------------------------------------------------------
+
 
 
 from RMS.Formats import FFfile
 from RMS.Formats import FTPdetectinfo
-from RMS.Logger import initLogging, getLogger
+from RMS.Logger import LoggingManager, getLogger
 import RMS.ConfigReader as cr
 
 # Get the logger from the main module
@@ -437,14 +461,9 @@ def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=
 
     # Check if tflite is available
     if TFLITE_AVAILABLE:
-        log.info("TensorFlow Lite is available.")
-        if USING_FULL_TF:
-            log.info("Using TensorFlow Lite from full TensorFlow package.")
-        else:
-            log.info("Using standalone tflite_runtime package.")
+        log.info("TF-Lite backend: %s", TFLITE_BACKEND)
     else:
-        log.warning("The package tflite_runtime is not installed! This package is not available on Python 2.")
-        log.warning("ML filtering skipped...")
+        log.warning("interpreter unavailable - ML filtering skipped")
 
         # Return a full list of FF files
         return [meteor_entry[0] for meteor_entry in meteor_list]
@@ -610,7 +629,8 @@ if __name__ == "__main__":
     config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
     ### Init the logger
-    initLogging(config, 'reprocess_')
+    log_manager = LoggingManager()
+    log_manager.initLogging(config, 'reprocess_')
     log = getLogger("logger")
 
     #########################

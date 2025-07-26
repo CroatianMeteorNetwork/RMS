@@ -4,6 +4,7 @@ from __future__ import print_function, division, absolute_import
 import platform
 import os
 import sys
+import traceback
 import shutil
 import errno
 import subprocess
@@ -26,6 +27,7 @@ else:
 
 
 import numpy as np
+import itertools
 
 from matplotlib import scale as mscale
 from matplotlib import transforms as mtransforms
@@ -631,6 +633,37 @@ class RmsDateTime:
             return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
 
+class UTCFromTimestamp:
+    """Cross-version helper to convert Unix timestamps to naive UTC datetime objects.
+
+    - Python 2.7-3.11: uses datetime.utcfromtimestamp()
+    - Python 3.12+: uses datetime.fromtimestamp(..., tz=timezone.utc).replace(tzinfo=None)
+    """
+
+    @staticmethod
+    def utcfromtimestamp(timestamp):
+        if sys.version_info >= (3, 12):
+            # Use aware datetime then strip tzinfo to make it naive
+            return datetime.datetime.fromtimestamp(
+                timestamp, tz=UTCFromTimestamp._get_utc_timezone()
+            ).replace(tzinfo=None)
+        else:
+            return datetime.datetime.utcfromtimestamp(timestamp)
+
+    @staticmethod
+    def _get_utc_timezone():
+        """Safely provide UTC tzinfo across Python versions."""
+        try:
+            # Python 3.2+
+            from datetime import timezone
+            return timezone.utc
+        except ImportError:
+            # Python 2: no timezone support
+            raise NotImplementedError(
+                "timezone-aware fromtimestamp() is not supported in Python < 3.2. "
+                "Use Python >= 3.12 or fallback to utcfromtimestamp()."
+            )
+
 def niceFormat(string, delim=":", extra_space=5):
 
     """
@@ -773,93 +806,265 @@ def obfuscatePassword(url):
     except Exception as e:
         log.error("Error in obfuscate_password: %s", str(e))
         return "[URL_REDACTED_DUE_TO_ERROR]"
-    
 
-def tarWithProgress(source_dir, tar_path, compression='bz2', remove_source=False):
-    """Create a tar archive with progress reporting based on file count, verify it, and optionally remove source.
-    
-    Args:
-        source_dir: Directory to archive
-        tar_path: Path where to save the tar file
-        compression: Compression type ('bz2' or 'gz')
-        remove_source: Whether to remove the source directory after successful archiving
-        
-    Returns:
-        bool: True if archive was created and verified successfully, False otherwise
+
+def _portableCommonpath(paths):
+    """Return the longest common sub-path shared by all given paths.
+
+    Arguments:
+        paths: [list[str]] Sequence (list, tuple, etc.) of file-system
+            paths to compare.
+
+    Return:
+        common_path: [str] The directory prefix common to every element in
+            *paths*, or an empty string if none exists.
     """
     try:
-        # Count total files to be archived
-        total_files = 0
-        for root, dirs, files in os.walk(source_dir):
-            total_files += len(files)
+        return os.path.commonpath(paths)          # Py 3.5+
+    
+    except AttributeError:
+        if not paths:
+            return ''
         
-        log.info("Found {} files to archive".format(total_files))
+        split_paths = [os.path.normpath(p).split(os.sep) for p in paths]
+        prefix_parts = os.path.commonprefix(split_paths)
+
+        if not prefix_parts:
+            return os.path.dirname(paths[0])      # diff drives (Windows)
         
-        # Open the archive file
+        prefix = os.sep.join(prefix_parts)
+
+        if not os.path.isdir(prefix):
+            prefix = os.path.dirname(prefix)
+
+        return prefix or os.path.dirname(paths[0])
+
+
+def tarWithProgress(source_dir, tar_path, compression='bz2', remove_source=False, file_list=None):
+    """Create a tar archive with progress feedback, verify it, and (optionally) delete the sources.
+
+    Arguments:
+        source_dir: [str | None] Directory whose entire contents will be
+            archived. Ignored when *file_list* is supplied.
+        tar_path: [str] Full path (including extension) where the archive
+            will be written.
+
+    Keyword arguments:
+        compression: [str] Compression algorithm: 'bz2' or 'gz'.
+            'bz2' by default.
+        remove_source: [bool] If *True* and *file_list* is *None*, delete
+            *source_dir* after the archive verifies correctly. False by
+            default.
+        file_list: [list[str] | None] Explicit list of file paths to
+            archive. When given, the directory walk is skipped and each
+            file is stored relative to their deepest common parent
+            directory. None by default.
+
+    Return:
+        success: [bool] True if the archive was created **and** verified
+            successfully, False otherwise.
+    """
+    try:
+        # 1. Build list of files ------------------------------------------------
+        if file_list is not None:
+            files_to_archive = list(file_list)
+            if not files_to_archive:
+                log.error("No files given in file_list - nothing to archive")
+                return False
+            base_dir = _portableCommonpath(files_to_archive)
+        else:
+            files_to_archive = [os.path.join(r, f)
+                                for r, _, fs in os.walk(source_dir)
+                                for f in fs]
+            base_dir = source_dir
+
+        total_files = len(files_to_archive)
+        if not total_files:
+            log.info("Nothing to archive")
+            return False
+
+        log.info("Found {:d} files to archive".format(total_files))
+                
+        # 2. Create tarball -----------------------------------------------------
         mode = 'w:bz2' if compression == 'bz2' else 'w:gz'
         with tarfile.open(tar_path, mode) as tar:
-            # Initialize progress tracking
-            processed_files = 0
-            last_percent = 0
-            
-            # Loop through files and add them to the archive
-            for root, dirs, files in os.walk(source_dir):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    arcname = os.path.join(os.path.basename(source_dir), os.path.relpath(file_path, source_dir))
-                    
-                    # Add the file to the archive
-                    tar.add(file_path, arcname=arcname)
-                    
-                    # Update and report progress
-                    processed_files += 1
-                    percent = int((processed_files / total_files) * 100)
-                    
-                    # Report progress every 5%
-                    if percent >= last_percent + 5:
-                        last_percent = (percent // 5) * 5
-                        log.info("Archiving progress: {}% ({}/{} files)".format(last_percent, processed_files, total_files))
-                        print("Archiving progress: {}% ({}/{} files)".format(last_percent, processed_files, total_files))
+            processed = 0
+            last_pct = 0
+            for fpath in files_to_archive:
+                rel = os.path.relpath(fpath, base_dir)
+                
+                # Check if the file is outside the base directory
+                if rel.startswith(os.pardir):
+                    raise ValueError("{} is outside {}".format(fpath, base_dir))
+                
+                arcname = os.path.join(os.path.basename(base_dir), rel)
+                tar.add(fpath, arcname=arcname)
+
+                processed += 1
+                pct = int(processed * 100.0/total_files)
+                if pct >= last_pct + 5:
+                    last_pct = (pct//5)*5
+                    print("Archiving progress: {}% ({}/{})".format(
+                          last_pct, processed, total_files))
         
-        # Verify the archive
+        # 3. Verify -------------------------------------------------------------
         log.info("Verifying archive integrity...")
-        print("Verifying archive integrity...")
-        
-        # Check file exists and has non-zero size
-        if not os.path.exists(tar_path) or os.path.getsize(tar_path) == 0:
-            log.error("Archive verification failed: File is empty or missing")
+        read_mode = 'r:bz2' if compression == 'bz2' else 'r:gz'
+
+        if not (os.path.exists(tar_path) and os.path.getsize(tar_path) > 0):
+            log.error("Archive verification failed: file is empty or missing")
             return False
-            
-        # Try to open and list contents
-        try:
-            # Read mode depends on compression
-            read_mode = 'r:bz2' if compression == 'bz2' else 'r:gz'
-            with tarfile.open(tar_path, read_mode) as test_tar:
-                # Count files in archive
-                archive_files = len(test_tar.getnames())
-                
-                # We expect at least (total_files) files in the archive
-                # (The count may not match exactly due to directory entries)
-                if archive_files < total_files:
-                    log.error("Archive verification failed: Expected at least {} files, found {}".format(
-                        total_files, archive_files))
-                    return False
-                    
-                log.info("Archive verified successfully: contains {} files".format(archive_files))
-                print("Archive verified successfully: contains {} files".format(archive_files))
-                
-                # Remove source directory if requested and verification passed
-                if remove_source:
-                    log.info("Removing source directory {}...".format(source_dir))
-                    shutil.rmtree(source_dir)
-                    log.info("Source directory removed successfully")
-                
-                return True
-                
-        except Exception as e:
-            log.error("Archive verification failed: {}".format(e))
-            return False
-            
+
+        with tarfile.open(tar_path, read_mode) as tst:
+            archive_files = len(tst.getnames())
+            if archive_files < total_files:
+                log.error("Archive verification failed: wanted >={} files, found {}".format(
+                          total_files, archive_files))
+                return False
+            log.info("Archive verified successfully: contains {} files".format(
+                     archive_files))
+            print("Archive verified successfully: contains {} files".format(
+                  archive_files))
+
+        # 4. Optional cleanup ---------------------------------------------------
+        if remove_source and file_list is None and source_dir:
+            log.info("Removing source directory {} ...".format(source_dir))
+            shutil.rmtree(source_dir)
+            log.info("Source directory removed")
+
+        return True
+
     except Exception as e:
         log.error("Error creating archive: {}".format(e))
+        log.error("".join(traceback.format_exception(*sys.exc_info())))
         return False
+
+def domainWrapping(query_min, query_max, range_min, range_max):
+    """ For a query in an arbitrarily ranged domain, return a query, or a pair of queries.
+
+    For example, for degrees of longitude 0-360.
+    340, 380, 0, 360 returns [[340, 360], [0, 20]]
+
+    For degrees of latitude -90, + 90.
+    70, 120, -90, 90 returns [[70, 90], [-90, -60]]
+
+    Arguments:
+        query_min: [float] Lower bound of query range.
+        query_max: [float] Upper bound of query range.
+        range_min: [float] Lower bound of domain range.
+        range_max: [float] Upper bound of domain range.
+
+    Return:
+        [list]: a query, or a pair of queries.
+    """
+
+    if query_max < query_min:
+        return [[query_min, query_max]]
+
+    # Compensate for range_mins
+    span = range_max - range_min
+    query_min, query_max = (query_min - range_min) % span, (query_max - range_min) % span
+
+    # No work to do
+    if query_min < query_max:
+        # Decompensate and return
+        return [[range_min + query_min, range_min + query_max]]
+
+    # Case where query_high was on the maximum range limit, avoid returning two overlapping queries
+    if query_min > query_max and query_max == range_min:
+        # Decompensate and return
+        return [[range_min + query_min, range_max]]
+
+    # Case where query_high was on the minimum range limit, avoid returning two overlapping queries
+    if query_min > query_max and query_max == 0:
+        # Decompensate and return
+        return [[range_min + query_min, range_max]]
+
+    # Case where one end was outside of range, return two queries
+    elif query_min > query_max:
+        q1 = [range_min + query_min, range_max]
+        q2 = [range_min, range_min + query_max]
+        return [q1, q2]
+
+    # Finally return query range for the case where the full range was specified
+    else:
+        return [[range_min, range_max]]
+
+def nDimensionDomainSplit(query_list):
+    """For an arbitrary number of dimensions, return a cartesian product of domain wrap queries.
+
+    For example a query between:
+        160 and 200 degrees of longitude (-180 +180),
+        80 and 110 degrees of latitude (-90 + 90) and
+        2300 and 0100 the next day would be passed as
+
+        [[160, 200, -180, +180], [80, 110, -90, +90], [23, 25, 0, 24]]
+
+    and would return
+
+        [[[160, 180], [80, 90], [23, 24]],
+         [[160, 180], [80, 90], [0, 1]],
+         [[160, 180], [-90, -70], [23, 24]],
+         [[160, 180], [-90, -70], [0, 1]],
+         [[-180, -160], [80, 90], [23, 24]],
+         [[-180, -160], [80, 90], [0, 1]],
+         [[-180, -160], [-90, -70], [23, 24]],
+         [[-180, -160], [-90, -70], [0, 1]]]
+
+    Only the minimum number of wrapped_queries are returned. In this case the degrees of longitude
+    does not wrap around, so only 6 wrapped_queries are required for complete coverage.
+
+        [[340, 350, 0, 360], [80, 110, -90, +90], [23, 25, 0, 24]]
+
+
+        [[340, 350], [80, 90], [23, 24]]
+        [[340, 350], [80, 90], [0, 1]]
+        [[340, 350], [-90, -70], [23, 24]]
+        [[340, 350], [-90, -70], [0, 1]]
+        [[340, 360], [0, 20]]
+        [[70, 90], [-90, -60]]
+
+    Arguments:
+        query_list: List of wrapped_queries in the form [[query_min, query_max], [range_min, range_max], ... ]
+
+    Return:
+        list: Cartesian product of split wrapped_queries as a list.
+    """
+    # Compute the split wrapped_queries for each dimension
+    wrapped_queries = []
+    for query in query_list:
+        query_min, query_max = query[0], query[1]
+        domain_low, domain_high = query[2], query[3]
+        wrapped_queries.append(domainWrapping(query_min, query_max, domain_low, domain_high))
+
+    # Produce the cartesian product across all result dimensions
+    wrapped_query_list = list(itertools.product(*wrapped_queries))
+
+    # Convert to a list
+    wrapped_queries = []
+    for result in wrapped_query_list:
+        wrapped_queries.append(list(result))
+    return wrapped_queries
+
+def sphericalDomainWrapping(ra_min, ra_max, dec_min, dec_max,
+                            ra_range_min=0, ra_range_max=360, dec_range_min=-90, dec_range_max=+90):
+    """ For a query in a spherical domain, compute the queries required to cover a search space.
+
+    Arguments:
+        ra_min: [float] right ascension in degrees.
+        ra_max: [float] right ascension in degrees.
+
+    Keyword arguments:
+        ra_range_min: [float] optional, default 0 right ascension in degrees domain minimum.
+        ra_range_max: [float] optional, default 360 right ascension in degrees domain maximum.
+        dec_range_min: [float] optional, default -90 declination in degrees domain minimum.
+        dec_range_max: [float] optional, default 90 declination in degrees domain maximum.
+
+    Return:
+        [list] of queries required to cover a spherical search space.
+    """
+
+    query = []
+    query.append([ra_min, ra_max, ra_range_min, ra_range_max])
+    query.append([dec_min, dec_max, dec_range_min, dec_range_max])
+    return nDimensionDomainSplit(query)

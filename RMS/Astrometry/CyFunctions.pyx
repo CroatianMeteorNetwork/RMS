@@ -992,8 +992,8 @@ cpdef np.ndarray[np.float64_t, ndim=1] raDecToCartesian(double ra, double dec):
     Notes:
         The coordinate system follows the convention:
         x-axis points to RA = 0, Dec = 0
-        y-axis points to RA = 90°, Dec = 0
-        z-axis points to the North Celestial Pole (Dec = 90°)
+        y-axis points to RA = 90, Dec = 0
+        z-axis points to the North Celestial Pole (Dec = 90)
     """
     cdef:
         double x = cos(dec)*cos(ra)
@@ -1013,16 +1013,16 @@ cpdef (double, double) cartesianToRaDec(np.ndarray[np.float64_t, ndim=1] vec):
 
     Return:
         (ra, dec): [tuple]
-            ra: [double] Right ascension in radians, range [0, 2π).
-            dec: [double] Declination in radians, range [-π/2, π/2].
+            ra: [double] Right ascension in radians, range [0, 2pi).
+            dec: [double] Declination in radians, range [-pi/2, pi/2].
 
     Notes:
         - The function returns (0, 0) if the input vector is [0, 0, 0] to avoid division by zero.
-        - The returned RA is normalized to be within [0, 2π).
+        - The returned RA is normalized to be within [0, 2pi).
         - The coordinate system assumes:
           x-axis points to RA = 0, Dec = 0
-          y-axis points to RA = 90°, Dec = 0
-          z-axis points to the North Celestial Pole (Dec = 90°)
+          y-axis points to RA = 90, Dec = 0
+          z-axis points to the North Celestial Pole (Dec = 90)
     """
     cdef:
         double x = vec[0]
@@ -1037,7 +1037,7 @@ cpdef (double, double) cartesianToRaDec(np.ndarray[np.float64_t, ndim=1] vec):
     ra = atan2(y, x)
     dec = asin(z/distance)
     
-    # Normalize RA to be within [0, 2π)
+    # Normalize RA to be within [0, 2pi)
     ra = fmod(ra + 2*M_PI, 2*M_PI)
     
     return ra, dec

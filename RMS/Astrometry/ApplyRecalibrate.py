@@ -34,7 +34,7 @@ from RMS.Astrometry.FFTalign import alignPlatepar
 from RMS.Formats import CALSTARS, FFfile, FTPdetectinfo, Platepar, StarCatalog
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, validDefaultFTPdetectinfo
 from RMS.Math import angularSeparation
-from RMS.Logger import initLogging, getLogger
+from RMS.Logger import LoggingManager, getLogger
 from RMS.Misc import RmsDateTime
 
 # Neighbourhood size around individual FFs with detections which will be takes for recalibration
@@ -581,10 +581,23 @@ def recalibrateSelectedFF(dir_path, ff_file_names, calstars_data, config, lim_ma
 
     calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
 
+    if not ff_file_names:
+        log.warning("recalibrateSelectedFF: no FF files after filtering - skipping recalibration")
+        return {}
+    
+    ts = FFfile.getMiddleTimeFF(ff_file_names[0], fps=config.fps, ret_milliseconds=True, dt_obj=True)
+
+    J2000 = datetime.datetime(2000, 1, 1, 12, 0, 0)
+
+    # Compute the number of years from J2000
+    years_from_J2000 = (ts - J2000).total_seconds()/(365.25*24*3600)
+    log.info('Loading star catalog with years from J2000: {:.2f}'.format(years_from_J2000))
+
     # load star catalog with increased catalog limiting magnitude
     star_catalog_status = StarCatalog.readStarCatalog(
         config.star_catalog_path,
         config.star_catalog_file,
+        years_from_J2000=years_from_J2000,
         lim_mag=lim_mag,
         mag_band_ratios=config.star_catalog_band_ratios,
     )
@@ -663,35 +676,6 @@ def recalibrateIndividualFFsAndApplyAstrometry(
     # Use a copy of the platepar
     platepar = copy.deepcopy(platepar)
 
-
-    ### Load catalog stars ##
-
-    # Increase catalog limiting magnitude by one to get more stars for matching
-    catalog_mag_limit = config.catalog_mag_limit + 1
-
-    # Load catalog stars (overwrite the mag band ratios if specific catalog is used)
-    star_catalog_status = StarCatalog.readStarCatalog(
-        config.star_catalog_path,
-        config.star_catalog_file,
-        lim_mag=catalog_mag_limit,
-        mag_band_ratios=config.star_catalog_band_ratios
-    )
-
-    if not star_catalog_status:
-        log.info("Could not load the star catalog!")
-        log.info(os.path.join(config.star_catalog_path, config.star_catalog_file))
-        return {}
-
-    catalog_stars, _, config.star_catalog_band_ratios = star_catalog_status
-
-    ### ###
-    
-    # Update the platepar coordinates from the config file
-    platepar.lat = config.latitude
-    platepar.lon = config.longitude
-    platepar.elev = config.elevation
-
-    
     ### Load CALSTARS data ###
 
     # Load the list of stars from the CALSTARS file
@@ -703,11 +687,51 @@ def recalibrateIndividualFFsAndApplyAstrometry(
     # Make a list of sorted FF files in CALSTARS
     calstars_ffs = sorted(calstars.keys())
 
+    if not calstars_ffs:
+        log.warning("No FF entries in CALSTARS - skipping recalibration")
+        return {}, []
+
     # Create a dictionary mapping FF file names in CALSTARS to datetime objects
     calstars_datetime_dict = OrderedDict()
     for ff_name in calstars:
         calstars_datetime_dict[ff_name] = FFfile.getMiddleTimeFF(ff_name, config.fps, dt_obj=True, 
                                                                  ff_frames=calstars_ff_frames)
+
+    ### Load catalog stars ##
+
+    # Increase catalog limiting magnitude by one to get more stars for matching
+    catalog_mag_limit = config.catalog_mag_limit + 1
+
+    ts = calstars_datetime_dict[calstars_ffs[0]]
+    J2000 = datetime.datetime(2000, 1, 1, 12, 0, 0)
+
+    # Compute the number of years from J2000
+    years_from_J2000 = (ts - J2000).total_seconds()/(365.25*24*3600)
+
+    # Load catalog stars (overwrite the mag band ratios if specific catalog is used)
+    star_catalog_status = StarCatalog.readStarCatalog(
+        config.star_catalog_path,
+        config.star_catalog_file,
+        years_from_J2000=years_from_J2000,
+        lim_mag=catalog_mag_limit,
+        mag_band_ratios=config.star_catalog_band_ratios
+    )
+
+    if not star_catalog_status:
+        log.info("Could not load the star catalog!")
+        log.info(os.path.join(config.star_catalog_path, config.star_catalog_file))
+        return {}, []
+
+    catalog_stars, _, config.star_catalog_band_ratios = star_catalog_status
+
+    ### ###
+    
+    # Update the platepar coordinates from the config file
+    platepar.lat = config.latitude
+    platepar.lon = config.longitude
+    platepar.elev = config.elevation
+
+    
 
     ### ###
 
@@ -732,7 +756,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
             log.info('ERROR! The FTPdetectinfo file does not exist: {:s}'.format(ftpdetectinfo_path))
             log.info('    The recalibration on every file was not done!')
 
-            return {}
+            return {}, []
 
         # If it exists, use it as the only file to load
         ftpdetectinfo_file_list = [os.path.basename(ftpdetectinfo_path)]
@@ -1231,7 +1255,8 @@ if __name__ == "__main__":
     config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
     # Initialize the logger
-    initLogging(config, 'recalibrate_', safedir=dir_path)
+    log_manager = LoggingManager()
+    log_manager.initLogging(config, 'recalibrate_', safedir=dir_path)
 
     # Get the logger handle
     log = getLogger("logger", level="INFO")

@@ -65,7 +65,9 @@ import argparse
 import json
 import pprint
 import re
+
 import RMS.ConfigReader as cr
+from RMS.Logger import LoggingManager, getLogger
 from time import sleep
 import datetime
 
@@ -77,6 +79,9 @@ else:
     # Python2 compatible version 
     import Utils.CameraControl27 as dvr
 
+# Get the logger from the main module
+log = getLogger("logger")
+
 
 def rebootCamera(cam):
     """Reboot the Camera
@@ -84,7 +89,7 @@ def rebootCamera(cam):
     Args:
         cam : The camera
     """
-    print('rebooting, please wait....')
+    log.info('Camera rebooting, please wait....')
     cam.reboot()
     retry = 0
     while retry < 5:
@@ -93,14 +98,14 @@ def rebootCamera(cam):
             break
         retry += 1
     if retry < 5: 
-        print('reboot successful')
+        log.info('reboot successful')
     else:
-        print('camera nonresponsive, please wait 30s and reconnect')
+        log.info('camera nonresponsive, please wait 30s and reconnect')
 
 
-def strIPtoHex(ip):
-    a = binascii.hexlify(socket.inet_aton(ip)).decode().upper()
-    addr='0x'+''.join([a[x:x+2] for x in range(0,len(a),2)][::-1])
+def strIPtoHex(ip_str):
+    a = binascii.hexlify(socket.inet_aton(ip_str)).decode().upper()
+    addr = '0x' + ''.join([a[x:x+2] for x in range(0, len(a), 2)][::-1])
     return addr
 
 
@@ -113,9 +118,9 @@ def iptoString(s):
     Returns:
         string: human readable IP in host order eg '192.169.1.10'
     """
-    a=s[2:]
-    addr='0x'+''.join([a[x:x+2] for x in range(0,len(a),2)][::-1])
-    ipaddr=ip.IPv4Address(int(addr,16))
+    a = s[2:]
+    addr = '0x' + ''.join([a[x:x+2] for x in range(0, len(a), 2)][::-1])
+    ipaddr = ip.IPv4Address(int(addr, 16))
     return ipaddr
 
 
@@ -151,16 +156,16 @@ def saveToFile(nc, dh, nt, cs, vs, gu, cp, rb, lc):
         with open(os.path.join('./camerasettings/', filename), 'w') as f:
             json.dump(config, f, indent=4, sort_keys=True)
 
-    print('Settings saved to ./camerasettings/')
+    log.info('Settings saved to ./camerasettings/')
 
 
 def loadFromFile():
     """Load the camera config from JSON files saved earlier"""
     if not os.path.exists('./camerasettings/'):
-        print('Settings files not found in ./camerasettings/')
+        log.info('Settings files not found in ./camerasettings/')
         return None
 
-    print('Loading settings....')
+    log.info('Loading settings....')
 
     config_files = {
         'netcommon.json': 'nc',
@@ -179,14 +184,14 @@ def loadFromFile():
     for filename, config_name in config_files.items():
         file_path = os.path.join('./camerasettings/', filename)
         if not os.path.exists(file_path):
-            print("Warning: {} not found. Skipping.".format(filename))
+            log.info("Warning: {} not found. Skipping.".format(filename))
             configs[config_name] = None
             continue
 
         with open(file_path, 'r') as f:
             configs[config_name] = json.load(f)
 
-    print('Loaded')
+    log.info('Loaded')
     return (configs['nc'], configs['dh'], configs['nt'], configs['cs'], configs['vs'],
             configs['gu'], configs['cp'], configs['rb'], configs['lc'])
 
@@ -196,7 +201,7 @@ def getNetworkParams(cam, showit=True):
 
     Args:
         cam : camera object
-        showit (bool, optional): whether to print out the settings.
+        showit (bool, optional): whether to log out the settings.
 
     Returns:
         json block containing the config
@@ -206,19 +211,19 @@ def getNetworkParams(cam, showit=True):
     nt = cam.get_info("NetWork.NetNTP")
 
     if showit is True:
-        print('IP Address  : ', iptoString(nc['HostIP']))
-        print('---------')
-        pprint.pprint(nc)
-        print('---------')
-        pprint.pprint(dh)
-        print('---------')
-        pprint.pprint(nt)
+        log.info('IP Address  : ' + str(iptoString(nc['HostIP'])))
+        log.info('---------')
+        log.info(pprint.pformat(nc))
+        log.info('---------')
+        log.info(pprint.pformat(dh))
+        log.info('---------')
+        log.info(pprint.pformat(nt))
     return nc, dh, nt
 
 
 def getIP(cam):
-    nc=cam.get_info("NetWork.NetCommon")
-    print(iptoString(nc['HostIP']))
+    nc = cam.get_info("NetWork.NetCommon")
+    log.info(str(iptoString(nc['HostIP'])))
     return
 
 
@@ -227,23 +232,23 @@ def getEncodeParams(cam, showit=True):
 
     Args:
         cam - the camera 
-        showit (bool, optional): whether to print out the settings.
+        showit (bool, optional): whether to log out the settings.
 
     Returns:
         json block containing the config
     """
     vidinfo = cam.get_info("Simplify.Encode")
     if showit is True:
-        pprint.pprint(vidinfo)
+        log.info(pprint.pformat(vidinfo))
     return vidinfo
 
 
 def getCameraParams(cam, showit=True):
-    """ display or retrueve the Camera section of the camera config
+    """ display or retrieve the Camera section of the camera config
 
     Args:
         cam - the camera 
-        showit (bool, optional): whether to print out the settings.
+        showit (bool, optional): whether to log out the settings.
 
     Returns:
         json block containing the config
@@ -253,9 +258,9 @@ def getCameraParams(cam, showit=True):
     p1 = caminfo['Param'][0]
     p2 = caminfo['ParamEx'][0]
     if showit is True:
-        pprint.pprint(fog)
-        pprint.pprint(p1)
-        pprint.pprint(p2)
+        log.info(pprint.pformat(fog))
+        log.info(pprint.pformat(p1))
+        log.info(pprint.pformat(p2))
     return caminfo
 
 
@@ -264,14 +269,14 @@ def getGuiParams(cam, showit=True):
 
     Args:
         cam - the camera 
-        showit (bool, optional): whether to print out the settings.
+        showit (bool, optional): whether to log out the settings.
 
     Returns:
         json block containing the config
     """
     caminfo = cam.get_info("AVEnc.VideoWidget")
     if showit is True:
-        pprint.pprint(caminfo)
+        log.info(pprint.pformat(caminfo))
     return caminfo
 
 
@@ -280,7 +285,7 @@ def getGeneralParams(cam, showit=True):
 
     Args:
         cam - the camera
-        showit (bool, optional): whether to print out the settings.
+        showit (bool, optional): whether to log out the settings.
 
     Returns:
         json block containing the config
@@ -289,9 +294,9 @@ def getGeneralParams(cam, showit=True):
     lc = cam.get_info("General.Location")
 
     if showit is True:
-        pprint.pprint(rb)
-        print('---------')
-        pprint.pprint(lc)
+        log.info(pprint.pformat(rb))
+        log.info('---------')
+        log.info(pprint.pformat(lc))
 
     return rb, lc
 
@@ -301,58 +306,60 @@ def getColorParams(cam, showit=True):
 
     Args:
         cam - the camera 
-        showit (bool, optional): whether to print out the settings.
+        showit (bool, optional): whether to log out the settings.
 
     Returns:
         json block containing the config
     """
     caminfo = cam.get_info("AVEnc.VideoColor.[0]")
     if showit is True:
-        pprint.pprint(caminfo)
+        log.info(pprint.pformat(caminfo))
     return caminfo
 
 
 def setEncodeParam(cam, opts):
     """ Set a parameter in the Encode section of the camera config
-        Note: a different approach has to be taken here than for camera params
-        as its not possible to set individual parameters without crashing the camera
+        Note: a different approach is used than for camera params
+        as it's not possible to set individual parameters without crashing the camera
     Args:
         cam - the camera 
         opts - array of fields, subfields and the value to set
     """
-    intflds=['FPS','BitRate','GOP','Quality']
+    intflds = ['FPS','BitRate','GOP','Quality']
 
     params = cam.get_info("Simplify.Encode")
-    fld=opts[1]
+    fld = opts[1]
     if fld == 'Video':
-        subfld=opts[2]
+        subfld = opts[2]
         val = opts[3]
-        if subfld=='Compression' and val !='H.264' and val != 'H.265':
-            print('Compression must be H.264 or H.265')
+        if subfld == 'Compression' and val not in ('H.264', 'H.265'):
+            log.info('Compression must be H.264 or H.265')
             return 
-        if subfld=='Resolution' and val !='720P' and val != '1080P' and val !='3M':
-            print('Resolution must be 720P, 1080P or 3M')
+        if subfld == 'Resolution' and val not in ('720P', '1080P', '3M'):
+            log.info('Resolution must be 720P, 1080P or 3M')
             return 
-        if subfld=='BitRateControl' and val !='CBR' and val !='VBR':
-            print('BitRateControl must be VBR or CBR')
+        if subfld == 'BitRateControl' and val not in ('CBR', 'VBR'):
+            log.info('BitRateControl must be VBR or CBR')
             return
         if subfld in intflds:
             val = int(val)
         params[0]['MainFormat']['Video'][subfld] = val
-    elif fld =='SecondStream':
+
+    elif fld == 'SecondStream':
         val = int(opts[2])
-        if val!=0 and val!=1:
-            print('SecondStream must be 1 or 0')
+        if val not in (0, 1):
+            log.info('SecondStream must be 1 or 0')
             return 
-        subfld=''
-        params[0]['ExtraFormat']['VideoEnable']=val
-        params[0]['ExtraFormat']['AudioEnable']=val
+        subfld = ''
+        params[0]['ExtraFormat']['VideoEnable'] = val
+        params[0]['ExtraFormat']['AudioEnable'] = val
     else:
         val = int(opts[2])
-        subfld=''
-        params[0]['MainFormat'][fld]=val
+        subfld = ''
+        params[0]['MainFormat'][fld] = val
+
     cam.set_info("Simplify.Encode", params)
-    print('Set {} {} to {}'.format(fld, subfld, val))
+    log.info('Set {} {} to {}'.format(fld, subfld, val))
 
 
 def setNetworkParam(cam, opts):
@@ -363,8 +370,7 @@ def setNetworkParam(cam, opts):
         opts - array of fields, subfields and the value to set
     """
     # top level field name
-    fld=opts[1]
-    # these fields are stored in the ParamEx.[0] block
+    fld = opts[1]
     if fld == 'HostIP':
         val = opts[2]
         hexval = strIPtoHex(val)
@@ -384,11 +390,10 @@ def setNetworkParam(cam, opts):
         val = int(opts[2])
         if val == 1:
             cam.set_info("NetWork.NetDHCP.[0].Enable", 1)
-            print('DHCP enabled')
+            log.info('DHCP enabled')
         else:
             cam.set_info("NetWork.NetDHCP.[0].Enable", 0)
-            print('DHCP disabled')
-        #dh = cam.get_info("NetWork.NetDHCP.[0]")
+            log.info('DHCP disabled')
 
     elif fld == 'setTimezone':
         val = opts[2]
@@ -398,22 +403,21 @@ def setNetworkParam(cam, opts):
         val = opts[2]
         if val == "0":
             cam.set_info("NetWork.NetNTP.Enable", False)
-            print('NTP disabled')
+            log.info('NTP disabled')
         else:
-            # hexval = strIPtoHex(val)
             cam.set_info("NetWork.NetNTP.Server.Name", val)
             cam.set_info("NetWork.NetNTP.Enable", True)
             cam.set_info("NetWork.NetNTP.UpdatePeriod", 60)
-            print('NTP enabled')
+            log.info('NTP enabled')
     elif fld == 'TransferPlan':
         val = opts[2]
         cam.set_info("NetWork.NetCommon.TransferPlan", val)
 
     else:
-        print('usage: SetParam Network option,value: ')
-        print('HostIP, GateWay or Submask followed by a dotted IP address')
-        print('EnableDHCP followed by 1 or 0')
-        print('EnableNTP followed by a dotted IP address to enable or 0 to disable')
+        log.info('usage: SetParam Network option,value: ')
+        log.info('HostIP, GateWay or Submask followed by a dotted IP address')
+        log.info('EnableDHCP followed by 1 or 0')
+        log.info('EnableNTP followed by a dotted IP address to enable or 0 to disable')
 
 
 def setVideoFormatParam(cam, opts):
@@ -427,15 +431,14 @@ def setVideoFormatParam(cam, opts):
     fld = opts[1]
     if fld == 'VideoFormat':
         val = opts[2]
-        if val != 'PAL' and val != 'NTSC':
-            print('VideoFormat must be PAL or NTSC')
+        if val not in ('PAL', 'NTSC'):
+            log.info('VideoFormat must be PAL or NTSC')
             return
         cam.set_info("General.Location.VideoFormat", val)
-        print("Video Format set to {}".format(val))
+        log.info("Video Format set to {}".format(val))
 
     else:
-        print('usage: SetParam General VideoFormat PAL')
-
+        log.info('usage: SetParam General VideoFormat PAL')
 
 
 def setCameraParam(cam, opts):
@@ -446,75 +449,71 @@ def setCameraParam(cam, opts):
         opts - array of fields, subfields and the value to set
     """
     # these fields are stored as integers. Others are Hex strings
-    intfields=['AeSensitivity','Day_nfLevel','DncThr','ElecLevel',
-        'IRCUTMode','IrcutSwap','Night_nfLevel', 'Level','AutoGain','Gain']
-    styleFlds='typedefault','type1','type2'
+    intfields = [
+        'AeSensitivity','Day_nfLevel','DncThr','ElecLevel','IRCUTMode',
+        'IrcutSwap','Night_nfLevel','Level','AutoGain','Gain'
+    ]
+    styleFlds = ('typedefault','type1','type2')
 
-    # top level field name
-    fld=opts[1]
-
+    fld = opts[1]
     if fld == 'ClearFog':
         subfld = opts[2].lower()
         val = int(opts[3])
         if subfld == 'enable':
-            if val == 1:
-                val = 'true'
-            else:
-                val = 'false'
+            val = True if val == 1 else False
 
         elif subfld == 'level':
             val = int(val)
 
         else:
-            print('Invalid ClearFog subfield. Use "enable" or "level".')
+            log.info('Invalid ClearFog subfield. Use "enable" or "level".')
             return
 
-        print('Set Camera.ClearFog.[0].{} to {}'.format(subfld, val))
-        cam.set_info("Camera.ClearFog.[0]", {subfld:val})
+        log.info('Set Camera.ClearFog.[0].{} to {}'.format(subfld, val))
+        cam.set_info("Camera.ClearFog.[0]", {subfld: val})
 
     # these fields are stored in the ParamEx.[0] block
     elif fld == 'Style':
         val = opts[2]
         if val not in styleFlds:
-            print('style must be one of ', styleFlds)
+            log.info('style must be one of {}'.format(styleFlds))
             return
-        print('Set Camera.ParamEx.[0].{} to {}'.format(fld, val))
-        cam.set_info("Camera.ParamEx.[0]",{fld:val})
+        log.info('Set Camera.ParamEx.[0].{} to {}'.format(fld, val))
+        cam.set_info("Camera.ParamEx.[0]", {fld: val})
 
     elif fld == 'BroadTrends':
-        subfld=opts[2]
+        subfld = opts[2]
         val = int(opts[3])
-        if subfld == 'AutoGain' or subfld == 'Gain':
-            fldToSet='Camera.ParamEx.[0].' + fld
-            print('Set {}.{} to {}'.format(fldToSet, subfld, val))
-            cam.set_info(fldToSet,{subfld:val})
+        if subfld in ('AutoGain', 'Gain'):
+            fldToSet = 'Camera.ParamEx.[0].' + fld
+            log.info('Set {}.{} to {}'.format(fldToSet, subfld, val))
+            cam.set_info(fldToSet, {subfld: val})
         else:
-            print("BroadTrends option must be 'AutoGain' or 'Gain'")
-            return
+            log.info("BroadTrends option must be 'AutoGain' or 'Gain'")
 
     # Exposuretime and gainparam have subfields
-    elif fld == 'ExposureParam' or fld == 'GainParam':
+    elif fld in ('ExposureParam', 'GainParam'):
 
-        subfld=opts[2]
+        subfld = opts[2]
         val = int(opts[3])
         if subfld not in intfields:
             # the two non-int fields in ExposureParam are the exposure times. 
-            # These are stored in microsconds converted ito hex strings.
+            # These are stored in microseconds converted to hex strings.
             if val < 100 or val > 80000: 
-                print('Exposure must be between 100 and 80000 microsecs')
+                log.info('Exposure must be between 100 and 80000 microsecs')
                 return
-            val ="0x%8.8X" % (int(val))
-        fldToSet='Camera.Param.[0].' + fld 
-        print('Set {}.{} to {}'.format(fldToSet, subfld, val))
-        cam.set_info(fldToSet,{subfld:val})
+            val = "0x%8.8X" % (int(val))
+        fldToSet = 'Camera.Param.[0].' + fld
+        log.info('Set {}.{} to {}'.format(fldToSet, subfld, val))
+        cam.set_info(fldToSet, {subfld: val})
 
     else:
         # other fields do not have subfields
         val = int(opts[2])
         if fld not in intfields:
-            val ="0x%8.8X" % val
-        print('Set Camera.Param.[0].{} to {}'.format(fld, val))
-        cam.set_info("Camera.Param.[0]",{fld:val})
+            val = "0x%8.8X" % val
+        log.info('Set Camera.Param.[0].{} to {}'.format(fld, val))
+        cam.set_info("Camera.Param.[0]", {fld: val})
 
 
 def setOSD(cam, opts):
@@ -526,17 +525,17 @@ def setOSD(cam, opts):
 
     info = cam.get_info("AVEnc.VideoWidget")
     if len(opts) == 0:
-        print('usage: setOSD on|off')
+        log.info('usage: setOSD on|off')
         return
 
     if opts[0] == 'on':
         info[0]["TimeTitleAttribute"]["EncodeBlend"] = True
         info[0]["ChannelTitleAttribute"]["EncodeBlend"] = True
-        print('Set osd enabled')
+        log.info('Set osd enabled')
     else:
         info[0]["TimeTitleAttribute"]["EncodeBlend"] = False 
         info[0]["ChannelTitleAttribute"]["EncodeBlend"] = False 
-        print('Set osd disabled')
+        log.info('Set osd disabled')
 
     cam.set_info("AVEnc.VideoWidget", info)
 
@@ -563,11 +562,11 @@ def setColor(cam, opts):
         except Exception:
             pass
     else:
-        print('usage: setColor brightness,contrast,saturation,hue,gain,acutance')
-        print('  b,c,s,h,g all numbers from 1 to 100')
-        print('  acutance sets both horiz and vert sharpness')
-        print('  the lower 8 bits set horiz and the upper 8 bits set vert')
-        return         
+        log.info('usage: setColor brightness,contrast,saturation,hue,gain,acutance')
+        log.info('  b,c,s,h,g all numbers from 1 to 100')
+        log.info('  acutance sets both horiz and vert sharpness')
+        log.info('  the lower 8 bits set horiz and the upper 8 bits set vert')
+        return
 
     n = 0
     info[n]["VideoColorParam"]["Brightness"] = b
@@ -577,7 +576,7 @@ def setColor(cam, opts):
     info[n]["VideoColorParam"]["Gain"] = g
     info[n]["VideoColorParam"]["Acutance"] = a
     # print(json.dumps(info[n], ensure_ascii=False, indent=4, sort_keys=True))
-    print('Set color configuration', b,c,s,h,g,a)
+    log.info('Set color configuration %s %s %s %s %s %s', b, c, s, h, g, a)
     cam.set_info("AVEnc.VideoColor.[0]", info)
 
 
@@ -590,37 +589,40 @@ def setAutoReboot(cam, opts):
 
     info = cam.get_info("General.AutoMaintain") 
     # print(json.dumps(info, ensure_ascii=False, indent=4, sort_keys=True))
-    if len(opts) < 1: 
-        print('usage: setAutoReboot dayofweek,hour')
-        print('  where dayofweek is Never EveryDay Monday Tuesday etc')
-        print('  and hour is a number between 0 and 23')
+    if len(opts) < 1:
+        log.info('usage: setAutoReboot dayofweek,hour')
+        log.info('  where dayofweek is Never EveryDay Monday Tuesday etc')
+        log.info('  and hour is a number between 0 and 23')
         return
     spls = opts[0].split(',')
     day = spls[0]
     hour = 0
     if len(spls) > 1:
         hour = int(spls[1])
-    if day not in ['Everyday','Monday','Tuesday','Wednesday','Thursday','Friday', 
-            'Saturday','Sunday','Never'] or hour < 0 or hour > 23:
-        print('usage: SetAutoReboot dayofweek,hour')
-        print('  where dayofweek is Never, Everyday, Monday, Tuesday, Wednesday etc')
-        print('  and hour is a number between 0 and 23')
+    valid_days = [
+        'Everyday','Monday','Tuesday','Wednesday','Thursday','Friday',
+        'Saturday','Sunday','Never'
+    ]
+    if day not in valid_days or hour < 0 or hour > 23:
+        log.info('usage: SetAutoReboot dayofweek,hour')
+        log.info('  where dayofweek is Never, Everyday, Monday, Tuesday, Wednesday etc')
+        log.info('  and hour is a number between 0 and 23')
         return
 
     info["AutoRebootDay"] = day
     info["AutoRebootHour"] = hour
-    print('Set autoreboot: ', day, 'at', hour*100)
+    log.info('Set autoreboot: %s at %s', day, hour*100)
     cam.set_info("General.AutoMaintain", info)
 
 
 def manageCloudConnection(cam, opts):
     if len(opts) < 1 or opts[0] not in ['on', 'off', 'get']:
-        print('usage: CloudConnection on|off|get')
+        log.info('usage: CloudConnection on|off|get')
         return
 
     info = cam.get_info("NetWork.Nat") 
     if opts[0] == 'get':
-        print('Enabled', info['NatEnable'])
+        log.info('Enabled %s', info['NatEnable'])
         return 
     if opts[0] == 'on':
         info["NatEnable"] = True
@@ -628,7 +630,7 @@ def manageCloudConnection(cam, opts):
         info["NatEnable"] = False
     cam.set_info("NetWork.Nat", info)
     info = cam.get_info("NetWork.Nat")
-    print('Enabled', info['NatEnable'])
+    log.info('Enabled %s', info['NatEnable'])
 
 
 def setParameter(cam, opts):
@@ -639,7 +641,7 @@ def setParameter(cam, opts):
         opts - array of fields, subfields and the value to set
     """
     if len(opts) < 3:
-        print('Not enough parameters, need at least block, field, value')
+        log.info('Not enough parameters, need at least block, field, value')
     if opts[0] == 'Camera':
         setCameraParam(cam, opts)
     elif opts[0] == 'Encode':
@@ -650,34 +652,44 @@ def setParameter(cam, opts):
         setVideoFormatParam(cam, opts)
 
     else:
-        print('Setting not currently supported for', opts)
+        log.info('Setting not currently supported for %s', opts)
 
 
-def switchDayTime(cam):
-    """ Switches the camera to daytime mode. Reboots camera. """
-
-    setCameraParam(cam, 'Camera ExposureParam LeastTime 1000'.split()) # 1 millisecond
-    setCameraParam(cam, 'Camera DayNightColor 1'.split()) # Color mode
-    setCameraParam(cam, 'Camera BLCMode 1'.split())
-    setCameraParam(cam, 'Camera ElecLevel 50'.split())
-    setCameraParam(cam, 'Camera GainParam Gain 10'.split())
-    setCameraParam(cam, 'Camera BroadTrends AutoGain 1'.split())
-
-
-def switchNightTime(cam):
-    """ Switches the camera to nighttime mode. Resets settings done by switchDayTime above.
-        Reboots camera.
+def switchMode(cam, mode_name, path='./camera_settings.json'):
     """
+    Switch the camera to a named mode by executing the commands in the JSON file.
+    Filters out any "SwitchMode" entries to avoid recursion.
 
-    setCameraParam(cam, 'Camera ExposureParam LeastTime 40000'.split()) # 40000 microseconds = 40ms
-    setCameraParam(cam, 'Camera DayNightColor 2'.split()) # Black and white mode
-    setCameraParam(cam, 'Camera BLCMode 0'.split())
-    setCameraParam(cam, 'Camera ElecLevel 100'.split())
-    setCameraParam(cam, 'Camera GainParam Gain 60'.split())
-    setCameraParam(cam, 'Camera BroadTrends AutoGain 0'.split())
+    Args:
+        cam: An authenticated camera object.
+        mode_name (str): The name of the mode to switch to ("day", "night", etc.).
+        path (str): Path to the JSON file containing mode definitions.
+    """
+    if not os.path.isfile(path):
+        raise FileNotFoundError("Camera settings file '{}' not found.".format(path))
+
+    with open(path, 'r') as f:
+        modes = json.load(f)
+
+    if mode_name not in modes:
+        raise ValueError("Mode '{}' not found in '{}'. Available modes: {}"
+                         .format(mode_name, path, list(modes.keys())))
+
+    # Loop over each command array in the specified mode
+    for param in modes[mode_name]:
+        cmd = param[0]
+        opts = param[1:]
+
+        # Avoid calling "SwitchMode" from within switchMode
+        if cmd == "SwitchMode":
+            log.warning("Ignoring SwitchMode command inside JSON to prevent recursion.")
+            continue
+
+        # Pass everything else directly to dvripCall
+        dvripCall(cam, cmd, opts)
 
 
-def dvripCall(cam, cmd, opts):
+def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
     """ retrieve or display the camera network settings
 
     Args:
@@ -687,28 +699,36 @@ def dvripCall(cam, cmd, opts):
     """
     if cmd == 'GetHostname':
         nt, _, _ = getNetworkParams(cam, False)
-        print(nt['HostName'])
+        log.info(nt['HostName'])
+        return
 
     elif cmd == 'GetNetConfig':
         getNetworkParams(cam, True)
+        return
 
     elif cmd == 'reboot':
         rebootCamera(cam)
+        return
 
     elif cmd == 'GetIP':
         getIP(cam)
+        return
 
     elif cmd == 'GetAutoReboot':
         getGeneralParams(cam, True)
+        return
 
     elif cmd == 'CloudConnection':
         manageCloudConnection(cam, opts)
+        return
 
     elif cmd == 'GetCameraParams':
         getCameraParams(cam, True)
+        return
 
     elif cmd == 'GetEncodeParams':
         getEncodeParams(cam, True)
+        return
 
     elif cmd == 'GetSettings':
         getNetworkParams(cam, True)
@@ -717,6 +737,7 @@ def dvripCall(cam, cmd, opts):
         getGuiParams(cam, True)
         getColorParams(cam, True)
         getGeneralParams(cam, True)
+        return
 
     elif cmd == 'SaveSettings':
         nc, dh, nt = getNetworkParams(cam, False)
@@ -726,9 +747,13 @@ def dvripCall(cam, cmd, opts):
         cp = getColorParams(cam, False)
         rb, lc = getGeneralParams(cam, False)
         saveToFile(nc, dh, nt, cs, vs, gu, cp, rb, lc)
+        return
 
     elif cmd == 'LoadSettings':
-        nc, dh, nt, cs, vs, gu, cp, rb, lc = loadFromFile()
+        loaded = loadFromFile()
+        if not loaded:
+            return
+        nc, dh, nt, cs, vs, gu, cp, rb, lc = loaded
         cam.set_info("NetWork.NetCommon", nc)
         cam.set_info("NetWork.NetDHCP", dh)
         cam.set_info("NetWork.NetNTP", nt)
@@ -739,49 +764,65 @@ def dvripCall(cam, cmd, opts):
         cam.set_info("General.AutoMaintain", rb)
         cam.set_info("General.Location", lc)
         rebootCamera(cam)
+        return
 
     elif cmd == 'SetParam':
         setParameter(cam, opts)
+        return
 
     elif cmd == 'CameraTime':
         if opts[0] == 'get':
-            print(cam.get_time())
+            log.info(str(cam.get_time()))
         elif opts[0] == 'set':
             if cam.get_info("NetWork.NetNTP.Enable") is True:
-                print('cant set the camera time - NTP enabled')
+                log.info('cant set the camera time - NTP enabled')
             else:
                 try:
                     reqtime = datetime.datetime.strptime(opts[1], '%Y%m%d_%H%M%S')
                 except:
                     reqtime = datetime.datetime.now()
                 cam.set_time(reqtime)
-                print('time set to', reqtime)
+                log.info('time set to %s', reqtime)
         else:
-            print('usage CameraTime get|set')
-
+            log.info('usage CameraTime get|set')
+        return
 
     elif cmd == 'SetColor':
         setColor(cam, opts)
+        return
 
     elif cmd == 'SetOSD':
         setOSD(cam, opts)
+        return
 
     elif cmd == 'SetAutoReboot':
         setAutoReboot(cam, opts)
+        return
 
-    elif cmd == 'SwitchNightTime':
-        switchNightTime(cam)
+    elif cmd == 'SwitchMode':
+        if not opts:
+            log.error("No mode specified for SwitchMode.")
+            return
+        
+        # If opts is just a string, use it directly; if it's a list, pull the first element
+        if isinstance(opts, str):
+            mode_name = opts
+        else:
+            mode_name = opts[0]
+        
+        switchMode(cam, mode_name, camera_settings_path)
+        return
     
-    elif cmd == 'SwitchDayTime':
-        switchDayTime(cam)
-    
+    # -- If we get here, command is not recognized:
     else:
-        print('System Info')
-        ugi=cam.get_upgrade_info()
-        print(ugi['Hardware'])
+        log.error("Unrecognized command '%s' in dvripCall. Options were: %s", cmd, opts)
+        log.info('System Info')
+        ugi = cam.get_upgrade_info()
+        log.info(ugi['Hardware'])
+        return
 
 
-def cameraControl(camera_ip, cmd, opts=''):
+def cameraControl(camera_ip, cmd, opts='', camera_settings_path='./camera_settings.json'):
     """CameraControl - main entry point to the module
 
     Args:
@@ -793,23 +834,30 @@ def cameraControl(camera_ip, cmd, opts=''):
     cam = dvr.DVRIPCam(camera_ip)
     if cam.login():
         try:
-            dvripCall(cam, cmd, opts)
+            dvripCall(cam, cmd, opts, camera_settings_path)
         except Exception as e:
-            print("Error executing command: {}".format(e))
-            print("This command may not be supported.")
+            log.error("Error executing command: %s", e)
+            log.error("This command may not be supported.")
     else:
-        print("Failure. Could not connect.")
+        log.info("Failure. Could not connect.")
     cam.close()
 
 
 def cameraControlV2(config, cmd, opts=''):
+    """High-level entry point that uses config to figure out IP and path."""
+
     if str(config.deviceID).isdigit():
-        print('Error: this utility only works with IP cameras')
+        log.info('Error: this utility only works with IP cameras')
         exit(1)
     # extract IP from config file
     camera_ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0]
 
-    cameraControl(camera_ip, cmd, opts)
+    if not hasattr(config, 'camera_settings_path') or not os.path.isfile(config.camera_settings_path):
+        camera_settings_path = './camera_settings.json'
+    else:
+        camera_settings_path = config.camera_settings_path
+
+    cameraControl(camera_ip, cmd, opts, camera_settings_path=camera_settings_path)
 
 
 if __name__ == '__main__':
@@ -820,36 +868,64 @@ if __name__ == '__main__':
     """
 
     # list of supported commands
-    cmd_list = ['reboot', 'GetHostname', 'GetSettings','GetDeviceInformation', 'GetNetConfig',
-        'GetCameraParams', 'GetEncodeParams', 'SetParam', 'SaveSettings', 'LoadSettings',
-        'SetColor', 'SetOSD', 'SetAutoReboot', 'GetIP', 'GetAutoReboot', 'CloudConnection', 'CameraTime',
-        'SwitchDayTime', 'SwitchNightTime']
-    opthelp='optional parameters for SetParam for example Camera ElecLevel 70 \n' \
-        'will set the AE Ref to 70.\n To see possibilities, execute GetSettings first. ' \
+    cmd_list = [
+        'reboot', 'GetHostname', 'GetSettings','GetDeviceInformation','GetNetConfig',
+        'GetCameraParams','GetEncodeParams','SetParam','SaveSettings','LoadSettings',
+        'SetColor','SetOSD','SetAutoReboot','GetIP','GetAutoReboot','CloudConnection',
+        'CameraTime','SwitchMode'
+    ]
+    opthelp = (
+        'optional parameters for SetParam for example Camera ElecLevel 70 \n'
+        'will set the AE Ref to 70.\n To see possibilities, execute GetSettings first. '
         'Call a function with no parameters to see the possibilities'
+    )
 
     usage = "Available commands " + str(cmd_list) + '\n' + opthelp
-    parser = argparse.ArgumentParser(description='Controls CMS-Compatible IP camera',
-        usage=usage)
-    parser.add_argument('command', metavar='command', type=str, nargs=1, help=' | '.join(cmd_list))
-    parser.add_argument('options', metavar='opts', type=str, nargs='*', help=opthelp)
+    parser = argparse.ArgumentParser(
+        description='Controls CMS-Compatible IP camera',
+        usage=usage
+    )
+    parser.add_argument(
+        'command',
+        metavar='command',
+        type=str,
+        nargs=1,
+        help=' | '.join(cmd_list)
+    )
+    parser.add_argument(
+        'options',
+        metavar='opts',
+        type=str,
+        nargs='*',
+        help=opthelp
+    )
 
-    parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
-        help="Path to a config file which will be used instead of the default one.")
+    parser.add_argument(
+        '-c', '--config',
+        nargs=1,
+        metavar='CONFIG_PATH',
+        type=str,
+        help="Path to a config file which will be used instead of the default one."
+    )
 
     cml_args = parser.parse_args()
     cmd = cml_args.command[0]
     if cml_args.options is not None:
         opts = cml_args.options
     else:
-        opts=''
-
-    if cmd not in cmd_list:
-        print('Error: command "{}" not supported'.format(cmd))
-        exit(1)
+        opts = ''
 
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
+    # initialise a logger, when running in standalone mode, to avoid DVRip's excessive debug messages
+    log_manager = LoggingManager()
+    log_manager.initLogging(config, log_file_prefix='camControl_')
+    log = getLogger("logger")
+
+
+    if cmd not in cmd_list:
+        log.info('Error: command "%s" not supported', cmd)
+        exit(1)
 
     cameraControlV2(config, cmd, opts)
 

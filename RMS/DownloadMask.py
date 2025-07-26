@@ -19,20 +19,20 @@ These are the default settings hard coded into ConfigReader.py
 
 from __future__ import print_function, division, absolute_import
 
-import logging
 import os
 from os.path import exists as file_exists
 
 import paramiko
 
 
-from RMS.UploadManager import getSSHAndSFTP, existsRemoteDirectory, createRemoteDirectory
+from RMS.Logger import LoggingManager, getLogger
 from RMS.Misc import RmsDateTime
+from RMS.UploadManager import getSSHAndSFTP, existsRemoteDirectory, createRemoteDirectory
 
 
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 
@@ -175,7 +175,6 @@ def downloadNewMask(config):
 
 if __name__ == "__main__":
 
-    from RMS.Logger import initLogging
     import RMS.ConfigReader as cr
 
     import argparse
@@ -193,7 +192,8 @@ if __name__ == "__main__":
     config = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath('.'))
 
     # Init the logger
-    initLogging(config)
+    log_manager = LoggingManager()
+    log_manager.initLogging(config)
 
 
     # Test mask downloading
