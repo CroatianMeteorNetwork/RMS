@@ -10,6 +10,21 @@ try:
 except ModuleNotFoundError:
     numpy_includes = []
 
+# --- bootstrap ---------------------------------------------------------------
+# During the first transition to the modern 'pip install -e .', RMS_Update.sh 
+# will still run the old 'python setup.py install', however this updated setup.py does
+# not support that. To avoid issues we force the use of pip to install in editable mode.
+# This code can be removed in a future release once all users have transitioned.
+from subprocess import check_call, CalledProcessError
+if "install" in sys.argv and "--old-and-unmanageable" not in sys.argv:
+    try:
+        check_call([sys.executable, "-m", "pip", "install",
+                    "-e", ".", "--no-deps", "--no-build-isolation"])
+    except CalledProcessError as exc:
+        sys.exit(exc.returncode)
+    sys.exit(0)
+# -----------------------------------------------------------------------------    
+
 # C/C++ extension
 kht_module = Extension(
     "kht_module",
