@@ -977,7 +977,7 @@ PY
 
     print_header "Running Setup"
     print_status "info" "Building RMS (this may take a while)..."
-    if ! pip install -e . --no-deps --no-build-isolation; then
+    if ! pip install -e . --no-deps; then
         print_status "error" "Build failed. See errors above."
         exit 1
     fi
