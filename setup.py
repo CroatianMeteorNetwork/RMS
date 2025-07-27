@@ -26,7 +26,7 @@ except ModuleNotFoundError:
 # How it works:
 # - Detects if setup.py was called with 'install' argument
 # - Excludes setuptools' internal flag '--old-and-unmanageable' to avoid loops
-# - Redirects to pip install with editable mode (-e) and no deps
+# - Redirects to pip install with editable mode (-e), no deps, and no build isolation
 # - Exits with appropriate return code to maintain script compatibility
 #
 # This can be removed after a deprecation period once all users have migrated.
@@ -34,7 +34,7 @@ from subprocess import check_call, CalledProcessError
 if "install" in sys.argv and "--old-and-unmanageable" not in sys.argv:
     try:
         check_call([sys.executable, "-m", "pip", "install",
-                    "-e", ".", "--no-deps"])
+                    "-e", ".", "--no-deps", "--no-build-isolation"])
     except CalledProcessError as exc:
         sys.exit(exc.returncode)
     sys.exit(0)
