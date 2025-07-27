@@ -11,10 +11,25 @@ except ModuleNotFoundError:
     numpy_includes = []
 
 # --- bootstrap ---------------------------------------------------------------
-# During the first transition to the modern 'pip install -e .', RMS_Update.sh 
-# will still run the old 'python setup.py install', however this updated setup.py does
-# not support that. To avoid issues we force the use of pip to install in editable mode.
-# This code can be removed in a future release once all users have transitioned.
+# This bootstrap code intercepts direct `python setup.py install` commands and 
+# redirects them to use pip in editable mode. This handles a critical transition
+# scenario:
+#
+# When RMS_Update.sh runs for the first time after this change:
+# 1. The script is already loaded in memory with the old `python setup.py install`
+# 2. Git pull updates the script to use `pip install -e .`
+# 3. But the in-memory version still executes the old command
+# 4. This bootstrap catches that and redirects it to the new pip command
+#
+# On subsequent runs, RMS_Update.sh will use the new command directly.
+#
+# How it works:
+# - Detects if setup.py was called with 'install' argument
+# - Excludes setuptools' internal flag '--old-and-unmanageable' to avoid loops
+# - Redirects to pip install with editable mode (-e), no deps, and no build isolation
+# - Exits with appropriate return code to maintain script compatibility
+#
+# This can be removed after a deprecation period once all users have migrated.
 from subprocess import check_call, CalledProcessError
 if "install" in sys.argv and "--old-and-unmanageable" not in sys.argv:
     try:
