@@ -291,6 +291,7 @@ class CustomHandler(logging.handlers.TimedRotatingFileHandler):
         """
         self.station_id = station_id
         self.log_file_prefix = log_file_prefix
+        self.sequence_number = 1  # Initialize sequence counter
 
         # The namer/rotator attributes are not used since we override doRollover.
         super(CustomHandler, self).__init__(
@@ -306,6 +307,9 @@ class CustomHandler(logging.handlers.TimedRotatingFileHandler):
         if self.stream:
             self.stream.close()
             self.stream = None
+
+        # Increment sequence number for the new file
+        self.sequence_number += 1
 
         # The 'rolloverAt' time is the scheduled time for the rollover, which is
         # the exact start time for the new log file.
@@ -323,7 +327,7 @@ class CustomHandler(logging.handlers.TimedRotatingFileHandler):
         # This is the crucial step that changes the name of the NEXT log file.
         self.baseFilename = os.path.join(
             os.path.dirname(self.baseFilename),
-            "{}log_{}_{}.log".format(self.log_file_prefix, self.station_id, new_time_str)
+            "{}log_{}_{}_{:03d}.log".format(self.log_file_prefix, self.station_id, new_time_str, self.sequence_number)
         )
         
         # Open the new log file stream using the updated baseFilename.
@@ -487,9 +491,9 @@ def _listener_configurer(config, log_file_prefix, safedir, console_level=logging
             log_path = safedir
             mkdirP(log_path)
 
-    # Generate log filename with timestamp
+    # Generate log filename with timestamp and initial sequence number
     start_time_str = RmsDateTime.utcnow().strftime("%Y%m%d_%H%M%S")
-    logfile_name = "{}log_{}_{}.log".format(log_file_prefix, config.stationID, start_time_str)
+    logfile_name = "{}log_{}_{}_{:03d}.log".format(log_file_prefix, config.stationID, start_time_str, 1)
     full_path = os.path.join(log_path, logfile_name)
 
     # If RMS is to reboot daily, set the rollover time to 25 hours to prevent log fracturing before a new
