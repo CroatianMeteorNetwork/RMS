@@ -173,6 +173,12 @@ class RawFrameSaver(multiprocessing.Process):
             log.info("Flushing %d tail-end raw frames before shutdown", len(leftovers))
             self.saveFramesToDisk(leftovers, self.daytime_mode)
 
+            # mark buffers consumed so run() won’t resave them
+            self.timeStamps1.fill(0)
+            self.timeStamps2.fill(0)
+            self.start_time1.value = 0
+            self.start_time2.value = 0
+
         # Free shared memory after the raw frame saver is done
         try:
             log.debug('Freeing frame buffers in raw frame saver...')
