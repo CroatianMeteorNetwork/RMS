@@ -5,8 +5,8 @@
 # the latest version of the post-update logic.
 
 # Directories and variables (passed as environment variables from RMS_Update.sh)
-RMSSOURCEDIR="${RMSSOURCEDIR:-~/source/RMS}"
-RMSBACKUPDIR="${RMSBACKUPDIR:-~/.rms_backup}"
+RMSSOURCEDIR="${RMSSOURCEDIR:-$HOME/source/RMS}"
+RMSBACKUPDIR="${RMSBACKUPDIR:-$HOME/.rms_backup}"
 UPDATEINPROGRESSFILE="${UPDATEINPROGRESSFILE:-$RMSBACKUPDIR/update_in_progress}"
 RMS_BRANCH="${RMS_BRANCH}"
 INITIAL_BRANCH="${INITIAL_BRANCH}"
