@@ -633,32 +633,43 @@ git_with_retry() {
                 fi
                 ;;
             "reset")
-                # Try gentle reset first
-                if git reset --hard "$RMS_REMOTE/$branch" 2>/dev/null; then
+                # First attempt at reset
+                local reset_output
+                reset_output=$(git reset --hard "$RMS_REMOTE/$branch" 2>&1)
+                if [ $? -eq 0 ]; then
                     return 0
                 else
-                    print_status "warning" "Git reset failed, checking for blocking untracked files..."
-                    # Check if specific untracked files are blocking the operation
-                    local remote_files=$(git ls-tree -r --name-only "$RMS_REMOTE/$branch" 2>/dev/null || echo "")
-                    local conflicts_found=false
-                    
-                    if [ -n "$remote_files" ]; then
-                        while IFS= read -r remote_file; do
-                            if [ -f "$remote_file" ] && git status --porcelain "$remote_file" 2>/dev/null | grep -q "^??"; then
-                                print_status "warning" "Untracked file '$remote_file' conflicts with remote branch"
-                                print_status "info" "Removing blocking untracked file: $remote_file"
-                                rm -f "$remote_file"
-                                conflicts_found=true
-                            fi
-                        done <<< "$remote_files"
+                    # Only handle untracked files if Git specifically complains about overwriting
+                    if echo "$reset_output" | grep -q "would be overwritten"; then
+                        print_status "warning" "Git reset failed due to untracked files that would be overwritten"
+                        print_status "info" "Moving conflicting untracked files to safety..."
                         
-                        if [ "$conflicts_found" = true ]; then
+                        # Create safety directory with timestamp
+                        local safety_dir="$RMSSOURCEDIR/../rms_untracked_backup_$(date +%Y%m%d_%H%M%S)"
+                        mkdir -p "$safety_dir"
+                        
+                        # Extract specific files from error message and move them
+                        local moved_files=false
+                        while IFS= read -r line; do
+                            if echo "$line" | grep -q "would be overwritten"; then
+                                local file_path=$(echo "$line" | sed "s/.*'\([^']*\)'.*/\1/")
+                                if [ -f "$file_path" ]; then
+                                    print_status "info" "Moving untracked file to safety: $file_path"
+                                    mkdir -p "$(dirname "$safety_dir/$file_path")"
+                                    mv "$file_path" "$safety_dir/$file_path"
+                                    moved_files=true
+                                fi
+                            fi
+                        done <<< "$reset_output"
+                        
+                        if [ "$moved_files" = true ]; then
+                            print_status "info" "Untracked files backed up to: $safety_dir"
                             if git reset --hard "$RMS_REMOTE/$branch" 2>/dev/null; then
                                 return 0
                             fi
                         fi
                     fi
-                    print_status "warning" "Git reset still failed, retrying..."
+                    print_status "warning" "Git reset failed, retrying..."
                 fi
                 ;;
             *)
