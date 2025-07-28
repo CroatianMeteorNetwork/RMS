@@ -1,35 +1,36 @@
 #!/bin/bash
 
-# This script updates the RMS code from GitHub.
-# Includes error handling, retries, and ensures critical files are never lost.
+# This script resets the RMS installation while preserving configuration files.
+# This is a standalone version that works with both old and new versions of the code.
+# Old code uses update_in_progress file, new code uses backup_state file.
+# The script automatically detects and uses the existing naming scheme.
 
 # Example Usage, from ~/source/RMS:
 # 1. Run script normally (uses current branch detected by Git):
-#    ./Scripts/RMS_Update.sh
+#    ./Scripts/RMS_Reset.sh
 # 2. List branches and switch interactively:
-#    ./Scripts/RMS_Update.sh --switch
+#    ./Scripts/RMS_Reset.sh --switch
 # 3. Directly switch to a specified branch:
-#    ./Scripts/RMS_Update.sh --switch prerelease
+#    ./Scripts/RMS_Reset.sh --switch prerelease
 # 4. Use an environment variable to specify the branch before running:
-#    RMS_BRANCH=prerelease ./Scripts/RMS_Update.sh
+#    RMS_BRANCH=prerelease ./Scripts/RMS_Reset.sh
 
 # Directories, files, and variables
 RMS_BRANCH="${RMS_BRANCH:-""}"  # Use environment variable if set, otherwise empty
-RMSSOURCEDIR=~/source/RMS
-RMSBACKUPDIR=~/.rms_backup
-INITIAL_COMMIT=""
-INITIAL_DATE=""
-FINAL_COMMIT=""
-FINAL_DATE=""
+RMSSOURCEDIR=$HOME/source/RMS
+RMSBACKUPDIR=$HOME/.rms_backup
 CURRENT_CONFIG="$RMSSOURCEDIR/.config"
 CURRENT_MASK="$RMSSOURCEDIR/mask.bmp"
+CURRENT_CAMERA_SETTINGS="$RMSSOURCEDIR/camera_settings.json"
 BACKUP_CONFIG="$RMSBACKUPDIR/.config"
 BACKUP_MASK="$RMSBACKUPDIR/mask.bmp"
-UPDATEINPROGRESSFILE=$RMSBACKUPDIR/update_in_progress
-LOCKFILE="/tmp/update.lock"
+BACKUP_CAMERA_SETTINGS="$RMSBACKUPDIR/camera_settings.json"
+SYSTEM_PACKAGES="$RMSSOURCEDIR/system_packages.txt"
+# State file variables will be set later after print_status is defined
+LOCKFILE="/tmp/rms_update.$(printf '%s' "$RMSSOURCEDIR" | sha1sum | cut -c1-8).lock"
 MIN_SPACE_MB=200  # Minimum required space in MB
 RETRY_LIMIT=3  # Retries for critical file operations
-GIT_RETRY_LIMIT=5
+GIT_RETRY_LIMIT=6
 GIT_RETRY_DELAY=15  # Seconds between git operation retries
 
 usage() {
@@ -63,40 +64,72 @@ parse_args() {
     done
 }
 
+# Check if we're in an interactive terminal that supports tput
+if [ -t 1 ] && command -v tput >/dev/null 2>&1 && tput colors >/dev/null 2>&1; then
+    USE_COLOR=true
+else
+    USE_COLOR=false
+fi
+
 # Functions for improved status output
 print_status() {
     local type=$1
     local msg=$2
-    case $type in
-        "error")
-            tput bold; tput setaf 1  # Bold red
-            echo "ERROR: $msg"
-            sleep 2  # Longer pause for errors
-            ;;
-        "warning")
-            tput setaf 3  # Yellow
-            echo "WARNING: $msg"
-            sleep 1
-            ;;
-        "success")
-            tput setaf 2  # Green
-            echo "$msg"
-            ;;
-        "info")
-            tput setaf 6  # Cyan
-            echo "$msg"
-            ;;
-    esac
-    tput sgr0  # Reset formatting
+    
+    if [ "$USE_COLOR" = true ]; then
+        case $type in
+            "error")
+                tput bold; tput setaf 1  # Bold red
+                echo "ERROR: $msg"
+                sleep 2  # Longer pause for errors
+                ;;
+            "warning")
+                tput setaf 3  # Yellow
+                echo "WARNING: $msg"
+                sleep 1
+                ;;
+            "success")
+                tput setaf 2  # Green
+                echo "$msg"
+                ;;
+            "info")
+                tput setaf 6  # Cyan
+                echo "$msg"
+                ;;
+        esac
+        tput sgr0  # Reset formatting
+    else
+        # Fallback for non-color terminals
+        case $type in
+            "error")
+                echo "[ERROR] $msg"
+                sleep 2
+                ;;
+            "warning")
+                echo "[WARNING] $msg"
+                sleep 1
+                ;;
+            "success")
+                echo "[SUCCESS] $msg"
+                ;;
+            "info")
+                echo "[INFO] $msg"
+                ;;
+        esac
+    fi
 }
 
 print_header() {
     local msg=$1
-    echo -e "\n"
-    tput bold; tput setaf 6  # Bold cyan
-    echo "====== $msg ======"
-    tput sgr0
-    echo -e "\n"
+    echo ""
+    if [ "$USE_COLOR" = true ]; then
+        tput bold; tput setaf 6  # Bold cyan
+        echo "====== $msg ======"
+        tput sgr0
+    else
+        echo "====== $msg ======"
+    fi
+    echo ""
     sleep 1
 }
 
@@ -199,11 +232,6 @@ switch_branch_interactive() {
     fi
 }
 
-# Function to clean up and release the lock on exit
-cleanup() {
-    rm -f "$LOCKFILE"
-}
-
 # Function to check available disk space
 check_disk_space() {
     local dir=$1
@@ -244,6 +272,71 @@ check_git_index() {
     return 0
 }
 
+check_and_fix_git_state() {
+    print_status "info" "Checking git repository state..."
+    
+    # Try to save any work first, but don't fail if stash fails
+    print_status "info" "Attempting to stash any local changes..."
+    git stash push -u -m "RMS auto-stash before update" 2>/dev/null || true
+    
+    # Warn user if a stash was created
+    if git stash list | grep -q 'RMS auto-stash before update'; then
+        print_status "warning" "Local changes were stashed. Run 'git stash pop' after the update to recover them."
+    fi
+    
+    # Check for merge conflicts
+    if git status --porcelain | grep -q "^UU\|^AA\|^DD"; then
+        print_status "warning" "Merge conflicts detected - aborting merge and discarding changes"
+        git merge --abort 2>/dev/null || true
+        git reset --hard HEAD 2>/dev/null || true
+        git clean -fd 2>/dev/null || true
+    fi
+    
+    # Check for ongoing rebase
+    if [ -d ".git/rebase-merge" ] || [ -d ".git/rebase-apply" ]; then
+        print_status "warning" "Rebase in progress - aborting rebase and discarding changes"
+        git rebase --abort 2>/dev/null || true
+        git reset --hard HEAD 2>/dev/null || true
+        git clean -fd 2>/dev/null || true
+    fi
+    
+    # Check for detached HEAD
+    if git symbolic-ref HEAD &>/dev/null; then
+        current_branch=$(git symbolic-ref --short HEAD)
+        print_status "info" "On branch: $current_branch"
+    else
+        print_status "warning" "Repository is in detached HEAD state"
+        print_status "info" "Attempting to return to a proper branch..."
+        
+        # Try to determine what branch we should be on
+        if [ -n "$RMS_BRANCH" ]; then
+            target_branch="$RMS_BRANCH"
+        else
+            # Default to master/main
+            if git show-ref --verify --quiet refs/remotes/$RMS_REMOTE/master; then
+                target_branch="master"
+            elif git show-ref --verify --quiet refs/remotes/$RMS_REMOTE/main; then
+                target_branch="main"
+            else
+                target_branch="master"  # fallback
+            fi
+        fi
+        
+        print_status "info" "Switching to branch: $target_branch"
+        if ! git checkout -B "$target_branch" "$RMS_REMOTE/$target_branch" 2>/dev/null; then
+            print_status "warning" "Failed to create branch, trying direct checkout..."
+            git checkout "$target_branch" 2>/dev/null || true
+        fi
+    fi
+    
+    # Discard any local changes to ensure clean state
+    print_status "info" "Discarding any local changes to ensure clean update..."
+    git reset --hard HEAD 2>/dev/null || true
+    git clean -fd 2>/dev/null || true
+    
+    print_status "success" "Git repository state verified and cleaned"
+}
+
 # Retry mechanism for critical file operations
 retry_cp() {
     local src=$1
@@ -252,9 +345,9 @@ retry_cp() {
     local retries=0
 
     while [ $retries -lt $RETRY_LIMIT ]; do
-        if cp "$src" "$temp_dest"; then
+        if cp -a "$src" "$temp_dest"; then
             # Validate the copied file
-            if diff "$src" "$temp_dest" > /dev/null; then
+            if cmp -s "$src" "$temp_dest"; then
                 mv "$temp_dest" "$dest"
                 return 0
             else
@@ -296,6 +389,15 @@ backup_files() {
     else
         print_status "info" "No original mask.bmp found. Blank mask will be used."
     fi
+
+    # Backup camera_settings.json
+    if [ -f "$CURRENT_CAMERA_SETTINGS" ]; then
+        if ! retry_cp "$CURRENT_CAMERA_SETTINGS" "$BACKUP_CAMERA_SETTINGS"; then
+            print_status "error" "Could not back up camera_settings.json file."
+        fi
+    else
+        print_status "info" "No original camera_settings.json found. Default settings will be used."
+    fi
 }
 
 # Restore files
@@ -320,6 +422,15 @@ restore_files() {
         fi
     else
         print_status "info" "No backup mask.bmp found - a new blank mask will be created by the installation."
+    fi
+
+    # Restore camera_settings.json
+    if [ -f "$BACKUP_CAMERA_SETTINGS" ]; then
+        if ! retry_cp "$BACKUP_CAMERA_SETTINGS" "$CURRENT_CAMERA_SETTINGS"; then
+            print_status "error" "Failed to restore camera_settings.json."
+        fi
+    else
+        print_status "info" "No backup camera_settings.json found - a new default settings file will be created by the installation."
     fi
 }
 
@@ -367,6 +478,7 @@ repair_repository() {
             print_status "info" "Restoring configuration from backup..."
             cp "$backup_dir/.config" "$RMSSOURCEDIR/" 2>/dev/null
             cp "$backup_dir/mask.bmp" "$RMSSOURCEDIR/" 2>/dev/null
+            cp "$backup_dir/camera_settings.json" "$RMSSOURCEDIR/" 2>/dev/null
             
             repair_success=true
         else
@@ -396,6 +508,7 @@ git_with_retry() {
     local backup_dir="${RMSSOURCEDIR}_backup_$(date +%Y%m%d_%H%M%S)"
 
     while [ $attempt -le $GIT_RETRY_LIMIT ]; do
+        local depth_arg=""
         print_status "info" "Attempting git $cmd (try $attempt of $GIT_RETRY_LIMIT)..."
 
         # Step 1: Clear Any Cached Git Settings to Ensure a Clean Retry
@@ -434,7 +547,7 @@ git_with_retry() {
                     cd "$RMSSOURCEDIR" || exit 1
 
                     # Restore critical files from backup
-                    for file in .config mask.bmp; do
+                    for file in .config mask.bmp camera_settings.json; do
                         if [ -f "$backup_dir/$file" ]; then
                             print_status "info" "Restoring $file from backup"
                             cp "$backup_dir/$file" "$RMSSOURCEDIR/"
@@ -454,8 +567,14 @@ git_with_retry() {
                 # Step 3: Restart SSH Agent & Kill Git Processes to Ensure Clean State
                 print_status "info" "Restarting SSH agent to clear any stuck Git connections..."
                 eval "$(ssh-agent -s)"  # Restart SSH agent
-                killall -q git || true  # Kill any running Git processes
 
+                # Graceful shutdown
+                pkill -u "$USER" -f git 2>/dev/null || true
+                sleep 2
+
+                # Hard kill if anything is left
+                pkill -9 -u "$USER" -f git 2>/dev/null || true
+                
                 # Step 4: Attempt wget/curl with Clean Environment
                 print_status "info" "Downloading latest RMS repository from GitHub using wget (supports resume)..."
                 if ! wget -c --tries=5 --timeout=30 -O RMS.tar.gz https://github.com/CroatianMeteorNetwork/RMS/archive/refs/heads/master.tar.gz; then
@@ -463,6 +582,7 @@ git_with_retry() {
 
                     if ! curl -L --retry 5 --retry-delay 10 --connect-timeout 30 -o RMS.tar.gz https://github.com/CroatianMeteorNetwork/RMS/archive/refs/heads/master.tar.gz; then
                         print_status "error" "Both wget and curl failed. Restoring original backup..."
+                        rm -f RMS.tar.gz  # Clean up any partial download
                         mv "$backup_dir" "$RMSSOURCEDIR"
                         return 1
                     fi
@@ -471,6 +591,7 @@ git_with_retry() {
                 # Verify the tarball integrity before extracting
                 if ! tar -tzf RMS.tar.gz >/dev/null; then
                     print_status "error" "Downloaded tarball is corrupted. Restoring original backup..."
+                    rm -f RMS.tar.gz  # Clean up corrupted tarball
                     mv "$backup_dir" "$RMSSOURCEDIR"
                     return 1
                 fi
@@ -478,9 +599,12 @@ git_with_retry() {
                 print_status "success" "Tarball downloaded successfully. Extracting..."
                 mkdir -p "$RMSSOURCEDIR"
                 tar -xzf RMS.tar.gz --strip-components=1 -C "$RMSSOURCEDIR"
+                
+                # Clean up the downloaded tarball
+                rm -f RMS.tar.gz
 
                 # Restore critical files from backup
-                for file in .config mask.bmp; do
+                for file in .config mask.bmp camera_settings.json; do
                     if [ -f "$backup_dir/$file" ]; then
                         print_status "info" "Restoring $file from backup"
                         cp "$backup_dir/$file" "$RMSSOURCEDIR/"
@@ -527,6 +651,25 @@ git_with_retry() {
 
     print_status "error" "Git $cmd failed after $GIT_RETRY_LIMIT attempts"
     return 1
+}
+
+ensure_branch_tracking() {
+    local branch=$1
+    
+    print_status "info" "Ensuring proper tracking for branch: $branch"
+    
+    # Check if branch already has tracking information
+    if ! git rev-parse --abbrev-ref "$branch@{upstream}" >/dev/null 2>&1; then
+        print_status "info" "Setting upstream tracking for $branch..."
+        if ! git branch --set-upstream-to="$RMS_REMOTE/$branch" "$branch"; then
+            print_status "warning" "Failed to set upstream tracking. You may need to run:"
+            print_status "warning" "git branch --set-upstream-to=$RMS_REMOTE/$branch $branch"
+            return 1
+        fi
+    else
+        print_status "info" "Branch $branch already has proper tracking"
+    fi
+    return 0
 }
 
 # Function to safely switch to a specified branch
@@ -593,28 +736,36 @@ switch_to_branch() {
     return 0
 }
 
+
 # Install missing dependencies
 install_missing_dependencies() {
-    # Hardcoded list of required packages in RMS_Reset only
-    local required_packages=(
-        "gobject-introspection"
-        "libgirepository1.0-dev"
-        "gstreamer1.0-libav"
-        "gstreamer1.0-plugins-bad"
-    )
+
+    if [ ! -f "$SYSTEM_PACKAGES" ]; then
+        echo "Warning: System packages file not found: $SYSTEM_PACKAGES"
+        return
+    fi
 
     local missing_packages=()
 
+    # -----------------------------------------------------------------------------
+    # We store system-level dependencies in a separate file (system_packages.txt)
+    # so that when RMS_Update pulls new code (including a potentially updated list of packages),
+    # we can read those new dependencies during the same run - no need to run the update
+    # script twice. Because the main script is loaded into memory, changing it mid-run
+    # won't reload it. But updating this separate file allows us to immediately pick
+    # up any added or changed packages without requiring a second pass.
     # Identify missing packages from the hardcoded list
-    for pkg in "${required_packages[@]}"; do
-        print_status "info" "Checking package: $pkg"
+    # -----------------------------------------------------------------------------
+
+    # Identify missing packages
+    while read -r pkg; do
+        # Skip blank lines or commented lines
+        [[ -z "$pkg" || "$pkg" =~ ^# ]] && continue
+        
         if ! dpkg -s "$pkg" &>/dev/null; then
-            print_status "info" "Package $pkg is missing"
             missing_packages+=("$pkg")
-        else
-            print_status "info" "Package $pkg is already installed"
         fi
-    done
+    done < $SYSTEM_PACKAGES
 
     # If no missing packages, inform and return
     if [ ${#missing_packages[@]} -eq 0 ]; then
@@ -634,15 +785,22 @@ install_missing_dependencies() {
             fi
         done
     else
-        # Clear screen and show prominent message for sudo
-        # tput clear  # Clear screen
-        tput bold; tput setaf 3  # Bold yellow
-        echo "
+        # Show prominent message for sudo
+        if [ "$USE_COLOR" = true ]; then
+            tput bold; tput setaf 3  # Bold yellow
+            echo "
 ==============================================
   Sudo access needed for package installation
 ==============================================
 "
-        tput sgr0  # Reset formatting
+            tput sgr0  # Reset formatting
+        else
+            echo "
+==============================================
+  Sudo access needed for package installation
+==============================================
+"
+        fi
         sleep 2
         
         sudo apt-get update
@@ -672,18 +830,43 @@ print_update_report() {
     local final_date
     IFS='|' read -r final_commit final_date <<< "$(get_commit_info)"
     
-    tput bold
+    if [ "$USE_COLOR" = true ]; then
+        tput bold
+    fi
     echo "Branch update summary:"
-    echo "  From: $INITIAL_BRANCH (${INITIAL_COMMIT} - ${INITIAL_DATE})"
+    echo "  From: $ORIGINAL_BRANCH (${ORIGINAL_COMMIT} - ${ORIGINAL_DATE})"
     echo "  To:   $RMS_BRANCH (${final_commit} - ${final_date})"
-    tput sgr0
+    if [ "$USE_COLOR" = true ]; then
+        tput sgr0
+    fi
+}
+
+# Function to determine which backup state file to use
+determine_state_file() {
+    OLD_STATE_FILE="$RMSBACKUPDIR/update_in_progress"
+    NEW_STATE_FILE="$RMSBACKUPDIR/backup_state"
+    
+    # Determine which state file to use
+    if [ -f "$OLD_STATE_FILE" ]; then
+        # Use old naming scheme if it exists
+        BACKUP_STATE_FILE="$OLD_STATE_FILE"
+        print_status "info" "Found existing update_in_progress file, using old naming scheme"
+    elif [ -f "$NEW_STATE_FILE" ]; then
+        # Use new naming scheme if it exists
+        BACKUP_STATE_FILE="$NEW_STATE_FILE"
+        print_status "info" "Found existing backup_state file, using new naming scheme"
+    else
+        # Default to new naming scheme if neither exists
+        BACKUP_STATE_FILE="$NEW_STATE_FILE"
+        print_status "info" "No existing state file found, using new naming scheme (backup_state)"
+    fi
 }
 
 # Function to handle error cleanup
 cleanup_on_error() {
     print_status "warning" "Error occurred, attempting to restore files..."
     restore_files
-    echo "0" > "$UPDATEINPROGRESSFILE"
+    echo "0" > "$BACKUP_STATE_FILE"
     exit 1
 }
 
@@ -693,45 +876,57 @@ cleanup_on_error() {
 main() {
     parse_args "$@"
 
-    print_header "Starting RMS Update"
+    print_header "Starting RMS Reset"
     
-    # Check for running instance FIRST
-    if [ -f "$LOCKFILE" ]; then
-        LOCK_PID=$(cat "$LOCKFILE")
-        if ps -p "$LOCK_PID" > /dev/null 2>&1; then
-            print_status "error" "Another instance of the script is already running. Exiting."
-            exit 1
-        else
-            print_status "warning" "Stale lock file found. Removing it and continuing."
-            rm -f "$LOCKFILE"
-        fi
+    # Protect against infinite re-exec loops
+    REEXEC_COUNT=${REEXEC_COUNT:-0}
+    if (( REEXEC_COUNT >= 2 )); then
+        print_status "error" "Script hash keeps changing - aborting to avoid infinite loop"
+        exit 1
     fi
-
-    # Create lock file immediately
-    echo $$ > "$LOCKFILE"
-    trap cleanup EXIT
+    
+    # Capture the original script hash for self-update detection
+    SELF_ABS=$(readlink -f "$0" 2>/dev/null || echo "$0")
+    SCRIPT_HASH=$(sha1sum "$SELF_ABS" 2>/dev/null | cut -d' ' -f1 || echo "unknown")
+    
+    # Use flock for robust locking
+    exec 200>"$LOCKFILE"
+    if ! flock -n 200; then
+        print_status "error" "Another RMS update is already running. Exiting."
+        exit 1
+    fi
+    # Lock will be automatically released when script exits
+    # Note: Lock is inherited by re-exec via exec, ensuring
+    # the entire update process is protected
 
     # Run space check before anything else
     print_status "info" "Checking available disk space..."
     check_disk_space "$RMSSOURCEDIR" "$MIN_SPACE_MB" || exit 1
 
-    # Get initial commit info
-    INITIAL_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
-    IFS='|' read -r INITIAL_COMMIT INITIAL_DATE <<< "$(get_commit_info)"
+    # Get initial commit info (preserve across re-exec)
+    if [ -z "${ORIGINAL_BRANCH+x}" ]; then
+        ORIGINAL_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+        ORIGINAL_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+        ORIGINAL_DATE=$(git log -1 --format="%cd" --date=local 2>/dev/null || echo "unknown")
+        export ORIGINAL_BRANCH ORIGINAL_COMMIT ORIGINAL_DATE
+    fi
 
     # Ensure the backup directory exists
     mkdir -p "$RMSBACKUPDIR"
+    
+    # Determine which backup state file to use
+    determine_state_file
 
     # Check if a previous backup/restore cycle was interrupted
-    UPDATEINPROGRESS="0"
-    if [ -f "$UPDATEINPROGRESSFILE" ]; then
+    BACKUP_IN_PROGRESS="0"
+    if [ -f "$BACKUP_STATE_FILE" ]; then
         print_status "info" "Reading custom files protection state..."
-        UPDATEINPROGRESS=$(cat "$UPDATEINPROGRESSFILE")
-        print_status "info" "Previous backup/restore cycle state: $UPDATEINPROGRESS"
+        BACKUP_IN_PROGRESS=$(cat "$BACKUP_STATE_FILE")
+        print_status "info" "Previous backup/restore cycle state: $BACKUP_IN_PROGRESS"
     fi
 
     # Backup files before any modifications if no interrupted cycle
-    if [ "$UPDATEINPROGRESS" = "0" ]; then
+    if [ "$BACKUP_IN_PROGRESS" = "0" ]; then
         backup_files
     else
         print_status "warning" "Skipping backup due to interrupted backup/restore cycle."
@@ -748,6 +943,9 @@ main() {
         exit 1
     fi
 
+    # Check and fix problematic git states
+    check_and_fix_git_state
+
     # Activate the virtual environment
     if [ -f ~/vRMS/bin/activate ]; then
         source ~/vRMS/bin/activate
@@ -761,18 +959,12 @@ main() {
     #######################################################
 
     # Mark custom files backup/restore cycle as in progress
-    echo "1" > "$UPDATEINPROGRESSFILE"
+    echo "1" > "$BACKUP_STATE_FILE"
 
    # Fetch updates
     if ! git_with_retry "fetch"; then
         print_status "error" "Failed to fetch updates. Aborting."
         cleanup_on_error
-    fi
-
-    # Stash any local changes first
-    print_status "info" "Stashing any local changes..."
-    if ! git stash; then
-        print_status "warning" "Git stash failed. Proceeding with operations."
     fi
 
     # Handle branch setup and switching
@@ -820,7 +1012,7 @@ main() {
         print_status "info" "Creating config template..."
         mv "$CURRENT_CONFIG" "$RMSSOURCEDIR/.configTemplate"
         
-        # Verify the move worked
+        # Verify the copy worked
         if [ ! -f "$RMSSOURCEDIR/.configTemplate" ]; then
             print_status "warning" "Failed to verify config template creation"
         else
@@ -828,11 +1020,24 @@ main() {
         fi
     fi
 
+    # Create template from the current default camera_settings file
+    if [ -f "$CURRENT_CAMERA_SETTINGS" ]; then
+        print_status "info" "Creating camera_settings template..."
+        mv "$CURRENT_CAMERA_SETTINGS" "$RMSSOURCEDIR/camera_settings_template.json"
+        
+        # Verify the move worked
+        if [ ! -f "$RMSSOURCEDIR/camera_settings_template.json" ]; then
+            print_status "warning" "Failed to verify camera settings template creation"
+        else
+            print_status "success" "Camera settings template created successfully"
+        fi
+    fi
+
     # Restore files after updates
     restore_files
 
     # Mark custom files backup/restore cycle as completed
-    echo "0" > "$UPDATEINPROGRESSFILE"
+    echo "0" > "$BACKUP_STATE_FILE"
 
     #######################################################
     ################ DANGER ZONE END ######################
@@ -840,6 +1045,22 @@ main() {
 
     # Perform cleanup operations before updating
     print_header "Cleaning Build Environment"
+
+    # Remove any stale global or egg installs of RMS before we rebuild
+    print_status "info" "Clearing old RMS installs from site-packages…"
+    pip uninstall -y RMS 2>/dev/null || true
+
+    # Resolve the active site‑packages directory inside the venv
+    SITE_DIR=$(python - <<'PY'
+import site, sys
+print(site.getsitepackages()[0])
+PY
+    )
+
+    # Remove any leftover RMS installs (eggs, .dist-info, .egg-info)
+    find "$SITE_DIR" -maxdepth 1 -name 'RMS-*.egg'       -prune -exec rm -rf {} +
+    find "$SITE_DIR" -maxdepth 1 -name 'RMS-*.dist-info' -prune -exec rm -rf {} +
+    find "$SITE_DIR" -maxdepth 1 -name 'RMS-*.egg-info'  -prune -exec rm -rf {} +
     
     print_status "info" "Removing build directory..."
     rm -rf build
@@ -887,6 +1108,7 @@ main() {
 
     print_header "Running Setup"
     print_status "info" "Building RMS (this may take a while)..."
+    # if ! pip install -e . --no-deps --no-build-isolation; then
     if ! python setup.py install; then
         print_status "error" "Build failed. See errors above."
         exit 1
