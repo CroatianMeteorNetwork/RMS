@@ -66,40 +66,72 @@ parse_args() {
     done
 }
 
+# Check if we're in an interactive terminal that supports tput
+if [ -t 1 ] && command -v tput >/dev/null 2>&1 && tput colors >/dev/null 2>&1; then
+    USE_COLOR=true
+else
+    USE_COLOR=false
+fi
+
 # Functions for improved status output
 print_status() {
     local type=$1
     local msg=$2
-    case $type in
-        "error")
-            tput bold; tput setaf 1  # Bold red
-            echo "ERROR: $msg"
-            sleep 2  # Longer pause for errors
-            ;;
-        "warning")
-            tput setaf 3  # Yellow
-            echo "WARNING: $msg"
-            sleep 1
-            ;;
-        "success")
-            tput setaf 2  # Green
-            echo "$msg"
-            ;;
-        "info")
-            tput setaf 6  # Cyan
-            echo "$msg"
-            ;;
-    esac
-    tput sgr0  # Reset formatting
+    
+    if [ "$USE_COLOR" = true ]; then
+        case $type in
+            "error")
+                tput bold; tput setaf 1  # Bold red
+                echo "ERROR: $msg"
+                sleep 2  # Longer pause for errors
+                ;;
+            "warning")
+                tput setaf 3  # Yellow
+                echo "WARNING: $msg"
+                sleep 1
+                ;;
+            "success")
+                tput setaf 2  # Green
+                echo "$msg"
+                ;;
+            "info")
+                tput setaf 6  # Cyan
+                echo "$msg"
+                ;;
+        esac
+        tput sgr0  # Reset formatting
+    else
+        # Fallback for non-color terminals
+        case $type in
+            "error")
+                echo "[ERROR] $msg"
+                sleep 2
+                ;;
+            "warning")
+                echo "[WARNING] $msg"
+                sleep 1
+                ;;
+            "success")
+                echo "[SUCCESS] $msg"
+                ;;
+            "info")
+                echo "[INFO] $msg"
+                ;;
+        esac
+    fi
 }
 
 print_header() {
     local msg=$1
-    echo -e "\n"
-    tput bold; tput setaf 6  # Bold cyan
-    echo "====== $msg ======"
-    tput sgr0
-    echo -e "\n"
+    echo ""
+    if [ "$USE_COLOR" = true ]; then
+        tput bold; tput setaf 6  # Bold cyan
+        echo "====== $msg ======"
+        tput sgr0
+    else
+        echo "====== $msg ======"
+    fi
+    echo ""
     sleep 1
 }
 
