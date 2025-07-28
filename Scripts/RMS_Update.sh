@@ -345,7 +345,7 @@ retry_cp() {
     while [ $retries -lt $RETRY_LIMIT ]; do
         if cp "$src" "$temp_dest"; then
             # Validate the copied file
-            if diff "$src" "$temp_dest" > /dev/null; then
+            if cmp -s "$src" "$temp_dest"; then
                 mv "$temp_dest" "$dest"
                 return 0
             else
