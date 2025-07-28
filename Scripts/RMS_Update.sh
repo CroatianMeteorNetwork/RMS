@@ -275,27 +275,43 @@ check_and_fix_git_state() {
     
     # Try to save any work first, but don't fail if stash fails
     print_status "info" "Attempting to stash any local changes..."
-    git stash push -u -m "RMS auto-stash before update" 2>/dev/null || true
     
-    # Warn user if a stash was created
-    if git stash list | grep -q 'RMS auto-stash before update'; then
-        print_status "warning" "Local changes were stashed. Run 'git stash pop' after the update to recover them."
+    # Check if there are actually changes to stash (only tracked files)
+    if git status --porcelain | grep -q '^[MADRCU]'; then
+        if git stash push -m "RMS auto-stash before update" 2>/dev/null; then
+            print_status "warning" "Local changes to tracked files were stashed. Run 'git stash pop' after the update to recover them."
+        else
+            print_status "warning" "Failed to stash changes - some modifications may be lost during update"
+        fi
+    else
+        print_status "info" "No tracked file changes to stash"
     fi
     
-    # Check for merge conflicts
+    # Warn about untracked files
+    if git status --porcelain | grep -q '^??'; then
+        print_status "info" "Untracked files detected - these will be preserved during update"
+    fi
+    
+    # Check for merge conflicts - try gentle abort first
     if git status --porcelain | grep -q "^UU\|^AA\|^DD"; then
-        print_status "warning" "Merge conflicts detected - aborting merge and discarding changes"
-        git merge --abort 2>/dev/null || true
-        git reset --hard HEAD 2>/dev/null || true
-        git clean -fd 2>/dev/null || true
+        print_status "warning" "Merge conflicts detected - attempting to abort merge"
+        if git merge --abort 2>/dev/null; then
+            print_status "info" "Merge aborted successfully"
+        else
+            print_status "warning" "Merge abort failed - forcing reset to HEAD"
+            git reset --hard HEAD 2>/dev/null || true
+        fi
     fi
     
-    # Check for ongoing rebase
+    # Check for ongoing rebase - try gentle abort first
     if [ -d ".git/rebase-merge" ] || [ -d ".git/rebase-apply" ]; then
-        print_status "warning" "Rebase in progress - aborting rebase and discarding changes"
-        git rebase --abort 2>/dev/null || true
-        git reset --hard HEAD 2>/dev/null || true
-        git clean -fd 2>/dev/null || true
+        print_status "warning" "Rebase in progress - attempting to abort rebase"
+        if git rebase --abort 2>/dev/null; then
+            print_status "info" "Rebase aborted successfully"
+        else
+            print_status "warning" "Rebase abort failed - forcing reset to HEAD"
+            git reset --hard HEAD 2>/dev/null || true
+        fi
     fi
     
     # Check for detached HEAD
@@ -625,10 +641,11 @@ git_with_retry() {
                 fi
                 ;;
             "reset")
-                if ! git reset --hard "$RMS_REMOTE/$branch"; then
-                    print_status "warning" "Git reset failed, retrying..."
-                else
+                # Try reset - should work since we're only dealing with tracked files
+                if git reset --hard "$RMS_REMOTE/$branch" 2>/dev/null; then
                     return 0
+                else
+                    print_status "warning" "Git reset failed, retrying..."
                 fi
                 ;;
             *)
