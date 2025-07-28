@@ -890,6 +890,14 @@ main() {
 
     # Ensure the backup directory exists
     mkdir -p "$RMSBACKUPDIR"
+    
+    # Migrate old update_in_progress file if it exists
+    # TODO: This migration code can be removed after a transition period (e.g., after 2026-01-01)
+    OLD_STATE_FILE="$RMSBACKUPDIR/update_in_progress"
+    if [ -f "$OLD_STATE_FILE" ]; then
+        print_status "info" "Migrating old backup state file..."
+        mv "$OLD_STATE_FILE" "$BACKUP_STATE_FILE"
+    fi
 
     # Check if a previous backup/restore cycle was interrupted
     BACKUP_IN_PROGRESS="0"
