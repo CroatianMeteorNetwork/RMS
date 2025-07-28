@@ -276,8 +276,9 @@ check_and_fix_git_state() {
     print_status "info" "Checking git repository state..."
     
     # Try to save any work first, but don't fail if stash fails
-    print_status "info" "Attempting to stash any local changes..."
-    git stash push -u -m "RMS auto-stash before update" 2>/dev/null || true
+    # Note: Only stash tracked files, let untracked files be handled by reset logic if needed
+    print_status "info" "Attempting to stash any local changes to tracked files..."
+    git stash push -m "RMS auto-stash before update" 2>/dev/null || true
     
     # Warn user if a stash was created
     if git stash list | grep -q 'RMS auto-stash before update'; then
