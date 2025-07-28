@@ -15,12 +15,8 @@
 
 # Directories, files, and variables
 RMS_BRANCH="${RMS_BRANCH:-""}"  # Use environment variable if set, otherwise empty
-RMSSOURCEDIR=~/source/RMS
-RMSBACKUPDIR=~/.rms_backup
-INITIAL_COMMIT=""
-INITIAL_DATE=""
-FINAL_COMMIT=""
-FINAL_DATE=""
+RMSSOURCEDIR=$HOME/source/RMS
+RMSBACKUPDIR=$HOME/.rms_backup
 CURRENT_CONFIG="$RMSSOURCEDIR/.config"
 CURRENT_MASK="$RMSSOURCEDIR/mask.bmp"
 CURRENT_CAMERA_SETTINGS="$RMSSOURCEDIR/camera_settings.json"
@@ -771,7 +767,7 @@ print_update_report() {
         tput bold
     fi
     echo "Branch update summary:"
-    echo "  From: $INITIAL_BRANCH (${INITIAL_COMMIT} - ${INITIAL_DATE})"
+    echo "  From: $ORIGINAL_BRANCH (${ORIGINAL_COMMIT} - ${ORIGINAL_DATE})"
     echo "  To:   $RMS_BRANCH (${final_commit} - ${final_date})"
     if [ "$USE_COLOR" = true ]; then
         tput sgr0
@@ -819,10 +815,13 @@ main() {
     print_status "info" "Checking available disk space..."
     check_disk_space "$RMSSOURCEDIR" "$MIN_SPACE_MB" || exit 1
 
-    # Get initial commit info
-    INITIAL_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
-    INITIAL_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-    INITIAL_DATE=$(git log -1 --format="%cd" --date=local 2>/dev/null || echo "unknown")
+    # Get initial commit info (preserve across re-exec)
+    if [ -z "${ORIGINAL_BRANCH+x}" ]; then
+        ORIGINAL_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+        ORIGINAL_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+        ORIGINAL_DATE=$(git log -1 --format="%cd" --date=local 2>/dev/null || echo "unknown")
+        export ORIGINAL_BRANCH ORIGINAL_COMMIT ORIGINAL_DATE
+    fi
 
     # Ensure the backup directory exists
     mkdir -p "$RMSBACKUPDIR"
