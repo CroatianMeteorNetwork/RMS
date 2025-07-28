@@ -328,12 +328,7 @@ check_and_fix_git_state() {
             git checkout "$target_branch" 2>/dev/null || true
         fi
     fi
-    
-    # Discard any local changes to ensure clean state
-    print_status "info" "Discarding any local changes to ensure clean update..."
-    git reset --hard HEAD 2>/dev/null || true
-    git clean -fd 2>/dev/null || true
-    
+        
     print_status "success" "Git repository state verified and cleaned"
 }
 
