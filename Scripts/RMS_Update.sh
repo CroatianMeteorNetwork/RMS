@@ -519,6 +519,7 @@ git_with_retry() {
 
                     if ! curl -L --retry 5 --retry-delay 10 --connect-timeout 30 -o RMS.tar.gz https://github.com/CroatianMeteorNetwork/RMS/archive/refs/heads/master.tar.gz; then
                         print_status "error" "Both wget and curl failed. Restoring original backup..."
+                        rm -f RMS.tar.gz  # Clean up any partial download
                         mv "$backup_dir" "$RMSSOURCEDIR"
                         return 1
                     fi
@@ -527,6 +528,7 @@ git_with_retry() {
                 # Verify the tarball integrity before extracting
                 if ! tar -tzf RMS.tar.gz >/dev/null; then
                     print_status "error" "Downloaded tarball is corrupted. Restoring original backup..."
+                    rm -f RMS.tar.gz  # Clean up corrupted tarball
                     mv "$backup_dir" "$RMSSOURCEDIR"
                     return 1
                 fi
@@ -534,6 +536,9 @@ git_with_retry() {
                 print_status "success" "Tarball downloaded successfully. Extracting..."
                 mkdir -p "$RMSSOURCEDIR"
                 tar -xzf RMS.tar.gz --strip-components=1 -C "$RMSSOURCEDIR"
+                
+                # Clean up the downloaded tarball
+                rm -f RMS.tar.gz
 
                 # Restore critical files from backup
                 for file in .config mask.bmp camera_settings.json; do
@@ -789,6 +794,10 @@ main() {
 
     print_header "Starting RMS Update"
     
+    # Capture the original script hash for self-update detection
+    SELF_ABS=$(readlink -f "$0" 2>/dev/null || echo "$0")
+    SCRIPT_HASH=$(sha1sum "$SELF_ABS" 2>/dev/null | cut -d' ' -f1 || echo "unknown")
+    
     # Use flock for robust locking
     exec 200>"$LOCKFILE"
     if ! flock -n 200; then
@@ -796,7 +805,7 @@ main() {
         exit 1
     fi
     # Lock will be automatically released when script exits
-    # Note: Lock is inherited by RMS_PostUpdate.sh via exec, ensuring
+    # Note: Lock is inherited by re-exec via exec, ensuring
     # the entire update process is protected
 
     # Run space check before anything else
@@ -940,6 +949,15 @@ main() {
 
     # Mark custom files backup/restore cycle as completed
     echo "0" > "$UPDATEINPROGRESSFILE"
+
+    # Check if this script was updated and re-exec if needed
+    SELF="$RMSSOURCEDIR/Scripts/RMS_Update.sh"
+    new_hash=$(sha1sum "$SELF" 2>/dev/null | cut -d' ' -f1 || echo "unknown")
+    if [[ "$SCRIPT_HASH" != "$new_hash" ]] && [[ "$new_hash" != "unknown" ]]; then
+        print_status "info" "Update script was modified - re-executing with new version..."
+        # Re-exec preserves file descriptors (including our flock) and arguments
+        exec "$SELF" "$@"
+    fi
 
     #######################################################
     ################ DANGER ZONE END ######################

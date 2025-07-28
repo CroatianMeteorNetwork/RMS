@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(diff:*)",
+      "Bash(sed:*)"
+    ],
+    "deny": []
+  }
+}
