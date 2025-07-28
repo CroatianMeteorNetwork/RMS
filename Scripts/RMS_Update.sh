@@ -29,7 +29,7 @@ BACKUP_MASK="$RMSBACKUPDIR/mask.bmp"
 BACKUP_CAMERA_SETTINGS="$RMSBACKUPDIR/camera_settings.json"
 SYSTEM_PACKAGES="$RMSSOURCEDIR/system_packages.txt"
 UPDATEINPROGRESSFILE=$RMSBACKUPDIR/update_in_progress
-LOCKDIR="$RMSSOURCEDIR/.update.lockdir"
+LOCKFILE="/tmp/rms_update.$(sha1sum <<<"$RMSSOURCEDIR" | cut -c1-8).lock"
 MIN_SPACE_MB=200  # Minimum required space in MB
 RETRY_LIMIT=3  # Retries for critical file operations
 GIT_RETRY_LIMIT=6
@@ -685,27 +685,15 @@ main() {
 
     print_header "Starting RMS Update"
     
-    # Remove any stray regular file before attempting lock
-    [ -f "$LOCKDIR" ] && rm -f "$LOCKDIR"
-    
-    # Atomic lock creation / stale-PID handling
-    if mkdir "$LOCKDIR" 2>/dev/null; then
-        echo "$$" >"$LOCKDIR/PID"
-        trap 'rm -rf "$LOCKDIR"' EXIT        # we hold the lock
-    else
-        if [ -f "$LOCKDIR/PID" ] && ps -p "$(cat "$LOCKDIR/PID")" >/dev/null 2>&1; then
-            print_status "error" "Another update (PID $(cat "$LOCKDIR/PID")) is running. Exiting."
-            exit 1
-        fi
-        print_status "warning" "Stale lock detected - removing it and continuing."
-        rm -rf "$LOCKDIR"
-        mkdir "$LOCKDIR" || {
-            print_status "error" "Could not claim lock after removing stale one."
-            exit 1
-        }
-        echo "$$" >"$LOCKDIR/PID"
-        trap 'rm -rf "$LOCKDIR"' EXIT
+    # Use flock for robust locking
+    exec 200>"$LOCKFILE"
+    if ! flock -n 200; then
+        print_status "error" "Another RMS update is already running. Exiting."
+        exit 1
     fi
+    # Lock will be automatically released when script exits
+    # Note: Lock is inherited by RMS_PostUpdate.sh via exec, ensuring
+    # the entire update process is protected
 
     # Run space check before anything else
     print_status "info" "Checking available disk space..."
