@@ -120,7 +120,8 @@ parse_args() {
             --switch)
                 if [[ -n "$2" && ! "$2" =~ ^-- ]]; then
                     SWITCH_MODE="direct"
-                    SWITCH_BRANCH="$2"
+                    # Trim whitespace from branch name
+                    SWITCH_BRANCH=$(echo "$2" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
                     shift 2
                 else
                     SWITCH_MODE="interactive"
@@ -1082,17 +1083,15 @@ main() {
     fi
 
     # Handle branch setup and switching
-    if [ "$1" = "--switch" ]; then
-        if [ -n "$2" ]; then
-            if ! switch_to_branch "$2"; then
-                cleanup_on_error
-            fi
-            RMS_BRANCH="$2"
-        else
-            switch_branch_interactive
-            if ! switch_to_branch "$RMS_BRANCH" "true"; then
-                cleanup_on_error
-            fi
+    if [ "${SWITCH_MODE:-}" = "direct" ]; then
+        if ! switch_to_branch "$SWITCH_BRANCH"; then
+            cleanup_on_error
+        fi
+        RMS_BRANCH="$SWITCH_BRANCH"
+    elif [ "${SWITCH_MODE:-}" = "interactive" ]; then
+        switch_branch_interactive
+        if ! switch_to_branch "$RMS_BRANCH" "true"; then
+            cleanup_on_error
         fi
     elif [ -z "$RMS_BRANCH" ]; then
         # If no branch specified (via --switch or environment), use current
