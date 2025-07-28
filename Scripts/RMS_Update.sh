@@ -1,4 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+# Enable strict error handling
+set -Eeuo pipefail
+
+# Enable ERR propagation into functions/subshells when possible (Bash 4.4+)
+shopt -s inherit_errexit 2>/dev/null || true
 
 # This script updates the RMS code from GitHub.
 # Includes error handling, retries, and ensures critical files are never lost.
@@ -13,28 +19,98 @@
 # 4. Use an environment variable to specify the branch before running:
 #    RMS_BRANCH=prerelease ./Scripts/RMS_Update.sh
 
-# Directories, files, and variables
+# Directories, files, and variables - marked readonly for safety
 RMS_BRANCH="${RMS_BRANCH:-""}"  # Use environment variable if set, otherwise empty
-RMSSOURCEDIR=$HOME/source/RMS
-RMSBACKUPDIR=$HOME/.rms_backup
-CURRENT_CONFIG="$RMSSOURCEDIR/.config"
-CURRENT_MASK="$RMSSOURCEDIR/mask.bmp"
-CURRENT_CAMERA_SETTINGS="$RMSSOURCEDIR/camera_settings.json"
-BACKUP_CONFIG="$RMSBACKUPDIR/.config"
-BACKUP_MASK="$RMSBACKUPDIR/mask.bmp"
-BACKUP_CAMERA_SETTINGS="$RMSBACKUPDIR/camera_settings.json"
-SYSTEM_PACKAGES="$RMSSOURCEDIR/system_packages.txt"
-BACKUP_STATE_FILE=$RMSBACKUPDIR/backup_state
-LOCKFILE="/tmp/rms_update.$(printf '%s' "$RMSSOURCEDIR" | sha1sum | cut -c1-8).lock"
-MIN_SPACE_MB=200  # Minimum required space in MB
-RETRY_LIMIT=3  # Retries for critical file operations
-GIT_RETRY_LIMIT=6
-GIT_RETRY_DELAY=15  # Seconds between git operation retries
+readonly RMSSOURCEDIR=$HOME/source/RMS
+readonly RMSBACKUPDIR=$HOME/.rms_backup
+readonly CURRENT_CONFIG="$RMSSOURCEDIR/.config"
+readonly CURRENT_MASK="$RMSSOURCEDIR/mask.bmp"
+readonly CURRENT_CAMERA_SETTINGS="$RMSSOURCEDIR/camera_settings.json"
+BACKUP_CONFIG="$RMSBACKUPDIR/.config"  # Mutable - can change to alt locations
+BACKUP_MASK="$RMSBACKUPDIR/mask.bmp"    # Mutable - can change to alt locations
+BACKUP_CAMERA_SETTINGS="$RMSBACKUPDIR/camera_settings.json"  # Mutable - can change to alt locations
+readonly SYSTEM_PACKAGES="$RMSSOURCEDIR/system_packages.txt"
+readonly BACKUP_STATE_FILE=$RMSBACKUPDIR/backup_state
+readonly LOCKFILE="/tmp/rms_update.$(printf '%s' "$RMSSOURCEDIR" | sha1sum | cut -c1-8).lock"
+readonly MIN_SPACE_MB=200  # Minimum required space in MB
+readonly RETRY_LIMIT=3  # Retries for critical file operations
+readonly GIT_RETRY_LIMIT=6
+readonly GIT_RETRY_DELAY=15  # Seconds between git operation retries
+
+# Trap handler for emergency cleanup
+emergency_cleanup() {
+    local exit_code=$?
+    local line_number=${1:-"unknown"}
+    
+    # Prevent re-entrancy by disabling the trap immediately
+    trap - ERR
+    
+    # Disable strict error handling for cleanup operations (both forms for full immunity)
+    set +e
+    set +o errexit
+    
+    # Release lock safely before any potentially failing operations
+    exec 200>&- 2>/dev/null || true
+    
+    print_status "error" "Script failed at line $line_number with exit code $exit_code"
+    print_status "warning" "Attempting emergency recovery..."
+    
+    # Only try to restore from backup if we were in the danger zone
+    if [ -f "$BACKUP_STATE_FILE" ]; then
+        local backup_state
+        backup_state=$(cat "$BACKUP_STATE_FILE" 2>/dev/null || echo "unknown")
+        if [ "$backup_state" = "1" ]; then
+            print_status "info" "Backup state indicates we were in danger zone, attempting restoration..."
+            restore_files 2>/dev/null || print_status "warning" "Failed to restore backup files"
+        else
+            print_status "info" "No restoration needed - backup state: $backup_state"
+        fi
+    fi
+    
+    # Try to reset git state if we're in a bad state - but don't fail if it doesn't work
+    if [ -d "$RMSSOURCEDIR/.git" ]; then
+        cd "$RMSSOURCEDIR" 2>/dev/null || true
+        if git status &>/dev/null 2>&1; then
+            print_status "info" "Attempting to restore git state..."
+            check_and_fix_git_state 2>/dev/null || print_status "warning" "Failed to fix git state"
+        fi
+    fi
+    
+    print_status "error" "Update failed. Repository may be in an inconsistent state."
+    print_status "info" "Manual recovery may be required. Check ~/source/RMS/.git/logs/ for git history."
+    
+    exit $exit_code
+}
+
+# Set up trap for errors and signals
+trap 'emergency_cleanup $LINENO' ERR INT TERM
+
+# Safety check to prevent catastrophic deletions if RMSSOURCEDIR is misconfigured
+validate_rms_directory() {
+    local dir="$1"
+    
+    # Check if directory is obviously dangerous
+    case "$dir" in
+        "/" | "/bin" | "/usr" | "/etc" | "/var" | "/home" | "/root" | "/sys" | "/proc" | "/dev")
+            print_status "error" "RMSSOURCEDIR points to dangerous system directory: $dir"
+            return 1
+            ;;
+    esac
+    
+    # Check if it contains RMS-like files (basic sanity check)
+    if [ -d "$dir" ] && [ ! -f "$dir/RMS/ConfigReader.py" ] && [ ! -f "$dir/setup.py" ]; then
+        print_status "warning" "Directory $dir doesn't appear to contain RMS code"
+        print_status "warning" "Expected to find RMS/ConfigReader.py or setup.py"
+        return 1
+    fi
+    
+    return 0
+}
 
 usage() {
-    echo "Usage: $0 [--switch <branch>] [--help]"
-    echo "  --switch <branch>  Interactively switch or switch to a specific branch"
-    echo "  --help             Show usage info"
+    print_status "info" "Usage: $0 [--switch <branch>] [--help]"
+    print_status "info" "  --switch <branch>  Interactively switch or switch to a specific branch"
+    print_status "info" "  --help             Show usage info"
     exit 1
 }
 
@@ -55,7 +131,7 @@ parse_args() {
                 usage
                 ;;
             *)
-                echo "Unknown argument: $1"
+                print_status "error" "Unknown argument: $1"
                 usage
                 ;;
         esac
@@ -69,6 +145,20 @@ else
     USE_COLOR=false
 fi
 
+# Check if we're running interactively (for sleep timing)
+if [ -t 0 ] && [ -t 1 ]; then
+    INTERACTIVE=true
+else
+    INTERACTIVE=false
+fi
+
+# Conditional sleep - only sleep when interactive
+interactive_sleep() {
+    if [ "$INTERACTIVE" = true ]; then
+        sleep "$1"
+    fi
+}
+
 # Functions for improved status output
 print_status() {
     local type=$1
@@ -79,12 +169,12 @@ print_status() {
             "error")
                 tput bold; tput setaf 1  # Bold red
                 echo "ERROR: $msg"
-                sleep 2  # Longer pause for errors
+                interactive_sleep 2  # Longer pause for errors
                 ;;
             "warning")
                 tput setaf 3  # Yellow
                 echo "WARNING: $msg"
-                sleep 1
+                interactive_sleep 1
                 ;;
             "success")
                 tput setaf 2  # Green
@@ -101,11 +191,11 @@ print_status() {
         case $type in
             "error")
                 echo "[ERROR] $msg"
-                sleep 2
+                interactive_sleep 2
                 ;;
             "warning")
                 echo "[WARNING] $msg"
-                sleep 1
+                interactive_sleep 1
                 ;;
             "success")
                 echo "[SUCCESS] $msg"
@@ -128,7 +218,7 @@ print_header() {
         echo "====== $msg ======"
     fi
     echo ""
-    sleep 1
+    interactive_sleep 1
 }
 
 check_git_setup() {
@@ -198,36 +288,49 @@ switch_branch_interactive() {
         exit 1
     fi
     
-    print_header "Available Branches"
-    for i in "${!branches[@]}"; do
-        local branch="${branches[$i]}"
-        # Compare with the actual current local branch
-        if [ "$branch" = "$current_branch" ]; then
-            # Highlight the current branch
-            tput bold; tput setaf 2
-            echo "$((i+1)). ${branch} (current)"
-            tput sgr0
+    local attempts=0
+    local max_attempts=3
+    
+    while (( attempts < max_attempts )); do
+        print_header "Available Branches"
+        for i in "${!branches[@]}"; do
+            local branch="${branches[$i]}"
+            # Compare with the actual current local branch
+            if [ "$branch" = "$current_branch" ]; then
+                # Highlight the current branch
+                tput bold; tput setaf 2
+                echo "$((i+1)). ${branch} (current)"
+                tput sgr0
+            else
+                echo "$((i+1)). ${branch}"
+            fi
+        done
+        
+        read -p "Enter the number of the branch to switch to (press Enter to keep current): " choice
+        
+        # Handle empty input (keep current branch)
+        if [ -z "$choice" ]; then
+            print_status "info" "Keeping current branch: $current_branch"
+            RMS_BRANCH="$current_branch"
+            return
+        fi
+        
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#branches[@]} )); then
+            RMS_BRANCH="${branches[$((choice-1))]}"
+            print_status "success" "Switched to branch: $RMS_BRANCH"
+            return
         else
-            echo "$((i+1)). ${branch}"
+            ((attempts++))
+            if (( attempts < max_attempts )); then
+                print_status "error" "Invalid selection. Please try again (attempt $attempts/$max_attempts)."
+                interactive_sleep 1
+            else
+                print_status "error" "Invalid selection after $max_attempts attempts. Using current branch."
+                RMS_BRANCH="$current_branch"
+                return
+            fi
         fi
     done
-    
-    read -p "Enter the number of the branch to switch to (press Enter to keep current): " choice
-    
-    # Handle empty input (keep current branch)
-    if [ -z "$choice" ]; then
-        print_status "info" "Keeping current branch: $current_branch"
-        RMS_BRANCH="$current_branch"
-        return
-    fi
-    
-    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#branches[@]} )); then
-        RMS_BRANCH="${branches[$((choice-1))]}"
-        print_status "success" "Switched to branch: $RMS_BRANCH"
-    else
-        print_status "error" "Invalid selection. Exiting."
-        exit 1
-    fi
 }
 
 # Function to check available disk space
@@ -378,31 +481,81 @@ retry_cp() {
 # Backup files
 backup_files() {
     print_header "Backing Up Original Files"
+    print_status "info" "Backup paths → $BACKUP_CONFIG / $BACKUP_MASK / $BACKUP_CAMERA_SETTINGS"
 
-    # Backup .config
+    # Backup .config with fallback locations
     if [ -f "$CURRENT_CONFIG" ]; then
         if ! retry_cp "$CURRENT_CONFIG" "$BACKUP_CONFIG"; then
-            print_status "error" "Could not back up .config file. Aborting."
-            exit 1
+            # Try alternative backup locations
+            local alt_backup_dirs=("/tmp/rms_backup_$$" "$HOME/rms_backup_$$")
+            local backup_success=false
+            
+            for alt_dir in "${alt_backup_dirs[@]}"; do
+                mkdir -p "$alt_dir" 2>/dev/null || continue
+                if retry_cp "$CURRENT_CONFIG" "$alt_dir/.config"; then
+                    print_status "warning" "Backed up .config to alternative location: $alt_dir"
+                    BACKUP_CONFIG="$alt_dir/.config"
+                    backup_success=true
+                    break
+                fi
+            done
+            
+            if [ "$backup_success" = false ]; then
+                print_status "error" "Could not back up .config file to any location. Continuing without backup."
+                print_status "warning" "Risk: Configuration may be lost if update fails."
+            fi
         fi
     else
         print_status "info" "No original .config found. Generic config will be used."
     fi
 
-    # Backup mask.bmp
+    # Backup mask.bmp with fallback locations
     if [ -f "$CURRENT_MASK" ]; then
         if ! retry_cp "$CURRENT_MASK" "$BACKUP_MASK"; then
-            print_status "error" "Could not back up mask.bmp file. Aborting."
-            exit 1
+            # Try alternative backup locations
+            local alt_backup_dirs=("/tmp/rms_backup_$$" "$HOME/rms_backup_$$")
+            local backup_success=false
+            
+            for alt_dir in "${alt_backup_dirs[@]}"; do
+                mkdir -p "$alt_dir" 2>/dev/null || continue
+                if retry_cp "$CURRENT_MASK" "$alt_dir/mask.bmp"; then
+                    print_status "warning" "Backed up mask.bmp to alternative location: $alt_dir"
+                    BACKUP_MASK="$alt_dir/mask.bmp"
+                    backup_success=true
+                    break
+                fi
+            done
+            
+            if [ "$backup_success" = false ]; then
+                print_status "error" "Could not back up mask.bmp file to any location. Continuing without backup."
+                print_status "warning" "Risk: Mask configuration may be lost if update fails."
+            fi
         fi
     else
         print_status "info" "No original mask.bmp found. Blank mask will be used."
     fi
 
-    # Backup camera_settings.json
+    # Backup camera_settings.json with fallback locations
     if [ -f "$CURRENT_CAMERA_SETTINGS" ]; then
         if ! retry_cp "$CURRENT_CAMERA_SETTINGS" "$BACKUP_CAMERA_SETTINGS"; then
-            print_status "error" "Could not back up camera_settings.json file."
+            # Try alternative backup locations
+            local alt_backup_dirs=("/tmp/rms_backup_$$" "$HOME/rms_backup_$$")
+            local backup_success=false
+            
+            for alt_dir in "${alt_backup_dirs[@]}"; do
+                mkdir -p "$alt_dir" 2>/dev/null || continue
+                if retry_cp "$CURRENT_CAMERA_SETTINGS" "$alt_dir/camera_settings.json"; then
+                    print_status "warning" "Backed up camera_settings.json to alternative location: $alt_dir"
+                    BACKUP_CAMERA_SETTINGS="$alt_dir/camera_settings.json"
+                    backup_success=true
+                    break
+                fi
+            done
+            
+            if [ "$backup_success" = false ]; then
+                print_status "error" "Could not back up camera_settings.json file to any location. Continuing without backup."
+                print_status "warning" "Risk: Camera settings may be lost if update fails."
+            fi
         fi
     else
         print_status "info" "No original camera_settings.json found. Default settings will be used."
@@ -412,22 +565,25 @@ backup_files() {
 # Restore files
 restore_files() {
     print_header "Restoring Configuration Files"
+    print_status "info" "Restore paths ← $BACKUP_CONFIG / $BACKUP_MASK / $BACKUP_CAMERA_SETTINGS"
 
-    # Restore .config
+    # Restore .config with graceful degradation
     if [ -f "$BACKUP_CONFIG" ]; then
         if ! retry_cp "$BACKUP_CONFIG" "$CURRENT_CONFIG"; then
-            print_status "error" "Failed to restore .config. Aborting."
-            exit 1
+            print_status "error" "Failed to restore .config after $RETRY_LIMIT attempts."
+            print_status "warning" "Continuing without restored config - RMS will create a new default config."
+            print_status "info" "You can manually restore from: $BACKUP_CONFIG"
         fi
     else
         print_status "info" "No backup .config found - a new one will be created by the installation."
     fi
 
-    # Restore mask.bmp
+    # Restore mask.bmp with graceful degradation
     if [ -f "$BACKUP_MASK" ]; then
         if ! retry_cp "$BACKUP_MASK" "$CURRENT_MASK"; then
-            print_status "error" "Failed to restore mask.bmp. Aborting."
-            exit 1
+            print_status "error" "Failed to restore mask.bmp after $RETRY_LIMIT attempts."
+            print_status "warning" "Continuing without restored mask - RMS will create a new blank mask."
+            print_status "info" "You can manually restore from: $BACKUP_MASK"
         fi
     else
         print_status "info" "No backup mask.bmp found - a new blank mask will be created by the installation."
@@ -517,19 +673,18 @@ git_with_retry() {
     local backup_dir="${RMSSOURCEDIR}_backup_$(date +%Y%m%d_%H%M%S)"
 
     while [ $attempt -le $GIT_RETRY_LIMIT ]; do
+        # Reset variables for clean state each iteration
         local depth_arg=""
         print_status "info" "Attempting git $cmd (try $attempt of $GIT_RETRY_LIMIT)..."
 
-        # Step 1: Clear Any Cached Git Settings to Ensure a Clean Retry
-        git config --global --unset http.version
-        git config --global --unset http.sslverify
-        git config --global --unset http.postbuffer
+        # Use ad-hoc git settings that don't persist after script exits
 
-        # Step 2: Apply Recommended Git Settings Before Each Attempt
-        git config --global http.version HTTP/1.1
-        git config --global http.sslverify false
-        git config --global http.postbuffer 1048576000  # Large buffer for large repo fetches
-
+        # Build git config arguments for this attempt (no persistent config changes)
+        local git_config_args=()
+        git_config_args+=(-c http.version=HTTP/1.1)
+        git_config_args+=(-c http.sslverify=false)
+        git_config_args+=(-c http.postbuffer=1048576000)
+        
         case $attempt in
             2)
                 print_status "info" "Switching to HTTP/1.1 for this attempt"
@@ -539,14 +694,11 @@ git_with_retry() {
                 depth_arg="--depth=1"
                 ;;
             4)
-                print_status "info" "Resetting Git settings and retrying with HTTP/1.1 and --depth=1"
-                git config --global --unset http.version
-                git config --global http.version HTTP/1.1
+                print_status "info" "Retrying with HTTP/1.1 and --depth=1"
                 depth_arg="--depth=1"
                 ;;
             5)
                 print_status "warning" "Final Git attempt: Recloning repository using HTTP/1.1"
-                git config --global http.version HTTP/1.1
 
                 cd ~ || exit 1
                 mv "$RMSSOURCEDIR" "$backup_dir"
@@ -564,77 +716,22 @@ git_with_retry() {
                     done
                     return 0
                 else
-                    print_status "error" "Reclone failed. Proceeding with wget/curl..."
+                    print_status "error" "Reclone failed after all Git recovery attempts."
                 fi
-                ;;
-            6)
-                print_status "error" "All Git attempts failed. Attempting to download GitHub tarball..."
-
-                cd ~/source || exit 1
-                mv "$RMSSOURCEDIR" "$backup_dir"
-
-                # Step 3: Restart SSH Agent & Kill Git Processes to Ensure Clean State
-                print_status "info" "Restarting SSH agent to clear any stuck Git connections..."
-                eval "$(ssh-agent -s)"  # Restart SSH agent
-
-                # Graceful shutdown
-                pkill -u "$USER" -f git 2>/dev/null || true
-                sleep 2
-
-                # Hard kill if anything is left
-                pkill -9 -u "$USER" -f git 2>/dev/null || true
-                
-                # Step 4: Attempt wget/curl with Clean Environment
-                print_status "info" "Downloading RMS repository ($branch branch) from GitHub using wget (supports resume)..."
-                if ! wget -c --tries=5 --timeout=30 -O RMS.tar.gz "https://github.com/CroatianMeteorNetwork/RMS/archive/refs/heads/$branch.tar.gz"; then
-                    print_status "warning" "wget failed. Trying curl as backup..."
-
-                    if ! curl -L --retry 5 --retry-delay 10 --connect-timeout 30 -o RMS.tar.gz "https://github.com/CroatianMeteorNetwork/RMS/archive/refs/heads/$branch.tar.gz"; then
-                        print_status "error" "Both wget and curl failed. Restoring original backup..."
-                        rm -f RMS.tar.gz  # Clean up any partial download
-                        mv "$backup_dir" "$RMSSOURCEDIR"
-                        return 1
-                    fi
-                fi
-
-                # Verify the tarball integrity before extracting
-                if ! tar -tzf RMS.tar.gz >/dev/null; then
-                    print_status "error" "Downloaded tarball is corrupted. Restoring original backup..."
-                    rm -f RMS.tar.gz  # Clean up corrupted tarball
-                    mv "$backup_dir" "$RMSSOURCEDIR"
-                    return 1
-                fi
-
-                print_status "success" "Tarball downloaded successfully. Extracting..."
-                mkdir -p "$RMSSOURCEDIR"
-                tar -xzf RMS.tar.gz --strip-components=1 -C "$RMSSOURCEDIR"
-                
-                # Clean up the downloaded tarball
-                rm -f RMS.tar.gz
-
-                # Restore critical files from backup
-                for file in .config mask.bmp camera_settings.json; do
-                    if [ -f "$backup_dir/$file" ]; then
-                        print_status "info" "Restoring $file from backup"
-                        cp "$backup_dir/$file" "$RMSSOURCEDIR/"
-                    fi
-                done
-
-                return 0
                 ;;
         esac
 
         # Ensure Git Fails Properly Before Retrying
         case $cmd in
             "fetch")
-                if ! git fetch --all --prune --force --verbose $depth_arg; then
+                if ! git "${git_config_args[@]}" fetch --all --prune --force --verbose $depth_arg; then
                     print_status "warning" "Git fetch failed, retrying..."
                 else
                     return 0
                 fi
                 ;;
             "checkout")
-                if ! git checkout "$branch"; then
+                if ! git "${git_config_args[@]}" checkout "$branch"; then
                     print_status "warning" "Git checkout failed, retrying..."
                 else
                     return 0
@@ -642,7 +739,7 @@ git_with_retry() {
                 ;;
             "reset")
                 # Try reset - should work since we're only dealing with tracked files
-                if git reset --hard "$RMS_REMOTE/$branch" 2>/dev/null; then
+                if git "${git_config_args[@]}" reset --hard "$RMS_REMOTE/$branch" 2>/dev/null; then
                     return 0
                 else
                     print_status "warning" "Git reset failed, retrying..."
@@ -784,7 +881,7 @@ install_missing_dependencies() {
     fi
 
     print_status "info" "The following packages will be installed: ${missing_packages[*]}"
-    sleep 1
+    interactive_sleep 1
 
     if sudo -n true 2>/dev/null; then
         print_status "info" "Passwordless sudo available. Installing missing packages..."
@@ -811,7 +908,7 @@ install_missing_dependencies() {
 ==============================================
 "
         fi
-        sleep 2
+        interactive_sleep 2
         
         sudo apt-get update
         for package in "${missing_packages[@]}"; do
@@ -878,12 +975,29 @@ main() {
     SELF_ABS=$(readlink -f "$0" 2>/dev/null || echo "$0")
     SCRIPT_HASH=$(sha1sum "$SELF_ABS" 2>/dev/null | cut -d' ' -f1 || echo "unknown")
     
+    # Clean up old lock files (older than 24 hours)
+    find /tmp -name 'rms_update.*.lock' -mmin +1440 -delete 2>/dev/null || true
+    
     # Use flock for robust locking
     exec 200>"$LOCKFILE"
     if ! flock -n 200; then
-        print_status "error" "Another RMS update is already running. Exiting."
+        print_status "error" "Another RMS update is already running."
+        
+        # Check if lock is held by a dead process (rare but possible after power loss)
+        if command -v lsof >/dev/null 2>&1; then
+            local lock_pids
+            lock_pids=$(lsof -Fp -- "$LOCKFILE" 2>/dev/null | grep '^p' | cut -c2- || echo "")
+            if [ -n "$lock_pids" ]; then
+                print_status "info" "Lock held by PID(s): $lock_pids"
+            else
+                print_status "warning" "Lock file exists but no process found holding it."
+                print_status "warning" "This may indicate a stale lock from system crash/power loss."
+                print_status "info" "If no RMS update is actually running, remove: $LOCKFILE"
+            fi
+        fi
         exit 1
     fi
+    # Let the file live; rely on flock + descriptor for locking
     # Lock will be automatically released when script exits
     # Note: Lock is inherited by re-exec via exec, ensuring
     # the entire update process is protected
@@ -926,6 +1040,12 @@ main() {
         print_status "warning" "Skipping backup due to interrupted backup/restore cycle."
     fi
 
+    # Validate directory before any operations (only if it exists)
+    if [ -d "$RMSSOURCEDIR" ] && ! validate_rms_directory "$RMSSOURCEDIR"; then
+        print_status "error" "Safety check failed. Refusing to operate on potentially dangerous directory."
+        exit 1
+    fi
+    
     # Change to the RMS source directory
     cd "$RMSSOURCEDIR" || { print_status "error" "RMS source directory not found. Exiting."; exit 1; }
 
@@ -998,7 +1118,7 @@ main() {
         fi
        
         print_status "success" "Successfully updated to latest version"
-        sleep 2
+        interactive_sleep 2
     fi
 
     # Create template from the current default config file
@@ -1035,11 +1155,18 @@ main() {
 
     # Check if this script was updated and re-exec if needed
     SELF="$RMSSOURCEDIR/Scripts/RMS_Update.sh"
-    new_hash=$(sha1sum "$SELF" 2>/dev/null | cut -d' ' -f1 || echo "unknown")
+    SELF_REAL=$(readlink -f "$SELF" 2>/dev/null || echo "$SELF")
+    new_hash=$(sha1sum "$SELF_REAL" 2>/dev/null | cut -d' ' -f1 || echo "unknown")
     if [[ "$SCRIPT_HASH" != "$new_hash" ]] && [[ "$new_hash" != "unknown" ]]; then
         print_status "info" "Update script was modified - re-executing with new version..."
         # Re-exec preserves file descriptors (including our flock) and arguments
-        exec env REEXEC_COUNT=$((REEXEC_COUNT+1)) "$SELF" "$@"
+        # Handle arithmetic safely in case of unexpected values
+        local next_count
+        if next_count=$((REEXEC_COUNT+1)) 2>/dev/null; then
+            exec env REEXEC_COUNT="$next_count" "$SELF" "$@"
+        else
+            print_status "warning" "Failed to increment REEXEC_COUNT, continuing with current version..."
+        fi
     fi
 
     #######################################################
@@ -1055,8 +1182,8 @@ main() {
 
     # Resolve the active site‑packages directory inside the venv
     SITE_DIR=$(python - <<'PY'
-import site, sys
-print(site.getsitepackages()[0])
+import sysconfig, sys, os
+print(sysconfig.get_paths()['purelib'])
 PY
     )
 
@@ -1065,8 +1192,8 @@ PY
     find "$SITE_DIR" -maxdepth 1 -name 'RMS-*.dist-info' -prune -exec rm -rf {} +
     find "$SITE_DIR" -maxdepth 1 -name 'RMS-*.egg-info'  -prune -exec rm -rf {} +
     
-    print_status "info" "Removing build directory..."
-    rm -rf build
+    print_status "info" "Removing build and dist directories..."
+    rm -rf build dist
 
     # Clean Python bytecode files
     print_status "info" "Cleaning up Python bytecode files..."
@@ -1076,29 +1203,29 @@ PY
                 print_status "warning" "pyclean with debris failed, falling back to basic cleanup..."
                 if ! pyclean .; then
                     print_status "warning" "pyclean failed, falling back to manual cleanup..."
-                    find . -name "*.pyc" -type f -delete
-                    find . -type d -name "__pycache__" -exec rm -r {} +
-                    find . -name "*.pyo" -type f -delete
+                    find "$RMSSOURCEDIR" -name "*.pyc" -type f -delete 2>/dev/null || true
+                    find "$RMSSOURCEDIR" -type d -name "__pycache__" -exec rm -r {} + 2>/dev/null || true
+                    find "$RMSSOURCEDIR" -name "*.pyo" -type f -delete 2>/dev/null || true
                 fi
             fi
         else
             print_status "info" "pyclean basic version detected..."
             if ! pyclean .; then
                 print_status "warning" "pyclean failed, falling back to manual cleanup..."
-                find . -name "*.pyc" -type f -delete
-                find . -type d -name "__pycache__" -exec rm -r {} +
-                find . -name "*.pyo" -type f -delete
+                find "$RMSSOURCEDIR" -name "*.pyc" -type f -delete 2>/dev/null || true
+                find "$RMSSOURCEDIR" -type d -name "__pycache__" -exec rm -r {} + 2>/dev/null || true
+                find "$RMSSOURCEDIR" -name "*.pyo" -type f -delete 2>/dev/null || true
             fi
         fi
     else
         print_status "info" "pyclean not found, using manual cleanup..."
-        find . -name "*.pyc" -type f -delete
-        find . -type d -name "__pycache__" -exec rm -r {} +
-        find . -name "*.pyo" -type f -delete
+        find "$RMSSOURCEDIR" -name "*.pyc" -type f -delete 2>/dev/null || true
+        find "$RMSSOURCEDIR" -type d -name "__pycache__" -exec rm -r {} + 2>/dev/null || true
+        find "$RMSSOURCEDIR" -name "*.pyo" -type f -delete 2>/dev/null || true
     fi
 
     print_status "info" "Cleaning up *.so files..."
-    find . -name "*.so" -type f -delete
+    find "$RMSSOURCEDIR" -name "*.so" -type f -delete 2>/dev/null || true
 
     # Install missing dependencies
     print_header "Installing Missing Dependencies"
@@ -1111,16 +1238,61 @@ PY
 
     print_header "Running Setup"
     print_status "info" "Building RMS (this may take a while)..."
-    if ! pip install -e . --no-deps --no-build-isolation; then
-        print_status "error" "Build failed. See errors above."
+    
+    # Try build with multiple recovery attempts
+    local build_attempts=0
+    local max_build_attempts=2
+    local build_success=false
+    
+    while (( build_attempts < max_build_attempts )) && [ "$build_success" = false ]; do
+        if pip install -e . --no-deps --no-build-isolation; then
+            build_success=true
+            break
+        else
+            ((build_attempts++))
+            if (( build_attempts < max_build_attempts )); then
+                print_status "warning" "Build failed (attempt $build_attempts/$max_build_attempts). Cleaning and retrying..."
+                # Clean build artifacts and try again
+                rm -rf build/ dist/ 2>/dev/null || true
+                find "$RMSSOURCEDIR" -name "*.pyc" -type f -delete 2>/dev/null || true
+                find "$RMSSOURCEDIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+                # Clear pip cache to avoid corrupted wheel issues (pip 21.1+ only)
+                if command -v pip >/dev/null 2>&1 && python -m pip cache --help >/dev/null 2>&1; then
+                    print_status "info" "Clearing pip cache to avoid wheel corruption..."
+                    python -m pip cache purge 2>/dev/null || true
+                else
+                    print_status "info" "Pip cache command not available, skipping cache clear..."
+                fi
+                interactive_sleep 2
+            fi
+        fi
+    done
+    
+    if [ "$build_success" = false ]; then
+        print_status "error" "Build failed after $max_build_attempts attempts."
+        print_status "warning" "Attempting to restore previous version..."
+        
+        # Try to rollback to previous commit if available
+        if [ -n "${ORIGINAL_COMMIT:-}" ] && [ "$ORIGINAL_COMMIT" != "unknown" ]; then
+            print_status "info" "Rolling back to previous commit: $ORIGINAL_COMMIT"
+            if git reset --hard "$ORIGINAL_COMMIT" 2>/dev/null; then
+                print_status "warning" "Rolled back to previous version. Update failed but system should be functional."
+                restore_files || print_status "warning" "Failed to restore config files"
+                return
+            fi
+        fi
+        
+        print_status "error" "Build recovery failed. Manual intervention may be required."
+        print_status "info" "Backup files are available in: $RMSBACKUPDIR"
         exit 1
     fi
+    
     print_status "success" "Build completed successfully"
     
     # Print the update report
     print_update_report
     print_status "success" "Update process completed successfully!"
-    sleep 3
+    interactive_sleep 3
 }
 
 # Run the main process
