@@ -292,7 +292,6 @@ check_and_fix_git_state() {
         else
             print_status "warning" "Merge abort failed - forcing clean state"
             git reset --hard HEAD 2>/dev/null || true
-            git clean -fd 2>/dev/null || true
         fi
     fi
     
@@ -304,7 +303,6 @@ check_and_fix_git_state() {
         else
             print_status "warning" "Rebase abort failed - forcing clean state"
             git reset --hard HEAD 2>/dev/null || true
-            git clean -fd 2>/dev/null || true
         fi
     fi
     
@@ -635,17 +633,28 @@ git_with_retry() {
                 fi
                 ;;
             "reset")
-                # Try gentle reset first, then hard reset if needed
+                # Try gentle reset first
                 if git reset --hard "$RMS_REMOTE/$branch" 2>/dev/null; then
                     return 0
                 else
-                    print_status "warning" "Git reset failed, retrying with cleanup..."
-                    git clean -fd 2>/dev/null || true
-                    if git reset --hard "$RMS_REMOTE/$branch" 2>/dev/null; then
-                        return 0
-                    else
-                        print_status "warning" "Git reset still failed, retrying..."
+                    print_status "warning" "Git reset failed, checking for blocking untracked files..."
+                    # Only clean if untracked files are blocking the operation
+                    local blocking_files=$(git status --porcelain | grep "^??" | head -5)
+                    if [ -n "$blocking_files" ]; then
+                        print_status "warning" "Untracked files may be blocking reset, attempting selective cleanup..."
+                        # Try to identify and remove only files that would conflict
+                        if git ls-tree -r --name-only "$RMS_REMOTE/$branch" | while read -r file; do
+                            if [ -f "$file" ] && git status --porcelain "$file" | grep -q "^??"; then
+                                print_status "info" "Removing blocking untracked file: $file"
+                                rm -f "$file"
+                            fi
+                        done; then
+                            if git reset --hard "$RMS_REMOTE/$branch" 2>/dev/null; then
+                                return 0
+                            fi
+                        fi
                     fi
+                    print_status "warning" "Git reset still failed, retrying..."
                 fi
                 ;;
             *)
