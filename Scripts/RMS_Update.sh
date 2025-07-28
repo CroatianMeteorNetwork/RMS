@@ -21,6 +21,8 @@ shopt -s inherit_errexit 2>/dev/null || true
 
 # Directories, files, and variables - marked readonly for safety
 RMS_BRANCH="${RMS_BRANCH:-""}"  # Use environment variable if set, otherwise empty
+SWITCH_MODE=""  # Set by parse_args: "", "direct", or "interactive"
+FORCE_UPDATE=false  # Set by parse_args when --force is used
 readonly RMSSOURCEDIR=$HOME/source/RMS
 readonly RMSBACKUPDIR=$HOME/.rms_backup
 readonly CURRENT_CONFIG="$RMSSOURCEDIR/.config"
@@ -34,7 +36,7 @@ readonly BACKUP_STATE_FILE=$RMSBACKUPDIR/backup_state
 readonly LOCKFILE="/tmp/rms_update.$(printf '%s' "$RMSSOURCEDIR" | sha1sum | cut -c1-8).lock"
 readonly MIN_SPACE_MB=200  # Minimum required space in MB
 readonly RETRY_LIMIT=3  # Retries for critical file operations
-readonly GIT_RETRY_LIMIT=6
+readonly GIT_RETRY_LIMIT=5
 readonly GIT_RETRY_DELAY=15  # Seconds between git operation retries
 
 # Trap handler for emergency cleanup
@@ -108,8 +110,9 @@ validate_rms_directory() {
 }
 
 usage() {
-    print_status "info" "Usage: $0 [--switch <branch>] [--help]"
+    print_status "info" "Usage: $0 [--switch <branch>] [--force] [--help]"
     print_status "info" "  --switch <branch>  Interactively switch or switch to a specific branch"
+    print_status "info" "  --force            Force update even if repository is up-to-date"
     print_status "info" "  --help             Show usage info"
     exit 1
 }
@@ -127,6 +130,10 @@ parse_args() {
                     SWITCH_MODE="interactive"
                     shift 1
                 fi
+                ;;
+            --force)
+                FORCE_UPDATE=true
+                shift 1
                 ;;
             --help|-h)
                 usage
@@ -299,9 +306,13 @@ switch_branch_interactive() {
             # Compare with the actual current local branch
             if [ "$branch" = "$current_branch" ]; then
                 # Highlight the current branch
-                tput bold; tput setaf 2
-                echo "$((i+1)). ${branch} (current)"
-                tput sgr0
+                if [ "$USE_COLOR" = true ]; then
+                    tput bold; tput setaf 2
+                    echo "$((i+1)). ${branch} (current)"
+                    tput sgr0
+                else
+                    echo "$((i+1)). ${branch} (current)"
+                fi
             else
                 echo "$((i+1)). ${branch}"
             fi
@@ -600,71 +611,6 @@ restore_files() {
     fi
 }
 
-# Function to repair corrupted repository
-repair_repository() {
-    print_header "Attempting Repository Repair"
-    local repair_success=false
-    
-    # Try basic repair first
-    print_status "info" "Attempting basic repository repair..."
-    git fsck --full 2>/dev/null
-
-    # Get list of corrupted objects
-    local corrupted_objects=$(find .git/objects -type f -empty | sed 's/\.git\/objects\///')
-    
-    if [ -n "$corrupted_objects" ]; then
-        print_status "warning" "Found corrupted objects, attempting removal..."
-        while IFS= read -r obj; do
-            rm -f ".git/objects/$obj"
-        done <<< "$corrupted_objects"
-        
-        # Try to repair again
-        if ! git fsck --full 2>/dev/null; then
-            print_status "warning" "Basic repair failed, attempting full reclone..."
-            
-            # Backup current directory
-            local timestamp=$(date +%Y%m%d_%H%M%S)
-            local backup_dir="${RMSSOURCEDIR}_backup_${timestamp}"
-            
-            print_status "info" "Creating backup at: $backup_dir"
-            if ! mv "$RMSSOURCEDIR" "$backup_dir"; then
-                print_status "error" "Failed to create backup. Aborting repair."
-                return 1
-            fi
-            
-            # Reclone repository
-            print_status "info" "Recloning repository..."
-            if ! git clone https://github.com/CroatianMeteorNetwork/RMS.git "$RMSSOURCEDIR"; then
-                print_status "error" "Failed to reclone repository. Restoring backup..."
-                mv "$backup_dir" "$RMSSOURCEDIR"
-                return 1
-            fi
-            
-            # Restore config files from backup
-            print_status "info" "Restoring configuration from backup..."
-            cp "$backup_dir/.config" "$RMSSOURCEDIR/" 2>/dev/null
-            cp "$backup_dir/mask.bmp" "$RMSSOURCEDIR/" 2>/dev/null
-            cp "$backup_dir/camera_settings.json" "$RMSSOURCEDIR/" 2>/dev/null
-            
-            repair_success=true
-        else
-            repair_success=true
-        fi
-    else
-        print_status "info" "No empty objects found, checking repository integrity..."
-        if git fsck --full 2>/dev/null; then
-            repair_success=true
-        fi
-    fi
-    
-    if [ "$repair_success" = true ]; then
-        print_status "success" "Repository repair completed successfully"
-        return 0
-    else
-        print_status "error" "Repository repair failed"
-        return 1
-    fi
-}
 
 # Function for reliable git operations
 git_with_retry() {
@@ -718,6 +664,7 @@ git_with_retry() {
                     return 0
                 else
                     print_status "error" "Reclone failed after all Git recovery attempts."
+                    return 1
                 fi
                 ;;
         esac
@@ -963,6 +910,40 @@ cleanup_on_error() {
 main() {
     parse_args "$@"
 
+    # Validate directory before attempting to enter it
+    if ! validate_rms_directory "$RMSSOURCEDIR"; then
+        print_status "error" "Safety check failed. Refusing to operate on directory: $RMSSOURCEDIR"
+        exit 1
+    fi
+
+    # Change to RMS directory for git operations
+    cd "$RMSSOURCEDIR" || { print_status "error" "RMS source directory not found. Exiting."; exit 1; }
+
+    # Check Git configuration first
+    check_git_setup
+
+    # ----------------- EARLY SHA CHECK -----------------
+    if [[ -z "$RMS_BRANCH" ]]; then
+        RMS_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+    fi
+
+    if [[ "$SWITCH_MODE" = "" && "$FORCE_UPDATE" = "false" ]]; then
+        REMOTE_SHA=$(git ls-remote --quiet --heads \
+                     "$RMS_REMOTE" "refs/heads/$RMS_BRANCH" | cut -f1)
+        LOCAL_SHA=$(git rev-parse HEAD)
+
+        if [[ -z "$REMOTE_SHA" ]]; then
+            print_status "error" "Cannot query remote ref $RMS_BRANCH"; exit 1
+        fi
+        if [[ "$REMOTE_SHA" == "$LOCAL_SHA" ]]; then
+            print_status "success" "Nothing new on $RMS_BRANCH – exiting."
+            exit 0
+        fi
+        print_status "info" "Will update ($LOCAL_SHA → $REMOTE_SHA)"
+    fi
+    # ---------------------------------------------------
+
+    # From here on: we know we need to do work
     print_header "Starting RMS Update"
     
     # Protect against infinite re-exec loops
@@ -1034,24 +1015,12 @@ main() {
         print_status "info" "Previous backup/restore cycle state: $BACKUP_IN_PROGRESS"
     fi
 
-    # Backup files before any modifications if no interrupted cycle
+    # Now that we know we need to modify the work-tree, backup files if no interrupted cycle
     if [ "$BACKUP_IN_PROGRESS" = "0" ]; then
         backup_files
     else
         print_status "warning" "Skipping backup due to interrupted backup/restore cycle."
     fi
-
-    # Validate directory before any operations (only if it exists)
-    if [ -d "$RMSSOURCEDIR" ] && ! validate_rms_directory "$RMSSOURCEDIR"; then
-        print_status "error" "Safety check failed. Refusing to operate on potentially dangerous directory."
-        exit 1
-    fi
-    
-    # Change to the RMS source directory
-    cd "$RMSSOURCEDIR" || { print_status "error" "RMS source directory not found. Exiting."; exit 1; }
-
-    # Check Git configuration
-    check_git_setup
 
     print_header "Updating from Git"
     if ! check_git_index; then
@@ -1060,6 +1029,12 @@ main() {
 
     # Check and fix problematic git states
     check_and_fix_git_state
+
+    # Handle interactive branch selection if needed
+    if [ "$SWITCH_MODE" = "interactive" ]; then
+        switch_branch_interactive
+        print_status "info" "Target branch: $RMS_BRANCH (interactive selection)"
+    fi
 
     # Activate the virtual environment
     if [ -f ~/vRMS/bin/activate ]; then
@@ -1082,21 +1057,16 @@ main() {
         cleanup_on_error
     fi
 
-    # Handle branch setup and switching
-    if [ "${SWITCH_MODE:-}" = "direct" ]; then
+
+    # Handle branch switching (branch already determined in pre-flight)
+    if [ "$SWITCH_MODE" = "direct" ]; then
         if ! switch_to_branch "$SWITCH_BRANCH"; then
             cleanup_on_error
         fi
-        RMS_BRANCH="$SWITCH_BRANCH"
-    elif [ "${SWITCH_MODE:-}" = "interactive" ]; then
-        switch_branch_interactive
+    elif [ "$SWITCH_MODE" = "interactive" ]; then
         if ! switch_to_branch "$RMS_BRANCH" "true"; then
             cleanup_on_error
         fi
-    elif [ -z "$RMS_BRANCH" ]; then
-        # If no branch specified (via --switch or environment), use current
-        RMS_BRANCH=$(git rev-parse --abbrev-ref HEAD || echo "master")
-        print_status "info" "Using current branch: $RMS_BRANCH"
     fi
 
     # Check if updates are needed
