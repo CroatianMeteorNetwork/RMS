@@ -921,7 +921,7 @@ install_missing_dependencies() {
 }
 
 get_commit_info() {
-    local branch=$1
+    local branch=${1:-""}
     local commit
     local date
     
