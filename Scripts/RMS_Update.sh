@@ -585,11 +585,11 @@ git_with_retry() {
                 pkill -9 -u "$USER" -f git 2>/dev/null || true
                 
                 # Step 4: Attempt wget/curl with Clean Environment
-                print_status "info" "Downloading latest RMS repository from GitHub using wget (supports resume)..."
-                if ! wget -c --tries=5 --timeout=30 -O RMS.tar.gz https://github.com/CroatianMeteorNetwork/RMS/archive/refs/heads/master.tar.gz; then
+                print_status "info" "Downloading RMS repository ($branch branch) from GitHub using wget (supports resume)..."
+                if ! wget -c --tries=5 --timeout=30 -O RMS.tar.gz "https://github.com/CroatianMeteorNetwork/RMS/archive/refs/heads/$branch.tar.gz"; then
                     print_status "warning" "wget failed. Trying curl as backup..."
 
-                    if ! curl -L --retry 5 --retry-delay 10 --connect-timeout 30 -o RMS.tar.gz https://github.com/CroatianMeteorNetwork/RMS/archive/refs/heads/master.tar.gz; then
+                    if ! curl -L --retry 5 --retry-delay 10 --connect-timeout 30 -o RMS.tar.gz "https://github.com/CroatianMeteorNetwork/RMS/archive/refs/heads/$branch.tar.gz"; then
                         print_status "error" "Both wget and curl failed. Restoring original backup..."
                         rm -f RMS.tar.gz  # Clean up any partial download
                         mv "$backup_dir" "$RMSSOURCEDIR"
