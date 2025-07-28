@@ -672,7 +672,7 @@ git_with_retry() {
         # Ensure Git Fails Properly Before Retrying
         case $cmd in
             "fetch")
-                if ! git "${git_config_args[@]}" fetch --all --prune --force --verbose $depth_arg; then
+                if ! git "${git_config_args[@]}" fetch --all --prune --force --quiet $depth_arg; then
                     print_status "warning" "Git fetch failed, retrying..."
                 else
                     return 0
@@ -910,6 +910,10 @@ cleanup_on_error() {
 main() {
     parse_args "$@"
 
+    # Protect against infinite re-exec loops (check early to know if this is a re-exec)
+    REEXEC_COUNT=${REEXEC_COUNT:-0}
+    export REEXEC_COUNT
+
     # Validate directory before attempting to enter it
     if ! validate_rms_directory "$RMSSOURCEDIR"; then
         print_status "error" "Safety check failed. Refusing to operate on directory: $RMSSOURCEDIR"
@@ -923,11 +927,9 @@ main() {
     check_git_setup
 
     # ----------------- EARLY SHA CHECK -----------------
-    if [[ -z "$RMS_BRANCH" ]]; then
-        RMS_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-    fi
+    if (( REEXEC_COUNT == 0 )) && [[ "$SWITCH_MODE" = "" && "$FORCE_UPDATE" = "false" ]]; then
+        [[ -z "$RMS_BRANCH" ]] && RMS_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
-    if [[ "$SWITCH_MODE" = "" && "$FORCE_UPDATE" = "false" ]]; then
         REMOTE_SHA=$(git ls-remote --quiet --heads \
                      "$RMS_REMOTE" "refs/heads/$RMS_BRANCH" | cut -f1)
         LOCAL_SHA=$(git rev-parse HEAD)
@@ -943,11 +945,11 @@ main() {
     fi
     # ---------------------------------------------------
 
+    # Ensure RMS_BRANCH is set (in case early check was skipped)
+    [[ -z "$RMS_BRANCH" ]] && RMS_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
     # From here on: we know we need to do work
     print_header "Starting RMS Update"
-    
-    # Protect against infinite re-exec loops
-    REEXEC_COUNT=${REEXEC_COUNT:-0}
     if (( REEXEC_COUNT >= 2 )); then
         print_status "error" "Script hash keeps changing - aborting to avoid infinite loop"
         exit 1
@@ -1069,9 +1071,12 @@ main() {
         fi
     fi
 
-    # Check if updates are needed
+    # Check if updates are needed (using FETCH_HEAD from the fetch we just did)
     print_status "info" "Checking for available updates..."
-    if ! git log HEAD.."$RMS_REMOTE/$RMS_BRANCH" --oneline | grep .; then
+    LOCAL_SHA=$(git rev-parse HEAD)
+    REMOTE_SHA=$(git rev-parse FETCH_HEAD)
+    
+    if [[ "$LOCAL_SHA" == "$REMOTE_SHA" ]]; then
         print_status "success" "Local repository already up to date with $RMS_REMOTE/$RMS_BRANCH"
     else
         print_status "info" "Updates available, resetting to remote state..."
@@ -1146,7 +1151,6 @@ main() {
         print_status "info" "Update script was modified - re-executing with new version..."
         # Re-exec preserves file descriptors (including our flock) and arguments
         # Handle arithmetic safely in case of unexpected values
-        local next_count
         if next_count=$((REEXEC_COUNT+1)) 2>/dev/null; then
             exec env REEXEC_COUNT="$next_count" "$SELF" "$@"
         else
