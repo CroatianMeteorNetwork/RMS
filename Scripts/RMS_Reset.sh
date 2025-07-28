@@ -284,20 +284,28 @@ check_and_fix_git_state() {
         print_status "warning" "Local changes were stashed. Run 'git stash pop' after the update to recover them."
     fi
     
-    # Check for merge conflicts
+    # Check for merge conflicts - try gentle abort first
     if git status --porcelain | grep -q "^UU\|^AA\|^DD"; then
-        print_status "warning" "Merge conflicts detected - aborting merge and discarding changes"
-        git merge --abort 2>/dev/null || true
-        git reset --hard HEAD 2>/dev/null || true
-        git clean -fd 2>/dev/null || true
+        print_status "warning" "Merge conflicts detected - attempting to abort merge"
+        if git merge --abort 2>/dev/null; then
+            print_status "info" "Merge aborted successfully"
+        else
+            print_status "warning" "Merge abort failed - forcing clean state"
+            git reset --hard HEAD 2>/dev/null || true
+            git clean -fd 2>/dev/null || true
+        fi
     fi
     
-    # Check for ongoing rebase
+    # Check for ongoing rebase - try gentle abort first
     if [ -d ".git/rebase-merge" ] || [ -d ".git/rebase-apply" ]; then
-        print_status "warning" "Rebase in progress - aborting rebase and discarding changes"
-        git rebase --abort 2>/dev/null || true
-        git reset --hard HEAD 2>/dev/null || true
-        git clean -fd 2>/dev/null || true
+        print_status "warning" "Rebase in progress - attempting to abort rebase"
+        if git rebase --abort 2>/dev/null; then
+            print_status "info" "Rebase aborted successfully"
+        else
+            print_status "warning" "Rebase abort failed - forcing clean state"
+            git reset --hard HEAD 2>/dev/null || true
+            git clean -fd 2>/dev/null || true
+        fi
     fi
     
     # Check for detached HEAD
@@ -627,10 +635,17 @@ git_with_retry() {
                 fi
                 ;;
             "reset")
-                if ! git reset --hard "$RMS_REMOTE/$branch"; then
-                    print_status "warning" "Git reset failed, retrying..."
-                else
+                # Try gentle reset first, then hard reset if needed
+                if git reset --hard "$RMS_REMOTE/$branch" 2>/dev/null; then
                     return 0
+                else
+                    print_status "warning" "Git reset failed, retrying with cleanup..."
+                    git clean -fd 2>/dev/null || true
+                    if git reset --hard "$RMS_REMOTE/$branch" 2>/dev/null; then
+                        return 0
+                    else
+                        print_status "warning" "Git reset still failed, retrying..."
+                    fi
                 fi
                 ;;
             *)
