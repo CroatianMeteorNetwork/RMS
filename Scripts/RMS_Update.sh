@@ -24,7 +24,7 @@ BACKUP_CONFIG="$RMSBACKUPDIR/.config"
 BACKUP_MASK="$RMSBACKUPDIR/mask.bmp"
 BACKUP_CAMERA_SETTINGS="$RMSBACKUPDIR/camera_settings.json"
 SYSTEM_PACKAGES="$RMSSOURCEDIR/system_packages.txt"
-UPDATEINPROGRESSFILE=$RMSBACKUPDIR/update_in_progress
+BACKUP_STATE_FILE=$RMSBACKUPDIR/backup_state
 LOCKFILE="/tmp/rms_update.$(printf '%s' "$RMSSOURCEDIR" | sha1sum | cut -c1-8).lock"
 MIN_SPACE_MB=200  # Minimum required space in MB
 RETRY_LIMIT=3  # Retries for critical file operations
@@ -843,7 +843,7 @@ print_update_report() {
 cleanup_on_error() {
     print_status "warning" "Error occurred, attempting to restore files..."
     restore_files
-    echo "0" > "$UPDATEINPROGRESSFILE"
+    echo "0" > "$BACKUP_STATE_FILE"
     exit 1
 }
 
@@ -892,15 +892,15 @@ main() {
     mkdir -p "$RMSBACKUPDIR"
 
     # Check if a previous backup/restore cycle was interrupted
-    UPDATEINPROGRESS="0"
-    if [ -f "$UPDATEINPROGRESSFILE" ]; then
+    BACKUP_IN_PROGRESS="0"
+    if [ -f "$BACKUP_STATE_FILE" ]; then
         print_status "info" "Reading custom files protection state..."
-        UPDATEINPROGRESS=$(cat "$UPDATEINPROGRESSFILE")
-        print_status "info" "Previous backup/restore cycle state: $UPDATEINPROGRESS"
+        BACKUP_IN_PROGRESS=$(cat "$BACKUP_STATE_FILE")
+        print_status "info" "Previous backup/restore cycle state: $BACKUP_IN_PROGRESS"
     fi
 
     # Backup files before any modifications if no interrupted cycle
-    if [ "$UPDATEINPROGRESS" = "0" ]; then
+    if [ "$BACKUP_IN_PROGRESS" = "0" ]; then
         backup_files
     else
         print_status "warning" "Skipping backup due to interrupted backup/restore cycle."
@@ -933,7 +933,7 @@ main() {
     #######################################################
 
     # Mark custom files backup/restore cycle as in progress
-    echo "1" > "$UPDATEINPROGRESSFILE"
+    echo "1" > "$BACKUP_STATE_FILE"
 
    # Fetch updates
     if ! git_with_retry "fetch"; then
@@ -1011,7 +1011,7 @@ main() {
     restore_files
 
     # Mark custom files backup/restore cycle as completed
-    echo "0" > "$UPDATEINPROGRESSFILE"
+    echo "0" > "$BACKUP_STATE_FILE"
 
     # Check if this script was updated and re-exec if needed
     SELF="$RMSSOURCEDIR/Scripts/RMS_Update.sh"
