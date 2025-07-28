@@ -1148,6 +1148,22 @@ main() {
 
     # Restore files after updates
     restore_files
+    
+    # Verify critical files were restored successfully
+    # Config is always required
+    [[ -f "$CURRENT_CONFIG" ]] || { print_status "error" "$CURRENT_CONFIG missing after restore"; exit 1; }
+    
+    # Mask is optional - only verify if backup existed
+    if [ -f "$BACKUP_MASK" ]; then
+        [[ -f "$CURRENT_MASK" ]] || { print_status "error" "$CURRENT_MASK missing after restore"; exit 1; }
+    fi
+    
+    # Camera settings is optional - only verify if backup existed  
+    if [ -f "$BACKUP_CAMERA_SETTINGS" ]; then
+        [[ -f "$CURRENT_CAMERA_SETTINGS" ]] || { print_status "error" "$CURRENT_CAMERA_SETTINGS missing after restore"; exit 1; }
+    fi
+    
+    print_status "success" "All configuration files verified after restore"
 
     # Mark custom files backup/restore cycle as completed
     echo "0" > "$BACKUP_STATE_FILE"
