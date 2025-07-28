@@ -668,7 +668,7 @@ repair_repository() {
 # Function for reliable git operations
 git_with_retry() {
     local cmd=$1
-    local branch=$2
+    local branch=${2:-""}
     local attempt=1
     local backup_dir="${RMSSOURCEDIR}_backup_$(date +%Y%m%d_%H%M%S)"
 
