@@ -638,17 +638,21 @@ git_with_retry() {
                     return 0
                 else
                     print_status "warning" "Git reset failed, checking for blocking untracked files..."
-                    # Only clean if untracked files are blocking the operation
-                    local blocking_files=$(git status --porcelain | grep "^??" | head -5)
-                    if [ -n "$blocking_files" ]; then
-                        print_status "warning" "Untracked files may be blocking reset, attempting selective cleanup..."
-                        # Try to identify and remove only files that would conflict
-                        if git ls-tree -r --name-only "$RMS_REMOTE/$branch" | while read -r file; do
-                            if [ -f "$file" ] && git status --porcelain "$file" | grep -q "^??"; then
-                                print_status "info" "Removing blocking untracked file: $file"
-                                rm -f "$file"
+                    # Check if specific untracked files are blocking the operation
+                    local remote_files=$(git ls-tree -r --name-only "$RMS_REMOTE/$branch" 2>/dev/null || echo "")
+                    local conflicts_found=false
+                    
+                    if [ -n "$remote_files" ]; then
+                        while IFS= read -r remote_file; do
+                            if [ -f "$remote_file" ] && git status --porcelain "$remote_file" 2>/dev/null | grep -q "^??"; then
+                                print_status "warning" "Untracked file '$remote_file' conflicts with remote branch"
+                                print_status "info" "Removing blocking untracked file: $remote_file"
+                                rm -f "$remote_file"
+                                conflicts_found=true
                             fi
-                        done; then
+                        done <<< "$remote_files"
+                        
+                        if [ "$conflicts_found" = true ]; then
                             if git reset --hard "$RMS_REMOTE/$branch" 2>/dev/null; then
                                 return 0
                             fi
