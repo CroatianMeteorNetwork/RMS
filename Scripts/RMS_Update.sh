@@ -25,7 +25,7 @@ BACKUP_MASK="$RMSBACKUPDIR/mask.bmp"
 BACKUP_CAMERA_SETTINGS="$RMSBACKUPDIR/camera_settings.json"
 SYSTEM_PACKAGES="$RMSSOURCEDIR/system_packages.txt"
 UPDATEINPROGRESSFILE=$RMSBACKUPDIR/update_in_progress
-LOCKFILE="/tmp/rms_update.$(sha1sum <<<"$RMSSOURCEDIR" | cut -c1-8).lock"
+LOCKFILE="/tmp/rms_update.$(printf '%s' "$RMSSOURCEDIR" | sha1sum | cut -c1-8).lock"
 MIN_SPACE_MB=200  # Minimum required space in MB
 RETRY_LIMIT=3  # Retries for critical file operations
 GIT_RETRY_LIMIT=6
@@ -268,6 +268,71 @@ check_git_index() {
         fi
     fi
     return 0
+}
+
+check_and_fix_git_state() {
+    print_status "info" "Checking git repository state..."
+    
+    # Try to save any work first, but don't fail if stash fails
+    print_status "info" "Attempting to stash any local changes..."
+    git stash push -u -m "RMS auto-stash before update" 2>/dev/null || true
+    
+    # Warn user if a stash was created
+    if git stash list | grep -q 'RMS auto-stash before update'; then
+        print_status "warning" "Local changes were stashed. Run 'git stash pop' after the update to recover them."
+    fi
+    
+    # Check for merge conflicts
+    if git status --porcelain | grep -q "^UU\|^AA\|^DD"; then
+        print_status "warning" "Merge conflicts detected - aborting merge and discarding changes"
+        git merge --abort 2>/dev/null || true
+        git reset --hard HEAD 2>/dev/null || true
+        git clean -fd 2>/dev/null || true
+    fi
+    
+    # Check for ongoing rebase
+    if [ -d ".git/rebase-merge" ] || [ -d ".git/rebase-apply" ]; then
+        print_status "warning" "Rebase in progress - aborting rebase and discarding changes"
+        git rebase --abort 2>/dev/null || true
+        git reset --hard HEAD 2>/dev/null || true
+        git clean -fd 2>/dev/null || true
+    fi
+    
+    # Check for detached HEAD
+    if git symbolic-ref HEAD &>/dev/null; then
+        current_branch=$(git symbolic-ref --short HEAD)
+        print_status "info" "On branch: $current_branch"
+    else
+        print_status "warning" "Repository is in detached HEAD state"
+        print_status "info" "Attempting to return to a proper branch..."
+        
+        # Try to determine what branch we should be on
+        if [ -n "$RMS_BRANCH" ]; then
+            target_branch="$RMS_BRANCH"
+        else
+            # Default to master/main
+            if git show-ref --verify --quiet refs/remotes/$RMS_REMOTE/master; then
+                target_branch="master"
+            elif git show-ref --verify --quiet refs/remotes/$RMS_REMOTE/main; then
+                target_branch="main"
+            else
+                target_branch="master"  # fallback
+            fi
+        fi
+        
+        print_status "info" "Switching to branch: $target_branch"
+        if ! git checkout -B "$target_branch" "$RMS_REMOTE/$target_branch" 2>/dev/null; then
+            print_status "warning" "Failed to create branch, trying direct checkout..."
+            git checkout "$target_branch" 2>/dev/null || true
+        fi
+    fi
+    
+    # Discard any local changes to ensure clean state
+    print_status "info" "Discarding any local changes to ensure clean update..."
+    git reset --hard HEAD 2>/dev/null || true
+    git clean -fd 2>/dev/null || true
+    
+    print_status "success" "Git repository state verified and cleaned"
 }
 
 # Retry mechanism for critical file operations
@@ -852,6 +917,9 @@ main() {
         exit 1
     fi
 
+    # Check and fix problematic git states
+    check_and_fix_git_state
+
     # Activate the virtual environment
     if [ -f ~/vRMS/bin/activate ]; then
         source ~/vRMS/bin/activate
@@ -871,17 +939,6 @@ main() {
     if ! git_with_retry "fetch"; then
         print_status "error" "Failed to fetch updates. Aborting."
         cleanup_on_error
-    fi
-
-    # Stash any local changes first
-    print_status "info" "Stashing any local changes..."
-    if ! git stash; then
-        print_status "error" "git stash failed - possible repository corruption."
-        print_status "info" "Attempting graceful Git recovery..."
-        if ! repair_repository; then
-            print_status "error" "Repo repair failed - aborting update"
-            cleanup_on_error
-        fi
     fi
 
     # Handle branch setup and switching
