@@ -87,10 +87,20 @@ fi
 
 # Parse command line arguments
 FORCE_UPDATE=false
+PREFERRED_TERM="lxterminal"     # default terminal
+LAUNCH_WAIT=2                   # seconds to wait for terminal to start
 POSITIONAL_ARGS=()
 
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --term)
+            PREFERRED_TERM="$2"
+            shift 2
+            ;;
+        --wait)
+            LAUNCH_WAIT="$2"
+            shift 2
+            ;;
         --force)
             FORCE_UPDATE=true
             shift
@@ -112,7 +122,10 @@ STATIONS_DIR="$USER_HOME/source/Stations"
 DESKTOP_DIR="$USER_HOME/Desktop"
 
 # Export display environment for GUI applications (needed when running from cron)
-export DISPLAY=:0
+if [[ -z ${DISPLAY:-} ]]; then
+    DISPLAY=$(who | awk '/\(:[0-9]/ {sub(/[()]/,"",$NF); print $NF; exit}')
+    export DISPLAY
+fi
 export XAUTHORITY="$HOME/.Xauthority"
 
 # Check if updates are actually needed before disrupting running processes (unless --force is used)
@@ -224,74 +237,42 @@ fi
 
 # Note: When run from user cron, DISPLAY may not be set. Terminal launching will fall back to tmux if needed.
 
-# Helper function to launch terminal across different desktop environments
-launch_term() {                     # $1 = title   $2... = command
+# Helper function to launch terminal using preferred terminal
+launch_term() {                            # $1 = title, $2… = cmd+args
     local title=$1; shift
-    local pid
+    local cmd pid
 
-    # Try GUI terminals first, with failure detection
-    if command -v lxterminal >/dev/null; then           # X11/Xwayland
-        (lxterminal --title="$title" -e "$@" >/dev/null 2>&1) &
-        pid=$!
-        sleep 1  # give it a moment to start
-        if ! kill -0 $pid 2>/dev/null; then
-            log_message "lxterminal failed for $title; falling back to tmux"
-        else
-            return 0
-        fi
-    fi
-    
-    if command -v footclient >/dev/null; then         # Wayland (foot with fallback)
-        (footclient --app-id="$title" -- "$@" >/dev/null 2>&1 || \
-         foot --app-id="$title" -e "$@" >/dev/null 2>&1) &
-        pid=$!
-        sleep 1
-        if ! kill -0 $pid 2>/dev/null; then
-            log_message "foot/footclient failed for $title; falling back to tmux"
-        else
-            return 0
-        fi
-    elif command -v foot >/dev/null; then               # Wayland (foot standalone)
-        (foot --app-id="$title" -e "$@" >/dev/null 2>&1) &
-        pid=$!
-        sleep 1
-        if ! kill -0 $pid 2>/dev/null; then
-            log_message "foot failed for $title; falling back to tmux"
-        else
-            return 0
-        fi
-    fi
-    
-    if command -v kitty >/dev/null; then              # Wayland or X11
-        (kitty -T "$title" "$@" >/dev/null 2>&1) &
-        pid=$!
-        sleep 1
-        if ! kill -0 $pid 2>/dev/null; then
-            log_message "kitty failed for $title; falling back to tmux"
-        else
-            return 0
-        fi
-    fi
-    
-    if command -v gnome-terminal >/dev/null; then     # Wayland-via-DBus
-        (gnome-terminal --title="$title" -- bash -lc "$*" >/dev/null 2>&1) &
-        pid=$!
-        sleep 1
-        if ! kill -0 $pid 2>/dev/null; then
-            log_message "gnome-terminal failed for $title; falling back to tmux"
-        else
-            return 0
-        fi
-    fi
-    
-    # If all GUI terminals failed or weren't found, fall back to tmux
-    if command -v tmux >/dev/null; then              # Fallback: tmux session
-        tmux has-session -t "$title" 2>/dev/null || tmux new -d -s "$title" "$@"
-        log_message "Started $title in tmux session (GUI terminals unavailable)"
-    else
-        log_message "Warning: No suitable terminal emulator found. Command not launched: $*"
-        return 1
-    fi
+    case "$PREFERRED_TERM" in
+        lxterminal)
+            cmd=(lxterminal --title="$title" -e "$@")
+            ;;
+        kitty)
+            cmd=(kitty -T "$title" "$@")
+            ;;
+        foot)
+            cmd=(foot --app-id="$title" -e "$@")
+            ;;
+        footclient)
+            cmd=(footclient --app-id="$title" -- "$@")
+            ;;
+        gnome-terminal)
+            cmd=(gnome-terminal --title="$title" -- bash -lc "exec \"\$@\"" _ "$@")
+            ;;
+        tmux)
+            tmux has-session -t "$title" 2>/dev/null || tmux new -d -s "$title" "$@"
+            return $?
+            ;;
+        *)
+            log_message "Unknown terminal '$PREFERRED_TERM'"
+            return 1
+            ;;
+    esac
+
+    # spawn and verify it's still alive after specified wait time
+    (setsid "${cmd[@]}" >/dev/null 2>&1) & 
+    pid=$!
+    sleep "$LAUNCH_WAIT"
+    kill -0 "$pid" 2>/dev/null
 }
 
 # Function to restart stations
