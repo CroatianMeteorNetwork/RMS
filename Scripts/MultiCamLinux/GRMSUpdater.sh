@@ -241,7 +241,15 @@ fi
 launch_term() {                            # $1 = title, $2… = cmd+args
     local title=$1; shift
     local cmd pid
-
+    
+    # Set up debug logging
+    local LOGDIR="$USER_HOME/RMS_data/logs"
+    local LOGFILE="$LOGDIR/${title}_launcher_$(date +%F_%T).log"
+    mkdir -p "$LOGDIR"
+    
+    log_message "Launching terminal '$PREFERRED_TERM' for station $title"
+    log_message "Command: $*"
+    
     case "$PREFERRED_TERM" in
         lxterminal)
             cmd=(lxterminal --title="$title" -e "$@")
@@ -268,16 +276,27 @@ launch_term() {                            # $1 = title, $2… = cmd+args
             ;;
     esac
 
-    # spawn the terminal
-    (setsid "${cmd[@]}" >/dev/null 2>&1) &
+    # spawn the terminal (with logging for debugging)
+    log_message "Executing: ${cmd[*]}"
+    (setsid "${cmd[@]}" >"$LOGFILE" 2>&1) &
+    local term_pid=$!
+    log_message "Terminal PID: $term_pid"
     
     # wait until the real StartCapture for this station shows up (max 10s)
     local tries=0
     local pat="StartCapture\\.sh[[:space:]]+$title([[:space:]]|$)"
+    log_message "Waiting for process pattern: $pat"
+    
     until pgrep -f -- "$pat" >/dev/null; do
-        (( tries++ > 20 )) && { log_message "Terminal failed for $title"; return 1; }
+        (( tries++ > 20 )) && { 
+            log_message "Terminal failed for $title after 10 seconds"
+            log_message "Check log file: $LOGFILE"
+            return 1
+        }
         sleep 0.5
     done
+    
+    log_message "Station $title started successfully"
     return 0
 }
 
@@ -312,6 +331,7 @@ restart_stations() {
         log_message "Starting station $station$([ -n "$delay" ] && echo " with delay $delay")"
         sleep 5
         
+        # Launch terminal
         if ! launch_term "$station" "$RMS_DIR/Scripts/MultiCamLinux/StartCapture.sh" "$station" "${delay:-}"; then
             log_message "Failed to start station $station - continuing with next station"
             continue
