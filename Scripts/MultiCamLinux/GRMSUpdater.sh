@@ -290,7 +290,7 @@ else
 fi
 sleep 10
 
-if [[ -z "$1" ]]; then
+if [[ ${#POSITIONAL_ARGS[@]} -eq 0 ]]; then
     # Called with no args - restart all configured stations
     log_message "Will restart all configured stations post-update"
     
