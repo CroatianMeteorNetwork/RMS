@@ -711,17 +711,9 @@ ensure_branch_tracking() {
 switch_to_branch() {
     local target_branch="$1"
     local from_interactive="${2:-false}"  # Optional parameter to indicate if called from interactive mode
-    local is_reflog_syntax=false
-
-    # Check if this is a reflog syntax (e.g., master@{2024-07-28})
-    if [[ "$target_branch" =~ ^([a-zA-Z0-9_/-]+)@\{.+\}$ ]]; then
-        is_reflog_syntax=true
-        local base_branch="${BASH_REMATCH[1]}"
-        print_status "info" "Detected reflog syntax for branch: $base_branch"
-    fi
 
     # Skip validation if called from interactive mode (already validated)
-    if [ "$from_interactive" = "false" ] && [ "$is_reflog_syntax" = "false" ]; then
+    if [ "$from_interactive" = "false" ]; then
         if [[ ! "$target_branch" =~ ^[a-zA-Z0-9_/-]+$ ]]; then
             print_status "error" "Invalid branch name '$target_branch'. Branch names can only contain letters, numbers, underscores, forward slashes and hyphens"
             return 1
@@ -744,66 +736,39 @@ switch_to_branch() {
         fi
     fi
 
-    print_status "info" "Attempting to switch to: $target_branch"
+    print_status "info" "Attempting to switch to branch: $target_branch"
 
-    if [ "$is_reflog_syntax" = true ]; then
-        # Handle reflog syntax differently
-        print_status "info" "Checking if reflog reference exists..."
-        
-        # First verify the reflog reference exists
-        if ! git rev-parse --verify -q "$target_branch" >/dev/null 2>&1; then
-            print_status "error" "Reflog reference '$target_branch' not found"
-            print_status "info" "Try 'git reflog show $base_branch' to see available dates"
+    # First try to create a tracking branch if it doesn't exist locally
+    if ! git rev-parse --verify -q "$target_branch" >/dev/null 2>&1; then
+        print_status "info" "Creating local tracking branch..."
+        if ! git branch --track "$target_branch" "$RMS_REMOTE/$target_branch"; then
+            print_status "error" "Failed to create tracking branch for $target_branch"
             return 1
         fi
-        
-        # Get the commit SHA for the reflog reference
-        local commit_sha=$(git rev-parse "$target_branch")
-        print_status "info" "Found commit: $commit_sha"
-        
-        # Check out in detached HEAD state
-        if ! git checkout "$commit_sha" 2>/dev/null; then
-            print_status "error" "Failed to checkout reflog reference $target_branch"
-            return 1
-        fi
-        
-        print_status "warning" "You are now in detached HEAD state at $target_branch"
-        print_status "info" "To create a branch from this point, use: git checkout -b <new-branch-name>"
-        return 0
     else
-        # Regular branch handling
-        # First try to create a tracking branch if it doesn't exist locally
-        if ! git rev-parse --verify -q "$target_branch" >/dev/null 2>&1; then
-            print_status "info" "Creating local tracking branch..."
-            if ! git branch --track "$target_branch" "$RMS_REMOTE/$target_branch"; then
-                print_status "error" "Failed to create tracking branch for $target_branch"
-                return 1
-            fi
-        else
-            # Ensure existing branch has proper tracking
-            ensure_branch_tracking "$target_branch"
-        fi
-
-        # Now try to switch to the branch
-        if ! git_with_retry "checkout" "$target_branch"; then
-            print_status "error" "Failed to switch to branch $target_branch. This could be due to:"
-            print_status "error" "- Local conflicts that need resolution"
-            print_status "error" "- Insufficient permissions"
-            print_status "error" "- Corrupted local repository"
-            return 1
-        fi
-
-        # Verify we're actually on the right branch
-        local current_branch
-        current_branch=$(git rev-parse --abbrev-ref HEAD)
-        if [ "$current_branch" != "$target_branch" ]; then
-            print_status "error" "Branch switch verification failed. Expected: $target_branch, Got: $current_branch"
-            return 1
-        fi
-
-        print_status "success" "Successfully switched to branch: $target_branch"
-        return 0
+        # Ensure existing branch has proper tracking
+        ensure_branch_tracking "$target_branch"
     fi
+
+    # Now try to switch to the branch
+    if ! git_with_retry "checkout" "$target_branch"; then
+        print_status "error" "Failed to switch to branch $target_branch. This could be due to:"
+        print_status "error" "- Local conflicts that need resolution"
+        print_status "error" "- Insufficient permissions"
+        print_status "error" "- Corrupted local repository"
+        return 1
+    fi
+
+    # Verify we're actually on the right branch
+    local current_branch
+    current_branch=$(git rev-parse --abbrev-ref HEAD)
+    if [ "$current_branch" != "$target_branch" ]; then
+        print_status "error" "Branch switch verification failed. Expected: $target_branch, Got: $current_branch"
+        return 1
+    fi
+
+    print_status "success" "Successfully switched to branch: $target_branch"
+    return 0
 }
 
 
@@ -1056,31 +1021,25 @@ main() {
         print_status "info" "Using current branch: $RMS_BRANCH"
     fi
 
-    # Check if we're in detached HEAD state (from reflog checkout)
-    if ! git symbolic-ref HEAD &>/dev/null; then
-        print_status "info" "In detached HEAD state - skipping update check"
-        print_status "info" "You're at a specific historical commit, no updates will be applied"
+    # Check if updates are needed
+    print_status "info" "Checking for available updates..."
+    if ! git log HEAD.."$RMS_REMOTE/$RMS_BRANCH" --oneline | grep .; then
+        print_status "success" "Local repository already up to date with $RMS_REMOTE/$RMS_BRANCH"
     else
-        # Check if updates are needed
-        print_status "info" "Checking for available updates..."
-        if ! git log HEAD.."$RMS_REMOTE/$RMS_BRANCH" --oneline | grep .; then
-            print_status "success" "Local repository already up to date with $RMS_REMOTE/$RMS_BRANCH"
-        else
-            print_status "info" "Updates available, resetting to remote state..."
-            if ! git_with_retry "reset" "$RMS_BRANCH"; then
-                print_status "error" "Failed to reset to $RMS_REMOTE/$RMS_BRANCH. Aborting."
-                cleanup_on_error
-            fi
-
-            # Ensure tracking information is maintained after reset
-            if ! ensure_branch_tracking "$RMS_BRANCH"; then
-                print_status "warning" "Failed to set branch tracking after reset"
-                print_status "warning" "You may need to manually set tracking with: git branch --set-upstream-to=$RMS_REMOTE/$RMS_BRANCH $RMS_BRANCH"
-            fi
-           
-            print_status "success" "Successfully updated to latest version"
-            sleep 2
+        print_status "info" "Updates available, resetting to remote state..."
+        if ! git_with_retry "reset" "$RMS_BRANCH"; then
+            print_status "error" "Failed to reset to $RMS_REMOTE/$RMS_BRANCH. Aborting."
+            cleanup_on_error
         fi
+
+        # Ensure tracking information is maintained after reset
+        if ! ensure_branch_tracking "$RMS_BRANCH"; then
+            print_status "warning" "Failed to set branch tracking after reset"
+            print_status "warning" "You may need to manually set tracking with: git branch --set-upstream-to=$RMS_REMOTE/$RMS_BRANCH $RMS_BRANCH"
+        fi
+       
+        print_status "success" "Successfully updated to latest version"
+        sleep 2
     fi
 
     # Create template from the current default config file
