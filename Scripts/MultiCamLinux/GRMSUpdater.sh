@@ -111,7 +111,9 @@ RMS_DIR="$USER_HOME/source/RMS"
 STATIONS_DIR="$USER_HOME/source/Stations"
 DESKTOP_DIR="$USER_HOME/Desktop"
 
-# Display environment is inherited from user session (no setup needed)
+# Export display environment for GUI applications (needed when running from cron)
+export DISPLAY=:0
+export XAUTHORITY="$HOME/.Xauthority"
 
 # Check if updates are actually needed before disrupting running processes (unless --force is used)
 if [[ "$FORCE_UPDATE" != "true" ]]; then
@@ -225,20 +227,67 @@ fi
 # Helper function to launch terminal across different desktop environments
 launch_term() {                     # $1 = title   $2... = command
     local title=$1; shift
+    local pid
 
+    # Try GUI terminals first, with failure detection
     if command -v lxterminal >/dev/null; then           # X11/Xwayland
-        lxterminal    --title="$title" -e "$@" &
-    elif command -v footclient >/dev/null; then         # Wayland (foot with fallback)
-        footclient    --app-id="$title" -- "$@" 2>/dev/null || \
-        foot          --app-id="$title" -e "$@" &
+        (lxterminal --title="$title" -e "$@" >/dev/null 2>&1) &
+        pid=$!
+        sleep 1  # give it a moment to start
+        if ! kill -0 $pid 2>/dev/null; then
+            log_message "lxterminal failed for $title; falling back to tmux"
+        else
+            return 0
+        fi
+    fi
+    
+    if command -v footclient >/dev/null; then         # Wayland (foot with fallback)
+        (footclient --app-id="$title" -- "$@" >/dev/null 2>&1 || \
+         foot --app-id="$title" -e "$@" >/dev/null 2>&1) &
+        pid=$!
+        sleep 1
+        if ! kill -0 $pid 2>/dev/null; then
+            log_message "foot/footclient failed for $title; falling back to tmux"
+        else
+            return 0
+        fi
     elif command -v foot >/dev/null; then               # Wayland (foot standalone)
-        foot          --app-id="$title" -e "$@" &
-    elif command -v kitty >/dev/null; then              # Wayland or X11
-        kitty         -T "$title"   "$@" &
-    elif command -v gnome-terminal >/dev/null; then     # Wayland-via-DBus
-        gnome-terminal --title="$title" -- bash -lc "$*" &
-    elif command -v tmux >/dev/null; then              # Fallback: tmux session
+        (foot --app-id="$title" -e "$@" >/dev/null 2>&1) &
+        pid=$!
+        sleep 1
+        if ! kill -0 $pid 2>/dev/null; then
+            log_message "foot failed for $title; falling back to tmux"
+        else
+            return 0
+        fi
+    fi
+    
+    if command -v kitty >/dev/null; then              # Wayland or X11
+        (kitty -T "$title" "$@" >/dev/null 2>&1) &
+        pid=$!
+        sleep 1
+        if ! kill -0 $pid 2>/dev/null; then
+            log_message "kitty failed for $title; falling back to tmux"
+        else
+            return 0
+        fi
+    fi
+    
+    if command -v gnome-terminal >/dev/null; then     # Wayland-via-DBus
+        (gnome-terminal --title="$title" -- bash -lc "$*" >/dev/null 2>&1) &
+        pid=$!
+        sleep 1
+        if ! kill -0 $pid 2>/dev/null; then
+            log_message "gnome-terminal failed for $title; falling back to tmux"
+        else
+            return 0
+        fi
+    fi
+    
+    # If all GUI terminals failed or weren't found, fall back to tmux
+    if command -v tmux >/dev/null; then              # Fallback: tmux session
         tmux has-session -t "$title" 2>/dev/null || tmux new -d -s "$title" "$@"
+        log_message "Started $title in tmux session (GUI terminals unavailable)"
     else
         log_message "Warning: No suitable terminal emulator found. Command not launched: $*"
         return 1
@@ -276,7 +325,10 @@ restart_stations() {
         log_message "Starting station $station$([ -n "$delay" ] && echo " with delay $delay")"
         sleep 5
         
-        launch_term "$station" "$RMS_DIR/Scripts/MultiCamLinux/StartCapture.sh" "$station" "${delay:-}"
+        if ! launch_term "$station" "$RMS_DIR/Scripts/MultiCamLinux/StartCapture.sh" "$station" "${delay:-}"; then
+            log_message "Failed to start station $station - continuing with next station"
+            continue
+        fi
     done
 }
 
