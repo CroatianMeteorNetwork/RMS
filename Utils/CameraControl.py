@@ -80,7 +80,7 @@ else:
     import Utils.CameraControl27 as dvr
 
 # Get the logger from the main module
-log = getLogger("logger", stdout=True)
+log = getLogger("logger")
 
 
 def rebootCamera(cam):
