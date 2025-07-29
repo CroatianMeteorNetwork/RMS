@@ -124,9 +124,20 @@ DESKTOP_DIR="$USER_HOME/Desktop"
 # Export display environment for GUI applications (needed when running from cron)
 if [[ -z ${DISPLAY:-} ]]; then
     DISPLAY=$(who | awk '/\(:[0-9]/ {sub(/[()]/,"",$NF); print $NF; exit}')
-    export DISPLAY
+    if [[ -n "$DISPLAY" ]]; then
+        export DISPLAY
+        log_message "Auto-detected DISPLAY=$DISPLAY"
+    else
+        log_message "Warning: Could not detect DISPLAY from 'who' output"
+    fi
 fi
-export XAUTHORITY="$HOME/.Xauthority"
+
+if [[ -n "$DISPLAY" ]]; then
+    export XAUTHORITY="$HOME/.Xauthority"
+    log_message "Using DISPLAY=$DISPLAY"
+else
+    log_message "No DISPLAY available - GUI terminals will fail, consider using --term tmux"
+fi
 
 # Check if updates are actually needed before disrupting running processes (unless --force is used)
 if [[ "$FORCE_UPDATE" != "true" ]]; then
@@ -276,6 +287,13 @@ launch_term() {                            # $1 = title, $2… = cmd+args
             ;;
     esac
 
+    # Check if we need a display for this terminal type
+    if [[ "$PREFERRED_TERM" != "tmux" && -z "$DISPLAY" ]]; then
+        log_message "Error: No DISPLAY available for GUI terminal '$PREFERRED_TERM'"
+        log_message "Try running with --term tmux or from a graphical session"
+        return 1
+    fi
+    
     # spawn the terminal (with logging for debugging)
     log_message "Executing: ${cmd[*]}"
     (setsid "${cmd[@]}" >"$LOGFILE" 2>&1) &
