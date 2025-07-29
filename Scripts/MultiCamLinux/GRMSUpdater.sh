@@ -268,11 +268,17 @@ launch_term() {                            # $1 = title, $2… = cmd+args
             ;;
     esac
 
-    # spawn and verify it's still alive after specified wait time
-    (setsid "${cmd[@]}" >/dev/null 2>&1) & 
-    pid=$!
-    sleep "$LAUNCH_WAIT"
-    kill -0 "$pid" 2>/dev/null
+    # spawn the terminal
+    (setsid "${cmd[@]}" >/dev/null 2>&1) &
+    
+    # wait until the real StartCapture for this station shows up (max 10s)
+    local tries=0
+    local pat="StartCapture\\.sh[[:space:]]+$title([[:space:]]|$)"
+    until pgrep -f -- "$pat" >/dev/null; do
+        (( tries++ > 20 )) && { log_message "Terminal failed for $title"; return 1; }
+        sleep 0.5
+    done
+    return 0
 }
 
 # Function to restart stations
