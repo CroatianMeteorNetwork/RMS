@@ -2550,17 +2550,6 @@ def computeFluxCorrectionsOnBins(
 
             # ###
 
-            
-            ### !!! MANUAL adjustment
-
-            # Reduce the collection area of all Korean cameras by 1.5x to raise their flux by the same amount
-            # It was noticed that where Korean GMN cameras dominate, the flux is about 1.5x too small.
-            if config.stationID.startswith("KR"):
-                collection_area /= 1.5
-                
-            ###
-            
-
             # Compute the nominal flux at the bin LM (meteors/1000km^2/h)
             collection_area_lm_6_5 = collection_area/population_index**(6.5 - lm_m)
 
