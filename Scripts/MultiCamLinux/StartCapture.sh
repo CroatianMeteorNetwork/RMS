@@ -58,7 +58,8 @@ cd ~/source/RMS
 
 LOGDIR=~/RMS_data/logs
 mkdir -p "$LOGDIR"
-LOGFILE="$LOGDIR/$(date +%F_%T)_startcap.log"
+# LOGFILE="$LOGDIR/$(date +%F_%T)_startcap.log"
+LOGFILE="/dev/null"  # Disable duplicate logging - RMS already logs
 
 configpath="/home/$(whoami)/source/Stations/$1/.config"
 echo "Using config from $configpath"
@@ -66,7 +67,7 @@ echo "Using config from $configpath"
 # ----- decide how we were launched ---------------------------------
 # real TTY (manual or .desktop launch)
 if [[ -t 1 ]]; then
-    echo "Logging to $LOGFILE"
+    # echo "Logging to $LOGFILE"  # Disabled since we're using /dev/null
     
     # duplicate output but shield tee from SIGINT
     exec > >(bash -c 'trap "" INT TERM; tee -a "$1"' _ "$LOGFILE") 2>&1
