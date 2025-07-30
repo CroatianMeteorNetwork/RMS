@@ -272,9 +272,11 @@ launch_term() {                            # $1 = title, $2… = cmd+args
             cmd=(footclient --app-id="$title" -- "$@")
             ;;
         gnome-terminal)
-            # same idea; keep for completeness
+            # build one properly-quoted payload string
+            local payload
+            payload=$(printf '%q ' "$@")          # quote every arg
             cmd=(gnome-terminal --title="$title" \
-                  -- "bash -c 'exec \"\$@\"' _ $*")
+                 -- bash -lc "exec $payload")     # no extra "_"
             ;;
         tmux)
             tmux has-session -t "$title" 2>/dev/null || tmux new -d -s "$title" "$@"
