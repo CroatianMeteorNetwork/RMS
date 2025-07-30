@@ -258,11 +258,9 @@ launch_term() {                            # $1 = title, $2… = cmd+args
     
     case "$PREFERRED_TERM" in
         lxterminal)
-            # hand everything to a bash launched by lxterminal
-            #   lxterminal … -e bash -c 'exec "$@"' _  cmd arg1 arg2 …
-            # the dummy "_" becomes $0 inside bash;  "$@" is the rest
+            # one quoted string after -e:
             cmd=(lxterminal --title="$title" \
-                  -e bash -c 'exec "$@"' _ "$@")
+                  -e "bash -c 'exec \"\$@\"' _ $*")
             ;;
         kitty)
             cmd=(kitty -T "$title" "$@")
@@ -274,7 +272,9 @@ launch_term() {                            # $1 = title, $2… = cmd+args
             cmd=(footclient --app-id="$title" -- "$@")
             ;;
         gnome-terminal)
-            cmd=(gnome-terminal --title="$title" -- bash -lc "exec \"\$@\"" _ "$@")
+            # same idea; keep for completeness
+            cmd=(gnome-terminal --title="$title" \
+                  -- "bash -c 'exec \"\$@\"' _ $*")
             ;;
         tmux)
             tmux has-session -t "$title" 2>/dev/null || tmux new -d -s "$title" "$@"
