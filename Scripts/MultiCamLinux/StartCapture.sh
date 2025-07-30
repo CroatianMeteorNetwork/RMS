@@ -85,8 +85,6 @@ if [[ -t 1 ]]; then            # we have a real TTY → manual or .desktop launc
 
 else                            # cron / GRMSUpdater / nohup etc.
     # no TTY – just append to the log file
-    exec >>"$LOGFILE" 2>&1
-    # use exec so signals go straight to Python
-    exec -a "StartCapture.sh $1" \
-         python -u -m RMS.StartCapture -c "$configpath"
+    { exec -a "StartCapture.sh $1" \
+        python -u -m RMS.StartCapture -c "$configpath"; } 2>&1 | tee -a "$LOGFILE"
 fi
