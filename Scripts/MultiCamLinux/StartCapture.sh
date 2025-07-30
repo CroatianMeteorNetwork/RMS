@@ -77,8 +77,8 @@ configpath=/home/$(whoami)/source/Stations/$1/.config
 echo Using config from $configpath
 echo $configpath
 
-# Launch RMS with unbuffered output
-exec python -u -m RMS.StartCapture -c "$configpath"
+# Launch RMS with unbuffered output, preserving script name in process list
+exec -a "StartCapture.sh $1" python -u -m RMS.StartCapture -c "$configpath"
 
 # Note: The following lines won't execute due to exec replacing the shell process
 # They're kept for documentation purposes but could be removed
