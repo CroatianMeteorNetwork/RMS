@@ -1,4 +1,6 @@
 #!/bin/bash
+set -Eeuo pipefail
+trap 'echo "StartCapture wrapper failed at line $LINENO"; exit 1' ERR
 
 # This software is part of the Linux port of RMS
 # Copyright (C) 2023  Ed Harman
@@ -66,14 +68,22 @@ echo "Using config from $configpath"
 # ----- decide how we were launched ---------------------------------
 if [[ -t 1 ]]; then            # we have a real TTY → manual or .desktop launch
     echo "Logging to $LOGFILE"
-    # duplicate output to screen *and* file
-    exec > >(tee -a "$LOGFILE") 2>&1
+    
+    # duplicate output but shield tee from SIGINT
+    exec > >(bash -c 'trap "" INT TERM; tee -a "$1"' _ "$LOGFILE") 2>&1
 
-    # run without exec so we drop back to the shell when Python ends
-    python -u -m RMS.StartCapture -c "$configpath"
+    python -u -m RMS.StartCapture -c "$configpath" &
+    child=$!
+
+    # forward INT/TERM from user to the child, then wait for it
+    forward() { kill -"$1" "$child" 2>/dev/null; }
+    trap 'forward INT'  INT
+    trap 'forward TERM' TERM
+    wait "$child"
+    status=$?
 
     # keep the window open for inspection
-    read -n1 -r -p "Capture ended – press any key to close…"
+    read -n1 -r -p "Capture ended (exit $status) - press any key to close…"
 
 else                            # cron / GRMSUpdater / nohup etc.
     # no TTY – just append to the log file
