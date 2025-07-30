@@ -1,6 +1,4 @@
 #!/bin/bash
-set -Eeuo pipefail
-trap 'echo "StartCapture wrapper failed at line $LINENO"; exit 1' ERR
 
 # This software is part of the Linux port of RMS
 # Copyright (C) 2023  Ed Harman
