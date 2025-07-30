@@ -64,7 +64,8 @@ configpath="/home/$(whoami)/source/Stations/$1/.config"
 echo "Using config from $configpath"
 
 # ----- decide how we were launched ---------------------------------
-if [[ -t 1 ]]; then            # we have a real TTY → manual or .desktop launch
+# real TTY (manual or .desktop launch)
+if [[ -t 1 ]]; then
     echo "Logging to $LOGFILE"
     
     # duplicate output but shield tee from SIGINT
@@ -83,8 +84,8 @@ if [[ -t 1 ]]; then            # we have a real TTY → manual or .desktop launc
     # keep the window open for inspection
     read -n1 -r -p "Capture ended (exit $status) - press any key to close…"
 
-else                            # cron / GRMSUpdater / nohup etc.
-    # no TTY – just append to the log file
+else
+    # no TTY (cron / GRMSUpdater / nohup etc.) - just append to the log file
     { exec -a "StartCapture.sh $1" \
         python -u -m RMS.StartCapture -c "$configpath"; } 2>&1 | tee -a "$LOGFILE"
 fi
