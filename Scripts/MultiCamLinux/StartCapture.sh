@@ -56,40 +56,24 @@ fi
 source ~/vRMS/bin/activate
 cd ~/source/RMS
 
-LOGDIR=~/RMS_data/logs
-mkdir -p "$LOGDIR"
-LOGFILE="$LOGDIR/$(date +%F_%T)_startcap.log"
-
 configpath="/home/$(whoami)/source/Stations/$1/.config"
 echo "Using config from $configpath"
 
-# ----- decide how we were launched ---------------------------------
-# real TTY (manual or .desktop launch)
+# TTY (manual or .desktop launch)
 if [[ -t 1 ]]; then
-    echo "Logging to $LOGFILE"
-    
-    # duplicate output but shield tee from SIGINT
-    exec > >(bash -c 'trap "" INT TERM; tee -a "$1"' _ "$LOGFILE") 2>&1
+   # run StartCapture with the wrapper-name preserved, no redirection
+    exec -a "StartCapture.sh $1" \
+         python -u -m RMS.StartCapture -c "$configpath"
+    status=$?            # we never reach here unless you remove exec
 
-    python -u -m RMS.StartCapture -c "$configpath" &
-    child=$!
-
-    # forward INT/TERM from user to the child, then wait for it
-    forward() { kill -"$1" "$child" 2>/dev/null; }
-    trap 'forward INT'  INT
-    trap 'forward TERM' TERM
-    wait "$child"
-    status=$?
-
-    # keep the window open for inspection only when user-started (GRMS_AUTO is unset)
+    # manual runs: pause so users can read the scroll-back
     if [[ -z "${GRMS_AUTO:-}" ]]; then
-        read -n1 -r -p "Capture ended (exit $status) - press any key to close..."
+        read -n1 -r -p "Capture ended (exit $status) - press any key to close…"
     fi
-
     exit "$status"
 
 else
-    # no TTY (cron / GRMSUpdater / nohup etc.) - just append to the log file
-    { exec -a "StartCapture.sh $1" \
-        python -u -m RMS.StartCapture -c "$configpath"; } 2>&1 | tee -a "$LOGFILE"
+    # non-TTY (cron / GRMSUpdater / nohup etc.)
+    exec -a "StartCapture.sh $1" \
+         python -u -m RMS.StartCapture -c "$configpath" 2>&1
 fi
