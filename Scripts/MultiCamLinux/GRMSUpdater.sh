@@ -260,26 +260,27 @@ launch_term() {                            # $1 = title, $2… = cmd+args
         lxterminal)
             # one quoted string after -e:
             cmd=(lxterminal --title="$title" \
-                  -e "bash -c 'exec \"\$@\"' _ $*")
+                  -e "bash -c 'export GRMS_AUTO=1; exec \"\$@\"' _ $*")
             ;;
         kitty)
-            cmd=(kitty -T "$title" "$@")
+            cmd=(env GRMS_AUTO=1 kitty -T "$title" "$@")
             ;;
         foot)
-            cmd=(foot --app-id="$title" -e "$@")
+            cmd=(env GRMS_AUTO=1 foot --app-id="$title" -e "$@")
             ;;
         footclient)
-            cmd=(footclient --app-id="$title" -- "$@")
+            cmd=(env GRMS_AUTO=1 footclient --app-id="$title" -- "$@")
             ;;
         gnome-terminal)
             # build one properly-quoted payload string
             local payload
             payload=$(printf '%q ' "$@")          # quote every arg
             cmd=(gnome-terminal --title="$title" \
-                 -- bash -lc "exec $payload")     # no extra "_"
+                 -- bash -lc "export GRMS_AUTO=1; exec $payload")
             ;;
         tmux)
-            tmux has-session -t "$title" 2>/dev/null || tmux new -d -s "$title" "$@"
+            tmux has-session -t "$title" 2>/dev/null || \
+                tmux new -d -s "$title" "export GRMS_AUTO=1; exec $*"
             return $?
             ;;
         *)

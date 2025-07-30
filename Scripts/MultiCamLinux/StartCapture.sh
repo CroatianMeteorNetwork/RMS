@@ -81,8 +81,12 @@ if [[ -t 1 ]]; then
     wait "$child"
     status=$?
 
-    # keep the window open for inspection
-    read -n1 -r -p "Capture ended (exit $status) - press any key to close…"
+    # keep the window open for inspection only when user-started (GRMS_AUTO is unset)
+    if [[ -z "${GRMS_AUTO:-}" ]]; then
+        read -n1 -r -p "Capture ended (exit $status) - press any key to close..."
+    fi
+
+    exit "$status"
 
 else
     # no TTY (cron / GRMSUpdater / nohup etc.) - just append to the log file
