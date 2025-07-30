@@ -52,7 +52,7 @@
 #
 # NOTE: This script should be run as the capture user, not root. Add to user's crontab:
 #   crontab -e
-#   0 2 * * * /path/to/GRMSUpdater.sh
+#   0 2 * * * /path/to/GRMSUpdater.sh --term gnome-terminal --force
 # This eliminates permission issues and follows the principle of least privilege.
 
 # Lock will be automatically released when script exits
@@ -186,7 +186,7 @@ if [[ ${#RunList[@]} -gt 0 ]]; then
     done
     
     # Wait for processes to shut down gracefully (with reasonable timeout)
-    SHUTDOWN_TIMEOUT=3600  # 1 hour - adjust based on your typical shutdown time
+    SHUTDOWN_TIMEOUT=600  # 10 minutes - adjust based on your typical shutdown time
     WAIT_INTERVAL=5
     elapsed=0
     
