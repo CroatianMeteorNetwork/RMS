@@ -313,41 +313,26 @@ launch_term() {                            # $1 = title, $2… = cmd+args
     return 0
 }
 
-# Function to restart stations
+# -------------------------------------------------------------------
+#  restart_stations  – relaunch each station in its own lxterminal
+# -------------------------------------------------------------------
 restart_stations() {
     local stations_to_restart=("$@")
-    
+
     if [[ ${#stations_to_restart[@]} -eq 0 ]]; then
         log_message "No stations to restart"
         return
     fi
-    
+
     log_message "Restarting ${#stations_to_restart[@]} stations: ${stations_to_restart[*]}"
-    
+
     for station in "${stations_to_restart[@]}"; do
-        # Get the delay parameter from this station's desktop link (if it exists)
-        local delay=""
-        local desktop_file="$DESKTOP_DIR/${station}_StartCap.desktop"
-        
-        if [[ -f "$desktop_file" ]]; then
-            # Look for explicit --delay= flag in the Exec line
-            local exec_line
-            exec_line=$(grep "^Exec=" "$desktop_file" 2>/dev/null || echo "")
-            if [[ -n "$exec_line" ]]; then
-                # Extract delay value from --delay=VALUE pattern
-                if [[ "$exec_line" =~ --delay=([0-9]+) ]]; then
-                    delay="${BASH_REMATCH[1]}"
-                fi
-            fi
-        fi
-        
-        log_message "Starting station $station$([ -n "$delay" ] && echo " with delay $delay")"
-        sleep 5
-        
-        # Launch terminal (StartCapture.sh only takes station as argument, delay is handled internally)
-        if ! launch_term "$station" "$RMS_DIR/Scripts/MultiCamLinux/StartCapture.sh" "$station"; then
-            log_message "Failed to start station $station - continuing with next station"
-            continue
+        log_message "Starting station $station"
+        sleep 5   # small stagger so they don't all open at once
+
+        if ! launch_term "$station" \
+              "$RMS_DIR/Scripts/MultiCamLinux/StartCapture.sh" "$station"; then
+            log_message "Failed to start station $station – continuing"
         fi
     done
 }
