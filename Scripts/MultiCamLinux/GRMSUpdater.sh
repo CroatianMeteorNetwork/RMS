@@ -174,12 +174,12 @@ mapfile -t RunList < <(
 if [[ ${#RunList[@]} -gt 0 ]]; then
     log_message "Gracefully stopping ${#RunList[@]} running RMS stations for update: ${RunList[*]}"
     
-    # First, try graceful shutdown with SIGTERM for each station (including all child processes)
+    # First, try graceful shutdown with SIGINT for each station (RMS handles this cleanly)
     for station in "${RunList[@]}"; do
-        log_message "Sending SIGTERM to all processes for station $station..."
+        log_message "Sending SIGINT to all processes for station $station..."
         pattern=$(regex_for "$station")
-        if pkill -f -TERM -- "$pattern" 2>/dev/null; then
-            log_message "Sent SIGTERM to station $station processes"
+        if pkill -f -INT -- "$pattern" 2>/dev/null; then
+            log_message "Sent SIGINT to station $station processes"
         else
             log_message "Warning: No processes found for station $station (may have already exited)"
         fi
