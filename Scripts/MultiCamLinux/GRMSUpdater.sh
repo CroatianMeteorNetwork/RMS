@@ -88,17 +88,12 @@ fi
 # Parse command line arguments
 FORCE_UPDATE=false
 PREFERRED_TERM="lxterminal"     # default terminal
-LAUNCH_WAIT=2                   # seconds to wait for terminal to start
 POSITIONAL_ARGS=()
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         --term)
             PREFERRED_TERM="$2"
-            shift 2
-            ;;
-        --wait)
-            LAUNCH_WAIT="$2"
             shift 2
             ;;
         --force)
@@ -349,8 +344,8 @@ restart_stations() {
         log_message "Starting station $station$([ -n "$delay" ] && echo " with delay $delay")"
         sleep 5
         
-        # Launch terminal
-        if ! launch_term "$station" "$RMS_DIR/Scripts/MultiCamLinux/StartCapture.sh" "$station" "${delay:-}"; then
+        # Launch terminal (StartCapture.sh only takes station as argument, delay is handled internally)
+        if ! launch_term "$station" "$RMS_DIR/Scripts/MultiCamLinux/StartCapture.sh" "$station"; then
             log_message "Failed to start station $station - continuing with next station"
             continue
         fi
