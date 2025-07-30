@@ -66,15 +66,9 @@ def breakHandler(signum, frame):
 
     # Set the flag to stop capturing video
     STOP_CAPTURE = True
-    
-    # Wake up any threads waiting on stop_event
-    stop_event.set()
 
     # This log entry is an adhoc fix to prevents Ctrl+C failure until the root cause is identified
     log.info("Ctrl+C pressed. Setting STOP_CAPTURE to True")
-
-# Global event for interruptible waits
-stop_event = threading.Event()
 
 # Save the original event for the Ctrl+C
 ORIGINAL_BREAK_HANDLE = signal.getsignal(signal.SIGINT)
@@ -1141,12 +1135,10 @@ if __name__ == "__main__":
 
             log.debug('Less than 15 minutes left to record, waiting for a new recording session tonight...')
 
-            # Reset the Ctrl+C to KeyboardInterrupt
-            resetSIGINT()
-
             try:
-                # Wait for 30 mins before checking again
-                time.sleep(30*60)
+                # Wait for 30 mins before checking again (interruptible)
+                from RMS.Misc import interruptibleWait
+                interruptibleWait(30*60)
 
             except KeyboardInterrupt:
 
@@ -1246,29 +1238,13 @@ if __name__ == "__main__":
                     duration/60/60))
 
                 try:
-                    # Clear any previous event state
-                    stop_event.clear()
-                    
-                    # Set up a temporary handler for the wait period
-                    def wait_handler(signum, frame):
-                        stop_event.set()
-                    
-                    signal.signal(signal.SIGINT, wait_handler)
-
                     # Wait until sunset (interruptible)
                     waiting_time_seconds = int(waiting_time.total_seconds())
                     if waiting_time_seconds > 0:
-                        # Use threading.Event for interruptible wait
-                        if stop_event.wait(timeout=waiting_time_seconds):
-                            # Event was set by Ctrl+C
-                            raise KeyboardInterrupt()
-                    
-                    # If we get here, the wait completed normally
-                    signal.signal(signal.SIGINT, ORIGINAL_BREAK_HANDLE)
+                        from RMS.Misc import interruptibleWait
+                        interruptibleWait(waiting_time_seconds)
 
                 except KeyboardInterrupt:
-                    # Restore original handler immediately to prevent issues during cleanup
-                    signal.signal(signal.SIGINT, ORIGINAL_BREAK_HANDLE)
                     
                     log.info('Ctrl + C pressed, exiting...')
 
