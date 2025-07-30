@@ -64,21 +64,23 @@ LOGFILE=$LOGPATH$LOGDATE$LOGSUFFIX
 
 mkdir -p $LOGPATH
 
-# Log the output to a file (warning: this breaks Ctrl+C passing to StartCapture)
-#python -m RMS.StartCapture 2>&1 | tee $LOGFILE
+# Set up output redirection based on whether we're in a terminal
+if [[ -t 1 ]]; then               # interactive launch
+    # Use tee to show output on screen AND append to log file
+    exec > >(tee -a "$LOGFILE") 2>&1
+else                              # cron / no TTY
+    # Just append to log file
+    exec >>"$LOGFILE" 2>&1
+fi
 
 configpath=/home/$(whoami)/source/Stations/$1/.config
 echo Using config from $configpath
 echo $configpath
 
+# Launch RMS with unbuffered output
+exec python -u -m RMS.StartCapture -c "$configpath"
 
-
-
-exec python -u -m RMS.StartCapture -c "$configpath" >>"$LOGFILE" 2>&1
-
-# Only run interactive commands if we have a terminal
-if [[ -t 0 ]] || [[ -t 1 ]]; then
-read -p "Press any key to continue... "
-
-$SHELL
-fi
+# Note: The following lines won't execute due to exec replacing the shell process
+# They're kept for documentation purposes but could be removed
+# read -p "Press any key to continue... "
+# $SHELL
