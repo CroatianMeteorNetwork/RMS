@@ -75,10 +75,29 @@ if [[ -t 1 ]]; then
     python -u -m RMS.StartCapture -c "$configpath" &
     child=$!
 
-    # forward INT/TERM from user to the child, then wait for it
-    forward() { kill -"$1" "$child" 2>/dev/null; }
-    trap 'forward INT'  INT
-    trap 'forward TERM' TERM
+    # Handle signals: SIGINT (user Ctrl-C) shows message, SIGTERM (GRMSUpdater) doesn't
+    handle_signal() {
+        local sig=$1
+        
+        # Always forward SIGINT to Python (it handles this better than SIGTERM)
+        if [[ "$sig" == "TERM" ]]; then
+            kill -INT "$child" 2>/dev/null  # Forward SIGINT instead of SIGTERM
+        else
+            kill -"$sig" "$child" 2>/dev/null
+        fi
+        
+        wait "$child"
+        status=$?
+        
+        # Only show message for SIGINT (user Ctrl-C), not SIGTERM (automated)
+        if [[ "$sig" == "INT" ]]; then
+            read -n1 -r -p "Capture ended (exit $status) - press any key to close..."
+        fi
+        exit "$status"
+    }
+    
+    trap 'handle_signal INT' INT
+    trap 'handle_signal TERM' TERM
     wait "$child"
     status=$?
 
