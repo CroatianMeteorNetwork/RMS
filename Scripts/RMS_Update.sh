@@ -1085,10 +1085,18 @@ main() {
     LOCAL_SHA=$(git rev-parse HEAD)
     REMOTE_SHA=$(git rev-parse FETCH_HEAD)
     
-    if [[ "$LOCAL_SHA" == "$REMOTE_SHA" ]]; then
+    # Check for modified tracked files (same logic as early check)
+    MODIFIED_FILES=$(git diff --name-only | grep -v -E '^(\.config|camera_settings\.json)$' || true)
+    
+    if [[ "$LOCAL_SHA" == "$REMOTE_SHA" && -z "$MODIFIED_FILES" ]]; then
         print_status "success" "Local repository already up to date with $RMS_REMOTE/$RMS_BRANCH"
     else
-        print_status "info" "Updates available, resetting to remote state..."
+        if [[ "$LOCAL_SHA" != "$REMOTE_SHA" ]]; then
+            print_status "info" "Updates available, resetting to remote state..."
+        else
+            print_status "info" "Repository up to date but resetting to restore modified tracked files..."
+        fi
+        
         if ! git_with_retry "reset" "$RMS_BRANCH"; then
             print_status "error" "Failed to reset to $RMS_REMOTE/$RMS_BRANCH. Aborting."
             cleanup_on_error
