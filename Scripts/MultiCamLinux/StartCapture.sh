@@ -56,31 +56,29 @@ fi
 source ~/vRMS/bin/activate
 cd ~/source/RMS
 
-# Init log file
-LOGPATH=~/RMS_data/logs/
-LOGDATE=$(date +"%Y%m%d_%H%M%S")
-LOGSUFFIX="_log.txt"
-LOGFILE=$LOGPATH$LOGDATE$LOGSUFFIX
+LOGDIR=~/RMS_data/logs
+mkdir -p "$LOGDIR"
+LOGFILE="$LOGDIR/$(date +%F_%T)_startcap.log"
 
-mkdir -p $LOGPATH
+configpath="/home/$(whoami)/source/Stations/$1/.config"
+echo "Using config from $configpath"
 
-# Set up output redirection based on whether we're in a terminal
-if [[ -t 1 ]]; then               # interactive launch
-    # Use tee to show output on screen AND append to log file
+# ----- decide how we were launched ---------------------------------
+if [[ -t 1 ]]; then            # we have a real TTY → manual or .desktop launch
+    echo "Logging to $LOGFILE"
+    # duplicate output to screen *and* file
     exec > >(tee -a "$LOGFILE") 2>&1
-else                              # cron / no TTY
-    # Just append to log file
+
+    # run without exec so we drop back to the shell when Python ends
+    python -u -m RMS.StartCapture -c "$configpath"
+
+    # keep the window open for inspection
+    read -n1 -r -p "Capture ended – press any key to close…"
+
+else                            # cron / GRMSUpdater / nohup etc.
+    # no TTY – just append to the log file
     exec >>"$LOGFILE" 2>&1
+    # use exec so signals go straight to Python
+    exec -a "StartCapture.sh $1" \
+         python -u -m RMS.StartCapture -c "$configpath"
 fi
-
-configpath=/home/$(whoami)/source/Stations/$1/.config
-echo Using config from $configpath
-echo $configpath
-
-# Launch RMS with unbuffered output, preserving script name in process list
-exec -a "StartCapture.sh $1" python -u -m RMS.StartCapture -c "$configpath"
-
-# Note: The following lines won't execute due to exec replacing the shell process
-# They're kept for documentation purposes but could be removed
-# read -p "Press any key to continue... "
-# $SHELL
