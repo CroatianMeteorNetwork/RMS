@@ -74,8 +74,11 @@ echo $configpath
 
 
 
-python -m RMS.StartCapture -c $configpath
+exec python -u -m RMS.StartCapture -c "$configpath" >>"$LOGFILE" 2>&1
 
+# Only run interactive commands if we have a terminal
+if [[ -t 0 ]] || [[ -t 1 ]]; then
 read -p "Press any key to continue... "
 
 $SHELL
+fi
