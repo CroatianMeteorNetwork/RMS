@@ -258,7 +258,11 @@ launch_term() {                            # $1 = title, $2… = cmd+args
     
     case "$PREFERRED_TERM" in
         lxterminal)
-            cmd=(lxterminal --title="$title" -e "$@")
+            # hand everything to a bash launched by lxterminal
+            #   lxterminal … -e bash -c 'exec "$@"' _  cmd arg1 arg2 …
+            # the dummy "_" becomes $0 inside bash;  "$@" is the rest
+            cmd=(lxterminal --title="$title" \
+                  -e bash -c 'exec "$@"' _ "$@")
             ;;
         kitty)
             cmd=(kitty -T "$title" "$@")
