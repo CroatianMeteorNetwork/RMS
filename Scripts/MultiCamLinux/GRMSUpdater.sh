@@ -295,7 +295,9 @@ launch_term() {                            # $1 = title, $2… = cmd+args
     
     # spawn the terminal (with logging for debugging)
     log_message "Executing: ${cmd[*]}"
-    (setsid "${cmd[@]}" >"$LOGFILE" 2>&1) &
+    ( exec 200>&-                     # Close the flock fd so children can't inherit it
+      setsid "${cmd[@]}" >"$LOGFILE" 2>&1
+    ) &
     local term_pid=$!
     log_message "Terminal PID: $term_pid"
     
