@@ -118,7 +118,7 @@ DESKTOP_DIR="$USER_HOME/Desktop"
 
 # Export display environment for GUI applications (needed when running from cron)
 if [[ -z ${DISPLAY:-} ]]; then
-    DISPLAY=$(who | awk '/\(:[0-9]/ {sub(/[()]/,"",$NF); print $NF; exit}')
+    DISPLAY=$(who | awk '/\(:[0-9]/{print $NF; exit}' | tr -d '()')
     if [[ -n "$DISPLAY" ]]; then
         export DISPLAY
         log_message "Auto-detected DISPLAY=$DISPLAY"
