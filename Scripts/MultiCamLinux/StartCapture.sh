@@ -59,21 +59,15 @@ cd ~/source/RMS
 configpath="/home/$(whoami)/source/Stations/$1/.config"
 echo "Using config from $configpath"
 
-# TTY (manual or .desktop launch)
-if [[ -t 1 ]]; then
-   # run StartCapture with the wrapper-name preserved, no redirection
-    exec -a "StartCapture.sh $1" \
-         python -u -m RMS.StartCapture -c "$configpath"
-    status=$?            # we never reach here unless you remove exec
-
-    # manual runs: pause so users can read the scroll-back
-    if [[ -z "${GRMS_AUTO:-}" ]]; then
-        read -n1 -r -p "Capture ended (exit $status) - press any key to close…"
-    fi
+# ───────── manual /.desktop launch  (has TTY, no GRMS_AUTO) ─────────
+if [[ -t 1 && -z "${GRMS_AUTO:-}" ]]; then
+    python -u -m RMS.StartCapture -c "$configpath"
+    status=$?
+    read -n1 -r -p "Capture ended (exit $status) - press any key to close…"
     exit "$status"
 
+# ───────── everything else  (GRMSUpdater / cron / nohup) ────────────
 else
-    # non-TTY (cron / GRMSUpdater / nohup etc.)
     exec -a "StartCapture.sh $1" \
          python -u -m RMS.StartCapture -c "$configpath" 2>&1
 fi
