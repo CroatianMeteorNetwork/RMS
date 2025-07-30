@@ -937,11 +937,20 @@ main() {
         if [[ -z "$REMOTE_SHA" ]]; then
             print_status "error" "Cannot query remote ref $RMS_BRANCH"; exit 1
         fi
-        if [[ "$REMOTE_SHA" == "$LOCAL_SHA" ]]; then
-            print_status "success" "Nothing new on $RMS_BRANCH – exiting."
+        
+        # Check for modified tracked files (excluding allowed config files)
+        MODIFIED_FILES=$(git diff --name-only | grep -v -E '^(\.config|camera_settings\.json)$' || true)
+        
+        if [[ "$REMOTE_SHA" == "$LOCAL_SHA" && -z "$MODIFIED_FILES" ]]; then
+            print_status "success" "Nothing new on $RMS_BRANCH and no tracked file modifications - exiting."
             exit 0
+        elif [[ "$REMOTE_SHA" == "$LOCAL_SHA" && -n "$MODIFIED_FILES" ]]; then
+            print_status "info" "Repository up to date but tracked files modified:"
+            echo "$MODIFIED_FILES" | sed 's/^/  /'
+            print_status "info" "Proceeding with update to restore tracked files"
+        else
+            print_status "info" "Will update ($LOCAL_SHA → $REMOTE_SHA)"
         fi
-        print_status "info" "Will update ($LOCAL_SHA → $REMOTE_SHA)"
     fi
     # ---------------------------------------------------
 

@@ -144,11 +144,18 @@ if [[ "$FORCE_UPDATE" != "true" ]]; then
         REMOTE_SHA=$(timeout 15s git ls-remote --quiet --heads origin "refs/heads/$CURRENT_BRANCH" | cut -f1)
         LOCAL_SHA=$(git rev-parse HEAD)
         
-        if [[ -n "$REMOTE_SHA" && "$REMOTE_SHA" == "$LOCAL_SHA" ]]; then
-            log_message "RMS is already up to date ($CURRENT_BRANCH: $LOCAL_SHA) - no need to restart stations"
+        # Check for modified tracked files (excluding allowed config files)
+        MODIFIED_FILES=$(git diff --name-only | grep -v -E '^(\.config|camera_settings\.json)$' || true)
+        
+        if [[ -n "$REMOTE_SHA" && "$REMOTE_SHA" == "$LOCAL_SHA" && -z "$MODIFIED_FILES" ]]; then
+            log_message "RMS is already up to date ($CURRENT_BRANCH: $LOCAL_SHA) and no tracked file modifications - no need to restart stations"
             log_message "Use --force to restart stations anyway"
             log_message "GRMSUpdater.sh completed successfully (early exit - no updates needed)"
             exit 0
+        elif [[ -n "$REMOTE_SHA" && "$REMOTE_SHA" == "$LOCAL_SHA" && -n "$MODIFIED_FILES" ]]; then
+            log_message "Repository up to date but tracked files modified:"
+            echo "$MODIFIED_FILES" | sed 's/^/  /' | while read -r line; do log_message "$line"; done
+            log_message "Proceeding with restart to restore tracked files"
         else
             log_message "Updates available for RMS ($CURRENT_BRANCH: $LOCAL_SHA → $REMOTE_SHA) - proceeding with restart"
         fi
