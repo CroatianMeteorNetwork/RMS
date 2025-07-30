@@ -354,7 +354,6 @@ if "$RMS_DIR/Scripts/RMS_Update.sh" >/dev/null; then
 else
     log_message "Warning: RMS update failed, but continuing to restart stations since they were already stopped"
 fi
-sleep 10
 
 if [[ ${#POSITIONAL_ARGS[@]} -eq 0 ]]; then
     # Called with no args - restart all configured stations
