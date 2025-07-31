@@ -710,8 +710,7 @@ def generateTimelapseFromFrames(image_files,
     
     for index, img_path in enumerate(image_files):
         if index % 100 == 0:
-            print("Processing frame {}/{} ({:.1f}%)"
-                  .format(index, len(image_files), (index/len(image_files)*100.0)))
+            print(f"\rProcessing frame {index}/{len(image_files)} ({index/len(image_files)*100.0:.1f}%)", end='', flush=True)
         
         # Load image with error handling
         image = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
@@ -763,6 +762,9 @@ def generateTimelapseFromFrames(image_files,
         except Exception as e:
             log.error("Warning: Error processing image {}: {}".format(img_path, e))
             skipped_count += 1
+    
+    # Print newline after progress is complete
+    print()
     
     # Create a temporary timestamp JSON file
     timestamp_path = video_path.replace(MP4_SUFFIX, TS_JSON_SUFFIX)

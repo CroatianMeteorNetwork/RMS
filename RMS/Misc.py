@@ -959,8 +959,7 @@ def tarWithProgress(source_dir, tar_path, compression='bz2', remove_source=False
                 pct = int(processed * 100.0/total_files)
                 if pct >= last_pct + 5:
                     last_pct = (pct//5)*5
-                    print("\rArchiving progress: {}% ({}/{})".format(
-                          last_pct, processed, total_files), end='', flush=True)
+                    print(f"\rArchiving progress: {last_pct}% ({processed}/{total_files})", end='', flush=True)
         
         # Print newline after progress is complete
         print()

@@ -80,6 +80,8 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
     if file_list is None:
         file_list = sorted(os.listdir(dir_path))
 
+    # Count valid FF files for progress reporting
+    total_valid_ff_files = sum(1 for ff_name in file_list if validFFName(ff_name))
 
     # List all FF files in the current dir
     for ff_name in file_list:
@@ -142,13 +144,16 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
                 continue
 
             if print_progress:
-                log.info('Stacking: {}'.format(ff_name))
+                print(f"\rStacking progress: {n_stacked+1}/{total_valid_ff_files} files", end='', flush=True)
 
             # Blend images 'if lighter'
             merge_img = blendLighten(merge_img, img)
 
             n_stacked += 1
 
+    # Print newline after progress is complete
+    if print_progress and n_stacked > 0:
+        print()
 
     # If the number of stacked image is less than 20% of the given images, stack without filtering
     if filter_bright and (n_stacked < 0.2*total_ff_files):

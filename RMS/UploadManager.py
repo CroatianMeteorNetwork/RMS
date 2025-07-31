@@ -393,42 +393,16 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                                 else:
                                     time_str = "{:.0f} sec remaining".format(time_remaining)
                                 
-                                print('[{:.1f}%] Uploading: {} ({}/{}) @ {} - {}'.format(
-                                    percent_complete,
-                                    os.path.basename(local_file),
-                                    formatSize(tracker.uploaded_bytes),
-                                    formatSize(tracker.total_bytes),
-                                    transfer_rate_str,
-                                    time_str,
-                                    end=''
-                                ))
+                                print(f'\r[{percent_complete:.1f}%] Uploading: {os.path.basename(local_file)} ({formatSize(tracker.uploaded_bytes)}/{formatSize(tracker.total_bytes)}) @ {transfer_rate_str} - {time_str}', end='', flush=True)
                             else:
                                 # At 100%, show "complete" instead of remaining time
                                 if percent_complete == 100.0:
-                                    print('[100.0%] Upload complete: {} ({}/{}) @ {}'.format(
-                                        os.path.basename(local_file),
-                                        formatSize(tracker.uploaded_bytes),
-                                        formatSize(tracker.total_bytes),
-                                        transfer_rate_str
-                                    ))
+                                    print(f'\r[100.0%] Upload complete: {os.path.basename(local_file)} ({formatSize(tracker.uploaded_bytes)}/{formatSize(tracker.total_bytes)}) @ {transfer_rate_str}')
                                 else:
-                                    print('[{:.1f}%] Uploading: {} ({}/{}) @ {}'.format(
-                                        percent_complete,
-                                        os.path.basename(local_file),
-                                        formatSize(tracker.uploaded_bytes),
-                                        formatSize(tracker.total_bytes),
-                                        transfer_rate_str,
-                                        end=''
-                                    ))
+                                    print(f'\r[{percent_complete:.1f}%] Uploading: {os.path.basename(local_file)} ({formatSize(tracker.uploaded_bytes)}/{formatSize(tracker.total_bytes)}) @ {transfer_rate_str}', end='', flush=True)
                         
                         else:
-                            print('[{:.1f}%] Uploading: {} ({}/{})'.format(
-                                percent_complete,
-                                os.path.basename(local_file),
-                                formatSize(tracker.uploaded_bytes),
-                                formatSize(tracker.total_bytes), 
-                                end=''
-                            ))
+                            print(f'\r[{percent_complete:.1f}%] Uploading: {os.path.basename(local_file)} ({formatSize(tracker.uploaded_bytes)}/{formatSize(tracker.total_bytes)})', end='', flush=True)
                         
                         tracker.last_percent = percent_complete
             
