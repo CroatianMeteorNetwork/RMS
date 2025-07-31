@@ -119,7 +119,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Restore positional parameters
-set -- "${POSITIONAL_ARGS[@]}"
+if [[ ${#POSITIONAL_ARGS[@]} -gt 0 ]]; then
+    set -- "${POSITIONAL_ARGS[@]}"
+else
+    set --  # Clear positional parameters
+fi
 
 # Set up path variables (running as capture user)
 USER_HOME="$HOME"
