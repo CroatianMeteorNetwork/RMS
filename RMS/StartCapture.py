@@ -671,13 +671,17 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
                 detection_results = []
 
-            # Save detection to disk and archive detection
-            night_archive_dir, archive_name, _ = processNight(night_data_dir, config, \
-                detection_results=detection_results, nodetect=nodetect)
+            # Save detection to disk and archive detection (skip if capture was stopped)
+            if not STOP_CAPTURE:
+                night_archive_dir, archive_name, _ = processNight(night_data_dir, config, \
+                    detection_results=detection_results, nodetect=nodetect)
+            else:
+                log.info("Skipping processing due to SIGINT")
+                night_archive_dir, archive_name = None, None
 
 
-            # Put the archive up for upload
-            if upload_manager is not None:
+            # Put the archive up for upload (skip if capture was stopped or no archive created)
+            if upload_manager is not None and archive_name is not None:
                 log.info("Adding file to upload list: %s", archive_name)
                 upload_manager.addFiles([archive_name])
                 log.info("File added.")
@@ -690,8 +694,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 detector.deleteBackupFiles()
 
 
-            # frames -> timelapse(s) -> archive(s) -> upload
-            if config.timelapse_generate_from_frames:
+            # frames -> timelapse(s) -> archive(s) -> upload (skip if capture was stopped)
+            if config.timelapse_generate_from_frames and not STOP_CAPTURE:
                 try:
                     log.info("Processing frame files...")
                     archive_paths = processFramesFiles(config)          # may return None
@@ -1170,8 +1174,8 @@ if __name__ == "__main__":
             continue
 
 
-        # Run auto-reprocessing only if the config option is set
-        if config.auto_reprocess:
+        # Run auto-reprocessing only if the config option is set and capture wasn't stopped
+        if config.auto_reprocess and not STOP_CAPTURE:
 
             # In case of continuous capture, start processing incomplete captures
             if not isinstance(start_time, bool) or config.continuous_capture:
