@@ -69,9 +69,18 @@ log_message() {
     echo "$message"
 }
 
-# Function to generate regex pattern for station matching
+# ------------------------------------------------------------
+#  regex_for() – match ONLY the StartCapture.sh argv
+#  • anchors on argv-0 (script path) so terminals / python lines don't match
+#  • station ID must be a standalone argument (not part of a path)
+# ------------------------------------------------------------
 regex_for() {
-    echo "/StartCapture\.sh[[:space:]]+$1([[:space:]]|$)"
+    # (^|[[:space:]])  argv start or preceding space
+    # [^[:space:]]*/StartCapture\.sh  script name with any path
+    # [[:space:]]+     one-or-more spaces
+    # $1               station ID
+    # ([[:space:]]|$)  end of arg or end of string
+    echo '(^|[[:space:]])[^[:space:]]*/StartCapture\.sh[[:space:]]+'"$1"'([[:space:]]|$)'
 }
 
 # Log script start
