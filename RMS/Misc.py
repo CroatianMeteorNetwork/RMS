@@ -233,14 +233,21 @@ def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=F
 
 
     # Compress the archive directory
-    archive_name = shutil.make_archive(os.path.join(dest_dir, compress_file), 'bztar', dest_dir, logger=log)
-
-    # Delete the archive directory after compression
-    if delete_dest_dir:
-        shutil.rmtree(dest_dir)
-
-
-    return archive_name
+    archive_path = os.path.join(dest_dir, compress_file) + '.tar.bz2'
+    
+    log.info("Creating archive: {}".format(archive_path))
+    
+    # Use tarWithProgress for compression with progress reporting
+    success = tarWithProgress(dest_dir, archive_path, compression='bz2', 
+                              remove_source=delete_dest_dir)
+    
+    if not success:
+        log.error("Failed to create archive: {}".format(archive_path))
+        return None
+    
+    log.info("Archive created successfully: {}".format(archive_path))
+    
+    return archive_path
 
 
 
@@ -952,8 +959,11 @@ def tarWithProgress(source_dir, tar_path, compression='bz2', remove_source=False
                 pct = int(processed * 100.0/total_files)
                 if pct >= last_pct + 5:
                     last_pct = (pct//5)*5
-                    print("Archiving progress: {}% ({}/{})".format(
-                          last_pct, processed, total_files))
+                    print("\rArchiving progress: {}% ({}/{})".format(
+                          last_pct, processed, total_files), end='', flush=True)
+        
+        # Print newline after progress is complete
+        print()
         
         # 3. Verify -------------------------------------------------------------
         log.info("Verifying archive integrity...")
