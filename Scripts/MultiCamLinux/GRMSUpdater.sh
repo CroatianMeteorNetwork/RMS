@@ -149,14 +149,14 @@ if [[ -n "$DISPLAY" ]]; then
     # Wrap in error handling to prevent crashes
     if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
         # Get UID safely
-        local uid
+        uid=""
         if command -v id >/dev/null 2>&1; then
             uid=$(id -u 2>/dev/null || echo "1000")
         else
             uid="1000"
         fi
         
-        local bus_path="/run/user/${uid}/bus"
+        bus_path="/run/user/${uid}/bus"
         if [[ -e "$bus_path" ]] && [[ -S "$bus_path" ]]; then
             export DBUS_SESSION_BUS_ADDRESS="unix:path=$bus_path"
             log_message "Auto-set DBUS_SESSION_BUS_ADDRESS for gnome-terminal"
