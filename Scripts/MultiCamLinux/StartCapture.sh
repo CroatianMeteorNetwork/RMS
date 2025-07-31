@@ -25,6 +25,11 @@
 # second command line arg is optional, can be used to adjust the sleep time in seconds
 # so that there can be a delay between starting each station
 
+delay_by_station_sequence() {
+
+# implement a delay based on position of station in directory
+# this is not used presently
+
 delay=$(ls /home/$(whoami)/source/Stations/ | grep -n $1 | cut -d':' -f1)
 delay=$((delay*30))
 echo Additional $delay second delay will be added.
