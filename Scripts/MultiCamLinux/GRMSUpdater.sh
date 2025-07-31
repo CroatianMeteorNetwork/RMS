@@ -140,6 +140,12 @@ fi
 if [[ -n "$DISPLAY" ]]; then
     export XAUTHORITY="$HOME/.Xauthority"
     log_message "Using DISPLAY=$DISPLAY"
+    
+    # Set up D-Bus for gnome-terminal (when running from cron)
+    if [[ -z "$DBUS_SESSION_BUS_ADDRESS" ]] && [[ -S "/run/user/$(id -u)/bus" ]]; then
+        export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
+        log_message "Auto-set DBUS_SESSION_BUS_ADDRESS for gnome-terminal"
+    fi
 else
     log_message "No DISPLAY available - GUI terminals will fail, consider using --term tmux"
 fi
