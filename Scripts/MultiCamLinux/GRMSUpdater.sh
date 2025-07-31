@@ -114,7 +114,6 @@ set -- "${POSITIONAL_ARGS[@]}"
 USER_HOME="$HOME"
 RMS_DIR="$USER_HOME/source/RMS"
 STATIONS_DIR="$USER_HOME/source/Stations"
-DESKTOP_DIR="$USER_HOME/Desktop"
 
 # Export display environment for GUI applications (needed when running from cron)
 if [[ -z ${DISPLAY:-} ]]; then
