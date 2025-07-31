@@ -142,9 +142,25 @@ if [[ -n "$DISPLAY" ]]; then
     log_message "Using DISPLAY=$DISPLAY"
     
     # Set up D-Bus for gnome-terminal (when running from cron)
-    if [[ -z "$DBUS_SESSION_BUS_ADDRESS" ]] && [[ -S "/run/user/$(id -u)/bus" ]]; then
-        export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
-        log_message "Auto-set DBUS_SESSION_BUS_ADDRESS for gnome-terminal"
+    # Wrap in error handling to prevent crashes
+    if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
+        # Get UID safely
+        local uid
+        if command -v id >/dev/null 2>&1; then
+            uid=$(id -u 2>/dev/null || echo "1000")
+        else
+            uid="1000"
+        fi
+        
+        local bus_path="/run/user/${uid}/bus"
+        if [[ -e "$bus_path" ]] && [[ -S "$bus_path" ]]; then
+            export DBUS_SESSION_BUS_ADDRESS="unix:path=$bus_path"
+            log_message "Auto-set DBUS_SESSION_BUS_ADDRESS for gnome-terminal"
+        else
+            log_message "D-Bus session bus not available at $bus_path (normal in cron context)"
+        fi
+    else
+        log_message "DBUS_SESSION_BUS_ADDRESS already set: $DBUS_SESSION_BUS_ADDRESS"
     fi
 else
     log_message "No DISPLAY available - GUI terminals will fail, consider using --term tmux"
