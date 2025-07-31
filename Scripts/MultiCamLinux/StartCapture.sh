@@ -98,6 +98,7 @@ if [[ -t 1 ]]; then
     
     trap 'handle_signal INT' INT
     trap 'handle_signal TERM' TERM
+    trap '' HUP
     wait "$child"
     status=$?
 
