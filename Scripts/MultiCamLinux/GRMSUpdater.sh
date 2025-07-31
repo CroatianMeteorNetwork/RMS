@@ -75,12 +75,14 @@ log_message() {
 #  • station ID must be a standalone argument (not part of a path)
 # ------------------------------------------------------------
 regex_for() {
-    # (^|[[:space:]])  argv start or preceding space
-    # [^[:space:]]*/StartCapture\.sh  script name with any path
-    # [[:space:]]+     one-or-more spaces
-    # $1               station ID
-    # ([[:space:]]|$)  end of arg or end of string
-    echo '(^|[[:space:]])[^[:space:]]*/StartCapture\.sh[[:space:]]+'"$1"'([[:space:]]|$)'
+    # Match ONLY the actual bash script process, not terminals or wrappers
+    # ^/bin/bash        must start with /bin/bash (the actual script interpreter)
+    # [[:space:]]+      one-or-more spaces
+    # .*/StartCapture\.sh  script path
+    # [[:space:]]+      one-or-more spaces  
+    # $1                station ID
+    # ([[:space:]]|$)   end of arg or end of string
+    echo '^/bin/bash[[:space:]]+.*/StartCapture\.sh[[:space:]]+'"$1"'([[:space:]]|$)'
 }
 
 # Log script start
