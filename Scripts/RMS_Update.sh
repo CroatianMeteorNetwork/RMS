@@ -1221,7 +1221,7 @@ PY
         module_name=$(basename "$module_dir")
         # Skip __pycache__ and the main RMS directory itself
         if [[ "$module_name" != "__pycache__" ]] && [[ "$module_name" != "RMS" ]]; then
-            ((modules_found++))
+            modules_found=$((modules_found + 1))
             print_status "info" "Found module: $module_name (from $module_dir)"
             if [ -d "$SITE_DIR/$module_name" ]; then
                 print_status "info" "Removing orphaned $module_name module from site-packages..."
@@ -1230,7 +1230,7 @@ PY
         fi
     done < <(find "$RMSSOURCEDIR" -name "__init__.py" -type f -print0 2>/dev/null)
     
-    if [ $modules_found -eq 0 ]; then
+    if [ "$modules_found" -eq 0 ]; then
         print_status "warning" "No RMS modules found in source directory"
     else
         print_status "info" "Checked $modules_found RMS modules"
