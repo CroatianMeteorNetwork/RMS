@@ -3,9 +3,6 @@ import datetime
 import numpy as np
 import matplotlib.pyplot as plt
 import RMS.ConfigReader as cr
-import ephem
-from RMS.Misc import RmsDateTime
-from RMS.Astrometry.Conversions import raDec2AltAz, datetime2JD
 
 from matplotlib.ticker import StrMethodFormatter
 
