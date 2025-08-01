@@ -1,17 +1,24 @@
+import datetime
+
 import numpy as np
 import matplotlib.pyplot as plt
 import RMS.ConfigReader as cr
+import ephem
+from RMS.Misc import RmsDateTime
+from RMS.Astrometry.Conversions import raDec2AltAz, datetime2JD
 
 from matplotlib.ticker import StrMethodFormatter
 
 from RMS.Routines.FOVArea import fovArea
 from RMS.Routines.FOVSkyArea import fovSkyArea
+
 from RMS.Astrometry.Conversions import latLonAlt2ECEF, ECEF2AltAz
+import ephem
 
 
 def plotFOVSkyMap(platepars, configs, out_dir, north_up=False, show_pointing=False, show_fov=False,
                   rotate_text=False, flip_text=False, show_ip=False, show_coordinates=False, masks=None,
-                  output_file_name="fov_sky_map.png"):
+                  output_file_name="fov_sky_map.png", show_sun=False, show_moon=False):
     """ Plot all given platepar files on an Alt/Az sky map.
 
 
@@ -28,10 +35,9 @@ def plotFOVSkyMap(platepars, configs, out_dir, north_up=False, show_pointing=Fal
         flip_text: [bool] If true, flip text so that it is never upside down
         show_ip: [bool] If true, annotate plot with address of camera
         show_coordinates: [bool] If true, annotate plot with coordinates
-        masks:
-
-    Keyword arguments:
         masks: [dict] A dictionary of mask objects where keys are station codes.
+        output_file_name: [str] Name of output file default "fov_sky_map.png"
+        show_sun: [bool] If true, annotate plot with sun track  , default False
 
     """
 
@@ -51,6 +57,7 @@ def plotFOVSkyMap(platepars, configs, out_dir, north_up=False, show_pointing=Fal
 
     # Reference height for FOV lat/lon
     ref_ht = 100000 # m
+    sun_plotted, moon_plotted = False, False
 
     for station_code in platepars:
 
@@ -126,6 +133,8 @@ def plotFOVSkyMap(platepars, configs, out_dir, north_up=False, show_pointing=Fal
             fov_label += "\n{:.1f} x {:.1f}, {:.1f} sq deg".format(pp.fov_h, pp.fov_v, fov_area)
             label_size -= 1
 
+        sun_plotted = plotSun(ax, configs, show_sun, station_code, sun_plotted)
+        moon_plotted = plotMoon(ax, configs, show_moon, station_code, moon_plotted)
 
         if station_code in configs:
             c = configs[station_code]
@@ -177,6 +186,65 @@ def plotFOVSkyMap(platepars, configs, out_dir, north_up=False, show_pointing=Fal
     plt.savefig(plot_path, dpi=150)
     print("FOV sky map saved to: {:s}".format(plot_path))
 
+def plotMoon(ax, configs, show_moon, station_code, moon_plotted):
+
+    if show_moon and station_code in configs and not moon_plotted:
+        c = configs[station_code]
+        o = ephem.Observer()
+        o.lat = str(c.latitude)
+        o.long = str(c.longitude)
+        o.elevation = c.elevation
+
+        # If the current time is not given, use the current time
+        current_time = datetime.datetime.now(datetime.timezone.utc)
+
+        moon_azim_list, moon_elev_list = [], []
+        for elapsed_time in range(0, 59 * 12 * 60 * 60, 300):
+            time_to_evaluate = current_time + datetime.timedelta(seconds=elapsed_time)
+            o.date = time_to_evaluate
+            moon = ephem.Moon(o)
+
+            moon.compute(o)
+
+            if moon.alt > 0:
+                moon_azim_list.append(moon.az)
+                moon_elev_list.append(np.degrees(moon.alt))
+
+        if len(moon_elev_list):
+            moon_plotted = True
+            ax.scatter(moon_azim_list, moon_elev_list, color='blue')
+    return moon_plotted
+
+
+
+def plotSun(ax, configs, show_sun, station_code, sun_plotted):
+    if show_sun and station_code in configs and not sun_plotted:
+        c = configs[station_code]
+        o = ephem.Observer()
+        o.lat = str(c.latitude)
+        o.long = str(c.longitude)
+        o.elevation = c.elevation
+
+        # If the current time is not given, use the current time
+        current_time = datetime.datetime.now(datetime.timezone.utc)
+
+        sun_azim_list, sun_elev_list = [], []
+        for elapsed_time in range(0, 365 * 24 * 60 * 60, 3600):
+            time_to_evaluate = current_time + datetime.timedelta(seconds=elapsed_time)
+            o.date = time_to_evaluate
+            sun = ephem.Sun(o)
+            sun.date = time_to_evaluate
+            sun.compute(o)
+
+            if sun.alt > 0:
+                sun_azim_list.append(sun.az)
+                sun_elev_list.append(np.degrees(sun.alt))
+
+        if len(sun_elev_list):
+            sun_plotted = True
+            ax.scatter(sun_azim_list, sun_elev_list, color='yellow')
+    return sun_plotted
+
 
 if __name__ == "__main__":
 
@@ -204,7 +272,7 @@ if __name__ == "__main__":
                             help="Show pointing on degrees in chart.")
 
     arg_parser.add_argument('-f','--fov', dest='fov', default=False, action="store_true",
-                            help="Show field of view in degrees on chart.")
+                            help="Show field of view and area in degrees on chart.")
 
     arg_parser.add_argument('-r', '--rotate', dest='rotate', default=False, action="store_true",
                             help="Rotate text in line with camera pointing.")
@@ -220,6 +288,12 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-c', '--show_coordinates', dest='show_coordinates', default=False, action="store_true",
                             help="Show coordinates of the camera.")
+
+    arg_parser.add_argument('-s', '--show_sun', dest='show_sun', default=False, action="store_true",
+                            help="Plot the position of the sun in each hour for the next year.")
+
+    arg_parser.add_argument('-m', '--show_moon', dest='show_moon', default=False, action="store_true",
+                            help="Plot the position of the moon every 300 seconds for the next 29.5 days.")
 
 
     ###
@@ -295,7 +369,8 @@ if __name__ == "__main__":
                   show_pointing=cml_args.pointing, show_fov=cml_args.fov,
                   rotate_text=cml_args.rotate, masks=masks,
                   flip_text=cml_args.flip_text, output_file_name=output_file_name,
-                  show_ip=cml_args.show_ip, show_coordinates=cml_args.show_coordinates)
+                  show_ip=cml_args.show_ip, show_coordinates=cml_args.show_coordinates,
+                  show_sun=cml_args.show_sun, show_moon=cml_args.show_moon)
 
 
 
