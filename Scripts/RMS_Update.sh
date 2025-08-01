@@ -1155,6 +1155,16 @@ main() {
         [[ -f "$CURRENT_CAMERA_SETTINGS" ]] || { print_status "error" "$CURRENT_CAMERA_SETTINGS missing after restore"; exit 1; }
     fi
     
+    # Manage camera brightness settings for day/night modes
+    if [ -f "$CURRENT_CAMERA_SETTINGS" ]; then
+        print_status "info" "Managing camera brightness settings for day/night modes..."
+        if python3 "$RMSSOURCEDIR/Scripts/ManageCameraBrightness.py" "$CURRENT_CAMERA_SETTINGS"; then
+            print_status "success" "Camera brightness settings configured for day/night modes"
+        else
+            print_status "warning" "Camera brightness management completed with warnings"
+        fi
+    fi
+    
     print_status "success" "All configuration files verified after restore"
 
     # Mark custom files backup/restore cycle as completed
@@ -1197,6 +1207,22 @@ PY
     find "$SITE_DIR" -maxdepth 1 -name 'RMS-*.egg'       -prune -exec rm -rf {} +
     find "$SITE_DIR" -maxdepth 1 -name 'RMS-*.dist-info' -prune -exec rm -rf {} +
     find "$SITE_DIR" -maxdepth 1 -name 'RMS-*.egg-info'  -prune -exec rm -rf {} +
+    
+    # Remove orphaned RMS modules from old installations
+    print_status "info" "Checking for orphaned RMS modules in site-packages..."
+    
+    # Find all Python packages in RMS source (directories with __init__.py)
+    # and remove their counterparts from site-packages if they exist
+    while IFS= read -r -d '' module_path; do
+        module_name=$(basename "$(dirname "$module_path")")
+        # Skip __pycache__ and the main RMS directory itself
+        if [[ "$module_name" != "__pycache__" ]] && [[ "$module_name" != "RMS" ]]; then
+            if [ -d "$SITE_DIR/$module_name" ]; then
+                print_status "info" "Removing orphaned $module_name module from site-packages..."
+                rm -rf "$SITE_DIR/$module_name"
+            fi
+        fi
+    done < <(find "$RMSSOURCEDIR" -name "__init__.py" -type f -print0 2>/dev/null)
     
     print_status "info" "Removing build and dist directories..."
     rm -rf build dist
