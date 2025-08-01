@@ -318,10 +318,10 @@ if __name__ == "__main__":
                             help="Show coordinates of the camera.")
 
     arg_parser.add_argument('-s', '--show_sun', dest='show_sun', default=False, action="store_true",
-                            help="Plot the position of the sun in each hour for the next year.")
+                            help="Plot the position of the sun in each hour for the next year as seen from one station.")
 
     arg_parser.add_argument('-m', '--show_moon', dest='show_moon', default=False, action="store_true",
-                            help="Plot the position of the moon every 300 seconds for the next 29.5 days.")
+                            help="Plot the position of the moon every 5 minutes for the next 29.5 days as seen from one station.")
 
 
     ###
