@@ -452,7 +452,7 @@ class PairedStars(object):
 class PlateTool(QtWidgets.QMainWindow):
     def __init__(self, input_path, config, beginning_time=None, fps=None, gamma=None, use_fr_files=False,
         geo_points_input=None, startUI=True, mask=None, nobg=False, peribg=False, flipud=False,
-        flatbiassub=False):
+        flatbiassub=False, platepar_file=None, fits_file=None):
         """ SkyFit interactive window.
 
         Arguments:
@@ -475,6 +475,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 coloured mask instead of the avepixel. False by default.
             flipud: [bool] Flip the image upside down. False by default.
             flatbiassub: [bool] Subtract flat and bias frames. False by default.
+            platepar_file: [str] path to platepar file to load
+            fits_file: [str] path to fits file to open
         """
 
         super(PlateTool, self).__init__()
@@ -493,6 +495,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         self.config = config
+
 
         # Store forced time of first frame
         self.beginning_time = beginning_time
@@ -614,6 +617,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # Detect data input type and init the image handle
         self.detectInputType(load=True, beginning_time=beginning_time, use_fr_files=self.use_fr_files)
 
+        if fits_file is not None:
+            print("Loading {}".format(fits_file))
+            self.img_handle.setCurrentFF(fits_file)
+
         # Update the FPS if it's forced
         self.setFPS()
 
@@ -649,7 +656,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # PLATEPAR
 
         # Load the platepar file
-        self.loadPlatepar()
+        self.loadPlatepar(platepar_file=platepar_file)
 
 
         # Set the given gamma value to platepar
@@ -7150,7 +7157,7 @@ def handleLoginPath(login_path, number_of_fits=None):
 
     # If no config path passed in then assume ~/source/RMS for .config
     remote_path = "source/RMS" if not len(remote_path) else remote_path
-    config_file_name = ('.config')
+    config_file_name = '.config'
     if remote_path.endswith(config_file_name):
         remote_path = remote_path[:-len(config_file_name)]
     print("Getting .config from {}@{}:{}:{}".format(user, host, port, remote_path))
@@ -7219,10 +7226,10 @@ if __name__ == '__main__':
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Tool for fitting astrometry plates and photometric calibration.")
 
-    arg_parser.add_argument('input_path', metavar='INPUT_PATH', type=str,
+    arg_parser.add_argument('input_path', metavar='INPUT_PATH', type=str, nargs='?',
                             help='Path to the folder with FF or image files, path to a video file, '
                                  '  to a state file, an RMS bz2 file, or user@host:path/to/config/ . for remote platepar fitting'
-                                 '  if no path is given, the .config is assumedd to be at ~/source/RMS/.config'
+                                 '  if no path is given, the .config is assumed to be at ~/source/RMS/.config'
                                  ' If images or videos are given, their names must be in the format: YYYYMMDD_hhmmss.uuuuuu')
 
 
@@ -7281,7 +7288,78 @@ if __name__ == '__main__':
     cml_args = arg_parser.parse_args()
 
     #########################
+    platepar_file = None
+    best_fits_file = None
+    mask_file = None
+    if cml_args.input_path is None:
+        print("No input path specified")
+        platepar_file = None
+        if cml_args.config is None:
+            c = cr.parse(os.path.expanduser(os.path.join(os.getcwd(), ".config")))
+            cml_args.config_path = os.path.expanduser(os.path.join(os.getcwd(), ".config"))
+        else:
+            c = cr.parse(os.path.expanduser(cml_args.config))
+            cml_args.config_path = os.path.expanduser(cml_args.config)
+        if cml_args.mask is None:
+            mask_path = os.path.expanduser(os.path.join(os.getcwd(), c.mask_file))
+            if os.path.exists(mask_path):
+                cml_args.mask_path = mask_path
 
+        captured_directory_path = os.path.expanduser(os.path.join(c.data_dir, c.captured_dir))
+        station = c.stationID
+        captured_directory_list = os.listdir(captured_directory_path)
+        captured_directory_list.sort(reverse=True)
+        captured_directory_calstars = {}
+
+        for potential_captured_directory in captured_directory_list:
+            one_valid_fits = False
+            captured_directory_full_path = os.path.join(captured_directory_path, potential_captured_directory)
+            if potential_captured_directory.startswith("{}_".format(station)) and os.path.isdir(
+                    captured_directory_full_path):
+                dir_date = potential_captured_directory.split("_")[1]
+                dir_time = potential_captured_directory.split("_")[2]
+                dir_us = potential_captured_directory.split("_")[3]
+                calstars_file_name = "CALSTARS_{}_{}_{}_{}.txt".format(station, dir_date, dir_time, dir_us)
+                calstars_full_path = os.path.join(captured_directory_full_path, calstars_file_name)
+                if os.path.exists(calstars_full_path):
+                    calstar_data, _ = CALSTARS.readCALSTARS(captured_directory_full_path, calstars_file_name)
+                    star_count_max = 0
+                    best_fits_file = None
+                    for calstar_entry in calstar_data:
+                        fits_file = calstar_entry[0]
+                        star_count = len(calstar_entry[1])
+                        if star_count > star_count_max:
+                            if os.path.exists(os.path.join(captured_directory_full_path, fits_file)):
+                                best_fits_file = fits_file
+                                star_count_max = star_count
+                    print("Best fits file {} has {} stars".format(best_fits_file, star_count_max))
+                    captured_directory_calstars[captured_directory_full_path] = [best_fits_file, star_count_max]
+
+                # Now check to see if the directory contains at least one valid FITS file
+                captured_directory_contents = os.listdir(captured_directory_full_path)
+                for file_name in captured_directory_contents:
+                    if file_name.startswith("FF_{}".format(station.upper())) and file_name.endswith(".fits"):
+                        one_valid_fits = True
+                        break
+            if one_valid_fits:
+                break
+
+        print("In directory {} we found fits file {}".format(captured_directory_full_path, file_name))
+
+        if len(captured_directory_calstars):
+            print("We found a calstars file for directory {}".format(captured_directory_full_path))
+            print("Best file was {} with {} stars".format(best_fits_file, star_count_max))
+        else:
+            print("We did not find calstars for directory {}".format(captured_directory_full_path))
+
+        potential_platepar_path = os.path.join(os.getcwd(), "platepar_cmn2010.cal")
+        if os.path.exists(potential_platepar_path):
+            platepar_file = potential_platepar_path
+        else:
+            platepar_file = None
+
+        cml_args.input_path = captured_directory_full_path
+        pass
 
     # Parse the beginning time into a datetime object
     if cml_args.timebeg is not None:
@@ -7377,11 +7455,13 @@ if __name__ == '__main__':
                 mask.width, mask.height, config.width, config.height))
             mask = None
 
+
+
         # Init SkyFit
         plate_tool = PlateTool(input_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
             gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints,
             mask=mask, nobg=cml_args.nobg, peribg=cml_args.peribg, flipud=cml_args.flipud, 
-            flatbiassub=cml_args.flatbiassub)
+            flatbiassub=cml_args.flatbiassub, platepar_file=platepar_file, fits_file=best_fits_file)
 
 
     # Run the GUI app
