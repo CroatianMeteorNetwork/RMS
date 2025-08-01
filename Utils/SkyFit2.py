@@ -18,6 +18,12 @@ import matplotlib.gridspec as gridspec
 import scipy.optimize
 import pyqtgraph as pg
 import random
+import tempfile
+import tarfile
+import shutil
+import paramiko
+import subprocess
+
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
@@ -446,7 +452,7 @@ class PairedStars(object):
 class PlateTool(QtWidgets.QMainWindow):
     def __init__(self, input_path, config, beginning_time=None, fps=None, gamma=None, use_fr_files=False,
         geo_points_input=None, startUI=True, mask=None, nobg=False, peribg=False, flipud=False,
-        flatbiassub=False):
+        flatbiassub=False, platepar_file=None, fits_file=None):
         """ SkyFit interactive window.
 
         Arguments:
@@ -469,6 +475,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 coloured mask instead of the avepixel. False by default.
             flipud: [bool] Flip the image upside down. False by default.
             flatbiassub: [bool] Subtract flat and bias frames. False by default.
+            platepar_file: [str] path to platepar file to load
+            fits_file: [str] path to fits file to open
         """
 
         super(PlateTool, self).__init__()
@@ -487,6 +495,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         self.config = config
+
 
         # Store forced time of first frame
         self.beginning_time = beginning_time
@@ -608,6 +617,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Detect data input type and init the image handle
         self.detectInputType(load=True, beginning_time=beginning_time, use_fr_files=self.use_fr_files)
 
+
         # Update the FPS if it's forced
         self.setFPS()
 
@@ -643,7 +653,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # PLATEPAR
 
         # Load the platepar file
-        self.loadPlatepar()
+        self.loadPlatepar(platepar_file=platepar_file)
 
 
         # Set the given gamma value to platepar
@@ -658,6 +668,11 @@ class PlateTool(QtWidgets.QMainWindow):
         ###################################################################################################
 
         print()
+
+        if fits_file is not None:
+            print("Loading {}".format(fits_file))
+            self.img_handle.setCurrentFF(fits_file)
+
 
         # INIT WINDOW
         if startUI:
@@ -6503,6 +6518,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
 
+
     def getRollingShutterCorrectedFrameNo(self, frame, pick):
         """ Given a pick object, return rolling shutter corrected (or not, depending on the config) frame
             number.
@@ -6569,10 +6585,16 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         def getMarkedStars(include_unsuitable=True):
+            """Returns: a list of stars which are either marked as paired, or bad in image coordinates.
 
-            """
+            Arguments:
 
-            Returns: a list of stars which are either marked as paired, or bad in image coordinates
+            Keyword Arguments:
+                include_unsuitable: [bool] Include stars marked as unsuitable.
+
+            Return
+                marked_x: [list] of x coordinates.
+                marked_y: [list] of y coordindates.
 
             """
 
@@ -6593,17 +6615,19 @@ class PlateTool(QtWidgets.QMainWindow):
 
         def isDouble(x,y, reference_x_list, reference_y_list, min_separation=5):
 
-            """
-            Are x,y coordinates which are very close to, but distinct from all coordinates in reference list
+            """ Are x,y coordinates which are very close to, but distinct from all coordinates in reference list.
 
-            Args:
-                x: image coordinates of star
-                y: image coordinates of star
-                reference_x_list: list of x image coordinates
-                reference_y_list: list of y image coordinates
+            Arguments:
+                x: [int] Image coordinates of star.
+                y: [int] Image coordinates of star.
+                reference_x_list: [list] List of x image coordinates.
+                reference_y_list: [list] List of y image coordinates.
 
-            Returns:
-                [bool] True if star is within min_separation of another star
+            Keyword Arguments:
+                min_separation: [int] Minimum separation not to be considered a double star.
+
+            Return:
+                [bool] True if star is within min_separation of another star.
             """
 
             for reference_x, reference_y in zip(reference_x_list, reference_y_list):
@@ -6620,17 +6644,19 @@ class PlateTool(QtWidgets.QMainWindow):
 
             """
             From the catalogue of filtered stars return a lists of coordinates stars which are not marked,
-            and another list which is the distance to the nearest marked star
+            and another list which is the distance to the nearest marked star.
 
-            Args:
-                marked_x_list: list of marked star x coordinates
-                marked_y_list: list of marked star y coordinates
-                min_separation: minimum separation to be regarded as a different stra
+            Arguments:
+                marked_x_list: [list] list of marked star x coordinates.
+                marked_y_list: [list] list of marked star y coordinates.
+
+            Keyword Arguments
+                min_separation: [int] Minimum seperation not be regarded as a double star.
 
             Returns:
-                unmarked_x_list: list of unmarked star x coordinates
-                unmarked_y_list: list of unmarked star x coordinates
-                dist_nearest_marked_list: distance of the nearest marked star for returned star coordinates
+                unmarked_x_list: list of unmarked star x coordinates.
+                unmarked_y_list: list of unmarked star x coordinates.
+                dist_nearest_marked_list: distance of the nearest marked star for returned star coordinates.
 
 
             """
@@ -6732,6 +6758,605 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
 
+def handleBZ2(bz2_path):
+    """Passed a path to a bz2 file, unpack and prepare a working area for PlateTool, and launch.
+
+    Arguments:
+        bz2_path: [path] Path to a bz2 file.
+
+    Return:
+        working_dir: [path] Path to a directory containing .config, fits files and if available, a mask.
+    """
+
+    bz2_path = os.path.expanduser(bz2_path)
+    bz2_basename = os.path.basename(bz2_path)
+    stationID = bz2_basename.split("_")[0]
+
+    with tempfile.TemporaryDirectory() as working_dir:
+        print("Extracting {}".format(bz2_basename))
+        with tarfile.open(bz2_path, 'r:bz2') as tar:
+            tar.extractall(path=working_dir)
+            config_path = os.path.join(working_dir, ".config")
+            if os.path.exists(config_path):
+                config = cr.parse(config_path)
+            else:
+                print("No config file found in {}".format(bz2_basename))
+                print("Quitting")
+                exit()
+            mask_path = os.path.join(working_dir, config.mask_file)
+            if os.path.exists(mask_path):
+                mask = getMaskFile(".", config)
+
+            # If the dimensions of the mask do not match the config file, ignore the mask
+            if (mask is not None) and (not mask.checkResolution(config.width, config.height)):
+                print(
+                    "Mask resolution ({:d}, {:d}) does not match the image resolution ({:d}, {:d}). Ignoring the mask.".format(
+                        mask.width, mask.height, config.width, config.height))
+                mask = None
+
+            # Init SkyFit
+            plate_tool = PlateTool(working_dir, config, beginning_time=beginning_time, fps=cml_args.fps, \
+                gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints,
+                mask=mask, nobg=cml_args.nobg, peribg=cml_args.peribg, flipud=cml_args.flipud,
+                flatbiassub=cml_args.flatbiassub)
+
+            # Run the GUI app
+            a = app.exec_()
+            temp_platepar_location = os.path.join(working_dir, config.platepar_name)
+            platepar_destination = os.path.join(os.getcwd(), "{}.cal".format(config.stationID.lower()))
+            print("Writing modified platepar to {}".format(platepar_destination))
+            shutil.copy2(temp_platepar_location, platepar_destination)
+            sys.exit(a)
+
+def lsRemote(host, username, port, remote_path):
+    """Return the files in a remote directory.
+
+    Arguments:
+        host: [str] remote host.
+        username: [str] user account to use.
+        port: [int] remote port number.
+        remote_pat: [str] path of remote directory to list.
+
+    Return:
+        files: [list of strings] Names of remote files.
+    """
+
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # Accept unknown host keys
+    ssh.connect(hostname=host, port=port, username=username)
+
+    try:
+        sftp = ssh.open_sftp()
+        print("Remote path {}".format(remote_path))
+        files = sftp.listdir(remote_path)
+        return files
+    finally:
+        sftp.close()
+        ssh.close()
+
+def downloadFile(host, username, port, remote_path, local_path):
+    """Download a single file try compressed rsync first, then fall back to Paramiko
+
+    Arguments:
+        host: [str] hostname of remote machine.
+        username: [str] username for remote machine.
+        port: [str] port.
+        remote_path: [path] full path to destination.
+        local_path: [path] full path of local target.
+
+    Return:
+        Nothing.
+    """
+
+    try:
+
+        remote = "{}@{}:{}".format(username, host, remote_path)
+        result = subprocess.run(['rsync', '-z', remote], capture_output=True, text=True)
+        if "No such file or directory" in result.stderr :
+            print("Remote file {} was not found.".format(os.path.basename(remote)))
+            return
+        else:
+            result = subprocess.run(['rsync', '-z', remote, local_path], capture_output=True, text=True)
+        if not os.path.exists(os.path.expanduser(local_path)):
+            print("Download of {} from {}@{} failed. You need to add your keys to remote using ssh-copy-id.".format(remote_path, username,host))
+            quit()
+        return
+    except:
+        pass
+
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # Accept unknown host keys
+    try:
+        ssh.connect(hostname=host, port=port, username=username)
+    except:
+        print("Login to {}@{} failed. You need to add your keys to remote using ssh-copy-id.".format(username,host))
+        quit()
+    try:
+        sftp = ssh.open_sftp()
+        remote_file_list = sftp.listdir(os.path.dirname(remote_path))
+        if remote_file_list:
+            sftp.get(remote_path, local_path)
+
+    finally:
+        sftp.close()
+        ssh.close()
+
+    return
+
+def nItemsFromList(number, input_list, drop_first=False, drop_last=False, sort=True):
+    """Return a list of length number, containing equally spaced items from input list.
+
+
+
+    Arguments:
+       number: [int] Number of list items to return. Can be more than the length of the input list,
+                    in which case items will be duplicated to pad to length.
+        input_list: [list] Input list.
+
+    Keyword arguments:
+        drop_first: [bool] If true, remove the first item from the list.
+        drop_last: [bool] If true, remove the last item from the list.
+
+    Return:
+        output_list: [list] list of length number
+    """
+
+    if number is None:
+        return input_list
+
+    # Avoid divide by zero error
+    if number == 1:
+        return [input_list[-1]]
+
+    # Avoid working on empty list
+
+    if len(input_list) < 1:
+        return[]
+
+    # Truncate as required
+    input_list = input_list[1:] if drop_first else input_list
+    input_list = input_list[:-1] if drop_last else input_list
+
+    # Sort the list
+    if sort:
+        input_list.sort()
+
+    output_list, n, gap = [], 0, (len(input_list)) / (number)
+    for i in range(0, number):
+        output_list.append(input_list[round(n)])
+        n += gap
+
+    return output_list
+
+def getFiles(host, user, port, remote_path, local_path, files_list, number=None):
+    """Passed a list of files, get from remote path and put in local path.
+
+    Arguments:
+        host: [str] hostname.
+        user: [str] user account.
+        port: [str] port.
+        remote_path: [str] remote path to get files from.
+        local_path: [str] local path to put files in.
+
+    Keyword Arguments:
+        number: [int] Optional, default None. The number of files to download from the list. If none,
+        or more than the number of files in the list, download all. If 1, download penultimate, if 0,
+        download middle.
+
+
+    Return:
+        local_target_list: [list] list of retrieved files.
+    """
+
+    files_list.sort()
+    if number == 0:
+        # Pick approximately the middle from the fil
+        files_list = [files_list[len(files_list) // 2]]
+    else:
+        files_list = nItemsFromList(number, files_list, drop_last=True, sort=True)
+    local_target_list = []
+    for f in files_list:
+        local_target, remote_target = os.path.join(local_path, f), os.path.join(remote_path, f)
+        text = highlight("Downloading ", files_list, f)
+        print(text, end='\r')
+        downloadFile(host, user, port, remote_target, local_target)
+        local_target_list.append(local_target)
+    text = highlight("Downloading ", files_list, f, all_done = True)
+    print(text)
+    return local_target_list
+
+def uploadFile(host, username, port, local_path, remote_path):
+    """Upload a single file.
+
+    Arguments:
+        host: [str] hostname of remote machine.
+        username: [str] username for remote machine.
+        port: [str] port.
+        local_path: [path] full path to file to be uploaded.
+        remote_path: [path] full path to destination.
+
+    Return:
+        Nothing.
+    """
+
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # Accept unknown host keys
+    try:
+        ssh.connect(hostname=host, port=port, username=username)
+    except:
+        print("Login to {}@{} failed. You need to add your keys to remote using ssh-copy-id.".format(username,host))
+
+    try:
+        sftp = ssh.open_sftp()
+        sftp.put(local_path, remote_path)
+        print("Uploaded {} to {}".format(local_path, remote_path))
+    finally:
+        sftp.close()
+        ssh.close()
+
+def putFiles(host, user, port, local_path, remote_path, files_list):
+    """Passed a list of files, put from local_path to remote path.
+
+    Arguments:
+        host: [str] hostname.
+        user: [str] user account.
+        port: [str] port.
+        local_path: [str] local path to get files from.
+        remote_path: [str] remote path to put files in.
+
+
+    Return:
+        local_target_list: [list] list of retrieved files.
+    """
+
+    local_target_list = []
+    for f in files_list:
+        local_target, remote_target = os.path.join(local_path, f), os.path.join(remote_path, f)
+        if os.path.exists(local_target):
+            uploadFile(host, user, port, local_target, remote_target)
+            local_target_list.append(local_target)
+        else:
+            print("Upload target {} not found on local.".format(local_target))
+    return local_target_list
+
+def getUserHostPortPath(path):
+    """Passed a user@host:port:path, or user@host:path return components, assuming port 22, and
+    if no path, assume source/RMS/
+
+    Arguments:
+        path: [str] path to be broken apart.
+
+    Return:
+        user: [str] e.g. rms
+        host: [str] e.g. raspberrypi
+        port: [str] e.g. 22
+        path: [str] e.g. 192.168.1.2
+    """
+
+    pattern_port = r'^([\w.-]+)@([\w.-]+):(\d+):(.*)$'
+    match_port = re.match(pattern_port, path)
+
+    if match_port:
+        user, host, port, path = match_port.groups()
+        return user, host, port, path
+
+    pattern = r'^([^@:\s]+)@([^@:\s]+):([^\s]+)$'
+    match = re.match(pattern, path)
+
+    if match:
+        user, host, path = match.groups()
+        return user, host, 22, path
+
+    pattern = r'^([\w\.-]+)@([\w\.-]+)$'
+    match_username_hostname = re.match(pattern, path)
+
+    if match_username_hostname:
+        user, host = match_username_hostname.groups()
+        return user, host, 22, "source/RMS/"
+
+
+    return None, None, None, None
+
+def highlight(custom_text, list, highlight, all_done=False):
+
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+    output = HEADER + custom_text + OKBLUE
+    if len(list) > 5:
+        output += "\n"
+    i = 0
+    highlight_passed = False
+    for item in list:
+        i += 1
+        if item == highlight and not all_done:
+            highlight_passed = True
+            output += WARNING
+            output += "{}".format(item)
+            output += ENDC + " "
+        elif highlight_passed == True and not all_done:
+            output += OKBLUE
+            output += "{}".format(item)
+            output += ENDC + " "
+        else:
+            output += OKGREEN
+            output += "{}".format(item)
+            output += ENDC + " "
+
+        if i % 6 == 0:
+            output += "\n" + " " * (len(custom_text) + 2)
+    output += ENDC
+
+    return output
+
+def getRemoteCapturedDirsPath(rc):
+    """Passed a config, get the path to the captured files on the remote machine.
+
+    config parser will expond the ~ in any remote path as though it is on the local machine.
+    This function strips off the local ~ and joins the remote ~
+
+    Arguments:
+        rc: [config] the remote RMS config instance.
+
+    Return:
+        [path] path to remote captured files.
+    """
+
+    len_local_home_directory = len(os.path.expanduser("~")) + len("/")
+    return os.path.join(rc.data_dir[len_local_home_directory:], rc.captured_dir)
+
+def getLatestCapturedDirectory(r, host, user, port):
+    """Get the latest captured directory from the remote machine.
+
+    Arguments:
+        r: [config] the remote RMS config instance.
+        host: [str] remote host.
+        user: [str] remote user.
+        port: [str] remote port.
+
+    Return:
+        [path] path to remote captured files directory.
+    """
+
+    remote_directory = getRemoteCapturedDirsPath(r)
+    print("Getting directory list of {}@{}:{}:{}".format(user, host, port, remote_directory))
+    remote_captured_directory_list = lsRemote(host, user, port, remote_directory)
+    remote_captured_directory_list = [d for d in remote_captured_directory_list if d.startswith(r.stationID)]
+    remote_captured_directory_list.sort(reverse=True)
+    return remote_captured_directory_list[0]
+
+def isLoginPath(path):
+    """Passed a path see if it is a path to a remote RMS installation.
+
+    Arguments:
+        path: [str] String to be tested.
+
+    Return:
+        is_login_path: [bool] True if a network path, else false.
+        """
+    pattern_username_hostname = r'\b[\w\.-]+@[\w\.-]+\b'
+    pattern_port = r'^([\w.-]+)@([\w.-]+):(\d+):(.*)$'
+    pattern = r'^[^@:\s]+@[^@:\s]+:[^\s]+$'
+    is_login_path = re.match(pattern, path) or re.match(pattern_port, path) or re.match(pattern_username_hostname, path)
+
+    return is_login_path
+
+def handleLoginPath(login_path, number_of_fits=None):
+    """Passed a login path, retrieve necessary files and start the platetool.
+
+    Arguments:
+       login_path: [str] user@host:port:path/to/.config or user@host:path/to/.config
+
+
+    Return:
+        Nothing.
+    """
+    # If no argyment was passsed then set as one, return approximiate middle file
+    number_of_fits = 1 if number_of_fits is None else int(number_of_fits)
+    user, host, port, remote_path = getUserHostPortPath(login_path)
+
+    # If no config path passed in then assume ~/source/RMS for .config
+    remote_path = "source/RMS" if not len(remote_path) else remote_path
+    config_file_name = '.config'
+    if remote_path.endswith(config_file_name):
+        remote_path = remote_path[:-len(config_file_name)]
+    print("Getting .config from {}@{}:{}:{}".format(user, host, port, remote_path))
+    # Create temporary directory
+    with tempfile.TemporaryDirectory() as local_path:
+
+        # First get the .config file
+        files_list = ['.config']
+
+        # Record a start time
+        time_started_getting_files = datetime.datetime.now(datetime.timezone.utc)
+
+        # Parse the remote configuration
+        remote_config = cr.parse(getFiles(host, user, port, remote_path, local_path, files_list)[0])
+
+        # Start making a list of files to get; the platepar, and the mask
+        platepar_mask_list = [remote_config.platepar_name, remote_config.mask_file]
+
+        # Get the platepar and and the mask
+        getFiles(host, user, port, remote_path, local_path, platepar_mask_list)
+
+        # Now get the remote paths of the remote directories of interest
+        latest_cap_dir = os.path.join(getRemoteCapturedDirsPath(remote_config), getLatestCapturedDirectory(remote_config, host, user, port))
+        latest_captured_files = lsRemote(host, user, port, latest_cap_dir)
+
+        # Filter only for fits files for the remote station
+        fits_files = [f for f in latest_captured_files if f.endswith(".fits") and f.startswith("FF_{}".format(remote_config.stationID))]
+
+        # Get the files
+        getFiles(host, user, port, latest_cap_dir, local_path, fits_files, number=number_of_fits)
+
+        # Record and print the time taken
+        time_finished_getting_files = datetime.datetime.now(datetime.timezone.utc)
+        time_taken = (time_finished_getting_files - time_started_getting_files).total_seconds()
+        print("Files retrieved in {:.1f} seconds".format(time_taken))
+
+        # Load the mask structure
+        mask_path = os.path.join(local_path, remote_config.mask_file)
+        if os.path.exists(mask_path):
+            mask_dir = os.path.dirname(mask_path)
+            mask = getMaskFile(mask_dir, remote_config)
+
+        # If the dimensions of the mask do not match the config file, ignore the mask
+        if (mask is not None) and (not mask.checkResolution(remote_config.width, remote_config.height)):
+            print(
+                "Mask resolution ({:d}, {:d}) does not match the image resolution ({:d}, {:d}). Ignoring the mask.".format(
+                    mask.width, mask.height, remote_config.width, remote_config.height))
+            mask = None
+
+        # Init SkyFit
+        plate_tool = PlateTool(local_path, remote_config, beginning_time=beginning_time, fps=cml_args.fps, \
+                               gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints,
+                               mask=mask, nobg=cml_args.nobg, peribg=cml_args.peribg, flipud=cml_args.flipud,
+                               flatbiassub=cml_args.flatbiassub)
+
+        # Run the GUI app
+        a = app.exec_()
+        files_list = [remote_config.platepar_name]
+        putFiles(host, user, port, local_path, remote_path, files_list)
+        sys.exit(a)
+
+
+def getFITSMostStars(calstars_full_path):
+    """
+    Use the calstars file to find the fits file which exists in the respective directory with the most stars
+    Args:
+        calstars_full_path: [str] full path to the calstars file
+
+    Return:
+        best_fits_file:[str] full path to the fits file with the most stars
+        star_count_max[int]: number of stars on that fits file
+    """
+
+    best_fits_file, star_count_max = None, 0
+    if os.path.exists(calstars_full_path):
+        captured_directory_full_path = os.path.dirname(calstars_full_path)
+        calstars_file_name = os.path.basename(calstars_full_path)
+        calstar_data, _ = CALSTARS.readCALSTARS(captured_directory_full_path, calstars_file_name)
+        for calstar_entry in calstar_data:
+            fits_file = calstar_entry[0]
+            star_count = len(calstar_entry[1])
+            if star_count > star_count_max:
+                if os.path.exists(os.path.join(captured_directory_full_path, fits_file)):
+                    best_fits_file = os.path.join(captured_directory_full_path, fits_file)
+                    star_count_max = star_count
+        print("Best fits file {} has {} stars".format(best_fits_file, star_count_max))
+
+
+    return best_fits_file, star_count_max
+
+def getCalstarsPath(captured_directory, config):
+    """
+
+    Arguments:
+        captured_directory: [str] RMS captured files directory
+        config: [config] RMS config instance
+
+    Return:
+        calstars_full_path:[str] full path to the calstars file
+    """
+
+    dir_date = captured_directory.split("_")[1]
+    dir_time = captured_directory.split("_")[2]
+    dir_us = captured_directory.split("_")[3]
+    captured_directory_full_path = os.path.join(config.data_dir, config.captured_dir, captured_directory)
+    calstars_file_name = "CALSTARS_{}_{}_{}_{}.txt".format(config.stationID, dir_date, dir_time, dir_us)
+    calstars_full_path = os.path.join(captured_directory_full_path, calstars_file_name)
+
+    return calstars_full_path
+
+
+def getPlateparFilePath(config):
+    """
+
+    Arguments:
+        config: [config] RMS config instance
+
+    Return:
+        platepar_file_path: [str] full path to a platepar file else None
+    """
+
+    potential_platepar_path = os.path.join(os.getcwd(), config.platepar_name)
+    if os.path.exists(potential_platepar_path):
+        platepar_file_path = potential_platepar_path
+    else:
+        platepar_file_path = None
+
+    return platepar_file_path
+
+def handleNoInputPath():
+    """
+    If no input path is specified then determine some good parameters for starting the platetool
+
+    The most recent captured files directory is chosen.
+    If this contains a calstar file, then the path to the fits file with the most stars is returned
+    If no calstar file, then none is returned
+    The default config and mask are also returned
+
+    Return:
+        captured_directory_full_path: [str] full path to the most recent captured directory which contains at least one fits file
+        platepar_file: [str] full path to the platepar file
+        mask_path: [str] full path to the mask kile
+        best_fits_file: [str] full path to the fits file with the most stars
+        c: [config] rms config instance
+
+
+    """
+
+
+    print("No input path specified, determining folder to use")
+
+    if cml_args.config is None:
+        c = cr.parse(os.path.expanduser(os.path.join(os.getcwd(), ".config")))
+        cml_args.config_path = os.path.expanduser(os.path.join(os.getcwd(), ".config"))
+    else:
+        c = cr.parse(os.path.expanduser(cml_args.config))
+        cml_args.config_path = os.path.expanduser(cml_args.config)
+
+    if cml_args.mask is None:
+        mask_path = os.path.expanduser(os.path.join(os.getcwd(), c.mask_file))
+        if os.path.exists(mask_path):
+            cml_args.mask_path = mask_path
+    else:
+        mask_path = cml_args.mask_path
+
+    captured_directory_path = os.path.expanduser(os.path.join(str(c.data_dir), str(c.captured_dir)))
+    station = c.stationID
+    captured_directory_list = os.listdir(captured_directory_path)
+    captured_directory_full_path = None
+    if not len(captured_directory_list):
+        print("No captured directories found, cannot continue")
+        quit()
+
+    for potential_captured_directory in sorted(captured_directory_list, reverse=True):
+        one_valid_fits = False
+        captured_directory_full_path = os.path.join(captured_directory_path, potential_captured_directory)
+        if potential_captured_directory.startswith("{}_".format(station)) and os.path.isdir(
+                captured_directory_full_path):
+            best_fits_file, star_count_max = getFITSMostStars(getCalstarsPath(potential_captured_directory, c))
+
+            # Now check to see if the directory contains at least one valid FITS file
+            captured_directory_contents = os.listdir(captured_directory_full_path)
+            for file_name in captured_directory_contents:
+                if file_name.startswith("FF_{}".format(station.upper())) and file_name.endswith(".fits"):
+                    one_valid_fits = True
+                    break
+        if one_valid_fits:
+            break
+
+    platepar_file = getPlateparFilePath(c)
+
+    return captured_directory_full_path, platepar_file, mask_path, best_fits_file, c
 
 if __name__ == '__main__':
     ### COMMAND LINE ARGUMENTS
@@ -6739,16 +7364,18 @@ if __name__ == '__main__':
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Tool for fitting astrometry plates and photometric calibration.")
 
-    arg_parser.add_argument('input_path', metavar='INPUT_PATH', type=str,
-                            help='Path to the folder with FF or image files, path to a video file, or to a state file.'
+    arg_parser.add_argument('input_path', metavar='INPUT_PATH', type=str, nargs='?',
+                            help='Path to the folder with FF or image files, path to a video file, '
+                                 '  to a state file, an RMS bz2 file, or user@host:path/to/config/ . for remote platepar fitting'
+                                 '  if no path is given, the .config is assumed to be at ~/source/RMS/.config'
                                  ' If images or videos are given, their names must be in the format: YYYYMMDD_hhmmss.uuuuuu')
+
 
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
                             help="Path to a config file which will be used instead of the default one."
                                  " To load the .config file in the given data directory, write '.' (dot).")
 
-    arg_parser.add_argument('-r', '--fr', action="store_true", \
-        help="""Use FR files. """)
+    arg_parser.add_argument('-r', '--fr', action="store_true",  help="""Use FR files. """)
 
     arg_parser.add_argument('-t', '--timebeg', nargs=1, metavar='TIME', type=str,
                             help="The beginning time of the video file in the YYYYMMDD_hhmmss.uuuuuu format.")
@@ -6782,17 +7409,28 @@ if __name__ == '__main__':
 
     arg_parser.add_argument('-m', '--mask', metavar='MASK_PATH', type=str,
                             help="Path to a mask file which will be applied to the star catalog")
-    
+
+    arg_parser.add_argument('-u', '--number_of_fits', metavar='NUMBER_OF_FITS', type=int,
+                            help="When working remotely, number of fits files to download. \n"
+                                    "If not specified, then pick the middle file"
+                                    "1 - Pick the penultimate file by time. \n"
+                                    "0 - Pick the file in the approximate middle of most recent capture session. \n")
+
+
+
     arg_parser.add_argument('--flatbiassub', action="store_true", \
         help="Subtract the bias from the flat. False by default.")
-
 
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
     #########################
-
+    platepar_file = None
+    best_fits_file = None
+    mask_file = None
+    if cml_args.input_path is None:
+        cml_args.input_path, platepar_file, cml_args.mask_path, best_fits_file, config = handleNoInputPath()
 
     # Parse the beginning time into a datetime object
     if cml_args.timebeg is not None:
@@ -6848,6 +7486,12 @@ if __name__ == '__main__':
 
         plate_tool.loadState(dir_path, state_name, beginning_time=beginning_time, mask=mask)
 
+    elif cml_args.input_path.endswith('.bz2'):
+        handleBZ2(cml_args.input_path)
+
+    elif isLoginPath(cml_args.input_path):
+        handleLoginPath(cml_args.input_path, cml_args.number_of_fits)
+
     else:
 
         # Extract the data directory path
@@ -6882,11 +7526,13 @@ if __name__ == '__main__':
                 mask.width, mask.height, config.width, config.height))
             mask = None
 
+
+
         # Init SkyFit
         plate_tool = PlateTool(input_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
             gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints,
             mask=mask, nobg=cml_args.nobg, peribg=cml_args.peribg, flipud=cml_args.flipud, 
-            flatbiassub=cml_args.flatbiassub)
+            flatbiassub=cml_args.flatbiassub, platepar_file=platepar_file, fits_file=best_fits_file)
 
 
     # Run the GUI app
