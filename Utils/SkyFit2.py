@@ -617,9 +617,6 @@ class PlateTool(QtWidgets.QMainWindow):
         # Detect data input type and init the image handle
         self.detectInputType(load=True, beginning_time=beginning_time, use_fr_files=self.use_fr_files)
 
-        if fits_file is not None:
-            print("Loading {}".format(fits_file))
-            self.img_handle.setCurrentFF(fits_file)
 
         # Update the FPS if it's forced
         self.setFPS()
@@ -671,6 +668,11 @@ class PlateTool(QtWidgets.QMainWindow):
         ###################################################################################################
 
         print()
+
+        if fits_file is not None:
+            print("Loading {}".format(fits_file))
+            self.img_handle.setCurrentFF(fits_file)
+
 
         # INIT WINDOW
         if startUI:
@@ -7220,6 +7222,137 @@ def handleLoginPath(login_path, number_of_fits=None):
         sys.exit(a)
 
 
+def getFITSMostStars(calstars_full_path):
+    """
+    Use the calstars file to find the fits file which exists in the respective directory with the most stars
+    Args:
+        calstars_full_path: [str] full path to the calstars file
+
+    Return:
+        best_fits_file:[str] full path to the fits file with the most stars
+        star_count_max[int]: number of stars on that fits file
+    """
+
+    best_fits_file, star_count_max = None, 0
+    if os.path.exists(calstars_full_path):
+        captured_directory_full_path = os.path.dirname(calstars_full_path)
+        calstars_file_name = os.path.basename(calstars_full_path)
+        calstar_data, _ = CALSTARS.readCALSTARS(captured_directory_full_path, calstars_file_name)
+        for calstar_entry in calstar_data:
+            fits_file = calstar_entry[0]
+            star_count = len(calstar_entry[1])
+            if star_count > star_count_max:
+                if os.path.exists(os.path.join(captured_directory_full_path, fits_file)):
+                    best_fits_file = os.path.join(captured_directory_full_path, fits_file)
+                    star_count_max = star_count
+        print("Best fits file {} has {} stars".format(best_fits_file, star_count_max))
+
+
+    return best_fits_file, star_count_max
+
+def getCalstarsPath(captured_directory, config):
+    """
+
+    Arguments:
+        captured_directory: [str] RMS captured files directory
+        config: [config] RMS config instance
+
+    Return:
+        calstars_full_path:[str] full path to the calstars file
+    """
+
+    dir_date = captured_directory.split("_")[1]
+    dir_time = captured_directory.split("_")[2]
+    dir_us = captured_directory.split("_")[3]
+    captured_directory_full_path = os.path.join(config.data_dir, config.captured_dir, captured_directory)
+    calstars_file_name = "CALSTARS_{}_{}_{}_{}.txt".format(config.stationID, dir_date, dir_time, dir_us)
+    calstars_full_path = os.path.join(captured_directory_full_path, calstars_file_name)
+
+    return calstars_full_path
+
+
+def getPlateparFilePath(config):
+    """
+
+    Arguments:
+        config: [config] RMS config instance
+
+    Return:
+        platepar_file_path: [str] full path to a platepar file else None
+    """
+
+    potential_platepar_path = os.path.join(os.getcwd(), config.platepar_name)
+    if os.path.exists(potential_platepar_path):
+        platepar_file_path = potential_platepar_path
+    else:
+        platepar_file_path = None
+
+    return platepar_file_path
+
+def handleNoInputPath():
+    """
+    If no input path is specified then determine some good parameters for starting the platetool
+
+    The most recent captured files directory is chosen.
+    If this contains a calstar file, then the path to the fits file with the most stars is returned
+    If no calstar file, then none is returned
+    The default config and mask are also returned
+
+    Return:
+        captured_directory_full_path: [str] full path to the most recent captured directory which contains at least one fits file
+        platepar_file: [str] full path to the platepar file
+        mask_path: [str] full path to the mask kile
+        best_fits_file: [str] full path to the fits file with the most stars
+        c: [config] rms config instance
+
+
+    """
+
+
+    print("No input path specified, determining folder to use")
+
+    if cml_args.config is None:
+        c = cr.parse(os.path.expanduser(os.path.join(os.getcwd(), ".config")))
+        cml_args.config_path = os.path.expanduser(os.path.join(os.getcwd(), ".config"))
+    else:
+        c = cr.parse(os.path.expanduser(cml_args.config))
+        cml_args.config_path = os.path.expanduser(cml_args.config)
+
+    if cml_args.mask is None:
+        mask_path = os.path.expanduser(os.path.join(os.getcwd(), c.mask_file))
+        if os.path.exists(mask_path):
+            cml_args.mask_path = mask_path
+    else:
+        mask_path = cml_args.mask_path
+
+    captured_directory_path = os.path.expanduser(os.path.join(str(c.data_dir), str(c.captured_dir)))
+    station = c.stationID
+    captured_directory_list = os.listdir(captured_directory_path)
+    captured_directory_full_path = None
+    if not len(captured_directory_list):
+        print("No captured directories found, cannot continue")
+        quit()
+
+    for potential_captured_directory in sorted(captured_directory_list, reverse=True):
+        one_valid_fits = False
+        captured_directory_full_path = os.path.join(captured_directory_path, potential_captured_directory)
+        if potential_captured_directory.startswith("{}_".format(station)) and os.path.isdir(
+                captured_directory_full_path):
+            best_fits_file, star_count_max = getFITSMostStars(getCalstarsPath(potential_captured_directory, c))
+
+            # Now check to see if the directory contains at least one valid FITS file
+            captured_directory_contents = os.listdir(captured_directory_full_path)
+            for file_name in captured_directory_contents:
+                if file_name.startswith("FF_{}".format(station.upper())) and file_name.endswith(".fits"):
+                    one_valid_fits = True
+                    break
+        if one_valid_fits:
+            break
+
+    platepar_file = getPlateparFilePath(c)
+
+    return captured_directory_full_path, platepar_file, mask_path, best_fits_file, c
+
 if __name__ == '__main__':
     ### COMMAND LINE ARGUMENTS
 
@@ -7292,74 +7425,7 @@ if __name__ == '__main__':
     best_fits_file = None
     mask_file = None
     if cml_args.input_path is None:
-        print("No input path specified")
-        platepar_file = None
-        if cml_args.config is None:
-            c = cr.parse(os.path.expanduser(os.path.join(os.getcwd(), ".config")))
-            cml_args.config_path = os.path.expanduser(os.path.join(os.getcwd(), ".config"))
-        else:
-            c = cr.parse(os.path.expanduser(cml_args.config))
-            cml_args.config_path = os.path.expanduser(cml_args.config)
-        if cml_args.mask is None:
-            mask_path = os.path.expanduser(os.path.join(os.getcwd(), c.mask_file))
-            if os.path.exists(mask_path):
-                cml_args.mask_path = mask_path
-
-        captured_directory_path = os.path.expanduser(os.path.join(c.data_dir, c.captured_dir))
-        station = c.stationID
-        captured_directory_list = os.listdir(captured_directory_path)
-        captured_directory_list.sort(reverse=True)
-        captured_directory_calstars = {}
-
-        for potential_captured_directory in captured_directory_list:
-            one_valid_fits = False
-            captured_directory_full_path = os.path.join(captured_directory_path, potential_captured_directory)
-            if potential_captured_directory.startswith("{}_".format(station)) and os.path.isdir(
-                    captured_directory_full_path):
-                dir_date = potential_captured_directory.split("_")[1]
-                dir_time = potential_captured_directory.split("_")[2]
-                dir_us = potential_captured_directory.split("_")[3]
-                calstars_file_name = "CALSTARS_{}_{}_{}_{}.txt".format(station, dir_date, dir_time, dir_us)
-                calstars_full_path = os.path.join(captured_directory_full_path, calstars_file_name)
-                if os.path.exists(calstars_full_path):
-                    calstar_data, _ = CALSTARS.readCALSTARS(captured_directory_full_path, calstars_file_name)
-                    star_count_max = 0
-                    best_fits_file = None
-                    for calstar_entry in calstar_data:
-                        fits_file = calstar_entry[0]
-                        star_count = len(calstar_entry[1])
-                        if star_count > star_count_max:
-                            if os.path.exists(os.path.join(captured_directory_full_path, fits_file)):
-                                best_fits_file = fits_file
-                                star_count_max = star_count
-                    print("Best fits file {} has {} stars".format(best_fits_file, star_count_max))
-                    captured_directory_calstars[captured_directory_full_path] = [best_fits_file, star_count_max]
-
-                # Now check to see if the directory contains at least one valid FITS file
-                captured_directory_contents = os.listdir(captured_directory_full_path)
-                for file_name in captured_directory_contents:
-                    if file_name.startswith("FF_{}".format(station.upper())) and file_name.endswith(".fits"):
-                        one_valid_fits = True
-                        break
-            if one_valid_fits:
-                break
-
-        print("In directory {} we found fits file {}".format(captured_directory_full_path, file_name))
-
-        if len(captured_directory_calstars):
-            print("We found a calstars file for directory {}".format(captured_directory_full_path))
-            print("Best file was {} with {} stars".format(best_fits_file, star_count_max))
-        else:
-            print("We did not find calstars for directory {}".format(captured_directory_full_path))
-
-        potential_platepar_path = os.path.join(os.getcwd(), "platepar_cmn2010.cal")
-        if os.path.exists(potential_platepar_path):
-            platepar_file = potential_platepar_path
-        else:
-            platepar_file = None
-
-        cml_args.input_path = captured_directory_full_path
-        pass
+        cml_args.input_path, platepar_file, cml_args.mask_path, best_fits_file, config = handleNoInputPath()
 
     # Parse the beginning time into a datetime object
     if cml_args.timebeg is not None:
