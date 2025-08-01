@@ -296,6 +296,60 @@ def pointInsideConvexPolygonSphere(points, vertices):
     return sphericalPolygonCheck(vertices, points)
 
 
+def sphericalPolygonArea(points):
+    """ Computes the area of a spherical polygon given its vertices.
+
+    This method uses a formula based on the surveyor's formula (or shoelace
+    formula) adapted for a sphere. It is more robust than implementations
+    of Girard's theorem for polygons that cross the RA=0/360 meridian.
+    It requires unwrapped longitude (RA) coordinates.
+
+    Arguments:
+        points: [list of tuples or Nx2 numpy array] A list of (RA, Dec) 
+            points in degrees for the polygon vertices. RA coordinates must be
+            "unwrapped" (i.e., continuous and not confined to 0-360).
+
+    Return:
+        [float] The area of the polygon in square degrees.
+
+    """
+
+    # A polygon must have at least 3 vertices.
+    if len(points) < 3:
+        return 0.0
+
+    # Convert points to radians
+    points_rad = np.radians(points)
+    
+    # Extract unwrapped RA and Dec from the input points
+    ra_rad = points_rad[:, 0]
+    dec_rad = points_rad[:, 1]
+    
+    # We use the spherical adaptation of the surveyor's formula.
+    # It calculates the signed area by summing the areas of trapezoids 
+    # formed by each polygon segment and lines of longitude.
+    # Area = sum[ (ra_{i+1} - ra_i)*(sin(dec_{i+1}) + sin(dec_i))/2 ]
+    
+    # To ensure the polygon is closed, we calculate the sum over the segments
+    # by pairing each vertex with the next, wrapping around at the end.
+    i = np.arange(len(ra_rad))
+    i_next = (i + 1) % len(ra_rad)
+
+    # Calculate the difference in RA for each segment
+    delta_ra = ra_rad[i_next] - ra_rad[i]
+
+    # Sum of sines of declination for each segment
+    sum_sin_dec = np.sin(dec_rad[i_next]) + np.sin(dec_rad[i])
+
+    # Sum the signed areas of the trapezoids
+    total_area_rad = np.sum(delta_ra*sum_sin_dec)/2.0
+
+    # The result is in steradians. Take the absolute value and convert to square degrees.
+    area_sq_deg = np.abs(total_area_rad*np.degrees(1)**2)
+
+    return area_sq_deg
+
+
 ##############################################################################################################
 
 def histogramEdgesEqualDataNumber(x, nbins):
