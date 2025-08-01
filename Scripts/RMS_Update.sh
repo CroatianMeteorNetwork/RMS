@@ -1210,19 +1210,31 @@ PY
     
     # Remove orphaned RMS modules from old installations
     print_status "info" "Checking for orphaned RMS modules in site-packages..."
+    print_status "info" "Looking for modules in: $RMSSOURCEDIR"
+    print_status "info" "Will check site-packages at: $SITE_DIR"
     
     # Find all Python packages in RMS source (directories with __init__.py)
     # and remove their counterparts from site-packages if they exist
+    modules_found=0
     while IFS= read -r -d '' module_path; do
-        module_name=$(basename "$(dirname "$module_path")")
+        module_dir=$(dirname "$module_path")
+        module_name=$(basename "$module_dir")
         # Skip __pycache__ and the main RMS directory itself
         if [[ "$module_name" != "__pycache__" ]] && [[ "$module_name" != "RMS" ]]; then
+            ((modules_found++))
+            print_status "info" "Found module: $module_name (from $module_dir)"
             if [ -d "$SITE_DIR/$module_name" ]; then
                 print_status "info" "Removing orphaned $module_name module from site-packages..."
                 rm -rf "$SITE_DIR/$module_name"
             fi
         fi
     done < <(find "$RMSSOURCEDIR" -name "__init__.py" -type f -print0 2>/dev/null)
+    
+    if [ $modules_found -eq 0 ]; then
+        print_status "warning" "No RMS modules found in source directory"
+    else
+        print_status "info" "Checked $modules_found RMS modules"
+    fi
     
     print_status "info" "Removing build and dist directories..."
     rm -rf build dist
