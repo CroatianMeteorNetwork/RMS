@@ -15,6 +15,93 @@ from RMS.Routines.FOVSkyArea import fovSkyArea
 from RMS.Astrometry.Conversions import latLonAlt2ECEF, ECEF2AltAz
 import ephem
 
+def plotMoon(ax, configs, show_moon, station_code, moon_plotted):
+    """
+    Plots the position of the moon every 5 minutes for the next 29.5 days
+
+    Arguments:
+        ax: [axis] axis on which to plot
+        configs: [dict] dictionary of config files
+        show_moon: [bool] whether to show moon
+        station_code: [str] station code
+        moon_plotted: [bool] if True, moon will not be plotted again, if False, moon will be plotted
+
+    Return:
+        moon_plotted: [bool] Generally returned true, unless the moon never rose above 0 elevation
+    """
+
+    if show_moon and station_code in configs and not moon_plotted:
+        c = configs[station_code]
+        o = ephem.Observer()
+        o.lat = str(c.latitude)
+        o.long = str(c.longitude)
+        o.elevation = c.elevation
+
+        # If the current time is not given, use the current time
+        current_time = datetime.datetime.now(datetime.timezone.utc)
+
+        moon_azim_list, moon_elev_list = [], []
+        for elapsed_time in range(0, 59 * 12 * 60 * 60, 300):
+            time_to_evaluate = current_time + datetime.timedelta(seconds=elapsed_time)
+            o.date = time_to_evaluate
+            moon = ephem.Moon(o)
+
+            moon.compute(o)
+
+            if moon.alt > 0:
+                moon_azim_list.append(moon.az)
+                moon_elev_list.append(np.degrees(moon.alt))
+
+        if len(moon_elev_list):
+            moon_plotted = True
+            ax.scatter(moon_azim_list, moon_elev_list, color='blue')
+    return moon_plotted
+
+
+
+def plotSun(ax, configs, show_sun, station_code, sun_plotted):
+    """
+        Plots the position of the sun every hour for the next 365 days
+
+        Arguments:
+            ax: [axis] axis on which to plot
+            configs: [dict] dictionary of config files
+            show_sun: [bool] whether to show sun
+            station_code: [str] station code
+            sun_plotted: [bool] if True, moon will not be plotted again, if False, moon will be plotted
+
+        Return:
+            sun_plotted: [bool] Generally returned true, unless the sun  never rose above 0 elevation
+        """
+
+    if show_sun and station_code in configs and not sun_plotted:
+        c = configs[station_code]
+        o = ephem.Observer()
+        o.lat = str(c.latitude)
+        o.long = str(c.longitude)
+        o.elevation = c.elevation
+
+        # If the current time is not given, use the current time
+        current_time = datetime.datetime.now(datetime.timezone.utc)
+
+        sun_azim_list, sun_elev_list = [], []
+        for elapsed_time in range(0, 365 * 24 * 60 * 60, 3600):
+            time_to_evaluate = current_time + datetime.timedelta(seconds=elapsed_time)
+            o.date = time_to_evaluate
+            sun = ephem.Sun(o)
+            sun.date = time_to_evaluate
+            sun.compute(o)
+
+            if sun.alt > 0:
+                sun_azim_list.append(sun.az)
+                sun_elev_list.append(np.degrees(sun.alt))
+
+        if len(sun_elev_list):
+            sun_plotted = True
+            ax.scatter(sun_azim_list, sun_elev_list, color='yellow')
+    return sun_plotted
+
+
 
 def plotFOVSkyMap(platepars, configs, out_dir, north_up=False, show_pointing=False, show_fov=False,
                   rotate_text=False, flip_text=False, show_ip=False, show_coordinates=False, masks=None,
@@ -185,65 +272,6 @@ def plotFOVSkyMap(platepars, configs, out_dir, north_up=False, show_pointing=Fal
         plot_path = os.path.join(plot_path, "fov_sky_map.png")
     plt.savefig(plot_path, dpi=150)
     print("FOV sky map saved to: {:s}".format(plot_path))
-
-def plotMoon(ax, configs, show_moon, station_code, moon_plotted):
-
-    if show_moon and station_code in configs and not moon_plotted:
-        c = configs[station_code]
-        o = ephem.Observer()
-        o.lat = str(c.latitude)
-        o.long = str(c.longitude)
-        o.elevation = c.elevation
-
-        # If the current time is not given, use the current time
-        current_time = datetime.datetime.now(datetime.timezone.utc)
-
-        moon_azim_list, moon_elev_list = [], []
-        for elapsed_time in range(0, 59 * 12 * 60 * 60, 300):
-            time_to_evaluate = current_time + datetime.timedelta(seconds=elapsed_time)
-            o.date = time_to_evaluate
-            moon = ephem.Moon(o)
-
-            moon.compute(o)
-
-            if moon.alt > 0:
-                moon_azim_list.append(moon.az)
-                moon_elev_list.append(np.degrees(moon.alt))
-
-        if len(moon_elev_list):
-            moon_plotted = True
-            ax.scatter(moon_azim_list, moon_elev_list, color='blue')
-    return moon_plotted
-
-
-
-def plotSun(ax, configs, show_sun, station_code, sun_plotted):
-    if show_sun and station_code in configs and not sun_plotted:
-        c = configs[station_code]
-        o = ephem.Observer()
-        o.lat = str(c.latitude)
-        o.long = str(c.longitude)
-        o.elevation = c.elevation
-
-        # If the current time is not given, use the current time
-        current_time = datetime.datetime.now(datetime.timezone.utc)
-
-        sun_azim_list, sun_elev_list = [], []
-        for elapsed_time in range(0, 365 * 24 * 60 * 60, 3600):
-            time_to_evaluate = current_time + datetime.timedelta(seconds=elapsed_time)
-            o.date = time_to_evaluate
-            sun = ephem.Sun(o)
-            sun.date = time_to_evaluate
-            sun.compute(o)
-
-            if sun.alt > 0:
-                sun_azim_list.append(sun.az)
-                sun_elev_list.append(np.degrees(sun.alt))
-
-        if len(sun_elev_list):
-            sun_plotted = True
-            ax.scatter(sun_azim_list, sun_elev_list, color='yellow')
-    return sun_plotted
 
 
 if __name__ == "__main__":
