@@ -917,11 +917,6 @@ if __name__ == '__main__':
 
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
-    # initialise a logger, when running in standalone mode, to avoid DVRip's excessive debug messages
-    log_manager = LoggingManager()
-    log_manager.initLogging(config, log_file_prefix='camControl_')
-    log = getLogger("logger")
-
 
     if cmd not in cmd_list:
         log.info('Error: command "%s" not supported', cmd)
