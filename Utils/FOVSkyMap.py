@@ -5,16 +5,21 @@ import matplotlib.pyplot as plt
 import RMS.ConfigReader as cr
 
 from matplotlib.ticker import StrMethodFormatter
-
 from RMS.Routines.FOVArea import fovArea
 from RMS.Routines.FOVSkyArea import fovSkyArea
 
 from RMS.Astrometry.Conversions import latLonAlt2ECEF, ECEF2AltAz
 import ephem
 
+# Duration of a lunar month in seconds
+LUNAR_MONTH_PERIOD_SECONDS = int(29.5 * 24 * 60 * 60)
+
+# Approximate duration of a year in seconds
+YEAR_IN_SECONDS = int(365.25 * 24 * 60 * 60)
+
 def plotMoon(ax, configs, show_moon, station_code, moon_plotted):
     """
-    Plots the position of the moon every 5 minutes for the next 29.5 days
+    Plots the position of the moon every 5 minutes for the next lunar month
 
     Arguments:
         ax: [axis] axis on which to plot
@@ -34,11 +39,12 @@ def plotMoon(ax, configs, show_moon, station_code, moon_plotted):
         o.long = str(c.longitude)
         o.elevation = c.elevation
 
-        # If the current time is not given, use the current time
+
         current_time = datetime.datetime.now(datetime.timezone.utc)
 
         moon_azim_list, moon_elev_list = [], []
-        for elapsed_time in range(0, 59 * 12 * 60 * 60, 300):
+
+        for elapsed_time in range(0, LUNAR_MONTH_PERIOD_SECONDS, 300):
             time_to_evaluate = current_time + datetime.timedelta(seconds=elapsed_time)
             o.date = time_to_evaluate
             moon = ephem.Moon(o)
@@ -65,10 +71,10 @@ def plotSun(ax, configs, show_sun, station_code, sun_plotted):
             configs: [dict] dictionary of config files
             show_sun: [bool] whether to show sun
             station_code: [str] station code
-            sun_plotted: [bool] if True, moon will not be plotted again, if False, moon will be plotted
+            sun_plotted: [bool] if True, sun will not be plotted again, if False, sun will be plotted
 
         Return:
-            sun_plotted: [bool] Generally returned true, unless the sun  never rose above 0 elevation
+            sun_plotted: [bool] Generally returned true, unless the sun never rose above 0 elevation
         """
 
     if show_sun and station_code in configs and not sun_plotted:
@@ -82,11 +88,11 @@ def plotSun(ax, configs, show_sun, station_code, sun_plotted):
         current_time = datetime.datetime.now(datetime.timezone.utc)
 
         sun_azim_list, sun_elev_list = [], []
-        for elapsed_time in range(0, 365 * 24 * 60 * 60, 3600):
+
+        for elapsed_time in range(0, YEAR_IN_SECONDS, 3600):
             time_to_evaluate = current_time + datetime.timedelta(seconds=elapsed_time)
             o.date = time_to_evaluate
             sun = ephem.Sun(o)
-            sun.date = time_to_evaluate
             sun.compute(o)
 
             if sun.alt > 0:
@@ -121,7 +127,7 @@ def plotFOVSkyMap(platepars, configs, out_dir, north_up=False, show_pointing=Fal
         show_coordinates: [bool] If true, annotate plot with coordinates
         masks: [dict] A dictionary of mask objects where keys are station codes.
         output_file_name: [str] Name of output file default "fov_sky_map.png"
-        show_sun: [bool] If true, annotate plot with sun track  , default False
+        show_sun: [bool] If true, annotate plot with sun track, default False
 
     """
 
