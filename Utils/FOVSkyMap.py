@@ -2,7 +2,6 @@ import datetime
 
 import numpy as np
 import matplotlib.pyplot as plt
-from pyvista.plotting.affine_widget import DARK_YELLOW
 
 import RMS.ConfigReader as cr
 
@@ -22,6 +21,8 @@ DAY_IN_SECONDS = int(24 * 60 * 60)
 # Approximate duration of a year in seconds
 YEAR_IN_SECONDS = int(365.25 * DAY_IN_SECONDS)
 
+# Astromical dusk, when centre of sun is 18 degrees below local horizon
+ASTRONOMICAL_DUSK = np.radians(-18)
 
 
 
@@ -112,7 +113,7 @@ def plotSun(ax, configs, show_sun, station_code, sun_plotted):
             ax.scatter(sun_azim_list, sun_elev_list, color='yellow')
     return sun_plotted
 
-def plotRaDec(ax, configs, show_radec, radec, radec_name, station_code, radec_plotted):
+def plotRaDec(ax, configs, show_radec, radec_list, radec_name_list, station_code, radec_plotted):
 
     """
         Plots the position of a radec point every minute for the next 24 hours, as long as Sun is
@@ -126,7 +127,8 @@ def plotRaDec(ax, configs, show_radec, radec, radec_name, station_code, radec_pl
             radec_plotted: [bool] if True, radec will not be plotted again, if False, radec will be plotted
 
         Return:
-            radec_plotted: [bool] Generally returned true, unless the sun never sank below 0 elevation
+            radec_plotted: [bool] Generally returned true, unless the sun never sank below 0 elevation, or the object
+            never rose
         """
 
     if show_radec and station_code in configs and not radec_plotted:
@@ -138,68 +140,107 @@ def plotRaDec(ax, configs, show_radec, radec, radec_name, station_code, radec_pl
 
         # If the current time is not given, use the current time
         current_time = datetime.datetime.now(datetime.timezone.utc)
+        if len(radec_name_list) == 1 and len(radec_list):
+            ax.set_title("Plot of {} RADEC ({:.1f},{:.1f}) degrees starting at {} ".format(radec_name_list[0], radec_list[0][0], radec_list[0][1], current_time.replace(microsecond=0)), fontsize=10)
+        else:
+            ax.set_title(
+                "Plot of {} objects starting at {} ".format(len(radec_name_list), current_time.replace(microsecond=0)), fontsize=10)
 
-        radec_azim_list, radec_elev_list = [], []
-        change_state, plot_arrow, plot_count, last_values_initialized = True, False, 1, False
-        for elapsed_time in range(0, DAY_IN_SECONDS, 60):
-            time_to_evaluate = current_time + datetime.timedelta(seconds=elapsed_time)
-            time_str = time_to_evaluate.strftime('%H:%M')
-            o.date = time_to_evaluate
-            sun = ephem.Sun(o)
-            sun.compute(o)
+        for radec, radec_name in zip(radec_list, radec_name_list):
+            radec_azim_list, radec_elev_list = [], []
+            change_state, plot_arrow, plot_count, last_values_initialized = True, False, 1, False
+            last_plotted_initialized = False
+            for elapsed_time in range(0, DAY_IN_SECONDS, 60):
 
-            # Is the sun below the horizon
-            if sun.alt < 0:
-                # Compute the az and el of the radec point
+
+                time_to_evaluate = current_time + datetime.timedelta(seconds=elapsed_time)
+                time_str = time_to_evaluate.strftime('%H:%M')
+                o.date = time_to_evaluate
+                sun = ephem.Sun(o)
+                sun.compute(o)
 
                 jd = datetime2JD(time_to_evaluate)
                 ra_degrees, dec_degrees = radec[0], radec[1]
-
                 az, el = raDec2AltAz(ra_degrees, dec_degrees, jd, c.latitude, c.longitude)
-                if plot_arrow or plot_count % 100 == 0:
-                    plot_arrow = False
-                    start, end = (np.radians(_az), _el), (np.radians(az), el)
-                    ax.annotate('',
-                                xy=end,
-                                xytext=start,
-                                arrowprops=dict(arrowstyle='->', color='orange', lw=2))
 
+                # Is it dark?
+                if sun.alt < ASTRONOMICAL_DUSK:
 
+                    if plot_arrow or plot_count % 100 == 0:
+                        plot_arrow = False
+                        start, end = (np.radians(_az), _el), (np.radians(az), el)
+                        ax.annotate('',
+                                    xy=end,
+                                    xytext=start,
+                                    arrowprops=dict(arrowstyle='->', color='orange', lw=2))
 
-                if change_state:
-                    change_state = False
-                    plot_arrow = True
-                    ax.annotate(" {}: UTC:{}".format(radec_name, time_str),
-                                xy=(np.radians(az), el), color="black", fontsize=8)
+                    if last_values_initialized:
+                        if change_state:
+                            change_state = False
+                            plot_arrow = True
+                            if _sun_alt < ASTRONOMICAL_DUSK and sun.alt > ASTRONOMICAL_DUSK:
+                                ax.annotate(" {}: UTC:{} (dawn)".format(radec_name, time_str),
+                                            xy=(np.radians(az), el), color="black", fontsize=8)
 
-                else:
-                    # Has the object risen or set below the horizon
-                    if _el < 0.1 and el > 0.1 or _el > 0.1 and el < 0.1:
-                        change_state = True
+                            elif _sun_alt > ASTRONOMICAL_DUSK and sun.alt < ASTRONOMICAL_DUSK:
+                                ax.annotate(" {}: UTC:{} (dusk)".format(radec_name, time_str),
+                                            xy=(np.radians(az), el), color="black", fontsize=8)
+                            elif object_set:
+                                ax.annotate(" {}: UTC:{} (setting)".format(radec_name, time_str),
+                                            xy=(np.radians(az), 0), color="black", fontsize=8)
+                            elif object_rise:
+                                ax.annotate(" {}: UTC:{} (rising)".format(radec_name, time_str),
+                                            xy=(np.radians(az), 0), color="black", fontsize=8)
 
-                radec_azim_list.append(np.radians(az))
-                radec_elev_list.append(el)
-                plot_count += 1
-                # store the previous elevation, azimuth and time
-                _el, _az, _time_str = el, az, time_str
+                        else:
+                            # Has the object risen or set below the horizon
+                            if _el < 0.1 and el > 0.1:
+                                change_state = True
+                                object_rise, object_set = True, False
+                            elif _el > 0.1 and el < 0.1:
+                                change_state = True
+                                object_ris, object_set = False, True
+
+                    radec_azim_list.append(np.radians(az))
+                    last_plotted_az = az
+                    _last_plotted_az = _az
+                    radec_elev_list.append(el)
+                    last_plotted_el = el
+                    _last_plotted_el = _el
+                    last_plotted_sun_alt = sun.alt
+                    last_plotted_time_str = time_str
+                    last_plotted_initialized = True
+                    plot_count += 1
+                    # store the previous elevation, azimuth and time
+                _el, _az, _time_str, _sun_alt = el, az, time_str, sun.alt
                 last_values_initialized = True
 
-        # Annotate the final point which was plotted
-        if last_values_initialized:
-            ax.annotate(" {}: UTC:{}".format(radec_name, _time_str),
-                    xy=(np.radians(_az), _el), color="black", fontsize=8)
+            # Annotate the final point which was plotted, provided this has been initialised
+            if last_plotted_initialized:
+                if last_plotted_sun_alt > _sun_alt:
+                    ax.annotate(" {}: UTC:{} (sunset)".format(radec_name, last_plotted_time_str),
+                            xy=(np.radians(last_plotted_az),last_plotted_el), color="black", fontsize=8)
 
+                elif last_plotted_sun_alt < _sun_alt:
+                    ax.annotate(" {}: UTC:{} (sunrise)".format(radec_name, last_plotted_time_str),
+                            xy=(np.radians(last_plotted_az),last_plotted_el), color="black", fontsize=8)
 
-        if len(radec_elev_list):
-            radec_plotted = True
-            ax.scatter(radec_azim_list, radec_elev_list, color='black', s=1)
+                start, end = (np.radians(_last_plotted_az), _last_plotted_el), (np.radians(last_plotted_az), last_plotted_el)
+                ax.annotate('',
+                            xy=end,
+                            xytext=start,
+                            arrowprops=dict(arrowstyle='->', color='orange', lw=2))
+
+            if len(radec_elev_list):
+                radec_plotted = True
+                ax.scatter(radec_azim_list, radec_elev_list, color='black', s=1)
     return radec_plotted
 
 
 def plotFOVSkyMap(platepars, configs, out_dir, north_up=False, show_pointing=False, show_fov=False,
                   rotate_text=False, flip_text=False, show_ip=False, show_coordinates=False, masks=None,
                   output_file_name="fov_sky_map.png", show_sun=False, show_moon=False,
-                  show_radec=False, radec = (None, None), radec_name=None):
+                  show_radec=False, radec_list=[], radec_name_list=[]):
     """ Plot all given platepar files on an Alt/Az sky map.
 
 
@@ -219,6 +260,9 @@ def plotFOVSkyMap(platepars, configs, out_dir, north_up=False, show_pointing=Fal
         masks: [dict] A dictionary of mask objects where keys are station codes.
         output_file_name: [str] Name of output file default "fov_sky_map.png"
         show_sun: [bool] If true, annotate plot with sun track, default False
+        show_radec: [bool] If true, annotate plot with the radec object given
+        radec_list: [list] A list of [ra, dec] to be plotted
+        radec_name_list: [list] A list of names, in the same order as the radec_list
 
     """
 
@@ -316,7 +360,7 @@ def plotFOVSkyMap(platepars, configs, out_dir, north_up=False, show_pointing=Fal
 
         sun_plotted = plotSun(ax, configs, show_sun, station_code, sun_plotted)
         moon_plotted = plotMoon(ax, configs, show_moon, station_code, moon_plotted)
-        radec_plotted = plotRaDec(ax, configs, show_radec, radec, radec_name, station_code, radec_plotted)
+        radec_plotted = plotRaDec(ax, configs, show_radec, radec_list, radec_name_list, station_code, radec_plotted)
 
         if station_code in configs:
             c = configs[station_code]
@@ -419,7 +463,7 @@ if __name__ == "__main__":
                             help="Plot the position of the moon every 5 minutes for the next 29.5 days as seen from one station.")
 
 
-    arg_parser.add_argument('-d', '--show_radec', dest='ra_dec', nargs=3, type=str,
+    arg_parser.add_argument('-d', '--show_radec', dest='ra_dec', nargs=3, type=str, action="append",
                             help="Show the path of a radec across the FoV, pass as ra, dec, name. The name passed will be used for annotation only.")
 
 
@@ -434,10 +478,12 @@ if __name__ == "__main__":
 
     show_radec = False
     if cml_args.ra_dec is not None:
-        ra = float(cml_args.ra_dec[0])
-        dec = float(cml_args.ra_dec[1])
-        radec_name = cml_args.ra_dec[2]
+        radec_list, radec_name_list = [], []
         show_radec = True
+        for radec_group in cml_args.ra_dec:
+            radec_list.append([float(radec_group[0]), float(radec_group[1])])
+            radec_name_list.append(radec_group[2])
+
     else:
         ra, dec, radec_name = None, None, None
 
@@ -506,7 +552,7 @@ if __name__ == "__main__":
                   flip_text=cml_args.flip_text, output_file_name=output_file_name,
                   show_ip=cml_args.show_ip, show_coordinates=cml_args.show_coordinates,
                   show_sun=cml_args.show_sun, show_moon=cml_args.show_moon,
-                  show_radec=show_radec, radec=(ra,dec), radec_name=radec_name)
+                  show_radec=show_radec, radec_list=radec_list, radec_name_list=radec_name_list)
 
 
 
