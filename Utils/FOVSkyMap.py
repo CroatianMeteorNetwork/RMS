@@ -143,6 +143,7 @@ def plotRaDec(ax, configs, show_radec, radec_list, radec_name_list, station_code
             ax.set_title(
                 "Plot of {} objects starting at {} ".format(len(radec_name_list), current_time.replace(microsecond=0)), fontsize=10)
 
+        object_rise, object_set = False, False
         for radec, radec_name in zip(radec_list, radec_name_list):
             radec_azim_list, radec_elev_list = [], []
             change_state, plot_arrow, plot_count, last_values_initialized = True, False, 1, False
