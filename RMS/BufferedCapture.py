@@ -919,20 +919,32 @@ class BufferedCapture(Process):
         if not GST_IMPORTED:
             return
 
-        bus = self.pipeline.get_bus()
-        mask = Gst.MessageType.ANY
+        try:
+            bus = self.pipeline.get_bus()
+            mask = Gst.MessageType.ANY
 
-        while not self._bus_should_exit:
-            msg = bus.timed_pop_filtered(5 * Gst.SECOND, mask)
-            if not msg:
-                continue
+            while not self._bus_should_exit and self.pipeline is not None:
+                msg = bus.timed_pop_filtered(5 * Gst.SECOND, mask)
+                if not msg:
+                    # Check if pipeline still exists
+                    if self.pipeline is None:
+                        break
+                    continue
 
-            if msg.type == Gst.MessageType.ERROR:
-                err, dbg = msg.parse_error()
-                log.error("GST ERROR from %s: %s", msg.src.get_name(), err)
-            elif msg.type == Gst.MessageType.WARNING:
-                warn, dbg = msg.parse_warning()
-                log.warning("GST WARN  from %s: %s", msg.src.get_name(), warn)
+                if msg.type == Gst.MessageType.ERROR:
+                    err, dbg = msg.parse_error()
+                    log.error("GST ERROR from %s: %s", msg.src.get_name(), err)
+                elif msg.type == Gst.MessageType.WARNING:
+                    warn, dbg = msg.parse_warning()
+                    log.warning("GST WARN  from %s: %s", msg.src.get_name(), warn)
+                elif msg.type == Gst.MessageType.EOS:
+                    log.debug("_busPoller: Received EOS, exiting")
+                    break
+                    
+        except Exception as e:
+            log.debug("_busPoller: Exception occurred: %s", str(e))
+        finally:
+            log.debug("_busPoller: Thread exiting")
 
 
     def createGstreamDevice(self, video_format, gst_decoder='decodebin', 
@@ -1220,8 +1232,9 @@ class BufferedCapture(Process):
 
                 try: 
 
-                    # Initialize GStreamer
-                    Gst.init(None)
+                    # Initialize GStreamer (only if not already initialized)
+                    if not Gst.is_initialized():
+                        Gst.init(None)
 
                     # Determine if which directory to save the raw video, if any
                     if self.config.raw_video_save:
@@ -1356,6 +1369,16 @@ class BufferedCapture(Process):
         # gracefully drain & stop the pipeline
         if self.pipeline:
             log.debug("releaseResources: Pipeline exists, starting shutdown")
+            
+            # Disconnect any signal handlers first
+            try:
+                splitmuxsink = self.pipeline.get_by_name("splitmuxsink0")
+                if splitmuxsink:
+                    log.debug("releaseResources: Disconnecting splitmuxsink signals")
+                    splitmuxsink.disconnect_by_func(self.moveSegment)
+            except Exception as e:
+                log.debug("releaseResources: Error disconnecting signals: %s", e)
+            
             bus = self.pipeline.get_bus()
             
             log.debug("releaseResources: Sending EOS event")
@@ -1418,6 +1441,17 @@ class BufferedCapture(Process):
                         self.device.set_state(Gst.State.NULL)
                     except Exception as exc:
                         log.warning("releaseResources: Gst set_state(NULL) failed: %s", exc)
+                
+                elif self.video_device_type == "gst" and GST_IMPORTED:
+                    # This is likely a GstAppSink - ensure it's properly cleaned
+                    log.debug("releaseResources: Releasing GStreamer AppSink")
+                    # AppSink cleanup happens when pipeline is unreffed
+                    # Just ensure we're not holding extra references
+                    if hasattr(self.device, 'set_emit_signals'):
+                        try:
+                            self.device.set_emit_signals(False)
+                        except:
+                            pass
 
                 else:                                                    # Fallback
                     log.debug("releaseResources: Unknown device type - just dropping ref")
