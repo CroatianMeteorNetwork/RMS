@@ -976,12 +976,14 @@ class BufferedCapture(Process):
         device_url = self.extractRtspUrl(self.config.deviceID)
 
         if self.config.protocol == 'udp':
-            protocol_str = "protocols=udp retry=5"
+            # UDP: shorter timeout since no connection state
+            protocol_str = "protocols=udp retry=5 timeout=5000000"
             # rtspsrc_params = ("rtspsrc buffer-mode=1 protocols=udp retry=5")
 
         else:
-            # Default to TCP
-            protocol_str = "protocols=tcp tcp-timeout=5000000 retry=5"
+            # TCP: comprehensive timeouts to prevent hangs
+            protocol_str = ("protocols=tcp tcp-timeout=5000000 retry=5 "
+                           "timeout=5000000 teardown-timeout=3000000")
 
         # Define the source up to the point where we want to branch off
         source_to_tee = (
@@ -1381,21 +1383,39 @@ class BufferedCapture(Process):
             
             bus = self.pipeline.get_bus()
             
-            log.debug("releaseResources: Sending EOS event")
-            self.pipeline.send_event(Gst.Event.new_eos())
-            
-            log.debug("releaseResources: Waiting for EOS/ERROR (2 second timeout)")
-            msg = bus.timed_pop_filtered(2*Gst.SECOND,
-                                Gst.MessageType.EOS | Gst.MessageType.ERROR)
-            log.debug(f"releaseResources: timed_pop_filtered returned: {msg}")
+            # Try graceful shutdown first
+            log.debug("releaseResources: Attempting graceful shutdown")
+            try:
+                log.debug("releaseResources: Sending EOS event")
+                self.pipeline.send_event(Gst.Event.new_eos())
+                
+                log.debug("releaseResources: Waiting for EOS/ERROR (2 second timeout)")
+                msg = bus.timed_pop_filtered(2*Gst.SECOND,
+                                    Gst.MessageType.EOS | Gst.MessageType.ERROR)
+                log.debug(f"releaseResources: timed_pop_filtered returned: {msg}")
 
-            log.debug("releaseResources: Setting pipeline to NULL state")
-            ret = self.pipeline.set_state(Gst.State.NULL)
-            log.debug(f"releaseResources: set_state returned: {ret}")
-            
-            log.debug("releaseResources: Getting pipeline state (1 second timeout)")
-            ret, state, pending = self.pipeline.get_state(Gst.SECOND)
-            log.debug(f"releaseResources: get_state returned: ret={ret}, state={state}, pending={pending}")
+                log.debug("releaseResources: Setting pipeline to NULL state")
+                ret = self.pipeline.set_state(Gst.State.NULL)
+                log.debug(f"releaseResources: set_state returned: {ret}")
+                
+                log.debug("releaseResources: Getting pipeline state (2 second timeout)")
+                ret, state, pending = self.pipeline.get_state(2*Gst.SECOND)
+                log.debug(f"releaseResources: get_state returned: ret={ret}, state={state}, pending={pending}")
+                
+                # Check if we actually reached NULL state
+                if state != Gst.State.NULL:
+                    log.warning("releaseResources: Graceful shutdown failed, pipeline stuck in state %s", state)
+                    raise Exception("Pipeline stuck, forcing shutdown")
+                    
+                log.debug("releaseResources: Graceful shutdown successful")
+                
+            except Exception as e:
+                log.warning("releaseResources: Graceful shutdown failed (%s), forcing pipeline shutdown", e)
+                
+                # Force shutdown - just set to NULL without waiting
+                log.debug("releaseResources: Force setting pipeline to NULL state")
+                self.pipeline.set_state(Gst.State.NULL)
+                # Don't wait for state change - just proceed with cleanup
 
             # wake poller
             if bus:
@@ -1425,6 +1445,7 @@ class BufferedCapture(Process):
         if pipe:
             log.debug("releaseResources: Unreffing pipeline")
             pipe.unref()
+            log.debug("releaseResources: Pipeline unreffed successfully")
         self.pipeline = None
 
         # device section
