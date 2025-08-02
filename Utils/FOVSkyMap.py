@@ -519,7 +519,7 @@ if __name__ == "__main__":
 
 
 
-    for entry in os.walk(os.path.expanduser(cml_args.dir_path), topdown=True):
+    for entry in sorted(os.walk(os.path.expanduser(cml_args.dir_path), topdown=True)):
 
         dir_path, dirs , file_list = entry
 
