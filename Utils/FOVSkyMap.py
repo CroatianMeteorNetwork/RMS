@@ -1,8 +1,6 @@
 import datetime
-
 import numpy as np
 import matplotlib.pyplot as plt
-
 import RMS.ConfigReader as cr
 
 from matplotlib.ticker import StrMethodFormatter
@@ -12,7 +10,7 @@ from RMS.Routines.FOVSkyArea import fovSkyArea
 from RMS.Astrometry.Conversions import latLonAlt2ECEF, ECEF2AltAz, raDec2AltAz, datetime2JD
 import ephem
 
-# Duration of a lunar month in seconds
+# Approximate duration of a lunar month in seconds
 LUNAR_MONTH_PERIOD_SECONDS = int(29.5 * 24 * 60 * 60)
 
 # Approximate duration of a day in seconds
@@ -23,8 +21,6 @@ YEAR_IN_SECONDS = int(365.25 * DAY_IN_SECONDS)
 
 # Astromical dusk, when centre of sun is 18 degrees below local horizon
 ASTRONOMICAL_DUSK = np.radians(-18)
-
-
 
 def plotMoon(ax, configs, show_moon, station_code, moon_plotted):
     """
@@ -127,7 +123,7 @@ def plotRaDec(ax, configs, show_radec, radec_list, radec_name_list, station_code
             radec_plotted: [bool] if True, radec will not be plotted again, if False, radec will be plotted
 
         Return:
-            radec_plotted: [bool] Generally returned true, unless the sun never sank below 0 elevation, or the object
+            radec_plotted: [bool] Generally returned true, unless the sun never set, or the object
             never rose
         """
 
@@ -199,7 +195,7 @@ def plotRaDec(ax, configs, show_radec, radec_list, radec_name_list, station_code
                                 object_rise, object_set = True, False
                             elif _el > 0.1 and el < 0.1:
                                 change_state = True
-                                object_ris, object_set = False, True
+                                object_rise, object_set = False, True
 
                     radec_azim_list.append(np.radians(az))
                     last_plotted_az = az
@@ -218,11 +214,11 @@ def plotRaDec(ax, configs, show_radec, radec_list, radec_name_list, station_code
             # Annotate the final point which was plotted, provided this has been initialised
             if last_plotted_initialized:
                 if last_plotted_sun_alt > _sun_alt:
-                    ax.annotate(" {}: UTC:{} (sunset)".format(radec_name, last_plotted_time_str),
+                    ax.annotate(" {}: UTC:{} (dusk)".format(radec_name, last_plotted_time_str),
                             xy=(np.radians(last_plotted_az),last_plotted_el), color="black", fontsize=8)
 
                 elif last_plotted_sun_alt < _sun_alt:
-                    ax.annotate(" {}: UTC:{} (sunrise)".format(radec_name, last_plotted_time_str),
+                    ax.annotate(" {}: UTC:{} (dawn)".format(radec_name, last_plotted_time_str),
                             xy=(np.radians(last_plotted_az),last_plotted_el), color="black", fontsize=8)
 
                 start, end = (np.radians(_last_plotted_az), _last_plotted_el), (np.radians(last_plotted_az), last_plotted_el)
@@ -464,7 +460,7 @@ if __name__ == "__main__":
 
 
     arg_parser.add_argument('-d', '--show_radec', dest='ra_dec', nargs=3, type=str, action="append",
-                            help="Show the path of a radec across the FoV, pass as ra, dec, name. The name passed will be used for annotation only.")
+                            help="Show the path of multiple radecs across the FoV, pass as ra, dec, name. The name passed will be used for annotation only.")
 
 
     ###
