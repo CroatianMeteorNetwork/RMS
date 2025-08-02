@@ -22,6 +22,7 @@ YEAR_IN_SECONDS = int(365.25 * DAY_IN_SECONDS)
 # Astromical dusk, when centre of sun is 18 degrees below local horizon
 ASTRONOMICAL_DUSK = np.radians(-18)
 
+
 def plotMoon(ax, configs, show_moon, station_code, moon_plotted):
     """
     Plots the position of the moon every 5 minutes for the next lunar month
@@ -65,8 +66,6 @@ def plotMoon(ax, configs, show_moon, station_code, moon_plotted):
             ax.scatter(moon_azim_list, moon_elev_list, color='blue')
     return moon_plotted
 
-
-
 def plotSun(ax, configs, show_sun, station_code, sun_plotted):
     """
         Plots the position of the sun every hour for the next 365 days
@@ -89,8 +88,8 @@ def plotSun(ax, configs, show_sun, station_code, sun_plotted):
         o.long = str(c.longitude)
         o.elevation = c.elevation
 
-        # If the current time is not given, use the current time
-        current_time = datetime.datetime.now(datetime.timezone.utc)
+        # Set the time to the previous midnight
+        current_time = datetime.datetime.now(datetime.timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 
         sun_azim_list, sun_elev_list = [], []
 
@@ -134,8 +133,10 @@ def plotRaDec(ax, configs, show_radec, radec_list, radec_name_list, station_code
         o.long = str(c.longitude)
         o.elevation = c.elevation
 
-        # If the current time is not given, use the current time
+        # Use the current time
         current_time = datetime.datetime.now(datetime.timezone.utc)
+
+        # Title the plot. If only RADEC is give, then put that in the title.
         if len(radec_name_list) == 1 and len(radec_list):
             ax.set_title("Plot of {} RADEC ({:.1f},{:.1f}) degrees starting at {} ".format(radec_name_list[0], radec_list[0][0], radec_list[0][1], current_time.replace(microsecond=0)), fontsize=10)
         else:
@@ -146,72 +147,85 @@ def plotRaDec(ax, configs, show_radec, radec_list, radec_name_list, station_code
             radec_azim_list, radec_elev_list = [], []
             change_state, plot_arrow, plot_count, last_values_initialized = True, False, 1, False
             last_plotted_initialized = False
+
             for elapsed_time in range(0, DAY_IN_SECONDS, 60):
 
-
+                # Initialize the observer
                 time_to_evaluate = current_time + datetime.timedelta(seconds=elapsed_time)
                 time_str = time_to_evaluate.strftime('%H:%M')
                 o.date = time_to_evaluate
                 sun = ephem.Sun(o)
                 sun.compute(o)
 
+                # Compute az and el of object
                 jd = datetime2JD(time_to_evaluate)
                 ra_degrees, dec_degrees = radec[0], radec[1]
                 az, el = raDec2AltAz(ra_degrees, dec_degrees, jd, c.latitude, c.longitude)
 
-                # Is it dark?
+                # Is the sun below the dusk threshold?
                 if sun.alt < ASTRONOMICAL_DUSK:
 
-                    if plot_arrow or plot_count % 100 == 0:
+                    # Plot arrows each hour, or when plot_arrow is set to show the direction of motion and passage of time
+                    if plot_arrow or (plot_count % 60 == 0 and plot_count != 0):
                         plot_arrow = False
                         start, end = (np.radians(_az), _el), (np.radians(az), el)
                         ax.annotate('',
                                     xy=end,
                                     xytext=start,
                                     arrowprops=dict(arrowstyle='->', color='orange', lw=2))
-
+                        plot_count = 0
+                    # Annotate the plot with information at dusk, dawn, and each rise and set of the object
                     if last_values_initialized:
                         if change_state:
                             change_state = False
-                            plot_arrow = True
+
                             if _sun_alt < ASTRONOMICAL_DUSK and sun.alt > ASTRONOMICAL_DUSK:
                                 ax.annotate(" {}: UTC:{} (dawn)".format(radec_name, time_str),
                                             xy=(np.radians(az), el), color="black", fontsize=8)
-
+                                plot_arrow = False
                             elif _sun_alt > ASTRONOMICAL_DUSK and sun.alt < ASTRONOMICAL_DUSK:
                                 ax.annotate(" {}: UTC:{} (dusk)".format(radec_name, time_str),
                                             xy=(np.radians(az), el), color="black", fontsize=8)
+                                plot_arrow = True
                             elif object_set:
                                 ax.annotate(" {}: UTC:{} (setting)".format(radec_name, time_str),
                                             xy=(np.radians(az), 0), color="black", fontsize=8)
+                                plot_arrow = False
                             elif object_rise:
                                 ax.annotate(" {}: UTC:{} (rising)".format(radec_name, time_str),
                                             xy=(np.radians(az), 0), color="black", fontsize=8)
+                                plot_arrow = True
 
                         else:
-                            # Has the object risen or set below the horizon
+                            # Has the object risen or set
                             if _el < 0.1 and el > 0.1:
                                 change_state = True
                                 object_rise, object_set = True, False
+                                plot_count = 0
                             elif _el > 0.1 and el < 0.1:
                                 change_state = True
                                 object_rise, object_set = False, True
+                                plot_count = 0
 
+                    # Append to the plot list
                     radec_azim_list.append(np.radians(az))
-                    last_plotted_az = az
-                    _last_plotted_az = _az
                     radec_elev_list.append(el)
-                    last_plotted_el = el
-                    _last_plotted_el = _el
-                    last_plotted_sun_alt = sun.alt
-                    last_plotted_time_str = time_str
+
+                    # Store previous plotted values to use for arrow directions etc
+                    last_plotted_az, _last_plotted_az = az, _az
+                    last_plotted_el, _last_plotted_el = el, _el
+                    last_plotted_sun_alt, last_plotted_time_str = sun.alt, time_str
                     last_plotted_initialized = True
+
+                    # Increment the plot counter, used for plotting arrows
                     plot_count += 1
-                    # store the previous elevation, azimuth and time
+
+                # Store the previous elevation, azimuth, time and sun elevation for determining dusk and dawn
                 _el, _az, _time_str, _sun_alt = el, az, time_str, sun.alt
                 last_values_initialized = True
 
             # Annotate the final point which was plotted, provided this has been initialised
+
             if last_plotted_initialized:
                 if last_plotted_sun_alt > _sun_alt:
                     ax.annotate(" {}: UTC:{} (dusk)".format(radec_name, last_plotted_time_str),
@@ -473,8 +487,9 @@ if __name__ == "__main__":
     config = Config()
 
     show_radec = False
+    radec_list, radec_name_list = [], []
     if cml_args.ra_dec is not None:
-        radec_list, radec_name_list = [], []
+
         show_radec = True
         for radec_group in cml_args.ra_dec:
             radec_list.append([float(radec_group[0]), float(radec_group[1])])
