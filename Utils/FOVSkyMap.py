@@ -294,6 +294,7 @@ def plotFOVSkyMap(platepars, configs, out_dir, north_up=False, show_pointing=Fal
     ref_ht = 100000 # m
     sun_plotted, moon_plotted, radec_plotted = False, False, False
 
+    print()
     for station_code in platepars:
 
         pp = platepars[station_code]
