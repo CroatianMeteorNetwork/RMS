@@ -2,20 +2,28 @@ import datetime
 
 import numpy as np
 import matplotlib.pyplot as plt
+from pyvista.plotting.affine_widget import DARK_YELLOW
+
 import RMS.ConfigReader as cr
 
 from matplotlib.ticker import StrMethodFormatter
 from RMS.Routines.FOVArea import fovArea
 from RMS.Routines.FOVSkyArea import fovSkyArea
 
-from RMS.Astrometry.Conversions import latLonAlt2ECEF, ECEF2AltAz
+from RMS.Astrometry.Conversions import latLonAlt2ECEF, ECEF2AltAz, raDec2AltAz, datetime2JD
 import ephem
 
 # Duration of a lunar month in seconds
 LUNAR_MONTH_PERIOD_SECONDS = int(29.5 * 24 * 60 * 60)
 
+# Approximate duration of a day in seconds
+DAY_IN_SECONDS = int(24 * 60 * 60)
+
 # Approximate duration of a year in seconds
-YEAR_IN_SECONDS = int(365.25 * 24 * 60 * 60)
+YEAR_IN_SECONDS = int(365.25 * DAY_IN_SECONDS)
+
+
+
 
 def plotMoon(ax, configs, show_moon, station_code, moon_plotted):
     """
@@ -104,11 +112,94 @@ def plotSun(ax, configs, show_sun, station_code, sun_plotted):
             ax.scatter(sun_azim_list, sun_elev_list, color='yellow')
     return sun_plotted
 
+def plotRaDec(ax, configs, show_radec, radec, radec_name, station_code, radec_plotted):
+
+    """
+        Plots the position of a radec point every minute for the next 24 hours, as long as Sun is
+        below local horizon
+
+        Arguments:
+            ax: [axis] axis on which to plot
+            configs: [dict] dictionary of config files
+            show_radec: [bool] whether to show radec
+            station_code: [str] station code
+            radec_plotted: [bool] if True, radec will not be plotted again, if False, radec will be plotted
+
+        Return:
+            radec_plotted: [bool] Generally returned true, unless the sun never sank below 0 elevation
+        """
+
+    if show_radec and station_code in configs and not radec_plotted:
+        c = configs[station_code]
+        o = ephem.Observer()
+        o.lat = str(c.latitude)
+        o.long = str(c.longitude)
+        o.elevation = c.elevation
+
+        # If the current time is not given, use the current time
+        current_time = datetime.datetime.now(datetime.timezone.utc)
+
+        radec_azim_list, radec_elev_list = [], []
+        change_state, plot_arrow, plot_count, last_values_initialized = True, False, 1, False
+        for elapsed_time in range(0, DAY_IN_SECONDS, 60):
+            time_to_evaluate = current_time + datetime.timedelta(seconds=elapsed_time)
+            time_str = time_to_evaluate.strftime('%H:%M')
+            o.date = time_to_evaluate
+            sun = ephem.Sun(o)
+            sun.compute(o)
+
+            # Is the sun below the horizon
+            if sun.alt < 0:
+                # Compute the az and el of the radec point
+
+                jd = datetime2JD(time_to_evaluate)
+                ra_degrees, dec_degrees = radec[0], radec[1]
+
+                az, el = raDec2AltAz(ra_degrees, dec_degrees, jd, c.latitude, c.longitude)
+                if plot_arrow or plot_count % 100 == 0:
+                    plot_arrow = False
+                    start, end = (np.radians(_az), _el), (np.radians(az), el)
+                    ax.annotate('',
+                                xy=end,
+                                xytext=start,
+                                arrowprops=dict(arrowstyle='->', color='orange', lw=2))
+
+
+
+                if change_state:
+                    change_state = False
+                    plot_arrow = True
+                    ax.annotate(" {}: UTC:{}".format(radec_name, time_str),
+                                xy=(np.radians(az), el), color="black", fontsize=8)
+
+                else:
+                    # Has the object risen or set below the horizon
+                    if _el < 0.1 and el > 0.1 or _el > 0.1 and el < 0.1:
+                        change_state = True
+
+                radec_azim_list.append(np.radians(az))
+                radec_elev_list.append(el)
+                plot_count += 1
+                # store the previous elevation, azimuth and time
+                _el, _az, _time_str = el, az, time_str
+                last_values_initialized = True
+
+        # Annotate the final point which was plotted
+        if last_values_initialized:
+            ax.annotate(" {}: UTC:{}".format(radec_name, _time_str),
+                    xy=(np.radians(_az), _el), color="black", fontsize=8)
+
+
+        if len(radec_elev_list):
+            radec_plotted = True
+            ax.scatter(radec_azim_list, radec_elev_list, color='black', s=1)
+    return radec_plotted
 
 
 def plotFOVSkyMap(platepars, configs, out_dir, north_up=False, show_pointing=False, show_fov=False,
                   rotate_text=False, flip_text=False, show_ip=False, show_coordinates=False, masks=None,
-                  output_file_name="fov_sky_map.png", show_sun=False, show_moon=False):
+                  output_file_name="fov_sky_map.png", show_sun=False, show_moon=False,
+                  show_radec=False, radec = (None, None), radec_name=None):
     """ Plot all given platepar files on an Alt/Az sky map.
 
 
@@ -147,7 +238,7 @@ def plotFOVSkyMap(platepars, configs, out_dir, north_up=False, show_pointing=Fal
 
     # Reference height for FOV lat/lon
     ref_ht = 100000 # m
-    sun_plotted, moon_plotted = False, False
+    sun_plotted, moon_plotted, radec_plotted = False, False, False
 
     for station_code in platepars:
 
@@ -225,6 +316,7 @@ def plotFOVSkyMap(platepars, configs, out_dir, north_up=False, show_pointing=Fal
 
         sun_plotted = plotSun(ax, configs, show_sun, station_code, sun_plotted)
         moon_plotted = plotMoon(ax, configs, show_moon, station_code, moon_plotted)
+        radec_plotted = plotRaDec(ax, configs, show_radec, radec, radec_name, station_code, radec_plotted)
 
         if station_code in configs:
             c = configs[station_code]
@@ -327,6 +419,10 @@ if __name__ == "__main__":
                             help="Plot the position of the moon every 5 minutes for the next 29.5 days as seen from one station.")
 
 
+    arg_parser.add_argument('-d', '--show_radec', dest='ra_dec', nargs=3, type=str,
+                            help="Show the path of a radec across the FoV, pass as ra, dec, name. The name passed will be used for annotation only.")
+
+
     ###
 
     # Parse the command line arguments
@@ -336,6 +432,14 @@ if __name__ == "__main__":
     # Init the default config file
     config = Config()
 
+    show_radec = False
+    if cml_args.ra_dec is not None:
+        ra = float(cml_args.ra_dec[0])
+        dec = float(cml_args.ra_dec[1])
+        radec_name = cml_args.ra_dec[2]
+        show_radec = True
+    else:
+        ra, dec, radec_name = None, None, None
 
     # Find all platepar files
     platepars = {}
@@ -401,8 +505,8 @@ if __name__ == "__main__":
                   rotate_text=cml_args.rotate, masks=masks,
                   flip_text=cml_args.flip_text, output_file_name=output_file_name,
                   show_ip=cml_args.show_ip, show_coordinates=cml_args.show_coordinates,
-                  show_sun=cml_args.show_sun, show_moon=cml_args.show_moon)
-
+                  show_sun=cml_args.show_sun, show_moon=cml_args.show_moon,
+                  show_radec=show_radec, radec=(ra,dec), radec_name=radec_name)
 
 
 
