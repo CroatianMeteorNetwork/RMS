@@ -145,6 +145,13 @@ if [[ -n "$DISPLAY" ]]; then
     export XAUTHORITY="$HOME/.Xauthority"
     log_message "Using DISPLAY=$DISPLAY"
     
+    # Set XDG_RUNTIME_DIR if not already set (needed for some terminals)
+    if [[ -z "${XDG_RUNTIME_DIR:-}" ]]; then
+        uid=$(id -u)
+        export XDG_RUNTIME_DIR="/run/user/$uid"
+        log_message "Set XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
+    fi
+    
     # Set up D-Bus for gnome-terminal (when running from cron)
     # Wrap in error handling to prevent crashes
     if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
