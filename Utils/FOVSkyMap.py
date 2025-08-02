@@ -180,19 +180,19 @@ def plotRaDec(ax, configs, show_radec, radec_list, radec_name_list, station_code
                             change_state = False
 
                             if _sun_alt < ASTRONOMICAL_DUSK and sun.alt > ASTRONOMICAL_DUSK:
-                                ax.annotate(" {}: UTC:{} (dawn)".format(radec_name, time_str),
-                                            xy=(np.radians(az), el), color="black", fontsize=8)
+                                ax.annotate("{} (dawn)".format(time_str),
+                                            xy=(np.radians(az), el - 2), color="black", fontsize=8)
                                 plot_arrow = False
                             elif _sun_alt > ASTRONOMICAL_DUSK and sun.alt < ASTRONOMICAL_DUSK:
-                                ax.annotate(" {}: UTC:{} (dusk)".format(radec_name, time_str),
-                                            xy=(np.radians(az), el), color="black", fontsize=8)
+                                ax.annotate(" {}: UTC {} (dusk)".format(radec_name, time_str),
+                                            xy=(np.radians(az + 2), el + 4), color="black", fontsize=8)
                                 plot_arrow = True
                             elif object_set:
-                                ax.annotate(" {}: UTC:{} (setting)".format(radec_name, time_str),
-                                            xy=(np.radians(az), 0), color="black", fontsize=8)
+                                ax.annotate(" {} (setting)".format(time_str),
+                                            xy=(np.radians(az - 2), 0), color="black", fontsize=8)
                                 plot_arrow = False
                             elif object_rise:
-                                ax.annotate(" {}: UTC:{} (rising)".format(radec_name, time_str),
+                                ax.annotate(" {}: UTC {} (rising)".format(radec_name, time_str),
                                             xy=(np.radians(az), 0), color="black", fontsize=8)
                                 plot_arrow = True
 
@@ -228,12 +228,12 @@ def plotRaDec(ax, configs, show_radec, radec_list, radec_name_list, station_code
 
             if last_plotted_initialized:
                 if last_plotted_sun_alt > _sun_alt:
-                    ax.annotate(" {}: UTC:{} (dusk)".format(radec_name, last_plotted_time_str),
-                            xy=(np.radians(last_plotted_az),last_plotted_el), color="black", fontsize=8)
+                    ax.annotate(" {}: UTC {} (dusk)".format(radec_name, last_plotted_time_str),
+                            xy=(np.radians(last_plotted_az + 2),last_plotted_el + 4), color="black", fontsize=8)
 
                 elif last_plotted_sun_alt < _sun_alt:
-                    ax.annotate(" {}: UTC:{} (dawn)".format(radec_name, last_plotted_time_str),
-                            xy=(np.radians(last_plotted_az),last_plotted_el), color="black", fontsize=8)
+                    ax.annotate(" {} (dawn)".format(last_plotted_time_str),
+                            xy=(np.radians(last_plotted_az),last_plotted_el - 4), color="black", fontsize=8)
 
                 start, end = (np.radians(_last_plotted_az), _last_plotted_el), (np.radians(last_plotted_az), last_plotted_el)
                 ax.annotate('',
@@ -421,6 +421,7 @@ def plotFOVSkyMap(platepars, configs, out_dir, north_up=False, show_pointing=Fal
     if os.path.isdir(plot_path):
         plot_path = os.path.join(plot_path, "fov_sky_map.png")
     plt.savefig(plot_path, dpi=150)
+    print()
     print("FOV sky map saved to: {:s}".format(plot_path))
 
 
