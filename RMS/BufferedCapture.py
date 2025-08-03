@@ -28,6 +28,7 @@ import copy
 import os.path
 from multiprocessing import Process, Event, Value, Array
 import threading
+from collections import deque
 import os
 import signal
 
@@ -167,6 +168,9 @@ class BufferedCapture(Process):
 
         # Initialize shared counter for dropped frames
         self.dropped_frames = Value('i', 0)
+        self.dropped_frames_session_start = 0  # Frames dropped at start of current night session
+        self.last_daytime_mode = None  # Track day/night transitions
+        self.dropped_frames_timestamps = deque()  # Track when frames were dropped for 10-min window
 
         # Flag for process control
         self.exit = Event()
@@ -1962,6 +1966,23 @@ class BufferedCapture(Process):
                     n_dropped = int((frame_timestamp - last_frame_timestamp)*self.config.fps)
 
                     self.dropped_frames.value += n_dropped
+                    
+                    # Record timestamp for 10-minute window tracking
+                    current_time = time.time()
+                    # Add n_dropped timestamps efficiently
+                    self.dropped_frames_timestamps.extend([current_time] * n_dropped)
+                    
+                    # Clean up old timestamps efficiently (remove from left)
+                    ten_min_ago = current_time - 600
+                    while self.dropped_frames_timestamps and self.dropped_frames_timestamps[0] <= ten_min_ago:
+                        self.dropped_frames_timestamps.popleft()
+                    
+                    # Safety limit to prevent unbounded memory growth
+                    if len(self.dropped_frames_timestamps) > 20000:
+                        log.warning("Dropped frames timestamp queue exceeded safety limit, trimming to recent 10000 entries")
+                        # Keep only most recent half
+                        recent_timestamps = list(self.dropped_frames_timestamps)[-10000:]
+                        self.dropped_frames_timestamps = deque(recent_timestamps)
 
                     if self.config.report_dropped_frames:
                         log.info("{}/{} frames dropped or late! Time for frame: {:.3f}, convert: {:.3f}, assignment: {:.3f}".format(
@@ -2005,8 +2026,29 @@ class BufferedCapture(Process):
                     
                     # For GStreamer, show elapsed time since frame capture to assess sink fill level
                     else:
-                        log.info("Block's max frame age: {:.3f} seconds. Run's dropped frames: {}"
-                                 .format(max_frame_age_seconds, self.dropped_frames.value))
+                        # Check for day→night transition to reset session counter
+                        current_daytime = self.daytime_mode.value if self.daytime_mode is not None else False
+                        if self.last_daytime_mode is not None and self.last_daytime_mode and not current_daytime:
+                            # Day→Night transition detected, reset session counter
+                            self.dropped_frames_session_start = self.dropped_frames.value
+                            self.dropped_frames_timestamps.clear()  # Clear 10-min window too
+                            log.info("Day→Night transition detected, resetting session counter")
+                        self.last_daytime_mode = current_daytime
+                        
+                        # Calculate buffer fill percentage based on max frame age
+                        # The appsink has max-buffers=100, so at fps rate, max capacity is ~100/fps seconds
+                        max_buffer_time = 100.0 / self.config.fps  # Theoretical max buffer time in seconds
+                        buffer_fill_percent = min(100, (max_frame_age_seconds / max_buffer_time) * 100)
+                        
+                        # Calculate dropped frames for current session (since day→night or process start)
+                        session_dropped = max(0, self.dropped_frames.value - self.dropped_frames_session_start)
+                        
+                        # Calculate dropped frames in last 10 minutes
+                        current_time = time.time()
+                        ten_min_ago = current_time - 600  # 10 minutes in seconds
+                        recent_dropped = len([t for t in self.dropped_frames_timestamps if t > ten_min_ago])
+                        
+                        log.info(f"Buffer fill: {buffer_fill_percent:.1f}%. Dropped frames: {recent_dropped} (last 10 min), {session_dropped} this session")
 
                 last_frame_timestamp = frame_timestamp
                 
