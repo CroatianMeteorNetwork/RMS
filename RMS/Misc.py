@@ -233,21 +233,14 @@ def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=F
 
 
     # Compress the archive directory
-    archive_path = os.path.join(dest_dir, compress_file) + '.tar.bz2'
-    
-    log.info("Creating archive: {}".format(archive_path))
-    
-    # Use tarWithProgress for compression with progress reporting
-    success = tarWithProgress(dest_dir, archive_path, compression='bz2', 
-                              remove_source=delete_dest_dir)
-    
-    if not success:
-        log.error("Failed to create archive: {}".format(archive_path))
-        return None
-    
-    log.info("Archive created successfully: {}".format(archive_path))
-    
-    return archive_path
+    archive_name = shutil.make_archive(os.path.join(dest_dir, compress_file), 'bztar', dest_dir)
+
+    # Delete the archive directory after compression
+    if delete_dest_dir:
+        shutil.rmtree(dest_dir)
+
+
+    return archive_name
 
 
 
