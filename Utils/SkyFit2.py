@@ -7253,10 +7253,14 @@ def getFITSMostStars(calstars_full_path):
     """
 
     best_fits_file, star_count_max = None, 0
+
+    # Try and load in the calstars file
     if os.path.exists(calstars_full_path):
         captured_directory_full_path = os.path.dirname(calstars_full_path)
         calstars_file_name = os.path.basename(calstars_full_path)
         calstar_data, _ = CALSTARS.readCALSTARS(captured_directory_full_path, calstars_file_name)
+
+        # Iterate through the calstar files, looking for the fits file which exists, and has the most stars
         for calstar_entry in calstar_data:
             fits_file = calstar_entry[0]
             star_count = len(calstar_entry[1])
@@ -7264,8 +7268,6 @@ def getFITSMostStars(calstars_full_path):
                 if os.path.exists(os.path.join(captured_directory_full_path, fits_file)):
                     best_fits_file = os.path.join(captured_directory_full_path, fits_file)
                     star_count_max = star_count
-        print("Best fits file {} has {} stars".format(best_fits_file, star_count_max))
-
 
     return best_fits_file, star_count_max
 
@@ -7479,7 +7481,19 @@ def handleNoInputPath(input_path=None):
 
 
 def getMaskPath(station_directory, multi_cam=False):
-    # Determine the mask path
+
+    """
+    Work out the path to the mask.
+
+    Arguments:
+        station_directory: [str] The directory for this station, i.e. ~/source/RMS/ or ~/source/RMSStations
+    Keyword Arguments:
+        multi_cam: [bool] Optional, default false, if true work using a multicam linux file structure.
+
+    Returns:
+        [str] path to the mask
+    """
+
     if multi_cam:
         multi_cam_stations_directory = os.path.join(os.path.dirname(os.getcwd()), "Stations")
         full_path_potential_station_directory = os.path.join(multi_cam_stations_directory, station_directory)
@@ -7571,23 +7585,46 @@ def anyFits(directory_list, config, prefix="FF", extension=".fits", delimiter="_
     return one_fits_file_found
 
 
-def verifyCapturedDirectories(directory_list, mc_c):
+def verifyCapturedDirectories(directory_list, config):
+    """
+    Given a list of file system objects, and a config file, return of list of directories which match the style
+    of an RMS captured directory associated with the station in the config file.
+
+    Args:
+        directory_list: [list] list of file system objects.
+        config: [config] RMS config instance.
+
+    Return:
+        verified directory list: Only the directories which match the expected format, sorted ascending.
+
+    """
+
+
     # Filter these list of files in the captured directory for directories which match expected pattern
-    full_path_to_captured_files_directory = os.path.join(mc_c.data_dir, mc_c.captured_dir)
+    full_path_to_captured_files_directory = os.path.join(config.data_dir, config.captured_dir)
     verified_directory_list = []
     for potential_directory in directory_list:
         if not os.path.isdir(os.path.join(full_path_to_captured_files_directory, potential_directory)):
             # If it is not a directory, continue
             continue
         # Check as much as we reasonably can that this is not some random directory saved here
-        if potential_directory.startswith("{}_".format(mc_c.stationID)) \
+        if potential_directory.startswith("{}_".format(config.stationID)) \
                 and len(potential_directory.split("_")) == 4:
             verified_directory_list.append(os.path.join(full_path_to_captured_files_directory, potential_directory))
     return sorted(verified_directory_list)
 
 
 def getCapturedDirectoryObjects(config):
-    # Get the list of objects in the captured directory, if this directory exists
+    """
+    Get all the file system objects in captured directory pointed to by the config file.
+
+    Arguments:
+        config: [config] RMS config instance.
+
+    Return:
+        captured_directory_list sorted ascending
+    """
+
     full_path_to_captured_files_directory = os.path.join(config.data_dir, config.captured_dir)
     captured_directory_list = []
     if os.path.exists(full_path_to_captured_files_directory):
