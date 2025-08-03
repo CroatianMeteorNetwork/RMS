@@ -11,6 +11,7 @@ import argparse
 import random
 import glob
 import shutil
+import time
 
 from RMS.ArchiveDetections import archiveDetections, archiveFieldsums, archiveFrameTimelapse
 # from RMS.Astrometry.ApplyAstrometry import applyAstrometryFTPdetectinfo
@@ -837,10 +838,54 @@ if __name__ == "__main__":
         log.info('Adding file to upload list: ' + archive_name)
         upload_manager.addFiles([archive_name])
 
-        # Stop the upload manager
+        # Wait for the upload to complete before stopping
         if upload_manager.is_alive():
+            log.info('Waiting for upload to complete...')
+            
+            # Monitor upload progress
+            max_stall_time = 300  # 5 minutes without progress = stalled
+            check_interval = 5    # Check every 5 seconds
+            last_check_time = time.time()
+            stall_timer = 0
+            last_queue_size = -1
+            
+            while True:
+                # Get current queue size
+                current_queue = upload_manager.getFileList()
+                current_queue_size = len(current_queue)
+                
+                # Check if upload is complete
+                if current_queue_size == 0 and not upload_manager.upload_in_progress.value:
+                    log.info('Upload completed successfully.')
+                    break
+                
+                # Check for progress
+                if current_queue_size < last_queue_size or upload_manager.upload_in_progress.value:
+                    # Progress detected, reset stall timer
+                    stall_timer = 0
+                    last_queue_size = current_queue_size
+                else:
+                    # No progress
+                    stall_timer += check_interval
+                    
+                # Check for stall
+                if stall_timer >= max_stall_time:
+                    log.warning(f'Upload stalled for {max_stall_time} seconds. Stopping upload manager.')
+                    break
+                
+                # Log status periodically
+                if time.time() - last_check_time >= 30:
+                    if current_queue_size > 0:
+                        log.info(f'Upload in progress... {current_queue_size} files remaining in queue')
+                    else:
+                        log.info('Waiting for current upload to finish...')
+                    last_check_time = time.time()
+                
+                time.sleep(check_interval)
+            
+            # Now safe to stop the upload manager
             upload_manager.stop()
-            log.info('Closing upload manager...')
+            log.info('Upload manager stopped.')
 
 
         # Delete detection backup files
