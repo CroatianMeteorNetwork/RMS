@@ -71,6 +71,8 @@ def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
         mask_path = os.path.join(config.config_file_path, config.mask_file)
 
     # Load the mask if given
+    global _last_mask_state
+    
     if mask_path:
         mask = MaskImage.loadMask(mask_path)
 
@@ -86,7 +88,6 @@ def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
             current_state = None
 
         # Only log mask state changes
-        global _last_mask_state
         if current_state != _last_mask_state:
             if current_state == 'white':
                 log.info('Mask is all white, setting it to None.')
@@ -96,7 +97,6 @@ def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
 
     else:
         # Only log if we previously had a mask
-        global _last_mask_state
         if _last_mask_state is not None:
             log.info('No mask file has been found.')
             _last_mask_state = None
