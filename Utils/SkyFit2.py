@@ -4642,6 +4642,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         if self.config.platepar_name in os.listdir(self.dir_path):
             initial_file = os.path.join(self.dir_path, self.config.platepar_name)
+            platepar_file = initial_file
         else:
             initial_file = self.dir_path
 
@@ -7308,6 +7309,18 @@ def getCalstarsPath(captured_directory, config):
 
     return calstars_full_path
 
+def expandUserList(path_list, file_type):
+
+    target_path_list = []
+    for path in path_list:
+        target = os.path.expanduser(path)
+        if not os.path.basename(target) == file_type and os.path.isdir(target):
+            target = os.path.join(target, file_type)
+        if os.path.isfile(target):
+            target_path_list.append(target)
+        else:
+            target_path_list.append(path)
+    return target_path_list
 
 def getPlateparFilePath(config):
     """
@@ -7630,6 +7643,12 @@ if __name__ == '__main__':
     mask_file = None
 
 
+    # expand the user for the list of cml_args.config
+
+    cml_args.config = expandUserList(cml_args.config, ".config")
+
+    print(cml_args.config)
+
     # Parse the beginning time into a datetime object
     if cml_args.timebeg is not None:
 
@@ -7661,6 +7680,15 @@ if __name__ == '__main__':
         config = None
         mask = None
     else:
+        cml_args.input_path = os.path.expanduser(cml_args.input_path)
+        config_path_list = []
+
+        if os.path.isfile(cml_args.mask) or cml_args.mask.endswith(".bmp"):
+            cml_args.mask = os.path.dirname(cml_args.mask)
+
+
+
+
         # If the state file was given, load the state
         if cml_args.input_path.endswith('.state'):
 
