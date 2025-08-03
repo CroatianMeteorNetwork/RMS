@@ -490,29 +490,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 input_path, platepar_file, mask_path, mask, fits_file, star_count_max, config, config_path = handleNoInputPath(
                     input_path=input_path)
 
-        
         fits_file_to_open = fits_file
-        if fits_file is not None:
-            print("Opening {} which has {} stars".format(fits_file, star_count_max))
-        # This message box is just for debugging
-        if False:
-            message = ""
-            message += "Config directory {} \n".format(os.path.dirname(config_path))
-            if platepar_file is None:
-                message += "No valid platepar found for this station\n"
-            else:
-                message += "Platepar directory {} \n".format(os.path.dirname(platepar_file))
-            if mask_path is None:
-                message += "No mask given"
-            else:
-                message += "Mask directory {} \n".format(os.path.dirname(mask_path))
-            message += "fits directory {} \n".format(os.path.basename(input_path))
-            if fits_file_to_open is None and fits_file is not None:
-                fits_file_to_open = os.path.basename(fits_file)
-                message += "Opening {}, which has {} stars".format(os.path.basename(fits_file_to_open), star_count_max)
-            qmessagebox(title='Station {} has data available'.format(config.stationID), \
-                        message=message,
-                        message_type="information")
+        print("Starting with file {}".format(fits_file_to_open))
         # Mode of operation - skyfit for fitting astrometric plates, manualreduction for manual picking
         #   of position on frames and photometry
         self.mode = 'skyfit'
@@ -6594,7 +6573,7 @@ class PlateTool(QtWidgets.QMainWindow):
             miss_this_one: Return coordinates of a different star at random, but don't mark anything.
             min_separation: Minimum separation in pixels between stars.
 
-        Returns: 
+        Return:
             (x,y) integers of the image location of the furthest star away from all other matched stars.
 
         """
@@ -6626,7 +6605,7 @@ class PlateTool(QtWidgets.QMainWindow):
             Keyword Arguments:
                 include_unsuitable: [bool] Include stars marked as unsuitable.
 
-            Return
+            Return:
                 marked_x: [list] of x coordinates.
                 marked_y: [list] of y coordindates.
 
@@ -6684,10 +6663,10 @@ class PlateTool(QtWidgets.QMainWindow):
                 marked_x_list: [list] list of marked star x coordinates.
                 marked_y_list: [list] list of marked star y coordinates.
 
-            Keyword Arguments
+            Keyword Arguments:
                 min_separation: [int] Minimum seperation not be regarded as a double star.
 
-            Returns:
+            Return:
                 unmarked_x_list: list of unmarked star x coordinates.
                 unmarked_y_list: list of unmarked star x coordinates.
                 dist_nearest_marked_list: distance of the nearest marked star for returned star coordinates.
@@ -7263,13 +7242,14 @@ def handleLoginPath(login_path, number_of_fits=None):
 
 def getFITSMostStars(calstars_full_path):
     """
-    Use the calstars file to find the fits file which exists in the respective directory with the most stars
-    Args:
-        calstars_full_path: [str] full path to the calstars file
+    Use the calstars file to find the fits file with the most stars.
+
+    Argument:
+        calstars_full_path: [str] full path to the calstars file.
 
     Return:
-        best_fits_file:[str] full path to the fits file with the most stars
-        star_count_max[int]: number of stars on that fits file
+        best_fits_file:[str] full path to the fits file with the most stars.
+        star_count_max[int]: number of stars on that fits file.
     """
 
     best_fits_file, star_count_max = None, 0
@@ -7290,14 +7270,16 @@ def getFITSMostStars(calstars_full_path):
     return best_fits_file, star_count_max
 
 def getCalstarsPath(captured_directory, config):
+
     """
+    Get the path to the calstars file.
 
     Arguments:
-        captured_directory: [str] RMS captured files directory
-        config: [config] RMS config instance
+        captured_directory: [str] RMS captured files directory.
+        config: [config] RMS config instance.
 
     Return:
-        calstars_full_path:[str] full path to the calstars file
+        calstars_full_path:[str] full path to the calstars file.
     """
 
     dir_date = captured_directory.split("_")[1]
@@ -7309,13 +7291,26 @@ def getCalstarsPath(captured_directory, config):
 
     return calstars_full_path
 
-def expandUserList(path_list, file_type):
+def expandUserList(path_list, file_name):
+    """
+    Given a list of paths, expand each path and add file_name to the end if the path is a directory.
+
+    Arguments:
+        path_list: [list] list of paths to be expanded.
+        file_name: [str] file name to be appended to each list item, if the list item is not this file already, and
+                        the directory is a target.
+
+    Return:
+        target_path_list: [list] returned list of paths, expanded, and with the file_type appended to each one.
+    """
 
     target_path_list = []
+    if path_list is None:
+        return path_list
     for path in path_list:
         target = os.path.expanduser(path)
-        if not os.path.basename(target) == file_type and os.path.isdir(target):
-            target = os.path.join(target, file_type)
+        if not os.path.basename(target) == file_name and os.path.isdir(target):
+            target = os.path.join(target, file_name)
         if os.path.isfile(target):
             target_path_list.append(target)
         else:
@@ -7326,10 +7321,10 @@ def getPlateparFilePath(config):
     """
 
     Arguments:
-        config: [config] RMS config instance
+        config: [config] RMS config instance.
 
     Return:
-        platepar_file_path: [str] full path to a platepar file else None
+        platepar_file_path: [str] full path to a platepar file else None.
     """
 
     potential_platepar_path = os.path.join(os.getcwd(), config.platepar_name)
@@ -7342,19 +7337,18 @@ def getPlateparFilePath(config):
 
 def handleNoInputPath(input_path=None):
     """
-    If no input path is specified then determine some good parameters for starting the platetool
-
-    The most recent captured files directory is chosen.
-    If this contains a calstar file, then the path to the fits file with the most stars is returned
-    If no calstar file, then none is returned
-    The default config and mask are also returned
+    If no input path is specified then check to see if a single station name was passed, i.e. au000d,
+    or if nothing was passed open a dialog box with a list of stations.
 
     Return:
         captured_directory_full_path: [str] full path to the most recent captured directory which contains at least one fits file
         platepar_file: [str] full path to the platepar file
-        mask_path: [str] full path to the mask kile
+        mask_path: [str] full path to the mask file
+        mask: [img] the mask
         best_fits_file: [str] full path to the fits file with the most stars
+        star_count_max: [int] the number of stars on the best_fits_file
         c: [config] rms config instance
+        cml_args.config_path: [path] path to the config file to use
 
 
     """
@@ -7371,7 +7365,6 @@ def handleNoInputPath(input_path=None):
     star_count_max = 0
 
     # Load the config in ~/source/RMS/.config
-
     if cml_args.config is None:
         c = cr.parse(os.path.expanduser(os.path.join(os.getcwd(), ".config")))
         cml_args.config_path = os.path.expanduser(os.path.join(os.getcwd(), ".config"))
@@ -7383,11 +7376,11 @@ def handleNoInputPath(input_path=None):
     if not c.stationID.startswith("XX"):
         # If we have fits, then populate
         if anyFits(verifyCapturedDirectories(getCapturedDirectoryObjects(c), c), c):
-            config_platepar_mask_dict[c.stationID] = [
-                                                        c,
+            config_platepar_mask_dict[c.stationID] = [  c,
                                                         cml_args.config_path,
                                                         getPlateparPath(os.getcwd),
-                                                        getMaskPath(os.getcwd())]
+                                                        getMaskPath(os.getcwd())
+                                                                                    ]
 
     # Are we in a multiple camera per username environment
     # Check to see if there is a XX at the start of the stationID or the ~/source/Stations directory exists
@@ -7420,10 +7413,11 @@ def handleNoInputPath(input_path=None):
                          getPlateparPath(potential_station_directory, multi_cam=True),
                             getMaskPath(potential_station_directory, multi_cam=True)]
 
+    # Is the station passed in from the command line available in the dictionary of stations
     if station_from_command_line in config_platepar_mask_dict.keys():
         selected_station = station_from_command_line
     else:
-
+        # If not, the open a dialog box to select from known stations with data
         dialog = ComboDialog(config_platepar_mask_dict,
                              window_title="Select station to calibrate",
                              label="Stations available for calibration:")
@@ -7434,6 +7428,7 @@ def handleNoInputPath(input_path=None):
             sys.exit()
 
 
+    # Start to set the variables to launch the platetool
     station_data = config_platepar_mask_dict[selected_station]
     c = station_data[0]
     cml_args.config_path = station_data[1]
@@ -7447,29 +7442,28 @@ def handleNoInputPath(input_path=None):
     else:
         mask_path = cml_args.mask
 
+    # Use the correct config file to build the paths
     captured_directory_path = os.path.expanduser(os.path.join(str(c.data_dir), str(c.captured_dir)))
     station = c.stationID
     captured_directory_list = os.listdir(captured_directory_path)
     captured_directory_full_path = None
+
+    # Check there are still some captured directories to use - there must be
     if not len(captured_directory_list):
         print("No captured directories found, cannot continue")
-        quit()
+        sys.exit()
 
-    for potential_captured_directory in sorted(captured_directory_list, reverse=True):
+    # Now work back from the newest directory
+    for potential_captured_directory in sorted(verifyCapturedDirectories(getCapturedDirectoryObjects(c), c), reverse=True):
         one_valid_fits = False
         captured_directory_full_path = os.path.join(captured_directory_path, potential_captured_directory)
-        if potential_captured_directory.startswith("{}_".format(station)) and os.path.isdir(
-                captured_directory_full_path):
+        potential_captured_directory = os.path.basename(potential_captured_directory)
+        if potential_captured_directory.startswith("{}_".format(station)) \
+                and os.path.isdir(captured_directory_full_path):
+            # Maybe we have a calstar file and can get a best_fits_file
             best_fits_file, star_count_max = getFITSMostStars(getCalstarsPath(potential_captured_directory, c))
-
-            # Now check to see if the directory contains at least one valid FITS file
-            captured_directory_contents = os.listdir(captured_directory_full_path)
-            for file_name in captured_directory_contents:
-                if file_name.startswith("FF_{}".format(station.upper())) and file_name.endswith(".fits"):
-                    one_valid_fits = True
-                    break
-        if one_valid_fits:
-            break
+            if anyFits([captured_directory_full_path], c):
+                break
 
     mask = None
     cml_args.mask = os.path.dirname(mask_path)
@@ -7501,7 +7495,21 @@ def getMaskPath(station_directory, multi_cam=False):
 
 
 def getPlateparPath(station_directory, multi_cam=False):
-    # Determine the platepar_path
+    """
+
+    Get the path to a file which can be read as a platepar.
+
+    Arguments:
+        station_directory: the directory of a specific station i.e. AU000A
+
+    Keyword Arguments:
+        multi_cam: True if this is a multi_cam environment, default false
+
+    Return:
+        [str] path to the platepar if one exists, else None
+    """
+
+
     if multi_cam:
         multi_cam_stations_directory = os.path.join(os.path.dirname(os.getcwd()), "Stations")
         full_path_potential_station_directory = os.path.join(multi_cam_stations_directory, station_directory)
@@ -7529,15 +7537,32 @@ def getPlateparPath(station_directory, multi_cam=False):
     return None
 
 
-def anyFits(directory_list, mc_c):
+def anyFits(directory_list, config, prefix="FF", extension=".fits", delimiter="_", no_of_parts=6):
+
+    """
+
+    Arguments:
+        directory_list: [list] list of directories to be searched
+        config: config file for stationID
+
+    Keyword arguments
+        prefix: [str] optional default FF
+        extension: [str] optional default .fits
+        delimiter: [char] optional default _
+        no_of_parts: [int] optional default 6
+
+    Returns:
+        [bool] True if any file matching is found
+    """
+
     # Does at least one of the captured_directories contain a fits file
     one_fits_file_found = False
     for captured_directory in directory_list:
         file_list = os.listdir(captured_directory)
         for test_file in file_list:
-            if test_file.startswith("FF_{}_".format(mc_c.stationID)) \
-                    and test_file.endswith(".fits") \
-                    and len(test_file.split("_")) == 6:
+            if test_file.startswith("{}{}{}{}".format(prefix,delimiter,config.stationID,delimiter)) \
+                    and test_file.endswith(extension) \
+                    and len(test_file.split("_")) == no_of_parts:
                 # This is probably a fits file
                 one_fits_file_found = True
                 break
