@@ -233,14 +233,21 @@ def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=F
 
 
     # Compress the archive directory
-    archive_name = shutil.make_archive(os.path.join(dest_dir, compress_file), 'bztar', dest_dir)
-
-    # Delete the archive directory after compression
-    if delete_dest_dir:
-        shutil.rmtree(dest_dir)
-
-
-    return archive_name
+    archive_path = os.path.join(os.path.dirname(dest_dir), compress_file) + '.tar.bz2'
+    
+    log.info("Creating archive: {}".format(archive_path))
+    
+    # Use tarWithProgress with flat_archive=True to maintain backward compatibility
+    success = tarWithProgress(dest_dir, archive_path, compression='bz2', 
+                              remove_source=delete_dest_dir, flat_archive=True)
+    
+    if not success:
+        log.error("Failed to create archive: {}".format(archive_path))
+        return None
+    
+    log.info("Archive created successfully: {}".format(archive_path))
+    
+    return archive_path
 
 
 
@@ -888,7 +895,7 @@ def _portableCommonpath(paths):
         return prefix or os.path.dirname(paths[0])
 
 
-def tarWithProgress(source_dir, tar_path, compression='bz2', remove_source=False, file_list=None):
+def tarWithProgress(source_dir, tar_path, compression='bz2', remove_source=False, file_list=None, flat_archive=False):
     """Create a tar archive with progress feedback, verify it, and (optionally) delete the sources.
 
     Arguments:
@@ -907,6 +914,8 @@ def tarWithProgress(source_dir, tar_path, compression='bz2', remove_source=False
             archive. When given, the directory walk is skipped and each
             file is stored relative to their deepest common parent
             directory. None by default.
+        flat_archive: [bool] If True, archive files without preserving the
+            base directory name in the archive structure. False by default.
 
     Return:
         success: [bool] True if the archive was created **and** verified
@@ -945,7 +954,11 @@ def tarWithProgress(source_dir, tar_path, compression='bz2', remove_source=False
                 if rel.startswith(os.pardir):
                     raise ValueError("{} is outside {}".format(fpath, base_dir))
                 
-                arcname = os.path.join(os.path.basename(base_dir), rel)
+                # If flat_archive is True, use just the relative path without the base directory name
+                if flat_archive:
+                    arcname = rel
+                else:
+                    arcname = os.path.join(os.path.basename(base_dir), rel)
                 tar.add(fpath, arcname=arcname)
 
                 processed += 1
