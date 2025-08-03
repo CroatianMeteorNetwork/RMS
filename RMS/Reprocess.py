@@ -205,6 +205,12 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
 
         obs_db_conn = getObsDBConn(config)
+        
+        # Get the observation session timestamp to ensure proper time isolation
+        from RMS.Formats.ObservationSummary import getEphemTimesFromCaptureDirectory
+        obs_start_time, _, _ = getEphemTimesFromCaptureDirectory(config, os.path.basename(night_data_dir))
+        session_timestamp = obs_start_time.strftime("%Y-%m-%d %H:%M:%S")
+        
         # Filter out detections using machine learning
         if config.ml_filter > 0:
 
@@ -212,9 +218,10 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
             ff_detected = filterFTPdetectinfoML(config, os.path.join(night_data_dir, ftpdetectinfo_name), \
                 threshold=config.ml_filter, keep_pngs=False, clear_prev_run=True)
-            addObsParam(obs_db_conn, "detections_after_ml", len(ff_detected))
-
-        addObsParam(obs_db_conn,"detections_after_ml", len(readFTPdetectinfo(night_data_dir,ftpdetectinfo_name)))
+            addObsParam(obs_db_conn, "detections_after_ml", len(ff_detected), timestamp=session_timestamp)
+        else:
+            # No ML filtering, use all detections
+            addObsParam(obs_db_conn, "detections_after_ml", len(readFTPdetectinfo(night_data_dir, ftpdetectinfo_name)), timestamp=session_timestamp)
         obs_db_conn.close()
 
         # Get the platepar file

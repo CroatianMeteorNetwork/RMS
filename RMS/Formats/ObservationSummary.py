@@ -498,13 +498,16 @@ def getObsDBConn(config, force_delete=False):
 
     return conn
 
-def addObsParam(conn, key, value):
+def addObsParam(conn, key, value, timestamp=None):
     """Add a single key value pair into the database.
 
     Arguments:
         conn [connection]: the connection to the database
         key [str]: the key for the value to be added
         value [str]: the value to be added
+
+    Keyword arguments:
+        timestamp [str]: optional timestamp to use instead of CURRENT_TIMESTAMP
 
     Return:
         Nothing
@@ -519,7 +522,10 @@ def addObsParam(conn, key, value):
 
     sql_statement += "      VALUES "
     sql_statement += "      (                            \n"
-    sql_statement += "      CURRENT_TIMESTAMP,'{}','{}'   \n".format(key, value)
+    if timestamp is not None:
+        sql_statement += "      '{}','{}','{}'   \n".format(timestamp, key, value)
+    else:
+        sql_statement += "      CURRENT_TIMESTAMP,'{}','{}'   \n".format(key, value)
     sql_statement += "      )"
 
     if conn is None:
