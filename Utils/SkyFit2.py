@@ -450,9 +450,9 @@ class PairedStars(object):
 
 
 class PlateTool(QtWidgets.QMainWindow):
-    def __init__(self, input_path, config, beginning_time=None, fps=None, gamma=None, use_fr_files=False,
+    def __init__(self, input_path, config, config_path=os.getcwd(), beginning_time=None, fps=None, gamma=None, use_fr_files=False,
         geo_points_input=None, startUI=True, mask=None, nobg=False, peribg=False, flipud=False,
-        flatbiassub=False, platepar_file=None, fits_file=None):
+        flatbiassub=False, platepar_file=None, fits_file_to_open=None):
         """ SkyFit interactive window.
 
         Arguments:
@@ -481,6 +481,38 @@ class PlateTool(QtWidgets.QMainWindow):
 
         super(PlateTool, self).__init__()
 
+
+        mask_path, fits_file, star_count_max = None, None, 0
+        if input_path is None:
+            input_path, platepar_file, mask_path, mask, fits_file, star_count_max, config, config_path = handleNoInputPath(input_path=input_path)
+        else:
+            if len(input_path) == 6:
+                input_path, platepar_file, mask_path, mask, fits_file, star_count_max, config, config_path = handleNoInputPath(
+                    input_path=input_path)
+
+        
+        fits_file_to_open = fits_file
+        if fits_file is not None:
+            print("Opening {} which has {} stars".format(fits_file, star_count_max))
+        # This message box is just for debugging
+        if False:
+            message = ""
+            message += "Config directory {} \n".format(os.path.dirname(config_path))
+            if platepar_file is None:
+                message += "No valid platepar found for this station\n"
+            else:
+                message += "Platepar directory {} \n".format(os.path.dirname(platepar_file))
+            if mask_path is None:
+                message += "No mask given"
+            else:
+                message += "Mask directory {} \n".format(os.path.dirname(mask_path))
+            message += "fits directory {} \n".format(os.path.basename(input_path))
+            if fits_file_to_open is None and fits_file is not None:
+                fits_file_to_open = os.path.basename(fits_file)
+                message += "Opening {}, which has {} stars".format(os.path.basename(fits_file_to_open), star_count_max)
+            qmessagebox(title='Station {} has data available'.format(config.stationID), \
+                        message=message,
+                        message_type="information")
         # Mode of operation - skyfit for fitting astrometric plates, manualreduction for manual picking
         #   of position on frames and photometry
         self.mode = 'skyfit'
@@ -617,7 +649,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # Detect data input type and init the image handle
         self.detectInputType(load=True, beginning_time=beginning_time, use_fr_files=self.use_fr_files)
 
-
+        if fits_file_to_open is not None and os.path.exists(fits_file_to_open):
+            self.img_handle.setCurrentFF(os.path.basename(fits_file_to_open))
         # Update the FPS if it's forced
         self.setFPS()
 
@@ -649,10 +682,12 @@ class PlateTool(QtWidgets.QMainWindow):
         self.loadCalstars()
 
 
+
         ###################################################################################################
         # PLATEPAR
 
         # Load the platepar file
+        print("Platepar is {}".format(platepar_file))
         self.loadPlatepar(platepar_file=platepar_file)
 
 
@@ -667,16 +702,16 @@ class PlateTool(QtWidgets.QMainWindow):
 
         ###################################################################################################
 
-        print()
+
 
         if fits_file is not None:
             print("Loading {}".format(fits_file))
-            self.img_handle.setCurrentFF(fits_file)
+
 
 
         # INIT WINDOW
         if startUI:
-            self.setupUI()
+            self.setupUI(starting_ff=fits_file)
 
 
     def setFPS(self):
@@ -689,12 +724,14 @@ class PlateTool(QtWidgets.QMainWindow):
                 print("Forcing video FPS to:", self.fps)
 
 
-    def setupUI(self, loaded_file=False):
+    def setupUI(self, loaded_file=False, starting_ff=None):
         """ Setup pyqt UI with widgets. No variables worth saving should be defined here.
 
         Keyword arguments:
             loaded_file: [bool] Loaded a state from a file. False by default.
         """
+
+
 
         self.central = QtWidgets.QWidget()
         self.setCentralWidget(self.central)
@@ -4505,6 +4542,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.img_handle = img_handle
 
 
+
     def loadCalstars(self):
         """ Loads data from calstars file and updates self.calstars """
 
@@ -7289,7 +7327,7 @@ def getPlateparFilePath(config):
 
     return platepar_file_path
 
-def handleNoInputPath():
+def handleNoInputPath(input_path=None):
     """
     If no input path is specified then determine some good parameters for starting the platetool
 
@@ -7307,9 +7345,19 @@ def handleNoInputPath():
 
 
     """
+    station_from_command_line = None
+    if input_path is not None:
+        if len(input_path) == 6 and input_path[0:2].isalpha():
+            station_from_command_line = input_path.upper()
+    else:
+        station_from_command_line = None
+    # This will hold the configs, and paths to platepars and masks for all valid stations found
+    config_platepar_mask_dict = {}
 
+    best_fits_file = None
+    star_count_max = 0
 
-    print("No input path specified, determining folder to use")
+    # Load the config in ~/source/RMS/.config
 
     if cml_args.config is None:
         c = cr.parse(os.path.expanduser(os.path.join(os.getcwd(), ".config")))
@@ -7318,12 +7366,73 @@ def handleNoInputPath():
         c = cr.parse(os.path.expanduser(cml_args.config))
         cml_args.config_path = os.path.expanduser(cml_args.config)
 
+    # Handle the single station per user account case
+    if not c.stationID.startswith("XX"):
+        # If we have fits, then populate
+        if anyFits(verifyCapturedDirectories(getCapturedDirectoryObjects(c), c), c):
+            config_platepar_mask_dict[c.stationID] = [
+                                                        c,
+                                                        cml_args.config_path,
+                                                        getPlateparPath(os.getcwd),
+                                                        getMaskPath(os.getcwd())]
+
+    # Are we in a multiple camera per username environment
+    # Check to see if there is a XX at the start of the stationID or the ~/source/Stations directory exists
+    multi_cam_stations_directory = os.path.join(os.path.dirname(os.getcwd()), "Stations")
+    if c.stationID.startswith("XX") or os.path.exists(multi_cam_stations_directory):
+
+        # This dictionary will hold lists [config, platepar_path, mask_path], key will be station directory
+        if os.path.exists(multi_cam_stations_directory):
+            potential_station_directory_list = sorted(os.listdir(multi_cam_stations_directory))
+            # Iterate over the stations and collect what we can
+            for potential_station_directory in potential_station_directory_list:
+                full_path_potential_station_directory = os.path.join(multi_cam_stations_directory, potential_station_directory)
+                config_path = os.path.join(full_path_potential_station_directory, os.path.basename(c.config_file_name))
+
+                # If we have a valid config, load it, if it is not valid, then move to the next stations
+                try:
+                    # Load the multi-cam config
+                    mc_c = cr.parse(os.path.expanduser(config_path))
+                except:
+                    continue
+
+                # If no fits file was found, then skip this station
+                if not anyFits(verifyCapturedDirectories(getCapturedDirectoryObjects(mc_c), mc_c), mc_c):
+                    continue
+
+                if mc_c.stationID == potential_station_directory:
+                    config_platepar_mask_dict[potential_station_directory] =  \
+                        [mc_c,
+                         config_path,
+                         getPlateparPath(potential_station_directory, multi_cam=True),
+                            getMaskPath(potential_station_directory, multi_cam=True)]
+
+    if station_from_command_line in config_platepar_mask_dict.keys():
+        selected_station = station_from_command_line
+    else:
+
+        dialog = ComboDialog(config_platepar_mask_dict,
+                             window_title="Select station to calibrate",
+                             label="Stations available for calibration:")
+        if dialog.exec_() == QDialog.Accepted:
+            selected_station = dialog.get_selection()
+            print("Selected station {}".format(selected_station))
+        else:
+            sys.exit()
+
+
+    station_data = config_platepar_mask_dict[selected_station]
+    c = station_data[0]
+    cml_args.config_path = station_data[1]
+    platepar_file = station_data[2]
+    cml_args.mask = station_data[3]
+
     if cml_args.mask is None:
         mask_path = os.path.expanduser(os.path.join(os.getcwd(), c.mask_file))
         if os.path.exists(mask_path):
-            cml_args.mask_path = mask_path
+            cml_args.mask = mask_path
     else:
-        mask_path = cml_args.mask_path
+        mask_path = cml_args.mask
 
     captured_directory_path = os.path.expanduser(os.path.join(str(c.data_dir), str(c.captured_dir)))
     station = c.stationID
@@ -7349,9 +7458,104 @@ def handleNoInputPath():
         if one_valid_fits:
             break
 
-    platepar_file = getPlateparFilePath(c)
+    mask = None
+    cml_args.mask = os.path.dirname(mask_path)
+    if os.path.exists(cml_args.mask):
+        mask = getMaskFile(cml_args.mask, c)
 
-    return captured_directory_full_path, platepar_file, mask_path, best_fits_file, c
+    if (mask is not None) and (not mask.checkResolution(c.width, c.height)):
+        print("Mask resolution ({:d}, {:d}) does not match the image resolution ({:d}, {:d}). Ignoring the mask.".format(
+                mask.width, mask.height, c.width, c.height))
+        mask = None
+
+    return captured_directory_full_path, platepar_file, mask_path, mask, best_fits_file, star_count_max, c, cml_args.config_path
+
+
+def getMaskPath(station_directory, multi_cam=False):
+    # Determine the mask path
+    if multi_cam:
+        multi_cam_stations_directory = os.path.join(os.path.dirname(os.getcwd()), "Stations")
+        full_path_potential_station_directory = os.path.join(multi_cam_stations_directory, station_directory)
+        c = cr.parse(os.path.expanduser(os.path.join(full_path_potential_station_directory, ".config")))
+        mask_path = os.path.join(full_path_potential_station_directory, c.mask_file)
+    else:
+        c = cr.parse(os.path.expanduser(os.path.join(os.getcwd(), ".config")))
+        mask_path = os.path.join(os.getcwd(), c.mask_file)
+
+    if not os.path.exists(mask_path):
+        mask_path = None
+    return mask_path
+
+
+def getPlateparPath(station_directory, multi_cam=False):
+    # Determine the platepar_path
+    if multi_cam:
+        multi_cam_stations_directory = os.path.join(os.path.dirname(os.getcwd()), "Stations")
+        full_path_potential_station_directory = os.path.join(multi_cam_stations_directory, station_directory)
+        c = cr.parse(os.path.expanduser(os.path.join(full_path_potential_station_directory, ".config")))
+        platepar_path = os.path.join(full_path_potential_station_directory, c.platepar_name)
+    else:
+        c = cr.parse(os.path.expanduser(os.path.join(os.getcwd(), ".config")))
+        platepar_path = os.path.join(os.getcwd(), c.platepar_name)
+
+    if os.path.exists(platepar_path):
+        pp = Platepar()
+        try:
+            pp.read(platepar_path)
+        except:
+            pp = None
+        if pp is None:
+            return None
+        else:
+            if pp.station_code != station_directory and multi_cam:
+                pp = None
+                platepar_path = None
+            else:
+                return platepar_path
+
+    return None
+
+
+def anyFits(directory_list, mc_c):
+    # Does at least one of the captured_directories contain a fits file
+    one_fits_file_found = False
+    for captured_directory in directory_list:
+        file_list = os.listdir(captured_directory)
+        for test_file in file_list:
+            if test_file.startswith("FF_{}_".format(mc_c.stationID)) \
+                    and test_file.endswith(".fits") \
+                    and len(test_file.split("_")) == 6:
+                # This is probably a fits file
+                one_fits_file_found = True
+                break
+        if one_fits_file_found:
+            break
+    return one_fits_file_found
+
+
+def verifyCapturedDirectories(directory_list, mc_c):
+    # Filter these list of files in the captured directory for directories which match expected pattern
+    full_path_to_captured_files_directory = os.path.join(mc_c.data_dir, mc_c.captured_dir)
+    verified_directory_list = []
+    for potential_directory in directory_list:
+        if not os.path.isdir(os.path.join(full_path_to_captured_files_directory, potential_directory)):
+            # If it is not a directory, continue
+            continue
+        # Check as much as we reasonably can that this is not some random directory saved here
+        if potential_directory.startswith("{}_".format(mc_c.stationID)) \
+                and len(potential_directory.split("_")) == 4:
+            verified_directory_list.append(os.path.join(full_path_to_captured_files_directory, potential_directory))
+    return sorted(verified_directory_list)
+
+
+def getCapturedDirectoryObjects(config):
+    # Get the list of objects in the captured directory, if this directory exists
+    full_path_to_captured_files_directory = os.path.join(config.data_dir, config.captured_dir)
+    captured_directory_list = []
+    if os.path.exists(full_path_to_captured_files_directory):
+        captured_directory_list = os.listdir(full_path_to_captured_files_directory)
+    return sorted(captured_directory_list)
+
 
 if __name__ == '__main__':
     ### COMMAND LINE ARGUMENTS
@@ -7424,8 +7628,7 @@ if __name__ == '__main__':
     platepar_file = None
     best_fits_file = None
     mask_file = None
-    if cml_args.input_path is None:
-        cml_args.input_path, platepar_file, cml_args.mask_path, best_fits_file, config = handleNoInputPath()
+
 
     # Parse the beginning time into a datetime object
     if cml_args.timebeg is not None:
@@ -7449,85 +7652,94 @@ if __name__ == '__main__':
 
     app = QtWidgets.QApplication(sys.argv)
 
-    # If the state file was given, load the state
-    if cml_args.input_path.endswith('.state'):
-
-        dir_path, state_name = os.path.split(cml_args.input_path)
-        config = cr.loadConfigFromDirectory(cml_args.config, cml_args.input_path)
-
-        # Create plate_tool without calling its constructor then calling loadstate
-        plate_tool = PlateTool.__new__(PlateTool)
-        super(PlateTool, plate_tool).__init__()
-
-        if cml_args.mask is not None:
-            print("Given a path to a mask at {}".format(cml_args.mask))
-            mask = getMaskFile(os.path.expanduser(cml_args.mask), config)
-
-        elif os.path.exists(os.path.join(config.rms_root_dir, config.mask_file)):
-            print("No mask specified loading mask from {}".format(os.path.join(config.rms_root_dir, config.mask_file)))
-            mask = getMaskFile(config.rms_root_dir, config)
-
-        elif os.path.exists("mask.bmp"):
-            mask = getMaskFile(".", config)
-
-        elif True:
-            mask = None
-
-        # If the dimensions of the mask do not match the config file, ignore the mask
-        if (mask is not None) and (not mask.checkResolution(config.width, config.height)):
-            print("Mask resolution ({:d}, {:d}) does not match the image resolution ({:d}, {:d}). Ignoring the mask.".format(
-                mask.width, mask.height, config.width, config.height))
-            mask = None
-
-        plate_tool.loadState(dir_path, state_name, beginning_time=beginning_time, mask=mask)
-
-    elif cml_args.input_path.endswith('.bz2'):
-        handleBZ2(cml_args.input_path)
-
-    elif isLoginPath(cml_args.input_path):
-        handleLoginPath(cml_args.input_path, cml_args.number_of_fits)
-
+    if cml_args.input_path is None:
+        input_path = None
+        config = None
+        mask = None
+    elif len(cml_args.input_path) == 6:
+        input_path = cml_args.input_path
+        config = None
+        mask = None
     else:
+        # If the state file was given, load the state
+        if cml_args.input_path.endswith('.state'):
 
-        # Extract the data directory path
-        input_path = cml_args.input_path.replace('"', '')
-        if os.path.isfile(input_path):
-            dir_path = os.path.dirname(input_path)
+            dir_path, state_name = os.path.split(cml_args.input_path)
+            config = cr.loadConfigFromDirectory(cml_args.config, cml_args.input_path)
+
+            # Create plate_tool without calling its constructor then calling loadstate
+            plate_tool = PlateTool.__new__(PlateTool)
+            super(PlateTool, plate_tool).__init__()
+
+            if cml_args.mask is not None:
+                print("Given a path to a mask at {}".format(cml_args.mask))
+                mask = getMaskFile(os.path.expanduser(cml_args.mask), config)
+
+            elif os.path.exists(os.path.join(config.rms_root_dir, config.mask_file)):
+                print("No mask specified loading mask from {}".format(os.path.join(config.rms_root_dir, config.mask_file)))
+                mask = getMaskFile(config.rms_root_dir, config)
+
+            elif os.path.exists("mask.bmp"):
+                mask = getMaskFile(".", config)
+
+            elif True:
+                mask = None
+
+            # If the dimensions of the mask do not match the config file, ignore the mask
+            if (mask is not None) and (not mask.checkResolution(config.width, config.height)):
+                print("Mask resolution ({:d}, {:d}) does not match the image resolution ({:d}, {:d}). Ignoring the mask.".format(
+                    mask.width, mask.height, config.width, config.height))
+                mask = None
+
+            plate_tool.loadState(dir_path, state_name, beginning_time=beginning_time, mask=mask)
+
+        elif cml_args.input_path.endswith('.bz2'):
+            handleBZ2(cml_args.input_path)
+
+        elif isLoginPath(cml_args.input_path):
+            handleLoginPath(cml_args.input_path, cml_args.number_of_fits)
+
         else:
-            dir_path = input_path
 
-        # Load the config file
-        config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
+            # Extract the data directory path
+            input_path = cml_args.input_path.replace('"', '')
+            if os.path.isfile(input_path):
+                dir_path = os.path.dirname(input_path)
+            else:
+                dir_path = input_path
+
+            # Load the config file
+            config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
 
-        if cml_args.mask is not None:
-            print("Given a path to a mask at {}".format(cml_args.mask))
-            mask = getMaskFile(os.path.expanduser(cml_args.mask), config)
+            if cml_args.mask is not None:
+                print("Given a path to a mask at {}".format(cml_args.mask))
+                mask = getMaskFile(os.path.expanduser(cml_args.mask), config)
 
-        elif os.path.exists(os.path.join(config.rms_root_dir, config.mask_file)):
+            elif os.path.exists(os.path.join(config.rms_root_dir, config.mask_file)):
 
-            print("No mask specified loading mask from {}".format(os.path.join(config.rms_root_dir, config.mask_file)))
-            mask = getMaskFile(config.rms_root_dir, config)
+                print("No mask specified loading mask from {}".format(os.path.join(config.rms_root_dir, config.mask_file)))
+                mask = getMaskFile(config.rms_root_dir, config)
 
-        elif os.path.exists("mask.bmp"):
-            mask = getMaskFile(".", config)
+            elif os.path.exists("mask.bmp"):
+                mask = getMaskFile(".", config)
 
-        else:
-            mask = None
+            else:
+                mask = None
 
-        # If the dimensions of the mask do not match the config file, ignore the mask
-        if (mask is not None) and (not mask.checkResolution(config.width, config.height)):
-            print("Mask resolution ({:d}, {:d}) does not match the image resolution ({:d}, {:d}). Ignoring the mask.".format(
-                mask.width, mask.height, config.width, config.height))
-            mask = None
+            # If the dimensions of the mask do not match the config file, ignore the mask
+            if (mask is not None) and (not mask.checkResolution(config.width, config.height)):
+                print("Mask resolution ({:d}, {:d}) does not match the image resolution ({:d}, {:d}). Ignoring the mask.".format(
+                    mask.width, mask.height, config.width, config.height))
+                mask = None
 
 
 
         # Init SkyFit
-        plate_tool = PlateTool(input_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
+    plate_tool = PlateTool(input_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
             gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints,
             mask=mask, nobg=cml_args.nobg, peribg=cml_args.peribg, flipud=cml_args.flipud, 
-            flatbiassub=cml_args.flatbiassub, platepar_file=platepar_file, fits_file=best_fits_file)
+            flatbiassub=cml_args.flatbiassub, platepar_file=platepar_file, fits_file_to_open=None)
 
 
     # Run the GUI app
