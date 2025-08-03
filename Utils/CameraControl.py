@@ -592,7 +592,7 @@ def setAutoReboot(cam, opts):
     if len(opts) < 1:
         log.info('usage: setAutoReboot dayofweek,hour')
         log.info('  where dayofweek is Never EveryDay Monday Tuesday etc')
-        log.info('  and hour is a number between 0 and 23 or "noon" for local noon')
+        log.info('  and hour is a number between 0 and 23 or "noon" for station solar noon')
         return
     spls = opts[0].split(',')
     day = spls[0]
@@ -609,14 +609,14 @@ def setAutoReboot(cam, opts):
         station_noon_in_utc = computeStationNoonInUTC(config)
         station_noon_in_machine_time = station_noon_in_utc + machine_time_offset
         hour = round(station_noon_in_machine_time,0)
-        log.info('  replaced "noon" with {} for machine time noon'.format(hour))
+        log.info('  replaced "noon" with {} for station solar noon'.format(hour))
 
     hour = int(hour)
 
     if day not in valid_days or hour < 0 or hour > 23:
         log.info('usage: SetAutoReboot dayofweek,hour')
         log.info('  where dayofweek is Never, Everyday, Monday, Tuesday, Wednesday etc')
-        log.info('  and hour is a number between 0 and 23 or "noon" for local computed noon')
+        log.info('  and hour is a number between 0 and 23 or "noon" for station solar noon')
         return
 
     info["AutoRebootDay"] = day
