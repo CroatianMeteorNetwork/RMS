@@ -598,7 +598,7 @@ def setAutoReboot(cam, opts):
     day = spls[0]
     hour = 0
     if len(spls) > 1:
-        hour = int(spls[1])
+        hour = spls[1]
     valid_days = [
         'Everyday','Monday','Tuesday','Wednesday','Thursday','Friday',
         'Saturday','Sunday','Never'
@@ -610,6 +610,8 @@ def setAutoReboot(cam, opts):
         station_noon_in_machine_time = station_noon_in_utc + machine_time_offset
         hour = int(station_noon_in_machine_time)
         log.info('replacing "noon" with {} for machine time noon'.format(hour))
+    else:
+        hour = int(hour)
 
     if day not in valid_days or hour < 0 or hour > 23:
         log.info('usage: SetAutoReboot dayofweek,hour')
