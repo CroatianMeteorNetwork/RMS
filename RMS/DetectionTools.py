@@ -38,6 +38,9 @@ import RMS.Routines.MorphCy as morph
 # Get the logger from the main module
 log = getLogger("logger")
 
+# Track the last mask state to only log changes
+_last_mask_state = None  # Can be None, 'white', or 'valid'
+
 
 def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
     """ Load the mask, dark and flat. 
@@ -73,13 +76,30 @@ def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
 
         log.debug('Loaded mask: {:s}'.format(mask_path))
 
-        # If the mask is all white, set it to None
+        # Check if the mask is all white
         if (mask is not None) and np.all(mask.img == 255):
-            log.info('Mask is all white, setting it to None.')
+            current_state = 'white'
             mask = None
+        elif mask is not None:
+            current_state = 'valid'
+        else:
+            current_state = None
+
+        # Only log mask state changes
+        global _last_mask_state
+        if current_state != _last_mask_state:
+            if current_state == 'white':
+                log.info('Mask is all white, setting it to None.')
+            elif current_state == 'valid' and _last_mask_state == 'white':
+                log.info('Valid mask loaded (no longer all white).')
+            _last_mask_state = current_state
 
     else:
-        log.info('No mask file has been found.')
+        # Only log if we previously had a mask
+        global _last_mask_state
+        if _last_mask_state is not None:
+            log.info('No mask file has been found.')
+            _last_mask_state = None
         
 
     # Try loading the dark frame
