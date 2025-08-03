@@ -1355,6 +1355,12 @@ class BufferedCapture(Process):
     def releaseResources(self):
         """Tear everything down in the right order so no FD survives."""
         
+        # Prevent multiple simultaneous calls
+        if hasattr(self, '_releasing_resources') and self._releasing_resources:
+            log.debug("releaseResources: Already in progress, skipping duplicate call")
+            return
+        self._releasing_resources = True
+        
         log.debug("releaseResources: Starting")
 
         def _timedCall(fn, timeout_s=2):
@@ -1364,7 +1370,6 @@ class BufferedCapture(Process):
             th.start()
             th.join(timeout_s)
             return not th.is_alive()
-
 
         # stop frame-saver children
         log.debug("releaseResources: Calling releaseRawArrays()")
@@ -1448,7 +1453,7 @@ class BufferedCapture(Process):
         if pipe:
             log.debug("releaseResources: Unreffing pipeline")
             # Use a timed call as final safety net (should not be needed with teardown-timeout)
-            if not _timedCall(pipe.unref, timeout=10):
+            if not _timedCall(pipe.unref, timeout_s=10):
                 log.warning("releaseResources: pipeline.unref() timed out after 10 seconds - this indicates a GStreamer bug")
             else:
                 log.debug("releaseResources: Pipeline unreffed successfully")
@@ -1487,6 +1492,9 @@ class BufferedCapture(Process):
                 self.device = None
 
         log.debug("releaseResources: Completed")
+        
+        # Reset the flag so future calls can proceed
+        self._releasing_resources = False
 
 
     def releaseRawArrays(self):
@@ -2116,12 +2124,9 @@ class BufferedCapture(Process):
                 wait_for_reconnect = False
                 log.info('Capture exited!')
 
-                # Save leftover raw frames from last used buffer
-                if self.config.save_frames:
-                    if raw_buffer_one:
-                        self.start_raw_time1.value = first_raw_frame_timestamp
-                    else:
-                        self.start_raw_time2.value = first_raw_frame_timestamp
+                # Don't signal RawFrameSaver here - let releaseRawArrays() handle final flush
+                # to avoid double flushing. The RawFrameSaver.stop() method will flush any
+                # remaining frames automatically.
 
                 break
 
