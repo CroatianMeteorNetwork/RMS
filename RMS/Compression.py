@@ -348,14 +348,14 @@ class Compressor(multiprocessing.Process):
             # Cut out the compressed frames to the proper size
             compressed = compressed[:, :self.config.height, :self.config.width]
             
-            log.info("Compression time: {:.3f} s".format(time.time() - t))
+            log.debug("Compression time: {:.3f} s".format(time.time() - t))
             t = time.time()
             
             # Save the compressed image
             filename_millis, filename_micros = self.saveFF(compressed, startTime, n*256)
             n += 1
             
-            log.info("Saving time: {:.3f} s".format(time.time() - t))
+            log.debug("Saving time: {:.3f} s".format(time.time() - t))
 
 
             # Save a live.jpg file to the data directory
