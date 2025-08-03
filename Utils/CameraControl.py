@@ -592,7 +592,7 @@ def setAutoReboot(cam, opts):
     if len(opts) < 1:
         log.info('usage: setAutoReboot dayofweek,hour')
         log.info('  where dayofweek is Never EveryDay Monday Tuesday etc')
-        log.info('  and hour is a number between 0 and 23')
+        log.info('  and hour is a number between 0 and 23 or "noon" for local noon')
         return
     spls = opts[0].split(',')
     day = spls[0]
@@ -603,10 +603,18 @@ def setAutoReboot(cam, opts):
         'Everyday','Monday','Tuesday','Wednesday','Thursday','Friday',
         'Saturday','Sunday','Never'
     ]
+
+    if hour == "noon":
+        machine_time_offset = computeMachineTimeOffset()
+        station_noon_in_utc = computeStationNoonInUTC(config)
+        station_noon_in_machine_time = station_noon_in_utc + machine_time_offset
+        hour = int(station_noon_in_machine_time)
+        log.info('replacing "noon" with {} for machine time noon'.format(hour))
+
     if day not in valid_days or hour < 0 or hour > 23:
         log.info('usage: SetAutoReboot dayofweek,hour')
         log.info('  where dayofweek is Never, Everyday, Monday, Tuesday, Wednesday etc')
-        log.info('  and hour is a number between 0 and 23')
+        log.info('  and hour is a number between 0 and 23 or "noon" for local computed noon')
         return
 
     info["AutoRebootDay"] = day
@@ -859,6 +867,34 @@ def cameraControlV2(config, cmd, opts=''):
 
     cameraControl(camera_ip, cmd, opts, camera_settings_path=camera_settings_path)
 
+def computeMachineTimeOffset():
+    """
+    Compute machine time offset.
+
+    Returns:
+        Time offset of machine relative to UTC in hours.
+    """
+
+    utc_time_naive = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+    local_time_naive = datetime.datetime.now()
+
+    return round((local_time_naive - utc_time_naive).total_seconds() / 3600,2)
+
+def computeStationNoonInUTC(config):
+    """
+
+    Arguments:
+        config: [config] RMS Config instance
+
+    Returns:
+        [float] Hour of solar noon computed using longitude
+    """
+
+    degrees_of_longitude = 360
+    hours_in_a_day = 24
+
+    return 12 - hours_in_a_day * (config.longitude / degrees_of_longitude)
+
 
 if __name__ == '__main__':
     """Main function
@@ -866,6 +902,8 @@ if __name__ == '__main__':
         command - the command you want to execute
         opts - optional list of fields and a value to pass to SetParam
     """
+
+
 
     # list of supported commands
     cmd_list = [
@@ -921,6 +959,8 @@ if __name__ == '__main__':
     log_manager = LoggingManager()
     log_manager.initLogging(config, log_file_prefix='camControl_')
     log = getLogger("logger")
+
+
 
 
     if cmd not in cmd_list:
