@@ -766,7 +766,7 @@ def updateCommitHistoryDirectory(remote_urls, target_directory):
 
         if first_remote:
             first_remote = False
-            p = subprocess.Popen(["git", "clone", url, "--filter=blob:none", "--no-checkout"], cwd=target_directory,
+            p = subprocess.Popen(["git", "clone", "--depth=1", "--no-checkout", url], cwd=target_directory,
                              stdout=subprocess.PIPE)
             p.wait()
             # this first remote might have been pulled in with the wrong local_name so rename it
@@ -782,7 +782,7 @@ def updateCommitHistoryDirectory(remote_urls, target_directory):
 
             p = subprocess.Popen(["git", "remote", "add", local_name, url], cwd = commit_repo_directory)
             p.wait()
-            p = subprocess.Popen(["git", "fetch", "--filter=blob:none", local_name], cwd = commit_repo_directory)
+            p = subprocess.Popen(["git", "fetch", "--depth=1", local_name], cwd = commit_repo_directory)
             p.wait()
     return commit_repo_directory
 
