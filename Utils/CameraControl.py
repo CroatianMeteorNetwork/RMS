@@ -609,6 +609,7 @@ def setAutoReboot(cam, opts):
         station_noon_in_utc = computeStationNoonInUTC(config)
         station_noon_in_machine_time = station_noon_in_utc + machine_time_offset
         hour = int(station_noon_in_machine_time)
+        print("Computed reboot hour of {}".format(hour))
         log.info('replacing "noon" with {} for machine time noon'.format(hour))
     else:
         hour = int(hour)
