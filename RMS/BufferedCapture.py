@@ -979,15 +979,14 @@ class BufferedCapture(Process):
 
         device_url = self.extractRtspUrl(self.config.deviceID)
 
+        # Common timeout settings for both UDP and TCP
+        # All streams need tcp-timeout since RTSP control always uses TCP
+        common_timeouts = "retry=5 timeout=5000000 tcp-timeout=5000000 teardown-timeout=3000000"
+        
         if self.config.protocol == 'udp':
-            # UDP: shorter timeout since no connection state
-            protocol_str = "protocols=udp retry=5 timeout=5000000"
-            # rtspsrc_params = ("rtspsrc buffer-mode=1 protocols=udp retry=5")
-
+            protocol_str = f"protocols=udp {common_timeouts}"
         else:
-            # TCP: comprehensive timeouts to prevent hangs
-            protocol_str = ("protocols=tcp tcp-timeout=5000000 retry=5 "
-                           "timeout=5000000 teardown-timeout=3000000")
+            protocol_str = f"protocols=tcp {common_timeouts}"
 
         # Define the source up to the point where we want to branch off
         source_to_tee = (
@@ -1448,8 +1447,11 @@ class BufferedCapture(Process):
         # only now drop the last reference
         if pipe:
             log.debug("releaseResources: Unreffing pipeline")
-            pipe.unref()
-            log.debug("releaseResources: Pipeline unreffed successfully")
+            # Use a timed call as final safety net (should not be needed with teardown-timeout)
+            if not _timedCall(pipe.unref, timeout=10):
+                log.warning("releaseResources: pipeline.unref() timed out after 10 seconds - this indicates a GStreamer bug")
+            else:
+                log.debug("releaseResources: Pipeline unreffed successfully")
         self.pipeline = None
 
         # device section
