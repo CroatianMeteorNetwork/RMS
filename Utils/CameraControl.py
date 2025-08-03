@@ -89,7 +89,7 @@ def rebootCamera(cam):
     Args:
         cam : The camera
     """
-    log.info('rebooting, please wait....')
+    log.info('Camera rebooting, please wait....')
     cam.reboot()
     retry = 0
     while retry < 5:
@@ -98,9 +98,9 @@ def rebootCamera(cam):
             break
         retry += 1
     if retry < 5: 
-        log.info('reboot successful')
+        log.info('Camera reboot successful')
     else:
-        log.info('camera nonresponsive, please wait 30s and reconnect')
+        log.info('Camera nonresponsive, please wait 30s and reconnect')
 
 
 def strIPtoHex(ip_str):
@@ -852,12 +852,8 @@ def cameraControlV2(config, cmd, opts=''):
     # extract IP from config file
     camera_ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0]
 
-    if not hasattr(config, 'camera_settings_path') or not os.path.isfile(config.camera_settings_path):
-        camera_settings_path = './camera_settings.json'
-    else:
-        camera_settings_path = config.camera_settings_path
-
-    cameraControl(camera_ip, cmd, opts, camera_settings_path=camera_settings_path)
+    # camera_settings_path is sanity checked in ConfigReader so no checks needed here
+    cameraControl(camera_ip, cmd, opts, camera_settings_path=config.camera_settings_path)
 
 
 if __name__ == '__main__':
@@ -917,8 +913,6 @@ if __name__ == '__main__':
 
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
-    # initialise a logger, when running in standalone mode, to avoid DVRip's excessive debug messages
-    logger = initLogging(config, log_file_prefix='camControl_')
     
     if cmd not in cmd_list:
         log.info('Error: command "%s" not supported', cmd)
