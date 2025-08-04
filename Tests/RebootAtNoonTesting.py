@@ -81,7 +81,7 @@ class TestRebootAtNoon(unittest.TestCase):
                         result = subprocess.run(['python','-m','Utils.CameraControl','SetAutoReboot','Everyday,noon'], capture_output=True, text=True)
                         print("Command feedback was {}".format(result))
                         rb = cam.get_info("General.AutoMaintain")
-                        print("Rb ".format(rb))
+                        print("Rb {}".format(rb))
 
         # Put the station longitude back
         writeFileFromLines(setValue(config_file, "System", "longitude", station_longitude))
