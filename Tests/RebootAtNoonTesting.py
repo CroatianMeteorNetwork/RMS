@@ -80,9 +80,9 @@ class TestRebootAtNoon(unittest.TestCase):
                         print("Testing at longitude: {} and time:{}".format(test_longitude, test_time_python_object))
                         cam.set_time(test_time_python_object)
                         camera_time = cam.get_time()
-                        #print("Camera set to {}".format(camera_time))
+                        print("Camera set to {}".format(camera_time))
                         result = subprocess.run(['python','-m','Utils.CameraControl','SetAutoReboot','Everyday,noon'], capture_output=True, text=True)
-                        #print("Command feedback was {}".format(result))
+                        print("Command feedback was {}".format(result))
                         reboot_hour_read_back = cam.get_info("General.AutoMaintain")['AutoRebootHour']
                         print("Reboot time read back as {}".format(reboot_hour_read_back))
                         test_data.append([test_longitude,test_time_python_object,camera_time,reboot_hour_read_back])
