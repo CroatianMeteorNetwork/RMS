@@ -896,22 +896,6 @@ def computeCameraTimeOffset(config):
     # wrap to +/- 12
     return ((camera_time_offset + 12) % 24) - 12
 
-def computeStationNoonInUTC(config):
-    """
-
-    Arguments:
-        config: [config] RMS Config instance
-
-    Returns:
-        [float] Hour of solar noon computed using longitude
-    """
-
-    degrees_of_longitude = 360
-    hours_in_a_day = 24
-
-    return 12 - hours_in_a_day * (config.longitude / degrees_of_longitude)
-
-
 if __name__ == '__main__':
     """Main function
     Args:
