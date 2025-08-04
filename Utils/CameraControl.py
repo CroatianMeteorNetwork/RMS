@@ -606,7 +606,8 @@ def setAutoReboot(cam, opts):
 
     if hour == "noon":
         camera_time_offset = computeCameraTimeOffset(config)
-        station_noon_in_utc = 12 - config.longitude / 15
+        # compute station noon from longitude, and wrap to within 24 hour window
+        station_noon_in_utc = int(12 - config.longitude / 15) % 24
         station_noon_in_machine_time = station_noon_in_utc + camera_time_offset
         hour = round(station_noon_in_machine_time,0)
         log.info('  replaced "noon" with {} for station solar noon'.format(hour))
