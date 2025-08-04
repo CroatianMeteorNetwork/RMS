@@ -881,21 +881,24 @@ def computeCameraTimeOffset(config):
         Time offset of camera relative to UTC in hours.
     """
 
-
-    # utc_time_naive = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+    utc_time_naive = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
     camera_ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0]
-    print("Camera ip {}".format(camera_ip))
     cam = dvr.DVRIPCam(camera_ip)
     if cam.login():
-        camera_time_string = str(cam.get_time())
-        print("Raw camera time string {}".format(camera_time_string))
-        camera_time_naive = datetime.datetime.strptime(camera_time_string, "%Y-%m-%d %H:%M:%S")
-        print("Camera time as python object {}".format(camera_time_naive))
-        local_time_naive = datetime.datetime.now()
-    else:
-        return None
+        try:
+            camera_time_string = str(cam.get_time())
+            camera_time_naive = datetime.datetime.strptime(camera_time_string, "%Y-%m-%d %H:%M:%S")
 
-    return round((local_time_naive - camera_time_naive).total_seconds() / 3600,2)
+        except:
+            return 0
+    else:
+        return 0
+
+    camera_time_offset = round((camera_time_naive - utc_time_naive).total_seconds() / 3600,2)
+
+    print("Camera time offset {}".format(camera_time_offset))
+
+    return camera_time_offset
 
 def computeStationNoonInUTC(config):
     """
