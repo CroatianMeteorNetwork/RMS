@@ -606,6 +606,9 @@ def setAutoReboot(cam, opts):
 
     if hour == "noon":
         camera_time_offset = computeCameraTimeOffset(cam)
+        if camera_time_offset is None:
+            log.warning("Unable to retrieve camera time, aborting")
+            return
         # compute station noon from longitude, and wrap to 24 hour window, as this is not done elsewhere
         station_noon_in_utc = int(12 - config.longitude / 15) % 24
         station_noon_in_machine_time = station_noon_in_utc + camera_time_offset
