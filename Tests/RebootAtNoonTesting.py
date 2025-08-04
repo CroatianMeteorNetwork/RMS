@@ -80,7 +80,7 @@ class TestRebootAtNoon(unittest.TestCase):
                         print("Camera set to {}".format(camera_time))
                         result = subprocess.run(['python','-m','Utils.CameraControl','SetAutoReboot','Everyday,noon'], capture_output=True, text=True)
                         print("Command feedback was {}".format(result))
-                        reboot_hour_read_back = json.loads(cam.get_info("General.AutoMaintain"))['AutoRebootHour']
+                        reboot_hour_read_back = cam.get_info("General.AutoMaintain")['AutoRebootHour']
                         print("Reboot time set as {}".format(reboot_hour_read_back))
 
         # Put the station longitude back
