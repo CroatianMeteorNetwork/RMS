@@ -9,7 +9,6 @@ import ctypes
 import multiprocessing
 import time
 import paramiko
-from tqdm import tqdm
 
 from RMS.Logger import LoggingManager, getLogger
 
@@ -244,6 +243,15 @@ def getSSHAndSFTP(hostname, **kwargs):
     return ssh, sftp
 
 
+# Define a class to track progress and share values between the callback and the main thread
+class ProgressTracker(object):
+    def __init__(self, total_bytes):
+        self.total_bytes = total_bytes
+        self.uploaded_bytes = 0
+        self.last_percent = 0
+        self.start_time = time.time()
+
+
 def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                rsa_private_key=os.path.expanduser('~/.ssh/id_rsa'),
                allow_dir_creation=False,
@@ -340,26 +348,68 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                 # Means remote file doesn't exist yet, so proceed
                 pass
             
-            # Upload the file to the server with tqdm progress bar
+            # Initialize the progress tracker
+            tracker = ProgressTracker(local_file_size)
+
+            update_interval = 1  # Update progress every 1% for large files or 5% for small files
+            if tracker.total_bytes > 100*1024*1024:  # For files over 100MB, update more frequently
+                update_interval = 0.5
+
+            # Define a callback function for progress reporting
+            def progressCallback(bytes_transferred, _):
+                """ Callback function to report upload progress. 
+                    It updates the tracker and prints the progress to the console.
+                """
+
+                tracker.uploaded_bytes = bytes_transferred
+                
+                # Calculate percentage
+                if tracker.total_bytes > 0:
+                    percent_complete = round(100.0*tracker.uploaded_bytes/tracker.total_bytes, 1)
+                    
+                    # Only update when the percentage changes by at least update_interval
+                    # Also prevent duplicate 100% messages
+                    if (percent_complete >= tracker.last_percent + update_interval and tracker.last_percent < 100.0) \
+                        or (percent_complete == 100.0 and tracker.last_percent != 100.0):
+                        
+                        elapsed_time = time.time() - tracker.start_time
+                        
+                        # Calculate transfer speed
+                        if elapsed_time > 0:
+                            transfer_rate = tracker.uploaded_bytes/elapsed_time/1024  # KB/s
+                            
+                            # Format as MB/s if over 1024 KB/s
+                            if transfer_rate > 1024:
+                                transfer_rate_str = "{:.2f} MB/s".format(transfer_rate/1024)
+                            else:
+                                transfer_rate_str = "{:.2f} KB/s".format(transfer_rate)
+                            
+                            # Estimate time remaining
+                            if percent_complete > 0 and percent_complete < 100.0:
+                                time_remaining = (elapsed_time/percent_complete)*(100 - percent_complete)
+                                # Format time remaining
+                                if time_remaining > 60:
+                                    time_str = "{:.1f} min remaining".format(time_remaining/60)
+                                else:
+                                    time_str = "{:.0f} sec remaining".format(time_remaining)
+                                
+                                print(f'\r[{percent_complete:.1f}%] Uploading: {os.path.basename(local_file)} ({formatSize(tracker.uploaded_bytes)}/{formatSize(tracker.total_bytes)}) @ {transfer_rate_str} - {time_str}', end='', flush=True)
+                            else:
+                                # At 100%, show "complete" instead of remaining time
+                                if percent_complete == 100.0:
+                                    print(f'\r[100.0%] Upload complete: {os.path.basename(local_file)} ({formatSize(tracker.uploaded_bytes)}/{formatSize(tracker.total_bytes)}) @ {transfer_rate_str}')
+                                else:
+                                    print(f'\r[{percent_complete:.1f}%] Uploading: {os.path.basename(local_file)} ({formatSize(tracker.uploaded_bytes)}/{formatSize(tracker.total_bytes)}) @ {transfer_rate_str}', end='', flush=True)
+                        
+                        else:
+                            print(f'\r[{percent_complete:.1f}%] Uploading: {os.path.basename(local_file)} ({formatSize(tracker.uploaded_bytes)}/{formatSize(tracker.total_bytes)})', end='', flush=True)
+                        
+                        tracker.last_percent = percent_complete
+            
+            # Upload the file to the server if it isn't already there
             log.info('Starting upload of ' \
                      + local_file + ' ({}) to '.format(formatSize(local_file_size)) + remote_file)
-            
-            # Create tqdm progress bar
-            with tqdm(total=local_file_size, unit='B', unit_scale=True, 
-                      desc=os.path.basename(local_file), 
-                      disable=None,  # Automatically detect if running in terminal
-                      leave=False,   # Remove progress bar after completion
-                      position=0,    # Keep at bottom of terminal
-                      bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]'
-                      ) as pbar:
-                
-                # Define callback for paramiko
-                def progressCallback(bytes_transferred, total_bytes):
-                    # Update progress bar
-                    pbar.update(bytes_transferred - pbar.n)
-                
-                # Upload the file
-                sftp.put(local_file, remote_file, callback=progressCallback)
+            sftp.put(local_file, remote_file, callback=progressCallback)
             log.debug("Upload completed, verifying...")
 
             # Check that the size of the remote file is correct, indicating a successful upload
