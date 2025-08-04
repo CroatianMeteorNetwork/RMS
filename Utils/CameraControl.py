@@ -605,7 +605,7 @@ def setAutoReboot(cam, opts):
     ]
 
     if hour == "noon":
-        camera_time_offset = computeCameraTimeOffset(config)
+        camera_time_offset = computeCameraTimeOffset(cam)
         # compute station noon from longitude, and wrap to 24 hour window, as this is not done elsewhere
         station_noon_in_utc = int(12 - config.longitude / 15) % 24
         station_noon_in_machine_time = station_noon_in_utc + camera_time_offset
@@ -869,7 +869,7 @@ def cameraControlV2(config, cmd, opts=''):
 
     cameraControl(camera_ip, cmd, opts, camera_settings_path=camera_settings_path)
 
-def computeCameraTimeOffset(config):
+def computeCameraTimeOffset(cam):
     """
     Compute camera time offset.
 
@@ -878,18 +878,11 @@ def computeCameraTimeOffset(config):
     """
 
     utc_time_naive = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
-    camera_ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0]
-    cam = dvr.DVRIPCam(camera_ip)
-    if cam.login():
-        try:
-            camera_time_string = str(cam.get_time())
-            camera_time_naive = datetime.datetime.strptime(camera_time_string, "%Y-%m-%d %H:%M:%S")
-
-        except:
-            return 0
-    else:
-        return 0
-
+    try:
+        camera_time_naive = datetime.datetime.strptime(str(cam.get_time()), "%Y-%m-%d %H:%M:%S")
+    except:
+        camera_time_naive = None
+        return None
 
     camera_time_offset = round((camera_time_naive - utc_time_naive).total_seconds() / 3600,2)
 
