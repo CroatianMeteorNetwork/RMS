@@ -6,6 +6,7 @@ import datetime
 import re
 import dvrip as dvr
 import subprocess
+import pickle
 
 def readFileAsLines(file_path="~/source/RMS/.config"):
 
@@ -58,17 +59,19 @@ def setValue(lines_list, section, key, value):
 class TestRebootAtNoon(unittest.TestCase):
 
     def test_RebootAtNoon(self):
-        # Test code - should produce no output
+
         config_file = readFileAsLines()
         camera_ip =  re.findall(r"[0-9]+(?:\.[0-9]+){3}", getValue(config_file, "Capture", "device"))[0]
         cam = dvr.DVRIPCam(camera_ip)
+        rms_data_path = os.path.expanduser(getValue(config_file, "Capture", "data_dir"))
 
         if cam.login():
 
             print("Logged in to {}".format(camera_ip))
             # Store the station longitude setting
             station_longitude = getValue(config_file, "System", "longitude")
-            for test_longitude in range(-360, 360, 5):
+            test_data = []
+            for test_longitude in range(-360, 360, 90):
                 writeFileFromLines(setValue(config_file, "System", "longitude", test_longitude))
                 for test_hour in range(0, 23):
                     for test_minute in range(0,45,15):
@@ -77,11 +80,14 @@ class TestRebootAtNoon(unittest.TestCase):
                         print("Testing at longitude: {} and time:{}".format(test_longitude, test_time_python_object))
                         cam.set_time(test_time_python_object)
                         camera_time = cam.get_time()
-                        print("Camera set to {}".format(camera_time))
+                        #print("Camera set to {}".format(camera_time))
                         result = subprocess.run(['python','-m','Utils.CameraControl','SetAutoReboot','Everyday,noon'], capture_output=True, text=True)
-                        print("Command feedback was {}".format(result))
+                        #print("Command feedback was {}".format(result))
                         reboot_hour_read_back = cam.get_info("General.AutoMaintain")['AutoRebootHour']
-                        print("Reboot time set as {}".format(reboot_hour_read_back))
+                        print("Reboot time read back as {}".format(reboot_hour_read_back))
+                        test_data.append([test_longitude,test_time_python_object,camera_time,reboot_hour_read_back])
+            with open(os.path.join(rms_data_path,"reboot_at_noon_test.pkl"), 'wb') as f:
+                pickle.dump(test_data, f)
 
         # Put the station longitude back
         writeFileFromLines(setValue(config_file, "System", "longitude", station_longitude))
