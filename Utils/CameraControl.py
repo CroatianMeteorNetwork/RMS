@@ -886,11 +886,14 @@ def computeCameraTimeOffset(config):
     camera_ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0]
     print("Camera ip {}".format(camera_ip))
     cam = dvr.DVRIPCam(camera_ip)
-    camera_time_string = str(cam.get_time())
-    print("Raw camera time string {}".format(camera_time_string))
-    camera_time_naive = datetime.strptime(camera_time_string, "%Y-%m-%d %H:%M:%S")
-    print("Camera time as python object {}".format(camera_time_naive))
-    local_time_naive = datetime.datetime.now()
+    if cam.login():
+        camera_time_string = str(cam.get_time())
+        print("Raw camera time string {}".format(camera_time_string))
+        camera_time_naive = datetime.strptime(camera_time_string, "%Y-%m-%d %H:%M:%S")
+        print("Camera time as python object {}".format(camera_time_naive))
+        local_time_naive = datetime.datetime.now()
+    else:
+        return None
 
     return round((local_time_naive - camera_time_naive).total_seconds() / 3600,2)
 
