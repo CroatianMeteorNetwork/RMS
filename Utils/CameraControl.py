@@ -880,6 +880,7 @@ def computeCameraTimeOffset(config):
 
     # utc_time_naive = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
     camera_ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0]
+    print(camera_ip)
     cam = dvr.DVRIPCam(camera_ip)
     camera_time_string = cam.get_time()
     print("Raw camera time string {}".format(camera_time_string))
