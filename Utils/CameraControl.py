@@ -605,9 +605,9 @@ def setAutoReboot(cam, opts):
     ]
 
     if hour == "noon":
-        machine_time_offset = computeMachineTimeOffset()
+        camera_time_offset = computeCameraTimeOffset(config)
         station_noon_in_utc = computeStationNoonInUTC(config)
-        station_noon_in_machine_time = station_noon_in_utc + machine_time_offset
+        station_noon_in_machine_time = station_noon_in_utc + camera_time_offset
         hour = round(station_noon_in_machine_time,0)
         log.info('  replaced "noon" with {} for station solar noon'.format(hour))
 
@@ -869,18 +869,25 @@ def cameraControlV2(config, cmd, opts=''):
 
     cameraControl(camera_ip, cmd, opts, camera_settings_path=camera_settings_path)
 
-def computeMachineTimeOffset():
+def computeCameraTimeOffset(config):
     """
-    Compute machine time offset.
+    Compute camera time offset.
 
     Returns:
-        Time offset of machine relative to UTC in hours.
+        Time offset of camera relative to UTC in hours.
     """
 
-    utc_time_naive = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
+    # utc_time_naive = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+    camera_ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0]
+    cam = dvr.DVRIPCam(camera_ip)
+    camera_time_string = cam.get_time()
+    print("Raw camera time string {}".format(camera_time_string))
+    camera_time_naive = datetime.strptime(camera_time_string, "%Y-%m-%d %H:%M:%S")
+    print("Camera time as python object {}".format(camera_time_naive))
     local_time_naive = datetime.datetime.now()
 
-    return round((local_time_naive - utc_time_naive).total_seconds() / 3600,2)
+    return round((local_time_naive - camera_time_naive).total_seconds() / 3600,2)
 
 def computeStationNoonInUTC(config):
     """
