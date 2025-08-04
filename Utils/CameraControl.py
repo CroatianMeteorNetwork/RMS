@@ -590,7 +590,7 @@ def setAutoReboot(cam, opts):
     info = cam.get_info("General.AutoMaintain") 
     # print(json.dumps(info, ensure_ascii=False, indent=4, sort_keys=True))
     if len(opts) < 1:
-        log.info('usage: setAutoReboot dayofweek,hour')
+        log.info('usage: SetAutoReboot dayofweek,hour')
         log.info('  where dayofweek is Never EveryDay Monday Tuesday etc')
         log.info('  and hour is a number between 0 and 23 or "noon" for station solar noon')
         return
