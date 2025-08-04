@@ -889,7 +889,7 @@ def computeCameraTimeOffset(config):
     if cam.login():
         camera_time_string = str(cam.get_time())
         print("Raw camera time string {}".format(camera_time_string))
-        camera_time_naive = datetime.strptime(camera_time_string, "%Y-%m-%d %H:%M:%S")
+        camera_time_naive = datetime.datetime.strptime(camera_time_string, "%Y-%m-%d %H:%M:%S")
         print("Camera time as python object {}".format(camera_time_naive))
         local_time_naive = datetime.datetime.now()
     else:
