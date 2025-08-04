@@ -48,6 +48,7 @@
 
   "day": [
     ["CameraTime", "set"],
+    ["SetAutoReboot", "Everyday,noon"],
     ["SetParam", "Camera", "DayNightColor", "1"],
     ["SetParam", "Camera", "ElecLevel", "50"],
     ["SetParam", "Camera", "BroadTrends", "AutoGain", "1"],
