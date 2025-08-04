@@ -606,7 +606,7 @@ def setAutoReboot(cam, opts):
 
     if hour == "noon":
         camera_time_offset = computeCameraTimeOffset(config)
-        station_noon_in_utc = computeStationNoonInUTC(config)
+        station_noon_in_utc = 12 - config.longitude * 15
         station_noon_in_machine_time = station_noon_in_utc + camera_time_offset
         hour = round(station_noon_in_machine_time,0)
         log.info('  replaced "noon" with {} for station solar noon'.format(hour))
@@ -844,10 +844,6 @@ def cameraControl(camera_ip, cmd, opts='', camera_settings_path='./camera_settin
     cam = dvr.DVRIPCam(camera_ip)
     if cam.login():
         try:
-            print("Cam {}".format(cam))
-            print("Cmd {}".format(cmd))
-            print("Opts {}".format(opts))
-            print("Path {}".format(camera_settings_path))
             dvripCall(cam, cmd, opts, camera_settings_path)
         except Exception as e:
             log.error("Error executing command: %s", e)
@@ -895,8 +891,6 @@ def computeCameraTimeOffset(config):
         return 0
 
     camera_time_offset = round((camera_time_naive - utc_time_naive).total_seconds() / 3600,2)
-
-    print("Camera time offset {}".format(camera_time_offset))
 
     return camera_time_offset
 
