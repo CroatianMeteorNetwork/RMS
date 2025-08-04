@@ -874,7 +874,7 @@ def computeCameraTimeOffset(config):
     Compute camera time offset.
 
     Returns:
-        Time offset of camera relative to UTC in hours.
+        Time offset of camera relative to UTC in hours. If the call fails, return 0
     """
 
     utc_time_naive = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
@@ -889,6 +889,7 @@ def computeCameraTimeOffset(config):
             return 0
     else:
         return 0
+
 
     camera_time_offset = round((camera_time_naive - utc_time_naive).total_seconds() / 3600,2)
 
