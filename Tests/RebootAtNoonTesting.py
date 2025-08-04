@@ -5,6 +5,7 @@ import unittest
 import datetime
 import re
 import dvrip as dvr
+import subprocess
 
 def readFileAsLines(file_path="~/source/RMS/.config"):
 
@@ -77,8 +78,8 @@ class TestRebootAtNoon(unittest.TestCase):
                         cam.set_time(test_time_python_object)
                         camera_time = cam.get_time()
                         print("Camera set to {}".format(camera_time))
-
-
+                        result = subprocess.run(['python','-m','Utils.CameraControl','setAutoReboot','EveryDay,noon'], capture_output=True, text=True)
+                        print("Command feedback was {}".format(result))
         # Put the station longitude back
         writeFileFromLines(setValue(config_file, "System", "longitude", station_longitude))
 
