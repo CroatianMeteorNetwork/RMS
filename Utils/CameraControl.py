@@ -893,7 +893,8 @@ def computeCameraTimeOffset(config):
 
     camera_time_offset = round((camera_time_naive - utc_time_naive).total_seconds() / 3600,2)
 
-    return camera_time_offset
+    # wrap to +/- 12
+    return ((camera_time_offset + 12) % 24) - 12
 
 def computeStationNoonInUTC(config):
     """
