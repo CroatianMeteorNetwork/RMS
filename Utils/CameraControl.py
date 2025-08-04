@@ -844,6 +844,10 @@ def cameraControl(camera_ip, cmd, opts='', camera_settings_path='./camera_settin
     cam = dvr.DVRIPCam(camera_ip)
     if cam.login():
         try:
+            print("Cam {}".format(cam))
+            print("Cmd {}".format(cmd))
+            print("Opts {}".format(opts))
+            print("Path {}".format(camera_settings_path))
             dvripCall(cam, cmd, opts, camera_settings_path)
         except Exception as e:
             log.error("Error executing command: %s", e)
