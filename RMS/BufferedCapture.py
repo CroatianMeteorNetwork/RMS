@@ -37,7 +37,6 @@ import numpy as np
 import socket
 import errno
 import json
-from tqdm import tqdm
 
 
 from RMS.Misc import obfuscatePassword
@@ -172,9 +171,6 @@ class BufferedCapture(Process):
         self.dropped_frames_session_start = 0  # Frames dropped at start of current night session
         self.last_daytime_mode = None  # Track day/night transitions
         self.dropped_frames_timestamps = deque()  # Track when frames were dropped for 10-min window
-        
-        # Initialize tqdm progress bar for buffer status
-        self.buffer_pbar = None
 
         # Flag for process control
         self.exit = Event()
@@ -205,11 +201,6 @@ class BufferedCapture(Process):
     def stopCapture(self):
         """ Stop capture.
         """
-        
-        # Clean up progress bar
-        if hasattr(self, 'buffer_pbar') and self.buffer_pbar is not None:
-            self.buffer_pbar.close()
-            self.buffer_pbar = None
         
         self.exit.set()
 
@@ -267,11 +258,6 @@ class BufferedCapture(Process):
             # Clean up raw frame arrays after process termination
             if hasattr(self, 'raw_frame_saver') and self.raw_frame_saver:
                 self.releaseRawArrays()
-            
-            # Clean up progress bar
-            if hasattr(self, 'buffer_pbar') and self.buffer_pbar is not None:
-                self.buffer_pbar.close()
-                self.buffer_pbar = None
 
         return self.dropped_frames.value
 
@@ -1734,12 +1720,6 @@ class BufferedCapture(Process):
         # Use the first frame buffer to start - it will be flip-flopped between the first and the second
         #   buffer during capture, to prevent any data loss
         buffer_one = True
-        
-        # Initialize buffer status progress bar
-        self.buffer_pbar = tqdm(total=100, desc="Buffer Status", 
-                               unit="%", position=1, leave=False,
-                               bar_format='{desc}: {n:.1f}% |{bar}| Dropped: {postfix}')
-        self.buffer_pbar.set_postfix_str("0 (10min), 0 (session)")
 
         wait_for_reconnect = False
 
@@ -2015,7 +1995,7 @@ class BufferedCapture(Process):
                         self.dropped_frames_timestamps = deque(recent_timestamps)
 
                     if self.config.report_dropped_frames:
-                        log.debug("{}/{} frames dropped or late! Time for frame: {:.3f}, convert: {:.3f}, assignment: {:.3f}".format(
+                        log.info("{}/{} frames dropped or late! Time for frame: {:.3f}, convert: {:.3f}, assignment: {:.3f}".format(
                             str(n_dropped), str(self.dropped_frames.value), t_frame, t_convert, t_assignment))
 
 
@@ -2051,7 +2031,7 @@ class BufferedCapture(Process):
                             run_start_ts = last_frame_timestamp
                             run_late_frames = 0
 
-                        log.debug("Block interval: mean %.3f, max %.3f (normalized). Dropped frames: %d",
+                        log.info("Block interval: mean %.3f, max %.3f (normalized). Dropped frames: %d",
                                  mean_interval_norm, max_frame_interval_normalized, run_late_frames)
                     
                     # For GStreamer, show elapsed time since frame capture to assess sink fill level
@@ -2078,14 +2058,7 @@ class BufferedCapture(Process):
                         ten_min_ago = current_time - 600  # 10 minutes in seconds
                         recent_dropped = len([t for t in self.dropped_frames_timestamps if t > ten_min_ago])
                         
-                        # Log to file at DEBUG level (since we have visual progress bar for terminal)
-                        log.debug(f"Buffer fill: {buffer_fill_percent:.1f}%. Dropped frames: {recent_dropped} (last 10 min), {session_dropped} this session")
-                        
-                        # Update tqdm progress bar at bottom of screen
-                        if self.buffer_pbar is not None:
-                            self.buffer_pbar.n = buffer_fill_percent
-                            self.buffer_pbar.set_postfix_str(f"{recent_dropped} (10min), {session_dropped} (session)")
-                            self.buffer_pbar.refresh()
+                        log.info(f"Buffer fill: {buffer_fill_percent:.1f}%. Dropped frames: {recent_dropped} (last 10 min), {session_dropped} this session")
 
                 last_frame_timestamp = frame_timestamp
                 
