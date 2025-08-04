@@ -121,7 +121,7 @@ parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --switch)
-                if [[ -n "$2" && ! "$2" =~ ^-- ]]; then
+                if [[ $# -gt 1 && -n "$2" && ! "$2" =~ ^-- ]]; then
                     SWITCH_MODE="direct"
                     # Trim whitespace from branch name
                     SWITCH_BRANCH=$(echo "$2" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
