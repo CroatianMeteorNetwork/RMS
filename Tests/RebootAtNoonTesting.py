@@ -106,7 +106,7 @@ class TestRebootAtNoon(unittest.TestCase):
             local_noon = 12 -  24 * longitude_wrapped / 360
             print("Local noon".format(local_noon))
             print("Camera time: {}".format(camera_time))
-            camera_time_offset_from_utc = (test_time - )
+            camera_time_offset_from_utc_hours = (test_time - camera_time).total_seconds() / 3600
 
         result = 1
         expected_result = 1
