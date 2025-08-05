@@ -71,10 +71,10 @@ class TestRebootAtNoon(unittest.TestCase):
             # Store the station longitude setting
             station_longitude = getValue(config_file, "System", "longitude")
             test_data = []
-            for test_longitude in range(-360, 360, 90):
+            for test_longitude in range(-360, 360, 10):
                 writeFileFromLines(setValue(config_file, "System", "longitude", test_longitude))
                 for test_hour in range(0, 23):
-                    for test_minute in range(0,45,15):
+                    for test_minute in range(0,60,15):
                         test_time_python_object = datetime.datetime.now(tz=datetime.timezone.utc).replace(tzinfo=None)
                         test_time_python_object = test_time_python_object.replace(hour=test_hour, minute=test_minute, second=0, microsecond=0)
                         print("Testing at longitude: {} and time:{}".format(test_longitude, test_time_python_object))
