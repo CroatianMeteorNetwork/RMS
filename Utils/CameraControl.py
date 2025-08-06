@@ -397,7 +397,9 @@ def setNetworkParam(cam, opts):
 
     elif fld == 'setTimezone':
         val = opts[2]
-        existing_timezone = cam.get_info("NetWork.NetNTP.Timezone").get('TimeZone')
+        data_dict = cam.get_info("NetWork")
+        print("Data dict: {}".format(data_dict))
+        existing_timezone = data_dict.get('TimeZone')
         print("Existing timezone: {}".format(existing_timezone))
         if existing_timezone is not None:
             if existing_timezone != val:
