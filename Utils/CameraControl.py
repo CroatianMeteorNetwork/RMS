@@ -794,7 +794,7 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
                     reqtime = datetime.datetime.strptime(opts[1], '%Y%m%d_%H%M%S')
                 except:
                     reqtime = datetime.datetime.now()
-                time_before_adjustment = datetime.datetime.strptime(str(cam.get_time()), '%Y%m%d_%H%M%S')
+                time_before_adjustment = datetime.datetime.strptime(str(cam.get_time()), '%Y-%m-%d %H:%M:%S')
                 print("Time before adjustment was :{}".format(time_before_adjustment))
                 print("Time to be set is :{}".format(reqtime))
                 time_increment_hrs = (time_before_adjustment - reqtime).total_seconds() / 3600
