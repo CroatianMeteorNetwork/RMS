@@ -797,7 +797,7 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
                 time_before_adjustment = datetime.datetime.strptime(str(cam.get_time()), '%Y-%m-%d %H:%M:%S')
                 print("Time before adjustment was :{}".format(time_before_adjustment))
                 print("Time to be set is :{}".format(reqtime))
-                time_increment_hrs = (time_before_adjustment - reqtime).total_seconds() / 3600
+                time_increment_hrs = (reqtime - time_before_adjustment).total_seconds() / 3600
                 print("Time increment is {}".format(time_increment_hrs))
 
                 if abs(time_increment_hrs) > 1:
@@ -807,8 +807,9 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
                         log.info("Moving camera clock forwards by {} hours.".format(round(time_increment_hrs,2)))
                     else:
                         log.info("Moving camera clock backwards by {} hours.".format(round(time_increment_hrs, 2)))
-                    log.info("Reboot time is {}, consider setting to {}".format(reboot_time, reboot_time_compensated))
-
+                    log.info("Reboot time is {}, consider setting to {}".format(datetime.datetime(hour = reboot_time), datetime.datetime(hour = reboot_time_compensated)))
+                else:
+                    log.info("Time increment is small, no change to reboot time recommended.")
                 cam.set_time(reqtime)
                 log.info('time set to %s', reqtime)
         else:
