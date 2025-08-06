@@ -816,7 +816,7 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
                     if reboot_time != reboot_time_compensated:
                         sleep(0.1) # Needed to make the logs get written in the correct order
                         log.info("Reboot time is hour  {}, consider setting to hour {}".format(reboot_time,reboot_time_compensated))
-                        log.info("\tusing command : python -m Utils.CameraControl SetAutoReboot {},{}".format(reboot_day, reboot_time_compensated))
+                        log.info("  using command : python -m Utils.CameraControl SetAutoReboot {},{}".format(reboot_day, reboot_time_compensated))
 
                 cam.set_time(reqtime)
                 log.info('time set to %s', reqtime)
