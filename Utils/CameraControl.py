@@ -813,8 +813,9 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
                         else:
                             log.info("Moving camera clock backwards by {} hour.".format(round(time_increment_hrs, 2)))
                     if reboot_time != reboot_time_compensated:
+                        time.sleep(0.1)
                         log.info("Reboot time is hour  {}, consider setting to hour {}".format(reboot_time,reboot_time_compensated))
-                        log.info("\tusing command : \n python -m Utils.CameraControl SetAutoReboot {}".format(reboot_time_compensated))
+                        log.info("\tusing command : python -m Utils.CameraControl SetAutoReboot {}".format(reboot_time_compensated))
 
                 cam.set_time(reqtime)
                 log.info('time set to %s', reqtime)
