@@ -799,7 +799,7 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
 
                 if abs(time_increment_hrs) > 1:
                     reboot_time = cam.get_info("General.AutoMaintain")['AutoRebootHour']
-                    reboot_time_compensated = round(reboot_time + time_increment_hrs)
+                    reboot_time_compensated = round(reboot_time - time_increment_hrs) % 24
                     if time_increment_hrs > 0:
 
                         if round(time_increment_hrs,2) != 1:
