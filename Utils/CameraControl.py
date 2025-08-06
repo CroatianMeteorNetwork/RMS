@@ -397,7 +397,7 @@ def setNetworkParam(cam, opts):
 
     elif fld == 'setTimezone':
         val = opts[2]
-        existing_timezone = cam.set_info("NetWork.NetNTP.TimeZone")
+        existing_timezone = cam.get_info("NetWork.NetNTP.TimeZone")
         if existing_timezone is not None:
             if existing_timezone != val:
                 reboot_time = cam.get_info("General.AutoMaintain")['AutoRebootHour']
