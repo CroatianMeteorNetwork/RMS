@@ -806,7 +806,7 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
                         log.info("Moving camera clock forwards by {} hours.".format(round(time_increment_hrs,2)))
                     else:
                         log.info("Moving camera clock backwards by {} hours.".format(round(time_increment_hrs, 2)))
-                    proposed_reboot_time = reboot_time + timedate.timedelta(hours=time_increment_hrs)
+                    proposed_reboot_time = reboot_time + datetime.timedelta(hours=time_increment_hrs)
                     log.info("Reboot time is {}, consider setting to {}".format(proposed_reboot_time))
 
                 cam.set_time(reqtime)
