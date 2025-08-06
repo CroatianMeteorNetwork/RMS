@@ -8,7 +8,7 @@ import dvrip as dvr
 import subprocess
 import pickle
 
-process_pickle_only = False
+process_pickle_only = True
 
 def readFileAsLines(file_path="~/source/RMS/.config"):
 
@@ -98,21 +98,33 @@ class TestRebootAtNoon(unittest.TestCase):
 
         with open(os.path.join(rms_data_path, "reboot_at_noon_test.pkl"), 'rb') as f:
             test_data_list = pickle.load(f)
-
+        output_data = []
+        max_divergence = 0
+        output_data.append(
+            "Longitude | Longitude wrapped | Local noon | Test time | Camera time | Camera time ahead (hrs) | Noon in camera time | Camera reboot time | Divergence |\n")
         for test_data in test_data_list:
-            print(test_data)
-            longitude, test_time, camera_time, reboot_hour_read_back = test_data
+            longitude, test_time_utc, camera_time, reboot_hour_read_back = test_data
             longitude_wrapped = (longitude + 180) % 360 - 180
-            local_noon = 12 -  24 * longitude_wrapped / 360
-            print("Local noon".format(local_noon))
-            print("Camera time: {}".format(camera_time))
-            camera_time_offset_from_utc_hours = (test_time - camera_time).total_seconds() / 3600
-
-        result = 1
-        expected_result = 1
-        self.assertEqual(result, expected_result)
 
 
+
+
+            local_noon_utc = 12 - 24 * longitude_wrapped / 360
+            camera_time_offset_from_utc_hours = (camera_time - test_time_utc).total_seconds() / 3600
+            noon_in_camera_time = (local_noon_utc + camera_time_offset_from_utc_hours) % 24
+            divergence_hrs = round(min(noon_in_camera_time - reboot_hour_read_back, reboot_hour_read_back, noon_in_camera_time),1)
+            output_data.append("{:>9} |{:>18} | {:>10} | {:>5}  | {:>5}    | {:>23} | {:>19} | {:>18} | {:>10} |\n".format(longitude, longitude_wrapped,
+                                    round(local_noon_utc,1), test_time_utc.strftime("%H:%M:%S"),
+                                    camera_time.strftime("%H:%M:%S"), round(camera_time_offset_from_utc_hours,1),
+                                    round(noon_in_camera_time,1), reboot_hour_read_back, divergence_hrs))
+
+            pass
+
+            self.assertLess (divergence_hrs, 2 )
+
+        with open(os.path.join(rms_data_path, "reboot_at_noon_test.txt"), 'w') as f:
+            f.writelines(output_data)
+            f.flush()
 
 if __name__ == '__main__':
 
