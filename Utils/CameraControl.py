@@ -408,7 +408,7 @@ def setNetworkParam(cam, opts):
                 timezone_change = int(val) - existing_timezone
                 reboot_time_compensated = reboot_time - timezone_change
                 log.info('Setting timezone to {}'.format(val))
-                log.info('Consider adjusting camera reboot time of {} to {} using command :'.format(existing_timezone, reboot_time_compensated))
+                log.info('Consider adjusting camera reboot time of {} to {} using command :'.format(reboot_time, reboot_time_compensated))
                 log.info('  python -m Utils.CameraControl SetAutoReboot {},{}'.format(reboot_day, reboot_time_compensated))
 
         cam.set_info("NetWork.NetNTP.TimeZone", val)
