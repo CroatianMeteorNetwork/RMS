@@ -8,7 +8,7 @@ import dvrip as dvr
 import subprocess
 import pickle
 
-process_pickle_only = True
+process_pickle_only = False
 
 def readFileAsLines(file_path="~/source/RMS/.config"):
 
