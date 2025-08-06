@@ -802,12 +802,12 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
 
                 if abs(time_increment_hrs) > 1:
                     reboot_time = cam.get_info("General.AutoMaintain")['AutoRebootHour']
+                    reboot_time_compensated = round(reboot_time + time_increment_hrs)
                     if time_increment_hrs > 0:
                         log.info("Moving camera clock forwards by {} hours.".format(round(time_increment_hrs,2)))
                     else:
                         log.info("Moving camera clock backwards by {} hours.".format(round(time_increment_hrs, 2)))
-                    proposed_reboot_time = reboot_time + datetime.timedelta(hours=time_increment_hrs)
-                    log.info("Reboot time is {}, consider setting to {}".format(proposed_reboot_time))
+                    log.info("Reboot time is {}, consider setting to {}".format(reboot_time, reboot_time_compensated))
 
                 cam.set_time(reqtime)
                 log.info('time set to %s', reqtime)
