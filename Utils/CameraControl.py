@@ -397,6 +397,17 @@ def setNetworkParam(cam, opts):
 
     elif fld == 'setTimezone':
         val = opts[2]
+        existing_timezone = cam.set_info("NetWork.NetNTP.TimeZone")
+        if existing_timezone is not None:
+            if existing_timezone != val:
+                reboot_time = cam.get_info("General.AutoMaintain")['AutoRebootHour']
+                reboot_day = cam.get_info("General.AutoMaintain")['AutoRebootDay']
+                timezone_change = val - existing_timezone
+                reboot_time_compensated = reboot_time - timezone_change
+                log.info('Setting timezone to {}'.format(val))
+                log.info('Consider adjusting camera reboot time of {} to {} using command :'.format(existing_timezone, reboot_time_compensated))
+                log.info('  python -m Utils.CameraControl SetAutoReboot {},{}'.format(reboot_day, reboot_time_compensated))
+
         cam.set_info("NetWork.NetNTP.TimeZone", val)
 
     elif fld == 'EnableNTP':
