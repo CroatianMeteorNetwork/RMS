@@ -795,21 +795,26 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
                 except:
                     reqtime = datetime.datetime.now()
                 time_before_adjustment = datetime.datetime.strptime(str(cam.get_time()), '%Y-%m-%d %H:%M:%S')
-                print("Time before adjustment was :{}".format(time_before_adjustment))
-                print("Time to be set is :{}".format(reqtime))
                 time_increment_hrs = (reqtime - time_before_adjustment).total_seconds() / 3600
-                print("Time increment is {}".format(time_increment_hrs))
 
                 if abs(time_increment_hrs) > 1:
                     reboot_time = cam.get_info("General.AutoMaintain")['AutoRebootHour']
                     reboot_time_compensated = round(reboot_time + time_increment_hrs)
                     if time_increment_hrs > 0:
-                        log.info("Moving camera clock forwards by {} hours.".format(round(time_increment_hrs,2)))
+
+                        if round(time_increment_hrs,2) != 1:
+                            log.info("Moving camera clock forwards by {} hours.".format(round(time_increment_hrs,2)))
+                        else:
+                            log.info("Moving camera clock forwards by {} hour.".format(round(time_increment_hrs, 2)))
                     else:
-                        log.info("Moving camera clock backwards by {} hours.".format(round(time_increment_hrs, 2)))
+
+                        if round(time_increment_hrs,2) != 1:
+                            log.info("Moving camera clock backwards by {} hours.".format(round(time_increment_hrs,2)))
+                        else:
+                            log.info("Moving camera clock backwards by {} hour.".format(round(time_increment_hrs, 2)))
+
                     log.info("Reboot time is {}, consider setting to {}".format(datetime.datetime(hour = reboot_time), datetime.datetime(hour = reboot_time_compensated)))
-                else:
-                    log.info("Time increment is small, no change to reboot time recommended.")
+                    log.info("\tusing command : \n python -m Utils.CameraControl SetAutoReboot {}".format(reboot_time_compensated))
                 cam.set_time(reqtime)
                 log.info('time set to %s', reqtime)
         else:
