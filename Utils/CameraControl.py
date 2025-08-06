@@ -403,7 +403,7 @@ def setNetworkParam(cam, opts):
             if existing_timezone != val:
                 reboot_time = cam.get_info("General.AutoMaintain")['AutoRebootHour']
                 reboot_day = cam.get_info("General.AutoMaintain")['AutoRebootDay']
-                timezone_change = val - existing_timezone
+                timezone_change = int(val) - existing_timezone
                 reboot_time_compensated = reboot_time - timezone_change
                 log.info('Setting timezone to {}'.format(val))
                 log.info('Consider adjusting camera reboot time of {} to {} using command :'.format(existing_timezone, reboot_time_compensated))
