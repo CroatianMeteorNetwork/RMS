@@ -52,6 +52,11 @@ import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
 
+# ASTRA Import - JustinDT
+import csv
+from .ASTRA import ASTRA
+from .ASTRA_GUI import launch_astra_gui, AstraConfigDialog
+
 
 class QFOVinputDialog(QtWidgets.QDialog):
 
@@ -1612,8 +1617,11 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'CTRL + D - Load dark\n'
             text_str += 'CTRL + F - Load flat\n'
             text_str += 'CTRL + P - Load platepar\n'
+            text_str += 'CTRL + O - Load ECSV/.txt picks\n'
             text_str += 'CTRL + W - Save current frame\n'
-            text_str += 'CTRL + S - Save FTPdetectinfo'
+            text_str += 'CTRL + S - Save FTPdetectinfo\n'
+            text_str += '\n'
+            text_str += 'CTRL + K - Open ASTRA GUI'
 
         self.label2.setText(text_str)
         self.label2.setPos(self.img_frame.width() - self.label2.boundingRect().width(), \
@@ -3912,6 +3920,332 @@ class PlateTool(QtWidgets.QMainWindow):
                 if hasattr(self.img.img_handle, 'current_line'):
                     print('Current line: {}'.format(self.img.img_handle.current_line))
                     self.img.nextLine()
+
+            # elif event.key() == QtCore.Qt.Key_L and (modifiers == QtCore.Qt.ControlModifier):
+            # # ASTRA Addition - Justin DT
+            #     # Run ASTRA Gaussian Picker
+
+            #     # Check if ASTRA has been run already
+
+            #     # Load all frames
+            #     frame_count = sum(1 for name in os.listdir(self.dir_path) if 'dump' in name)
+            #     frames = np.zeros((frame_count, *self.img_handle.loadFrame().shape), dtype=np.float32)
+            #     for i in range(frame_count):
+            #         frames[i] = self.img_handle.loadFrame()
+            #         self.img_handle.nextFrame()
+            #     # Load all times
+            #     pick_frame_indices = np.array(list(self.pick_list.keys()), dtype=int)
+            #     times = np.array([(self.img_handle.frame_dt_dict[k]) for k in pick_frame_indices])
+
+            #     # Package data for ASTRA, from DetApp
+            #     if self.picks_origin == 'ecsv' or self.picks_origin == 'txt':
+            #         data_dict = {
+            #             "img_obj" : self.img_handle,
+            #             "frames" : frames,
+            #             "picks" : [[self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid']] for key in self.pick_list.keys()],
+            #             "pick_frame_indices" : pick_frame_indices,
+            #             "times" : times,
+            #             "picks_origin" : self.picks_origin
+            #         }
+            #     # Package data for ASTRA, from manual picks
+            #     else:
+            #         if len(self.pick_list.keys()) != 5:
+            #             print('ERROR: Re-run ASTRA when either DetApp picks are loaded, or using manual with the following instructions:')
+            #             print('1. Pick three frame-adjacent leading-edge picks at the highest SNR near middle of event')
+            #             print('2. Pick two the leading edge of the first and last frame of the event')
+            #             print(' NOTE: It is essential that the line outlined by the first and last picks perfectly intersect the meteor trajectory')
+            #             print('3. THEN, re-run ASTRA using CTRL + L')
+            #         else:
+            #             first_pick = self.pick_list[list(self.pick_list.keys())[0]][0:2]
+            #             last_pick = self.pick_list[list(self.pick_list.keys())[-1]][0:2]
+            #             middle_picks = [self.pick_list[key][0:2] for key in self.pick_list.keys()]
+            #             data_dict = {
+            #                 "img_obj" : self.img_handle,
+            #                 "frames" : frames,
+            #                 "first_pick" : first_pick,
+            #                 "last_pick" : last_pick,
+            #                 "middle_picks" : middle_picks,
+            #                 "pick_frame_indices" : pick_frame_indices,
+            #                 "times" : times,
+            #                 "picks_origin" : self.picks_origin
+            #             }
+
+            #     # Run ASTRA Auto-Picker
+            #     self.ASTRA_obj = ASTRA(data_dict, verbose=False, apply_kalman=False)
+            #     print('ASTRA Object Created! Processing beginning (30-80 seconds)...')
+            #     self.ASTRA_obj.process()
+            #     print('ASTRA Processing Complete!')
+            #     pick_frame_indices = self.ASTRA_obj.pick_frame_indices
+            #     global_picks = self.ASTRA_obj.global_picks  
+            #     snrs = self.ASTRA_obj.snr 
+            #     self.picks_origin = 'astra' 
+
+            #     # Add ASTRA picks to the pick list
+            #     self.clearAllPicks()  # Clear previous picks
+            #     for i in range(len(global_picks)):
+            #         self.addCentroid(frame=pick_frame_indices[i], 
+            #                          x_centroid=global_picks[i][0],
+            #                          y_centroid=global_picks[i][1],
+            #                          snr=snrs[i])
+            #     self.updatePicks()
+            #     print(f'Loaded {len(pick_frame_indices)} Picks from ASTRA! Minimum SNR of 10')
+
+
+
+            elif event.key() == QtCore.Qt.Key_K and (modifiers == QtCore.Qt.ControlModifier):
+            # ASTRA Addition - Justin DT
+                self.open_astra_gui()
+
+    def clearAllPicks(self):
+        # ASTRA Addition - Justin DT
+        """Clears all meteor picks."""
+        self.pick_list = {}
+        self.updatePicks()
+
+    def open_astra_gui(self):
+        self.astra_dialog = AstraConfigDialog(
+            run_load_callback=self.load_picks_from_file,
+            run_astra_callback=self.run_astra_from_config,
+            run_kalman_callback=self.run_kalman_from_config,
+            skyfit_instance=self,
+            parent=self
+        )
+        self.astra_dialog.show()    
+        
+    def load_picks_from_file(self, config):
+
+        file_path = config["file_path"]
+
+        if not os.path.exists(file_path):
+            print(f'ERROR: No Valid ECSV or .txt file selected')
+            return
+
+        if file_path.endswith('.ecsv'):
+            self.clearAllPicks()  # Clear previous picks
+            picks, pick_frame_indices = self.loadECSV(file_path)
+            for i in range(len(pick_frame_indices)):
+                self.pick_list[pick_frame_indices[i]] = picks[i]
+                self.tab.debruijn.modifyRow(pick_frame_indices[i], 1)
+                self.updateGreatCircle()
+                print(f'Added centroid at ({picks[i]["x_centroid"]}, {picks[i]["y_centroid"]}) on frame {pick_frame_indices[i]}')
+            self.updatePicks()
+        
+        if file_path.endswith('.txt'):
+            self.clearAllPicks()  # Clear previous picks
+            picks, pick_frame_indices = self.loadTXT(file_path)
+            for i in range(len(pick_frame_indices)):
+                self.pick_list[pick_frame_indices[i]] = picks[i]
+                self.tab.debruijn.modifyRow(pick_frame_indices[i], 1)
+                self.updateGreatCircle()
+                print(f'Added centroid at ({picks[i]["x_centroid"]}, {picks[i]["y_centroid"]}) on frame {pick_frame_indices[i]}')
+            self.updatePicks()
+
+        print(f'Loaded {len(pick_frame_indices)} picks from {file_path}!')
+
+    def run_astra_from_config(self, config, progress_callback=None):
+
+        if self.pick_list == {}:
+            print('ERROR: No picks loaded! Please load picks from ECSV or TXT file, or use manual picks.')
+            return
+
+        print("Running ASTRA with:", config)
+        # Check if ASTRA has been run already
+
+        # Load all frames
+        frame_count = sum(1 for name in os.listdir(self.dir_path) if 'dump' in name)
+        frames = np.zeros((frame_count, *self.img_handle.loadFrame().shape), dtype=np.float32)
+        for i in range(frame_count):
+            frames[i] = self.img_handle.loadFrame()
+            self.img_handle.nextFrame()
+        # Load all times
+        pick_frame_indices = np.array(list(self.pick_list.keys()), dtype=int)
+        times = np.array([(self.img_handle.frame_dt_dict[k]) for k in pick_frame_indices])
+
+        # Package data for ASTRA, from DetApp
+        if config["pick_method"] == 'ECSV / txt':
+            data_dict = {
+                "img_obj" : self.img_handle,
+                "frames" : frames,
+                "picks" : [[self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid']] for key in self.pick_list.keys()],
+                "pick_frame_indices" : pick_frame_indices,
+                "times" : times,
+                "config" : config
+            }
+        # Package data for ASTRA, from manual picks
+        else:
+            if len(self.pick_list.keys()) != 5:
+                print('ERROR: Re-run ASTRA when either DetApp picks are loaded, or using manual with the following instructions:')
+                print('1. Pick three frame-adjacent leading-edge picks at the highest SNR near middle of event')
+                print('2. Pick two the leading edge of the first and last frame of the event')
+                print(' NOTE: It is essential that the line outlined by the first and last picks perfectly intersect the meteor trajectory')
+                print('3. THEN, re-run ASTRA')
+            else:
+                middle_picks = [[self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid']] for key in self.pick_list.keys()]
+                data_dict = {
+                    "img_obj" : self.img_handle,
+                    "frames" : frames,
+                    "middle_picks" : middle_picks,
+                    "pick_frame_indices" : pick_frame_indices,
+                    "times" : times,
+                    "config" : config
+                }
+
+        # Run ASTRA Auto-Picker
+        self.ASTRA_obj = ASTRA(data_dict, progress_callback=progress_callback)
+        print('ASTRA Object Created! Processing beginning (30-80 seconds)...')
+        self.ASTRA_obj.process()
+        print('ASTRA Processing Complete!')
+        pick_frame_indices = self.ASTRA_obj.pick_frame_indices
+        global_picks = self.ASTRA_obj.global_picks  
+        snrs = self.ASTRA_obj.snr 
+
+        # Add ASTRA picks to the pick list
+        self.clearAllPicks()  # Clear previous picks
+        for i in range(len(global_picks)):
+            self.addCentroid(frame=pick_frame_indices[i], 
+                                x_centroid=global_picks[i][0],
+                                y_centroid=global_picks[i][1],
+                                snr=snrs[i])
+        self.updatePicks()
+        print(f'Loaded {len(pick_frame_indices)} Picks from ASTRA! Minimum SNR of 10')
+
+    def run_kalman_from_config(self, config):
+        print("Running Kalman with:", config)
+
+        pick_frame_indices = np.array(list(self.pick_list.keys()), dtype=int)
+
+        if hasattr(self, 'ASTRA_obj'):
+                xypicks = self.ASTRA_obj.runKalman()
+        else:
+            measurements = [(self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid']) for key in self.pick_list.keys()]
+            times = [self.img_handle.frame_dt_dict[key] for key in self.pick_list.keys()]
+            snr = [self.pick_list[key]['snr'] for key in self.pick_list.keys()]
+            xypicks = ASTRA.runKalman(
+                measurements=measurements,
+                times=times,
+                snr=snr)
+
+        print(f'Kalman filter applied to {len(xypicks)} picks!')   
+        # Clear previous picks
+        self.clearAllPicks()
+        for i in range(len(pick_frame_indices)):
+            pick = {
+                'x_centroid': xypicks[i][0],
+                'y_centroid': xypicks[i][1],
+                'mode': 1,
+                'intensity_sum': 1,
+                'photometry_pixels': None,
+                'background_intensity': 0,
+                'snr': 1,
+                'saturated': False,
+            }
+            self.pick_list[pick_frame_indices[i]] = pick
+            self.tab.debruijn.modifyRow(pick_frame_indices[i], 1)
+            self.updateGreatCircle()
+        self.updatePicks()
+            
+
+    def loadTXT(self, txt_file_path):
+        # ASTRA Addition - Justin DT
+        """
+        Loads the TXT file and adds the relevant info to pick_list
+        Args:
+            txt_file_path (str): Path to the TXT file to load
+        Returns:
+            picks (np.ndarray): (N, 2) array of (x, y) picks
+            pick_frame_indices (np.ndarray): (N,) array of frame indices for each pick
+        """
+
+        picks = [] # (N, x, y) array of picks
+        pick_frame_indices = [] # (N,) array of frame indices
+
+        # Opens and pareses pick file
+        with open(txt_file_path, 'r') as file:
+            for line in file:
+                if line.strip() and not line.startswith('#'):
+                    parts = line.split()
+                    frame_number = int(parts[0])
+                    cx, cy = float(parts[4]), float(parts[5])
+                    
+                    picks.append({
+                        'x_centroid': cx,
+                        'y_centroid': cy,
+                        'mode' : 1,
+                        'intensity_sum' : 1,
+                        'photometry_pixels' : None,
+                        'background_intensity' : 0,
+                        'snr' : 1,
+                        'saturated' : False,
+                    })
+                    pick_frame_indices.append(frame_number)
+
+        return np.array(picks), np.array(pick_frame_indices)
+
+    def loadECSV(self, ECSV_file_path):
+        # ASTRA Addition - Justin DT
+        """
+        Loads the ECSV file and adds the relevant info to pick_list
+        Args:
+            ECSV_file_path (str): Path to the ECSV file to load
+        Returns:
+            picks (np.ndarray): (N, 2) array of (x, y) picks
+            pick_frame_indices (np.ndarray): (N,) array of frame indices for each pick
+            mags (np.ndarray): (N,) array of magnitudes for each pick
+        """
+
+        picks = []  # N x args_dict array for addCentroid
+        picks = []
+        pick_frame_indices = []  # (N,) array of frame indices
+        pick_frame_times = []  # (N,) array of frame times
+
+        # Opens and parses the ECSV file
+        with open(ECSV_file_path, 'r') as file:
+            reader = csv.DictReader(file)
+            temp_bool = False
+            for i, row in enumerate(reader):
+                if None in row.keys() and isinstance(row[None], list) and len(row[None]) > 9:
+                    if temp_bool == False:
+                        temp_bool = True
+                        column_names = list(row[None])
+                        x_ind = column_names.index('x_image')
+                        y_ind = column_names.index('y_image')
+                        background_ind = column_names.index('background_pixel_value')
+                        sat_ind = column_names.index('saturated_pixels')
+                        snr_ind = column_names.index('snr')
+                        continue
+                    
+                    picks.append({
+                        'x_centroid': float(row[None][x_ind]),
+                        'y_centroid': float(row[None][y_ind]),
+                        'mode': 1,  # Assuming mode 1 for centroiding
+                        'intensity_sum' : 1,
+                        'photometry_pixels': None,  # Assuming no photometry pixels for ECSV
+                        'background_intensity': float(row[None][background_ind]),
+                        'saturated': bool(row[None][sat_ind]),
+                        'snr': float(row[None][snr_ind]),
+                    })
+                    pick_frame_times.append(datetime.datetime.fromisoformat(row['# %ECSV 0.9']))
+                else:
+                    continue
+        # Converts times into frame indices, accounting for floating-point errors
+        pick_frame_indices = []
+        for time in pick_frame_times:
+            try:
+                pick_frame_indices.append(self.img_handle.frame_dt_list.index(time))
+            except ValueError:
+                try:
+                    # Account for floating-point errors by replacing the time with a close match
+                    pick_frame_indices.append(self.img_handle.frame_dt_list.index(time + datetime.timedelta(microseconds=1)))
+                except ValueError:
+                    try:
+                        pick_frame_indices.append(self.img_handle.frame_dt_list.index(time - datetime.timedelta(microseconds=1)))
+                    except ValueError:
+                        raise ValueError(f'Time {time} not found in frame_dt_list. Please check the time format or the frame_dt_list.')
+
+
+        return picks, np.array(pick_frame_indices)
+
+
 
     def keyReleaseEvent(self, event):
         
