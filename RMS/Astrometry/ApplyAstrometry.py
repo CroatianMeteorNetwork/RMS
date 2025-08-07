@@ -1037,6 +1037,98 @@ def geoHt2RaDec(platepar, jd, lat, lon, h):
     return ra, dec
 
 
+def geoHt2RaDec_vectorized(platepar, jd, lat, lon, h):
+    """ Vectorized version of geoHt2RaDec. Given geo coordinates of the target and a height of the target 
+        above sea level, compute equatorial coordinates of the target. Supports both scalar and array inputs.
+
+    Arguments:
+        platepar: [Platepar object]
+        jd: [float] Julian date.
+        lat: [float or ndarray] latitude in degrees (+north).
+        lon: [float or ndarray] longitude in degrees (+east).
+        h: [float or ndarray] elevation of the target in meters (WGS84).
+
+    Return:
+        (ra, dec): [tuple of floats or ndarrays] Right ascension and declination in degrees
+
+    """
+    from RMS.Astrometry.Conversions import EARTH, JD2LST
+    from RMS.Math import vectNorm
+    
+    # Convert inputs to numpy arrays for vectorization
+    lat = np.atleast_1d(np.asarray(lat, dtype=np.float64))
+    lon = np.atleast_1d(np.asarray(lon, dtype=np.float64))
+    h = np.atleast_1d(np.asarray(h, dtype=np.float64))
+    
+    # Check if inputs are scalar (single values)
+    is_scalar = (lat.size == 1) and (lon.size == 1) and (h.size == 1)
+    
+    # Convert to radians
+    lat_rad = np.radians(lat)
+    lon_rad = np.radians(lon)
+    
+    # Calculate ECEF coordinates for all targets (vectorized)
+    N = EARTH.EQUATORIAL_RADIUS / np.sqrt(1.0 - (EARTH.E**2) * np.sin(lat_rad)**2)
+    ecef_x = (N + h) * np.cos(lat_rad) * np.cos(lon_rad)
+    ecef_y = (N + h) * np.cos(lat_rad) * np.sin(lon_rad)
+    ecef_z = ((1 - EARTH.E**2) * N + h) * np.sin(lat_rad)
+    
+    # Get Local Sidereal Time for all longitudes
+    LST_rad = np.radians(JD2LST(jd, lon)[0])
+    
+    # Calculate the Earth radius at given latitudes
+    Rh = np.sqrt(ecef_x**2 + ecef_y**2 + ecef_z**2)
+    
+    # Calculate the geocentric latitude
+    lat_geocentric = np.arctan2(ecef_z, np.sqrt(ecef_x**2 + ecef_y**2))
+    
+    # Calculate ECI coordinates for all targets
+    x_target = Rh * np.cos(lat_geocentric) * np.cos(LST_rad)
+    y_target = Rh * np.cos(lat_geocentric) * np.sin(LST_rad)
+    z_target = Rh * np.sin(lat_geocentric)
+    
+    # Calculate station ECI coordinates (single point)
+    station_lat_rad = np.radians(platepar.lat)
+    station_lon_rad = np.radians(platepar.lon)
+    N_station = EARTH.EQUATORIAL_RADIUS / np.sqrt(1.0 - (EARTH.E**2) * np.sin(station_lat_rad)**2)
+    station_ecef_x = (N_station + platepar.elev) * np.cos(station_lat_rad) * np.cos(station_lon_rad)
+    station_ecef_y = (N_station + platepar.elev) * np.cos(station_lat_rad) * np.sin(station_lon_rad)
+    station_ecef_z = ((1 - EARTH.E**2) * N_station + platepar.elev) * np.sin(station_lat_rad)
+    
+    station_LST_rad = np.radians(JD2LST(jd, platepar.lon)[0])
+    station_Rh = np.sqrt(station_ecef_x**2 + station_ecef_y**2 + station_ecef_z**2)
+    station_lat_geocentric = np.arctan2(station_ecef_z, np.sqrt(station_ecef_x**2 + station_ecef_y**2))
+    
+    x_station = station_Rh * np.cos(station_lat_geocentric) * np.cos(station_LST_rad)
+    y_station = station_Rh * np.cos(station_lat_geocentric) * np.sin(station_LST_rad)
+    z_station = station_Rh * np.sin(station_lat_geocentric)
+    
+    # Compute pointing vectors from station to all targets
+    dx = x_target - x_station
+    dy = y_target - y_station
+    dz = z_target - z_station
+    
+    # Normalize the pointing vectors
+    norm = np.sqrt(dx**2 + dy**2 + dz**2)
+    dx_norm = dx / norm
+    dy_norm = dy / norm
+    dz_norm = dz / norm
+    
+    # Convert to RA/Dec (vectorized)
+    dec = np.arcsin(dz_norm)
+    ra = np.arctan2(dy_norm, dx_norm) % (2*np.pi)
+    
+    # Convert to degrees
+    ra_deg = np.degrees(ra)
+    dec_deg = np.degrees(dec)
+    
+    # Return scalars if input was scalar, arrays otherwise
+    if is_scalar:
+        return ra_deg[0], dec_deg[0]
+    else:
+        return ra_deg, dec_deg
+
+
 def geoHt2XY(platepar, lat, lon, h):
     """ Given geo coordinates of the target and a height of the target above sea level,
         compute pixel coordinates on the image.
@@ -1065,6 +1157,44 @@ def geoHt2XY(platepar, lat, lon, h):
 
     # Project the RA/Dec to the image
     x, y = raDecToXYPP(ra, dec, J2000_JD.days, platepar)
+    
+    return x, y
+
+
+def geoHt2XY_vectorized(platepar, lat, lon, h):
+    """ Vectorized version of geoHt2XY. Given geo coordinates of the target and a height of the target 
+        above sea level, compute pixel coordinates on the image. Supports both scalar and array inputs.
+        
+        This function is fully vectorized and processes arrays efficiently using numpy broadcasting.
+
+    Arguments:
+        platepar: [Platepar object]
+        lat: [float or ndarray] latitude in degrees (+north)
+        lon: [float or ndarray] longitude in degrees (+east)
+        h: [float or ndarray] elevation of the target in meters (WGS84)
+
+    Return:
+        (x, y): [tuple of floats or ndarrays] Image X and Y coordinates
+
+    """
+
+    # Disable the refraction correction
+    platepar = copy.deepcopy(platepar)
+    platepar.refraction = False
+
+    # Get RA/Dec coordinates using vectorized function
+    ra, dec = geoHt2RaDec_vectorized(platepar, J2000_JD.days, lat, lon, h)
+
+    # Ensure RA and Dec are arrays for raDecToXYPP
+    ra = np.atleast_1d(ra)
+    dec = np.atleast_1d(dec)
+
+    # Project the RA/Dec to the image (raDecToXYPP already handles arrays efficiently)
+    x, y = raDecToXYPP(ra, dec, J2000_JD.days, platepar)
+    
+    # Return scalar values if input was scalar
+    if ra.size == 1:
+        return x[0] if isinstance(x, np.ndarray) else x, y[0] if isinstance(y, np.ndarray) else y
     
     return x, y
 
