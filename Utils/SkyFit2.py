@@ -55,7 +55,7 @@ from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
 # ASTRA Import - JustinDT
 import csv
 from .ASTRA import ASTRA
-from .ASTRA_GUI import launch_astra_gui, AstraConfigDialog
+from .ASTRA_GUI import launch_astra_gui, AstraConfigDialog, AstraWorker, KalmanWorker
 
 
 class QFOVinputDialog(QtWidgets.QDialog):
@@ -1617,7 +1617,6 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'CTRL + D - Load dark\n'
             text_str += 'CTRL + F - Load flat\n'
             text_str += 'CTRL + P - Load platepar\n'
-            text_str += 'CTRL + O - Load ECSV/.txt picks\n'
             text_str += 'CTRL + W - Save current frame\n'
             text_str += 'CTRL + S - Save FTPdetectinfo\n'
             text_str += '\n'
@@ -3993,8 +3992,23 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
             elif event.key() == QtCore.Qt.Key_K and (modifiers == QtCore.Qt.ControlModifier):
-            # ASTRA Addition - Justin DT
-                self.open_astra_gui()
+                # ASTRA Addition - Justin DT
+
+                # Set saturation threshold as a class var
+                self.saturation_threshold = int(round(0.98*(2**self.config.bit_depth - 1)))
+                if hasattr(self, "astra_dialog"):
+                    if self.astra_dialog is not None:
+                        self.astra_dialog.close()
+                        self.astra_dialog = None
+                    else:
+                        self.open_astra_gui()
+                        self.astra_dialog.finished.connect(self.clear_astra_dialog_reference)
+                else:
+                    self.open_astra_gui()
+                    self.astra_dialog.finished.connect(self.clear_astra_dialog_reference)
+
+    def clear_astra_dialog_reference(self):
+        self.astra_dialog = None
 
     def clearAllPicks(self):
         # ASTRA Addition - Justin DT
@@ -4003,14 +4017,12 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updatePicks()
 
     def open_astra_gui(self):
-        self.astra_dialog = AstraConfigDialog(
-            run_load_callback=self.load_picks_from_file,
-            run_astra_callback=self.run_astra_from_config,
+        self.astra_dialog = launch_astra_gui(
+            run_astra_callback=None,
             run_kalman_callback=self.run_kalman_from_config,
-            skyfit_instance=self,
-            parent=self
+            run_load_callback=self.load_picks_from_file,
+            skyfit_instance=self
         )
-        self.astra_dialog.show()    
         
     def load_picks_from_file(self, config):
 
@@ -4042,43 +4054,53 @@ class PlateTool(QtWidgets.QMainWindow):
 
         print(f'Loaded {len(pick_frame_indices)} picks from {file_path}!')
 
-    def run_astra_from_config(self, config, progress_callback=None):
-
+    def prepare_astra_data(self, config):
         if self.pick_list == {}:
             print('ERROR: No picks loaded! Please load picks from ECSV or TXT file, or use manual picks.')
             return
-
+        
         print("Running ASTRA with:", config)
-        # Check if ASTRA has been run already
+
+        # Sort pick list according to keys
+        self.pick_list = dict(sorted(self.pick_list.items()))
 
         # Load all frames
+        temp_curr_frame = self.img_handle.current_frame
+        self.img_handle.setFrame(0)  # Reset to the first frame
         frame_count = sum(1 for name in os.listdir(self.dir_path) if 'dump' in name)
         frames = np.zeros((frame_count, *self.img_handle.loadFrame().shape), dtype=np.float32)
         for i in range(frame_count):
             frames[i] = self.img_handle.loadFrame()
             self.img_handle.nextFrame()
+        self.img_handle.setFrame(temp_curr_frame)  # Reset to the original frame
         # Load all times
         pick_frame_indices = np.array(list(self.pick_list.keys()), dtype=int)
         times = np.array([(self.img_handle.frame_dt_dict[k]) for k in pick_frame_indices])
 
         # Package data for ASTRA, from DetApp
         if config["pick_method"] == 'ECSV / txt':
+            if len(self.pick_list.keys()) <= 5:
+                print('ERROR: Not enough picks loaded! Please load at least 5 picks from ECSV or TXT file.')
+                return
             data_dict = {
                 "img_obj" : self.img_handle,
                 "frames" : frames,
                 "picks" : [[self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid']] for key in self.pick_list.keys()],
                 "pick_frame_indices" : pick_frame_indices,
                 "times" : times,
-                "config" : config
+                "config" : config,
+                "saturation_threshold" : self.saturation_threshold
             }
         # Package data for ASTRA, from manual picks
         else:
+            self.updatePicks()
             if len(self.pick_list.keys()) != 5:
                 print('ERROR: Re-run ASTRA when either DetApp picks are loaded, or using manual with the following instructions:')
                 print('1. Pick three frame-adjacent leading-edge picks at the highest SNR near middle of event')
                 print('2. Pick two the leading edge of the first and last frame of the event')
                 print(' NOTE: It is essential that the line outlined by the first and last picks perfectly intersect the meteor trajectory')
                 print('3. THEN, re-run ASTRA')
+                return
             else:
                 middle_picks = [[self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid']] for key in self.pick_list.keys()]
                 data_dict = {
@@ -4087,62 +4109,89 @@ class PlateTool(QtWidgets.QMainWindow):
                     "middle_picks" : middle_picks,
                     "pick_frame_indices" : pick_frame_indices,
                     "times" : times,
-                    "config" : config
+                    "config" : config,
+                    "saturation_threshold" : self.saturation_threshold
                 }
 
-        # Run ASTRA Auto-Picker
-        self.ASTRA_obj = ASTRA(data_dict, progress_callback=progress_callback)
-        print('ASTRA Object Created! Processing beginning (30-80 seconds)...')
-        self.ASTRA_obj.process()
-        print('ASTRA Processing Complete!')
-        pick_frame_indices = self.ASTRA_obj.pick_frame_indices
-        global_picks = self.ASTRA_obj.global_picks  
-        snrs = self.ASTRA_obj.snr 
+        return data_dict
+
+
+    def integrate_astra_results(self, astra):
+        pick_frame_indices = astra.pick_frame_indices
+        global_picks = astra.global_picks
+        snrs = astra.snr
+        config = astra.astra_config
+        intensity_sums = astra.abs_level_sums
+        background_intensities = astra.background_levels
+        photometry_pixels = astra.photometry_pixels
 
         # Add ASTRA picks to the pick list
         self.clearAllPicks()  # Clear previous picks
         for i in range(len(global_picks)):
-            self.addCentroid(frame=pick_frame_indices[i], 
-                                x_centroid=global_picks[i][0],
-                                y_centroid=global_picks[i][1],
-                                snr=snrs[i])
-        self.updatePicks()
-        print(f'Loaded {len(pick_frame_indices)} Picks from ASTRA! Minimum SNR of 10')
-
-    def run_kalman_from_config(self, config):
-        print("Running Kalman with:", config)
-
-        pick_frame_indices = np.array(list(self.pick_list.keys()), dtype=int)
-
-        if hasattr(self, 'ASTRA_obj'):
-                xypicks = self.ASTRA_obj.runKalman()
-        else:
-            measurements = [(self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid']) for key in self.pick_list.keys()]
-            times = [self.img_handle.frame_dt_dict[key] for key in self.pick_list.keys()]
-            snr = [self.pick_list[key]['snr'] for key in self.pick_list.keys()]
-            xypicks = ASTRA.runKalman(
-                measurements=measurements,
-                times=times,
-                snr=snr)
-
-        print(f'Kalman filter applied to {len(xypicks)} picks!')   
-        # Clear previous picks
-        self.clearAllPicks()
-        for i in range(len(pick_frame_indices)):
             pick = {
-                'x_centroid': xypicks[i][0],
-                'y_centroid': xypicks[i][1],
+                'x_centroid': global_picks[i][0],
+                'y_centroid': global_picks[i][1],
                 'mode': 1,
-                'intensity_sum': 1,
-                'photometry_pixels': None,
-                'background_intensity': 0,
-                'snr': 1,
+                'intensity_sum': intensity_sums[i],
+                'photometry_pixels': photometry_pixels[i],
+                'background_intensity': background_intensities[i],
+                'snr': snrs[i],
                 'saturated': False,
             }
             self.pick_list[pick_frame_indices[i]] = pick
             self.tab.debruijn.modifyRow(pick_frame_indices[i], 1)
             self.updateGreatCircle()
+            print(f'Added centroid at ({pick["x_centroid"]}, {pick["y_centroid"]}) on frame {pick_frame_indices[i]}')
         self.updatePicks()
+        print(f'Loaded {len(pick_frame_indices)} Picks from ASTRA! Minimum SNR of {config["astra"]["m_SNR"]}')
+
+    def run_kalman_from_config(self, config, progress_callback=None):
+        print("Running Kalman with:", config)   
+
+        # Sort pick list according to keys
+        self.pick_list = dict(sorted(self.pick_list.items()))
+
+        pick_frame_indices = np.array(list(self.pick_list.keys()), dtype=int)
+
+        if hasattr(self, 'ASTRA_obj'):
+                xypicks, smooth_P = self.ASTRA_obj.runKalman()
+        else:
+
+            measurements = [(self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid']) for key in self.pick_list.keys()]
+            times = [self.img_handle.frame_dt_dict[key] for key in self.pick_list.keys()]
+            snr = [self.pick_list[key]['snr'] for key in self.pick_list.keys()]
+
+            # Dummy dict to instantiate ASTRA object
+            data_dict = {
+                "img_obj" : 0,
+                "frames" : [],
+                "picks" : [],
+                "pick_frame_indices" : np.array([]),
+                "times" : times,
+                "config" : config,
+                "middle_picks" : [],
+                "saturation_threshold" : self.saturation_threshold
+            }
+
+
+            tempASTRA = ASTRA(data_dict, progress_callback=progress_callback)
+
+            xypicks, smooth_P = tempASTRA.runKalman(
+                measurements=measurements,
+                times=times,
+                snr=snr)
+
+        print(f'Kalman filter applied to {len(xypicks)} picks!')   
+        for i in range(len(pick_frame_indices)):
+            self.pick_list[pick_frame_indices[i]]["x_centroid"] = xypicks[i][0]
+            self.pick_list[pick_frame_indices[i]]["y_centroid"] = xypicks[i][1]
+            self.tab.debruijn.modifyRow(pick_frame_indices[i], 1)
+            self.updateGreatCircle()
+            print(f'Adjusted centroid at ({xypicks[i][0]}, {xypicks[i][1]}) on frame {pick_frame_indices[i]}')
+            print(f'Kalman uncertainty (pixels): {np.sqrt(smooth_P[i][0,0])}, {np.sqrt(smooth_P[i][1,1])}')
+        self.updatePicks()
+        print(f'Loaded {len(pick_frame_indices)} picks from Kalman Smoothing!')
+        print(f'Mean Kalman uncertainty (pixels): {np.mean(np.sqrt(smooth_P[:,0,0]))}, {np.mean(np.sqrt(smooth_P[:,1,1]))}')
             
 
     def loadTXT(self, txt_file_path):

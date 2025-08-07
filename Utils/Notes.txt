@@ -1,0 +1,38 @@
+
+
+ASTRA GUI:
+
+    Buttons:
+
+    Settings:
+        -second pass std parameter constraint
+        -star background thresholding coeff
+        -SNR reject threshold
+        -Verbose
+
+        
+        PSO Settings
+            -OOB penalty
+            -Options (c1, c2, w)
+            -max itters
+            -n particles
+            -parameter space velocity coeff
+            -ftol
+            -ftol itters
+            -explorative coeff
+        
+        Cropping Settings
+            -padding coeff
+            -init sigma gues
+            -max sigma coeff
+            -max length coeff
+
+        Second pass Settings
+            -oob penalty
+
+        Kalman:
+            -Typ sigma
+            -motonicity
+            -use_accel
+
+    THere is a one frame offset near the start

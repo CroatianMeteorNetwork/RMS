@@ -54,16 +54,16 @@ class AstraConfigDialog(QDialog):
         pso_defaults = {
             "w (0-1)": "0.9", "c1 (0-1)": "0.4", "c2 (0-1)": "0.3",
             "m_iter": "100", "n_par": "100", "Vc (0-1)": "0.3",
-            "ftol": "1e-4", "ftol_iter": "25", "expl_c": "3"
+            "ftol": "1e-4", "ftol_iter": "25", "expl_c": "3", "P_sigma": "3"
         }
         main_layout.addWidget(add_grid_fields(self.pso_fields, pso_defaults, "PSO PARAMETER SETTINGS"))
 
         # === ASTRA General Settings ===
         self.astra_fields = {}
         astra_defaults = {
-            "P_sigma": "3", "O_sigma": "3", "m_SNR": "10",
+            "O_sigma": "3", "m_SNR": "10",
             "P_c": "1.5", "sigma_i (px)": "2", "sigma_m": "1.2",
-            "L_m": "1.5", "VERB": "False"
+            "L_m": "1.5", "VERB": "False", "P_thresh" : "0.65"
         }
         main_layout.addWidget(add_grid_fields(self.astra_fields, astra_defaults, "ASTRA PARAMETER SETTINGS"))
 
@@ -81,30 +81,34 @@ class AstraConfigDialog(QDialog):
         self.param_info.setReadOnly(True)
         self.param_info.setHtml(
             "<b> MANUAL PICK MODE GUIDE </b><br>"
-            "<b>1.</b> Pick three frame-adjacent leading-edge picks at the highest SNR near middle of event.<br>"
-            "<b>2.</b> Pick two the leading edge of the first and last frame of the event.<br>"
+            "<b>1.</b> Pick two the leading edge of the first and last frame of the event.<br>"
             "NOTE: It is essential that the line outlined by the first and last picks perfectly intersect the meteor trajectory.<br>"
+            "<b>2.</b> Pick three frame-adjacent leading-edge picks at the highest SNR near middle of event.<br>"
             "<b>3.</b> THEN, run ASTRA with the 'RUN ASTRA' button.<br><br>"
-            "<b>w</b>: PSO intertial weight<br>"
-            "<b>c1</b>: PSO social component (individual best)<br>"
-            "<b>c2</b>: PSO cognitive component (global best)<br>"
-            "<b>m_iter</b>: Max PSO iterations<br>"
-            "<b>n_par</b>: Number of particles<br>"
-            "<b>Vc</b>: Fraction of parameter space as max velocity<br>"
-            "<b>tol</b>: Min tolerance for convergence<br>"
-            "<b>tol_iter</b>: Min itterations for convergence<br>"
-            "<b>expl_c</b>: Explorative coeffecient (inital particle seeding)<br>"
-            "<b>P_sigma</b>: 2nd pass optimizer paramter bound coeffeicent<br>"
-            "<b>O_sigma</b>: Num STD above background to mask as star<br>"
-            "<b>m_SNR</b>: Minimum SNR value to keep pick<br>"
-            "<b>P_c</b>: Streak cropping padding coeffeicent<br>"
-            "<b>sigma_i</b>: Initial Gaussian sigma (height) guess<br>"
-            "<b>sigma_m</b>: Coeff to init. sigma guess as max bound<br>"
-            "<b>L_m</b>: Coeff to init. length guess as max bound<br>"
-            "<b>VERB</b>: Verbose<br>"
+            "NOTE ON CHANGING PARAMETERS<br>"
+            "Default parameters are optimized to work for most EMCCD data. Paramters are sensitive and may result in large changes in computation time and possible failure. Only change when dealing with extranous data."
+            "All extra descriptions on how parameters affect the algorithm are with respect to increasing the value of the parameter.<br><br>"
+            "<b>w</b>: PSO intertial weight - Increases parameter exploration<br>"
+            "<b>c1</b>: PSO social component (individual best) - Increases local parameter minimum exploration<br>"
+            "<b>c2</b>: PSO cognitive component (global best) - Decreases parameter exploration, improves convergence<br>"
+            "<b>m_iter</b>: Max PSO iterations - Improves convergence, increases computation time. Must be matched with higher parameter exploration<br>"
+            "<b>n_par</b>: Number of particles - Improves exploration, increases computation time. Must be matches with higher parameter exploration<br>"
+            "<b>Vc</b>: Fraction of parameter space as max velocity - Improves exploration, must be matched with faster convergence<br>"
+            "<b>ftol</b>: Min tolerance for convergence - Improves full local optimization, increases computation time<br>"
+            "<b>ftol_iter</b>: Min itterations for convergence - Improves full local optimization, increases computation time<br>"
+            "<b>expl_c</b>: Explorative coeffecient (disperses inital particle seeding) - Increases exploration, reduces local minimization<br>"
+            "<b>P_sigma</b>: 2nd pass optimizer paramter bound coeffeicent - Improves ability for local minimizer to adjust from PSO result, reduces optimal local solution<br>"
+            "<b>O_sigma</b>: Num STD above background to mask as star - Reduces chance for bright meteors to be masked as a star<br>"
+            "<b>m_SNR</b>: Minimum SNR value to keep pick - Improves the quality of picks, reduces total picks<br>"
+            "<b>P_c</b>: Streak cropping padding coeffeicent - Increases ability for ASTRA to recover from bad fits, increases computation time<br>"
+            "<b>sigma_i</b>: Initial Gaussian sigma (height) guess - Improves ASTRA ability to fit large meteors, increases computation time and can throw off algorithm if inaccurate<br>"
+            "<b>sigma_m</b>: Coeff to init. sigma guess as max bound - Improves ASTRA ability to fit large meteors, increases computation time and can throw off algorithm if inaccurate<br>"
+            "<b>L_m</b>: Coeff to init. length guess as max bound - Improves ASTRA ability to fit large meteors, increases computation time and can throw off algorithm if inaccurate<br>"
+            "<b>P_thresh</b>: Fraction of peak meteor brightness to threshold photometry pixels - less noise included in photometry, though possibly less of the meteor as well.<br>"
+            "<b>VERB</b>: Verbose -shows testing data<br>"
             "<b>Monotonicity</b>: Enforce monotonic motion<br>"
             "<b>Use_Accel</b>: Enable acceleration model (default const. vel.)<br>"
-            "<b>Med_err</b>: Estimated error at median SNR for R matrix<br>"
+            "<b>Med_err</b>: Estimated error at median SNR for R matrix - Increases power of Kalman filter, high values may fake data by overfitting<br>"
         )
         guide_layout.addWidget(self.param_info)
         guide_group.setLayout(guide_layout)
@@ -124,7 +128,7 @@ class AstraConfigDialog(QDialog):
         self.run_kalman_btn = QPushButton("RUN KALMAN")
         self.load_btn.clicked.connect(self.load_picks)
         self.run_astra_btn.clicked.connect(self.start_astra_thread)
-        self.run_kalman_btn.clicked.connect(self.run_kalman)
+        self.run_kalman_btn.clicked.connect(self.start_kalman_thread)
         btn_layout.addWidget(self.load_btn)
         btn_layout.addWidget(self.run_astra_btn)
         btn_layout.addWidget(self.run_kalman_btn)
@@ -182,30 +186,72 @@ class AstraConfigDialog(QDialog):
             self.run_kalman_callback(self.config)
 
     def start_astra_thread(self):
+        from PyQt5 import QtCore
         self.store_config()
+        config = self.get_config()
+
+        self.thread = QThread()
+        self.worker = AstraWorker(config, self.skyfit_instance)
+        print('ASTRA Object Created! Processing beginning (30-80 seconds)...')
+        self.worker.moveToThread(self.thread)
+
         self.run_astra_btn.setEnabled(False)
         self.run_kalman_btn.setEnabled(False)
+        self.load_btn.setEnabled(False)
 
-        self.worker_thread = QThread()
-        self.worker = AstraWorker(self.config, self.skyfit_instance)
-        self.worker.moveToThread(self.worker_thread)
-
-        self.worker_thread.started.connect(self.worker.run)
         self.worker.progress.connect(self.update_progress)
 
-        self.worker.finished.connect(self.worker_thread.quit)
-        self.worker.finished.connect(self.worker.deleteLater)
-        self.worker_thread.finished.connect(self.worker_thread.deleteLater)
+        self.thread.started.connect(self.worker.run)
 
+        self.worker.results_ready.connect(
+            self.skyfit_instance.integrate_astra_results, 
+            QtCore.Qt.QueuedConnection
+        )
+
+        # Clean up and re-enable UI
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+        
+
+        # Restore interactivity
         self.worker.finished.connect(lambda: self.run_astra_btn.setEnabled(True))
         self.worker.finished.connect(lambda: self.run_kalman_btn.setEnabled(True))
+        self.worker.finished.connect(lambda: self.load_btn.setEnabled(True))
 
-        self.worker_thread.start()
+        self.thread.start()
 
+    def start_kalman_thread(self):
+        self.store_config()
+        self.config = self.get_config()
+
+        self.run_kalman_btn.setEnabled(False)
+        self.run_astra_btn.setEnabled(False)
+
+        self.kalman_worker = KalmanWorker(self.skyfit_instance, self.config)
+        self.kalman_worker.progress.connect(self.update_progress)
+        self.kalman_worker.finished.connect(lambda: self.run_kalman_btn.setEnabled(True))
+        self.kalman_worker.finished.connect(lambda: self.run_astra_btn.setEnabled(True))
+        self.kalman_worker.finished.connect(lambda: self.update_progress(100))
+        self.kalman_worker.start()
+
+class KalmanWorker(QThread):
+    progress = pyqtSignal(int)
+    finished = pyqtSignal()
+
+    def __init__(self, skyfit_instance, config):
+        super().__init__()
+        self.skyfit_instance = skyfit_instance
+        self.config = config
+
+    def run(self):
+        self.skyfit_instance.run_kalman_from_config(self.config, progress_callback=self.progress.emit)
+        self.finished.emit()
 
 class AstraWorker(QObject):
     finished = pyqtSignal()
     progress = pyqtSignal(int)
+    results_ready = pyqtSignal(object)
 
     def __init__(self, config, skyfit_instance):
         super().__init__()
@@ -213,19 +259,32 @@ class AstraWorker(QObject):
         self.skyfit_instance = skyfit_instance
 
     def run(self):
-        # Temporarily replace progress callback
-        self.skyfit_instance.run_astra_from_config(self.config, progress_callback=self.progress.emit)
+        # Prepare data
+        data_dict = self.skyfit_instance.prepare_astra_data(self.config)
+
+        # Run ASTRA here, directly in worker
+        from .ASTRA import ASTRA
+        astra = ASTRA(data_dict, progress_callback=self.progress.emit)
+        astra.process()
+
+        # Handle results via callback
+        self.results_ready.emit(astra)
         self.finished.emit()
 
-
-def launch_astra_gui(run_astra_callback=None, run_kalman_callback=None, load_picks_callback=None):
-    import sys
-    app = QApplication.instance() or QApplication(sys.argv)
-    dialog = AstraConfigDialog(run_astra_callback=run_astra_callback, run_kalman_callback=run_kalman_callback, load_picks_callback=load_picks_callback)
-    if dialog.exec_():
-        return dialog.get_config()
-    return None
-
+def launch_astra_gui(run_astra_callback=None,
+                     run_kalman_callback=None,
+                     run_load_callback=None,
+                     parent=None,
+                     skyfit_instance=None):
+    dialog = AstraConfigDialog(
+        run_astra_callback=run_astra_callback,
+        run_kalman_callback=run_kalman_callback,
+        run_load_callback=run_load_callback,
+        parent=parent,
+        skyfit_instance=skyfit_instance
+    )
+    dialog.show()
+    return dialog
 
 if __name__ == "__main__":
     config = launch_astra_gui()

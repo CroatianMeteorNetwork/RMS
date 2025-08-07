@@ -40,17 +40,18 @@ class ASTRA:
         # 1) Image Data Processing Constants/Settings
 
         # Multiples of background STD + mean to mask pixels above as stars
-        self.BACKGROUND_STD_THRESHOLD = 3 # multiple of std dev to mask pixels above
+        self.BACKGROUND_STD_THRESHOLD = float(self.astra_config['astra']['O_sigma']) # multiple of std dev to mask pixels above
+        self.saturation_threshold = float(data_dict["saturation_threshold"])
 
         # 2) Recursive Cropping & Fitting Constants/Settings
 
         # Represents the multiples of their standard deviations that the parameters are allowed to deviate within in the second pass gaussian
         self.std_parameter_constraint = [
-            float(self.astra_config['astra']['P_c']), # level_sum
-            float(self.astra_config['astra']['P_c']), # height / sigma_y
-            float(self.astra_config['astra']['P_c']), # x0
-            float(self.astra_config['astra']['P_c']), # y0
-            float(self.astra_config['astra']['P_c'])  # length / sigma_x
+            float(self.astra_config['pso']['P_sigma']), # level_sum
+            float(self.astra_config['pso']['P_sigma']), # height / sigma_y
+            float(self.astra_config['pso']['P_sigma']), # x0
+            float(self.astra_config['pso']['P_sigma']), # y0
+            float(self.astra_config['pso']['P_sigma'])  # length / sigma_x
         ]
 
         # The settings passed onto the PSO on the first pass
@@ -101,8 +102,8 @@ class ASTRA:
 
         # 4) Kalman Settings
         self.kalman_settings = {
-            'monotonicity': bool(self.astra_config['kalman']['Monotonicity']),
-            'use_accel': bool(self.astra_config['kalman']['Use_Accel']),
+            'monotonicity': self.astra_config['kalman']['Monotonicity'] == 'True',
+            'use_accel': self.astra_config['kalman']['Use_Accel'] == 'True',
             'typ_sigma': float(self.astra_config['kalman']['Med_err (px)'])
         }
 
@@ -132,7 +133,7 @@ class ASTRA:
 
         # Stores data from dict as class attributes
 
-        self.verbose = bool(self.astra_config['astra']['VERB'])
+        self.verbose = self.astra_config['astra']['VERB'] == 'True'
 
     def updateProgress(self):
 
@@ -149,8 +150,11 @@ class ASTRA:
                     for step in self.progressed_frames.keys()
                 ) / self.total_frames * 100
                 self.progress_callback(int(current_percentage))
-        elif self.mode == 'Kalman':
-            pass
+        if self.mode == 'Kalman':
+            if self.progress_callback:
+                current_percentage = (self.exec_count / self.total_exec) * 100
+                self.progress_callback(int(current_percentage))
+
 
     def process(self):
         """
@@ -181,7 +185,6 @@ class ASTRA:
         except Exception as e:
             print(f'Error processing image data: {e}')
 
-
         # 2. Recursively crop & fit a moving gaussian across whole event
         # try:
         self.cropAllMeteorFrames(self.pick_frame_indices, self.picks if self.astra_config['pick_method'] == 'ECSV / txt' else None)
@@ -204,6 +207,7 @@ class ASTRA:
         # 6. Return the ASTRA object for later processing/saving
         return self
     
+    
     def runKalman(self, measurements=None, times=None, snr=None):
         """
         Runs the Kalman filter on the final picks if enabled.
@@ -214,21 +218,37 @@ class ASTRA:
         """
 
         self.mode = 'Kalman'  # Set the mode to Kalman for processing
+        self.exec_count = 0
+        self.total_exec = 1  # Initialize total execution count to avoid division by zero
+        self.updateProgress()
+
+
+        if self.astra_config['kalman']['Monotonicity'] == "True":
+            time_coeff = 3
+        else:
+            time_coeff = 2
+
+        if self.progress_callback is not None:
+            self.progress_callback(0)
 
         if measurements is None:
             try:
-                x_smooth, p_smooth = self.applyKalmanFilter(self.global_picks, self.times, self.snr)
+                self.total_exec = len(self.times) * time_coeff
+                smooth_picks, smooth_P = self.applyKalmanFilter(self.global_picks, self.times, self.snr)
             except Exception as e:
                 print(f'Error applying Kalman filter: {e}')
         else:
             # If measurements are provided, use them instead of the global picks
             try:
-                x_smooth, p_smooth = self.applyKalmanFilter(measurements, times, snr)
+                self.total_exec = len(times) * time_coeff
+                smooth_picks, smooth_P = self.applyKalmanFilter(measurements, times, snr)
             except Exception as e:
                 print(f'Error applying Kalman filter: {e}')
-        
-        return x_smooth[:, 0:2]
 
+        self.exec_count = self.total_exec
+        self.updateProgress()
+        
+        return smooth_picks, smooth_P
     
     # 1) -- Functional Methods --
 
@@ -298,11 +318,14 @@ class ASTRA:
         if self.astra_config['pick_method'] == 'ECSV / txt':
             seed_picks_global = detApp_picks[len(detApp_picks) // 2 - 1: len(detApp_picks) // 2 + 2]
             seed_indices = pick_frame_indices[len(detApp_picks) // 2 - 1: len(detApp_picks) // 2 + 2]
-            omega = np.arctan2(seed_picks_global[-1][0] - seed_picks_global[0][0], seed_picks_global[-1][1] - seed_picks_global[0][1]) + np.pi / 2
+            omega = np.arctan2(seed_picks_global[-1][1] - seed_picks_global[0][1], -seed_picks_global[-1][0] + seed_picks_global[0][0])  % (2*np.pi)
         else:
             seed_picks_global = self.middle_picks[1:-1]
             seed_indices = self.pick_frame_indices[1:-1]
-            omega = np.arctan2(self.middle_picks[-1][0] - self.middle_picks[0][0], self.middle_picks[-1][1] - self.middle_picks[0][1]) + np.pi / 2
+            omega = np.arctan2(self.middle_picks[-1][1] - self.middle_picks[0][1], self.middle_picks[-1][0] - self.middle_picks[0][0])
+
+        if self.verbose:
+            print(f"Starting recursive cropping with {len(seed_indices)} seed picks at indices {seed_indices} and omega {omega} radians.")
 
         # 2) -- Estimate initial parameters from the seed picks --
 
@@ -345,6 +368,8 @@ class ASTRA:
         # Update progress
         self.progressed_frames['cropping'] = 3
         self.updateProgress()
+        if self.verbose:
+            print(f"Finished cropping {len(seed_indices)} frames with est. centroids: {self.first_pass_params[:, 2:4]}")
 
         # Instantiate splines
         parameter_estimation_functions = self.updateParameterEstimationFunctions(self.crop_vars, self.first_pass_params, forward_pass=True) # Set forward_pass to True since there are only 3 points
@@ -457,6 +482,9 @@ class ASTRA:
         self.abs_level_sums = []
         snr_rejection_bool = np.zeros((refined_params.shape[0],), dtype=bool)
         frame_snr_values = []
+        self.background_levels = []
+        self.photometry_pixels = []
+        self.saturated_bool_list = []
 
         # Itterate over each frame
         for i in range(len(fit_imgs)):
@@ -474,6 +502,8 @@ class ASTRA:
             elif not self.checkStreakInBounds(self.translatePicksToGlobal((refined_params[i, 2], refined_params[i, 3]), crop_vars[i]),
                                                 refined_params[idx, 4], refined_params[idx, 1], self.omega, self.directions):
                 snr_rejection_bool[i] = True
+            if idx == len(fit_imgs) - 1:
+                print('FINAL POINT')
             # If passes all checks, append SNR and level sum
             else:
                 frame_snr_values.append(snr)
@@ -491,17 +521,20 @@ class ASTRA:
         pick_frame_indices = np.array(pick_frame_indices)[~snr_rejection_bool]
         fit_costs = fit_costs[~snr_rejection_bool]
         self.abs_level_sums = np.array(self.abs_level_sums)[~snr_rejection_bool]
-
+        self.background_levels = np.array(self.background_levels)[~snr_rejection_bool]
+        self.saturated_bool_list = np.array(self.saturated_bool_list)[~snr_rejection_bool]
 
         # Save copies before indexing to avoid recursion errors
         fit_imgs_copy = fit_imgs.copy()
         cropped_frames_copy = cropped_frames.copy()
         times_copy = times.copy()
+        photometry_pixels_copy = self.photometry_pixels.copy()
 
         # Remove low-SNR frames from fit_imgs and cropped_frames
         fit_imgs = [fit_imgs_copy[i] for i in range(len(fit_imgs_copy)) if not snr_rejection_bool[i]]
         cropped_frames = [cropped_frames_copy[i] for i in range(len(cropped_frames_copy)) if not snr_rejection_bool[i]]
         times = [times_copy[i] for i in range(len(times_copy)) if not snr_rejection_bool[i]]
+        self.photometry_pixels = [photometry_pixels_copy[i] for i in range(len(photometry_pixels_copy)) if not snr_rejection_bool[i]]
 
         # Translate to global coordinates as new variable
         global_picks = np.array([self.movePickToEdge(self.translatePicksToGlobal((refined_params[i, 2], refined_params[i, 3]), crop_vars[i]),
@@ -542,9 +575,16 @@ class ASTRA:
 
         # Package all picks into a list
         bounding_points = [edge_pick_back, edge_pick_front, top_pick, bottom_pick]
+        print(bounding_points)
 
         # Check if any of the bounding points are out of bounds
         if np.any([point[0] < 0 or point[0] >= self.frames.shape[1] or point[1] < 0 or point[1] >= self.frames.shape[2] for point in bounding_points]):
+            in_bounds = False
+
+        # Check if pick is close enough to edge to be considered OOB
+        edge_buffer = 3  # pixels
+        if (global_pick[0] < edge_buffer or global_pick[0] >= self.frames.shape[1] - edge_buffer or
+            global_pick[1] < edge_buffer or global_pick[1] >= self.frames.shape[2] - edge_buffer):
             in_bounds = False
 
         # Return the in_bounds bool
@@ -956,25 +996,37 @@ class ASTRA:
         # Copy fit image and cropped_frame
         fit_img = fit_img.copy()
         cropped_frame = cropped_frame.copy()
+        avebk = self.avepixel_background.copy()
 
         # Clip fit image to zero and one
-        fit_img[fit_img <= 1] = 0
-        fit_img[fit_img > 1] = 1
+        thresh = np.max(fit_img) * float(self.astra_config['astra']['P_thresh'])
+        fit_img[fit_img <= thresh] = 0
+        fit_img[fit_img > thresh] = 1
 
         # Sum the inside outside of the fit image
         level_sum = np.sum(fit_img * cropped_frame)
         nonzero_count = np.count_nonzero(fit_img)
 
+        nonzero_indices = np.argwhere(fit_img == 1)
+        # Shift nonzero_indices by xmin and ymin to get global pixel coordinates
+        nonzero_indices[:, 0] += y_min
+        nonzero_indices[:, 1] += x_min
+        photometry_pixels = [tuple(idx[::-1]) for idx in nonzero_indices]
+        saturated_bool = np.any(frame[photometry_pixels] >= self.saturation_threshold)
+
         # Mask the cropped_frame
-        frame = frame[y_min:y_max, x_min:x_max]
-
-        cropped_frame = np.ma.masked_array(cropped_frame, mask=(fit_img == 1))
-
-        self.abs_level_sums.append(level_sum)
+        avebk = avebk[y_min:y_max, x_min:x_max]
 
         # Calculate std and median of the background
-        background_std = np.std(frame) # THIS SHOULD BE ORIGINAL FRAME
-        background_median = np.median(frame)
+        background_std = np.std(avebk)
+        background_median = np.median(avebk)
+
+        self.abs_level_sums.append(level_sum)
+        self.background_levels.append(background_median)
+        # Find the indexes of each nonzero value in fit_img
+        # Convert nonzero_indices to a list of (x, y) tuples
+        self.photometry_pixels.append(photometry_pixels)
+        self.saturated_bool_list.append(saturated_bool)
 
         # 10) final SNR
         return signalToNoise(
@@ -1052,7 +1104,6 @@ class ASTRA:
         next_height = paramter_estimation_functions['height'](x)
         next_length = paramter_estimation_functions['length'](x)
         next_norm = paramter_estimation_functions['norm'](x)
-        print('next_norm:', next_norm)
 
         # Translate next_level_sum back into regualr space from log space
         next_level_sum = np.exp(next_level_sum)
@@ -1098,19 +1149,19 @@ class ASTRA:
         )
 
         # If unsuccesful revert to initial guess
-        if not res.success:
+        if res.success is False:
             print(f"Warning: Local optimization failed with message: {res.message}. Reverting to initial guess.")
             best_pos = p0
             best_cost = self.LocalObjectiveFunction(p0, data_tuple, y_obs, 0, omega, bounds, directions)
-
-        # Get best cost and position
-        best_pos = res.x
-        best_cost = res.fun
+        else:
+            # Get best cost and position
+            best_pos = res.x
+            best_cost = res.fun
  
         # Check if best_pos is within bounds
         for i, (val, bound) in enumerate(zip(best_pos, bounds)):
             lower, upper = bound
-            if val < lower or val > upper:
+            if val < lower or val > upper: 
                 print(f"Warning: Parameter {i} (value: {val}) is outside the bounds [{lower}, {upper}]")
 
         # Calculate the fitted image
@@ -1148,6 +1199,8 @@ class ASTRA:
             est_level_sum = estim_next_params['level_sum']
             est_height = estim_next_params['height']
             est_length = estim_next_params['length']
+            if self.verbose:
+                print(f"Using provided estimations: {estim_next_params}")
         else:
             try:
                 est_level_sum = np.sum(cropped_frame)
@@ -1155,7 +1208,7 @@ class ASTRA:
                 est_height = 2
             except Exception as e:
                 raise ValueError("Either spline_estim or init_length must be provided for first_pass_gaussian.")
-
+        
         # 2) -- Build up p0, i0, v0 and bounds --
         p0 = [
             est_level_sum, # level_sum
@@ -1385,7 +1438,7 @@ class ASTRA:
         
         return cropped_frame, crop_vars
 
-
+# MAKE SURE TO CLEAN NEW VARS
         
     def movingGaussian(self, data_tuple, omega, a0, level_sum, sigma, x0, y0, L, saturation_level=None):
         """ Moving Gaussian function with saturation intensity limiting.
@@ -1416,6 +1469,7 @@ class ASTRA:
 
         """
 
+        saturation_level = self.saturation_threshold
         x, y = data_tuple
 
         # Rotate the coordinates
@@ -1506,7 +1560,6 @@ class ASTRA:
         est_next_params = self.estimateNextParameters(paramter_estimation_functions, self.first_pass_params.shape[0], forward_pass=forward_pass)
 
         # Crop the frame around the new center
-        print(f'Cropping frame {frame_index}, estimated center: {est_center_global}, estimated next params: {est_next_params}, pass: {"forward" if forward_pass else "backward"}')
         cropped_frame, crop_vars = self.cropFrameToGaussian(self.subtracted_frames[frame_index], est_center_global, 
                                                                     est_next_params['height'] * self.cropping_settings['max_sigma_coeff'], 
                                                                     est_next_params['length'] * self.cropping_settings['max_length_coeff'],
@@ -1553,7 +1606,8 @@ class ASTRA:
         # Update progress
         self.progressed_frames['cropping'] += 1
         self.updateProgress()
-        print(f'frame {frame_index} processed, next center: {next_center_global}, pass: {"forward" if forward_pass else "backward"}')
+        if self.verbose:
+            print(f"Recursive cropping at frame {frame_index} with center {est_center_global} and next center {next_center_global}, Forward pass: {forward_pass}")
 
         # NOTE: Add robust quit conditions for full detapp non-reliance
         if use_DetApp:
@@ -1574,7 +1628,9 @@ class ASTRA:
     def applyKalmanFilter(self, global_edge_picks, times, snr_values):
         
         # Prepare the measurements and noise covariance matrices
-        measurements = global_edge_picks
+        measurements = np.array(global_edge_picks)
+        times = np.array(times)
+        snr_values = np.array(snr_values)
 
         # Normalize times
         t0 = times[0]  # Use the first time as the reference
@@ -1582,9 +1638,13 @@ class ASTRA:
             (t - t0).total_seconds()
             for t in times
         ])
+        self.exec_count += 1
+        self.updateProgress()
 
         R = self.computeR(snr_values)
         Q_base = self.computeQBase(measurements, rel_seconds)
+        self.exec_count += 2
+        self.updateProgress()
     
         # Call the Kalman filter function
         x_smooth, p_smooth = self.kalmanFilterCA(
@@ -1639,6 +1699,9 @@ class ASTRA:
         # NOTE: compute this as residuals from the expected position
         R_ref = np.diag([sigma_typical**2, sigma_typical**2])
 
+        # Clip SNR to 1
+        snr_values = np.clip(snr_values, 1, None)
+
         # Use the median SNR as reference
         snr_ref = np.median(snr_values)
 
@@ -1650,7 +1713,7 @@ class ASTRA:
 
         return R_dyn
     
-    def kalmanFilterCA(measurements, times, Q_base, R, monotonicity=True, epsilon=1e-6, use_accel=False):
+    def kalmanFilterCA(self, measurements, times, Q_base, R, monotonicity=True, epsilon=1e-6, use_accel=False):
         """
         Kalman filter with Rauch–Tung–Striebel (RTS) smoothing using a constant-acceleration model.
         Handles irregular time intervals between measurements by recomputing dynamics at each step.
@@ -1723,10 +1786,11 @@ class ASTRA:
         P_forward[0] = P0
         x_pred[0] = x0
         P_pred[0] = P0
-
+        
         # -------- FORWARD KALMAN FILTER PASS --------
         for k in range(1, N):
-
+            self.exec_count += 1
+            self.updateProgress()
             dt = times[k] - times[k - 1]  # Dynamic time step
 
 
@@ -1780,6 +1844,8 @@ class ASTRA:
         P_smooth[-1] = P_forward[-1]
 
         for k in range(N - 2, -1, -1):
+            self.exec_count += 1
+            self.updateProgress()
             dt = times[k + 1] - times[k]
 
             # Reconstruct A matrix for backward step
@@ -1801,6 +1867,8 @@ class ASTRA:
 
         # -------- OPTIONAL MONOTONICITY ENFORCEMENT --------
         if monotonicity:
+            self.exec_count += 1
+            self.updateProgress()
             # Compute total displacement in x and y
             dx_total = x_smooth[-1, 0] - x_smooth[0, 0]
             dy_total = x_smooth[-1, 1] - x_smooth[0, 1]
@@ -1818,7 +1886,7 @@ class ASTRA:
 
             # Enforce non-decreasing or non-increasing motion
             for k in range(1, N):
-                
+
                 if direction > 0 and x_smooth[k, dominant] + epsilon < x_smooth[k - 1, dominant]:
                     x_smooth[k, dominant] = x_smooth[k - 1, dominant]
                     x_smooth[k, velocity_idx] = 0.0
@@ -1826,7 +1894,6 @@ class ASTRA:
                 elif direction < 0 and x_smooth[k, dominant] - epsilon > x_smooth[k - 1, dominant]:
                     x_smooth[k, dominant] = x_smooth[k - 1, dominant]
                     x_smooth[k, velocity_idx] = 0.0
-
         return x_smooth, P_smooth
 
 
