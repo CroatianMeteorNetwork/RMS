@@ -28,6 +28,7 @@ import copy
 import os.path
 from multiprocessing import Process, Event, Value, Array
 import threading
+from collections import deque
 import os
 import signal
 
@@ -167,6 +168,9 @@ class BufferedCapture(Process):
 
         # Initialize shared counter for dropped frames
         self.dropped_frames = Value('i', 0)
+        self.dropped_frames_session_start = 0  # Frames dropped at start of current night session
+        self.last_daytime_mode = None  # Track day/night transitions
+        self.dropped_frames_timestamps = deque()  # Track when frames were dropped for 10-min window
 
         # Flag for process control
         self.exit = Event()
@@ -919,20 +923,32 @@ class BufferedCapture(Process):
         if not GST_IMPORTED:
             return
 
-        bus = self.pipeline.get_bus()
-        mask = Gst.MessageType.ANY
+        try:
+            bus = self.pipeline.get_bus()
+            mask = Gst.MessageType.ANY
 
-        while not self._bus_should_exit:
-            msg = bus.timed_pop_filtered(5 * Gst.SECOND, mask)
-            if not msg:
-                continue
+            while not self._bus_should_exit and self.pipeline is not None:
+                msg = bus.timed_pop_filtered(5 * Gst.SECOND, mask)
+                if not msg:
+                    # Check if pipeline still exists
+                    if self.pipeline is None:
+                        break
+                    continue
 
-            if msg.type == Gst.MessageType.ERROR:
-                err, dbg = msg.parse_error()
-                log.error("GST ERROR from %s: %s", msg.src.get_name(), err)
-            elif msg.type == Gst.MessageType.WARNING:
-                warn, dbg = msg.parse_warning()
-                log.warning("GST WARN  from %s: %s", msg.src.get_name(), warn)
+                if msg.type == Gst.MessageType.ERROR:
+                    err, dbg = msg.parse_error()
+                    log.error("GST ERROR from %s: %s", msg.src.get_name(), err)
+                elif msg.type == Gst.MessageType.WARNING:
+                    warn, dbg = msg.parse_warning()
+                    log.warning("GST WARN  from %s: %s", msg.src.get_name(), warn)
+                elif msg.type == Gst.MessageType.EOS:
+                    log.debug("_busPoller: Received EOS, exiting")
+                    break
+                    
+        except Exception as e:
+            log.debug("_busPoller: Exception occurred: %s", str(e))
+        finally:
+            log.debug("_busPoller: Thread exiting")
 
 
     def createGstreamDevice(self, video_format, gst_decoder='decodebin', 
@@ -963,13 +979,14 @@ class BufferedCapture(Process):
 
         device_url = self.extractRtspUrl(self.config.deviceID)
 
+        # Common timeout settings for both UDP and TCP
+        # All streams need tcp-timeout since RTSP control always uses TCP
+        common_timeouts = "retry=5 timeout=5000000 tcp-timeout=5000000 teardown-timeout=3000000"
+        
         if self.config.protocol == 'udp':
-            protocol_str = "protocols=udp retry=5"
-            # rtspsrc_params = ("rtspsrc buffer-mode=1 protocols=udp retry=5")
-
+            protocol_str = f"protocols=udp {common_timeouts}"
         else:
-            # Default to TCP
-            protocol_str = "protocols=tcp tcp-timeout=5000000 retry=5"
+            protocol_str = f"protocols=tcp {common_timeouts}"
 
         # Define the source up to the point where we want to branch off
         source_to_tee = (
@@ -1220,8 +1237,9 @@ class BufferedCapture(Process):
 
                 try: 
 
-                    # Initialize GStreamer
-                    Gst.init(None)
+                    # Initialize GStreamer (only if not already initialized)
+                    if not Gst.is_initialized():
+                        Gst.init(None)
 
                     # Determine if which directory to save the raw video, if any
                     if self.config.raw_video_save:
@@ -1337,6 +1355,12 @@ class BufferedCapture(Process):
     def releaseResources(self):
         """Tear everything down in the right order so no FD survives."""
         
+        # Prevent multiple simultaneous calls
+        if hasattr(self, '_releasing_resources') and self._releasing_resources:
+            log.debug("releaseResources: Already in progress, skipping duplicate call")
+            return
+        self._releasing_resources = True
+        
         log.debug("releaseResources: Starting")
 
         def _timedCall(fn, timeout_s=2):
@@ -1347,7 +1371,6 @@ class BufferedCapture(Process):
             th.join(timeout_s)
             return not th.is_alive()
 
-
         # stop frame-saver children
         log.debug("releaseResources: Calling releaseRawArrays()")
         self.releaseRawArrays()
@@ -1356,23 +1379,51 @@ class BufferedCapture(Process):
         # gracefully drain & stop the pipeline
         if self.pipeline:
             log.debug("releaseResources: Pipeline exists, starting shutdown")
+            
+            # Disconnect any signal handlers first
+            try:
+                splitmuxsink = self.pipeline.get_by_name("splitmuxsink0")
+                if splitmuxsink:
+                    log.debug("releaseResources: Disconnecting splitmuxsink signals")
+                    splitmuxsink.disconnect_by_func(self.moveSegment)
+            except Exception as e:
+                log.debug("releaseResources: Error disconnecting signals: %s", e)
+            
             bus = self.pipeline.get_bus()
             
-            log.debug("releaseResources: Sending EOS event")
-            self.pipeline.send_event(Gst.Event.new_eos())
-            
-            log.debug("releaseResources: Waiting for EOS/ERROR (2 second timeout)")
-            msg = bus.timed_pop_filtered(2*Gst.SECOND,
-                                Gst.MessageType.EOS | Gst.MessageType.ERROR)
-            log.debug(f"releaseResources: timed_pop_filtered returned: {msg}")
+            # Try graceful shutdown first
+            log.debug("releaseResources: Attempting graceful shutdown")
+            try:
+                log.debug("releaseResources: Sending EOS event")
+                self.pipeline.send_event(Gst.Event.new_eos())
+                
+                log.debug("releaseResources: Waiting for EOS/ERROR (2 second timeout)")
+                msg = bus.timed_pop_filtered(2*Gst.SECOND,
+                                    Gst.MessageType.EOS | Gst.MessageType.ERROR)
+                log.debug(f"releaseResources: timed_pop_filtered returned: {msg}")
 
-            log.debug("releaseResources: Setting pipeline to NULL state")
-            ret = self.pipeline.set_state(Gst.State.NULL)
-            log.debug(f"releaseResources: set_state returned: {ret}")
-            
-            log.debug("releaseResources: Getting pipeline state (1 second timeout)")
-            ret, state, pending = self.pipeline.get_state(Gst.SECOND)
-            log.debug(f"releaseResources: get_state returned: ret={ret}, state={state}, pending={pending}")
+                log.debug("releaseResources: Setting pipeline to NULL state")
+                ret = self.pipeline.set_state(Gst.State.NULL)
+                log.debug(f"releaseResources: set_state returned: {ret}")
+                
+                log.debug("releaseResources: Getting pipeline state (2 second timeout)")
+                ret, state, pending = self.pipeline.get_state(2*Gst.SECOND)
+                log.debug(f"releaseResources: get_state returned: ret={ret}, state={state}, pending={pending}")
+                
+                # Check if we actually reached NULL state
+                if state != Gst.State.NULL:
+                    log.warning("releaseResources: Graceful shutdown failed, pipeline stuck in state %s", state)
+                    raise Exception("Pipeline stuck, forcing shutdown")
+                    
+                log.debug("releaseResources: Graceful shutdown successful")
+                
+            except Exception as e:
+                log.warning("releaseResources: Graceful shutdown failed (%s), forcing pipeline shutdown", e)
+                
+                # Force shutdown - just set to NULL without waiting
+                log.debug("releaseResources: Force setting pipeline to NULL state")
+                self.pipeline.set_state(Gst.State.NULL)
+                # Don't wait for state change - just proceed with cleanup
 
             # wake poller
             if bus:
@@ -1401,7 +1452,11 @@ class BufferedCapture(Process):
         # only now drop the last reference
         if pipe:
             log.debug("releaseResources: Unreffing pipeline")
-            pipe.unref()
+            # Use a timed call as final safety net (should not be needed with teardown-timeout)
+            if not _timedCall(pipe.unref, timeout_s=10):
+                log.warning("releaseResources: pipeline.unref() timed out after 10 seconds - this indicates a GStreamer bug")
+            else:
+                log.debug("releaseResources: Pipeline unreffed successfully")
         self.pipeline = None
 
         # device section
@@ -1418,6 +1473,17 @@ class BufferedCapture(Process):
                         self.device.set_state(Gst.State.NULL)
                     except Exception as exc:
                         log.warning("releaseResources: Gst set_state(NULL) failed: %s", exc)
+                
+                elif self.video_device_type == "gst" and GST_IMPORTED:
+                    # This is likely a GstAppSink - ensure it's properly cleaned
+                    log.debug("releaseResources: Releasing GStreamer AppSink")
+                    # AppSink cleanup happens when pipeline is unreffed
+                    # Just ensure we're not holding extra references
+                    if hasattr(self.device, 'set_emit_signals'):
+                        try:
+                            self.device.set_emit_signals(False)
+                        except:
+                            pass
 
                 else:                                                    # Fallback
                     log.debug("releaseResources: Unknown device type - just dropping ref")
@@ -1426,6 +1492,9 @@ class BufferedCapture(Process):
                 self.device = None
 
         log.debug("releaseResources: Completed")
+        
+        # Reset the flag so future calls can proceed
+        self._releasing_resources = False
 
 
     def releaseRawArrays(self):
@@ -1907,6 +1976,23 @@ class BufferedCapture(Process):
                     n_dropped = int((frame_timestamp - last_frame_timestamp)*self.config.fps)
 
                     self.dropped_frames.value += n_dropped
+                    
+                    # Record timestamp for 10-minute window tracking
+                    current_time = time.time()
+                    # Add n_dropped timestamps efficiently
+                    self.dropped_frames_timestamps.extend([current_time] * n_dropped)
+                    
+                    # Clean up old timestamps efficiently (remove from left)
+                    ten_min_ago = current_time - 600
+                    while self.dropped_frames_timestamps and self.dropped_frames_timestamps[0] <= ten_min_ago:
+                        self.dropped_frames_timestamps.popleft()
+                    
+                    # Safety limit to prevent unbounded memory growth
+                    if len(self.dropped_frames_timestamps) > 20000:
+                        log.warning("Dropped frames timestamp queue exceeded safety limit, trimming to recent 10000 entries")
+                        # Keep only most recent half
+                        recent_timestamps = list(self.dropped_frames_timestamps)[-10000:]
+                        self.dropped_frames_timestamps = deque(recent_timestamps)
 
                     if self.config.report_dropped_frames:
                         log.info("{}/{} frames dropped or late! Time for frame: {:.3f}, convert: {:.3f}, assignment: {:.3f}".format(
@@ -1950,8 +2036,29 @@ class BufferedCapture(Process):
                     
                     # For GStreamer, show elapsed time since frame capture to assess sink fill level
                     else:
-                        log.info("Block's max frame age: {:.3f} seconds. Run's dropped frames: {}"
-                                 .format(max_frame_age_seconds, self.dropped_frames.value))
+                        # Check for day→night transition to reset session counter
+                        current_daytime = self.daytime_mode.value if self.daytime_mode is not None else False
+                        if self.last_daytime_mode is not None and self.last_daytime_mode and not current_daytime:
+                            # Day→Night transition detected, reset session counter
+                            self.dropped_frames_session_start = self.dropped_frames.value
+                            self.dropped_frames_timestamps.clear()  # Clear 10-min window too
+                            log.info("Day→Night transition detected, resetting session counter")
+                        self.last_daytime_mode = current_daytime
+                        
+                        # Calculate buffer fill percentage based on max frame age
+                        # The appsink has max-buffers=100, so at fps rate, max capacity is ~100/fps seconds
+                        max_buffer_time = 100.0 / self.config.fps  # Theoretical max buffer time in seconds
+                        buffer_fill_percent = min(100, (max_frame_age_seconds / max_buffer_time) * 100)
+                        
+                        # Calculate dropped frames for current session (since day→night or process start)
+                        session_dropped = max(0, self.dropped_frames.value - self.dropped_frames_session_start)
+                        
+                        # Calculate dropped frames in last 10 minutes
+                        current_time = time.time()
+                        ten_min_ago = current_time - 600  # 10 minutes in seconds
+                        recent_dropped = len([t for t in self.dropped_frames_timestamps if t > ten_min_ago])
+                        
+                        log.info(f"Buffer fill: {buffer_fill_percent:.1f}%. Dropped frames: {recent_dropped} (last 10 min), {session_dropped} this session")
 
                 last_frame_timestamp = frame_timestamp
                 
@@ -2017,12 +2124,9 @@ class BufferedCapture(Process):
                 wait_for_reconnect = False
                 log.info('Capture exited!')
 
-                # Save leftover raw frames from last used buffer
-                if self.config.save_frames:
-                    if raw_buffer_one:
-                        self.start_raw_time1.value = first_raw_frame_timestamp
-                    else:
-                        self.start_raw_time2.value = first_raw_frame_timestamp
+                # Don't signal RawFrameSaver here - let releaseRawArrays() handle final flush
+                # to avoid double flushing. The RawFrameSaver.stop() method will flush any
+                # remaining frames automatically.
 
                 break
 
