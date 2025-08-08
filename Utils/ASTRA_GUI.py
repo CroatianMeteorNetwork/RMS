@@ -61,7 +61,7 @@ class AstraConfigDialog(QDialog):
         # === ASTRA General Settings ===
         self.astra_fields = {}
         astra_defaults = {
-            "O_sigma": "3", "m_SNR": "10",
+            "O_sigma": "3", "m_SNR": "5",
             "P_c": "1.5", "sigma_i (px)": "2", "sigma_m": "1.2",
             "L_m": "1.5", "VERB": "False", "P_thresh" : "0.65"
         }
@@ -89,8 +89,8 @@ class AstraConfigDialog(QDialog):
             "Default parameters are optimized to work for most EMCCD data. Paramters are sensitive and may result in large changes in computation time and possible failure. Only change when dealing with extranous data."
             "All extra descriptions on how parameters affect the algorithm are with respect to increasing the value of the parameter.<br><br>"
             "<b>w</b>: PSO intertial weight - Increases parameter exploration<br>"
-            "<b>c1</b>: PSO social component (individual best) - Increases local parameter minimum exploration<br>"
-            "<b>c2</b>: PSO cognitive component (global best) - Decreases parameter exploration, improves convergence<br>"
+            "<b>c1</b>: PSO cognitive component (individual best) - Increases local parameter minimum exploration<br>"
+            "<b>c2</b>: PSO social component (global best) - Decreases parameter exploration, improves convergence<br>"
             "<b>m_iter</b>: Max PSO iterations - Improves convergence, increases computation time. Must be matched with higher parameter exploration<br>"
             "<b>n_par</b>: Number of particles - Improves exploration, increases computation time. Must be matches with higher parameter exploration<br>"
             "<b>Vc</b>: Fraction of parameter space as max velocity - Improves exploration, must be matched with faster convergence<br>"
@@ -261,6 +261,10 @@ class AstraWorker(QObject):
     def run(self):
         # Prepare data
         data_dict = self.skyfit_instance.prepare_astra_data(self.config)
+
+        if data_dict is False:
+            self.finished.emit()
+            return
 
         # Run ASTRA here, directly in worker
         from .ASTRA import ASTRA

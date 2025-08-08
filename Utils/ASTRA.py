@@ -58,9 +58,9 @@ class ASTRA:
         self.first_pass_settings = {
             "residuals_method" : 'abs', # method for calculating residuals
             "oob_penalty" : 1e6, # penalty for out-of-bounds particles
-            "options": {"c1": float(self.astra_config['pso']['w (0-1)']), # cognitive component
-                        "c2": float(self.astra_config['pso']['c1 (0-1)']), # social component
-                        "w": float(self.astra_config['pso']['c2 (0-1)'])}, # inertia weight
+            "options": {"w": float(self.astra_config['pso']['w (0-1)']), # cognitive component
+                        "c1": float(self.astra_config['pso']['c1 (0-1)']), # social component
+                        "c2": float(self.astra_config['pso']['c2 (0-1)'])}, # inertia weight
             "max_iter": int(self.astra_config['pso']['m_iter']), # maximum iterations
             "n_particles": int(self.astra_config['pso']['n_par']), # number of particles
             "Velocity_coeff": float(self.astra_config['pso']['Vc (0-1)']), # percentage of parameter range for velocity clamp
@@ -186,23 +186,22 @@ class ASTRA:
             print(f'Error processing image data: {e}')
 
         # 2. Recursively crop & fit a moving gaussian across whole event
-        # try:
-        self.cropAllMeteorFrames(self.pick_frame_indices, self.picks if self.astra_config['pick_method'] == 'ECSV / txt' else None)
-        # except Exception as e:
-        #     print(f'Error cropping and fitting meteor frames: {e}')
+        try:
+            self.cropAllMeteorFrames(self.pick_frame_indices, self.picks if self.astra_config['pick_method'] == 'ECSV / txt' else None)
+        except Exception as e:
+            print(f'Error cropping and fitting meteor frames: {e}')
 
         # 3. Refine the moving gaussian fit by using a local optimizer
-        # try:
-        self.refineAllMeteorCrops(self.first_pass_params, self.cropped_frames, self.omega, self.directions)
-        # except Exception as e:
-        #     print(f'Error refining meteor crops: {e}')
-        
+        try:
+            self.refineAllMeteorCrops(self.first_pass_params, self.cropped_frames, self.omega, self.directions)
+        except Exception as e:
+            print(f'Error refining meteor crops: {e}')
 
         # 4. Remove picks with low SNR and out-of-bounds picks, refactors into global coordinates
-        try:
-            self.removeLowSNRPicks(self.refined_fit_params, self.fit_imgs, self.frames, self.cropped_frames, self.crop_vars, self.pick_frame_indices, self.fit_costs, self.times)
-        except Exception as e:
-            print(f'Error removing low SNR picks: {e}')
+    # try:
+        self.removeLowSNRPicks(self.refined_fit_params, self.fit_imgs, self.frames, self.cropped_frames, self.crop_vars, self.pick_frame_indices, self.fit_costs, self.times)
+    # except Exception as e:
+    #     print(f'Error removing low SNR picks: {e}')
             
         # 6. Return the ASTRA object for later processing/saving
         return self
@@ -322,7 +321,7 @@ class ASTRA:
         else:
             seed_picks_global = self.middle_picks[1:-1]
             seed_indices = self.pick_frame_indices[1:-1]
-            omega = np.arctan2(self.middle_picks[-1][1] - self.middle_picks[0][1], self.middle_picks[-1][0] - self.middle_picks[0][0])
+            omega = np.arctan2(self.middle_picks[-1][1] - self.middle_picks[0][1], -self.middle_picks[-1][0] + self.middle_picks[0][0]) % (2*np.pi)
 
         if self.verbose:
             print(f"Starting recursive cropping with {len(seed_indices)} seed picks at indices {seed_indices} and omega {omega} radians.")
@@ -348,12 +347,11 @@ class ASTRA:
         # 3) -- Instantiate nessesary instance arrays --
         # NOTE: times will also need to be here for full DetApp independance
         self.cropped_frames = [None] * len(seed_indices) # (N, w, h) array of cropped frames
-        self.first_pass_params = np.zeros((len(seed_indices), 5), dtype=np.float32) # (N, 5) array of first pass parameters (level_sum, height, x0, y0, length)
+        self.first_pass_params = np.zeros((len(seed_indices), 5), dtype=np.float32) # (N, 5) array of first pass parameters (level_sum, height, x0)
         self.crop_vars = np.zeros((len(seed_indices), 6), dtype=np.float32) # (N, 6) array of crop variables (cx, cy, xmin, xmax, ymin, ymax)
 
         # # 4) -- Process each seed pick to kick-start recursion --
         for i in range(len(seed_indices)):
-
 
             # Crop initial frames
             self.cropped_frames[i], self.crop_vars[i] = self.cropFrameToGaussian(self.subtracted_frames[seed_indices[i]],
@@ -502,8 +500,6 @@ class ASTRA:
             elif not self.checkStreakInBounds(self.translatePicksToGlobal((refined_params[i, 2], refined_params[i, 3]), crop_vars[i]),
                                                 refined_params[idx, 4], refined_params[idx, 1], self.omega, self.directions):
                 snr_rejection_bool[i] = True
-            if idx == len(fit_imgs) - 1:
-                print('FINAL POINT')
             # If passes all checks, append SNR and level sum
             else:
                 frame_snr_values.append(snr)
@@ -575,7 +571,6 @@ class ASTRA:
 
         # Package all picks into a list
         bounding_points = [edge_pick_back, edge_pick_front, top_pick, bottom_pick]
-        print(bounding_points)
 
         # Check if any of the bounding points are out of bounds
         if np.any([point[0] < 0 or point[0] >= self.frames.shape[1] or point[1] < 0 or point[1] >= self.frames.shape[2] for point in bounding_points]):
@@ -977,7 +972,7 @@ class ASTRA:
 
         # Return the new picks
         return (next_x, next_y)
-    
+
     def calculateSNR(self, fit_img, frame, cropped_frame, crop_vars):
         """
         Calculates the Signal-to-Noise Ratio (SNR) for a given fit image and frame.
@@ -999,41 +994,74 @@ class ASTRA:
         avebk = self.avepixel_background.copy()
 
         # Clip fit image to zero and one
-        thresh = np.max(fit_img) * float(self.astra_config['astra']['P_thresh'])
-        fit_img[fit_img <= thresh] = 0
-        fit_img[fit_img > thresh] = 1
+        fit_img[fit_img <= 1] = 0
+        fit_img[fit_img > 1] = 1
 
-        # Sum the inside outside of the fit image
-        level_sum = np.sum(fit_img * cropped_frame)
-        nonzero_count = np.count_nonzero(fit_img)
+        masked_cropped = fit_img * cropped_frame
 
-        nonzero_indices = np.argwhere(fit_img == 1)
-        # Shift nonzero_indices by xmin and ymin to get global pixel coordinates
+        # Invert fit_img: 1 becomes 0, 0 becomes 1
+        inverted_fit_img = 1 - fit_img.copy()
+        masked_avebk = inverted_fit_img * avebk[y_min:y_max, x_min:x_max]
+
+        median_ave = np.median(masked_avebk[masked_avebk > 0])
+        std_ave = np.std(masked_avebk[masked_avebk > 0])
+
+        masked_cropped[masked_cropped < np.percentile(masked_cropped, float(self.astra_config['astra']['P_thresh']))] = 0
+
+        nonzero_count = np.count_nonzero(masked_cropped)
+        level_sum = np.ma.sum(masked_cropped)
+
+        nonzero_indices = np.argwhere(masked_cropped > 0)
+        # # Shift nonzero_indices by xmin and ymin to get global pixel coordinates
+        # nonzero_indices[:, 0] += y_min
+        # nonzero_indices[:, 1] += x_min
+        # photometry_pixels = [tuple(idx[::-1]) for idx in nonzero_indices]
+        # saturated_bool = np.any(frame[photometry_pixels] >= self.saturation_threshold)
+
+        # # Copy fit image and cropped_frame
+        # fit_img = fit_img.copy()
+        # cropped_frame = cropped_frame.copy()
+
+        # # Clip fit image to zero and one
+        # fit_img[fit_img <= 1] = 0
+        # fit_img[fit_img > 1] = 1
+
+        # # Sum the inside outside of the fit image
+        # level_sum = np.sum(fit_img * cropped_frame)
+        # nonzero_count = np.count_nonzero(fit_img)
+
+        # # Mask the cropped_frame
+        # cframe = [y_min:y_max, x_min:x_max]
+
+        # nonzero_indices = np.argwhere(fit_img > 0)
+
+        # cropped_frame = np.ma.masked_array(cropped_frame, mask=(fit_img == 1))
+
+        # # Calculate std and median of the background
+        # background_std = np.std(cropped_frame) # THIS SHOULD BE ORIGINAL FRAME
+        # background_median = np.median(cropped_frame)
+
+        
+        self.abs_level_sums.append(level_sum)
+        self.background_levels.append(median_ave)
+        # Find the indexes of each nonzero value in fit_img
+        # Convert nonzero_indices to a list of (x, y) tuples
         nonzero_indices[:, 0] += y_min
         nonzero_indices[:, 1] += x_min
         photometry_pixels = [tuple(idx[::-1]) for idx in nonzero_indices]
         saturated_bool = np.any(frame[photometry_pixels] >= self.saturation_threshold)
-
-        # Mask the cropped_frame
-        avebk = avebk[y_min:y_max, x_min:x_max]
-
-        # Calculate std and median of the background
-        background_std = np.std(avebk)
-        background_median = np.median(avebk)
-
-        self.abs_level_sums.append(level_sum)
-        self.background_levels.append(background_median)
-        # Find the indexes of each nonzero value in fit_img
-        # Convert nonzero_indices to a list of (x, y) tuples
         self.photometry_pixels.append(photometry_pixels)
         self.saturated_bool_list.append(saturated_bool)
+
+        if self.verbose:
+            print(f"Level sum: {level_sum}, STD ave: {std_ave}, Nonzero count: {nonzero_count}, Background std: {median_ave}, Saturated: {saturated_bool}")
 
         # 10) final SNR
         return signalToNoise(
             level_sum,
             nonzero_count,
-            background_median,
-            background_std
+            median_ave,
+            std_ave
     )
 
     # 3) -- Helper Methods --
@@ -1576,6 +1604,8 @@ class ASTRA:
             self.first_pass_params = np.vstack([self.first_pass_params, best_fit])
             if frame_index not in self.pick_frame_indices:
                 self.pick_frame_indices.append(frame_index)
+                self.pick_frame_indices = sorted(self.pick_frame_indices)
+
 
         else:
             self.cropped_frames.insert(0,cropped_frame)
@@ -1583,6 +1613,7 @@ class ASTRA:
             self.first_pass_params = np.vstack([best_fit, self.first_pass_params])
             if frame_index not in self.pick_frame_indices:
                 self.pick_frame_indices.insert(0, frame_index)
+                self.pick_frame_indices = sorted(self.pick_frame_indices)
 
         # Update estimation functions off new parameters
         parameter_estimation_functions = self.updateParameterEstimationFunctions(self.crop_vars, self.first_pass_params, forward_pass=forward_pass)
@@ -1608,7 +1639,7 @@ class ASTRA:
         self.updateProgress()
         if self.verbose:
             print(f"Recursive cropping at frame {frame_index} with center {est_center_global} and next center {next_center_global}, Forward pass: {forward_pass}")
-
+            print(f' Frame index: {frame_index}, Est. Center: {est_center_global}, Next Center: {next_center_global}, Pass Coeff: {pass_coeff}')
         # NOTE: Add robust quit conditions for full detapp non-reliance
         if use_DetApp:
             # Quit if no more frames covered by DetApp

@@ -52,7 +52,6 @@ import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
 
-# ASTRA Import - JustinDT
 import csv
 from .ASTRA import ASTRA
 from .ASTRA_GUI import launch_astra_gui, AstraConfigDialog, AstraWorker, KalmanWorker
@@ -4100,7 +4099,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 print('2. Pick two the leading edge of the first and last frame of the event')
                 print(' NOTE: It is essential that the line outlined by the first and last picks perfectly intersect the meteor trajectory')
                 print('3. THEN, re-run ASTRA')
-                return
+                return False
             else:
                 middle_picks = [[self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid']] for key in self.pick_list.keys()]
                 data_dict = {
