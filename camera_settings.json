@@ -2,7 +2,6 @@
   "init": [
     ["SetOSD", "off"],
     ["SetColor", "100,50,50,50,0,0"],
-    ["SetAutoReboot", "Everyday,15"],
     ["CameraTime", "set"],
     ["CloudConnection", "off"],
     ["SetParam", "Network", "TransferPlan", "Fluency"],
@@ -48,6 +47,7 @@
 
   "day": [
     ["CameraTime", "set"],
+    ["SetAutoReboot", "Everyday,noon"],
     ["SetParam", "Camera", "DayNightColor", "1"],
     ["SetParam", "Camera", "ElecLevel", "50"],
     ["SetParam", "Camera", "BroadTrends", "AutoGain", "1"],
@@ -58,6 +58,7 @@
 
   "night": [
     ["CameraTime", "set"],
+    ["SetAutoReboot", "Everyday,noon"],
     ["SetParam", "Camera", "DayNightColor", "2"],
     ["SetParam", "Camera", "ElecLevel", "60"],
     ["SetParam", "Camera", "BroadTrends", "AutoGain", "0"],
