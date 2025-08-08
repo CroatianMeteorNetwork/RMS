@@ -3950,7 +3950,7 @@ if __name__ == "__main__":
         sys.exit()
 
 
-    datetime_pattern = "%Y/%M/%d %H:%M:%S"
+    datetime_pattern = "%Y/%m/%d %H:%M:%S"
     
     # Use manually defined time intervals
     if cml_args.timeinterval is not None:
