@@ -713,7 +713,7 @@ class UploadManager(multiprocessing.Process):
             failed files to disk. 
 
         Keyword arguments:
-            retries: [int] Number of tried to upload a file before giving up.
+            retries: [int] Number of tried to upload a file before giving up. Default is 5.
         """
 
         # Skip uploading if the upload is already in progress
@@ -724,58 +724,65 @@ class UploadManager(multiprocessing.Process):
         # Set flag that the upload as in progress
         self.upload_in_progress.value = True
 
-        # Read the file list from disk
-        self.loadQueue()
+        try:
+            # Read the file list from disk
+            self.loadQueue()
 
-        tries = 0
+            tries = 0
 
-        # Go through every file and upload it to server
-        while True:
+            # Go through every file and upload it to server
+            while True:
 
-            # Get a file from the queue
-            with self.file_queue_lock:
-                try:
-                    file_name = self.file_queue.get(timeout=1)
-                except QueueEmpty:
-                    break  # nothing left to do
-
-            if not os.path.isfile(file_name):
-                log.warning("Local file not found: {:s}".format(file_name))
-                log.warning("Skipping it...")
-                continue
-
-            # Separate the path to the file and the file name
-            data_path, f_name = os.path.split(file_name)
-
-            # Upload the file via SFTP (use the lowercase version of the station ID as the username)
-            upload_status = uploadSFTP(self.config.hostname, self.config.stationID.lower(), data_path, \
-                self.config.remote_dir, [f_name], rsa_private_key=self.config.rsa_private_key, 
-                port=self.config.host_port)
-
-            # If the upload was successful, rewrite the holding file, which will remove the uploaded file
-            if upload_status:
-                log.info('Upload successful!')
-                self.saveQueue(overwrite=True)
-                tries = 0
-
-            # If the upload failed, put the file back on the list and wait a bit
-            else:
-
-                log.warning('Uploading failed! Retry {:d} of {:d}'.format(tries + 1, retries))
-
-                tries += 1 
+                # Get a file from the queue
                 with self.file_queue_lock:
-                    self.file_queue.put(file_name)
+                    try:
+                        file_name = self.file_queue.get(timeout=1)
+                    except QueueEmpty:
+                        break  # nothing left to do
 
-                # Given the network a moment to recover between attempts
-                time.sleep(10)
+                if not os.path.isfile(file_name):
+                    log.warning("Local file not found: {:s}".format(file_name))
+                    log.warning("Skipping it...")
+                    continue
 
-            # Check if the upload was tried too many times
-            if tries >= retries:
-                break
+                # Separate the path to the file and the file name
+                data_path, f_name = os.path.split(file_name)
 
-        # Set the flag that the upload is done
-        self.upload_in_progress.value = False
+                # Upload the file via SFTP (use the lowercase version of the station ID as the username)
+                upload_status = uploadSFTP(self.config.hostname, self.config.stationID.lower(), data_path, \
+                    self.config.remote_dir, [f_name], rsa_private_key=self.config.rsa_private_key, 
+                    port=self.config.host_port)
+
+                # If the upload was successful, rewrite the holding file, which will remove the uploaded file
+                if upload_status:
+                    log.info('Upload successful!')
+                    self.saveQueue(overwrite=True)
+                    tries = 0
+
+                # If the upload failed, put the file back on the list and wait a bit
+                else:
+
+                    log.warning('Uploading failed! Retry {:d} of {:d}'.format(tries + 1, retries))
+
+                    tries += 1 
+                    with self.file_queue_lock:
+                        self.file_queue.put(file_name)
+
+                    # Progressive retry delay: 15s * 2^(attempt-1), capped at 8 minutes
+                    delay = min(15*(2**(tries - 1)), 480)
+                    if delay < 60:
+                        log.info("Waiting %.0f s before next retry...", delay)
+                    else:
+                        log.info("Waiting %.1f min before next retry...", delay/60)
+                    time.sleep(delay)
+
+                # Check if the upload was tried too many times
+                if tries >= retries:
+                    break
+
+        finally:
+            # Set the flag that the upload is done
+            self.upload_in_progress.value = False
 
 
     def delayNextUpload(self, delay=0):
