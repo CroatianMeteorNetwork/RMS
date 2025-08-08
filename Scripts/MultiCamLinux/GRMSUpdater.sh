@@ -61,6 +61,10 @@
 set -Eeuo pipefail
 trap 'echo "Error: Script failed at line $LINENO"' ERR
 
+# Ensure bash is used as the shell for all child processes
+# (fixes issues when script is run from cron which sets SHELL=/bin/sh)
+export SHELL=/bin/bash
+
 # Function to log messages via syslog
 log_message() {
     local message="$1"
@@ -308,6 +312,8 @@ launch_term() {                            # $1 = title, $2… = cmd+args
     
     case "$PREFERRED_TERM" in
         lxterminal)
+            # Set SHELL to /bin/bash to fix lxterminal server mode issue
+            export SHELL=/bin/bash
             # one quoted string after -e:
             cmd=(lxterminal --title="$title" \
                   -e "bash -c 'export GRMS_AUTO=1; exec \"\$@\"' _ $*")
