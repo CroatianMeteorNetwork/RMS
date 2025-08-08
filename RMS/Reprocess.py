@@ -209,7 +209,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         
         # Get the observation session timestamp to ensure proper time isolation
         from RMS.Formats.ObservationSummary import getEphemTimesFromCaptureDirectory
-        obs_start_time, _, _ = getEphemTimesFromCaptureDirectory(config, os.path.basename(night_data_dir))
+        night_dir_name = os.path.basename(night_data_dir)
+        obs_start_time, _, _ = getEphemTimesFromCaptureDirectory(config, night_dir_name)
         session_timestamp = obs_start_time.strftime("%Y-%m-%d %H:%M:%S")
         
         # Filter out detections using machine learning
@@ -219,10 +220,10 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
             ff_detected = filterFTPdetectinfoML(config, os.path.join(night_data_dir, ftpdetectinfo_name), \
                 threshold=config.ml_filter, keep_pngs=False, clear_prev_run=True)
-            addObsParam(obs_db_conn, "detections_after_ml", len(ff_detected), timestamp=session_timestamp)
+            addObsParam(obs_db_conn, "detections_after_ml", len(ff_detected), timestamp=session_timestamp, night_directory=night_dir_name)
         else:
             # No ML filtering, use all detections
-            addObsParam(obs_db_conn, "detections_after_ml", len(readFTPdetectinfo(night_data_dir, ftpdetectinfo_name)), timestamp=session_timestamp)
+            addObsParam(obs_db_conn, "detections_after_ml", len(readFTPdetectinfo(night_data_dir, ftpdetectinfo_name)), timestamp=session_timestamp, night_directory=night_dir_name)
         obs_db_conn.close()
 
         # Get the platepar file
@@ -244,14 +245,14 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             if fit_status:
 
                 log.info('Astrometric calibration SUCCESSFUL!')
-                addObsParam(obs_db_conn, "photometry_good", "True")
+                addObsParam(obs_db_conn, "photometry_good", "True", night_directory=night_dir_name)
                 # Save the refined platepar to the night directory and as default
                 platepar.write(os.path.join(night_data_dir, config.platepar_name), fmt=platepar_fmt)
                 platepar.write(platepar_path, fmt=platepar_fmt)
 
             else:
                 log.info('Astrometric calibration FAILED!, Using old platepar for calibration...')
-                addObsParam(obs_db_conn, "photometry_good", "False")
+                addObsParam(obs_db_conn, "photometry_good", "False", night_directory=night_dir_name)
 
             obs_db_conn.close()
             # If a flat is used, disable vignetting correction
@@ -506,8 +507,9 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         if intervals_path is not None:
             extra_files.append(intervals_path)
         obs_db_conn = getObsDBConn(config)
-        addObsParam(obs_db_conn,"jitter_quality",jitter_quality)
-        addObsParam(obs_db_conn,"dropped_frame_rate",dropped_frame_rate)
+        night_dir_name = os.path.basename(night_data_dir)
+        addObsParam(obs_db_conn,"jitter_quality",jitter_quality, night_directory=night_dir_name)
+        addObsParam(obs_db_conn,"dropped_frame_rate",dropped_frame_rate, night_directory=night_dir_name)
         obs_db_conn.close()
 
     except Exception as e:

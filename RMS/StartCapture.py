@@ -515,7 +515,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
             # Open the observation summary report
             if video_file is None:
-                log.info(startObservationSummaryReport(config, duration, force_delete=False))
+                log.info(startObservationSummaryReport(config, duration, night_directory=night_data_dir_name, force_delete=False))
 
             # Start the compressor
             compressor.start()

@@ -78,101 +78,60 @@ def roundWithoutTrailingZero(value, no):
     value = round(value,no)
     return str("{0:g}".format(value))
 
-def getObservationDurationNightTime(config, start_time):
-    """Get the duration of an observation session not in continuous capture mode.
-
-
-    Arguments:
-        conn: [object] database connection instance.
-        config: [object] RMS configuration instance.
-
-    Return:
-        duration: [float] duration of observation in seconds.
-    """
-
-    _, duration = captureDuration(config.latitude, config.longitude, config.elevation,start_time)
-
-    end_time = start_time + datetime.timedelta(seconds=duration)
-
-    return start_time, duration, end_time
-
-def getObservationDurationContinuous(config, start_time):
-    """Get the duration of an observation session in continuous capture mode.
-
-        o.date is initialised to the start time of the observation session, rather
-        than an arbitrary time during the previous capture session.
-
-        Arguments:
-            config: [object] RMS configuration instance.
-            start_time: [object] time within, but near to the start of the observation session
-
-        Return:
-            duration: [float] duration of observation in seconds. If cannot be computed, return 0.
-        """
-
-    # convert start_time to a python object
-    if DEBUG_PRINT:
-        print("Passed a start time of {}".format(start_time))
-
-    # Initialize sun and observer
-    o = ephem.Observer()
-    o.lat, o.long, o.elevation  = str(config.latitude), str(config.longitude), config.elevation
-    s, o.horizon, o.date = ephem.Sun(), SWITCH_HORIZON_DEG, start_time
-
-    # Is this start time during night time capture hours
-    s.compute()
-    while o.next_setting(s).datetime() < o.next_rising(s).datetime():
-        if DEBUG_PRINT:
-            print("{} is not at night time".format(start_time))
-        start_time +=datetime.timedelta(minutes=1)
-        o.date = start_time
-        s.compute()
-    if DEBUG_PRINT:
-        print("Advanced time to {}".format(o.date))
-
-    # Compute duration
-    try:
-        s.compute()
-
-        start_time_ephem = o.previous_setting(s).datetime()
-        end_time_ephem = o.next_rising(s).datetime()
-        duration_ephem = (end_time_ephem - start_time_ephem).total_seconds()
-    except:
-        start_time_ephem = None
-        duration_ephem = 0
-        end_time_ephem = None
-
-    if DEBUG_PRINT:
-        print("start_time_ephem {}".format(start_time_ephem))
-        print("duration_ephem {:.1f} hours".format(duration_ephem / 3600))
-        print("end_time_ephem {}".format(end_time_ephem))
-
-    return start_time_ephem, duration_ephem, end_time_ephem
-
 def getObservationDuration(config, start_time):
-    """Get the duration of the observation session.
+    """Get the theoretical duration of the observation session for a specific night.
 
-    Capture can operate in two modes. Continuous capture, where the capture runs all day,
-    and nighttime only mode. The duration of the observation sessions is computed in a
-    slightly different way in these two cases. This function calls the correct function
-    to compute the duration of the observation session, based on the RMS configuration
-    instance.
+    Calculates sunset-to-sunrise duration using the appropriate horizon angle
+    based on whether continuous capture mode is enabled.
 
     Arguments:
         config: [object] RMS configuration instance.
-        start_time: [object] A time during the observation session.
+        start_time: [datetime] A time during the observation session (typically from directory name).
 
     Return:
-        duration: [int] duration of the observation session in seconds.
+        (sunset_time, duration, sunrise_time): Tuple of sunset time, duration in seconds, and sunrise time.
 
     """
-
+    
+    # Initialize the observer
+    o = ephem.Observer()
+    o.lat = str(config.latitude)
+    o.long = str(config.longitude)
+    o.elevation = config.elevation
+    
+    # Set horizon angle based on capture mode
     if config.continuous_capture:
-        start_time_ephem, duration_ephem, end_time_ephem = getObservationDurationContinuous(config, start_time)
+        o.horizon = '-9'  # 9 degrees below horizon for continuous mode
     else:
-        start_time_ephem, duration_ephem, end_time_ephem = getObservationDurationNightTime(config, start_time)
+        o.horizon = '-5:26'  # 5.5 degrees below horizon for nighttime-only mode
+    
+    o.date = start_time
+    
+    s = ephem.Sun()
+    s.compute()
+    
+    try:
+        # Find the sunset that preceded this time (start of the night)
+        sunset_time = o.previous_setting(s).datetime()
+        
+        # Find the sunrise that follows the sunset (end of the night)
+        o.date = sunset_time
+        sunrise_time = o.next_rising(s).datetime()
+        
+        duration = (sunrise_time - sunset_time).total_seconds()
+    except:
+        # Handle polar night/day cases
+        sunset_time = None
+        duration = 0
+        sunrise_time = None
+    
+    if DEBUG_PRINT:
+        print("Horizon angle: {}".format(o.horizon))
+        print("start_time_ephem {}".format(sunset_time))
+        print("duration_ephem {:.1f} hours".format(duration / 3600 if duration else 0))
+        print("end_time_ephem {}".format(sunrise_time))
 
-    return start_time_ephem, duration_ephem, end_time_ephem
+    return sunset_time, duration, sunrise_time
 
 def getTimeClient():
     """Attempt to identify which time service client, if any is providing a service.
@@ -199,7 +158,7 @@ def getTimeClient():
             pass
     return "Not recognized"
 
-def timeSyncStatus(config, conn, force_client=None):
+def timeSyncStatus(config, conn, night_directory=None, force_client=None):
 
     """
     Add time sync information to the observation summary.
@@ -207,6 +166,7 @@ def timeSyncStatus(config, conn, force_client=None):
     Arguments:
         config: [Config] Configuration object.
         conn: [Connection] database connection.
+        night_directory: [string] optional, name of the night directory.
 
     Keyword arguments:
         force_client: [string] optional, string to force resolution by ntpd, chrony, or a query on a remote server.
@@ -224,43 +184,42 @@ def timeSyncStatus(config, conn, force_client=None):
 
     if time_client =="ntpd":
         synchronized, uncertainty, ahead_ms = getNTPStatistics()
-        addObsParam(conn, "clock_measurement_source", "ntp")
-        addObsParam(conn, "clock_synchronized", synchronized)
-        addObsParam(conn, "clock_ahead_ms", ahead_ms)
-        addObsParam(conn, "clock_error_uncertainty_ms", uncertainty)
+        addObsParam(conn, "clock_measurement_source", "ntp", night_directory=night_directory)
+        addObsParam(conn, "clock_synchronized", synchronized, night_directory=night_directory)
+        addObsParam(conn, "clock_ahead_ms", ahead_ms, night_directory=night_directory)
+        addObsParam(conn, "clock_error_uncertainty_ms", uncertainty, night_directory=night_directory)
 
     elif time_client == "chronyd":
         synchronized, ahead_ms, uncertainty_ms = getChronyUncertainty()
-        addObsParam(conn, "clock_measurement_source", "chrony")
-        addObsParam(conn, "clock_synchronized", synchronized)
-        addObsParam(conn, "clock_ahead_ms", ahead_ms)
-        addObsParam(conn, "clock_error_uncertainty_ms", uncertainty_ms)
+        addObsParam(conn, "clock_measurement_source", "chrony", night_directory=night_directory)
+        addObsParam(conn, "clock_synchronized", synchronized, night_directory=night_directory)
+        addObsParam(conn, "clock_ahead_ms", ahead_ms, night_directory=night_directory)
+        addObsParam(conn, "clock_error_uncertainty_ms", uncertainty_ms, night_directory=night_directory)
 
     else:
-        addObsParam(conn, "clock_measurement_source", "Not detected")
+        addObsParam(conn, "clock_measurement_source", "Not detected", night_directory=night_directory)
         remote_time_query, uncertainty = timestampFromNTP()
         if remote_time_query is not None:
             local_time_query = (datetime.datetime.now(datetime.timezone.utc)
                                 - datetime.datetime(1970, 1, 1)
                                         .replace(tzinfo=datetime.timezone.utc)).total_seconds()
             ahead_ms = (local_time_query - remote_time_query) * 1000
-            addObsParam(conn, "clock_error_uncertainty_ms", uncertainty * 1000)
+            addObsParam(conn, "clock_error_uncertainty_ms", uncertainty * 1000, night_directory=night_directory)
 
         else:
             ahead_ms, uncertainty = "Unknown", "Unknown"
-            addObsParam(conn, "clock_error_uncertainty_ms", uncertainty)
-        addObsParam(conn, "clock_ahead_ms", ahead_ms)
+            addObsParam(conn, "clock_error_uncertainty_ms", uncertainty, night_directory=night_directory)
+        addObsParam(conn, "clock_ahead_ms", ahead_ms, night_directory=night_directory)
 
         result_list = subprocess.run(['timedatectl','status'], capture_output = True).stdout.splitlines()
 
         for raw_result in result_list:
             result = raw_result.decode('ascii')
             if "synchronized" in result:
-                conn = getObsDBConn(config)
                 if result.split(":")[1].strip() == "no":
-                    addObsParam(conn, "clock_synchronized", False)
+                    addObsParam(conn, "clock_synchronized", False, night_directory=night_directory)
                 else:
-                    addObsParam(conn, "clock_synchronized", True)
+                    addObsParam(conn, "clock_synchronized", True, night_directory=night_directory)
 
     return ahead_ms
 
@@ -480,6 +439,21 @@ def getObsDBConn(config, force_delete=False):
             """SELECT name FROM sqlite_master WHERE type = 'table' and name = 'records';""").fetchall()
 
         if len(tables) > 0:
+            # Check if NightDirectory column exists, if not add it (for migration)
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(records)")
+            columns = [column[1] for column in cursor.fetchall()]
+            
+            if 'NightDirectory' not in columns:
+                print("Migrating observation database to add NightDirectory column...")
+                try:
+                    conn.execute("ALTER TABLE records ADD COLUMN NightDirectory TEXT")
+                    conn.execute("CREATE INDEX IF NOT EXISTS idx_night_directory ON records(NightDirectory)")
+                    conn.commit()
+                    print("Database migration completed successfully.")
+                except Exception as e:
+                    print("Warning: Could not add NightDirectory column: {}".format(e))
+            
             return conn
     except:
         if EM_RAISE:
@@ -491,14 +465,18 @@ def getObsDBConn(config, force_delete=False):
     sql_command += "( \n"
     sql_command += "id INTEGER PRIMARY KEY AUTOINCREMENT, \n"
     sql_command += "TimeStamp TEXT NOT NULL, \n"
+    sql_command += "NightDirectory TEXT, \n"
     sql_command += "Key TEXT NOT NULL, \n"
     sql_command += "Value TEXT NOT NULL \n"
     sql_command += ") \n"
     conn.execute(sql_command)
+    
+    # Create index on NightDirectory for faster queries
+    conn.execute("CREATE INDEX idx_night_directory ON records(NightDirectory)")
 
     return conn
 
-def addObsParam(conn, key, value, timestamp=None):
+def addObsParam(conn, key, value, timestamp=None, night_directory=None):
     """Add a single key value pair into the database.
 
     Arguments:
@@ -508,6 +486,7 @@ def addObsParam(conn, key, value, timestamp=None):
 
     Keyword arguments:
         timestamp [str]: optional timestamp to use instead of CURRENT_TIMESTAMP
+        night_directory [str]: optional night directory name to associate with this record
 
     Return:
         Nothing
@@ -517,15 +496,21 @@ def addObsParam(conn, key, value, timestamp=None):
     sql_statement = ""
     sql_statement += "INSERT INTO records \n"
     sql_statement += "(\n"
-    sql_statement += "      TimeStamp, Key, Value \n"
+    sql_statement += "      TimeStamp, NightDirectory, Key, Value \n"
     sql_statement += ")\n\n"
 
     sql_statement += "      VALUES "
     sql_statement += "      (                            \n"
     if timestamp is not None:
-        sql_statement += "      '{}','{}','{}'   \n".format(timestamp, key, value)
+        if night_directory is not None:
+            sql_statement += "      '{}','{}','{}','{}'   \n".format(timestamp, night_directory, key, value)
+        else:
+            sql_statement += "      '{}',NULL,'{}','{}'   \n".format(timestamp, key, value)
     else:
-        sql_statement += "      CURRENT_TIMESTAMP,'{}','{}'   \n".format(key, value)
+        if night_directory is not None:
+            sql_statement += "      CURRENT_TIMESTAMP,'{}','{}','{}'   \n".format(night_directory, key, value)
+        else:
+            sql_statement += "      CURRENT_TIMESTAMP,NULL,'{}','{}'   \n".format(key, value)
     sql_statement += "      )"
 
     if conn is None:
@@ -730,6 +715,19 @@ def nightSummaryData(config, night_data_dir):
     # Compute key values from the ephemeris values
 
     start_ephem, duration_ephem, end_ephem = getObservationDuration(config, time_first_fits_file)
+    
+    # Account for normal startup delay between sunset and first FITS file
+    # This is the typical time needed for camera initialization, buffer allocation, etc.
+    normal_startup_delay = 9  # seconds for normal mode
+    if hasattr(config, 'switch_camera_modes') and config.switch_camera_modes:
+        normal_startup_delay = 30  # seconds for camera mode switching
+    duration_ephem = max(0, duration_ephem - normal_startup_delay)
+    
+    # Also account for any programmed capture delay (for staggered multi-camera systems)
+    # This is in addition to the normal startup delay
+    if hasattr(config, 'capture_wait_seconds') and config.capture_wait_seconds > 0:
+        duration_ephem = max(0, duration_ephem - config.capture_wait_seconds)
+    
     total_expected_fits_ephemeris = round(duration_ephem / duration_one_fits_file)
     fits_file_shortfall_ephemeris = total_expected_fits_ephemeris - fits_count
     fits_file_shortfall_ephemeris = 0 if fits_file_shortfall_ephemeris < 1 else fits_file_shortfall_ephemeris
@@ -767,8 +765,13 @@ def updateCommitHistoryDirectory(remote_urls, target_directory):
         if first_remote:
             first_remote = False
             p = subprocess.Popen(["git", "clone", "--depth=1", "--no-checkout", url], cwd=target_directory,
-                             stdout=subprocess.PIPE)
-            p.wait()
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            try:
+                p.wait(timeout=60)  # 60 second timeout for clone (generous for slow connections)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                print("Git clone timed out after 60 seconds")
+                return None
             # this first remote might have been pulled in with the wrong local_name so rename it
             commit_repo_directory = os.path.join(target_directory, os.listdir(target_directory)[0])
             downloaded_remote_name = subprocess.check_output(["git", "remote"], cwd = commit_repo_directory).strip().decode('utf-8')
@@ -782,8 +785,13 @@ def updateCommitHistoryDirectory(remote_urls, target_directory):
 
             p = subprocess.Popen(["git", "remote", "add", local_name, url], cwd = commit_repo_directory)
             p.wait()
-            p = subprocess.Popen(["git", "fetch", "--depth=1", local_name], cwd = commit_repo_directory)
-            p.wait()
+            p = subprocess.Popen(["git", "fetch", "--depth=1", local_name], cwd = commit_repo_directory,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            try:
+                p.wait(timeout=60)  # 60 second timeout for fetch (generous for slow connections)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                print("Git fetch timed out after 60 seconds for remote: {}".format(local_name))
     return commit_repo_directory
 
 def getCommit(repo):
@@ -837,49 +845,6 @@ def getRemoteUrls(repo):
                 url_remote_list_to_return.append([remote, url])
     return url_remote_list_to_return
 
-def getBranchOfCommit(repo, commit):
-    """Find a branch where a commit exists.
-
-    Arguments:
-        repo: [path] directory of repository.
-        commit: [str] commit hash
-
-    Return:
-        local_branch: [str] A local branch where a commit exists.
-    """
-
-    local_branch = subprocess.check_output(["git", "branch", "-a", "--contains", commit], cwd=repo).decode(
-         "utf-8").split("\n")[0].replace("*", "").strip()
-    return local_branch
-
-def getLatestCommit(repo, commit_branch):
-    """Get the latest commit on a specific branch on the local repository.
-
-    Arguments:
-        repo: [path] repository directory.
-        commit_branch: [str] branch.
-
-    Return:
-        commit: [str] the hash of the latest commit on commit_branch in repository
-    """
-
-    if commit_branch.startswith("remotes/"):
-        commit_branch = commit_branch[len("remotes/"):]
-
-    commit_list = subprocess.check_output(["git", "branch", "-r", "-v"], cwd=repo).decode("utf-8").split("\n")
-    commit = None
-    for branch in commit_list:
-
-        branch_list = branch.split()
-        if len(branch_list) > 1:
-            remote_branch = branch_list[0]
-            remote_commit = branch_list[1]
-
-            if commit_branch == remote_branch:
-                commit = remote_commit
-                break
-    return commit
-
 def getRemoteBranchNameForCommit(repo, commit):
     """Get the remote branch name for a commit on a local branch.
 
@@ -906,6 +871,21 @@ def getRemoteBranchNameForCommit(repo, commit):
 
     return remote_branch_name
 
+def getLocalBranchName():
+    """Get the name of the current local branch.
+    
+    Return:
+        branch_name: [str] The name of the current local branch, or None if not in a git repo.
+    """
+    try:
+        branch_name = subprocess.check_output(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"], 
+            cwd=os.getcwd()
+        ).decode("utf-8").strip()
+        return branch_name
+    except:
+        return None
+
 def daysBehind():
     """Measure how far behind the latest commit on the active branch is behind a branch with that commit on the remote
     repository.
@@ -923,6 +903,12 @@ def daysBehind():
     target_directory = target_directory_obj.name
     remote_urls = getRemoteUrls(os.getcwd())
     commit_repo_directory = updateCommitHistoryDirectory(remote_urls, target_directory)
+    
+    # Check if the repository update failed (timeout or other error)
+    if commit_repo_directory is None:
+        target_directory_obj.cleanup()
+        return "Unable to determine - timeout", None
+    
     remote_branch_of_commit = getRemoteBranchNameForCommit(commit_repo_directory, latest_local_commit)
     if not remote_branch_of_commit is None:
         latest_remote_date = getDateOfCommit(commit_repo_directory, remote_branch_of_commit)
@@ -931,7 +917,7 @@ def daysBehind():
         return days_behind, remote_branch_of_commit
     else:
         target_directory_obj.cleanup()
-        return "Unable to determine"
+        return "Unable to determine", None
 
 def retrieveObservationData(conn, config, night_directory=None, ordering=None):
     """ Query the database to get the data more recent than the time passed in.
@@ -958,13 +944,11 @@ def retrieveObservationData(conn, config, night_directory=None, ordering=None):
         for night_directory in night_dir_list:
             if night_directory.startswith(config.stationID) and os.path.isdir(os.path.join(captured_data_dir, night_directory)):
                 break
-
-    obs_start_time, obs_duration, obs_end_time = getEphemTimesFromCaptureDirectory(config, night_directory)
+    
+    # Extract just the directory name if a full path was provided
+    night_directory = os.path.basename(night_directory)
 
     # print("Night directory was {}".format(night_directory))
-    # print("Observation start time was {}".format(obs_start_time))
-    # print("Observation duration was {}".format(obs_duration))
-    # print("Observation end time was {}".format(obs_end_time))
 
     if ordering is None:
         # Be sure to add a comma after each list entry, IDE will not pick up this error as Python will concatenate
@@ -995,14 +979,30 @@ def retrieveObservationData(conn, config, night_directory=None, ordering=None):
     # Use this print call to check the ordering
     # print("Ordering {}".format(ordering))
 
-    next_start_time = getNextStartTime(conn, obs_end_time)
-    # print("Observation start time was {}".format(obs_start_time))
-    # print("Next start time was {}".format(next_start_time))
-
     sql_statement = ""
     sql_statement += "SELECT Key, Value from records \n"
-    sql_statement += "           WHERE TimeStamp >= '{}' \n".format(obs_start_time)
-    sql_statement += "           AND   TimeStamp <= '{}' \n".format(next_start_time)
+    # Handle both new records with NightDirectory and old records without it
+    if night_directory:
+        sql_statement += "           WHERE NightDirectory = '{}' \n".format(night_directory)
+        sql_statement += "              OR (NightDirectory IS NULL \n"
+        # For old records, fall back to time-based filtering
+        obs_start_time, obs_duration, obs_end_time = getEphemTimesFromCaptureDirectory(config, night_directory)
+        if obs_start_time and obs_end_time:
+            # Use a 2-hour buffer before start time to catch records added at capture start
+            query_start_time = obs_start_time - datetime.timedelta(hours=2)
+            next_start_time = getNextStartTime(conn, obs_end_time)
+            sql_statement += "                  AND TimeStamp >= '{}' \n".format(query_start_time)
+            sql_statement += "                  AND TimeStamp <= '{}') \n".format(next_start_time)
+        else:
+            sql_statement += "                  ) \n"
+    else:
+        # If no night_directory specified, use time-based query (backward compatibility)
+        obs_start_time, obs_duration, obs_end_time = getEphemTimesFromCaptureDirectory(config, night_directory)
+        if obs_start_time and obs_end_time:
+            query_start_time = obs_start_time - datetime.timedelta(hours=2)
+            next_start_time = getNextStartTime(conn, obs_end_time)
+            sql_statement += "           WHERE TimeStamp >= '{}' \n".format(query_start_time)
+            sql_statement += "           AND   TimeStamp <= '{}' \n".format(next_start_time)
     sql_statement += "           GROUP BY KEY \n"
     sql_statement += "           ORDER BY \n"
     sql_statement += "              CASE Key \n"
@@ -1111,7 +1111,7 @@ def writeToJSON(config, file_path_and_name, night_dir):
         as_ascii = serialize(config, as_json=True, night_directory=night_dir).encode("ascii", errors="ignore").decode("ascii")
         summary_file_handle.write(as_ascii)
 
-def startObservationSummaryReport(config, duration, force_delete=False):
+def startObservationSummaryReport(config, duration, night_directory=None, force_delete=False):
     """ Enters the parameters known at the start of observation into the database.
 
     Arguments:
@@ -1119,6 +1119,7 @@ def startObservationSummaryReport(config, duration, force_delete=False):
         duration: [int]the initially calculated duration seconds.
 
     Keyword arguments:
+        night_directory: [str] optional name of the night directory (e.g. 'US0001_20240101_123456_789012')
         force_delete: [bool] forces deletion of the observation summary database, default False.
 
     Return:
@@ -1131,9 +1132,14 @@ def startObservationSummaryReport(config, duration, force_delete=False):
     start_time_object = (datetime.datetime.now(datetime.timezone.utc) -
                          datetime.timedelta(seconds=1)).replace(tzinfo=datetime.timezone.utc)
     start_time_object_rounded = start_time_object.replace(microsecond=0)
-    addObsParam(conn, "start_time", start_time_object_rounded)
-    addObsParam(conn, "duration_from_start_of_observation", duration)
-    addObsParam(conn, "stationID", sanitise(config.stationID, space_substitution=""))
+    
+    # Extract just the directory name if a full path was provided
+    if night_directory:
+        night_directory = os.path.basename(night_directory)
+    
+    addObsParam(conn, "start_time", start_time_object_rounded, night_directory=night_directory)
+    addObsParam(conn, "duration_from_start_of_observation", duration, night_directory=night_directory)
+    addObsParam(conn, "stationID", sanitise(config.stationID, space_substitution=""), night_directory=night_directory)
 
     if isRaspberryPi():
         with open('/sys/firmware/devicetree/base/model', 'r') as m:
@@ -1141,15 +1147,21 @@ def startObservationSummaryReport(config, duration, force_delete=False):
     else:
         hardware_version = sanitise(platform.machine(), space_substitution=" ")
 
-    addObsParam(conn, "hardware_version", hardware_version)
+    addObsParam(conn, "hardware_version", hardware_version, night_directory=night_directory)
 
     try:
         repo_path = getRmsRootDir()
         repo = git.Repo(repo_path)
         if repo:
             addObsParam(conn, "commit_date",
-                        UTCFromTimestamp.utcfromtimestamp(repo.head.object.committed_date).strftime('%Y%m%d_%H%M%S'))
-            addObsParam(conn, "commit_hash", repo.head.object.hexsha)
+                        UTCFromTimestamp.utcfromtimestamp(repo.head.object.committed_date).strftime('%Y%m%d_%H%M%S'),
+                        night_directory=night_directory)
+            addObsParam(conn, "commit_hash", repo.head.object.hexsha, night_directory=night_directory)
+            
+            # Get the local branch name
+            local_branch = getLocalBranchName()
+            if local_branch:
+                addObsParam(conn, "remote_branch", local_branch, night_directory=night_directory)
         else:
             print("RMS Git repository not found. Skipping Git-related information.")
     except:
@@ -1160,16 +1172,16 @@ def startObservationSummaryReport(config, duration, force_delete=False):
 
         try:
             storage_total, storage_used, storage_free = shutil.disk_usage(config.data_dir)
-            addObsParam(conn, "storage_total_gb", round(storage_total/(1024**3), 2))
-            addObsParam(conn, "storage_used_gb", round(storage_used/(1024**3), 2))
-            addObsParam(conn, "storage_free_gb", round(storage_free/(1024**3), 2))
+            addObsParam(conn, "storage_total_gb", round(storage_total/(1024**3), 2), night_directory=night_directory)
+            addObsParam(conn, "storage_used_gb", round(storage_used/(1024**3), 2), night_directory=night_directory)
+            addObsParam(conn, "storage_free_gb", round(storage_free/(1024**3), 2), night_directory=night_directory)
         except:
-            addObsParam(conn, "storage_total_gb", "Not available")
-            addObsParam(conn, "storage_used_gb", "Not available")
-            addObsParam(conn, "storage_free_gb", "Not available")
+            addObsParam(conn, "storage_total_gb", "Not available", night_directory=night_directory)
+            addObsParam(conn, "storage_used_gb", "Not available", night_directory=night_directory)
+            addObsParam(conn, "storage_free_gb", "Not available", night_directory=night_directory)
 
     captured_directories = captureDirectories(os.path.join(config.data_dir, config.captured_dir), config.stationID)
-    addObsParam(conn, "captured_directories", captured_directories)
+    addObsParam(conn, "captured_directories", captured_directories, night_directory=night_directory)
     try:
         addObsParam(conn, "camera_information", gatherCameraInformation(config))
     except:
@@ -1222,9 +1234,12 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
     total_expected_fits, total_expected_fits_ephemeris = nightSummaryData(config, night_data_dir)
 
     obs_db_conn = getObsDBConn(config)
+    
+    # Extract just the directory name if a full path was provided
+    night_dir_name = os.path.basename(night_data_dir)
 
     try:
-        timeSyncStatus(config, obs_db_conn)
+        timeSyncStatus(config, obs_db_conn, night_dir_name)
     except Exception as e:
         print(repr(e))
 
@@ -1233,35 +1248,41 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
     if os.path.exists(platepar_path):
         platepar = Platepar()
         platepar.read(platepar_path, use_flat=config.use_flat)
-        addObsParam(obs_db_conn, "camera_pointing_az", format("{:.2f} degrees".format(platepar.az_centre)))
-        addObsParam(obs_db_conn, "camera_pointing_alt", format("{:.2f} degrees".format(platepar.alt_centre)))
-        addObsParam(obs_db_conn, "camera_fov_h","{:.2f}".format(platepar.fov_h))
-        addObsParam(obs_db_conn, "camera_fov_v","{:.2f}".format(platepar.fov_v))
-        addObsParam(obs_db_conn, "camera_lens", estimateLens(platepar.fov_h))
+        addObsParam(obs_db_conn, "camera_pointing_az", format("{:.2f} degrees".format(platepar.az_centre)), night_directory=night_dir_name)
+        addObsParam(obs_db_conn, "camera_pointing_alt", format("{:.2f} degrees".format(platepar.alt_centre)), night_directory=night_dir_name)
+        addObsParam(obs_db_conn, "camera_fov_h","{:.2f}".format(platepar.fov_h), night_directory=night_dir_name)
+        addObsParam(obs_db_conn, "camera_fov_v","{:.2f}".format(platepar.fov_v), night_directory=night_dir_name)
+        addObsParam(obs_db_conn, "camera_lens", estimateLens(platepar.fov_h), night_directory=night_dir_name)
 
-    addObsParam(obs_db_conn, "continuous_capture", config.continuous_capture)
-    addObsParam(obs_db_conn, "time_start_ephem", start_ephem)
-    addObsParam(obs_db_conn, "time_first_fits_file", time_first_fits_file)
-    addObsParam(obs_db_conn, "time_end_ephem", end_ephem)
-    addObsParam(obs_db_conn, "time_last_fits_file", time_last_fits_file)
-    addObsParam(obs_db_conn, "capture_duration_from_fits", capture_duration_from_fits)
-    addObsParam(obs_db_conn, "capture_duration_from_ephemeris", capture_duration_from_ephemeris)
-    addObsParam(obs_db_conn, "total_expected_fits", round(total_expected_fits))
-    addObsParam(obs_db_conn, "total_expected_fits_ephemeris", round(total_expected_fits_ephemeris))
-    addObsParam(obs_db_conn, "total_fits", fits_count)
-    addObsParam(obs_db_conn, "fits_file_shortfall", fits_file_shortfall)
-    addObsParam(obs_db_conn, "fits_file_shortfall_ephemeris", fits_file_shortfall_ephemeris)
-    addObsParam(obs_db_conn, "fits_file_shortfall_as_time", fits_file_shortfall_as_time)
-    addObsParam(obs_db_conn, "fits_file_shortfall_as_time_ephemeris", fits_file_shortfall_as_time_ephemeris)
-    addObsParam(obs_db_conn, "protocol_in_use", config.protocol)
-    addObsParam(obs_db_conn, "star_catalog_file", config.star_catalog_file)
+    addObsParam(obs_db_conn, "continuous_capture", config.continuous_capture, night_directory=night_dir_name)
+    addObsParam(obs_db_conn, "time_start_ephem", start_ephem, night_directory=night_dir_name)
+    addObsParam(obs_db_conn, "time_first_fits_file", time_first_fits_file, night_directory=night_dir_name)
+    addObsParam(obs_db_conn, "time_end_ephem", end_ephem, night_directory=night_dir_name)
+    addObsParam(obs_db_conn, "time_last_fits_file", time_last_fits_file, night_directory=night_dir_name)
+    addObsParam(obs_db_conn, "capture_duration_from_fits", capture_duration_from_fits, night_directory=night_dir_name)
+    addObsParam(obs_db_conn, "capture_duration_from_ephemeris", capture_duration_from_ephemeris, night_directory=night_dir_name)
+    addObsParam(obs_db_conn, "total_expected_fits", round(total_expected_fits), night_directory=night_dir_name)
+    addObsParam(obs_db_conn, "total_expected_fits_ephemeris", round(total_expected_fits_ephemeris), night_directory=night_dir_name)
+    addObsParam(obs_db_conn, "total_fits", fits_count, night_directory=night_dir_name)
+    addObsParam(obs_db_conn, "fits_file_shortfall", fits_file_shortfall, night_directory=night_dir_name)
+    addObsParam(obs_db_conn, "fits_file_shortfall_ephemeris", fits_file_shortfall_ephemeris, night_directory=night_dir_name)
+    addObsParam(obs_db_conn, "fits_file_shortfall_as_time", fits_file_shortfall_as_time, night_directory=night_dir_name)
+    addObsParam(obs_db_conn, "fits_file_shortfall_as_time_ephemeris", fits_file_shortfall_as_time_ephemeris, night_directory=night_dir_name)
+    addObsParam(obs_db_conn, "protocol_in_use", config.protocol, night_directory=night_dir_name)
+    addObsParam(obs_db_conn, "star_catalog_file", config.star_catalog_file, night_directory=night_dir_name)
 
+    # Get the local branch name
+    local_branch = getLocalBranchName()
+    if local_branch:
+        addObsParam(obs_db_conn, "remote_branch", local_branch, night_directory=night_dir_name)
+    
+    # Get repository lag information
     try:
-        days_behind, remote_branch = daysBehind()
-        addObsParam(obs_db_conn, "repository_lag_remote_days", days_behind)
-        addObsParam(obs_db_conn, "remote_branch", os.path.basename(remote_branch))
+        days_behind, _ = daysBehind()
+        addObsParam(obs_db_conn, "repository_lag_remote_days", days_behind, night_directory=night_dir_name)
     except:
-        addObsParam(obs_db_conn, "repository_lag_remote_days", "Not determined")
+        addObsParam(obs_db_conn, "repository_lag_remote_days", "Not determined", night_directory=night_dir_name)
+    
     obs_db_conn.close()
 
     writeToFile(config, getRMSStyleFileName(night_data_dir, "observation_summary.txt"), night_data_dir)
