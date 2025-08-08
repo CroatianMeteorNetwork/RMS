@@ -92,6 +92,11 @@ class RawFrameSaver(multiprocessing.Process):
             frametimes : [List] list of (frame, timestamp) pairs of corresponding frames and timestamps
         """
 
+        # Log block-level summary with day/night mode
+        frame_count = sum(1 for _, ts in frametimes if ts != 0)
+        if frame_count > 0:
+            mode_str = "day" if daytime_mode else "night"
+            log.info("Saving block of %d raw frames to disk (%s mode)", frame_count, mode_str)
 
         for (frame, timestamp) in frametimes:
 
@@ -148,7 +153,7 @@ class RawFrameSaver(multiprocessing.Process):
                 else:
                     cv2.imwrite(frame_path, frame, [int(cv2.IMWRITE_JPEG_QUALITY), self.config.jpgs_quality])
 
-                log.info("Frame saved: {0}".format(filename))
+                log.debug("Frame saved: {0}".format(filename))
 
             except Exception as e:
                 log.error("Could not save frame to disk: {0}".format(e))
