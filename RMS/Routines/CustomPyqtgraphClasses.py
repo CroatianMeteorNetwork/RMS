@@ -15,6 +15,7 @@ from RMS.Astrometry.Conversions import AER2LatLonAlt
 from RMS.Formats.FFfile import reconstructFrame as reconstructFrameFF
 from RMS.Routines import Image
 from RMS.Routines.DebruijnSequence import findAllInDeBruijnSequence, generateDeBruijnSequence
+from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QComboBox, QPushButton, QSizePolicy
 
 import time
 import re
@@ -167,6 +168,37 @@ class CustomMessageBox(QtWidgets.QMessageBox):
 
     def setIcon(self, icon):
         pass
+
+
+class ComboDialog(QDialog):
+    def __init__(self,  options_dict, window_title="Select", label="Options"):
+        super().__init__()
+
+        self.resize(300,100)
+        self.setWindowTitle(window_title)
+
+        # Layout
+        layout = QVBoxLayout()
+
+        # Label
+        self.label = QLabel(label)
+        layout.addWidget(self.label)
+
+        # Combo Box
+        self.combo = QComboBox()
+        self.combo.addItems(options_dict.keys())
+        layout.addWidget(self.combo)
+
+        # Button
+
+        ok_button = QPushButton("OK")
+        ok_button.clicked.connect(self.accept)
+        layout.addWidget(ok_button)
+
+        self.setLayout(layout)
+
+    def get_selection(self):
+        return self.combo.currentText()
 
 
 class TextItemList(pg.GraphicsObject):
