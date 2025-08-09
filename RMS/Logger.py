@@ -85,16 +85,6 @@ _pre_init_logger.setLevel(logging.INFO)
 ##############################################################################
 # HELPERS
 ##############################################################################
-class LevelRespectingQueueListener(logging.handlers.QueueListener):
-    """QueueListener that respects individual handler levels."""
-    def handle(self, record):
-        """Override to check handler levels before handling."""
-        record = self.prepare(record)
-        for handler in self.handlers:
-            if record.levelno >= handler.level:  # Check handler level
-                handler.handle(record)
-
-
 class LoggerWriter:
     """ Used to redirect stdout/stderr to the log.
     """
@@ -540,7 +530,7 @@ def _listener_configurer(config, log_file_prefix, safedir, console_level=logging
 
 def _listener_process(queue, config, log_file_prefix, safedir, console_level=logging.INFO, file_level=logging.DEBUG):
     """ Target function for the logging listener process.
-    Ignores SIGINT and runs QueueListener for async logging.
+    Ignores SIGINT and processes messages in strict FIFO order.
     """
     import signal
     signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -549,23 +539,29 @@ def _listener_process(queue, config, log_file_prefix, safedir, console_level=log
     logging.Formatter.converter = time.gmtime
     _listener_configurer(config, log_file_prefix, safedir, console_level, file_level)
 
-    # Start queue listener with our custom listener
     main_logger = logging.getLogger()
-    queue_listener = LevelRespectingQueueListener(queue, *main_logger.handlers)
-    queue_listener.start()
+    handlers = tuple(main_logger.handlers)  # stable snapshot
 
-    # Keep the process alive
+    # Single consumer: preserves FIFO order
     while True:
         try:
             record = queue.get()
-            if record is None:  # Shutdown sentinel
+            if record is None:       # shutdown sentinel
                 break
-            queue_listener.handle(record)
+            # Process record through each handler that accepts its level
+            for h in handlers:
+                if record.levelno >= h.level:
+                    h.handle(record)
         except Exception as e:
             print("Error in listener process: {}".format(e))
             continue
 
-    queue_listener.stop()
+    # Flush all handlers on shutdown
+    for h in handlers:
+        try: 
+            h.flush()
+        except: 
+            pass
 
 
 ##############################################################################
