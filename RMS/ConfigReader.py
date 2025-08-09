@@ -1023,6 +1023,9 @@ def parseCapture(config, parser):
         config.log_file_log_level = parser.getint(section, "log_file_log_level")
         config.log_file_log_level = log_level_mapping[min(max(config.log_file_log_level, 0), 4)]
 
+    if parser.has_option(section, "log_stdout"):
+        config.log_stdout = parser.getboolean(section, "log_stdout")
+
     if parser.has_option(section, "arch_dirs_to_keep"):
         config.arch_dirs_to_keep = int(parser.get(section, "arch_dirs_to_keep"))
 
