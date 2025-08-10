@@ -45,11 +45,11 @@ emergency_cleanup() {
     local line_number=${1:-"unknown"}
     
     # Prevent re-entrancy by disabling the trap immediately
-    trap - ERR
+    trap - ERR INT TERM
     
-    # Disable strict error handling for cleanup operations (both forms for full immunity)
-    set +e
-    set +o errexit
+    # Disable strict error handling for cleanup operations
+    set +e +u
+    set +o pipefail
     
     # Release lock safely before any potentially failing operations
     exec 200>&- 2>/dev/null || true
@@ -283,14 +283,33 @@ check_git_setup() {
 
 # Function to handle interactive branch selection
 switch_branch_interactive() {
+    # Check if we're in an interactive terminal
+    if [ "$INTERACTIVE" = false ]; then
+        print_status "error" "Interactive switch needs a TTY. Use '--switch <branch>' or set RMS_BRANCH."
+        exit 1
+    fi
+    
     print_status "info" "Fetching available branches..."
+    
+    # Fetch fresh branch list from remote
+    if ! git_with_retry "fetch"; then
+        print_status "error" "Failed to fetch branches"
+        exit 1
+    fi
     
     # Grab the *actual* current local branch
     local current_branch
     current_branch=$(git rev-parse --abbrev-ref HEAD)
 
-    # Get list of remote branches, excluding HEAD
-    branches=( $(git branch -r | grep "$RMS_REMOTE/" | grep -v HEAD | sed "s/$RMS_REMOTE\///") )    
+    # Get list of remote branches, excluding symbolic references
+    local -a branches
+    readarray -t branches < <(
+        git branch -r \
+        | sed 's/^[[:space:]]*//' \
+        | grep "^${RMS_REMOTE}/" \
+        | grep -v ' -> ' \
+        | sed "s|^${RMS_REMOTE}/||"
+    )    
     if [ ${#branches[@]} -eq 0 ]; then
         print_status "error" "No branches found"
         exit 1
@@ -329,7 +348,10 @@ switch_branch_interactive() {
         
         if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#branches[@]} )); then
             RMS_BRANCH="${branches[$((choice-1))]}"
-            print_status "success" "Switched to branch: $RMS_BRANCH"
+            print_status "success" "Selected branch: $RMS_BRANCH"
+            if git rev-parse --abbrev-ref "${RMS_REMOTE}/${RMS_BRANCH}" >/dev/null 2>&1; then
+                print_status "info" "Will track upstream: ${RMS_REMOTE}/${RMS_BRANCH}"
+            fi
             return
         else
             ((attempts++))
@@ -390,10 +412,10 @@ check_and_fix_git_state() {
     
     # Try to save any work first, but don't fail if stash fails
     print_status "info" "Attempting to stash any local changes..."
-    
+
     # Check if there are actually changes to stash (only tracked files)
-    if git status --porcelain | grep -q '^[MADRCU]'; then
-        if git stash push -m "RMS auto-stash before update" 2>/dev/null; then
+    if ! git diff --quiet || ! git diff --cached --quiet; then
+        if git -c user.name=RMS-Update -c user.email=rms-update@local stash push -m "RMS auto-stash before update" 2>/dev/null; then
             print_status "warning" "Local changes to tracked files were stashed. Run 'git stash pop' after the update to recover them."
         else
             print_status "warning" "Failed to stash changes - some modifications may be lost during update"
@@ -601,10 +623,12 @@ restore_files() {
         print_status "info" "No backup mask.bmp found - a new blank mask will be created by the installation."
     fi
 
-    # Restore camera_settings.json
+    # Restore camera_settings.json with graceful degradation
     if [ -f "$BACKUP_CAMERA_SETTINGS" ]; then
         if ! retry_cp "$BACKUP_CAMERA_SETTINGS" "$CURRENT_CAMERA_SETTINGS"; then
-            print_status "error" "Failed to restore camera_settings.json."
+            print_status "error" "Failed to restore camera_settings.json after $RETRY_LIMIT attempts."
+            print_status "warning" "Continuing without restored camera settings - RMS will create new default settings."
+            print_status "info" "You can manually restore from: $BACKUP_CAMERA_SETTINGS"
         fi
     else
         print_status "info" "No backup camera_settings.json found - a new default settings file will be created by the installation."
@@ -628,13 +652,11 @@ git_with_retry() {
 
         # Build git config arguments for this attempt (no persistent config changes)
         local git_config_args=()
-        git_config_args+=(-c http.version=HTTP/1.1)
-        git_config_args+=(-c http.sslverify=false)
-        git_config_args+=(-c http.postbuffer=1048576000)
         
         case $attempt in
             2)
                 print_status "info" "Switching to HTTP/1.1 for this attempt"
+                git_config_args+=(-c http.version=HTTP/1.1)
                 ;;
             3)
                 print_status "info" "Using --depth=1 for a shallow fetch"
@@ -642,6 +664,7 @@ git_with_retry() {
                 ;;
             4)
                 print_status "info" "Retrying with HTTP/1.1 and --depth=1"
+                git_config_args+=(-c http.version=HTTP/1.1)
                 depth_arg="--depth=1"
                 ;;
             5)
@@ -650,7 +673,7 @@ git_with_retry() {
                 cd ~ || exit 1
                 mv "$RMSSOURCEDIR" "$backup_dir"
 
-                if git clone --config http.version=HTTP/1.1 https://github.com/CroatianMeteorNetwork/RMS.git "$RMSSOURCEDIR"; then
+                if git clone --config http.version=HTTP/1.1 --config http.sslverify=false https://github.com/CroatianMeteorNetwork/RMS.git "$RMSSOURCEDIR"; then
                     print_status "success" "Repository successfully recloned using HTTP/1.1"
                     cd "$RMSSOURCEDIR" || exit 1
 
@@ -742,7 +765,7 @@ switch_to_branch() {
         print_status "info" "Validating branch: $target_branch"
         
         # Verify remote branch exists
-        if ! git rev-parse --verify -q "$RMS_REMOTE/$target_branch" >/dev/null 2>&1; then
+        if ! git rev-parse --verify --quiet "refs/remotes/$RMS_REMOTE/$target_branch" >/dev/null; then
             print_status "error" "Branch '$target_branch' not found in remote '$RMS_REMOTE'"
             print_status "info" "Available branches:"
             git branch -r | grep "$RMS_REMOTE/" | grep -v HEAD | sed "s/$RMS_REMOTE\//  /"
@@ -759,7 +782,7 @@ switch_to_branch() {
     print_status "info" "Attempting to switch to branch: $target_branch"
 
     # First try to create a tracking branch if it doesn't exist locally
-    if ! git rev-parse --verify -q "$target_branch" >/dev/null 2>&1; then
+    if ! git rev-parse --verify --quiet "refs/heads/$target_branch" >/dev/null; then
         print_status "info" "Creating local tracking branch..."
         if ! git branch --track "$target_branch" "$RMS_REMOTE/$target_branch"; then
             print_status "error" "Failed to create tracking branch for $target_branch"
@@ -820,7 +843,7 @@ install_missing_dependencies() {
         if ! dpkg -s "$pkg" &>/dev/null; then
             missing_packages+=("$pkg")
         fi
-    done < $SYSTEM_PACKAGES
+    done < "$SYSTEM_PACKAGES"
 
     # If no missing packages, inform and return
     if [ ${#missing_packages[@]} -eq 0 ]; then
@@ -926,30 +949,43 @@ main() {
     # Check Git configuration first
     check_git_setup
 
+    # Normalize env-driven target into a direct switch unless --switch already set
+    if [[ -n "$RMS_BRANCH" && -z "$SWITCH_MODE" ]]; then
+        SWITCH_MODE="direct"
+        SWITCH_BRANCH="${RMS_BRANCH#"$RMS_REMOTE"/}"   # strip optional remote prefix
+    fi
+    
+    # Normalize switch branch name (strip remote prefix if present)
+    [[ -n "${SWITCH_BRANCH:-}" ]] && SWITCH_BRANCH="${SWITCH_BRANCH#${RMS_REMOTE}/}"
+
     # ----------------- EARLY SHA CHECK -----------------
-    if (( REEXEC_COUNT == 0 )) && [[ "$SWITCH_MODE" = "" && "$FORCE_UPDATE" = "false" ]]; then
-        [[ -z "$RMS_BRANCH" ]] && RMS_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-
-        REMOTE_SHA=$(git ls-remote --quiet --heads \
-                     "$RMS_REMOTE" "refs/heads/$RMS_BRANCH" | cut -f1)
-        LOCAL_SHA=$(git rev-parse HEAD)
-
-        if [[ -z "$REMOTE_SHA" ]]; then
-            print_status "error" "Cannot query remote ref $RMS_BRANCH"; exit 1
-        fi
-        
-        # Check for modified tracked files (excluding allowed config files)
-        MODIFIED_FILES=$(git diff --name-only | grep -v -E '^(\.config|camera_settings\.json)$' || true)
-        
-        if [[ "$REMOTE_SHA" == "$LOCAL_SHA" && -z "$MODIFIED_FILES" ]]; then
-            print_status "success" "Nothing new on $RMS_BRANCH and no tracked file modifications - exiting."
-            exit 0
-        elif [[ "$REMOTE_SHA" == "$LOCAL_SHA" && -n "$MODIFIED_FILES" ]]; then
-            print_status "info" "Repository up to date but tracked files modified:"
-            echo "$MODIFIED_FILES" | sed 's/^/  /'
-            print_status "info" "Proceeding with update to restore tracked files"
+    if (( REEXEC_COUNT == 0 )) && [[ -z "$SWITCH_MODE" && "$FORCE_UPDATE" = false ]]; then
+        if ! git symbolic-ref -q HEAD >/dev/null; then
+            print_status "info" "Detached HEAD state detected; skipping early SHA check."
         else
-            print_status "info" "Will update ($LOCAL_SHA → $REMOTE_SHA)"
+            [[ -z "$RMS_BRANCH" ]] && RMS_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+            REMOTE_SHA=$(git ls-remote --quiet --heads \
+                         "$RMS_REMOTE" "refs/heads/$RMS_BRANCH" | cut -f1)
+            LOCAL_SHA=$(git rev-parse HEAD)
+
+            if [[ -z "$REMOTE_SHA" ]]; then
+                print_status "error" "Cannot query remote ref $RMS_BRANCH"; exit 1
+            fi
+            
+            # Check for modified tracked files (excluding allowed config/template/mask files)
+            MODIFIED_FILES=$(git diff --name-only | grep -v -E '^(\.config|camera_settings\.json|\.configTemplate|camera_settings_template\.json|mask\.bmp)$' || true)
+            
+            if [[ "$REMOTE_SHA" == "$LOCAL_SHA" && -z "$MODIFIED_FILES" ]]; then
+                print_status "success" "Nothing new on $RMS_BRANCH and no tracked file modifications - exiting."
+                exit 0
+            elif [[ "$REMOTE_SHA" == "$LOCAL_SHA" && -n "$MODIFIED_FILES" ]]; then
+                print_status "info" "Repository up to date but tracked files modified:"
+                echo "$MODIFIED_FILES" | sed 's/^/  /'
+                print_status "info" "Proceeding with update to restore tracked files"
+            else
+                print_status "info" "Will update ($LOCAL_SHA → $REMOTE_SHA)"
+            fi
         fi
     fi
     # ---------------------------------------------------
@@ -1034,25 +1070,19 @@ main() {
     fi
 
     print_header "Updating from Git"
-    if ! check_git_index; then
-        exit 1
-    fi
 
-    # Check and fix problematic git states
-    check_and_fix_git_state
-
-    # Handle interactive branch selection if needed
-    if [ "$SWITCH_MODE" = "interactive" ]; then
-        switch_branch_interactive
-        print_status "info" "Target branch: $RMS_BRANCH (interactive selection)"
-    fi
-
-    # Activate the virtual environment
+    # Activate the virtual environment BEFORE entering the danger zone
     if [ -f ~/vRMS/bin/activate ]; then
         source ~/vRMS/bin/activate
     else
         print_status "error" "Virtual environment not found. Exiting."
         exit 1
+    fi
+
+    # Handle interactive branch selection if needed (safe - just reads remotes)
+    if [ "$SWITCH_MODE" = "interactive" ]; then
+        switch_branch_interactive
+        print_status "info" "Target branch: $RMS_BRANCH (interactive selection)"
     fi
 
     #######################################################
@@ -1061,6 +1091,13 @@ main() {
 
     # Mark custom files backup/restore cycle as in progress
     echo "1" > "$BACKUP_STATE_FILE"
+
+    if ! check_git_index; then
+        cleanup_on_error
+    fi
+
+    # Check and fix problematic git states
+    check_and_fix_git_state
 
    # Fetch updates
     if ! git_with_retry "fetch"; then
@@ -1074,19 +1111,21 @@ main() {
         if ! switch_to_branch "$SWITCH_BRANCH"; then
             cleanup_on_error
         fi
+        RMS_BRANCH=$(git rev-parse --abbrev-ref HEAD)   # Update to actual branch we're on
     elif [ "$SWITCH_MODE" = "interactive" ]; then
         if ! switch_to_branch "$RMS_BRANCH" "true"; then
             cleanup_on_error
         fi
+        RMS_BRANCH=$(git rev-parse --abbrev-ref HEAD)   # Update to actual branch we're on
     fi
 
-    # Check if updates are needed (using FETCH_HEAD from the fetch we just did)
+    # Check if updates are needed (compare HEAD to remote ref)
     print_status "info" "Checking for available updates..."
     LOCAL_SHA=$(git rev-parse HEAD)
-    REMOTE_SHA=$(git rev-parse FETCH_HEAD)
+    REMOTE_SHA=$(git rev-parse "$RMS_REMOTE/$RMS_BRANCH")
     
-    # Check for modified tracked files (same logic as early check)
-    MODIFIED_FILES=$(git diff --name-only | grep -v -E '^(\.config|camera_settings\.json)$' || true)
+    # Check for modified tracked files (same logic as early check, but also exclude mask.bmp)
+    MODIFIED_FILES=$(git diff --name-only | grep -v -E '^(\.config|camera_settings\.json|\.configTemplate|camera_settings_template\.json|mask\.bmp)$' || true)
     
     if [[ "$LOCAL_SHA" == "$REMOTE_SHA" && -z "$MODIFIED_FILES" ]]; then
         print_status "success" "Local repository already up to date with $RMS_REMOTE/$RMS_BRANCH"
@@ -1141,19 +1180,18 @@ main() {
     # Restore files after updates
     restore_files
     
-    # Verify critical files were restored successfully
-    # Config is always required
-    [[ -f "$CURRENT_CONFIG" ]] || { print_status "error" "$CURRENT_CONFIG missing after restore"; exit 1; }
-    
-    # Mask is optional - only verify if backup existed
-    if [ -f "$BACKUP_MASK" ]; then
-        [[ -f "$CURRENT_MASK" ]] || { print_status "error" "$CURRENT_MASK missing after restore"; exit 1; }
-    fi
-    
-    # Camera settings is optional - only verify if backup existed  
-    if [ -f "$BACKUP_CAMERA_SETTINGS" ]; then
-        [[ -f "$CURRENT_CAMERA_SETTINGS" ]] || { print_status "error" "$CURRENT_CAMERA_SETTINGS missing after restore"; exit 1; }
-    fi
+    # Verify restored files uniformly: if a backup existed, the restored file must exist and match bit-for-bit
+    for name in ".config" "mask.bmp" "camera_settings.json"; do
+        backup="$RMSBACKUPDIR/$name"
+        current="$RMSSOURCEDIR/$name"
+        if [ -f "$backup" ]; then
+            [[ -f "$current" ]] || { print_status "error" "$current missing after restore"; exit 1; }
+            if ! cmp -s "$backup" "$current"; then
+                print_status "error" "Restored $name does not match backup — aborting."
+                exit 1
+            fi
+        fi
+    done
     
     # Manage camera brightness settings for day/night modes
     if [ -f "$CURRENT_CAMERA_SETTINGS" ]; then
@@ -1194,7 +1232,7 @@ main() {
 
     # Remove any stale global or egg installs of RMS before we rebuild
     print_status "info" "Clearing old RMS installs from site-packages…"
-    pip uninstall -y RMS 2>/dev/null || true
+    python -m pip uninstall -y RMS 2>/dev/null || true
 
     # Resolve the active site‑packages directory inside the venv
     SITE_DIR=$(python - <<'PY'
@@ -1267,7 +1305,7 @@ PY
 
     print_header "Installing Python Requirements"
     print_status "info" "This may take a few minutes..."
-    pip install -r requirements.txt
+    python -m pip install -r requirements.txt
     print_status "success" "Python requirements installed"
 
     print_header "Running Setup"
@@ -1279,7 +1317,7 @@ PY
     local build_success=false
     
     while (( build_attempts < max_build_attempts )) && [ "$build_success" = false ]; do
-        if pip install -e . --no-deps --no-build-isolation; then
+        if python -m pip install -e . --no-deps --no-build-isolation; then
             build_success=true
             break
         else
