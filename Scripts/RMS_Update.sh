@@ -1213,7 +1213,12 @@ main() {
     SELF_REAL=$(readlink -f "$SELF" 2>/dev/null || echo "$SELF")
     new_hash=$(sha1sum "$SELF_REAL" 2>/dev/null | cut -d' ' -f1 || echo "unknown")
     if [[ "$SCRIPT_HASH" != "$new_hash" ]] && [[ "$new_hash" != "unknown" ]]; then
-        print_status "info" "Update script was modified - re-executing with new version..."
+        echo ""
+        print_header "SCRIPT SELF-UPDATE DETECTED"
+        print_status "warning" "RMS_Update.sh was modified during the update"
+        print_status "info" "Restarting with the new version to apply improvements..."
+        echo ""
+        interactive_sleep 2
         # Re-exec preserves file descriptors (including our flock) and arguments
         # Handle arithmetic safely in case of unexpected values
         if next_count=$((REEXEC_COUNT+1)) 2>/dev/null; then
