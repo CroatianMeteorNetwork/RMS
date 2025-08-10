@@ -1255,15 +1255,7 @@ PY
         rm -rf "$SITE_DIR/RMS"
         print_status "success" "Removed old RMS directory from site-packages"
     fi
-    
-    # Also check for other top-level RMS-related modules that might be orphaned
-    for module in Utils LiveViewer; do
-        if [ -d "$SITE_DIR/$module" ]; then
-            print_status "info" "Found orphaned $module directory in site-packages, removing..."
-            rm -rf "$SITE_DIR/$module"
-        fi
-    done
-    
+        
     print_status "info" "Removing build and dist directories..."
     rm -rf build dist
 
