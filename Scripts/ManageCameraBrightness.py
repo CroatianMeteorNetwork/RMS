@@ -310,7 +310,7 @@ def manageCameraBrightness(camera_settings_path: str) -> bool:
     else:
         print("No modifications needed - brightness settings already configured correctly")
     
-    return modifications_made
+    return True  # Return True for success (whether modified or not)
 
 def main():
     """Main function to handle command line arguments and run the brightness management."""
@@ -330,17 +330,12 @@ def main():
     
     success = manageCameraBrightness(camera_settings_path)
     
+    print("=" * 60)
     if success:
-        print("=" * 60)
         print("Camera brightness management completed successfully!")
-        print()
-        print("Summary:")
-        print("- Day mode: Uses brightness=50 for better daytime visibility")
-        print("- Night mode: Uses your original brightness setting for optimal night capture")
-        print("- Original settings preserved in .backup file")
+        sys.exit(0)
     else:
-        print("=" * 60)
-        print("Camera brightness management completed with warnings or errors.")
+        print("Camera brightness management failed.")
         sys.exit(1)
 
 if __name__ == "__main__":
