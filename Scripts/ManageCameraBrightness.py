@@ -15,10 +15,36 @@ Usage: python3 manage_camera_brightness.py [path_to_camera_settings.json]
 import json
 import sys
 import os
+import shutil
 import re
 from typing import Dict, List, Any, Optional, Tuple
 
-def find_setcolor_command(commands: List[List[str]]) -> Optional[Tuple[int, str]]:
+SKIP_COMPARE_PREFIXES = {
+    "CameraTime",
+    "reboot",
+    "SetParam|Camera|DayNightColor",
+}
+
+def getCommandKey(cmd: List[str]) -> str:
+    """Generate a unique key for a command for comparison purposes."""
+    if not cmd:
+        return ""
+    if cmd[0] == "SetParam":
+        if len(cmd) >= 5:   # SetParam, Section, Group, Name, Value
+            return f"SetParam|{cmd[1]}|{cmd[2]}|{cmd[3]}"
+        elif len(cmd) == 4: # SetParam, Section, Name, Value
+            return f"SetParam|{cmd[1]}|{cmd[2]}"
+        return "SetParam"
+    if cmd[0] == "SetColor":
+        return "SetColor"
+    return cmd[0]
+
+def shouldSkipComparison(cmd: List[str]) -> bool:
+    """Check if a command should be skipped during comparison."""
+    k = getCommandKey(cmd)
+    return k in SKIP_COMPARE_PREFIXES or any(k.startswith(pref) for pref in SKIP_COMPARE_PREFIXES)
+
+def findSetColorCommand(commands: List[List[str]]) -> Optional[Tuple[int, str]]:
     """Find SetColor command in a list of commands.
     
     Returns:
@@ -31,7 +57,7 @@ def find_setcolor_command(commands: List[List[str]]) -> Optional[Tuple[int, str]
             return i, brightness
     return None
 
-def find_daynight_color_index(commands: List[List[str]]) -> Optional[int]:
+def findDayNightColorIndex(commands: List[List[str]]) -> Optional[int]:
     """Find the index of DayNightColor parameter in commands list.
     
     Returns:
@@ -45,7 +71,7 @@ def find_daynight_color_index(commands: List[List[str]]) -> Optional[int]:
             return i + 1  # Return index after DayNightColor
     return None
 
-def create_setcolor_command(brightness: str, original_values: str = "50,50,50,0,0") -> List[str]:
+def createSetColorCommand(brightness: str, original_values: str = "50,50,50,0,0") -> List[str]:
     """Create a SetColor command with specified brightness.
     
     Args:
@@ -57,7 +83,7 @@ def create_setcolor_command(brightness: str, original_values: str = "50,50,50,0,
     """
     return ["SetColor", f"{brightness},{original_values}"]
 
-def format_camera_settings_json(settings: Dict[str, Any]) -> str:
+def formatCameraSettingsJson(settings: Dict[str, Any]) -> str:
     """Format camera settings JSON in the original compact style with preserved blank lines.
     
     Args:
@@ -109,60 +135,45 @@ def format_camera_settings_json(settings: Dict[str, Any]) -> str:
     lines.append('}')
     return '\n'.join(lines)
 
-def compare_settings(init_commands: List[List[str]], night_commands: List[List[str]]) -> List[str]:
-    """Compare night settings against init settings to find discrepancies.
-    
-    Args:
-        init_commands: List of commands from init section
-        night_commands: List of commands from night section
-        
-    Returns:
-        List of warning messages for settings that don't match
-    """
-    warnings = []
-    
-    # Build a lookup of init settings (excluding certain commands that shouldn't match)
-    init_settings = {}
-    skip_commands = {"CameraTime", "reboot"}  # Commands that are expected to differ
-    
-    for cmd in init_commands:
-        if len(cmd) >= 1 and cmd[0] not in skip_commands:
-            if cmd[0] == "SetParam" and len(cmd) >= 4:
-                # For SetParam commands, use a composite key
-                key = f"{cmd[0]}|{cmd[1]}|{cmd[2]}"
-                if len(cmd) == 4:
-                    init_settings[key] = cmd[3]
-                elif len(cmd) == 5:
-                    init_settings[f"{key}|{cmd[3]}"] = cmd[4]
-            elif cmd[0] == "SetColor":
-                init_settings["SetColor"] = cmd[1]
-            else:
-                # For other commands, use the full command as key
-                init_settings[cmd[0]] = cmd[1] if len(cmd) > 1 else ""
-    
-    # Check night settings against init
-    for cmd in night_commands:
-        if len(cmd) >= 1 and cmd[0] not in skip_commands:
-            if cmd[0] == "SetParam" and len(cmd) >= 4:
-                # For SetParam commands, check against init
-                key = f"{cmd[0]}|{cmd[1]}|{cmd[2]}"
-                if len(cmd) == 4:
-                    init_value = init_settings.get(key)
-                    if init_value is not None and init_value != cmd[3]:
-                        warnings.append(f"Night setting {cmd[1]}.{cmd[2]} = '{cmd[3]}' differs from init value '{init_value}'")
-                elif len(cmd) == 5:
-                    full_key = f"{key}|{cmd[3]}"
-                    init_value = init_settings.get(full_key)
-                    if init_value is not None and init_value != cmd[4]:
-                        warnings.append(f"Night setting {cmd[1]}.{cmd[2]}.{cmd[3]} = '{cmd[4]}' differs from init value '{init_value}'")
-            elif cmd[0] == "SetColor":
-                init_value = init_settings.get("SetColor")
-                if init_value is not None and init_value != cmd[1]:
-                    warnings.append(f"Night SetColor = '{cmd[1]}' differs from init value '{init_value}'")
-    
+def compareSettings(init_commands: List[List[str]], night_commands: List[List[str]]) -> List[str]:
+    """Compare night settings vs init, filtering out noisy params."""
+    warnings: List[str] = []
+
+    init_filtered = [c for c in init_commands if not shouldSkipComparison(c)]
+    night_filtered = [c for c in night_commands if not shouldSkipComparison(c)]
+
+    def buildMap(cmds: List[List[str]]) -> Dict[str, List[str]]:
+        m: Dict[str, List[str]] = {}
+        for c in cmds:
+            m[getCommandKey(c)] = c
+        return m
+
+    init_map = buildMap(init_filtered)
+    night_map = buildMap(night_filtered)
+
+    def desc(c: Optional[List[str]]) -> str:
+        if not c:
+            return "missing"
+        if c[0] == "SetParam":
+            if len(c) >= 5:
+                return f"{c[1]}.{c[2]}.{c[3]} = '{c[4]}'"
+            elif len(c) == 4:
+                return f"{c[1]}.{c[2]} = '{c[3]}'"
+        if c[0] == "SetColor":
+            return f"SetColor = '{c[1]}'"
+        return " ".join(c)
+
+    for k in sorted(set(init_map.keys()) | set(night_map.keys())):
+        if any(k.startswith(pref) for pref in SKIP_COMPARE_PREFIXES):
+            continue
+        a = init_map.get(k)
+        b = night_map.get(k)
+        if a != b:
+            warnings.append(f"{desc(b)} differs from init ({desc(a)})")
+
     return warnings
 
-def manage_camera_brightness(camera_settings_path: str) -> bool:
+def manageCameraBrightness(camera_settings_path: str) -> bool:
     """Manage brightness settings in camera_settings.json.
     
     Args:
@@ -190,7 +201,7 @@ def manage_camera_brightness(camera_settings_path: str) -> bool:
         return False
     
     # Find the original SetColor command in init section
-    init_setcolor = find_setcolor_command(settings['init'])
+    init_setcolor = findSetColorCommand(settings['init'])
     if not init_setcolor:
         print("Warning: No SetColor command found in 'init' section")
         print("Cannot determine user's custom brightness value")
@@ -208,12 +219,12 @@ def manage_camera_brightness(camera_settings_path: str) -> bool:
     # Process day section
     if 'day' in settings:
         day_commands = settings['day']
-        day_setcolor = find_setcolor_command(day_commands)
-        daynight_index = find_daynight_color_index(day_commands)
+        day_setcolor = findSetColorCommand(day_commands)
+        daynight_index = findDayNightColorIndex(day_commands)
         
         if not day_setcolor and daynight_index is not None:
             # Add SetColor with brightness=50 for day mode
-            day_setcolor_cmd = create_setcolor_command("50", remaining_values)
+            day_setcolor_cmd = createSetColorCommand("50", remaining_values)
             day_commands.insert(daynight_index, day_setcolor_cmd)
             print("Added day brightness setting (brightness=50)")
             modifications_made = True
@@ -228,12 +239,12 @@ def manage_camera_brightness(camera_settings_path: str) -> bool:
     # Process night section
     if 'night' in settings:
         night_commands = settings['night']
-        night_setcolor = find_setcolor_command(night_commands)
-        daynight_index = find_daynight_color_index(night_commands)
+        night_setcolor = findSetColorCommand(night_commands)
+        daynight_index = findDayNightColorIndex(night_commands)
         
         if not night_setcolor and daynight_index is not None:
             # Add SetColor with original brightness for night mode
-            night_setcolor_cmd = create_setcolor_command(original_brightness, remaining_values)
+            night_setcolor_cmd = createSetColorCommand(original_brightness, remaining_values)
             night_commands.insert(daynight_index, night_setcolor_cmd)
             print(f"Added night brightness setting (brightness={original_brightness})")
             modifications_made = True
@@ -250,7 +261,7 @@ def manage_camera_brightness(camera_settings_path: str) -> bool:
     
     # Check for night/init setting discrepancies
     if 'night' in settings:
-        setting_warnings = compare_settings(settings['init'], settings['night'])
+        setting_warnings = compareSettings(settings['init'], settings['night'])
         if setting_warnings:
             print("\n⚠️  Configuration Warnings:")
             print("Night settings that don't match init conditions:")
@@ -266,13 +277,12 @@ def manage_camera_brightness(camera_settings_path: str) -> bool:
         try:
             # Create backup
             backup_path = camera_settings_path + '.backup'
-            with open(backup_path, 'w') as f:
-                json.dump(settings, f, indent=2)
+            shutil.copy2(camera_settings_path, backup_path)
             print(f"Created backup: {backup_path}")
             
             # Write modified settings with original compact format
             with open(camera_settings_path, 'w') as f:
-                f.write(format_camera_settings_json(settings))
+                f.write(formatCameraSettingsJson(settings))
             print(f"Updated camera settings: {camera_settings_path}")
             
         except IOError as e:
@@ -299,7 +309,7 @@ def main():
     print(f"Managing camera brightness settings in: {camera_settings_path}")
     print("=" * 60)
     
-    success = manage_camera_brightness(camera_settings_path)
+    success = manageCameraBrightness(camera_settings_path)
     
     if success:
         print("=" * 60)
