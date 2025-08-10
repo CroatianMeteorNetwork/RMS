@@ -135,25 +135,24 @@ def formatCameraSettingsJson(settings: Dict[str, Any]) -> str:
     lines.append('}')
     return '\n'.join(lines)
 
-def compareSettings(init_commands: List[List[str]], night_commands: List[List[str]]) -> List[str]:
-    """Compare night settings vs init, filtering out noisy params."""
+def compareSettings(init_commands: List[List[str]], day_commands: List[List[str]], night_commands: List[List[str]]) -> List[str]:
+    """Check that night properly resets parameters that day modified from init."""
     warnings: List[str] = []
-
-    init_filtered = [c for c in init_commands if not shouldSkipComparison(c)]
-    night_filtered = [c for c in night_commands if not shouldSkipComparison(c)]
 
     def buildMap(cmds: List[List[str]]) -> Dict[str, List[str]]:
         m: Dict[str, List[str]] = {}
         for c in cmds:
-            m[getCommandKey(c)] = c
+            if not shouldSkipComparison(c):
+                m[getCommandKey(c)] = c
         return m
 
-    init_map = buildMap(init_filtered)
-    night_map = buildMap(night_filtered)
+    init_map = buildMap(init_commands)
+    day_map = buildMap(day_commands)
+    night_map = buildMap(night_commands)
 
     def desc(c: Optional[List[str]]) -> str:
         if not c:
-            return "missing"
+            return "not set"
         if c[0] == "SetParam":
             if len(c) >= 5:
                 return f"{c[1]}.{c[2]}.{c[3]} = '{c[4]}'"
@@ -163,13 +162,33 @@ def compareSettings(init_commands: List[List[str]], night_commands: List[List[st
             return f"SetColor = '{c[1]}'"
         return " ".join(c)
 
-    for k in sorted(set(init_map.keys()) | set(night_map.keys())):
+    # Find parameters that day changes from init
+    day_changes = {}
+    for k in day_map:
         if any(k.startswith(pref) for pref in SKIP_COMPARE_PREFIXES):
             continue
-        a = init_map.get(k)
-        b = night_map.get(k)
-        if a != b:
-            warnings.append(f"{desc(b)} differs from init ({desc(a)})")
+        init_val = init_map.get(k)
+        day_val = day_map.get(k)
+        if init_val != day_val:
+            day_changes[k] = (init_val, day_val)
+    
+    # Check if night properly resets those day-changed parameters back to init
+    for k, (init_val, day_val) in day_changes.items():
+        night_val = night_map.get(k)
+        
+        # Night should either reset to init value OR not set it at all (letting init value persist)
+        if night_val is not None and night_val != init_val:
+            warnings.append(f"Day changes {desc(init_val)} to {desc(day_val)}, but night sets {desc(night_val)} instead of restoring init value")
+    
+    # Also warn about night settings that differ from init but weren't changed by day
+    for k in night_map:
+        if any(k.startswith(pref) for pref in SKIP_COMPARE_PREFIXES):
+            continue
+        if k not in day_changes:  # This parameter wasn't changed by day
+            init_val = init_map.get(k)
+            night_val = night_map.get(k)
+            if init_val != night_val:
+                warnings.append(f"Night unnecessarily sets {desc(night_val)} (init: {desc(init_val)}, day doesn't change it)")
 
     return warnings
 
@@ -259,18 +278,18 @@ def manageCameraBrightness(camera_settings_path: str) -> bool:
     else:
         print("Warning: 'night' section not found in camera_settings.json")
     
-    # Check for night/init setting discrepancies
-    if 'night' in settings:
-        setting_warnings = compareSettings(settings['init'], settings['night'])
+    # Check for proper day/night transitions
+    if 'day' in settings and 'night' in settings:
+        setting_warnings = compareSettings(settings['init'], settings['day'], settings['night'])
         if setting_warnings:
             print("\n⚠️  Configuration Warnings:")
-            print("Night settings that don't match init conditions:")
+            print("Day/Night transition issues detected:")
             for warning in setting_warnings:
                 print(f"  • {warning}")
-            print("\nThese settings may prevent the camera from returning to init state during night mode.")
-            print("Consider reviewing these discrepancies to ensure proper day/night transitions.")
+            print("\nThese issues may prevent proper day/night transitions.")
+            print("Night should reset any parameters that day modifies back to their init values.")
         else:
-            print("Night settings properly restore init conditions (excluding expected differences)")
+            print("✓ Day/night transitions look correct - night properly resets day's changes")
     
     # Write back the modified settings if changes were made
     if modifications_made:
