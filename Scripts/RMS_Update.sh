@@ -927,6 +927,24 @@ cleanup_on_error() {
     exit 1
 }
 
+# Function to create RMS_Reset.sh recovery script
+create_recovery_script() {
+    local recovery_script="$RMSSOURCEDIR/Scripts/RMS_Reset.sh"
+    local current_script="$RMSSOURCEDIR/Scripts/RMS_Update.sh"
+    
+    print_status "info" "Creating recovery script RMS_Reset.sh..."
+    
+    # Copy the current script to RMS_Reset.sh
+    if cp "$current_script" "$recovery_script" 2>/dev/null; then
+        # Make it executable
+        chmod +x "$recovery_script" 2>/dev/null || true
+        print_status "success" "Recovery script created: Scripts/RMS_Reset.sh"
+        print_status "info" "Use './Scripts/RMS_Reset.sh --switch' to return from old branches"
+    else
+        print_status "warning" "Could not create recovery script (non-critical)"
+    fi
+}
+
 #######################################################
 ######################   MAIN   #######################
 #######################################################
@@ -1084,6 +1102,9 @@ main() {
         switch_branch_interactive
         print_status "info" "Target branch: $RMS_BRANCH (interactive selection)"
     fi
+
+    # Create recovery script BEFORE we modify anything
+    create_recovery_script
 
     #######################################################
     ################ DANGER ZONE START ####################
