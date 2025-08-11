@@ -1,49 +1,48 @@
-#  Dataloader Imports
 import datetime
 import os
 import csv
 import numpy as np
 import scipy.optimize
-
-
-# Gaussian Filtration Imports
-# import numpy as np
 import scipy
 from RMS.Routines.Image import signalToNoise
 from pyswarms.single.global_best import GlobalBestPSO
-
-# Kalman Filtration Imports
-# import numpy as np
-
-# ECSV Save Imports
-# import numpy as np
-# import os
-# import csv
 import shutil
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
 from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz
 
-# Testing
-import matplotlib.pyplot as plt
-import matplotlib.animation as animation
-
 class ASTRA:
 
     def __init__(self, data_dict, progress_callback=None):
+        """
+        ASTRA : Astrometric Streak Tracking and Refinement Algorithm
+        A class for proccessing meteor picks in EMCCD data, using a recursive algorithm to retreive accurate picks automatically.
+        ________________________
+        Initializes the ASTRA object with the provided data dictionary and progress callback.
+
+        Args:
+            data_dict (dict): A dictionary containing the necessary data for processing:
+            progress_callback (callable, optional): A callback function to update progress. Defaults to None.
+        """
 
         # -- Constants & Settings --
 
-        self.astra_config = data_dict.get("config", {})  # Load ASTRA configuration from data_dict, if available
-        self.progress_callback = progress_callback  # Callback for progress updates
-        if self.progress_callback:
+        # Try loading initial data
+        try:
+            self.astra_config = data_dict["config"]  # Load ASTRA configuration from data_dict
+        except KeyError:
+            print("Warning, 'config' key not found in passed data_dict. Aborting process")
+            return
+        
+        # Initialize callback and set progress to 0
+        if self.process_callback:
+            self.progress_callback = progress_callback # Instantiate progress callback
             self.progress_callback(0)  # Initialize progress to 0
+
         # 1) Image Data Processing Constants/Settings
-
-        # Multiples of background STD + mean to mask pixels above as stars
         self.BACKGROUND_STD_THRESHOLD = float(self.astra_config['astra']['O_sigma']) # multiple of std dev to mask pixels above
-        self.saturation_threshold = float(data_dict["saturation_threshold"])
+        self.saturation_threshold = float(data_dict["saturation_threshold"]) # Saturation threshold for EMCCD cameras, used to mask saturated pixels
 
-        # 2) Recursive Cropping & Fitting Constants/Settings
+        # 2) PSO Constants/Settings
 
         # Represents the multiples of their standard deviations that the parameters are allowed to deviate within in the second pass gaussian
         self.std_parameter_constraint = [
@@ -86,18 +85,8 @@ class ASTRA:
         # NOTE depreciated, using local not dual PSO
         self.second_pass_settings = {
             "residuals_method" : 'abs_squared', # method for calculating residuals
-            "oob_penalty" : 1000000, # penalty for out-of-bounds particles
-            "options": {"c1": 0.8, # cognitive component
-                        "c2": 0.4, # social component
-                        "w": 0.6}, # inertia weight
-            "max_iter": 75, # maximum iterations
-            "n_particles": 35, # number of particles
-            "velocity_clamp": (-0.1, 0.1), # velocity clamp for particles
-            "bh_strategy": 'nearest', # best-historical strategy
-            "vh_strategy": 'zero', # velocity-historical strategy
-            "ftol" : 1e-6, # function tolerance for convergence
-            "ftol_iter" : 15, # number of iterations for function tolerance
-            "method" : 'L-BFGS-B' # method for optimization
+            "method" : 'L-BFGS-B', # method for optimization
+            "oob_penalty" : 1e6, # penalty for out-of-bounds function evaluations
         }
 
         # 4) Kalman Settings
@@ -111,9 +100,6 @@ class ASTRA:
         self.SNR_threshold = float(self.astra_config['astra']['m_SNR'])
 
         # -- Data Attributes --
-
-
-
         # Unpack data from the data_dict
 
         self.data_dict = data_dict # Data dictionary containing all necessary data
@@ -129,31 +115,7 @@ class ASTRA:
             self.middle_picks = np.array(data_dict['middle_picks'])
             self.pick_frame_indices = data_dict["pick_frame_indices"].tolist() # List of frame indices corresponding to the picks
 
-        # Load Frames
-
-        # Stores data from dict as class attributes
-
         self.verbose = self.astra_config['astra']['VERB'] == 'True'
-
-    def updateProgress(self):
-
-        time_weights_gaus = {
-            'cropping' : 0.7,
-            'refining' : 0.2,
-            'removing' : 0.1
-        }
-
-        if self.mode == 'Gaussian':
-            if self.progress_callback:
-                current_percentage = sum(
-                    self.progressed_frames[step] * time_weights_gaus[step]
-                    for step in self.progressed_frames.keys()
-                ) / self.total_frames * 100
-                self.progress_callback(int(current_percentage))
-        if self.mode == 'Kalman':
-            if self.progress_callback:
-                current_percentage = (self.exec_count / self.total_exec) * 100
-                self.progress_callback(int(current_percentage))
 
 
     def process(self):
@@ -172,6 +134,7 @@ class ASTRA:
 
         self.mode = 'Gaussian'  # Set the mode to Gaussian for processing
 
+        # Instantiate variables to store progress
         self.progressed_frames = {
             'cropping': 0,
             'refining': 0,
@@ -205,8 +168,10 @@ class ASTRA:
             
         # 6. Return the ASTRA object for later processing/saving
         return self
-    
-    
+
+
+    # 1) -- Functional Methods --
+
     def runKalman(self, measurements=None, times=None, snr=None):
         """
         Runs the Kalman filter on the final picks if enabled.
@@ -216,40 +181,44 @@ class ASTRA:
             self (ASTRA): The ASTRA object with processed data.
         """
 
+        # Instantiate variables to store progress
         self.mode = 'Kalman'  # Set the mode to Kalman for processing
         self.exec_count = 0
         self.total_exec = 1  # Initialize total execution count to avoid division by zero
         self.updateProgress()
 
-
+        # Add another multiple of frames to process if the monotonicity is enabled
         if self.astra_config['kalman']['Monotonicity'] == "True":
             time_coeff = 3
         else:
             time_coeff = 2
 
+        # Set progress to 0
         if self.progress_callback is not None:
             self.progress_callback(0)
 
+        # If executing Kalman within the ASTRA object, use the global picks and times
         if measurements is None:
             try:
                 self.total_exec = len(self.times) * time_coeff
                 smooth_picks, smooth_P = self.applyKalmanFilter(self.global_picks, self.times, self.snr)
             except Exception as e:
                 print(f'Error applying Kalman filter: {e}')
+        # Else use provided measurements and times
         else:
-            # If measurements are provided, use them instead of the global picks
             try:
                 self.total_exec = len(times) * time_coeff
                 smooth_picks, smooth_P = self.applyKalmanFilter(measurements, times, snr)
             except Exception as e:
                 print(f'Error applying Kalman filter: {e}')
 
+        # Update the progress
         self.exec_count = self.total_exec
         self.updateProgress()
-        
+
+        # Return adjusted picks and covariance matrix
         return smooth_picks, smooth_P
     
-    # 1) -- Functional Methods --
 
     def processImageData(self, img_obj, frames):
         """
@@ -299,6 +268,7 @@ class ASTRA:
         
         # 3) -- Returns Data --
         return avepixel_background, subtracted_frames
+
 
     def cropAllMeteorFrames(self, pick_frame_indices, detApp_picks=None):
         """
@@ -411,6 +381,7 @@ class ASTRA:
         # Return modified instance variables
         return self.cropped_frames, self.first_pass_params, self.crop_vars
 
+
     def refineAllMeteorCrops(self, first_pass_params, cropped_frames, omega, directions):
         """
         Refines the moving Gaussian fit by using a local optimizer on the second pass.
@@ -450,6 +421,7 @@ class ASTRA:
             self.updateProgress()
 
         return self.refined_fit_params, self.fit_costs, self.fit_imgs
+
 
     def removeLowSNRPicks(self, refined_params, fit_imgs, frames, cropped_frames, crop_vars, pick_frame_indices, fit_costs, times):
         """
@@ -544,7 +516,10 @@ class ASTRA:
 
         # Return all
         return self.refined_fit_params, self.fit_imgs, self.cropped_frames, self.crop_vars, self.pick_frame_indices, self.global_picks, self.fit_costs, self.times, self.abs_level_sums
-    
+
+
+    # 2) -- Calculation/Conversion Methods --
+
     def checkStreakInBounds(self, global_pick, prev_length, prev_sigma, omega, directions):
         """
         Checks if the streak defined by the global pick, previous length, previous sigma, omega, and directions is within the bounds of the frames.
@@ -585,228 +560,6 @@ class ASTRA:
         # Return the in_bounds bool
         return in_bounds
 
-    def saveAni(self, dest_path=None):
-
-        # 0) Check if the ASTRA object has been processed
-        if not hasattr(self, 'global_picks'):
-            raise AttributeError("ERROR: ASTRA.process() needs to be run before saving.")
-
-        # Set picks to kalman or gaussian
-        if hasattr(self, 'smoothed_picks'):
-            picks = self.smoothed_picks
-            method = 'KALMAN'
-        else:
-            picks = self.global_picks
-            method = 'GAUSSIAN'
-
-        # If not provided default to expected format path
-        if dest_path is None:
-            dest_path = os.path.join(self.event_path, 'Picks', method, f"{self.event_path.split('/')[-1]}_{self.camera_code}.mp4")
-            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-
-        # Otherwise check if the path exists
-        else:
-            if not os.path.exists(dest_path):
-                raise FileNotFoundError(f"The destination path '{dest_path}' does not exist.")
-            elif not os.path.isdir(os.path.dirname(dest_path)):
-                dest_path = os.path.join(dest_path, f"{self.event_path.split('/')[-1]}_{self.camera_code}.mp4")
-
-        fig, axs = plt.subplots(1, 3, figsize=(12, 6))
-        fig.suptitle("Gaussian Fits", fontsize=16)
-
-        n_crops = len(self.cropped_frames)
-
-        def update(i: int) -> None:
-            crop = self.cropped_frames[i]
-            crop_vars = self.crop_vars[i]
-            fit = self.fit_imgs[i]
-            fit_params = self.refined_fit_params[i]
-            snr = self.snr[i]
-            x, y = self.translatePicksToGlobal(picks[i], crop_vars, global_to_local=True)
-
-            # Add title indicating rejection status and index number
-            fig.suptitle(f"Crop {i}:, SNR: {snr:.2f}", fontsize=14)
-
-            # Display fit parameters at the bottom of the figure
-            plt.figtext(0.5, 0.01, f"Level Sum: {fit_params[0]:.2f}, Sigma: {fit_params[1]:.2f}, "
-                                   f"x0: {fit_params[2]:.2f}, y0: {fit_params[3]:.2f}, L: {fit_params[4]:.2f}",
-                        ha="center", fontsize=12)
-
-            # left: crop image
-            ax1 = axs[0]
-            ax1.clear()
-            ax1.set_title(f"Crop {i}")
-            ax1.imshow(crop, vmin=0, vmax=np.max(crop), cmap='gray')
-            ax1.plot(x, y, "ro", markersize=5)
-
-            # middle: overlay fit point
-            ax2 = axs[1]
-            ax2.clear()
-            ax2.set_title("Gaussian Fit")
-            ax2.imshow(fit, vmin=0, vmax=np.max(fit), cmap='gray')
-            ax2.plot(x, y, "ro", markersize=5)
-
-            # right: fit residuals
-            abs_res = np.abs(crop - fit)
-            ax3 = axs[2]
-            ax3.clear()
-            ax3.set_title("Fit Residuals")
-            ax3.imshow(abs_res, vmin=np.min(abs_res), vmax=np.max(abs_res), cmap='coolwarm')
-
-        def animate(i: int) -> None:
-            update(i % n_crops)
-
-        ani = animation.FuncAnimation(fig, animate, frames=n_crops, interval=1000, repeat=True)
-
-        ani.save(dest_path, writer='ffmpeg', fps=1)
-
-    def saveECSV(self, template_path='Kalman_Centroiding/Data/ECSV_Templates', dest_path=None):
-
-        # 0) Check if the ASTRA object has been processed
-        if not hasattr(self, 'global_picks'):
-            raise AttributeError("ERROR: ASTRA.process() needs to be run before saving.")
-        
-        # Determine if Kalman filter has been applied
-        if hasattr(self, 'smoothed_picks'):
-            # Use smoothed picks if Kalman filter has been applied
-            picks = self.smoothed_picks
-            method = 'KALMAN'
-        else:
-            picks = self.global_picks
-            method = 'GAUSSIAN'
-
-        # 1) Ensure the template folder path exists
-        if not os.path.exists(template_path):
-            raise FileNotFoundError(f"The template folder path '{template_path}' does not exist.")
-        
-        # 2) Determine destination path
-
-        # If not provided default to expected format path
-        if dest_path is None:
-            dest_path = os.path.join(self.event_path, 'Picks', method, f"{self.event_path.split('/')[-1]}_{self.camera_code}.ecsv")
-        # Otherwise check if the path exists
-        else:
-            if not os.path.exists(dest_path):
-                raise FileNotFoundError(f"The destination path '{dest_path}' does not exist.")
-            elif not os.path.isdir(os.path.dirname(dest_path)):
-                dest_path = os.path.join(dest_path, f"{self.event_path.split('/')[-1]}_{self.camera_code}.ecsv")
-
-
-
-        # 3) Load data
-        avepixel_background = self.avepixel_background
-        times = self.times
-        platepar = self.platepar
-        level_sums = self.abs_level_sums
-        lattitude = self.latitude
-        longitude = self.longitude
-        elevation = self.elevation
-        event_path = self.event_path
-        camera_code = self.camera_code
-        pick_frame_indices = self.pick_frame_indices
-        frames = self.frames
-
-        # 4) Format time data
-        formatted_times = [
-            (
-                t.year, t.month, t.day,
-                t.hour, t.minute, t.second,
-                t.microsecond
-            )
-            for t in times
-        ]
-        ra_dec_conversion_times = [
-            (
-                t.year, t.month, t.day,
-                t.hour, t.minute, t.second,
-                t.microsecond / 1e3  # Convert microseconds to milliseconds, as req by xyToRaDecPP
-            )
-            for t in times
-        ]
-
-        # 5) Calculate RA, DEC, AZ, ALT
-        jd, Ra, Dec, mags = xyToRaDecPP(ra_dec_conversion_times, picks[:, 0], picks[:, 1], level_sums, platepar, measurement=True)
-        Az, Alt = trueRaDec2ApparentAltAz(Ra, Dec, jd, lattitude, longitude, refraction=False)
-
-        # 6) Copy the template file
-
-        # Create the directory if it does not exist
-        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-
-        # Copy the template file over
-        shutil.copy(os.path.join(template_path, camera_code+'.ecsv'), dest_path)
-
-        # 7) Edit the copied template file
-        with open(dest_path, 'r') as file:
-            lines = file.readlines()
-
-            # Extract the header and data lines
-            header_lines = [line for line in lines if line.startswith('#')]
-            data_lines = [line for line in lines if not line.startswith('#')]
-
-            # Update obs_latitude and obs_longitude in the header
-            for i, line in enumerate(header_lines):
-                if 'obs_latitude' in line:
-                    header_lines[i] = f"# - {{obs_latitude: {lattitude}}}\n"
-                if 'obs_longitude' in line:
-                    header_lines[i] = f"# - {{obs_longitude: {longitude}}}\n"
-                if 'obs_elevation' in line:
-                    header_lines[i] = f"# - {{obs_elevation: {elevation}}}\n"
-
-            # Parse the data lines into a list of dictionaries
-            reader = csv.DictReader(data_lines, delimiter=',')
-            data = list(reader)
-
-            # Add new rows with known values and set unknown values to 0
-            updated_data = []
-
-            # Iterate through the picks and create new rows
-            for i, Ra_val in enumerate(Ra):
-
-                # Determine integrated pixel value and background pixel value, falling back to zero if error arises
-                try:
-                    ipv = frames[pick_frame_indices[i], int(picks[i][0]), int(picks[i][1])].astype(np.float32)
-                except Exception as e:
-                    print(f'Error calculating integrated pixel value on pick {picks[i]}, defaulting to zero:', e)
-                    ipv = 0
-                try:
-                    bpv = avepixel_background[int(picks[i][1]), int(picks[i][0])].astype(np.float32)
-                except Exception as e:
-                    print(f'Error calculating background pixel value on pick {picks[i]}, defaulting to zero:', e)
-                    bpv = 0
-
-                new_row = {
-                    'datetime': datetime.datetime(*formatted_times[i]).isoformat() if i < len(formatted_times) else "",
-                    'ra': f"{Ra_val:.6f}",
-                    'dec': f"{Dec[i]:.6f}" if i < len(Dec) else "0.0",
-                    'azimuth': f"{Az[i]:.6f}" if i < len(Az) else "0.0",
-                    'altitude': f"{Alt[i]:.6f}" if i < len(Alt) else "0.0",
-                    'x_image': f"{picks[i][0]:.3f}" if i < len(picks) else "0.0",
-                    'y_image': f"{picks[i][1]:.3f}" if i < len(picks) else "0.0",
-                    'integrated_pixel_value': f"{ipv}" if i < len(picks) else "0",
-                    'background_pixel_value': f"{bpv}" if i < len(picks) else "0",
-                    'saturated_pixels': data[i].get('saturated_pixels', False) if i < len(data) else False,
-                    'mag_data': f"{mags[i]:.2f}" if i < len(mags) else "0.0",
-                    'err_minus_mag': data[i].get('err_minus_mag', "0.0") if i < len(data) else "0.0",
-                    'err_plus_mag': data[i].get('err_plus_mag', "0.0") if i < len(data) else "0.0",
-                    'snr': data[i].get('snr', "0.0") if i < len(data) else "0.0"
-                }
-                updated_data.append(new_row)
-            data = updated_data
-
-        # 8) Write the updated data back to the file
-        with open(dest_path, 'w') as file:
-            # Write the header lines
-            file.writelines(header_lines)
-
-            # Write the updated data
-            writer = csv.DictWriter(file, fieldnames=reader.fieldnames, delimiter=',')
-            writer.writeheader()
-            writer.writerows(data)
-
-
-
-    # 2) -- Calculation/Conversion Methods --
 
     def translatePicksToGlobal(self, local_pick, frame_crop_vars, global_to_local=False):
         """
@@ -836,6 +589,7 @@ class ASTRA:
 
             return (x_global, y_global)
     
+
     def movePickToEdge(self, center_pick, omega, length, directions=(1, 1)):
         """
         Moves the center pick to the leading edge of the crop based on the fitted parameters.
@@ -862,6 +616,7 @@ class ASTRA:
         # Return the new picks
         return (edge_x, edge_y)
     
+
     def estimateCenter(self, edge_pick, omega, length, directions=(1, 1)):
         """
         Estimates the center of the crop based on the edge pick, angle, and length.
@@ -883,6 +638,7 @@ class ASTRA:
         # Return the center pick
         return center_pick
     
+
     def calculateAdaptiveVelocityClamp(self, bounds):
         """
         Calculates the velocity clamp to be based on a fraction of the parameter domain.
@@ -904,6 +660,7 @@ class ASTRA:
         # Return the velocity clamp as a tuple
         return (-adaptive_velocity_clamps, adaptive_velocity_clamps)
     
+
     def calculateAdaptiveBounds(self, first_pass_parameters, p0, scipy_format = False):
         """
         Calculates the adaptive bounds for the parameters based on the first pass results.
@@ -947,6 +704,7 @@ class ASTRA:
         # Return the adaptive bounds
         return adaptive_bounds
     
+
     def estimateNextCenter(self, current_global_center, length, omega, directions=(1, 1)):
         """
         Estimates the next center of the crop based on the current global center, length, and angle.
@@ -973,6 +731,7 @@ class ASTRA:
         # Return the new picks
         return (next_x, next_y)
 
+
     def calculateSNR(self, fit_img, frame, cropped_frame, crop_vars):
         """
         Calculates the Signal-to-Noise Ratio (SNR) for a given fit image and frame.
@@ -988,7 +747,7 @@ class ASTRA:
         # Round crop variables to integers for indexing
         _, _, x_min, x_max, y_min, y_max = map(int, crop_vars.copy())
 
-        # Copy fit image and cropped_frame
+        # Copy fit image, cropped_frame, and avepixel_background to avoid modifying the original data
         fit_img = fit_img.copy()
         cropped_frame = cropped_frame.copy()
         avebk = self.avepixel_background.copy()
@@ -997,72 +756,55 @@ class ASTRA:
         fit_img[fit_img <= 1] = 0
         fit_img[fit_img > 1] = 1
 
+        # Mask cropped frame with fit image to remove the background
         masked_cropped = fit_img * cropped_frame
 
         # Invert fit_img: 1 becomes 0, 0 becomes 1
         inverted_fit_img = 1 - fit_img.copy()
+
+        # Mask the avebk with the inverted fit image to remove the streak
         masked_avebk = inverted_fit_img * avebk[y_min:y_max, x_min:x_max]
 
+        # Calculate the median and standard deviation of the masked average background
         median_ave = np.median(masked_avebk[masked_avebk > 0])
         std_ave = np.std(masked_avebk[masked_avebk > 0])
 
+        # Crop the masked frame to the percentile threshold defined by P_thresh
         masked_cropped[masked_cropped < np.percentile(masked_cropped, float(self.astra_config['astra']['P_thresh']))] = 0
 
+        # Count the non-zero values in the masked cropped frame, and calculate the level sum
         nonzero_count = np.count_nonzero(masked_cropped)
         level_sum = np.ma.sum(masked_cropped)
 
+        # Find all indices of non-zero values for the photometry pixels
         nonzero_indices = np.argwhere(masked_cropped > 0)
-        # # Shift nonzero_indices by xmin and ymin to get global pixel coordinates
-        # nonzero_indices[:, 0] += y_min
-        # nonzero_indices[:, 1] += x_min
-        # photometry_pixels = [tuple(idx[::-1]) for idx in nonzero_indices]
-        # saturated_bool = np.any(frame[photometry_pixels] >= self.saturation_threshold)
-
-        # # Copy fit image and cropped_frame
-        # fit_img = fit_img.copy()
-        # cropped_frame = cropped_frame.copy()
-
-        # # Clip fit image to zero and one
-        # fit_img[fit_img <= 1] = 0
-        # fit_img[fit_img > 1] = 1
-
-        # # Sum the inside outside of the fit image
-        # level_sum = np.sum(fit_img * cropped_frame)
-        # nonzero_count = np.count_nonzero(fit_img)
-
-        # # Mask the cropped_frame
-        # cframe = [y_min:y_max, x_min:x_max]
-
-        # nonzero_indices = np.argwhere(fit_img > 0)
-
-        # cropped_frame = np.ma.masked_array(cropped_frame, mask=(fit_img == 1))
-
-        # # Calculate std and median of the background
-        # background_std = np.std(cropped_frame) # THIS SHOULD BE ORIGINAL FRAME
-        # background_median = np.median(cropped_frame)
-
         
-        self.abs_level_sums.append(level_sum)
-        self.background_levels.append(median_ave)
-        # Find the indexes of each nonzero value in fit_img
-        # Convert nonzero_indices to a list of (x, y) tuples
+        # Convert photometry pixels to global coordinates and adjust indices
         nonzero_indices[:, 0] += y_min
         nonzero_indices[:, 1] += x_min
         photometry_pixels = [tuple(idx[::-1]) for idx in nonzero_indices]
+
+        # Check if any of the photometry pixels are saturated
         saturated_bool = np.any(frame[photometry_pixels] >= self.saturation_threshold)
+
+        # Append data to instance variables
         self.photometry_pixels.append(photometry_pixels)
         self.saturated_bool_list.append(saturated_bool)
+        self.abs_level_sums.append(level_sum)
+        self.background_levels.append(median_ave)
 
+        # Print debug information if verbose is enabled
         if self.verbose:
             print(f"Level sum: {level_sum}, STD ave: {std_ave}, Nonzero count: {nonzero_count}, Background std: {median_ave}, Saturated: {saturated_bool}")
 
-        # 10) final SNR
+        # Finally calculate SNR
         return signalToNoise(
             level_sum,
             nonzero_count,
             median_ave,
             std_ave
     )
+
 
     # 3) -- Helper Methods --
 
@@ -1107,6 +849,7 @@ class ASTRA:
         }
 
         return paramter_estimation_functions
+
 
     def estimateNextParameters(self, paramter_estimation_functions, n_points, forward_pass):
         """
@@ -1157,15 +900,13 @@ class ASTRA:
         # Return next parameters
         return next_params
 
+
     def LocalGaussianFit(self, p0, obs_frame, omega, bounds, directions):
 
         # Define initial parameters
         y, x = np.indices(obs_frame.shape)
         data_tuple = (x, y)
         y_obs = obs_frame.ravel()
-
-        # Generate initial positions for optimizer
-        # init_pos = self.generate_initial_particles(bounds, n_particles=self.second_pass_settings["n_particles"], p0=p0)
 
         # Instantiate optimizer
         res = scipy.optimize.minimize(
@@ -1199,8 +940,6 @@ class ASTRA:
         return best_pos, best_cost, img
 
         
-
-
     def GaussianPSO(self, cropped_frame, omega, directions, estim_next_params=None, init_length=None):
         """
         Performs a Particle Swarm Optimization (PSO) to fit a moving Gaussian to the cropped frame.
@@ -1309,6 +1048,7 @@ class ASTRA:
 
         return best_pos, best_cost
 
+
     def PSOObjectiveFunction(self, params, data_tuple, y_obs, a0, omega, bounds, directions):
         """ 
         Objective function for the PSO optimization, calculating the residuals based on the moving Gaussian fit.
@@ -1360,6 +1100,7 @@ class ASTRA:
 
         return residuals
     
+
     def LocalObjectiveFunction(self, params, data_tuple, y_obs, a0, omega, bounds, directions):
         """
         Objective function for the local optimization, calculating the residuals based on the moving Gaussian fit.
@@ -1381,30 +1122,31 @@ class ASTRA:
         intens = self.movingGaussian(data_tuple, omega, a0, level_sum, sigma, x0, y0, length)
 
         # Calculate the residuals based on the specified method
-        if self.first_pass_settings["residuals_method"] == 'abs_squared':
+        if self.second_pass_settings["residuals_method"] == 'abs_squared':
             residuals = np.sum(np.abs(intens - y_obs)**2)
-        elif self.first_pass_settings["residuals_method"] == 'abs':
+        elif self.second_pass_settings["residuals_method"] == 'abs':
             residuals = np.sum(np.abs(intens - y_obs))
-        elif self.first_pass_settings["residuals_method"] == 'abs_cubed':
+        elif self.second_pass_settings["residuals_method"] == 'abs_cubed':
             residuals = np.sum(np.abs(intens - y_obs)**3)
         else:
-            raise ValueError(f"Unknown residuals method: {self.first_pass_settings['residuals_method']}")
+            raise ValueError(f"Unknown residuals method: {self.second_pass_settings['residuals_method']}")
 
         # Penalty function for OOB particles
         for i in range(len(params)):
             if params[i] < bounds[i][0] or params[i] > bounds[i][1]:
-                residuals += self.first_pass_settings["oob_penalty"]
+                residuals += self.second_pass_settings["oob_penalty"]
 
         # Penalty for OOB streaks
         front = self.movePickToEdge((params[2:4]), omega, params[4], directions=directions)
         back = self.movePickToEdge((params[2:4]), omega, -params[4], directions=directions)
 
         if front[0] < 0 or front[0] >= data_tuple[0].shape[1] or front[1] < 0 or front[1] >= data_tuple[0].shape[0]:
-            residuals += self.first_pass_settings["oob_penalty"]
+            residuals += self.second_pass_settings["oob_penalty"]
         if back[0] < 0 or back[0] >= data_tuple[0].shape[1] or back[1] < 0 or back[1] >= data_tuple[0].shape[0]:
-            residuals += self.first_pass_settings["oob_penalty"]
+            residuals += self.second_pass_settings["oob_penalty"]
 
         return residuals
+
 
     def cropFrameToGaussian(self, sub_frame, est_global_center, max_sigma, max_length, omega, cropping_settings=None):
         """
@@ -1466,8 +1208,7 @@ class ASTRA:
         
         return cropped_frame, crop_vars
 
-# MAKE SURE TO CLEAN NEW VARS
-        
+
     def movingGaussian(self, data_tuple, omega, a0, level_sum, sigma, x0, y0, L, saturation_level=None):
         """ Moving Gaussian function with saturation intensity limiting.
 
@@ -1520,6 +1261,7 @@ class ASTRA:
 
         return intens.ravel()
 
+
     def generateInitialParticles(self, bounds, n_particles, p0=None):
         """
         Generate initial particles for the optimization process.
@@ -1569,6 +1311,7 @@ class ASTRA:
 
         # Return the generated particles
         return pos
+
 
     def recursiveCroppingAlgorithm(self, frame_index, est_center_global, paramter_estimation_functions, omega, directions, forward_pass = False, use_DetApp = True):
         """
@@ -1656,6 +1399,7 @@ class ASTRA:
                                         use_DetApp=use_DetApp
                                         )
     
+
     def applyKalmanFilter(self, global_edge_picks, times, snr_values):
         
         # Prepare the measurements and noise covariance matrices
@@ -1692,6 +1436,7 @@ class ASTRA:
 
         return self.smoothed_picks, self.smoothed_covars
 
+
     def computeQBase(self, measurements, times):
         # Empirical Accel
                 # Estimate Q_base using empirical acceleration from valid positions
@@ -1723,6 +1468,7 @@ class ASTRA:
 
         return Q_base
     
+
     def computeR(self, snr_values):
 
        # Decide what your baseline per‐axis error is at SNR_ref:
@@ -1744,6 +1490,7 @@ class ASTRA:
 
         return R_dyn
     
+
     def kalmanFilterCA(self, measurements, times, Q_base, R, monotonicity=True, epsilon=1e-6, use_accel=False):
         """
         Kalman filter with Rauch–Tung–Striebel (RTS) smoothing using a constant-acceleration model.
@@ -1927,5 +1674,29 @@ class ASTRA:
                     x_smooth[k, velocity_idx] = 0.0
         return x_smooth, P_smooth
 
+
+    def updateProgress(self):
+        """
+        Calculates approx. progress based on either Gaussian or Kalman mode. Updates the progress callback.
+        The progress is calculated based on the number of frames processed in each step and the total number of frames.
+        The weights for each step are defined in the time_weights_gaus dictionary.
+        """
+        time_weights_gaus = {
+            'cropping' : 0.7,
+            'refining' : 0.2,
+            'removing' : 0.1
+        }
+
+        if self.mode == 'Gaussian':
+            if self.progress_callback:
+                current_percentage = sum(
+                    self.progressed_frames[step] * time_weights_gaus[step]
+                    for step in self.progressed_frames.keys()
+                ) / self.total_frames * 100
+                self.progress_callback(int(current_percentage))
+        if self.mode == 'Kalman':
+            if self.progress_callback:
+                current_percentage = (self.exec_count / self.total_exec) * 100
+                self.progress_callback(int(current_percentage))
 
 
