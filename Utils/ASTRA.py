@@ -35,8 +35,8 @@ class ASTRA:
             return
         
         # Initialize callback and set progress to 0
-        if self.process_callback:
-            self.progress_callback = progress_callback # Instantiate progress callback
+        self.progress_callback = progress_callback
+        if self.progress_callback is not None:
             self.progress_callback(0)  # Initialize progress to 0
 
         # 1) Image Data Processing Constants/Settings
