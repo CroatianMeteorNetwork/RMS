@@ -198,10 +198,10 @@ class ASTRA:
             print(f'Error refining meteor crops: {e}')
 
         # 4. Remove picks with low SNR and out-of-bounds picks, refactors into global coordinates
-    # try:
-        self.removeLowSNRPicks(self.refined_fit_params, self.fit_imgs, self.frames, self.cropped_frames, self.crop_vars, self.pick_frame_indices, self.fit_costs, self.times)
-    # except Exception as e:
-    #     print(f'Error removing low SNR picks: {e}')
+        try:
+            self.removeLowSNRPicks(self.refined_fit_params, self.fit_imgs, self.frames, self.cropped_frames, self.crop_vars, self.pick_frame_indices, self.fit_costs, self.times)
+        except Exception as e:
+            print(f'Error removing low SNR picks: {e}')
             
         # 6. Return the ASTRA object for later processing/saving
         return self
