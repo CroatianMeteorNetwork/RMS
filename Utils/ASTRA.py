@@ -1,15 +1,9 @@
-import datetime
-import os
-import csv
 import numpy as np
 import scipy.optimize
 import scipy.stats
 import scipy.special
 from RMS.Routines.Image import signalToNoise
 from pyswarms.single.global_best import GlobalBestPSO
-import shutil
-from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
-from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz
 
 class ASTRA:
 

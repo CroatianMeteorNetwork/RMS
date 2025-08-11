@@ -5,6 +5,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject
 from .ASTRA import ASTRA  
+import html, re
 
 
 class AstraConfigDialog(QDialog):
@@ -37,12 +38,60 @@ class AstraConfigDialog(QDialog):
         pick_method_group.setLayout(pick_layout)
         main_layout.addWidget(pick_method_group)
 
-        def add_grid_fields(field_dict, defaults, title):
+        # === LATEX CONVERSIONS ===
+        _GREEK = {
+        "alpha":"α","beta":"β","gamma":"γ","delta":"δ","epsilon":"ε","zeta":"ζ","eta":"η",
+        "theta":"θ","iota":"ι","kappa":"κ","lambda":"λ","mu":"μ","nu":"ν","xi":"ξ",
+        "pi":"π","rho":"ρ","sigma":"σ","tau":"τ","upsilon":"υ","phi":"φ","chi":"χ",
+        "psi":"ψ","omega":"ω",
+        }
+        
+        def to_html_math(s: str) -> str:
+            # escape first, we’ll insert our own tags
+            t = html.escape(s)
+
+            # 1) greek name → symbol (word boundaries; case-sensitive map above)
+            for name, sym in _GREEK.items():
+                t = re.sub(rf'\b{re.escape(name)}\b', sym, t)
+
+            # 2) underscores → <sub>…</sub>, e.g., sigma_i -> σ<sub>i</sub>, Med_err -> Med<sub>err</sub>
+            # handles multiple: a_b_c -> a<sub>b</sub><sub>c</sub>
+            def _subber(m):
+                base = m.group(1)
+                subs = m.group(2)
+                # split on underscores inside the suffix and nest subs
+                out = base
+                for part in subs.split('_'):    
+                    out += f'<sub>{part}</sub>'
+                return out
+            t = re.sub(r'([A-Za-zΑ-Ωα-ω]+)_([A-Za-z0-9_]+)', _subber, t)
+
+            # 3) simple power like ^2 → <sup>2</sup>
+            t = re.sub(r'\^([0-9]+)', r'<sup>\1</sup>', t)
+
+            # 4) replace ASCII ranges like (0-1) → [0, 1] (purely cosmetic)
+            t = t.replace('(0-1)', '[0, 1]')
+
+            # Tell Qt “this is rich text” by starting with a tag
+            return f'<span>{t}</span>'
+
+        def add_grid_fields(field_dict, defaults, title, tooltips=None):
             group = QGroupBox(title)
             layout = QGridLayout()
+            tts = tooltips or {}
             for idx, (key, default) in enumerate(defaults.items()):
-                label = QLabel(f"<b>{key}</b>:")
+                key_html = to_html_math(key)                 # pretty label text
+                label = QLabel(f"{key_html}:")
+                # tooltips: format if present
+                tt_raw = tts.get(key, "")
+                tt_html = to_html_math(tt_raw) if tt_raw else ""
+                if tt_html:
+                    label.setToolTip(tt_html)
+
                 field = QLineEdit(default)
+                if tt_html:
+                    field.setToolTip(tt_html)
+
                 layout.addWidget(label, idx // 2, (idx % 2) * 2)
                 layout.addWidget(field, idx // 2, (idx % 2) * 2 + 1)
                 field_dict[key] = field
@@ -56,7 +105,6 @@ class AstraConfigDialog(QDialog):
             "m_iter": "100", "n_par": "100", "Vc (0-1)": "0.3",
             "ftol": "1e-4", "ftol_iter": "25", "expl_c": "3", "P_sigma": "3"
         }
-        main_layout.addWidget(add_grid_fields(self.pso_fields, pso_defaults, "PSO PARAMETER SETTINGS"))
 
         # === ASTRA General Settings ===
         self.astra_fields = {}
@@ -65,54 +113,53 @@ class AstraConfigDialog(QDialog):
             "P_c": "1.5", "sigma_i (px)": "2", "sigma_m": "1.2",
             "L_m": "1.5", "VERB": "False", "P_thresh" : "0.65"
         }
-        main_layout.addWidget(add_grid_fields(self.astra_fields, astra_defaults, "ASTRA PARAMETER SETTINGS"))
 
         # === Kalman Filter Settings ===
         self.kalman_fields = {}
         kalman_defaults = {
             "Monotonicity": "True", "Use_Accel": "True", "Med_err (px)": "0.3"
         }
-        main_layout.addWidget(add_grid_fields(self.kalman_fields, kalman_defaults, "KALMAN FILTER SETTINGS"))
 
         # === PARAMETER GUIDE ===
-        guide_group = QGroupBox("PARAMETER GUIDE")
-        guide_layout = QVBoxLayout()
-        self.param_info = QTextEdit()
-        self.param_info.setReadOnly(True)
-        self.param_info.setHtml(
-            "<b> MANUAL PICK MODE GUIDE </b><br>"
-            "<b>1.</b> Pick two the leading edge of the first and last frame of the event.<br>"
-            "NOTE: It is essential that the line outlined by the first and last picks perfectly intersect the meteor trajectory.<br>"
-            "<b>2.</b> Pick three frame-adjacent leading-edge picks at the highest SNR near middle of event.<br>"
-            "<b>3.</b> THEN, run ASTRA with the 'RUN ASTRA' button.<br><br>"
-            "NOTE ON CHANGING PARAMETERS<br>"
-            "Default parameters are optimized to work for most EMCCD data. Paramters are sensitive and may result in large changes in computation time and possible failure. Only change when dealing with extranous data."
-            "All extra descriptions on how parameters affect the algorithm are with respect to increasing the value of the parameter.<br><br>"
-            "<b>w</b>: PSO intertial weight - Increases parameter exploration<br>"
-            "<b>c1</b>: PSO cognitive component (individual best) - Increases local parameter minimum exploration<br>"
-            "<b>c2</b>: PSO social component (global best) - Decreases parameter exploration, improves convergence<br>"
-            "<b>m_iter</b>: Max PSO iterations - Improves convergence, increases computation time. Must be matched with higher parameter exploration<br>"
-            "<b>n_par</b>: Number of particles - Improves exploration, increases computation time. Must be matches with higher parameter exploration<br>"
-            "<b>Vc</b>: Fraction of parameter space as max velocity - Improves exploration, must be matched with faster convergence<br>"
-            "<b>ftol</b>: Min tolerance for convergence - Improves full local optimization, increases computation time<br>"
-            "<b>ftol_iter</b>: Min itterations for convergence - Improves full local optimization, increases computation time<br>"
-            "<b>expl_c</b>: Explorative coeffecient (disperses inital particle seeding) - Increases exploration, reduces local minimization<br>"
-            "<b>P_sigma</b>: 2nd pass optimizer paramter bound coeffeicent - Improves ability for local minimizer to adjust from PSO result, reduces optimal local solution<br>"
-            "<b>O_sigma</b>: Num STD above background to mask as star - Reduces chance for bright meteors to be masked as a star<br>"
-            "<b>m_SNR</b>: Minimum SNR value to keep pick - Improves the quality of picks, reduces total picks<br>"
-            "<b>P_c</b>: Streak cropping padding coeffeicent - Increases ability for ASTRA to recover from bad fits, increases computation time<br>"
-            "<b>sigma_i</b>: Initial Gaussian sigma (height) guess - Improves ASTRA ability to fit large meteors, increases computation time and can throw off algorithm if inaccurate<br>"
-            "<b>sigma_m</b>: Coeff to init. sigma guess as max bound - Improves ASTRA ability to fit large meteors, increases computation time and can throw off algorithm if inaccurate<br>"
-            "<b>L_m</b>: Coeff to init. length guess as max bound - Improves ASTRA ability to fit large meteors, increases computation time and can throw off algorithm if inaccurate<br>"
-            "<b>P_thresh</b>: Fraction of peak meteor brightness to threshold photometry pixels - less noise included in photometry, though possibly less of the meteor as well.<br>"
-            "<b>VERB</b>: Verbose -shows testing data<br>"
-            "<b>Monotonicity</b>: Enforce monotonic motion<br>"
-            "<b>Use_Accel</b>: Enable acceleration model (default const. vel.)<br>"
-            "<b>Med_err</b>: Estimated error at median SNR for R matrix - Increases power of Kalman filter, high values may fake data by overfitting<br>"
+        PSO_TT = {
+            "w (0-1)": "PSO inertia (exploration vs exploitation). Higher = more exploration.",
+            "c1 (0-1)": "Cognitive weight (pull to particle’s best).",
+            "c2 (0-1)": "Social weight (pull to global best).",
+            "m_iter": "Maximum PSO iterations.",
+            "n_par": "Number of particles.",
+            "Vc (0-1)": "Max velocity as fraction of bound width.",
+            "ftol": "Stop when objective change < ftol.",
+            "ftol_iter": "Consecutive iters below ftol to stop.",
+            "expl_c": "Initial seeding spread coefficient.",
+            "P_sigma": "Second-pass bound looseness for local fitting."
+        }
+
+        ASTRA_TT = {
+            "O_sigma": "Background mask threshold (σ above mean).",
+            "m_SNR": "Minimum SNR to keep a pick.",
+            "P_c": "Crop padding coefficient.",
+            "sigma_i (px)": "Initial Gaussian σ guess (px).",
+            "sigma_m": "Max σ multiplier (upper bound).",
+            "L_m": "Max length multiplier (upper bound).",
+            "P_thresh": "Photometry threshold (fraction of peak).",
+            "VERB": "Verbose logging (True/False)."
+        }
+
+        KALMAN_TT = {
+            "Monotonicity": "Enforce monotonic motion along dominant axis.",
+            "Use_Accel": "Use constant-acceleration model (else CV).",
+            "Med_err (px)": "R at median SNR (px) — higher trusts model more."
+        }
+
+        main_layout.addWidget(
+            add_grid_fields(self.pso_fields, pso_defaults, "PSO PARAMETER SETTINGS", PSO_TT)
         )
-        guide_layout.addWidget(self.param_info)
-        guide_group.setLayout(guide_layout)
-        main_layout.addWidget(guide_group)
+        main_layout.addWidget(
+            add_grid_fields(self.astra_fields, astra_defaults, "ASTRA PARAMETER SETTINGS", ASTRA_TT)
+        )
+        main_layout.addWidget(
+            add_grid_fields(self.kalman_fields, kalman_defaults, "KALMAN FILTER SETTINGS", KALMAN_TT)
+        )
 
         # === Progress Bar ===
         self.progress_bar = QProgressBar()
