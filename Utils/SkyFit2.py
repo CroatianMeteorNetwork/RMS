@@ -3919,77 +3919,6 @@ class PlateTool(QtWidgets.QMainWindow):
                     print('Current line: {}'.format(self.img.img_handle.current_line))
                     self.img.nextLine()
 
-            # elif event.key() == QtCore.Qt.Key_L and (modifiers == QtCore.Qt.ControlModifier):
-            # # ASTRA Addition - Justin DT
-            #     # Run ASTRA Gaussian Picker
-
-            #     # Check if ASTRA has been run already
-
-            #     # Load all frames
-            #     frame_count = sum(1 for name in os.listdir(self.dir_path) if 'dump' in name)
-            #     frames = np.zeros((frame_count, *self.img_handle.loadFrame().shape), dtype=np.float32)
-            #     for i in range(frame_count):
-            #         frames[i] = self.img_handle.loadFrame()
-            #         self.img_handle.nextFrame()
-            #     # Load all times
-            #     pick_frame_indices = np.array(list(self.pick_list.keys()), dtype=int)
-            #     times = np.array([(self.img_handle.frame_dt_dict[k]) for k in pick_frame_indices])
-
-            #     # Package data for ASTRA, from DetApp
-            #     if self.picks_origin == 'ecsv' or self.picks_origin == 'txt':
-            #         data_dict = {
-            #             "img_obj" : self.img_handle,
-            #             "frames" : frames,
-            #             "picks" : [[self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid']] for key in self.pick_list.keys()],
-            #             "pick_frame_indices" : pick_frame_indices,
-            #             "times" : times,
-            #             "picks_origin" : self.picks_origin
-            #         }
-            #     # Package data for ASTRA, from manual picks
-            #     else:
-            #         if len(self.pick_list.keys()) != 5:
-            #             print('ERROR: Re-run ASTRA when either DetApp picks are loaded, or using manual with the following instructions:')
-            #             print('1. Pick three frame-adjacent leading-edge picks at the highest SNR near middle of event')
-            #             print('2. Pick two the leading edge of the first and last frame of the event')
-            #             print(' NOTE: It is essential that the line outlined by the first and last picks perfectly intersect the meteor trajectory')
-            #             print('3. THEN, re-run ASTRA using CTRL + L')
-            #         else:
-            #             first_pick = self.pick_list[list(self.pick_list.keys())[0]][0:2]
-            #             last_pick = self.pick_list[list(self.pick_list.keys())[-1]][0:2]
-            #             middle_picks = [self.pick_list[key][0:2] for key in self.pick_list.keys()]
-            #             data_dict = {
-            #                 "img_obj" : self.img_handle,
-            #                 "frames" : frames,
-            #                 "first_pick" : first_pick,
-            #                 "last_pick" : last_pick,
-            #                 "middle_picks" : middle_picks,
-            #                 "pick_frame_indices" : pick_frame_indices,
-            #                 "times" : times,
-            #                 "picks_origin" : self.picks_origin
-            #             }
-
-            #     # Run ASTRA Auto-Picker
-            #     self.ASTRA_obj = ASTRA(data_dict, verbose=False, apply_kalman=False)
-            #     print('ASTRA Object Created! Processing beginning (30-80 seconds)...')
-            #     self.ASTRA_obj.process()
-            #     print('ASTRA Processing Complete!')
-            #     pick_frame_indices = self.ASTRA_obj.pick_frame_indices
-            #     global_picks = self.ASTRA_obj.global_picks  
-            #     snrs = self.ASTRA_obj.snr 
-            #     self.picks_origin = 'astra' 
-
-            #     # Add ASTRA picks to the pick list
-            #     self.clearAllPicks()  # Clear previous picks
-            #     for i in range(len(global_picks)):
-            #         self.addCentroid(frame=pick_frame_indices[i], 
-            #                          x_centroid=global_picks[i][0],
-            #                          y_centroid=global_picks[i][1],
-            #                          snr=snrs[i])
-            #     self.updatePicks()
-            #     print(f'Loaded {len(pick_frame_indices)} Picks from ASTRA! Minimum SNR of 10')
-
-
-
             elif event.key() == QtCore.Qt.Key_K and (modifiers == QtCore.Qt.ControlModifier):
                 # ASTRA Addition - Justin DT
 
@@ -4025,33 +3954,60 @@ class PlateTool(QtWidgets.QMainWindow):
         
     def load_picks_from_file(self, config):
 
+        # Unpack file path
         file_path = config["file_path"]
 
+        # Check if the file path exists
         if not os.path.exists(file_path):
             print(f'ERROR: No Valid ECSV or .txt file selected')
             return
-
-        if file_path.endswith('.ecsv'):
-            self.clearAllPicks()  # Clear previous picks
-            picks, pick_frame_indices = self.loadECSV(file_path)
-            for i in range(len(pick_frame_indices)):
-                self.pick_list[pick_frame_indices[i]] = picks[i]
-                self.tab.debruijn.modifyRow(pick_frame_indices[i], 1)
-                self.updateGreatCircle()
-                print(f'Added centroid at ({picks[i]["x_centroid"]}, {picks[i]["y_centroid"]}) on frame {pick_frame_indices[i]}')
-            self.updatePicks()
         
-        if file_path.endswith('.txt'):
-            self.clearAllPicks()  # Clear previous picks
-            picks, pick_frame_indices = self.loadTXT(file_path)
-            for i in range(len(pick_frame_indices)):
-                self.pick_list[pick_frame_indices[i]] = picks[i]
-                self.tab.debruijn.modifyRow(pick_frame_indices[i], 1)
-                self.updateGreatCircle()
-                print(f'Added centroid at ({picks[i]["x_centroid"]}, {picks[i]["y_centroid"]}) on frame {pick_frame_indices[i]}')
-            self.updatePicks()
+        # Check if the file camera code matches the frames loaded
 
-        print(f'Loaded {len(pick_frame_indices)} picks from {file_path}!')
+        # Open ECSV
+        if file_path.endswith('.ecsv'):
+
+            # Create a temp pick_list
+            pick_list = {}
+
+            # Load the picks and indices from loadECSV
+            pick_list = self.loadECSV(file_path)
+
+        if file_path.endswith('.txt'):
+            
+            # Create a temp pick_list
+            pick_list = {}
+
+            # Load all picks and indices from loadTXT
+            pick_list = self.loadTXT(file_path)
+
+        # Check if the returned values from load are None
+        if pick_list is None:
+            return # Warning was raised in loadTXT/loadECSV
+
+        # Check if the pick list is empty
+        if pick_list == {}:
+            qmessagebox(
+                title='Pick Load Error',
+                message=f'No picks loaded from {file_path}',
+                message_type="error"
+            )
+            return
+
+        # Update the main pick list & GUI
+        self.clearAllPicks()
+        self.pick_list = pick_list
+        self.updateGreatCircle()
+
+        # Print out added centroids
+        for i, k in enumerate(pick_list.keys()):
+            self.tab.debruijn.modifyRow(k, 1)
+            print(f'Added centroid at ({pick_list[k]["x_centroid"]}, {pick_list[k]["y_centroid"]}) on frame {k}')
+        
+        # Finally update the GUI picks
+        self.updatePicks()
+
+        print(f'Loaded {len(pick_list.keys())} picks from {file_path}!')
 
     def prepare_astra_data(self, config):
         if self.pick_list == {}:
@@ -4207,27 +4163,68 @@ class PlateTool(QtWidgets.QMainWindow):
         picks = [] # (N, x, y) array of picks
         pick_frame_indices = [] # (N,) array of frame indices
 
-        # Opens and pareses pick file
-        with open(txt_file_path, 'r') as file:
-            for line in file:
-                if line.strip() and not line.startswith('#'):
-                    parts = line.split()
-                    frame_number = int(parts[0])
-                    cx, cy = float(parts[4]), float(parts[5])
-                    
-                    picks.append({
-                        'x_centroid': cx,
-                        'y_centroid': cy,
-                        'mode' : 1,
-                        'intensity_sum' : 1,
-                        'photometry_pixels' : None,
-                        'background_intensity' : 0,
-                        'snr' : 1,
-                        'saturated' : False,
-                    })
-                    pick_frame_indices.append(frame_number)
+        # Temp bool to extract header line
+        first_bool = False
 
-        return np.array(picks), np.array(pick_frame_indices)
+        # Wrap in try except for uncaught errors
+        try:
+            # Opens and pareses pick file
+            with open(txt_file_path, 'r') as file:
+                for i, line in enumerate(file):
+                    if line.strip() and not line.startswith('#'):
+
+                        # Clean the line
+                        line = [part.strip() for part in line.split() if part]
+
+                        # Unpack the header
+                        if first_bool == False:
+                            first_bool = True
+
+                            # Unpack header info
+                            column_names = [part.strip() for part in temp_line.split()[1:] if part]
+
+                            # Extract indices
+                            frame_number_idx = column_names.index('fr') if 'fr' in column_names else None
+                            x_centroid_idx = column_names.index('cx') if 'cx' in column_names else None
+                            y_centroid_idx = column_names.index('cy') if 'cy' in column_names else None
+
+                            # Raise error if not found in txt file
+                            if frame_number_idx is None or x_centroid_idx is None or y_centroid_idx is None:
+                                qmessagebox(title="TXT File Format Error", 
+                                            message="TXT file must contain 'fr', 'cx', and 'cy' columns.",
+                                            message_type="error")
+                                return None
+                        
+                        else:
+                            # Unpack the pick
+                            frame_number = int(line[frame_number_idx])
+                            cx, cy = float(line[x_centroid_idx]), float(line[y_centroid_idx])
+
+                            picks.append({
+                                'x_centroid': cx,
+                                'y_centroid': cy,
+                                'mode' : 1,
+                                'intensity_sum' : 1,
+                                'photometry_pixels' : None,
+                                'background_intensity' : 0,
+                                'snr' : 1,
+                                'saturated' : False,
+                            })
+                            pick_frame_indices.append(frame_number)
+
+                    # Store a temp line to hit previous for col names
+                    temp_line = line
+
+            # Pack picks in self.pick_list format
+            pick_list = {frame: pick for frame, pick in zip(pick_frame_indices, picks)}
+
+            return pick_list
+
+        except Exception as e:
+            qmessagebox(title="File Read Error", 
+                        message=f"Unknown Error reading TXT file, check correct file loaded.: {str(e)}",
+                        message_type="error")
+            return None
 
     def loadECSV(self, ECSV_file_path):
         # ASTRA Addition - Justin DT
@@ -4241,57 +4238,108 @@ class PlateTool(QtWidgets.QMainWindow):
             mags (np.ndarray): (N,) array of magnitudes for each pick
         """
 
+        # Instantiate arrays to be populated
         picks = []  # N x args_dict array for addCentroid
-        picks = []
         pick_frame_indices = []  # (N,) array of frame indices
         pick_frame_times = []  # (N,) array of frame times
 
-        # Opens and parses the ECSV file
-        with open(ECSV_file_path, 'r') as file:
-            reader = csv.DictReader(file)
-            temp_bool = False
-            for i, row in enumerate(reader):
-                if None in row.keys() and isinstance(row[None], list) and len(row[None]) > 9:
-                    if temp_bool == False:
-                        temp_bool = True
-                        column_names = list(row[None])
-                        x_ind = column_names.index('x_image')
-                        y_ind = column_names.index('y_image')
-                        background_ind = column_names.index('background_pixel_value')
-                        sat_ind = column_names.index('saturated_pixels')
-                        snr_ind = column_names.index('snr')
+        # wrap in try except to catch unknown errors
+        try:
+            # Opens and parses the ECSV file
+            with open(ECSV_file_path, 'r') as file:
+
+                # Read the file contents
+                contents = file.readlines()
+        
+                # Temp bool to get the column names
+                first_bool = False
+
+                # Process the contents
+                for line in contents:
+
+                    # Clean the line
+                    line = [part.strip() for part in line.split(',') if part]
+
+                    # Skip header lines
+                    if line[0].startswith('#'):
                         continue
-                    
-                    picks.append({
-                        'x_centroid': float(row[None][x_ind]),
-                        'y_centroid': float(row[None][y_ind]),
-                        'mode': 1,  # Assuming mode 1 for centroiding
-                        'intensity_sum' : 1,
-                        'photometry_pixels': None,  # Assuming no photometry pixels for ECSV
-                        'background_intensity': float(row[None][background_ind]),
-                        'saturated': bool(row[None][sat_ind]),
-                        'snr': float(row[None][snr_ind]),
-                    })
-                    pick_frame_times.append(datetime.datetime.fromisoformat(row['# %ECSV 0.9']))
-                else:
-                    continue
-        # Converts times into frame indices, accounting for floating-point errors
-        pick_frame_indices = []
-        for time in pick_frame_times:
-            try:
-                pick_frame_indices.append(self.img_handle.frame_dt_list.index(time))
-            except ValueError:
+
+                    if first_bool == False:
+                        # Set first bool to True so header is not unpacked twice
+                        first_bool = True
+
+                        # Unpack column names
+                        column_names = line
+
+                        # Map column names to their indices
+                        pick_frame_times_idx = column_names.index('datetime') if 'datetime' in column_names else None
+                        x_ind = column_names.index('x_image') if 'x_image' in column_names else None
+                        y_ind = column_names.index('y_image') if 'y_image' in column_names else None
+                        background_ind = column_names.index('background_pixel_value') if 'background_pixel_value' in column_names else None
+                        sat_ind = column_names.index('saturated_pixels') if 'saturated_pixels' in column_names else None
+                        snr_ind = column_names.index('snr') if 'snr' in column_names else None
+
+                        # Ensure essential values are in the ECSV
+                        if x_ind is None or y_ind is None or pick_frame_times_idx is None:
+                            qmessagebox(title="ECSV File Format Error", 
+                                        message="ECSV file must contain 'x_image', 'y_image', and 'datetime' columns.",
+                                        message_type="error")
+                            return None
+
+                        continue
+
+                    else:
+                        # Unpack line
+
+                        # Populate arrays
+                        cx, cy = float(line[x_ind]), float(line[y_ind])
+                        background = float(line[background_ind]) if background_ind is not None else 0
+                        saturated = bool(line[sat_ind]) if sat_ind is not None else False
+                        snr = float(line[snr_ind]) if snr_ind is not None else 1
+                        pick_frame_times.append(datetime.datetime.strptime(line[pick_frame_times_idx], '%Y-%m-%dT%H:%M:%S.%f'))
+
+                        # Load in pick parameters, use default for other values
+                        picks.append({
+                            'x_centroid': cx,
+                            'y_centroid': cy,
+                            'mode': 1,
+                            'intensity_sum': 1,
+                            'photometry_pixels': None,
+                            'background_intensity': background,
+                            'snr': snr,
+                            'saturated': saturated,
+                        })
+
+            # Converts times into frame indices, accounting for floating-point errors
+            pick_frame_indices = []
+            for time in pick_frame_times:
                 try:
-                    # Account for floating-point errors by replacing the time with a close match
-                    pick_frame_indices.append(self.img_handle.frame_dt_list.index(time + datetime.timedelta(microseconds=1)))
+                    pick_frame_indices.append(self.img_handle.frame_dt_list.index(time))
                 except ValueError:
                     try:
-                        pick_frame_indices.append(self.img_handle.frame_dt_list.index(time - datetime.timedelta(microseconds=1)))
+                        # Account for floating-point errors by replacing the time with a close match
+                        pick_frame_indices.append(self.img_handle.frame_dt_list.index(time + datetime.timedelta(microseconds=1)))
                     except ValueError:
-                        raise ValueError(f'Time {time} not found in frame_dt_list. Please check the time format or the frame_dt_list.')
+                        try:
+                            pick_frame_indices.append(self.img_handle.frame_dt_list.index(time - datetime.timedelta(microseconds=1)))
+                        except ValueError:
+                            raise ValueError(f'Time {time} not found in frame_dt_list. Please check the time format or the frame_dt_list.')
 
+            # if arrays are different dimensions raise error
+            if len(picks) != len(pick_frame_indices):
+                qmessagebox(title="Pick/Frame Index Mismatch",
+                            message="Mismatch between number of picks and frame indices. Please check the ECSV file for frame-time mismatch errors.",
+                            message_type="error")
+                return None
 
-        return picks, np.array(pick_frame_indices)
+            pick_list = {frame: pick for frame, pick in zip(pick_frame_indices, picks)}
+
+            return pick_list
+        except Exception as e:
+            qmessagebox(title='File Read Error',
+                        message=f"Unknown Error reading TXT file, check correct file loaded.: {str(e)}",
+                        message_type="error")
+            return None
 
 
 

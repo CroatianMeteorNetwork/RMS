@@ -3,7 +3,8 @@ import os
 import csv
 import numpy as np
 import scipy.optimize
-import scipy
+import scipy.stats
+import scipy.special
 from RMS.Routines.Image import signalToNoise
 from pyswarms.single.global_best import GlobalBestPSO
 import shutil
