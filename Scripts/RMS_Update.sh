@@ -964,6 +964,9 @@ main() {
     # Change to RMS directory for git operations
     cd "$RMSSOURCEDIR" || { print_status "error" "RMS source directory not found. Exiting."; exit 1; }
 
+    # Create recovery script immediately (before ANY git operations that might change RMS_Update.sh)
+    create_recovery_script
+
     # Check Git configuration first
     check_git_setup
 
@@ -1102,9 +1105,6 @@ main() {
         switch_branch_interactive
         print_status "info" "Target branch: $RMS_BRANCH (interactive selection)"
     fi
-
-    # Create recovery script BEFORE we modify anything
-    create_recovery_script
 
     #######################################################
     ################ DANGER ZONE START ####################
