@@ -8,6 +8,7 @@ import ephem
 import Utils.CameraControl as cc
 from RMS.Logger import getLogger
 from RMS.Misc import RmsDateTime
+from Scripts.ManageCameraBrightness import manageCameraBrightness
 
 # Get the logger from the main module
 log = getLogger("logger")
@@ -39,6 +40,9 @@ def switchCameraMode(config, daytime_mode, camera_mode_switch_trigger):
 
         if mode_name not in modes:
             raise KeyError("Mode '{}' not defined in {}.".format(mode_name, mode_path))
+
+        # Ensure brightness settings are correct for day/night modes
+        manageCameraBrightness(mode_path)
 
         try:
             cc.cameraControlV2(config, "SwitchMode", mode_name)

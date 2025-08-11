@@ -1193,16 +1193,6 @@ main() {
         fi
     done
     
-    # Manage camera brightness settings for day/night modes
-    if [ -f "$CURRENT_CAMERA_SETTINGS" ]; then
-        print_status "info" "Managing camera brightness settings for day/night modes..."
-        if python3 "$RMSSOURCEDIR/Scripts/ManageCameraBrightness.py" "$CURRENT_CAMERA_SETTINGS"; then
-            print_status "success" "Camera brightness settings configured for day/night modes"
-        else
-            print_status "warning" "Camera brightness management completed with warnings"
-        fi
-    fi
-    
     print_status "success" "All configuration files verified after restore"
 
     # Mark custom files backup/restore cycle as completed

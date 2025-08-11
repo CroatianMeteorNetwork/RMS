@@ -18,6 +18,9 @@ import os
 import shutil
 import re
 from typing import Dict, List, Any, Optional, Tuple
+from RMS.Logger import getLogger
+
+log = getLogger("logger")
 
 SKIP_COMPARE_PREFIXES = {
     "CameraTime",
@@ -203,7 +206,7 @@ def manageCameraBrightness(camera_settings_path: str) -> bool:
     """
     
     if not os.path.exists(camera_settings_path):
-        print(f"Error: Camera settings file not found: {camera_settings_path}")
+        log.error(f"Camera settings file not found: {camera_settings_path}")
         return False
     
     # Read the current camera settings
@@ -211,27 +214,26 @@ def manageCameraBrightness(camera_settings_path: str) -> bool:
         with open(camera_settings_path, 'r') as f:
             settings = json.load(f)
     except (json.JSONDecodeError, IOError) as e:
-        print(f"Error reading camera settings file: {e}")
+        log.error(f"Reading camera settings file: {e}")
         return False
     
     # Check if required sections exist
     if 'init' not in settings:
-        print("Error: 'init' section not found in camera_settings.json")
+        log.error("'init' section not found in camera_settings.json")
         return False
     
     # Find the original SetColor command in init section
     init_setcolor = findSetColorCommand(settings['init'])
     if not init_setcolor:
-        print("Warning: No SetColor command found in 'init' section")
-        print("Cannot determine user's custom brightness value")
+        log.warning("No SetColor command found in 'init' section - cannot determine user's custom brightness value")
         return False
     
     init_setcolor_index, original_brightness = init_setcolor
     original_command = settings['init'][init_setcolor_index][1]  # Full parameter string
     remaining_values = ','.join(original_command.split(',')[1:])  # Everything after brightness
     
-    print(f"Found original brightness setting: {original_brightness}")
-    print(f"Original SetColor parameters: {original_command}")
+    log.debug(f"Found original brightness setting: {original_brightness}")
+    log.debug(f"Original SetColor parameters: {original_command}")
     
     modifications_made = False
     
@@ -245,15 +247,15 @@ def manageCameraBrightness(camera_settings_path: str) -> bool:
             # Add SetColor with brightness=50 for day mode
             day_setcolor_cmd = createSetColorCommand("50", remaining_values)
             day_commands.insert(daynight_index, day_setcolor_cmd)
-            print("Added day brightness setting (brightness=50)")
+            log.info("Added day brightness setting (brightness=50)")
             modifications_made = True
         elif day_setcolor:
             day_brightness = day_setcolor[1]
-            print(f"Day section already has SetColor with brightness={day_brightness}")
+            log.debug(f"Day section already has SetColor with brightness={day_brightness}")
         else:
-            print("Warning: Could not find DayNightColor in day section to insert SetColor")
+            log.warning("Could not find DayNightColor in day section to insert SetColor")
     else:
-        print("Warning: 'day' section not found in camera_settings.json")
+        log.warning("'day' section not found in camera_settings.json")
     
     # Process night section
     if 'night' in settings:
@@ -265,31 +267,28 @@ def manageCameraBrightness(camera_settings_path: str) -> bool:
             # Add SetColor with original brightness for night mode
             night_setcolor_cmd = createSetColorCommand(original_brightness, remaining_values)
             night_commands.insert(daynight_index, night_setcolor_cmd)
-            print(f"Added night brightness setting (brightness={original_brightness})")
+            log.info(f"Added night brightness setting (brightness={original_brightness})")
             modifications_made = True
         elif night_setcolor:
             night_brightness = night_setcolor[1]
             if night_brightness != original_brightness:
-                print(f"Note: Night brightness ({night_brightness}) differs from init brightness ({original_brightness})")
+                log.info(f"Night brightness ({night_brightness}) differs from init brightness ({original_brightness})")
             else:
-                print(f"Night section already has correct SetColor with brightness={night_brightness}")
+                log.debug(f"Night section already has correct SetColor with brightness={night_brightness}")
         else:
-            print("Warning: Could not find DayNightColor in night section to insert SetColor")
+            log.warning("Could not find DayNightColor in night section to insert SetColor")
     else:
-        print("Warning: 'night' section not found in camera_settings.json")
+        log.warning("'night' section not found in camera_settings.json")
     
     # Check for proper day/night transitions
     if 'day' in settings and 'night' in settings:
         setting_warnings = compareSettings(settings['init'], settings['day'], settings['night'])
         if setting_warnings:
-            print("\n⚠️  Configuration Warnings:")
-            print("Day/Night transition issues detected:")
+            log.warning("Day/Night transition issues detected:")
             for warning in setting_warnings:
-                print(f"  • {warning}")
-            print("\nThese issues may prevent proper day/night transitions.")
-            print("Night should reset any parameters that day modifies back to their init values.")
+                log.warning(f"  {warning}")
         else:
-            print("✓ Day/night transitions look correct - night properly resets day's changes")
+            log.debug("Day/night transitions look correct - night properly resets day's changes")
     
     # Write back the modified settings if changes were made
     if modifications_made:
@@ -297,18 +296,18 @@ def manageCameraBrightness(camera_settings_path: str) -> bool:
             # Create backup
             backup_path = camera_settings_path + '.backup'
             shutil.copy2(camera_settings_path, backup_path)
-            print(f"Created backup: {backup_path}")
+            log.debug(f"Created backup: {backup_path}")
             
             # Write modified settings with original compact format
             with open(camera_settings_path, 'w') as f:
                 f.write(formatCameraSettingsJson(settings))
-            print(f"Updated camera settings: {camera_settings_path}")
+            log.info(f"Updated camera settings: {camera_settings_path}")
             
         except IOError as e:
-            print(f"Error writing camera settings file: {e}")
+            log.error(f"Writing camera settings file: {e}")
             return False
     else:
-        print("No modifications needed - brightness settings already configured correctly")
+        log.debug("No modifications needed - brightness settings already configured correctly")
     
     return True  # Return True for success (whether modified or not)
 
