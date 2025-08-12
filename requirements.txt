@@ -27,3 +27,4 @@ wheel>=0.30.0
 setuptools>=40.0.0
 ifaddr; sys_platform =="win32"
 PyGObject<=3.50; python_version >= '3.6'
+rawpy; (sys_platform == "win32") or (sys_platform == "darwin") or (sys_platform == "linux" and platform_machine in ["x86_64","aarch64"])
