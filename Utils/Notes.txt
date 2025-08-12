@@ -1,18 +1,18 @@
 TODO:
     GENERAL:
-
+        -Put sidebar button to open Astra
+        -Add option to save ASTRA animation
     ASTRA:
         -Improve SNR calculation using SkyFit2 functions   
             -If does not improve star masking issues, bridge gaps with kalman
-        -Use LaTeX for titles
-        -Hover-over parameter descriptions
-        -Add flexibility for multiple manual picks, generally make more robust.
-        -remove load points button, make auto when selecting ECSV
         -run computeintensitysum() etc after running ASTRA/Kalman
         -Look into correcting photometry pixels post-kalman filter
     KALMAN:
-        -Remove accelration option in GUI
-        -Use median residuals from accel model to create measurement cov. matrix
-        -Expose process cov matrix in GUI, default 0.1
+
     PIPELINE:
         -look into replaceing SNR rejection with model residuals and SNR mix
+
+
+NOTE:
+    -in future versions ASTRA can be configued to run multiple passes to improve quality in low-pick events
+    -getting warnings during ani saving that matplotlib will likely fail out of thread, no errors encountered though.

@@ -22,13 +22,22 @@ class AstraConfigDialog(QDialog):
         main_layout = QVBoxLayout()
 
         # === Kick-start method selection ===
-        pick_method_group = QGroupBox("KICK START MODE")
+        pick_method_group = QGroupBox("INFO & PICK LOADING")
         pick_layout = QVBoxLayout()
-        self.pick_method_combo = QComboBox()
-        self.pick_method_combo.addItems(["ECSV / txt", "Manual"])
-        self.pick_method_combo.currentIndexChanged.connect(self.toggle_file_button)
-        pick_layout.addWidget(self.pick_method_combo)
 
+        intro_label = QLabel(
+            "<b>ASTRA: Astrometric Streak Tracking and Refinement Algorithm</b> <br> ASTRA is an algoritm for automating manual EMCCD picking/photometry, and can also be used to refine manual picks/photometry."
+        )
+        intro_label.setWordWrap(True)
+        intro_label.setAlignment(Qt.AlignCenter)
+        pick_layout.addWidget(intro_label)
+
+        info_label = QLabel(
+            "<b>ASTRA requires (at least) 3 frame-adjacent leading-edge picks at a good-SNR section AND 2 leading edge picks at the frames marking the start/end of the event. These can be loaded through ECSV/txt files, or done manually.</b> <br> Hover over parameters and READY/NOT READY icons for info."
+        )
+        info_label.setWordWrap(True)
+        info_label.setAlignment(Qt.AlignCenter)
+        pick_layout.addWidget(info_label)
         self.file_picker_button = QPushButton("SELECT ECSV/TXT FILE")
         self.file_picker_button.clicked.connect(self.select_file)
         pick_layout.addWidget(self.file_picker_button)
@@ -47,41 +56,39 @@ class AstraConfigDialog(QDialog):
         }
         
         def to_html_math(s: str) -> str:
-            # escape first, we’ll insert our own tags
             t = html.escape(s)
 
-            # 1) greek name → symbol (word boundaries; case-sensitive map above)
-            for name, sym in _GREEK.items():
-                t = re.sub(rf'\b{re.escape(name)}\b', sym, t)
-
-            # 2) underscores → <sub>…</sub>, e.g., sigma_i -> σ<sub>i</sub>, Med_err -> Med<sub>err</sub>
-            # handles multiple: a_b_c -> a<sub>b</sub><sub>c</sub>
+            # 1) underscores → HTML subscript tags
             def _subber(m):
                 base = m.group(1)
                 subs = m.group(2)
-                # split on underscores inside the suffix and nest subs
-                out = base
-                for part in subs.split('_'):    
-                    out += f'<sub>{part}</sub>'
-                return out
+                for part in subs.split('_'):
+                    base += f'<sub>{part}</sub>'
+                return base
             t = re.sub(r'([A-Za-zΑ-Ωα-ω]+)_([A-Za-z0-9_]+)', _subber, t)
 
-            # 3) simple power like ^2 → <sup>2</sup>
+            # 2) greek conversion inside and outside subscripts
+            for name, sym in _GREEK.items():
+                # Replace in normal text
+                t = re.sub(rf'\b{re.escape(name)}\b', sym, t)
+                # Replace inside <sub>...</sub>
+                t = re.sub(rf'(<sub>){re.escape(name)}(</sub>)', rf'\1{sym}\2', t)
+
+            # 3) superscripts
             t = re.sub(r'\^([0-9]+)', r'<sup>\1</sup>', t)
 
-            # 4) replace ASCII ranges like (0-1) → [0, 1] (purely cosmetic)
+            # 4) cosmetic replace for (0-1)
             t = t.replace('(0-1)', '[0, 1]')
 
-            # Tell Qt “this is rich text” by starting with a tag
-            return f'<span>{t}</span>'
+            return t
 
         def add_grid_fields(field_dict, defaults, title, tooltips=None):
             group = QGroupBox(title)
             layout = QGridLayout()
             tts = tooltips or {}
             for idx, (key, default) in enumerate(defaults.items()):
-                key_html = to_html_math(key)                 # pretty label text
-                label = QLabel(f"{key_html}:")
+                key_html = to_html_math(key)                 
+                label = QLabel(key_html.replace('</span></body></html>', ':</span></body></html>'))
                 # tooltips: format if present
                 tt_raw = tts.get(key, "")
                 tt_html = to_html_math(tt_raw) if tt_raw else ""
@@ -101,54 +108,55 @@ class AstraConfigDialog(QDialog):
         # === PSO Settings ===
         self.pso_fields = {}
         pso_defaults = {
-            "w (0-1)": "0.9", "c1 (0-1)": "0.4", "c2 (0-1)": "0.3",
-            "m_iter": "100", "n_par": "100", "Vc (0-1)": "0.3",
-            "ftol": "1e-4", "ftol_iter": "25", "expl_c": "3", "P_sigma": "3"
+            "w (0-1)": "0.9", "c_1 (0-1)": "0.4", "c_2 (0-1)": "0.3",
+            "max itter": "100", "n_particles": "100", "V_c (0-1)": "0.3",
+            "ftol": "1e-4", "ftol_itter": "25", "expl_c": "3", "P_sigma": "3"
         }
 
         # === ASTRA General Settings ===
         self.astra_fields = {}
         astra_defaults = {
-            "O_sigma": "3", "m_SNR": "5",
-            "P_c": "1.5", "sigma_i (px)": "2", "sigma_m": "1.2",
-            "L_m": "1.5", "VERB": "False", "P_thresh" : "0.65"
+            "star_thresh": "3", "min SNR": "5",
+            "P_crop": "1.5", "sigma_init (px)": "2", "sigma_max": "1.2",
+            "L_max": "1.5", "Verbose": "False", "photom_thresh" : "0.65", "Save Animation": "False"
         }
 
         # === Kalman Filter Settings ===
         self.kalman_fields = {}
         kalman_defaults = {
-            "Monotonicity": "True", "Use_Accel": "True", "Med_err (px)": "0.3"
+            "Monotonicity": "True", "sigma_xy (px)": "0.1", "sigma_vxy (%) [0,1]": "0.001"
         }
 
         # === PARAMETER GUIDE ===
         PSO_TT = {
-            "w (0-1)": "PSO inertia (exploration vs exploitation). Higher = more exploration.",
-            "c1 (0-1)": "Cognitive weight (pull to particle’s best).",
-            "c2 (0-1)": "Social weight (pull to global best).",
-            "m_iter": "Maximum PSO iterations.",
-            "n_par": "Number of particles.",
-            "Vc (0-1)": "Max velocity as fraction of bound width.",
-            "ftol": "Stop when objective change < ftol.",
-            "ftol_iter": "Consecutive iters below ftol to stop.",
-            "expl_c": "Initial seeding spread coefficient.",
-            "P_sigma": "Second-pass bound looseness for local fitting."
+            "w (0-1)": "PSO particle inertia. Higher = more exploration.",
+            "c_1 (0-1)": "Cognitive weight (pull to particle’s best).",
+            "c_2 (0-1)": "Social weight (pull to global best).",
+            "max itter": "Maximum PSO iterations.",
+            "n_particles": "Number of PSO particles.",
+            "V_c (0-1)": "Max velocity as fraction of parameter range.",
+            "ftol": "Stop when objective change % < ftol.",
+            "ftol_itter": "Minimum consecutive iters below ftol to stop.",
+            "expl_c": "Initial seeding spread coefficient. Higher = more exploration.",
+            "P_sigma": "Second-pass bound looseness for local fitting. Higher = looser bounds"
         }
 
         ASTRA_TT = {
-            "O_sigma": "Background mask threshold (σ above mean).",
-            "m_SNR": "Minimum SNR to keep a pick.",
-            "P_c": "Crop padding coefficient.",
-            "sigma_i (px)": "Initial Gaussian σ guess (px).",
-            "sigma_m": "Max σ multiplier (upper bound).",
-            "L_m": "Max length multiplier (upper bound).",
-            "P_thresh": "Photometry threshold (fraction of peak).",
-            "VERB": "Verbose logging (True/False)."
+            "star_thresh": "Background mask threshold (σ above mean).",
+            "min SNR": "Minimum SNR to keep a pick.",
+            "P_crop": "Crop padding coefficient.",
+            "sigma_init (px)": "Initial Gaussian σ guess (px).",
+            "sigma_max": "Max σ multiplier (upper bound).",
+            "L_max": "Max length multiplier (upper bound).",
+            "photom_thresh": "Luminosity threshold for photometry pixels (fraction of peak).",
+            "Verbose": "Verbose console logging (True/False).",
+            "Save Animation" : "Save animation showing fit, crop, and residuals for each frame."
         }
 
         KALMAN_TT = {
-            "Monotonicity": "Enforce monotonic motion along dominant axis.",
-            "Use_Accel": "Use constant-acceleration model (else CV).",
-            "Med_err (px)": "R at median SNR (px) — higher trusts model more."
+            "Monotonicity": "Enforce monotonic motion along dominant axis (True/False).",
+            "sigma_xy (px)": "STD of position estimate errors (px).",
+            "sigma_vxy (%) [0,1]": "STD of velocity estimate errors (px/frame)."
         }
 
         main_layout.addWidget(
@@ -165,31 +173,47 @@ class AstraConfigDialog(QDialog):
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        main_layout.addWidget(QLabel("Progress:"))
+        # Progress label and ASTRA status indicator
+        progress_status_layout = QHBoxLayout()
+        progress_label = QLabel("Progress:")
+        progress_status_layout.addWidget(progress_label)
+
+        # ASTRA status label and dot
+        self.astra_status_label = QLabel("ASTRA:")
+        self.astra_status_dot = QLabel()
+        
+        # Kalman status label and dot
+        self.kalman_status_label = QLabel("KALMAN:")
+        self.kalman_status_dot = QLabel()
+
+        # Place ASTRA and KALMAN status beside each other, right-aligned
+        progress_status_layout.addStretch()
+        progress_status_layout.addWidget(self.astra_status_label)
+        progress_status_layout.addWidget(self.astra_status_dot)
+        progress_status_layout.addSpacing(16)  # Optional: add space between ASTRA and KALMAN
+        progress_status_layout.addWidget(self.kalman_status_label)
+        progress_status_layout.addWidget(self.kalman_status_dot)
+
+        main_layout.addLayout(progress_status_layout)
         main_layout.addWidget(self.progress_bar)
 
         # === Control Buttons ===
         btn_layout = QHBoxLayout()
-        self.load_btn = QPushButton("LOAD PICKS")
         self.run_astra_btn = QPushButton("RUN ASTRA")
         self.run_kalman_btn = QPushButton("RUN KALMAN")
-        self.load_btn.clicked.connect(self.load_picks)
+        self.run_astra_btn = QPushButton("RUN ASTRA")
+        self.run_kalman_btn = QPushButton("RUN KALMAN")
         self.run_astra_btn.clicked.connect(self.start_astra_thread)
         self.run_kalman_btn.clicked.connect(self.start_kalman_thread)
-        btn_layout.addWidget(self.load_btn)
         btn_layout.addWidget(self.run_astra_btn)
         btn_layout.addWidget(self.run_kalman_btn)
         main_layout.addLayout(btn_layout)
 
+        # Now that buttons exist, set initial status
+        self.set_astra_status(False)  # Default to not ready (red)
+        self.set_kalman_status(False)  # Default to not ready (red)
+
         self.setLayout(main_layout)
-        self.toggle_file_button()
-
-    def toggle_file_button(self):
-        self.file_picker_button.setEnabled(self.pick_method_combo.currentText() == "ECSV / txt")
-
-    def toggle_load_button(self):
-        self.load_btn.setEnabled(self.pick_method_combo.currentText() == "ECSV / txt")
-
 
     def select_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -200,24 +224,66 @@ class AstraConfigDialog(QDialog):
         )
         if file_path:
             self.selected_file_label.setText(file_path)
+            self.store_config()
+            if self.load_picks_callback:
+                self.load_picks_callback(self.config)
+
+    def set_astra_status(self, ready, hover_text=""):
+        """
+        Sets the ASTRA status dot color: green if ready, red if not.
+        If ready == "WARN", sets color to yellow and text to READY.
+        Optionally sets a tooltip (hover text) to inform the user.
+        Disables the ASTRA button if not ready.
+        """
+        if ready == "WARN":
+            status_text = "READY"
+            color = "#FFC107"  # Yellow
+            enable_btn = True
+        else:
+            status_text = "READY" if ready else "NOT READY"
+            color = "#4CAF50" if ready else "#F44336"  # Green or Red
+            enable_btn = bool(ready)
+        self.astra_status_dot.setText(status_text)
+        self.astra_status_dot.setAlignment(Qt.AlignCenter)
+        self.astra_status_dot.setStyleSheet(
+            f"background-color: {color}; color: white; border-radius: 6px; min-width: 80px; min-height: 20px; max-height: 40px; font-weight: bold;"
+        )
+        self.astra_status_dot.setToolTip(hover_text or "")
+        self.run_astra_btn.setEnabled(enable_btn)
+
+    def set_kalman_status(self, ready, hover_text=""):
+        """
+        Sets the Kalman status dot color: green if ready, red if not.
+        Optionally sets a tooltip (hover text) to inform the user.
+        Disables the KALMAN button if not ready.
+        """
+
+        if ready == "WARN":
+            status_text = "READY"
+            color = "#FFC107"  # Yellow
+            enable_btn = True
+        else:
+            status_text = "READY" if ready else "NOT READY"
+            color = "#4CAF50" if ready else "#F44336"  # Green or Red
+            enable_btn = bool(ready)
+        self.kalman_status_dot.setText(status_text)
+        self.kalman_status_dot.setAlignment(Qt.AlignCenter)
+        self.kalman_status_dot.setStyleSheet(
+            f"background-color: {color}; color: white; border-radius: 6px; min-width: 80px; min-height: 20px; max-height: 40px; font-weight: bold;"
+        )
+        self.kalman_status_dot.setToolTip(hover_text or "")
+        self.run_kalman_btn.setEnabled(enable_btn)
 
     def update_progress(self, value):
         self.progress_bar.setValue(value)
     
-    def load_picks(self):
-        self.store_config()
-        if self.load_picks_callback:
-            self.load_picks_callback(self.config)
-
     def store_config(self):
         self.config = {
-            "pick_method": self.pick_method_combo.currentText(),
             "file_path": self.selected_file_label.text(),
             "pso": {k: v.text() for k, v in self.pso_fields.items()},
             "astra": {k: v.text() for k, v in self.astra_fields.items()},
             "kalman": {k: v.text() for k, v in self.kalman_fields.items()}
         }
-        print("Stored ASTRA Config:", self.config)
 
     def get_config(self):
         return self.config
@@ -244,7 +310,7 @@ class AstraConfigDialog(QDialog):
 
         self.run_astra_btn.setEnabled(False)
         self.run_kalman_btn.setEnabled(False)
-        self.load_btn.setEnabled(False)
+        self.file_picker_button.setEnabled(False)
 
         self.worker.progress.connect(self.update_progress)
 
@@ -262,9 +328,12 @@ class AstraConfigDialog(QDialog):
         
 
         # Restore interactivity
-        self.worker.finished.connect(lambda: self.run_astra_btn.setEnabled(True))
-        self.worker.finished.connect(lambda: self.run_kalman_btn.setEnabled(True))
-        self.worker.finished.connect(lambda: self.load_btn.setEnabled(True))
+        self.worker.finished.connect(lambda: self.file_picker_button.setEnabled(True))
+
+        # Restore interactivity if ASTRA/Kalman can run
+        self.worker.finished.connect(lambda: self.skyfit_instance.checkASTRACanRun())
+        self.worker.finished.connect(lambda: self.skyfit_instance.checkKalmanCanRun())
+
 
         self.thread.start()
 
@@ -274,11 +343,17 @@ class AstraConfigDialog(QDialog):
 
         self.run_kalman_btn.setEnabled(False)
         self.run_astra_btn.setEnabled(False)
+        self.file_picker_button.setEnabled(False)
 
         self.kalman_worker = KalmanWorker(self.skyfit_instance, self.config)
         self.kalman_worker.progress.connect(self.update_progress)
-        self.kalman_worker.finished.connect(lambda: self.run_kalman_btn.setEnabled(True))
-        self.kalman_worker.finished.connect(lambda: self.run_astra_btn.setEnabled(True))
+
+        # Restore interactivity
+        self.kalman_worker.finished.connect(lambda: self.file_picker_button.setEnabled(True))
+
+        # Restore interactivity if ASTRA/Kalman can run
+        self.kalman_worker.finished.connect(lambda: self.skyfit_instance.checkASTRACanRun())
+        self.kalman_worker.finished.connect(lambda: self.skyfit_instance.checkKalmanCanRun())
         self.kalman_worker.finished.connect(lambda: self.update_progress(100))
         self.kalman_worker.start()
 

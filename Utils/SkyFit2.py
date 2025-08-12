@@ -1895,7 +1895,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.pick_marker2.addPoints(pos=data1, size=10, pen=pick_color)
         self.pick_marker2.addPoints(pos=data2, size=10, pen=gap_color)
 
-
     def updateFitResiduals(self):
         """ Draw fit residual lines. """
 
@@ -3951,6 +3950,9 @@ class PlateTool(QtWidgets.QMainWindow):
             run_load_callback=self.load_picks_from_file,
             skyfit_instance=self
         )
+        # Update ASTRA/Kalman ready status
+        self.checkKalmanCanRun()
+        self.checkASTRACanRun()
         
     def load_picks_from_file(self, config):
 
@@ -4007,13 +4009,117 @@ class PlateTool(QtWidgets.QMainWindow):
         # Finally update the GUI picks
         self.updatePicks()
 
+        # Update Kalman/ASTRA Ready status if instance exists
+        if hasattr(self, 'astra_dialog') and self.astra_dialog is not None:
+            self.checkASTRACanRun()
+            self.checkKalmanCanRun()
+
+        # Send console and GUI updates
         print(f'Loaded {len(pick_list.keys())} picks from {file_path}!')
+        qmessagebox(
+            title='Picks Loaded Successfully',
+            message=f'Successfully loaded {len(pick_list.keys())} picks from {file_path}!',
+            message_type='info'
+        )
+
+    def checkKalmanCanRun(self):
+        """Checks if kalman filter can be run, updates astra GUI"""
+        # Unpack picks with non-None values
+        keys = np.array(
+            sorted(
+            k for k in self.pick_list.keys()
+            if (
+                self.pick_list[k].get('x_centroid') is not None
+                or self.pick_list[k].get('y_centroid') is not None
+            )
+            ),
+            dtype=int
+        )
+
+        # Enough points for a good run
+        if keys.size >= 5:  
+            tt = 'Ready to run.'
+            self.astra_dialog.set_kalman_status(True, tt)
+        # Minimum amount of points to run
+        elif keys.size >= 3:
+            tt = 'Ready to run. WARNING: Kalman should be generally run with at least 5 points.'
+            self.astra_dialog.set_kalman_status("WARN", tt)
+        # Not enough poinst to run
+        else:
+            tt = 'Not ready. Kalman requires at least 3 points (generally >= 5 points).'
+            self.astra_dialog.set_kalman_status(False, tt)
+
+
+    def checkASTRACanRun(self):
+        """Checks if ASTRA can be run, updates astra GUI"""
+
+        # Instantiate boolean vars
+        middle_points_bool = False
+        ending_points_bool = False
+        middle_includes_ends_bool = False
+        middle_includes_both_ends_bool = False
+
+        # Only include keys where x_centroid or y_centroid is not None
+        keys = np.array(
+            sorted(
+            k for k in self.pick_list.keys()
+            if (
+                self.pick_list[k].get('x_centroid') is not None
+                or self.pick_list[k].get('y_centroid') is not None
+            )
+            ),
+            dtype=int
+        )
+
+        if keys.size >= 3:
+
+            # True where [k[i], k[i+1], k[i+2]] are consecutive integers
+            triples = (keys[:-2] + 1 == keys[1:-1]) & (keys[:-2] + 2 == keys[2:])
+
+            # indices i that start a consecutive triple
+            i_triples = np.where(triples)[0]
+
+            # exclude triples that touch the first or last key in the whole list
+            # i == 0 uses the very first key; i+2 == len(keys)-1 uses the very last
+            inner = i_triples[(i_triples > 0) & (i_triples + 2 < len(keys) - 1)]
+
+            middle_points_bool = inner.size > 0
+
+            middle_includes_ends_bool = i_triples.size > 0
+
+            if keys.size == 3 and middle_includes_ends_bool:
+                middle_includes_both_ends_bool = True
+
+        else:
+            middle_points_bool = False
+            middle_includes_ends_bool = False
+
+        ending_points_bool = True if (len(keys) >= 2 and keys[0] + 1 != keys[-1]) else False
+
+        if middle_includes_both_ends_bool:
+            tt = "Ready to run. WARNING: Three middle picks includes both endpoints, ASTRA will only process the three points"
+            self.astra_dialog.set_astra_status('WARN', tt)
+
+        elif middle_points_bool:
+            # Picks include three in middle, and two endpoints
+            tt = "Ready to run, there are at least three consecutive points and two endpoints"
+            self.astra_dialog.set_astra_status(True, tt)
+        
+        elif middle_includes_ends_bool:
+            # Picks include three in the middle, which are part of the endpoints
+            tt = "Ready to run. WARNING: Three consecutive middle points includes end-points - ASTRA will stop at either beginning/end of middle points."
+            self.astra_dialog.set_astra_status('WARN', tt)
+        
+        else:
+            if ending_points_bool:
+                tt = "Not ready. End points selected, please pick three consecutive frames at high-SNR."
+                self.astra_dialog.set_astra_status(False, tt)
+            else:
+                tt = "Not ready. Select three consecutive frames at high SNR, and the start/end frames of the streak"
+                self.astra_dialog.set_astra_status(False, tt)
 
     def prepare_astra_data(self, config):
-        if self.pick_list == {}:
-            print('ERROR: No picks loaded! Please load picks from ECSV or TXT file, or use manual picks.')
-            return
-        
+
         print("Running ASTRA with:", config)
 
         # Sort pick list according to keys
@@ -4029,44 +4135,25 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img_handle.nextFrame()
         self.img_handle.setFrame(temp_curr_frame)  # Reset to the original frame
         # Load all times
-        pick_frame_indices = np.array(list(self.pick_list.keys()), dtype=int)
+        pick_frame_indices = np.array(
+            [key for key in self.pick_list.keys()
+             if self.pick_list[key]['x_centroid'] is not None and self.pick_list[key]['y_centroid'] is not None],
+            dtype=int
+        )
         times = np.array([(self.img_handle.frame_dt_dict[k]) for k in pick_frame_indices])
 
         # Package data for ASTRA, from DetApp
-        if config["pick_method"] == 'ECSV / txt':
-            if len(self.pick_list.keys()) <= 5:
-                print('ERROR: Not enough picks loaded! Please load at least 5 picks from ECSV or TXT file.')
-                return
-            data_dict = {
-                "img_obj" : self.img_handle,
-                "frames" : frames,
-                "picks" : [[self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid']] for key in self.pick_list.keys()],
-                "pick_frame_indices" : pick_frame_indices,
-                "times" : times,
-                "config" : config,
-                "saturation_threshold" : self.saturation_threshold
-            }
+        data_dict = {
+            "img_obj" : self.img_handle,
+            "frames" : frames,
+            "picks" : [[self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid']] for key in pick_frame_indices],
+            "pick_frame_indices" : pick_frame_indices,
+            "times" : times,
+            "config" : config,
+            "saturation_threshold" : self.saturation_threshold,
+            "data_path" : self.dir_path
+        }
         # Package data for ASTRA, from manual picks
-        else:
-            self.updatePicks()
-            if len(self.pick_list.keys()) != 5:
-                print('ERROR: Re-run ASTRA when either DetApp picks are loaded, or using manual with the following instructions:')
-                print('1. Pick three frame-adjacent leading-edge picks at the highest SNR near middle of event')
-                print('2. Pick two the leading edge of the first and last frame of the event')
-                print(' NOTE: It is essential that the line outlined by the first and last picks perfectly intersect the meteor trajectory')
-                print('3. THEN, re-run ASTRA')
-                return False
-            else:
-                middle_picks = [[self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid']] for key in self.pick_list.keys()]
-                data_dict = {
-                    "img_obj" : self.img_handle,
-                    "frames" : frames,
-                    "middle_picks" : middle_picks,
-                    "pick_frame_indices" : pick_frame_indices,
-                    "times" : times,
-                    "config" : config,
-                    "saturation_threshold" : self.saturation_threshold
-                }
 
         return data_dict
 
@@ -4098,7 +4185,18 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateGreatCircle()
             print(f'Added centroid at ({pick["x_centroid"]}, {pick["y_centroid"]}) on frame {pick_frame_indices[i]}')
         self.updatePicks()
-        print(f'Loaded {len(pick_frame_indices)} Picks from ASTRA! Minimum SNR of {config["astra"]["m_SNR"]}')
+
+        # Update Kalman/ASTRA Ready status if instance exists
+        if hasattr(self, 'astra_dialog') and self.astra_dialog is not None:
+            self.checkASTRACanRun()
+            self.checkKalmanCanRun()
+
+        # Print and open dialog showing ASTRA has been run
+        print(f'Loaded {len(pick_frame_indices)} Picks from ASTRA! Minimum SNR of {config["astra"]["min SNR"]}')
+
+        qmessagebox(title="ASTRA Finished Processing",
+                    message=f'Loaded {len(pick_frame_indices)} Picks from ASTRA! Minimum SNR of {config["astra"]["min SNR"]}',
+                    message_type='info')
 
     def run_kalman_from_config(self, config, progress_callback=None):
         print("Running Kalman with:", config)   
@@ -4106,35 +4204,33 @@ class PlateTool(QtWidgets.QMainWindow):
         # Sort pick list according to keys
         self.pick_list = dict(sorted(self.pick_list.items()))
 
-        pick_frame_indices = np.array(list(self.pick_list.keys()), dtype=int)
+        pick_frame_indices = np.array(
+            [key for key in self.pick_list.keys()
+             if self.pick_list[key]['x_centroid'] is not None and self.pick_list[key]['y_centroid'] is not None],
+            dtype=int
+        )
 
-        if hasattr(self, 'ASTRA_obj'):
-                xypicks, smooth_P = self.ASTRA_obj.runKalman()
-        else:
+        measurements = [(self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid']) for key in pick_frame_indices]
+        times = [self.img_handle.frame_dt_dict[key] for key in pick_frame_indices]
 
-            measurements = [(self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid']) for key in self.pick_list.keys()]
-            times = [self.img_handle.frame_dt_dict[key] for key in self.pick_list.keys()]
-            snr = [self.pick_list[key]['snr'] for key in self.pick_list.keys()]
-
-            # Dummy dict to instantiate ASTRA object
-            data_dict = {
-                "img_obj" : 0,
-                "frames" : [],
-                "picks" : [],
-                "pick_frame_indices" : np.array([]),
-                "times" : times,
-                "config" : config,
-                "middle_picks" : [],
-                "saturation_threshold" : self.saturation_threshold
-            }
+        # Dummy dict to instantiate ASTRA object
+        data_dict = {
+            "img_obj" : 0,
+            "frames" : [],
+            "picks" : [],
+            "pick_frame_indices" : np.array([]),
+            "times" : times,
+            "config" : config,
+            "middle_picks" : [],
+            "saturation_threshold" : self.saturation_threshold
+        }
 
 
-            tempASTRA = ASTRA(data_dict, progress_callback=progress_callback)
+        tempASTRA = ASTRA(data_dict, progress_callback=progress_callback)
 
-            xypicks, smooth_P = tempASTRA.runKalman(
-                measurements=measurements,
-                times=times,
-                snr=snr)
+        xypicks, smooth_P = tempASTRA.runKalman(
+            measurements=measurements,
+            times=times)
 
         print(f'Kalman filter applied to {len(xypicks)} picks!')   
         for i in range(len(pick_frame_indices)):
@@ -4147,7 +4243,17 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updatePicks()
         print(f'Loaded {len(pick_frame_indices)} picks from Kalman Smoothing!')
         print(f'Mean Kalman uncertainty (pixels): {np.mean(np.sqrt(smooth_P[:,0,0]))}, {np.mean(np.sqrt(smooth_P[:,1,1]))}')
-            
+        print(f'Median Kalman uncertainty (pixels): {np.median(np.sqrt(smooth_P[:,0,0]))}, {np.median(np.sqrt(smooth_P[:,1,1]))}')
+
+        # Update kalman/astra readiness if instance exists
+        if hasattr(self, 'astra_dialog') and self.astra_dialog is not None:
+            self.checkASTRACanRun()
+            self.checkKalmanCanRun()
+
+        # Open dialog box to show done
+        qmessagebox(title="Kalman Finished Processing",
+                    message=f'Loaded {len(pick_frame_indices)} Picks from Kalman Smoothing!',
+                    message_type='info')
 
     def loadTXT(self, txt_file_path):
         # ASTRA Addition - Justin DT
@@ -5353,6 +5459,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.updateGreatCircle()
 
+        # Update Kalman/ASTRA Ready status if instance exists
+        if hasattr(self, 'astra_dialog') and self.astra_dialog is not None:
+            self.checkASTRACanRun()
+            self.checkKalmanCanRun()
+
     def removeCentroid(self, frame):
         """
         Removes the pick from given frame if it is there
@@ -5371,6 +5482,12 @@ class PlateTool(QtWidgets.QMainWindow):
             self.pick_list[self.img.getFrame()]['y_centroid'] = None
             self.pick_list[self.img.getFrame()]['mode'] = None
             self.tab.debruijn.removeRow(frame)
+
+        # Update Kalman/ASTRA Ready status if instance exists
+        if hasattr(self, 'astra_dialog') and self.astra_dialog is not None:
+            self.checkASTRACanRun()
+            self.checkKalmanCanRun()
+
 
     def centroid(self, prev_x_cent=None, prev_y_cent=None):
         """ Find the centroid of the star clicked on the image. """
