@@ -55,6 +55,7 @@ from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
 import csv
 from .ASTRA import ASTRA
 from .ASTRA_GUI import launch_astra_gui, AstraConfigDialog, AstraWorker, KalmanWorker
+import copy
 
 
 class QFOVinputDialog(QtWidgets.QDialog):
@@ -3920,7 +3921,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             elif event.key() == QtCore.Qt.Key_K and (modifiers == QtCore.Qt.ControlModifier):
                 # ASTRA Addition - Justin DT
-
+                self.previous_picks = []
                 # Set saturation threshold as a class var
                 self.saturation_threshold = int(round(0.98*(2**self.config.bit_depth - 1)))
                 if hasattr(self, "astra_dialog"):
@@ -4010,6 +4011,20 @@ class PlateTool(QtWidgets.QMainWindow):
             )
             return
 
+        # Add previous picks to list
+        if np.array(
+            sorted(
+            k for k in self.pick_list.keys()
+            if (
+                self.pick_list[k].get('x_centroid') is not None
+                or self.pick_list[k].get('y_centroid') is not None
+            )
+            ),
+            dtype=int
+        ).size > 0:
+            # Deep copy to avoid storing references to mutable objects
+            self.previous_picks.append(copy.deepcopy(self.pick_list))
+
         # Update the main pick list & GUI
         self.clearAllPicks()
         self.pick_list = pick_list
@@ -4027,6 +4042,7 @@ class PlateTool(QtWidgets.QMainWindow):
         if hasattr(self, 'astra_dialog') and self.astra_dialog is not None:
             self.checkASTRACanRun()
             self.checkKalmanCanRun()
+            self.checkPickRevertCanRun()
 
         # Send console and GUI updates
         print(f'Loaded {len(pick_list.keys())} picks from {file_path}!')
@@ -4058,11 +4074,28 @@ class PlateTool(QtWidgets.QMainWindow):
         elif keys.size >= 3:
             tt = 'Ready to run. WARNING: Kalman should be generally run with at least 5 points.'
             self.astra_dialog.set_kalman_status("WARN", tt)
-        # Not enough poinst to run
+        # Not enough points to run
         else:
             tt = 'Not ready. Kalman requires at least 3 points (generally >= 5 points).'
             self.astra_dialog.set_kalman_status(False, tt)
 
+    def reverseASTRAPicks(self):
+        if not self.previous_picks == []:
+            old_picks = self.previous_picks.pop()
+            self.clearAllPicks()
+            for frame_num in old_picks.keys():
+                self.pick_list[frame_num] = old_picks[frame_num]
+                self.tab.debruijn.modifyRow(frame_num, 1)
+            self.updateGreatCircle()
+            self.updatePicks()
+            print(f'Reverted picks to previous state with {len(old_picks.keys())} picks.')
+        self.checkPickRevertCanRun()
+            
+    def checkPickRevertCanRun(self):
+        if self.previous_picks == []:
+            self.astra_dialog.set_revert_status(False)
+        else:
+            self.astra_dialog.set_revert_status(True)
 
     def checkASTRACanRun(self):
         """Checks if ASTRA can be run, updates astra GUI"""
@@ -4184,6 +4217,20 @@ class PlateTool(QtWidgets.QMainWindow):
         background_intensities = astra.background_levels
         photometry_pixels = astra.photometry_pixels
 
+        # Add previous picks to list
+        if np.array(
+            sorted(
+            k for k in self.pick_list.keys()
+            if (
+                self.pick_list[k].get('x_centroid') is not None
+                or self.pick_list[k].get('y_centroid') is not None
+            )
+            ),
+            dtype=int
+        ).size > 0:
+            # Deep copy to avoid storing references to mutable objects
+            self.previous_picks.append(copy.deepcopy(self.pick_list))
+
         # Add ASTRA picks to the pick list
         self.clearAllPicks()  # Clear previous picks
         for i in range(len(global_picks)):
@@ -4207,6 +4254,7 @@ class PlateTool(QtWidgets.QMainWindow):
         if hasattr(self, 'astra_dialog') and self.astra_dialog is not None:
             self.checkASTRACanRun()
             self.checkKalmanCanRun()
+            self.checkPickRevertCanRun()
 
         # Print and open dialog showing ASTRA has been run
         print(f'Loaded {len(pick_frame_indices)} Picks from ASTRA! Minimum SNR of {astra_config["astra"]["min SNR"]}')
@@ -4251,6 +4299,20 @@ class PlateTool(QtWidgets.QMainWindow):
         xypicks, _ = tempASTRA.runKalman(
             measurements=measurements,
             times=times)
+        
+        # Add previous picks to list
+        if np.array(
+            sorted(
+            k for k in self.pick_list.keys()
+            if (
+                self.pick_list[k].get('x_centroid') is not None
+                or self.pick_list[k].get('y_centroid') is not None
+            )
+            ),
+            dtype=int
+        ).size > 0:
+            # Deep copy to avoid storing references to mutable objects
+            self.previous_picks.append(copy.deepcopy(self.pick_list))
 
         print(f'Kalman filter applied to {len(xypicks)} picks!')   
         for i in range(len(pick_frame_indices)):
@@ -4266,6 +4328,7 @@ class PlateTool(QtWidgets.QMainWindow):
         if hasattr(self, 'astra_dialog') and self.astra_dialog is not None:
             self.checkASTRACanRun()
             self.checkKalmanCanRun()
+            self.checkPickRevertCanRun()
 
         if astra_config['kalman']['save results'].lower() == 'true':
             qmessagebox(title="Kalman Finished Processing",

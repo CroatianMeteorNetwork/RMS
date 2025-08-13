@@ -13,6 +13,8 @@ TODO:
     PIPELINE:
         -look into replaceing SNR rejection with model residuals and SNR mix
 
+    -Look into SNR issues in skyfit
+    -Look into bug where photom is not loaded from plate
 
 NOTE:
     -in future versions ASTRA can be configued to run multiple passes to improve quality in low-pick events

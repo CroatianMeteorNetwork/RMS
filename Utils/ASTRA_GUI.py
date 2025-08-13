@@ -22,7 +22,7 @@ class AstraConfigDialog(QDialog):
         main_layout = QVBoxLayout()
 
         # === Kick-start method selection ===
-        pick_method_group = QGroupBox("INFO & PICK LOADING")
+        pick_method_group = QGroupBox("INFO AND PICK LOADING")
         pick_layout = QVBoxLayout()
 
         intro_label = QLabel(
@@ -38,9 +38,14 @@ class AstraConfigDialog(QDialog):
         info_label.setWordWrap(True)
         info_label.setAlignment(Qt.AlignCenter)
         pick_layout.addWidget(info_label)
+
+        # Create two rows: first for file picker, second for revert button
+        file_picker_layout = QHBoxLayout()
         self.file_picker_button = QPushButton("SELECT ECSV/TXT FILE")
         self.file_picker_button.clicked.connect(self.select_file)
-        pick_layout.addWidget(self.file_picker_button)
+        file_picker_layout.addWidget(self.file_picker_button)
+        pick_layout.addLayout(file_picker_layout)
+
         self.selected_file_label = QLabel("No file selected")
         pick_layout.addWidget(self.selected_file_label)
 
@@ -210,9 +215,18 @@ class AstraConfigDialog(QDialog):
         btn_layout.addWidget(self.run_kalman_btn)
         main_layout.addLayout(btn_layout)
 
+        # Move REVERT button below RUN ASTRA/KALMAN buttons as one row
+        revert_layout = QHBoxLayout()
+        self.set_prev_picks_button = QPushButton("REVERT ASTRA/KALMAN PICKS")
+        self.set_prev_picks_button.clicked.connect(self.set_previous_picks)
+        revert_layout.addWidget(self.set_prev_picks_button)
+        main_layout.addLayout(revert_layout)
+
+
         # Now that buttons exist, set initial status
         self.set_astra_status(False)  # Default to not ready (red)
         self.set_kalman_status(False)  # Default to not ready (red)
+        self.set_revert_status(False)  # Default to not ready (disabled)
 
         self.setLayout(main_layout)
 
@@ -228,6 +242,9 @@ class AstraConfigDialog(QDialog):
             self.store_config()
             if self.load_picks_callback:
                 self.load_picks_callback(self.config)
+
+    def set_revert_status(self, ready):
+        self.set_prev_picks_button.setEnabled(ready)
 
     def set_astra_status(self, ready, hover_text=""):
         """
@@ -337,6 +354,9 @@ class AstraConfigDialog(QDialog):
 
 
         self.thread.start()
+
+    def set_previous_picks(self):
+        self.skyfit_instance.reverseASTRAPicks()
 
     def start_kalman_thread(self):
         self.store_config()
