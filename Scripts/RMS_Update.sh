@@ -68,7 +68,15 @@ emergency_cleanup() {
         backup_state=$(cat "$BACKUP_STATE_FILE" 2>/dev/null || echo "unknown")
         if [ "$backup_state" = "1" ]; then
             print_status "info" "Backup state indicates we were in danger zone, attempting restoration..."
-            restore_files 2>/dev/null || print_status "warning" "Failed to restore backup files"
+            if restore_files 2>/dev/null; then
+                print_status "success" "Backup files restored successfully"
+                # Only reset the flag if restore succeeded
+                echo "0" > "$BACKUP_STATE_FILE" 2>/dev/null || true
+            else
+                print_status "warning" "Failed to restore backup files"
+                print_status "warning" "Backup state remains set - will retry restoration on next run"
+                print_status "info" "Manual restoration may be needed from: $RMSBACKUPDIR"
+            fi
         else
             print_status "info" "No restoration needed - backup state: $backup_state"
         fi
@@ -1137,8 +1145,16 @@ main() {
         print_status "info" "Previous backup/restore cycle state: $BACKUP_IN_PROGRESS"
     fi
 
+    #######################################################
+    ################ DANGER ZONE START ####################
+    #######################################################
+    # From this point forward, we're modifying the work tree
+    # and need to ensure proper cleanup on any failure
+    
     # Now that we know we need to modify the work-tree, backup files if no interrupted cycle
     if [ "$BACKUP_IN_PROGRESS" = "0" ]; then
+        # Mark custom files backup/restore cycle as in progress BEFORE backing up
+        echo "1" > "$BACKUP_STATE_FILE"
         backup_files
     else
         print_status "warning" "Skipping backup due to interrupted backup/restore cycle."
@@ -1146,7 +1162,7 @@ main() {
 
     print_header "Updating from Git"
 
-    # Activate the virtual environment BEFORE entering the danger zone
+    # Activate the virtual environment
     if [ -f ~/vRMS/bin/activate ]; then
         source ~/vRMS/bin/activate
     else
@@ -1159,13 +1175,6 @@ main() {
         switch_branch_interactive
         print_status "info" "Target branch: $RMS_BRANCH (interactive selection)"
     fi
-
-    #######################################################
-    ################ DANGER ZONE START ####################
-    #######################################################
-
-    # Mark custom files backup/restore cycle as in progress
-    echo "1" > "$BACKUP_STATE_FILE"
 
     if ! check_git_index; then
         cleanup_on_error
