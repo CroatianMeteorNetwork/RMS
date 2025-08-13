@@ -639,10 +639,14 @@ restore_files() {
     print_header "Restoring Configuration Files"
     print_status "info" "Restore paths ← $BACKUP_CONFIG / $BACKUP_MASK / $BACKUP_CAMERA_SETTINGS"
     
-    local restore_failed=0
+    local restore_failed
+    restore_failed=0
 
+    print_status "info" "Checking for backup files..."
+    
     # Restore .config with graceful degradation
     if [ -f "$BACKUP_CONFIG" ]; then
+        print_status "info" "Found backup .config at $BACKUP_CONFIG"
         if ! retry_cp "$BACKUP_CONFIG" "$CURRENT_CONFIG"; then
             print_status "error" "Failed to restore .config after $RETRY_LIMIT attempts."
             print_status "warning" "Continuing without restored config - RMS will create a new default config."
@@ -655,6 +659,7 @@ restore_files() {
 
     # Restore mask.bmp with graceful degradation
     if [ -f "$BACKUP_MASK" ]; then
+        print_status "info" "Found backup mask.bmp at $BACKUP_MASK"
         if ! retry_cp "$BACKUP_MASK" "$CURRENT_MASK"; then
             print_status "error" "Failed to restore mask.bmp after $RETRY_LIMIT attempts."
             print_status "warning" "Continuing without restored mask - RMS will create a new blank mask."
@@ -667,6 +672,7 @@ restore_files() {
 
     # Restore camera_settings.json with graceful degradation
     if [ -f "$BACKUP_CAMERA_SETTINGS" ]; then
+        print_status "info" "Found backup camera_settings.json at $BACKUP_CAMERA_SETTINGS"
         if ! retry_cp "$BACKUP_CAMERA_SETTINGS" "$CURRENT_CAMERA_SETTINGS"; then
             print_status "error" "Failed to restore camera_settings.json after $RETRY_LIMIT attempts."
             print_status "warning" "Continuing without restored camera settings - RMS will create new default settings."
@@ -677,6 +683,7 @@ restore_files() {
         print_status "info" "No backup camera_settings.json found - a new default settings file will be created by the installation."
     fi
     
+    print_status "info" "Restore function completed with status: $restore_failed"
     return $restore_failed
 }
 
