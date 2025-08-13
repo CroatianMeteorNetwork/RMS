@@ -37,7 +37,12 @@ readonly LOCKFILE="/tmp/rms_update.$(printf '%s' "$RMSSOURCEDIR" | sha1sum | cut
 readonly MIN_SPACE_MB=200  # Minimum required space in MB
 readonly RETRY_LIMIT=3  # Retries for critical file operations
 readonly GIT_RETRY_LIMIT=5
+
 readonly GIT_RETRY_DELAY=15  # Seconds between git operation retries
+
+# Remote/branch tracking inferred at runtime (initialized to avoid -u unbound errors)
+BRANCH_REMOTE=""
+UPSTREAM_BRANCH=""
 
 # Trap handler for emergency cleanup
 emergency_cleanup() {
@@ -665,7 +670,11 @@ restore_files() {
 git_with_retry() {
     local cmd=$1
     local branch=${2:-""}
-    local remote_to_use="${3:-$BRANCH_REMOTE}"
+    local remote_to_use="${3-}"
+    # Fallback lazily to resolved branch remote, then RMS remote
+    if [[ -z "${remote_to_use:-}" ]]; then
+        remote_to_use="${BRANCH_REMOTE:-$RMS_REMOTE}"
+    fi
     local attempt=1
     local backup_dir="${RMSSOURCEDIR}_backup_$(date +%Y%m%d_%H%M%S)"
 
@@ -759,8 +768,11 @@ git_with_retry() {
 
 ensure_branch_tracking() {
     local branch=$1
-    local remote=${2:-$BRANCH_REMOTE}
-    local remote_branch=${3:-$UPSTREAM_BRANCH}
+    local remote="${2-}"
+    local remote_branch="${3-}"
+    # Resolve safe defaults without expanding unset vars under 'set -u'
+    remote="${remote:-${BRANCH_REMOTE:-$RMS_REMOTE}}"
+    remote_branch="${remote_branch:-${UPSTREAM_BRANCH:-$RMS_BRANCH}}"
 
     print_status "info" "Ensuring proper tracking for branch: $branch (remote: $remote, upstream: $remote_branch)"
 
