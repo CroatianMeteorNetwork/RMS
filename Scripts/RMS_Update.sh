@@ -638,6 +638,8 @@ backup_files() {
 restore_files() {
     print_header "Restoring Configuration Files"
     print_status "info" "Restore paths ← $BACKUP_CONFIG / $BACKUP_MASK / $BACKUP_CAMERA_SETTINGS"
+    
+    local restore_failed=0
 
     # Restore .config with graceful degradation
     if [ -f "$BACKUP_CONFIG" ]; then
@@ -645,6 +647,7 @@ restore_files() {
             print_status "error" "Failed to restore .config after $RETRY_LIMIT attempts."
             print_status "warning" "Continuing without restored config - RMS will create a new default config."
             print_status "info" "You can manually restore from: $BACKUP_CONFIG"
+            restore_failed=1
         fi
     else
         print_status "info" "No backup .config found - a new one will be created by the installation."
@@ -656,6 +659,7 @@ restore_files() {
             print_status "error" "Failed to restore mask.bmp after $RETRY_LIMIT attempts."
             print_status "warning" "Continuing without restored mask - RMS will create a new blank mask."
             print_status "info" "You can manually restore from: $BACKUP_MASK"
+            restore_failed=1
         fi
     else
         print_status "info" "No backup mask.bmp found - a new blank mask will be created by the installation."
@@ -667,10 +671,13 @@ restore_files() {
             print_status "error" "Failed to restore camera_settings.json after $RETRY_LIMIT attempts."
             print_status "warning" "Continuing without restored camera settings - RMS will create new default settings."
             print_status "info" "You can manually restore from: $BACKUP_CAMERA_SETTINGS"
+            restore_failed=1
         fi
     else
         print_status "info" "No backup camera_settings.json found - a new default settings file will be created by the installation."
     fi
+    
+    return $restore_failed
 }
 
 
@@ -983,8 +990,12 @@ print_update_report() {
 # Function to handle error cleanup
 cleanup_on_error() {
     print_status "warning" "Error occurred, attempting to restore files..."
-    restore_files
-    echo "0" > "$BACKUP_STATE_FILE"
+    if restore_files; then
+        echo "0" > "$BACKUP_STATE_FILE"
+        print_status "success" "Files restored, backup state reset"
+    else
+        print_status "warning" "Restore failed, keeping backup state flag set"
+    fi
     exit 1
 }
 
