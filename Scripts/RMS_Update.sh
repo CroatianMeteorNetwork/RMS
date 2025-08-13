@@ -285,6 +285,31 @@ check_git_setup() {
     fi
 }
 
+# Determine remote and upstream branch name for a given local branch
+resolve_branch_remote() {
+    local branch="$1"
+    BRANCH_REMOTE="$RMS_REMOTE"
+    UPSTREAM_BRANCH="$branch"
+
+    # Use configured upstream if present
+    if git rev-parse --abbrev-ref "$branch@{upstream}" >/dev/null 2>&1; then
+        local fullref
+        fullref=$(git rev-parse --abbrev-ref --symbolic-full-name "$branch@{upstream}")
+        BRANCH_REMOTE="${fullref%%/*}"
+        UPSTREAM_BRANCH="${fullref#*/}"
+        return
+    fi
+
+    # Else, try to find a remote that has this branch
+    for r in $(git remote); do
+        if git ls-remote --exit-code --heads "$r" "refs/heads/$branch" >/dev/null 2>&1; then
+            BRANCH_REMOTE="$r"
+            UPSTREAM_BRANCH="$branch"
+            return
+        fi
+    done
+}
+
 
 # Function to handle interactive branch selection
 switch_branch_interactive() {
@@ -645,6 +670,11 @@ restore_files() {
 git_with_retry() {
     local cmd=$1
     local branch=${2:-""}
+    local remote_to_use="${3-}"
+    # Fallback lazily to resolved branch remote, then RMS remote
+    if [[ -z "${remote_to_use:-}" ]]; then
+        remote_to_use="${BRANCH_REMOTE:-$RMS_REMOTE}"
+    fi
     local attempt=1
     local backup_dir="${RMSSOURCEDIR}_backup_$(date +%Y%m%d_%H%M%S)"
 
@@ -715,7 +745,7 @@ git_with_retry() {
                 ;;
             "reset")
                 # Try reset - should work since we're only dealing with tracked files
-                if git "${git_config_args[@]}" reset --hard "$RMS_REMOTE/$branch" 2>/dev/null; then
+                if git "${git_config_args[@]}" reset --hard "$remote_to_use/$branch" 2>/dev/null; then
                     return 0
                 else
                     print_status "warning" "Git reset failed, retrying..."
@@ -738,15 +768,20 @@ git_with_retry() {
 
 ensure_branch_tracking() {
     local branch=$1
-    
-    print_status "info" "Ensuring proper tracking for branch: $branch"
-    
+    local remote="${2-}"
+    local remote_branch="${3-}"
+    # Resolve safe defaults without expanding unset vars under 'set -u'
+    remote="${remote:-${BRANCH_REMOTE:-$RMS_REMOTE}}"
+    remote_branch="${remote_branch:-${UPSTREAM_BRANCH:-$RMS_BRANCH}}"
+
+    print_status "info" "Ensuring proper tracking for branch: $branch (remote: $remote, upstream: $remote_branch)"
+
     # Check if branch already has tracking information
     if ! git rev-parse --abbrev-ref "$branch@{upstream}" >/dev/null 2>&1; then
         print_status "info" "Setting upstream tracking for $branch..."
-        if ! git branch --set-upstream-to="$RMS_REMOTE/$branch" "$branch"; then
+        if ! git branch --set-upstream-to="$remote/$remote_branch" "$branch"; then
             print_status "warning" "Failed to set upstream tracking. You may need to run:"
-            print_status "warning" "git branch --set-upstream-to=$RMS_REMOTE/$branch $branch"
+            print_status "warning" "git branch --set-upstream-to=$remote/$remote_branch $branch"
             return 1
         fi
     else
@@ -779,34 +814,40 @@ switch_to_branch() {
             remote_candidate="$maybe_remote"
             target_branch="$maybe_branch"
         fi
-
-        # Verify it's actually a branch (not a tag or other ref)
-        if ! git show-ref --verify --quiet "refs/remotes/$RMS_REMOTE/$target_branch"; then
-            print_status "error" "'$target_branch' exists but is not a valid branch"
-            return 1
-        fi
     fi
 
-    print_status "info" "Attempting to switch to branch: $target_branch"
+    # If no explicit remote, try to find any remote carrying this branch
+    if [ -z "$remote_candidate" ]; then
+        for r in $(git remote); do
+            if git ls-remote --exit-code --heads "$r" "refs/heads/$target_branch" >/dev/null 2>&1; then
+                remote_candidate="$r"
+                break
+            fi
+        done
+    fi
+
+    # Fallback to RMS_REMOTE if still unknown
+    if [ -z "$remote_candidate" ]; then
+        remote_candidate="$RMS_REMOTE"
+    fi
+
+    print_status "info" "Attempting to switch to branch: $target_branch (remote: $remote_candidate)"
 
     # First try to create a tracking branch if it doesn't exist locally
     if ! git rev-parse --verify --quiet "refs/heads/$target_branch" >/dev/null; then
         print_status "info" "Creating local tracking branch..."
-        if ! git branch --track "$target_branch" "$RMS_REMOTE/$target_branch"; then
-            print_status "error" "Failed to create tracking branch for $target_branch"
+        if ! git branch --track "$target_branch" "$remote_candidate/$target_branch"; then
+            print_status "error" "Failed to create tracking branch for $target_branch from $remote_candidate"
             return 1
         fi
     else
         # Ensure existing branch has proper tracking
-        ensure_branch_tracking "$target_branch"
+        ensure_branch_tracking "$target_branch" "$remote_candidate" "$target_branch"
     fi
 
     # Now try to switch to the branch
     if ! git_with_retry "checkout" "$target_branch"; then
-        print_status "error" "Failed to switch to branch $target_branch. This could be due to:"
-        print_status "error" "- Local conflicts that need resolution"
-        print_status "error" "- Insufficient permissions"
-        print_status "error" "- Corrupted local repository"
+        print_status "error" "Failed to switch to branch $target_branch."
         return 1
     fi
 
@@ -1146,6 +1187,7 @@ main() {
             cleanup_on_error
         fi
         RMS_BRANCH=$(git rev-parse --abbrev-ref HEAD)   # Update to actual branch we're on
+        resolve_branch_remote "$RMS_BRANCH"
     elif [ "$SWITCH_MODE" = "interactive" ]; then
         if ! switch_to_branch "$RMS_BRANCH" "true"; then
             cleanup_on_error
