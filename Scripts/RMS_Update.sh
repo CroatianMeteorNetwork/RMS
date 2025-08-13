@@ -37,7 +37,12 @@ readonly LOCKFILE="/tmp/rms_update.$(printf '%s' "$RMSSOURCEDIR" | sha1sum | cut
 readonly MIN_SPACE_MB=200  # Minimum required space in MB
 readonly RETRY_LIMIT=3  # Retries for critical file operations
 readonly GIT_RETRY_LIMIT=5
+
 readonly GIT_RETRY_DELAY=15  # Seconds between git operation retries
+
+# Remote/branch tracking inferred at runtime (initialized to avoid -u unbound errors)
+BRANCH_REMOTE=""
+UPSTREAM_BRANCH=""
 
 # Trap handler for emergency cleanup
 emergency_cleanup() {
@@ -750,26 +755,29 @@ ensure_branch_tracking() {
     return 0
 }
 
-# Function to safely switch to a specified branch
+# Function to safely switch to a specified branch (supports remote/branch syntax)
 switch_to_branch() {
     local target_branch="$1"
     local from_interactive="${2:-false}"  # Optional parameter to indicate if called from interactive mode
 
     # Skip validation if called from interactive mode (already validated)
     if [ "$from_interactive" = "false" ]; then
-        if [[ ! "$target_branch" =~ ^[a-zA-Z0-9_/-]+$ ]]; then
-            print_status "error" "Invalid branch name '$target_branch'. Branch names can only contain letters, numbers, underscores, forward slashes and hyphens"
+        if [[ ! "$target_branch" =~ ^[a-zA-Z0-9_./-]+$ ]]; then
+            print_status "error" "Invalid branch name '$target_branch'. Branch names can only contain letters, numbers, underscores, forward slashes, periods and hyphens"
             return 1
         fi
-        
-        print_status "info" "Validating branch: $target_branch"
-        
-        # Verify remote branch exists
-        if ! git rev-parse --verify --quiet "refs/remotes/$RMS_REMOTE/$target_branch" >/dev/null; then
-            print_status "error" "Branch '$target_branch' not found in remote '$RMS_REMOTE'"
-            print_status "info" "Available branches:"
-            git branch -r | grep "$RMS_REMOTE/" | grep -v HEAD | sed "s/$RMS_REMOTE\//  /"
-            return 1
+    fi
+
+    # Determine which remote to use
+    local remote_candidate=""
+
+    # Allow 'remote/branch' syntax
+    if [[ "$target_branch" == */* ]]; then
+        local maybe_remote="${target_branch%%/*}"
+        local maybe_branch="${target_branch#*/}"
+        if git remote | grep -qx "$maybe_remote"; then
+            remote_candidate="$maybe_remote"
+            target_branch="$maybe_branch"
         fi
 
         # Verify it's actually a branch (not a tag or other ref)
@@ -810,7 +818,11 @@ switch_to_branch() {
         return 1
     fi
 
-    print_status "success" "Successfully switched to branch: $target_branch"
+    # Update globals so downstream logic uses the correct remote/ref
+    BRANCH_REMOTE="$remote_candidate"
+    UPSTREAM_BRANCH="$target_branch"
+
+    print_status "success" "Successfully switched to branch: $target_branch (remote: $remote_candidate)"
     return 0
 }
 
@@ -985,13 +997,13 @@ main() {
             print_status "info" "Detached HEAD state detected; skipping early SHA check."
         else
             [[ -z "$RMS_BRANCH" ]] && RMS_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+            resolve_branch_remote "$RMS_BRANCH"
 
-            REMOTE_SHA=$(git ls-remote --quiet --heads \
-                         "$RMS_REMOTE" "refs/heads/$RMS_BRANCH" | cut -f1)
+            REMOTE_SHA=$(git ls-remote --quiet --heads "$BRANCH_REMOTE" "refs/heads/$UPSTREAM_BRANCH" | cut -f1)
             LOCAL_SHA=$(git rev-parse HEAD)
 
             if [[ -z "$REMOTE_SHA" ]]; then
-                print_status "error" "Cannot query remote ref $RMS_BRANCH"; exit 1
+                print_status "error" "Cannot query remote ref $UPSTREAM_BRANCH on $BRANCH_REMOTE"; exit 1
             fi
             
             # Check for modified tracked files (excluding allowed config/template/mask files)
@@ -1139,18 +1151,22 @@ main() {
             cleanup_on_error
         fi
         RMS_BRANCH=$(git rev-parse --abbrev-ref HEAD)   # Update to actual branch we're on
+        resolve_branch_remote "$RMS_BRANCH"
+    else
+        # No switch mode - ensure we still resolve the remote for the current branch
+        resolve_branch_remote "$RMS_BRANCH"
     fi
 
     # Check if updates are needed (compare HEAD to remote ref)
     print_status "info" "Checking for available updates..."
     LOCAL_SHA=$(git rev-parse HEAD)
-    REMOTE_SHA=$(git rev-parse "$RMS_REMOTE/$RMS_BRANCH")
+    REMOTE_SHA=$(git rev-parse "$BRANCH_REMOTE/$UPSTREAM_BRANCH")
     
     # Check for modified tracked files (same logic as early check, but also exclude mask.bmp)
     MODIFIED_FILES=$(git diff --name-only | grep -v -E '^(\.config|camera_settings\.json|\.configTemplate|camera_settings_template\.json|mask\.bmp)$' || true)
     
     if [[ "$LOCAL_SHA" == "$REMOTE_SHA" && -z "$MODIFIED_FILES" ]]; then
-        print_status "success" "Local repository already up to date with $RMS_REMOTE/$RMS_BRANCH"
+        print_status "success" "Local repository already up to date with $BRANCH_REMOTE/$UPSTREAM_BRANCH"
     else
         if [[ "$LOCAL_SHA" != "$REMOTE_SHA" ]]; then
             print_status "info" "Updates available, resetting to remote state..."
@@ -1158,15 +1174,15 @@ main() {
             print_status "info" "Repository up to date but resetting to restore modified tracked files..."
         fi
         
-        if ! git_with_retry "reset" "$RMS_BRANCH"; then
-            print_status "error" "Failed to reset to $RMS_REMOTE/$RMS_BRANCH. Aborting."
+        if ! git_with_retry "reset" "$UPSTREAM_BRANCH" "$BRANCH_REMOTE"; then
+            print_status "error" "Failed to reset to $BRANCH_REMOTE/$UPSTREAM_BRANCH. Aborting."
             cleanup_on_error
         fi
 
         # Ensure tracking information is maintained after reset
-        if ! ensure_branch_tracking "$RMS_BRANCH"; then
+        if ! ensure_branch_tracking "$RMS_BRANCH" "$BRANCH_REMOTE" "$UPSTREAM_BRANCH"; then
             print_status "warning" "Failed to set branch tracking after reset"
-            print_status "warning" "You may need to manually set tracking with: git branch --set-upstream-to=$RMS_REMOTE/$RMS_BRANCH $RMS_BRANCH"
+            print_status "warning" "You may need to manually set tracking with: git branch --set-upstream-to=$BRANCH_REMOTE/$UPSTREAM_BRANCH $RMS_BRANCH"
         fi
        
         print_status "success" "Successfully updated to latest version"
@@ -1234,7 +1250,19 @@ main() {
         # Re-exec preserves file descriptors (including our flock) and arguments
         # Handle arithmetic safely in case of unexpected values
         if next_count=$((REEXEC_COUNT+1)) 2>/dev/null; then
-            exec env REEXEC_COUNT="$next_count" "$SELF" "$@"
+            # Construct new arguments for re-exec
+            # If we selected a branch interactively, pass it explicitly
+            if [ "$SWITCH_MODE" = "interactive" ] && [ -n "$RMS_BRANCH" ]; then
+                # Build new argument list preserving --force if present
+                local new_args=("--switch" "$RMS_BRANCH")
+                if [ "$FORCE_UPDATE" = true ]; then
+                    new_args+=("--force")
+                fi
+                exec env REEXEC_COUNT="$next_count" "$SELF" "${new_args[@]}"
+            else
+                # Use original arguments
+                exec env REEXEC_COUNT="$next_count" "$SELF" "$@"
+            fi
         else
             print_status "warning" "Failed to increment REEXEC_COUNT, continuing with current version..."
         fi
