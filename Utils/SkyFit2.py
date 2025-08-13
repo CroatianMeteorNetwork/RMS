@@ -4224,8 +4224,8 @@ class PlateTool(QtWidgets.QMainWindow):
             "pick_frame_indices" : np.array([]),
             "times" : times,
             "astra_config" : astra_config,
-            "middle_picks" : [],
             "saturation_threshold" : self.saturation_threshold,
+            "data_path" : self.dir_path,
             "img_config" : self.config,
             "dark" : None,
             "flat" : None
@@ -4234,7 +4234,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         tempASTRA = ASTRA(data_dict, progress_callback=progress_callback)
 
-        xypicks, smooth_P = tempASTRA.runKalman(
+        xypicks, _ = tempASTRA.runKalman(
             measurements=measurements,
             times=times)
 
@@ -4245,21 +4245,23 @@ class PlateTool(QtWidgets.QMainWindow):
             self.tab.debruijn.modifyRow(pick_frame_indices[i], 1)
             self.updateGreatCircle()
             print(f'Adjusted centroid at ({xypicks[i][0]}, {xypicks[i][1]}) on frame {pick_frame_indices[i]}')
-            print(f'Kalman uncertainty (pixels): {np.sqrt(smooth_P[i][0,0])}, {np.sqrt(smooth_P[i][1,1])}')
         self.updatePicks()
         print(f'Loaded {len(pick_frame_indices)} picks from Kalman Smoothing!')
-        print(f'Mean Kalman uncertainty (pixels): {np.mean(np.sqrt(smooth_P[:,0,0]))}, {np.mean(np.sqrt(smooth_P[:,1,1]))}')
-        print(f'Median Kalman uncertainty (pixels): {np.median(np.sqrt(smooth_P[:,0,0]))}, {np.median(np.sqrt(smooth_P[:,1,1]))}')
 
         # Update kalman/astra readiness if instance exists
         if hasattr(self, 'astra_dialog') and self.astra_dialog is not None:
             self.checkASTRACanRun()
             self.checkKalmanCanRun()
 
-        # Open dialog box to show done
-        qmessagebox(title="Kalman Finished Processing",
-                    message=f'Loaded {len(pick_frame_indices)} Picks from Kalman Smoothing!',
-                    message_type='info')
+        if astra_config['kalman']['save results'].lower() == 'true':
+            qmessagebox(title="Kalman Finished Processing",
+                message=f'Saved to CSV & Loaded {len(pick_frame_indices)} Picks from Kalman Smoothing.',
+                message_type='info')
+        else:
+            # Open dialog box to show done
+            qmessagebox(title="Kalman Finished Processing",
+                        message=f'Loaded {len(pick_frame_indices)} Picks from Kalman Smoothing!',
+                        message_type='info')
 
     def loadTXT(self, txt_file_path):
         # ASTRA Addition - Justin DT

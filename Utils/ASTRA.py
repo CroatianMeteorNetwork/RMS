@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import scipy.optimize
 import scipy.stats
@@ -91,7 +92,8 @@ class ASTRA:
             'monotonicity': self.astra_config['kalman']['Monotonicity'].lower() == 'true',
             'use_accel': False,
             'sigma_xy': float(self.astra_config['kalman']['sigma_xy (px)']),
-            'sigma_vxy_perc': float(self.astra_config['kalman']['sigma_vxy (%) [0,1]'])
+            'sigma_vxy_perc': float(self.astra_config['kalman']['sigma_vxy (%) [0,1]']),
+            'save results' : self.astra_config['kalman']["save results"].lower() == 'true'
         }
 
         # The SNR threshold for rejecting low SNR frames
@@ -577,7 +579,6 @@ class ASTRA:
         picks = self.global_picks
         method = 'GAUSSIAN'
 
-        # If not provided default to expected format path
         fig_dir = os.path.join(data_path, "ASTRA_figures")
         if not os.path.exists(fig_dir):
             os.makedirs(fig_dir)
@@ -1551,6 +1552,9 @@ class ASTRA:
             use_accel=self.kalman_settings['use_accel']
         )
 
+        if self.kalman_settings['save results']:
+            self.saveKalmanUncertaintiesToCSV(self.data_path, normalized_times, measurements, x_smooth, p_smooth)
+
         self.smoothed_picks = x_smooth[:, :2]  # Extract smoothed positions (x, y)
         self.smoothed_covars = p_smooth[:, :2, :2]  # Extract smoothed position covariances
 
@@ -1577,6 +1581,9 @@ class ASTRA:
             [0, 0, 0, 0, 0, 1]
         ])
 
+        # save as instance var for later saving
+        self.Q_base = Q_base
+
         return Q_base
     
 
@@ -1597,6 +1604,9 @@ class ASTRA:
         # Form R as a 2x2 array of diagonal variances
         R = np.array([[x_std**2, 0], 
                       [0, y_std**2]])
+        
+        # Save as instance var for later saving
+        self.R = R
 
         return R
 
@@ -1953,3 +1963,74 @@ class ASTRA:
         photometry_pixels = [tuple(idx[::-1]) for idx in nonzero_indices]
 
         return photometry_pixels
+
+    def saveKalmanUncertaintiesToCSV(self, data_path, times, measurements, x_smooth, p_smooth):
+        import os
+        import datetime
+        import csv
+
+        fig_dir = os.path.join(data_path, "ASTRA_Kalman_Results")
+        if not os.path.exists(fig_dir):
+            os.makedirs(fig_dir)
+
+        # Make dest path
+        now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        data = {"time (sec since start)" : [],
+                "original x" : [],
+                "original y" : [],
+                "smoothed x" : [],
+                "smoothed y" : [],
+                "smoothed vx" : [],
+                "smoothed vy" : [],
+                "smoothed ax" : [],
+                "smoothed ay" : [],
+                "kalman uncertainty/STD (x)" : [],
+                "kalman uncertainty/STD (y)" : [],
+                "kalman uncertainty/STD (vx)" : [],
+                "kalman uncertainty/STD (vy)" : [],
+                "kalman uncertainty/STD (ax)" : [],
+                "kalman uncertainty/STD (ay)" : []
+                }
+         
+        #  populate data dict
+        for i in range(len(times)):
+            data['time (sec since start)'].append(times[i])
+            data['original x'].append(measurements[i][0])
+            data['original y'].append(measurements[i][1])
+            data['smoothed x'].append(x_smooth[i][0])
+            data['smoothed y'].append(x_smooth[i][1])
+            data['smoothed vx'].append(x_smooth[i][2])
+            data['smoothed vy'].append(x_smooth[i][3])
+            data['smoothed ax'].append(x_smooth[i][4])
+            data['smoothed ay'].append(x_smooth[i][5])
+            data['kalman uncertainty/STD (x)'].append(np.sqrt(p_smooth[i][0][0]))
+            data['kalman uncertainty/STD (y)'].append(np.sqrt(p_smooth[i][1][1]))
+            data['kalman uncertainty/STD (vx)'].append(np.sqrt(p_smooth[i][2][2]))
+            data['kalman uncertainty/STD (vy)'].append(np.sqrt(p_smooth[i][3][3]))
+            data['kalman uncertainty/STD (ax)'].append(np.sqrt(p_smooth[i][4][4]))
+            data['kalman uncertainty/STD (ay)'].append(np.sqrt(p_smooth[i][5][5]))
+
+        # Add header row for Q_base and R std values
+        std_q_base = np.sqrt(np.diag(self.Q_base))
+        std_r = np.sqrt(np.diag(self.R))
+        header_q_base = ["Q_base STD (x)", "Q_base STD (y)", "Q_base STD (vx)", "Q_base STD (vy)", "Q_base STD (ax)", "Q_base STD (ay)"]
+        header_r = ["R STD (x)", "R STD (y)"]
+
+        # Write header row to CSV before the main data
+        csv_path = os.path.join(fig_dir, f"kalman_results_{now_str}.csv")
+        with open(csv_path, 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            # Write Q_base std header and values
+            writer.writerow(header_q_base)
+            writer.writerow([f"{v:.6f}" for v in std_q_base])
+            # Write R std header and values
+            writer.writerow(header_r)
+            writer.writerow([f"{v:.6f}" for v in std_r])
+            # Write main data header
+            writer.writerow(list(data.keys()))
+            # Write main data rows
+            for i in range(len(times)):
+                writer.writerow([data[key][i] for key in data.keys()])
+
+        print(f"Kalman results saved to {csv_path}")
