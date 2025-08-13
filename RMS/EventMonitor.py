@@ -2153,6 +2153,7 @@ class EventMonitor(multiprocessing.Process):
         with tempfile.TemporaryDirectory() as radec_event_dir:
             thumbnail_file_path = os.path.join(radec_event_dir, thumbnail_file_name)
             magnitudes_chart_file_path = os.path.join(radec_event_dir, magnitudes_time_chart_file_name)
+            magnitudes_elevation_chart_file_path = os.path.join(radec_event_dir, magnitudes_elevation_chart_file_name)
 
             file_list = []
             file_path = os.path.join(radec_event_dir, thumbnail_file_name)
