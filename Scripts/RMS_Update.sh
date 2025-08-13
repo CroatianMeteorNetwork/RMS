@@ -999,6 +999,7 @@ main() {
             
             if [[ "$REMOTE_SHA" == "$LOCAL_SHA" && -z "$MODIFIED_FILES" ]]; then
                 print_status "success" "Nothing new on $RMS_BRANCH and no tracked file modifications - exiting."
+                print_status "info" "Use './Scripts/RMS_Update.sh --force' to force rebuild and reinstall."
                 exit 0
             elif [[ "$REMOTE_SHA" == "$LOCAL_SHA" && -n "$MODIFIED_FILES" ]]; then
                 print_status "info" "Repository up to date but tracked files modified:"
