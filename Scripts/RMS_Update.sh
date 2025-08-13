@@ -985,7 +985,10 @@ main() {
             print_status "info" "Detached HEAD state detected; skipping early SHA check."
         else
             [[ -z "$RMS_BRANCH" ]] && RMS_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+            # Get the remote which is actually in use
             RMS_REMOTE=$(git for-each-ref --format='%(upstream:remotename)' $(git symbolic-ref -q HEAD))
+
             REMOTE_SHA=$(git ls-remote --quiet --heads \
                          "$RMS_REMOTE" "refs/heads/$RMS_BRANCH" | cut -f1)
             LOCAL_SHA=$(git rev-parse HEAD)
