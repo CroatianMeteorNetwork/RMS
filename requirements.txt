@@ -30,4 +30,3 @@ PyGObject<=3.50; python_version >= '3.6'
 rawpy; sys_platform == "win32"
 rawpy; sys_platform == "darwin"
 rawpy; sys_platform == "linux" and platform_machine == "x86_64"
-rawpy; sys_platform == "linux" and platform_machine == "aarch64"
