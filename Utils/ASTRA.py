@@ -4,6 +4,8 @@ import scipy.stats
 import scipy.special
 from RMS.Routines.Image import signalToNoise
 from pyswarms.single.global_best import GlobalBestPSO
+from RMS.Routines import Image
+import cv2
 
 class ASTRA:
 
@@ -110,6 +112,9 @@ class ASTRA:
         self.verbose = self.astra_config['astra']['Verbose'].lower() == 'true'
         self.save_animation = self.astra_config['astra']['Save Animation'].lower() == 'true'
         self.data_path = self.data_dict['data_path']
+        self.dark = data_dict['dark']
+        self.flat_struct = data_dict['flat']
+        self.skyfit_config = data_dict['img_config']
 
 
     def process(self):
@@ -234,7 +239,7 @@ class ASTRA:
             # Load background using RMS
             fake_ff_obj = img_obj.loadChunk()
             avepixel_background = fake_ff_obj.avepixel
-            subtracted_frames = frames - avepixel_background
+            subtracted_frames = frames.copy() - avepixel_background
 
             # Clip subtracted frames & background to above zero
             subtracted_frames = np.clip(subtracted_frames, 0, None)
@@ -446,11 +451,20 @@ class ASTRA:
         self.photometry_pixels = []
         self.saturated_bool_list = []
 
+        if self.verbose:
+            self.temp_count = 0
+
         # Itterate over each frame
         for i in range(len(fit_imgs)):
+
+            # Calculate photom_pixels
+            photom_pixels = self.computePhotometryPixels(fit_imgs[i], cropped_frames[i], crop_vars[i])
+
+            # Calculate SNR, and photom values
+            snr = self.computeIntensitySum(photom_pixels, (refined_params[i, 2], refined_params[i, 3]), frames[pick_frame_indices[i]])
             
-            # Determine SNR
-            snr = self.calculateSNR(fit_imgs[i], frames[pick_frame_indices[i]], cropped_frames[i], crop_vars[i])
+            # Determine SNR - DEPRECIATED
+            # snr = self.calculateSNR(fit_imgs[i], frames[pick_frame_indices[i]], cropped_frames[i], crop_vars[i])
 
             # Set index for previous parameters (util. previous since optim. will reshape curr params to fit even if streak is partially OOB)
             idx = i - 1 if i > 0 else 0
@@ -794,6 +808,7 @@ class ASTRA:
 
 
     def calculateSNR(self, fit_img, frame, cropped_frame, crop_vars):
+        # DEPRECATED
         """
         Calculates the Signal-to-Noise Ratio (SNR) for a given fit image and frame.
         Args:
@@ -1748,3 +1763,163 @@ class ASTRA:
         seed_pick_frame_indices = keys[start:start+3]
         seed_picks = p_sorted[start:start+3]
         return seed_picks, seed_pick_frame_indices
+
+    def computeIntensitySum(self, photom_pixels, global_centroid, raw_frame):
+        """ Compute the background subtracted sum of intensity of colored pixels. The background is estimated
+            as the median of near pixels that are not colored.
+        """
+
+        x_arr, y_arr = np.array(photom_pixels).T
+        raw_frame = raw_frame.copy()
+        avepixel = self.avepixel_background.copy()
+
+        # Take a window twice the size of the colored pixels
+        x_color_size = np.max(x_arr) - np.min(x_arr)
+        y_color_size = np.max(y_arr) - np.min(y_arr)
+
+        x_min = int(global_centroid[0] - x_color_size)
+        x_max = int(global_centroid[0] + x_color_size)
+        y_min = int(global_centroid[1] - y_color_size)
+        y_max = int(global_centroid[1] + y_color_size)
+
+        # Limit the size to be within the bounds
+        if x_min < 0: x_min = 0
+        if x_max > raw_frame.shape[0]: x_max = raw_frame.shape[0]
+        if y_min < 0: y_min = 0
+        if y_max > raw_frame.shape[1]: y_max = raw_frame.shape[1]
+
+        # Take only the colored part
+        mask_img = np.ones_like(raw_frame)
+        mask_img[x_arr, y_arr] = 0
+        masked_img = np.ma.masked_array(raw_frame, mask_img)
+        crop_img = masked_img[x_min:x_max, y_min:y_max]
+
+        # Perform gamma correction on the colored part
+        crop_img = Image.gammaCorrectionImage(crop_img, self.skyfit_config.gamma, bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
+
+        # Mask out the colored in pixels
+        mask_img_bg = np.zeros_like(raw_frame)
+        mask_img_bg[x_arr, y_arr] = 1
+
+        # Take the image where the colored part is masked out and crop the surroundings
+        masked_img_bg = np.ma.masked_array(raw_frame, mask_img_bg)
+        crop_bg = masked_img_bg[x_min:x_max, y_min:y_max]
+
+        # Perform gamma correction on the background
+        crop_bg = Image.gammaCorrectionImage(crop_bg, self.skyfit_config.gamma, bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
+
+        # Compute the median background
+        background_lvl = np.ma.median(crop_bg)
+
+        if self.dark is not None:
+            avepixel = Image.applyDark(avepixel, self.dark)
+        if self.flat_struct is not None:
+            avepixel = Image.applyFlat(avepixel, self.flat_struct)
+
+        
+        # Mask out the colored in pixels
+        avepixel_masked = np.ma.masked_array(avepixel, mask_img)
+        avepixel_crop = avepixel_masked[x_min:x_max, y_min:y_max]
+
+        # Perform gamma correction on the avepixel crop
+        avepixel_crop = Image.gammaCorrectionImage(avepixel_crop, self.skyfit_config.gamma, bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
+
+        background_lvl = np.ma.median(avepixel_crop)
+
+        # Subtract the avepixel crop from the data crop, clip the negative values to 0 and
+        #  sum up the intensity
+        crop_img_nobg = crop_img.astype(float) - avepixel_crop
+        crop_img_nobg = np.clip(crop_img_nobg, 0, None)
+        intensity_sum = np.ma.sum(crop_img_nobg)
+
+        # Check if the result is masked
+        if np.ma.is_masked(intensity_sum):
+            # If the result is masked (i.e. error reading pixels), set the intensity sum to 1
+            print("Warning: intensity sum is masked, setting to 1") #Fallback to regular method, ENSURE NEVER 0
+            intensity_sum = 1
+        else:
+            intensity_sum = intensity_sum.astype(int)
+
+        ### Measure the SNR of the pick ###
+
+        # Compute the standard deviation of the background
+        background_stddev = np.ma.std(crop_bg)
+
+        # Count the number of pixels in the photometric area
+        source_px_count = np.ma.sum(~crop_img.mask)
+
+        # Compute the signal to noise ratio using the CCD equation
+        snr = signalToNoise(intensity_sum, source_px_count, background_lvl, background_stddev)
+
+        ### Determine if there is any saturation in the measured photometric area
+
+        # Compute the saturation threshold
+        saturation_threshold = int(0.98*(2**self.skyfit_config.bit_depth))
+
+        # If at least 2 pixels are saturated in the photometric area, mark the pick as saturated
+        if np.sum(crop_img > saturation_threshold) >= 2:
+            saturated_bool = True
+        else:
+            saturated_bool = False
+
+        # Append values to class arrays
+        self.photometry_pixels.append(photom_pixels)
+        self.saturated_bool_list.append(saturated_bool)
+        self.abs_level_sums.append(intensity_sum)
+        self.background_levels.append(background_lvl)
+
+        if self.verbose:
+            print("SNR update on frame {:2d}: intensity sum = {:8d}, source px count = {:5d}, background lvl = {:8.2f}, background stddev = {:6.2f}, SNR = {:.2f}".format(
+                self.pick_frame_indices[self.temp_count], intensity_sum, source_px_count, background_lvl, background_stddev, snr))
+            self.temp_count += 1
+
+        # return SNR
+        return snr
+
+
+    def computePhotometryPixels(self, fit_img, cropped_frame, crop_vars):
+        """
+        Compute all pixels to be included in photometry, by thresholding pixel intensity over a certain percentile the fit image.
+        args:
+            fit_img: The fit image to use for photometry.
+            cropped_frame: The cropped frame to use for photometry.
+            crop_vars: The crop variables to use for photometry.
+        returns:
+            A list of tuples representing the coordinates of the photometry pixels.
+        """
+
+
+        # Round crop variables to integers for indexing
+        _, _, x_min, x_max, y_min, y_max = map(int, crop_vars.copy())
+
+        # Copy over variables to avoid refference errors
+        fit_img = fit_img.copy()
+        cropped_frame = cropped_frame.copy()
+
+        # Clip fit image to zero and one
+        fit_img[fit_img <= 1] = 0
+        fit_img[fit_img > 1] = 1
+
+        # Mask cropped frame with fit image to remove the background
+        masked_cropped = fit_img * cropped_frame
+
+        masked_cropped[masked_cropped < np.percentile(masked_cropped, float(self.astra_config['astra']['photom_thresh']))] = 0
+
+        # binarize mask_cropped
+        masked_cropped[masked_cropped > 0] = 1
+        masked_cropped[masked_cropped <= 0] = 0
+
+        # Use morphological operator to close up photometry pixels (complete holes etc)
+        kernel = np.ones((3, 3), np.uint8)
+
+        masked_cropped = cv2.morphologyEx(masked_cropped, cv2.MORPH_CLOSE, kernel)
+
+        # Get indices for all non-zero pixels
+        nonzero_indices = np.argwhere(masked_cropped > 0)
+
+        # Convert photometry pixels to global coordinates and adjust indices
+        nonzero_indices[:, 0] += y_min
+        nonzero_indices[:, 1] += x_min
+        photometry_pixels = [tuple(idx[::-1]) for idx in nonzero_indices]
+
+        return photometry_pixels

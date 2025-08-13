@@ -4118,9 +4118,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 tt = "Not ready. Select three consecutive frames at high SNR, and the start/end frames of the streak"
                 self.astra_dialog.set_astra_status(False, tt)
 
-    def prepare_astra_data(self, config):
+    def prepare_astra_data(self, astra_config):
 
-        print("Running ASTRA with:", config)
+        print("Running ASTRA with:", astra_config)
 
         # Sort pick list according to keys
         self.pick_list = dict(sorted(self.pick_list.items()))
@@ -4149,9 +4149,12 @@ class PlateTool(QtWidgets.QMainWindow):
             "picks" : [[self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid']] for key in pick_frame_indices],
             "pick_frame_indices" : pick_frame_indices,
             "times" : times,
-            "config" : config,
+            "astra_config" : astra_config,
             "saturation_threshold" : self.saturation_threshold,
-            "data_path" : self.dir_path
+            "data_path" : self.dir_path,
+            "img_config" : self.config,
+            "dark" : self.dark if hasattr(self, 'dark') else None,
+            "flat" : self.flat_struct if hasattr(self, 'flat_struct') else None
         }
         # Package data for ASTRA, from manual picks
 
@@ -4162,7 +4165,7 @@ class PlateTool(QtWidgets.QMainWindow):
         pick_frame_indices = astra.pick_frame_indices
         global_picks = astra.global_picks
         snrs = astra.snr
-        config = astra.astra_config
+        astra_config = astra.astra_config
         intensity_sums = astra.abs_level_sums
         background_intensities = astra.background_levels
         photometry_pixels = astra.photometry_pixels
@@ -4192,14 +4195,14 @@ class PlateTool(QtWidgets.QMainWindow):
             self.checkKalmanCanRun()
 
         # Print and open dialog showing ASTRA has been run
-        print(f'Loaded {len(pick_frame_indices)} Picks from ASTRA! Minimum SNR of {config["astra"]["min SNR"]}')
+        print(f'Loaded {len(pick_frame_indices)} Picks from ASTRA! Minimum SNR of {astra_config["astra"]["min SNR"]}')
 
         qmessagebox(title="ASTRA Finished Processing",
-                    message=f'Loaded {len(pick_frame_indices)} Picks from ASTRA! Minimum SNR of {config["astra"]["min SNR"]}',
+                    message=f'Loaded {len(pick_frame_indices)} Picks from ASTRA! Minimum SNR of {astra_config["astra"]["min SNR"]}',
                     message_type='info')
 
-    def run_kalman_from_config(self, config, progress_callback=None):
-        print("Running Kalman with:", config)   
+    def run_kalman_from_config(self, astra_config, progress_callback=None):
+        print("Running Kalman with:", astra_config)   
 
         # Sort pick list according to keys
         self.pick_list = dict(sorted(self.pick_list.items()))
@@ -4220,9 +4223,12 @@ class PlateTool(QtWidgets.QMainWindow):
             "picks" : [],
             "pick_frame_indices" : np.array([]),
             "times" : times,
-            "config" : config,
+            "astra_config" : astra_config,
             "middle_picks" : [],
-            "saturation_threshold" : self.saturation_threshold
+            "saturation_threshold" : self.saturation_threshold,
+            "img_config" : self.config,
+            "dark" : None,
+            "flat" : None
         }
 
 
