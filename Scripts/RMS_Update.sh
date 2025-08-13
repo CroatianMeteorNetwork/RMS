@@ -82,14 +82,8 @@ emergency_cleanup() {
         fi
     fi
     
-    # Try to reset git state if we're in a bad state - but don't fail if it doesn't work
-    if [ -d "$RMSSOURCEDIR/.git" ]; then
-        cd "$RMSSOURCEDIR" 2>/dev/null || true
-        if git status &>/dev/null 2>&1; then
-            print_status "info" "Attempting to restore git state..."
-            check_and_fix_git_state 2>/dev/null || print_status "warning" "Failed to fix git state"
-        fi
-    fi
+    # Do NOT try to fix git state during emergency cleanup
+    # This could make things worse by stashing restored files
     
     print_status "error" "Update failed. Repository may be in an inconsistent state."
     print_status "info" "Manual recovery may be required. Check ~/source/RMS/.git/logs/ for git history."
