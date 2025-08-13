@@ -1566,7 +1566,17 @@ class ASTRA:
         # px / frame * frame/seconds
 
         # Calculate average velocity (px/s)
-        avrg_velocity = np.mean(np.diff(np.linalg.norm(measurements, axis=1)) / np.diff(times))  # px/s
+        x_meas = measurements[:, 0]
+        y_meas = measurements[:, 1]
+        
+        # Fit a line through time vs coordinates to estimate average velocity
+        x_fit = np.polyfit(times, x_meas, 1)
+        y_fit = np.polyfit(times, y_meas, 1)
+
+        # Take the geometric mean of the velocities as the average
+        avrg_velocity = np.hypot(x_fit[0], y_fit[0])  # Geometric mean of x and y velocities
+
+        print(f"Average velocity: {avrg_velocity:.2f} px/s")
 
         # Instantiate process noise covariance
         sigma_vxy = self.kalman_settings['sigma_vxy_perc']/100 * avrg_velocity
@@ -1589,9 +1599,9 @@ class ASTRA:
 
     def computeR(self, measurements, times):
 
-        # fit x and y vs time to a quadratic
-        x_fit = np.polyfit(times, measurements[:, 0], 2)
-        y_fit = np.polyfit(times, measurements[:, 1], 2)
+        # fit x and y vs time to a line
+        x_fit = np.polyfit(times, measurements[:, 0], 1)
+        y_fit = np.polyfit(times, measurements[:, 1], 1)
 
         # Calculate all residuals between fit and measurements
         x_residuals = measurements[:, 0] - np.polyval(x_fit, times)

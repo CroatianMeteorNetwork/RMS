@@ -124,7 +124,7 @@ class AstraConfigDialog(QDialog):
         # === Kalman Filter Settings ===
         self.kalman_fields = {}
         kalman_defaults = {
-            "Monotonicity": "True", "sigma_xy (px)": "0.1", "sigma_vxy (%)": "0.1", "save results" : "False"
+            "Monotonicity": "True", "sigma_xy (px)": "0.25", "sigma_vxy (%)": "50", "save results" : "False"
         }
 
         # === PARAMETER GUIDE ===

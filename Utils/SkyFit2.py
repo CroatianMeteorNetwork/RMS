@@ -3966,22 +3966,36 @@ class PlateTool(QtWidgets.QMainWindow):
         
         # Check if the file camera code matches the frames loaded
 
-        # Open ECSV
-        if file_path.endswith('.ecsv'):
-
-            # Create a temp pick_list
-            pick_list = {}
-
-            # Load the picks and indices from loadECSV
-            pick_list = self.loadECSV(file_path)
-
-        if file_path.endswith('.txt'):
+        
+        # DetApp picks in a ev*.txt files
+        if file_path.startswith('ev') and file_path.endswith('.txt'):
             
             # Create a temp pick_list
             pick_list = {}
 
             # Load all picks and indices from loadTXT
             pick_list = self.loadTXT(file_path)
+
+        # Open ECSV file (even if it doesn't have an .ecsv extension)
+        else:
+
+            # Create a temp pick_list
+            pick_list = {}
+
+            # Load the picks and indices from loadECSV
+            try:
+                pick_list = self.loadECSV(file_path)
+
+            except Exception as e:
+                
+                print(f'ERROR: Failed to load ECSV file {file_path}: {e}')
+                qmessagebox(
+                    title='ECSV Load Error',
+                    message=f'Failed to load ECSV file {file_path}: {e}',
+                    message_type="error"
+                )
+                return
+
 
         # Check if the returned values from load are None
         if pick_list is None:
