@@ -20,7 +20,7 @@ from __future__ import print_function, division, absolute_import
 import os
 import sys
 import shutil
-
+import tempfile
 import datetime
 import time
 import dateutil
@@ -31,7 +31,13 @@ import copy
 import uuid
 import random
 import string
+import ephem
 
+
+from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, correctVignetting
+from matplotlib import pyplot as plt
+from RMS.Routines.MaskImage import loadMask
+from Utils.FOVSkyMap import plotFOVSkyMap
 
 if sys.version_info[0] < 3:
 
@@ -54,20 +60,24 @@ else:
 import numpy as np
 
 import RMS.ConfigReader as cr
+import json
 
-from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector
-from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt
+from RMS.Formats.CALSTARS import readCALSTARS
+from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector, raDec2AltAz
+from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt, jd2Date
+from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
 from RMS.Logger import getLogger
-from RMS.Math import angularSeparationVect
-from RMS.Formats.FFfile import convertFRNameToFF
+from RMS.Math import angularSeparationVect, angularSeparationDeg
+from RMS.Formats.FFfile import convertFRNameToFF, getMiddleTimeFF
 from RMS.Formats.Platepar import Platepar
 from RMS.UploadManager import uploadSFTP
 from Utils.StackFFs import stackFFs
 from Utils.FRbinViewer import view
 from Utils.BatchFFtoImage import batchFFtoImage
 from RMS.CaptureDuration import captureDuration
-from RMS.Misc import sanitise, RmsDateTime
-
+from RMS.Misc import sanitise, RmsDateTime, getRmsRootDir, mkdirP
+from RMS.Formats.FFfile import read
+from matplotlib.dates import DateFormatter
 
 # Import Cython functions
 import pyximport
@@ -136,6 +146,11 @@ class EventContainer(object):
         self.stations_required = ""
         self.respond_to = ""
 
+        # For radec or tle specification
+        self.jd_start, self.jd_end = 0, 0
+        self.ra, self.dec = 0, 0
+        self.tle_0, self.tle_1, self.tle_2 = "", "", ""
+
         # These are internal control properties
         self.uuid = ""
         self.event_spec_type = 0
@@ -193,6 +208,16 @@ class EventContainer(object):
         self.ht2 = float(value) if "EventHt2" == variable_name else self.ht2
         self.ht2_std = float(value) if "EventHt2Std" == variable_name else self.ht2_std
         self.cart2_std = float(value) if "EventCart2Std" == variable_name else self.cart2_std
+
+        # Radec and tle events
+        if value is not None:
+            self.jd_start = float(value) if "JDStart" == variable_name else self.jd_start
+            self.jd_end = float(value) if "JDEnd" == variable_name else self.jd_end
+            self.ra = float(value) if "Ra" == variable_name else self.ra
+            self.dec = float(value) if "Dec" == variable_name else self.dec
+            self.tle_0 = str(value) if "tle_0" == variable_name else self.tle_0
+            self.tle_1 = str(value) if "tle_1" == variable_name else self.tle_1
+            self.tle_2 = str(value) if "tle_2" == variable_name else self.tle_2
 
         # Optional parameters for defining trajectory by a start point, and a direction
         if "EventAzim" == variable_name:
@@ -265,6 +290,15 @@ class EventContainer(object):
         output += ("Start Angle              : {:3.2f}\n".format(self.start_angle))
         output += ("End Distance (km)        : {:3.2f}\n".format(self.end_distance / 1000))
         output += ("End Angle                : {:3.2f}\n".format(self.end_angle))
+        output += "# RaDEC and TLE events     \n"
+        output += ("JD_Start                 : {:3.2f}\n".format(self.jd_start))
+        output += ("JD_End                   : {:3.2f}\n".format(self.jd_end))
+        output += ("TLE_0                    : {}\n".format(self.tle_0))
+        output += ("TLE_1                    : {}\n".format(self.tle_1))
+        output += ("TLE_2                    : {}\n".format(self.tle_2))
+        output += ("RA                       : {:3.2f}\n".format(self.ra))
+        output += ("Dec                      : {:3.2f}\n".format(self.dec))
+
         output += "# Station information        \n"
         output += ("Field of view RA         : {:3.2f}\n".format(self.fovra))
         output += ("Field of view Dec        : {:3.2f}\n".format(self.fovdec))
@@ -286,12 +320,21 @@ class EventContainer(object):
         """
 
         reasonable = True
-        reasonable = False if self.lat == "" else reasonable
-        reasonable = False if self.lat is None else reasonable
-        reasonable = False if self.lon == "" else reasonable
-        reasonable = False if self.lon is None else reasonable
-        reasonable = False if 0 < float(self.time_tolerance) > 300 else reasonable
-        reasonable = False if self.close_radius > self.far_radius else reasonable
+        if self.jd_start == 0 and self.jd_end == 0:
+            reasonable = False if self.lat == "" else reasonable
+            reasonable = False if self.lat is None else reasonable
+            reasonable = False if self.lon == "" else reasonable
+            reasonable = False if self.lon is None else reasonable
+            reasonable = False if 0 < float(self.time_tolerance) > 300 else reasonable
+            reasonable = False if self.close_radius > self.far_radius else reasonable
+        else:
+            reasonable = False if self.jd_end < self.jd_start else reasonable
+            if self.tle_0 == "" or self.tle_1 == "" or self.tle_2 == "":
+                reasonable = False if self.ra == 0 or self.dec == 0 else reasonable
+            else:
+                reasonable = False if self.tle_0 == "" else reasonable
+                reasonable = False if self.tle_1 == "" else reasonable
+                reasonable = False if self.tle_2 == "" else reasonable
 
         return reasonable
 
@@ -906,6 +949,14 @@ class EventMonitor(multiprocessing.Process):
             log.info("Missing db column Suffix")
             self.addDBcol("Suffix","TEXT")
 
+        if not self.checkDBcol(conn,"JDStart"):
+            log.info("Missing db column JDStart")
+            self.addDBcol("JDStart","REAL")
+
+        if not self.checkDBcol(conn,"JDEnd"):
+            log.info("Missing db column JDEnd")
+            self.addDBcol("JDEnd","REAL")
+
         if not self.checkDBcol(conn,"Ra"):
             log.info("Missing db column Ra")
             self.addDBcol("Ra","REAL")
@@ -914,6 +965,17 @@ class EventMonitor(multiprocessing.Process):
             log.info("Missing db column Dec")
             self.addDBcol("Dec","REAL")
 
+        if not self.checkDBcol(conn,"TLE_0"):
+            log.info("Missing db column TLE_0")
+            self.addDBcol("TLE_0","TEXT")
+
+        if not self.checkDBcol(conn,"TLE_1"):
+            log.info("Missing db column TLE_1")
+            self.addDBcol("TLE_1","TEXT")
+
+        if not self.checkDBcol(conn,"TLE_2"):
+            log.info("Missing db column TLE_2")
+            self.addDBcol("TLE_2","TEXT")
 
         if not self.checkDBcol(conn,"RequireFR"):
             log.info("Missing db column RequireFR")
@@ -1052,6 +1114,14 @@ class EventMonitor(multiprocessing.Process):
         sql_statement += "CloseRadius = '{}'            AND \n".format(event.close_radius)
         sql_statement += "TimeTolerance = '{}'          AND \n".format(event.time_tolerance)
         sql_statement += "StationsRequired = '{}'       AND \n".format(event.stations_required)
+        sql_statement += "JDStart = '{}'                AND \n".format(event.jd_start)
+        sql_statement += "JDEnd = '{}'                  AND \n".format(event.jd_end)
+        sql_statement += "Ra = '{}'                     AND \n".format(event.ra)
+        sql_statement += "Dec = '{}'                    AND \n".format(event.dec)
+        sql_statement += "TLE_0 = '{}'                  AND \n".format(event.tle_0)
+        sql_statement += "TLE_1 = '{}'                  AND \n".format(event.tle_1)
+        sql_statement += "TLE_2 = '{}'                  AND \n".format(event.tle_2)
+
         sql_statement += "RespondTo = '{}'                  \n".format(event.respond_to)
 
         # does a similar event exist
@@ -1120,8 +1190,9 @@ class EventMonitor(multiprocessing.Process):
             sql_statement += "CloseRadius, FarRadius,                     \n"
             sql_statement += "EventLat2, EventLat2Std, EventLon2, EventLon2Std,EventHt2, EventHt2Std, EventCart2Std,    \n"
             sql_statement += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax,    \n"
-            sql_statement += "processedstatus, uploadedstatus, uuid, RespondTo, StationsRequired, RequireFR, timeadded \n"
-            sql_statement += ")                                           \n"
+            sql_statement += "processedstatus, uploadedstatus, uuid, RespondTo, StationsRequired, RequireFR, \n"
+            sql_statement += "Ra, Dec, JDStart, JDEnd, tle_0, tle_1, tle_2, \n"
+            sql_statement += "timeadded)                                           \n"
 
             sql_statement += "VALUES "
             sql_statement += "(                            \n"
@@ -1135,6 +1206,7 @@ class EventMonitor(multiprocessing.Process):
                                                                       event.elev_std,
                                                                       qry_elev_is_max)
             sql_statement += "{},  {}, '{}', '{}', '{}' , '{}', \n".format(0, 0,uuid.uuid4(), event.respond_to, event.stations_required, event.require_FR)
+            sql_statement += "{}, {}, '{}', '{}', '{}' , '{}', '{}',  \n".format(event.ra, event.dec, event.jd_start, event.jd_end, event.tle_0, event.tle_1, event.tle_2)
             sql_statement += "CURRENT_TIMESTAMP ) \n"
 
             try:
@@ -1149,7 +1221,10 @@ class EventMonitor(multiprocessing.Process):
                 log.info("Add event failed")
                 self.recoverFromDatabaseError()
                 return False
-            log.info("Added event at {} to the database".format(event.dt))
+            if event.dt != 0:
+                log.info("Added event at {} to the database".format(event.dt))
+            elif event.jd_start != 0 and event.jd_end != 0:
+                log.info("Added event between JD:{} and JD:{} to the database".format(event.jd_start, event.jd_end))
             return True
         else:
             return False
@@ -1353,7 +1428,7 @@ class EventMonitor(multiprocessing.Process):
 
         return events
 
-    def getUnprocessedEventsfromDB(self):
+    def getUnprocessedEventsfromDB(self, reprocess=False):
 
         """ Get the unprocessed events from the database
 
@@ -1372,11 +1447,13 @@ class EventMonitor(multiprocessing.Process):
         sql_query_cols += "FarRadius,CloseRadius, uuid,"
         sql_query_cols += "EventLat2, EventLat2Std, EventLon2, EventLon2Std,EventHt2, EventHt2Std, "
         sql_query_cols += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax, RespondTo, StationsRequired,"
-        sql_query_cols += "EventCartStd, EventCart2Std, RequireFR"
+        sql_query_cols += "EventCartStd, EventCart2Std, RequireFR,"
+        sql_query_cols += "JDStart, JDEnd, Ra, Dec, tle_0, tle_1, tle_2"
         sql_statement += sql_query_cols
         sql_statement += " \n"
         sql_statement += "FROM event_monitor "
-        sql_statement += "WHERE processedstatus = 0"
+        if not reprocess:
+            sql_statement += "WHERE processedstatus = 0"
 
         try:
             cursor = self.db_conn.cursor().execute(sql_statement)
@@ -1724,7 +1801,13 @@ class EventMonitor(multiprocessing.Process):
         # put all the files from the filelist into the event directory
         pack_size = 0
         for file in file_list:
-            pack_size += os.path.getsize(file)
+            if file is None:
+                log.info("File name None passed")
+            else:
+                if os.path.exists(file):
+                    pack_size += os.path.getsize(file)
+                else:
+                    log.info("File {} was not found, not adding to size.".format(file))
         log.info("File pack ({:.0f}MB) assembly started".format(pack_size/1024/1024))
 
         # Don't upload things which are too large
@@ -1733,7 +1816,14 @@ class EventMonitor(multiprocessing.Process):
             return False
 
         for file in file_list:
-            shutil.copy(file, this_event_directory)
+            if file is None:
+                log.info("None file passed - ignoring")
+            else:
+                if os.path.exists(file):
+                    log.info("Adding {} to payload at {}".format(os.path.basename(file), os.path.basename(this_event_directory)))
+                    shutil.copy(file, this_event_directory)
+                else:
+                    log.info("Not adding {} to payload as file not found".format(file))
         log.info("File pack assembled")
 
         stackFFs(this_event_directory, "jpg", captured_stack=True, print_progress=False)
@@ -1741,6 +1831,8 @@ class EventMonitor(multiprocessing.Process):
         # convert bins to MP4
         for file in file_list:
             #Guard against FS files getting into binViewer
+            if file is None:
+                continue
             if file.endswith(".bin") and sys.version_info[0] >= 3 and os.path.basename(file)[0:2] != "FS":
                 fr_file = os.path.basename(file)
                 ff_file = convertFRNameToFF(fr_file)
@@ -1834,6 +1926,325 @@ class EventMonitor(multiprocessing.Process):
 
         return found
 
+    def handleFutureEvents(self, observed_event, future_events):
+
+        if convertGMNTimeToPOSIX(observed_event.dt) + \
+                datetime.timedelta(seconds=int(observed_event.time_tolerance)) > RmsDateTime.utcnow():
+            time_until_event_end_seconds = (convertGMNTimeToPOSIX(observed_event.dt) -
+                                            RmsDateTime.utcnow() +
+                                            datetime.timedelta(
+                                                seconds=int(observed_event.time_tolerance))).total_seconds()
+            future_events += 1
+            in_future = True
+            log.info("The end of event at {} is in the future by {:.1f} minutes"
+                     .format(observed_event.dt, time_until_event_end_seconds / 60))
+            if time_until_event_end_seconds < float(self.check_interval) * 60:
+                log.info(
+                    "Check interval is set to {:.1f} minutes, however end of future event is only {:.1f} minutes away"
+                    .format(float(self.check_interval), time_until_event_end_seconds / 60))
+                # set the check_interval to the time until the end of the event
+                self.check_interval = float(time_until_event_end_seconds) / 60
+                # random time offset to reduce congestion
+                self.check_interval += random.randint(20, 60) / 60
+                log.info("Check interval set to {:.1f} minutes, so that future event is reported quickly"
+                         .format(float(self.check_interval)))
+            else:
+                log.info(
+                    "Check interval is set to {:.1f} minutes, end of future event {:.1f} minutes away, no action required"
+                    .format(float(self.check_interval), time_until_event_end_seconds / 60))
+
+        else:
+            in_future = False
+
+        return future_events, in_future
+
+
+    def processLatLonEvent(self, observed_event, future_events, ev_con, check_time_start, test_mode=False):
+
+        # check to see if the end of this event is in the future, if it is then do not process
+        # if the end of the event is before the next scheduled execution of event monitor loop,
+        # then set the loop to execute after the event ends
+        future_events, in_future = self.handleFutureEvents(observed_event, future_events)
+        if in_future:
+            return future_events, in_future
+
+        log.info("Checks on trajectories for event at {}".format(observed_event.dt))
+
+        # Iterate through the work
+        # Events can be specified in different ways, make sure converted to LatLon
+        observed_event.latLonAzElToLatLonLatLon()
+        # Get the files
+        file_list = self.getFileList(observed_event)
+
+        # If there are no files based on time, then mark as processed and continue
+        if (len(file_list) == 0 or file_list == [None]) and not test_mode:
+            log.info("No files for event - marking {} as processed".format(observed_event.dt))
+            self.markEventAsProcessed(observed_event)
+            # This moves to next observed_event
+            return future_events, in_future
+
+        # move to the next event if we required an FR file but do not have one
+
+        if observed_event.require_FR == 1:
+            log.info("Event at {} requires FR file".format(observed_event.dt))
+            if not self.frFileInList(file_list):
+                log.info("Event at {} skipped - FR required and none found".format(observed_event.dt))
+                self.markEventAsProcessed(observed_event)
+                return future_events, in_future
+            else:
+                log.info("Event at {} required FR file and file was found".format(observed_event.dt))
+        else:
+            log.info("FR file not required for event at {}".format(observed_event.dt))
+
+        # If there is a .config file then parse it as evcon - not the station config
+        for file in file_list:
+            if file.endswith(".config"):
+                ev_con = cr.parse(file)
+
+        # Look for the station code in the stations_required string
+        if observed_event.stations_required.find(ev_con.stationID) != -1:
+            if self.doUpload(observed_event, ev_con, file_list, test_mode):
+                log.info("In Stations_Required - marking {} as processed".format(observed_event.dt))
+                self.markEventAsProcessed(observed_event)
+                if len(file_list) > 0:
+                    self.markEventAsUploaded(observed_event, file_list)
+            else:
+                log.error(
+                    "Upload failed for event at {}. Event retained in database for retry.".format(observed_event.dt))
+            return future_events, in_future
+
+        # Initialise the population of trajectories
+        event_population = []
+        # If we have any standard deviation definitions then create a population of 1000, else create a population of 1
+        if observed_event.hasCartSD() or observed_event.hasPolarSD():
+            log.info("Working with standard deviations")
+            event_population = observed_event.appendPopulation(event_population, 1000)
+        else:
+            log.info("Working without standard deviations")
+            event_population = observed_event.appendPopulation(event_population, 1)
+
+        # Apply SD to the population
+        if observed_event.hasCartSD():
+            log.info("Applying cartesian standard deviations")
+            event_population = observed_event.applyCartesianSD(event_population)
+        if observed_event.hasPolarSD():
+            log.info("Applying polar standard deviations")
+            event_population = observed_event.applyPolarSD(event_population)
+
+        # Add trajectories with elevations from observed value to 15 deg
+        if observed_event.elev_is_max:
+            log.info("Rotating trajectory around observed point")
+            event_population = observed_event.addElevationRange(event_population, observed_event, 15)
+
+        # Start testing trajectories from the population
+        for event in event_population:
+            # check if this has already been handled
+            if self.eventProcessed(observed_event.uuid):
+                break  # do no more work on any version of this trajectory - break exits loop
+            # From the infinitely extended trajectory, work out the closest point to the camera
+            # ev_con.elevation is the height above sea level of the station in metres, no conversion required
+            start_dist, end_dist, atmos_dist = calculateClosestPoint(event.lat, event.lon, event.ht * 1000,
+                                                                     event.lat2, event.lon2, event.ht2 * 1000,
+                                                                     ev_con.latitude, ev_con.longitude,
+                                                                     ev_con.elevation)
+            min_dist = min([start_dist, end_dist, atmos_dist])
+
+            # If this version of the trajectory outside the farradius, continue
+            if min_dist > event.far_radius * 1000 and not test_mode:
+                # Do no more work on this version of the trajectory
+                continue
+
+            # If trajectory inside the closeradius, then do the upload and mark as processed
+            if min_dist < event.close_radius * 1000 and not test_mode:
+                # this is just for info
+                log.info("Event at {} was {:.0f}km away, inside {:.0f}km so is uploaded with no further checks.".format(
+                    event.dt, min_dist / 1000, event.close_radius))
+                check_time_end = RmsDateTime.utcnow()
+                check_time_seconds = (check_time_end - check_time_start).total_seconds()
+                log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
+                count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
+                    event)
+                # If doUpload returned True mark the event as processed and uploaded
+                if self.doUpload(event, ev_con, file_list, test_mode):
+                    log.info("Inside close radius - marking {} as processed".format(observed_event.dt))
+                    self.markEventAsProcessed(observed_event)
+                    if len(file_list) > 0:
+                        self.markEventAsUploaded(observed_event, file_list)
+                    break  # Do no more work on any version of this trajectory - break exits loop
+                else:
+                    log.error("Upload failed for event at {}. Event retained in database for retry.".format(event.dt))
+
+            # If trajectory inside the farradius, then check if the trajectory went through the FoV
+            # The returned count is the number of 100th parts of the trajectory observed through the FoV
+            if min_dist < event.far_radius * 1000 or test_mode:
+                # log.info("Event at {} was {:4.1f}km away, inside {:4.1f}km, consider FOV.".format(event.dt, min_dist / 1000, event.far_radius))
+                count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
+                    event)
+                if count != 0:
+                    log.info(
+                        "Event at {} had {} points out of 100 in the trajectory in the FOV. Uploading.".format(event.dt,
+                                                                                                               count))
+                    check_time_end = RmsDateTime.utcnow()
+                    check_time_seconds = (check_time_end - check_time_start).total_seconds()
+                    log.info("Check of trajectories took {:2f} seconds".format(check_time_seconds))
+                    if self.doUpload(observed_event, ev_con, file_list, test_mode=test_mode):
+                        self.markEventAsUploaded(observed_event, file_list)
+                        if not test_mode:
+                            log.info(
+                                "Trajectory passed through FoV - marking {} as processed".format(observed_event.dt))
+                            self.markEventAsProcessed(observed_event)
+                        break  # Do no more work on any version of this trajectory
+                    else:
+                        log.error(
+                            "Upload failed for event at {}. Event retained in database for retry.".format(event.dt))
+                    if test_mode:
+                        rp = Platepar()
+                        rp.read(self.getPlateparFilePath(event))
+                        with open(os.path.expanduser(os.path.join(self.syscon.data_dir, "testlog")), 'at') as logfile:
+                            logfile.write(
+                                "{} LOC {} Az:{:3.1f} El:{:3.1f} sta_lat:{:3.4f} sta_lon:{:3.4f} sta_dist:{:3.0f} end_dist:{:3.0f} fov_h:{:3.1f} fov_v:{:3.1f} sa:{:3.1f} ea::{:3.1f} \n".format(
+                                    convertGMNTimeToPOSIX(event.dt), ev_con.stationID, rp.az_centre, rp.alt_centre,
+                                    rp.lat, rp.lon, event.start_distance / 1000, event.end_distance / 1000, rp.fov_h,
+                                    rp.fov_v, event.start_angle, event.end_angle))
+                else:
+
+                    if not test_mode:
+                        pass
+
+                # Continue with other trajectories from this population
+                continue
+
+        return future_events, in_future
+
+    def processRaDecEvent(self, e, future_events, sys_con, check_time_start, test_mode=False):
+        """
+
+        Arguments:
+            e:[object] Event specification
+            future_events: Number of future events found so far
+            sys_con: [config] RMS event instance for the system
+            check_time_start: [datetime] Start time of the check
+            test_mode:
+        Keyword Arguments:
+
+        Return:
+            future_events; [int] number of future events found
+        """
+
+        e.dt = jd2RMSStyle(e.jd_end)
+        future_events, in_future = self.handleFutureEvents(e, future_events)
+        e.dt = jd2RMSStyle(e.jd_start)
+        if in_future:
+            return future_events, in_future
+
+        log.info("Starting work on a RaDec specified event")
+        log.info("JD_start  :   {} or {}".format(e.jd_start, jd2Date(e.jd_start, dt_obj=True)))
+        log.info("JD_end    :   {} or {}".format(e.jd_end, jd2Date(e.jd_end, dt_obj=True)))
+        log.info("Ra        :   {}".format(e.ra))
+        log.info("Dec       :   {}".format(e.dec))
+
+        e.suffix = "JD_start_{}_JD_end_{}_Ra_{:.0f}_Dec_{:.0f}".format(round(e.jd_start * 100), round(e.jd_end * 100), round(e.ra * 100), round(e.dec * 100))
+        generic_file_name = "{}_{}.png".format(sys_con.stationID, e.suffix)
+        thumbnail_file_name = "thumbnail_{}".format(generic_file_name)
+        calstar_assisted_thumbnail_file_name = "calstar_assisted_thumbnail_{}".format(generic_file_name)
+        magnitudes_chart_file_name = "magnitudes_{}".format(generic_file_name)
+
+        with tempfile.TemporaryDirectory() as radec_event_dir:
+            thumbnail_file_path = os.path.join(radec_event_dir, thumbnail_file_name)
+            magnitudes_chart_file_path = os.path.join(radec_event_dir, magnitudes_chart_file_name)
+
+            file_list = []
+            file_path = os.path.join(radec_event_dir, thumbnail_file_name)
+            e.suffix = "" if e.suffix == "event" else e.suffix
+
+
+            thumbnail_file_path = saveThumbnailsRaDec(e.ra, e.dec, e.jd_start, e.jd_end, config=sys_con, file_path=thumbnail_file_path)
+            if thumbnail_file_path is None:
+                log.info("No thumbnail returned for this event")
+
+                return future_events, in_future
+
+            else:
+                file_list.append(thumbnail_file_path)
+
+            json_name = os.path.join(radec_event_dir, "{}.{}".format(e.suffix,"json"))
+            mags_radec_dict = dictMagsRaDec(sys_con, e.ra, e.dec, e.jd_start, e.jd_end)
+            log.info("Returned from dictMagsRaDec")
+            log.info("Thumbnail file path {}".format(thumbnail_file_path))
+            if thumbnail_file_path is not None:
+
+                log.info("Thumbnail path was not none")
+                # Produce a skymap
+                pp_dict, config_dict, mask_dict = {}, {}, {}
+                pp = Platepar()
+                pp.read(os.path.join(os.path.expanduser(sys_con.config_file_path), sys_con.platepar_name))
+                mask = loadMask(os.path.join(os.path.expanduser(sys_con.config_file_path), sys_con.mask_file))
+                config_dict[sys_con.stationID], pp_dict[sys_con.stationID], mask_dict[sys_con.stationID] = sys_con, pp, mask
+                fov_file_name = "FOV_{}_Ra_{:.0f}_Dec_{:.0f}.png".format(sys_con.stationID, e.ra *100, e.dec * 100)
+                fov_file_path = os.path.join(radec_event_dir, fov_file_name)
+                plotFOVSkyMap(pp_dict, config_dict, None,
+                                                 output_file_name=fov_file_path,
+                                                 masks=mask_dict, north_up=True, show_radec=True,
+                                                 radec_list=[[e.ra, e.dec]],
+                                                 radec_name_list=["({},{})".format(e.ra, e.dec)])
+                if os.path.exists(fov_file_path):
+                    file_list.append(fov_file_path)
+
+                with open(json_name, 'w') as f:
+                    json.dump(mags_radec_dict, f)
+                file_list.append(json_name)
+                magnitudes_chart_file_path = dictToMagnitudePlot(sys_con, mags_radec_dict, e, file_path=magnitudes_chart_file_path)
+
+                if magnitudes_chart_file_path is not None:
+                    file_list.append(magnitudes_chart_file_path)
+
+                calstar_assisted_thumbnails_path = os.path.join(radec_event_dir, calstar_assisted_thumbnail_file_name)
+                file_list.append(dictToThumbnails(sys_con, mags_radec_dict, e, calstar_assisted_thumbnails_path))
+
+
+
+            filtered_file_list = []
+            for file in file_list:
+                if file is not None:
+                    if os.path.exists(file):
+                        filtered_file_list.append(file)
+            file_list = filtered_file_list
+
+            if file_list is None or not len(file_list):
+                log.info("Nothing to upload")
+            else:
+                log.info("{} files to upload".format(len(file_list)))
+                if self.doUpload(e, sys_con, file_list):
+                    self.markEventAsUploaded(e, file_list)
+                    self.markEventAsProcessed(e)
+
+                if os.path.exists(file_path) and os.path.isfile(file_path):
+                    os.remove(file_path)
+
+        return future_events, in_future
+
+    def processTLEEvent(self, e, future_events, ev_con, check_time_start, test_mode):
+
+        log.info("Starting work on a TLE specified event")
+        log.info("JD_start  :   {}".format(e.jd_start))
+        log.info("JD_end    :   {}".format(e.jd_end))
+        log.info("tle_0     :   {}".format(e.tle_0))
+        log.info("tle_1     :   {}".format(e.tle_1))
+        log.info("tle_2     :   {}".format(e.tle_2))
+
+        e.dt = jd2RMSStyle(e.jd_end)
+        future_events, in_future = self.handleFutureEvents(e, future_events)
+        e.dt = jd2RMSStyle(e.jd_start)
+        if in_future:
+            return future_events, in_future
+        #file_coordinate_list = getFitsPathsAndCoordsTLE(ev_con, e)
+
+
+
+        return future_events, in_future
+
+
+
     def checkEvents(self, ev_con, test_mode = False):
 
         """
@@ -1846,176 +2257,30 @@ class EventMonitor(multiprocessing.Process):
 
         # Get the work to be done
 
-        unprocessed = self.getUnprocessedEventsfromDB()
+        unprocessed = self.getUnprocessedEventsfromDB(reprocess=False)
 
         future_events = 0
         for observed_event in unprocessed:
 
-            # check to see if the end of this event is in the future, if it is then do not process
-            # if the end of the event is before the next scheduled execution of event monitor loop,
-            # then set the loop to execute after the event ends
-            if convertGMNTimeToPOSIX(observed_event.dt) + \
-                    datetime.timedelta(seconds=int(observed_event.time_tolerance)) > RmsDateTime.utcnow():
-                time_until_event_end_seconds = (convertGMNTimeToPOSIX(observed_event.dt) -
-                                                    RmsDateTime.utcnow() +
-                                                    datetime.timedelta(seconds=int(observed_event.time_tolerance))).total_seconds()
-                future_events += 1
-                log.info("The end of event at {} is in the future by {:.1f} minutes"
-                         .format(observed_event.dt, time_until_event_end_seconds / 60))
-                if time_until_event_end_seconds < float(self.check_interval) * 60:
-                    log.info("Check interval is set to {:.1f} minutes, however end of future event is only {:.1f} minutes away"
-                             .format(float(self.check_interval),time_until_event_end_seconds / 60))
-                    # set the check_interval to the time until the end of the event
-                    self.check_interval = float(time_until_event_end_seconds) / 60
-                    # random time offset to reduce congestion
-                    self.check_interval += random.randint(20, 60) / 60
-                    log.info("Check interval set to {:.1f} minutes, so that future event is reported quickly"
-                             .format(float(self.check_interval)))
-                else:
-                    log.info("Check interval is set to {:.1f} minutes, end of future event {:.1f} minutes away, no action required"
-                             .format(float(self.check_interval),time_until_event_end_seconds / 60 ))
-                continue
-
-
-            log.info("Checks on trajectories for event at {}".format(observed_event.dt))
             check_time_start = RmsDateTime.utcnow()
-            # Iterate through the work
-            # Events can be specified in different ways, make sure converted to LatLon
-            observed_event.latLonAzElToLatLonLatLon()
-            # Get the files
-            file_list = self.getFileList(observed_event)
 
-            # If there are no files based on time, then mark as processed and continue
-            if (len(file_list) == 0 or file_list == [None]) and not test_mode:
-                log.info("No files for event - marking {} as processed".format(observed_event.dt))
-                self.markEventAsProcessed(observed_event)
-                # This moves to next observed_event
-                continue
-
-            # move to the next event if we required an FR file but do not have one
-
-            if observed_event.require_FR == 1:
-                log.info("Event at {} requires FR file".format(observed_event.dt))
-                if not self.frFileInList(file_list):
-                    log.info("Event at {} skipped - FR required and none found".format(observed_event.dt))
-                    self.markEventAsProcessed(observed_event)
+            if observed_event.lat != 0 and observed_event.lon !=0:
+                log.info("Working on a lat, lon style event")
+                future_events, in_future = self.processLatLonEvent(observed_event, future_events, ev_con, check_time_start, test_mode)
+                if in_future:
                     continue
-                else:
-                    log.info("Event at {} required FR file and file was found".format(observed_event.dt))
-            else:
-                log.info("FR file not required for event at {}".format(observed_event.dt))
-
-            # If there is a .config file then parse it as evcon - not the station config
-            for file in file_list:
-                if file.endswith(".config"):
-                    ev_con = cr.parse(file)
-
-            # Look for the station code in the stations_required string
-            if observed_event.stations_required.find(ev_con.stationID) != -1:
-                if self.doUpload(observed_event, ev_con, file_list, test_mode):
-                    log.info("In Stations_Required - marking {} as processed".format(observed_event.dt))
-                    self.markEventAsProcessed(observed_event)
-                    if len(file_list) > 0:
-                        self.markEventAsUploaded(observed_event, file_list)
-                else:
-                    log.error("Upload failed for event at {}. Event retained in database for retry.".format(observed_event.dt))
-                continue
-
-            # Initialise the population of trajectories
-            event_population = []
-            # If we have any standard deviation definitions then create a population of 1000, else create a population of 1
-            if observed_event.hasCartSD() or observed_event.hasPolarSD():
-                log.info("Working with standard deviations")
-                event_population = observed_event.appendPopulation(event_population,1000)
-            else:
-                log.info("Working without standard deviations")
-                event_population = observed_event.appendPopulation(event_population,1)
-
-
-
-            # Apply SD to the population
-            if observed_event.hasCartSD():
-                log.info("Applying cartesian standard deviations")
-                event_population = observed_event.applyCartesianSD(event_population)
-            if observed_event.hasPolarSD():
-                log.info("Applying polar standard deviations")
-                event_population = observed_event.applyPolarSD(event_population)
-
-            # Add trajectories with elevations from observed value to 15 deg
-            if observed_event.elev_is_max:
-                log.info("Rotating trajectory around observed point")
-                event_population = observed_event.addElevationRange(event_population, observed_event, 15)
-
-            # Start testing trajectories from the population
-            for event in event_population:
-                # check if this has already been handled
-                if self.eventProcessed(observed_event.uuid):
-                    break # do no more work on any version of this trajectory - break exits loop
-                # From the infinitely extended trajectory, work out the closest point to the camera
-                # ev_con.elevation is the height above sea level of the station in metres, no conversion required
-                start_dist, end_dist, atmos_dist = calculateClosestPoint(event.lat, event.lon, event.ht * 1000,
-                                                                              event.lat2, event.lon2, event.ht2 * 1000,
-                                                                              ev_con.latitude, ev_con.longitude, ev_con.elevation)
-                min_dist = min([start_dist, end_dist, atmos_dist])
-
-                # If this version of the trajectory outside the farradius, continue
-                if min_dist > event.far_radius * 1000 and not test_mode:
-                    # Do no more work on this version of the trajectory
-                    continue
-
-            # If trajectory inside the closeradius, then do the upload and mark as processed
-                if min_dist < event.close_radius * 1000 and not test_mode:
-                    # this is just for info
-                    log.info("Event at {} was {:.0f}km away, inside {:.0f}km so is uploaded with no further checks.".format(event.dt, min_dist / 1000, event.close_radius))
-                    check_time_end = RmsDateTime.utcnow()
-                    check_time_seconds = (check_time_end- check_time_start).total_seconds()
-                    log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
-                    count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
-                        event)
-                    # If doUpload returned True mark the event as processed and uploaded
-                    if self.doUpload(event, ev_con, file_list, test_mode):
-                        log.info("Inside close radius - marking {} as processed".format(observed_event.dt))
-                        self.markEventAsProcessed(observed_event)
-                        if len(file_list) > 0:
-                            self.markEventAsUploaded(observed_event, file_list)
-                        break # Do no more work on any version of this trajectory - break exits loop
-                    else:
-                        log.error("Upload failed for event at {}. Event retained in database for retry.".format(event.dt))
-
-            # If trajectory inside the farradius, then check if the trajectory went through the FoV
-            # The returned count is the number of 100th parts of the trajectory observed through the FoV
-                if min_dist < event.far_radius * 1000 or test_mode:
-                    #log.info("Event at {} was {:4.1f}km away, inside {:4.1f}km, consider FOV.".format(event.dt, min_dist / 1000, event.far_radius))
-                    count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(event)
-                    if count != 0:
-                        log.info("Event at {} had {} points out of 100 in the trajectory in the FOV. Uploading.".format(event.dt, count))
-                        check_time_end = RmsDateTime.utcnow()
-                        check_time_seconds = (check_time_end - check_time_start).total_seconds()
-                        log.info("Check of trajectories took {:2f} seconds".format(check_time_seconds))
-                        if self.doUpload(observed_event, ev_con, file_list, test_mode=test_mode):
-                            self.markEventAsUploaded(observed_event, file_list)
-                            if not test_mode:
-                                log.info("Trajectory passed through FoV - marking {} as processed".format(observed_event.dt))
-                                self.markEventAsProcessed(observed_event)
-                            break # Do no more work on any version of this trajectory
-                        else:
-                            log.error("Upload failed for event at {}. Event retained in database for retry.".format(event.dt))
-                        if test_mode:
-                            rp = Platepar()
-                            rp.read(self.getPlateparFilePath(event))
-                            with open(os.path.expanduser(os.path.join(self.syscon.data_dir, "testlog")), 'at') as logfile:
-                                logfile.write(
-                                    "{} LOC {} Az:{:3.1f} El:{:3.1f} sta_lat:{:3.4f} sta_lon:{:3.4f} sta_dist:{:3.0f} end_dist:{:3.0f} fov_h:{:3.1f} fov_v:{:3.1f} sa:{:3.1f} ea::{:3.1f} \n".format(
-                                    convertGMNTimeToPOSIX(event.dt), ev_con.stationID, rp.az_centre, rp.alt_centre,
-                                    rp.lat, rp.lon, event.start_distance / 1000, event.end_distance / 1000, rp.fov_h,
-                                    rp.fov_v, event.start_angle, event.end_angle))
-                    else:
-
-                        if not test_mode:
-                            pass
-
-                    # Continue with other trajectories from this population
-                    continue
+            elif observed_event.jd_start != 0 and observed_event.jd_end !=0:
+                log.info("JD start and end specified {}, {}.".format(observed_event.jd_start, observed_event.jd_end))
+                if observed_event.ra != 0 and observed_event.dec !=0:
+                    log.info("Ra and Dec specified".format(observed_event.ra, observed_event.dec))
+                    future_events, in_future = self.processRaDecEvent(observed_event, future_events, ev_con, check_time_start, test_mode)
+                    if in_future:
+                        continue
+                elif observed_event.tle_0 != "" and observed_event.tle_1 != "" and observed_event.tle_2 != "":
+                    log.info("TLE event specified")
+                    future_events, in_future = self.processTLEEvent(observed_event, future_events, ev_con, check_time_start, test_mode)
+                    if in_future:
+                        continue
 
             # End of the processing loop for this event
             if self.eventProcessed(observed_event.uuid):
@@ -2081,7 +2346,7 @@ class EventMonitor(multiprocessing.Process):
 
         return True
 
-    def getEventsAndCheck(self, start_time, end_time, testmode=False):
+    def getEventsAndCheck(self, start_time=None, end_time=None, testmode=False):
         """
         Gets event(s) from the webpage, or a local file.
         Calls self.addevent to add them to the database
@@ -2155,6 +2420,1240 @@ class EventMonitor(multiprocessing.Process):
             # Increase the check interval
             if self.check_interval < self.syscon.event_monitor_check_interval:
                 self.check_interval = self.check_interval * 1.1
+
+
+def dictToThumbnails(config, observations_dict, event, file_path=None):
+    """
+    Given a dictionary of observation information, return path to an image of thumbnails.
+
+    Arguments:
+        config: [config] RMS config instance.
+        observations_dict: [dict] A dictionary of observation data.
+        event: [object] Eventmonitor event specification.
+
+    Keyword arguments:
+        file_path: [str] File path where the image should be stored, optional default None.
+
+    Return:
+        file_path: [str] File path where the image was stored.
+    """
+
+    thumbnail_list = []
+    if not len(observations_dict):
+        return None
+    r, d = event.ra, event.dec
+    calstar_observation_count = 0
+    for j in observations_dict:
+        observations = observations_dict.get(j)
+        if 'pixels' in observations:
+            thumbnail_list.append([observations['fits'], observations['pixels']])
+            r = observations['coords']['equatorial']['ra']
+            d = observations['coords']['equatorial']['dec']
+            calstar_observation_count += 1
+    if not len(thumbnail_list):
+        log.info("No calstar calibrated thumbnails generated for radec:({:1f},{:1f})".format(r,d))
+        return None
+
+
+    contact_sheet, headings_list, position_list = assembleContactSheet(thumbnail_list)
+    plt, fn = renderContactSheet(config, event.jd_start, event.jd_end, contact_sheet, headings_list, position_list, r=r, d=d)
+    if plt is None:
+        log.info("No transits found - cannot plot")
+        return
+    else:
+        file_path = fn if file_path is None else file_path
+        plt.savefig(file_path)
+        log.info("CALSTAR calibrated thumbnails saved at {}".format(file_path))
+    return file_path
+
+
+def renderMagnitudePlot(config, magnitude_list, elevation_list, e_jd, l_jd, r, d, plot_format=".png"):
+    """
+    Given a config file, magnitude list, elevation list render a plot showing magnitude variation against time.
+
+    Arguments:
+        config: [config] RMS Config instance.
+        magnitude_list: [list] List of magnitudes.
+        elevation_list: [list] List of elevations relative to local horizon.
+        e_jd: [float] Earliest time in julian date, only used for title.
+        l_jd: [float] Latest time in julian date, only used for title.
+        r: [float] Right ascension, only used for title.
+        d: [float] Declination, only user for title.
+
+    Keyword arguments:
+        plot_format: [str] Optional, default png.
+
+    Returns:
+        plt: [object] Matplot plot instance.
+        plot_filename: [str] Filename where the plot was saved.
+    """
+    if len(magnitude_list):
+        x_vals, y_vals = [], []
+        plot_filename = "{}_r_{}_d_{}_jd_{}_{}_magnitude.{}".format(config.stationID, r, d, e_jd, l_jd, plot_format)
+        for jd, mag in magnitude_list:
+            x_vals.append(jd2Date(float(jd), dt_obj=True))
+            y_vals.append(mag)
+
+        start_time, end_time = min(x_vals).strftime("%Y-%m-%d %H:%M:%S"), max(x_vals).strftime("%Y-%m-%d %H:%M:%S")
+        title = "Plot of magnitudes at RA {} Dec {} from {} to {}".format(r, d, start_time, end_time)
+        plt.figure(figsize=(areaToGoldenRatioXY(16 * 12, rotate=True)))
+
+        plt.plot(marker='o', edgecolor='k', label='Elevation', s=100, c='none', zorder=3)
+        ax = plt.gca()
+        plt.scatter(x_vals, y_vals, c=elevation_list, zorder=3)
+        plt.gca().invert_yaxis()
+        plt.colorbar(label="Elevation from Horizontal (degrees)")
+        seconds_of_observation = (max(x_vals) - min(x_vals)).total_seconds()
+        log.info("Seconds of observation is {}".format(seconds_of_observation))
+        seconds_of_observation = max(1,seconds_of_observation)
+        interval_between_ticks = seconds_of_observation / 6
+        tick_offsets = np.arange(0, seconds_of_observation, interval_between_ticks)
+        x_tick_list = []
+        date_form = DateFormatter("%Y-%m-%d %H:%M:%S")
+        ax.xaxis.set_major_formatter(date_form)
+        for offset in tick_offsets:
+            x_tick_list.append((min(x_vals) + datetime.timedelta(seconds=offset)).strftime("%Y-%m-%d %H:%M:%S"))
+        plt.gca().set_xticks(x_tick_list)
+        plt.gca().set_xticklabels(x_tick_list, color='black', fontweight='normal', fontsize='10',
+                                  horizontalalignment='center')
+        plt.xlabel("Time (UTC)")
+        plt.ylabel("Magnitude")
+
+        plt.title(title)
+
+        return plt, plot_filename
+
+    else:
+        return None, None
+
+
+def dictToMagnitudePlot(config, observations_dict, event, file_path=None):
+    """
+    Given a config file, an observations dict, and an event specification return the path to a plot.
+
+    Arguments:
+        config: [object] RMS config instance.
+        observations_dict: [dict] Dictionary of observations.
+        event: [object] Event specification instance.
+
+    Keyword Arguments:
+        file_path: [str] Path to the location where the plot should be saved.
+
+    Return:
+        file_path: [str] Path to the location where the file was actually saved.
+    """
+
+    magnitude_list, elevation_list = [], []
+    if not len(observations_dict):
+        return None
+
+    # Initialise variables
+    r, d, plt = 0,0, None
+
+    for j in observations_dict:
+        observations = observations_dict.get(j)
+        magnitude_list.append([j, observations['photometry']['mag']])
+        elevation_list.append(observations['coords']['horizontal']['el'])
+        r = observations['coords']['equatorial']['ra']
+        d = observations['coords']['equatorial']['dec']
+
+
+    plt, fn = renderMagnitudePlot(config, magnitude_list, elevation_list, event.jd_start, event.jd_end, round(r, 2), round(d, 2))
+
+    if plt is None:
+        print("No observations found - cannot plot")
+        return
+    else:
+        file_path = fn if file_path is None else file_path
+        plt.savefig(file_path)
+        log.info("Magnitude plot saved at {}".format(file_path))
+    return file_path
+
+
+
+
+def filterCalstarByJD(calstar, config, e_jd, l_jd):
+    """
+    Given a CALSTAR, config file and a jd range, return the fits files, sorted ascending, within that range.
+
+    Arguments:
+        calstar: [struct] CALSTAR structure.
+        config: [config] RMS config instance.
+        e_jd: [float] Earliest julian date.
+        l_jd: [float] Latest julian date.
+
+    Returns:
+        fits_paths: [list] List of full paths to the fits files within jd range.
+    """
+
+    filtered_fits = []
+    for fits_file, star_list in calstar[0]:
+
+        # Get date_time jd of this file
+        date_time, jd = rmsTimeExtractor(fits_file, asTuple=True)
+
+        # Skip anything which is not in the time window
+        if not (e_jd < jd < l_jd):
+            continue
+
+        # If too few stars on this specific observation, then ignore
+        if len(star_list) < config.min_matched_stars:
+            continue
+        filtered_fits.append([fits_file, star_list])
+
+    return sorted(filtered_fits)
+
+def getFitsPaths(path_to_search, jd_start, jd_end=None, prefix="FF", extension="fits"):
+    """
+    Given a list of directories, find the FF files within the jd_range
+    Arguments:
+        path_to_search: [str] Path to search
+        jd_start: [float] Julian start date.
+        jd_end: [float] Julian end date.
+
+    Keyword arguments:
+        prefix: [str] Optional default FF
+        extension: [str] Optional default fits
+
+    Returns:
+        fits_paths: [list] A list of all the fits files between the JD range
+    """
+    directories_to_search = filterDirectoriesByJD(path_to_search, jd_start, jd_end)
+    jd_end = jd_start if jd_end is None else jd_start
+
+    fits_paths = []
+    for directory in directories_to_search:
+        directory_list = os.listdir(directory)
+        directory_list.sort()
+        station_id = os.path.basename(directory).split("_")[0].upper()
+        for file_name in directory_list:
+            if file_name.startswith("{}_{}".format(prefix, station_id))  \
+                                and file_name.endswith(".{}".format(extension)):
+                file_jd = rmsTimeExtractor(file_name, asJD=True)
+                if file_jd is not None:
+                    if jd_start <= file_jd <= jd_end:
+                        fits_paths.append(os.path.join(path_to_search, directory, file_name))
+
+    return fits_paths
+
+
+def dictMagsRaDec(config, r, d, e_jd=0, l_jd=np.inf):
+    """
+    Given a config, radec and an optional JD range, return a dictionary of observation information.
+
+    Arguments:
+        config: [config] RMS config instance.
+        r: [float] Right ascension, degrees.
+        d: [float] Declination, degrees.
+
+    Keyword arguments:
+        e_jd: Earliest Julian date, optional default 0.
+        l_jd: Latest Julian date, optional default infinity.
+
+    Return:
+        observation_sequence_dict: [dict] JD is key, contains information about observations.
+    """
+
+    full_path_to_archived = os.path.expanduser(os.path.join(config.data_dir, config.archived_dir))
+    full_path_to_default_platepar = os.path.join(getRmsRootDir(), config.platepar_name)
+
+
+    directories_to_search = filterDirectoriesByJD(full_path_to_archived, e_jd, l_jd)
+    observation_sequence_dict = {}
+    number_of_directories_to_search, directories_searched = len(directories_to_search), 0
+    for search_dir in directories_to_search:
+        image_count = 0
+        for j in observation_sequence_dict:
+            if 'pixels' in observation_sequence_dict[j]:
+                image_count += 1
+
+        if image_count > 1000:
+            log.info("Sequence dict is getting dangerously large - aborting at {} images".format(image_count))
+            break
+        else:
+            log.info("Sequence dict has {} images".format(image_count))
+
+        dir_jd = rmsTimeExtractor(search_dir, asJD=True)
+        directories_searched += 1
+
+
+        full_path = os.path.join(full_path_to_archived, search_dir)
+        full_path_to_session_platepar = os.path.join(full_path, config.platepar_name)
+        platepars_all_recalibrated_path = os.path.join(full_path, config.platepars_recalibrated_name)
+
+
+        pp = Platepar()
+        if os.path.exists(platepars_all_recalibrated_path):
+            pp_mid_recal = Platepar()
+            with open(platepars_all_recalibrated_path, 'r') as fh:
+                pp_recal_json = json.load(fh)
+                if len(pp_recal_json):
+                    midpoint = int(len(pp_recal_json) / 2)
+                    for fits, i in zip(pp_recal_json, range(0,midpoint)):
+                        pass
+                    pp_mid_recal.loadFromDict(pp_recal_json[fits])
+                    recalibrated_platepar_loaded = True
+                else:
+                    recalibrated_platepar_loaded = False
+        else:
+            pp_mid_recal = None
+            recalibrated_platepar_loaded = False
+            pp_recal_json = None
+
+        # Read in a platepar in the following preference order
+        # session platepar, default platepar, the middle recalibrated platepar
+        # if no success with any of these, then continue to the next directory
+        if os.path.exists(full_path_to_session_platepar):
+            pp.read(full_path_to_session_platepar)
+        elif os.path.exists(full_path_to_default_platepar):
+            os.path.exists(full_path_to_default_platepar)
+            pp.read(full_path_to_default_platepar)
+        elif recalibrated_platepar_loaded:
+            pp = pp_mid_recal
+        else:
+            continue
+
+        log.info("Searching directory {} jd={:.2f}, {} of {} for radec:({:.1f},{:.1f}) degrees, camera az,el:({:.1f},{:.1f}) degrees"
+                 .format(os.path.basename(search_dir), dir_jd, directories_searched, number_of_directories_to_search, r,
+                         d, pp.az_centre, pp.alt_centre))
+
+        # Read in the CALSTARS file
+
+        search_dir_split = os.path.basename(search_dir).split("_")
+        session_date, session_time, session_microseconds = search_dir_split[1], search_dir_split[2], search_dir_split[3]
+        calstar_name = "CALSTARS_{}_{}_{}_{}.txt".format(config.stationID,session_date, session_time, session_microseconds)
+        full_path_calstar = os.path.join(search_dir, calstar_name)
+        if os.path.exists(full_path_calstar):
+            log.info("Reading in {}".format(os.path.basename(full_path_calstar)))
+            calstars_path, calstars_name = os.path.dirname(full_path_calstar), os.path.basename(full_path_calstar)
+            calstar = readCALSTARS(calstars_path, calstars_name)
+
+        else:
+            log.warnings("Did not find {:s} in {:s}".format(calstar_name, search_dir))
+            continue
+
+        dict_from_calstar = calstarRaDecToDict(full_path, config, pp, pp_recal_json, r, d, e_jd, l_jd, calstar)
+
+
+        if dict_from_calstar is not None:
+            log.info("Sequence dict update start - total entries {}".format(len(observation_sequence_dict)))
+            observation_sequence_dict.update(dict_from_calstar)
+
+    return observation_sequence_dict
+
+
+
+def calstarRaDecToDict(data_dir_path, config, pp, pp_recal_json, r_target, d_target, e_jd, l_jd, calstar,
+                       search_sky_radius_degrees=1, centre_on_calstar_coords=True):
+    """
+    Return a dictionary of information about observations drawn from radec files, and excised images from fits files.
+
+    Arguments:
+        data_dir_path: [str] Path to the directory containing the mask file.
+        config: [config] RMS config instance.
+        pp: [platepar] Platepar instance.
+        pp_recal_json: [str] JSON string of recalibrated platepars.
+        r_target: [float] Right ascension, degrees, of target.
+        d_target: [float] Declination, degrees, of target.
+        e_jd: [float] Earliest Julian date to consider.
+        l_jd: [float] Latest Julian date to consider
+        calstar: [struct] CALSTAR structure.
+
+    Keyword arguments:
+        search_sky_radius_degrees: [float] Optional, default 1, radius around radec to find CALSTAR reference.
+        centre_on_calstar_coords: [bool] Optional, default True, take the CALSTAR coordinates for the centre of image to excise.
+
+    Return:
+        sequence_dict: [dict] Key JD of observation information from this station.
+    """
+    log.info("Search CALSTARS file for ra,dec:({:.2f},{:.2f})".format(r_target, d_target))
+    observations_with_image_count, observations_without_image_count, total_observations = 0, 0, 0
+    captured_directory_path = os.path.join(config.data_dir, config.captured_dir)
+    candidate_fits = filterCalstarByJD(calstar, config, e_jd, l_jd)
+
+
+    log.info("Processing {} candidate fits files".format(len(candidate_fits)))
+    sequence_dict = dict()
+    iteration_counter, step = 0, round(len(candidate_fits) / 5)
+    for fits_file, star_list in candidate_fits:
+        iteration_counter += 1
+        if iteration_counter % step == 0:
+            log.info("Working on fits {} of {}".format(iteration_counter, len(candidate_fits)))
+        date_time, jd = rmsTimeExtractor(fits_file, asTuple=True)
+        if pp_recal_json is not None:
+            if fits_file in pp_recal_json:
+                # If we have a platepar in pp_recal then use it, else just use the last platepar
+                pp.loadFromDict(pp_recal_json[fits_file])
+
+        containsRaDec, _, _ = plateparFitsContainsRaDec(r_target, d_target, pp, fits_file, data_dir_path, check_mask=False)
+        if not containsRaDec:
+            continue
+        # Overwrite vignetting coefficient with platepar value
+
+        jd_list, y_list, x_list, bg_list, amp_list, FWHM_list, snr_list, NSatPx_list = [], [], [], [], [], [], [], []
+
+        # Build up lists of data for this image
+        for y, x, bg_intensity, amplitude, FWHM, bg_intensity, snr, NSatPx in star_list:
+            jd_list.append(jd)
+            x_list.append(x)
+            y_list.append(y)
+            bg_list.append(bg_intensity)
+            amp_list.append(amplitude)
+            FWHM_list.append(FWHM)
+            snr_list.append(snr)
+            NSatPx_list.append(NSatPx)
+
+        # Convert to arrays
+        jd_arr, x_data, y_data, level_data = np.array(jd_list), np.array(x_list), np.array(y_list), np.array(bg_list)
+
+        # Process data into RaDec and apply magnitude corrections
+        jd, ra, dec, mag = xyToRaDecPP(jd_arr, x_data, y_data, level_data, pp,
+                                       jd_time=True, extinction_correction=True, measurement=True)
+
+        for j, x, y, r, d, bg, amp, FWHM, mag, x_cs, y_cs, snr, NSatPX in zip(jd, x_list, y_list, ra, dec, bg_list,
+                                                                 amp_list, FWHM_list, mag, x_list,
+                                                                 y_list, snr_list, NSatPx_list):
+            az, el = raDec2AltAz(r, d, j, pp.lat, pp.lon)
+            radius = np.hypot(y - pp.Y_res / 2, x - pp.X_res / 2)
+            actual_deviation_degrees = angularSeparationDeg(r_target, d_target, r, d)
+            vignetting, offset = pp.vignetting_coeff, pp.mag_lev
+            mag_recalc = 0 - 2.5 * np.log10(correctVignetting(bg, radius, vignetting)) + offset
+            if mag == np.inf:
+                continue
+
+            if actual_deviation_degrees < search_sky_radius_degrees:
+                path_to_ff = os.path.join(data_dir_path, fits_file)
+                if os.path.exists(path_to_ff):
+                    path_to_ff = path_to_ff
+
+                else:
+                    fits_time_jd = rmsTimeExtractor(path_to_ff, asJD=True)
+                    path_to_ff = getFitsPaths(captured_directory_path, fits_time_jd)
+                    if len(path_to_ff):
+                        path_to_ff = path_to_ff[0]
+                    else:
+                        path_to_ff = None
+            else:
+                path_to_ff = None
+
+            x_from_radec_arr, y_from_radec_arr = raDecToXYPP(np.array([r]), np.array([d]), np.array([j]), pp)
+            x_from_radec, y_from_radec = x_from_radec_arr[0], y_from_radec_arr[0]
+            if centre_on_calstar_coords:
+                x_centre, y_centre = round(x), round(y)
+            else:
+
+                x_centre, y_centre = round(x_from_radec), round(y_from_radec)
+
+
+            if path_to_ff is not None:
+                observation_dict = {"fits": fits_file,
+                                    "coords": {
+                                        "image_coords_from_calstar": {"x": x, "y": y},
+                                        "image_coords_from_radec": {"x": x_from_radec, "y": y_from_radec},
+                                        "horizontal": {"az": az, "el": el},
+                                        "equatorial": {"ra": r, "dec": d}},
+                                    "radius": radius,
+                                    "photometry": {"bg": bg,
+                                                   "amp": amp,
+                                                   "FWHM": FWHM,
+                                                   "mag": mag,
+                                                   "mag_recalc": mag_recalc,
+                                                   "p_offset": offset,
+                                                   "p_vig": vignetting,
+                                                   "snr": snr,
+                                                   "nsatpx": NSatPX},
+                                    "deviation_from_camera_centre_degrees": actual_deviation_degrees,
+                                    "pixels": readCroppedFF(path_to_ff, x_centre, y_centre).tolist()}
+
+                # This has an image, so overwrite something without an image
+                if j in sequence_dict:
+                    if 'pixels' not in sequence_dict[j]:
+                        sequence_dict[j] = observation_dict
+                        observations_with_image_count += 1
+                        observations_without_image_count -= 1
+                else:
+                    sequence_dict[j] = observation_dict
+                    total_observations += 1
+
+            else:
+                observation_dict = {"fits": fits_file,
+                                    "coords": {
+                                        "image_coords_from_calstar": {"x": x, "y": y},
+                                        "image_coords_from_radec": {"x": x_from_radec, "y": y_from_radec},
+                                        "horizontal": {"az": az, "el": el},
+                                        "equatorial": {"ra": r, "dec": d}},
+                                    "radius": radius,
+                                    "photometry":   {"bg": bg,
+                                                    "amp": amp,
+                                                    "FWHM": FWHM,
+                                                    "mag": mag,
+                                                    "mag_recalc": mag_recalc,
+                                                    "p_offset": offset,
+                                                    "p_vig": vignetting,
+                                                    "snr": snr,
+                                                    "nsatpx": NSatPX},
+                                    "deviation_from_camera_centre_degrees": actual_deviation_degrees}
+                # Only add if this j is not already in the dict
+                if j not in sequence_dict:
+                    sequence_dict[j] = observation_dict
+                    observations_without_image_count += 1
+                    total_observations += 1
+
+
+
+    log.info("From this directory:")
+    log.info("  Observations with images    {}".format(observations_with_image_count))
+    log.info("  Observations without images {}".format(observations_without_image_count))
+    log.info("  Total observations:         {}".format(total_observations))
+
+    return sequence_dict
+
+
+def rmsTimeExtractor(rms_time, asTuple = False, asJD = False, delimiter = None):
+    """
+    General purpose function to convert *20240819*010235*{123 | 123456} into a datetime object or JD.
+
+    Arguments:
+        rms_time: [str] RMS time string, can include a full path, in which case only basename evalued
+
+    Keyword arguments
+        asTuple: [bool] Optional, default False, return as a tuple of dt, and JD
+        asJD: [bool] Optional, default False, return as a Julian Date
+        delimiter: [str] Optional, default None, delimiter to use. If not given, will guess based on first non alpha numeric
+
+    Returns:
+        time: [various] Time extracted from string
+    """
+
+    # Initialise variables
+    year, month, day, hour, minute, second = None, None, None, None, None, None
+
+    dt = None
+    rms_time = os.path.basename(rms_time)
+    # remove any dots, might be filename extension
+    rms_time = rms_time.split(".")[0] if "." in rms_time else rms_time
+
+    # Initialise delim in case nothing is detected
+    delim = "_"
+    # find the delimiter, which is probably the first non alphanumeric character
+    if delimiter == None:
+        for c in rms_time:
+            if c.isnumeric() or c.isalpha():
+                continue
+            else:
+                delim = c
+                break
+    if delim not in rms_time:
+        return None
+
+    field_list = rms_time.split(delim)
+    field_count = len(field_list)
+    str_us = "0"
+
+    consecutive_time_date_fields = 0
+
+    # Parse rms filename, datestring into a date time object
+    for field, field_no in zip(field_list, range (0, field_count)):
+        field = field.split(".")[0] if "." in field else field
+        if field.isnumeric():
+            consecutive_time_date_fields += 1
+
+        # Handle year month day
+        if consecutive_time_date_fields == 1:
+            if len(field) == 8 or len(field) == 6:
+                # This looks like a date field so process the date field
+                str_date = field_list[field_no]
+                if len(str_date) == 8:
+                    year, month, day = int(str_date[:4]), int(str_date[4:6]), int(str_date[6:8])
+                    dt = datetime.datetime(year=int(year), month=int(month), day=int(day))
+                # Handle 2 digit year format
+                if len(str_date) == 6:
+                    year, month, day = 2000 + int(str_date[:2]), int(str_date[2:4]), int(str_date[4:6])
+                    dt = datetime.datetime(year=int(year), month=month, day=day)
+            else:
+                dt = 0
+
+        # Handle hour minute second
+        if consecutive_time_date_fields == 2:
+            if len(field) == 6:
+                # Found two consecutive numeric fields followed by a non numeric
+                # These are date and time
+                str_time = field_list[field_no]
+                hour, minute, second = int(str_time[:2]), int(str_time[2:4]), int(str_time[4:6])
+                dt = datetime.datetime(year, month , day, hour, minute, second)
+            elif len(field) == 4:
+                str_time = field_list[field_no]
+                hour, minute, second = int(str_time[:2]), int(str_time[2:4]), 0
+                dt = datetime.datetime(year, month, day, hour, minute, second)
+            else:
+                # if the second field is not of length 6 then reset the counter
+                consecutive_time_date_fields = 0
+
+        # Handle fractional seconds
+        if consecutive_time_date_fields == 3:
+            if field.isnumeric():
+                # Convert any arbitrary length next field to microseconds
+                us = int(field) * (10 ** (6 - len(field)))
+                dt = datetime.datetime(year, month, day, hour, minute, second, microsecond=int(us))
+                # Stop looping in all cases
+                break
+            else:
+                # Stop looping in call cases
+                break
+
+    if dt is None:
+        return dt
+
+    if asTuple:
+        return dt, datetime2JD(dt)
+
+    if asJD:
+        return datetime2JD(dt)
+    else:
+        return dt
+
+def checkMaskxy(x, y, mask_path, mask=None):
+
+    """
+    Discover if a point on an image is visible through the mask
+
+    Args:
+        x: [int] x coordinate on image.
+        y: [int] y coordinate on image.
+        mask_path: [str] Path to a mask.
+        mask: [struct] Mask structure - saves time by passing the mask if same mask is used repeatedly.
+
+    Returns:
+        [bool]: True if visible, else false
+    """
+
+    if mask is None:
+        if os.path.exists(mask_path):
+            if os.path.splitext(mask_path) == "bmp":
+                m = loadMask(mask_path)
+            else:
+                path_name = os.path.join(mask_path, "mask.bmp")
+                default_mask = os.path.join(getRmsRootDir(), "mask.bmp")
+                if os.path.exists(path_name):
+                    m = loadMask(os.path.join(mask_path, "mask.bmp"))
+                elif os.path.exists(default_mask):
+                    m = loadMask(os.path.join(default_mask))
+                else:
+                    return True
+        else:
+            return True
+    else:
+        m = mask
+
+    if m.img[y, x] == 255:
+        return True
+    else:
+        return False
+
+def plateparFitsContainsRaDec(r, d, source_pp, file_name, mask_dir, check_mask=True, mask=None):
+
+    """
+    Does a fits file, with a given platepar, contain given radec coordinates?
+
+    Arguments:
+        r: [float] right_ascension degrees.
+        d: [float] declination degrees.
+        source_pp: [object] platepar.
+        file_name: [str] file name of the fits file.
+        mask_dir: [path] directory holding the mask file.
+
+    Keyword arguments:
+        check_mask: [bool] Optional, default true, check if mask is obstructing view of object.
+        mask: [struct] mask object, passing the mask in saves time if the same mask will be used lots of times.
+
+    Return:
+        [bool] True if contains radec, unobstructed by the mask if check_mask selected.
+        x: [float] x coordinate on image.
+        y: [float] y coordinate on image.
+    """
+
+    # Get the image time from the file_name
+    source_JD = rmsTimeExtractor(file_name, asJD=True)
+
+    # Convert r,d to source image coordinates
+    r_array = np.array([r])
+    d_array = np.array([d])
+    jd_arr = np.array([rmsTimeExtractor(file_name, asJD=True)])
+    x_arr = np.array([source_pp.X_res / 2])
+    y_arr = np.array([source_pp.Y_res / 2])
+    level_arr = np.array([1])
+    _, r_centre_pp, dec_centre_pp, _ = xyToRaDecPP(jd_arr, x_arr, y_arr, level_arr, source_pp, jd_time=True)
+
+    # Check the angle, to prevent false positives for objects behind the camera
+    angle_from_centre = angularSeparationDeg(r, d, r_centre_pp, dec_centre_pp)[0]
+
+    # this prevents spurious coordinates being generated for r, d outside fov
+    if angle_from_centre > max(source_pp.fov_h, source_pp.fov_v) / 2:
+        return False, 0, 0
+
+    source_x, source_y = raDecToXYPP(r_array, d_array, source_JD, source_pp)
+    source_x, source_y = round(source_x[0]), round(source_y[0])
+
+    if 0 < source_x < source_pp.X_res and 0 < source_y < source_pp.Y_res:
+        if check_mask:
+            if checkMaskxy(source_x,source_y, mask_dir, mask=mask):
+
+                return True, source_x, source_y
+            else:
+                return False, 0, 0
+        else:
+            return True, source_x, source_y
+    else:
+        return False, 0, 0
+
+def renderContactSheet(config, e_jd, l_jd, contact_sheet_array, headings_list, position_list, r=None, d=None, plot_format='png'):
+
+    """
+    Given an array, render a contact sheet.
+
+    Arguments:
+        config: [config] config for the system.
+        e_jd: [float] earliest jd for the event.
+        l_jd: [float] latest jd for the event.
+        contact_sheet_array: [array] array of the image.
+        headings_list: [list] list of headings, usually time for each column.
+        position_list: [list] list of the positions.
+
+    Keyword arguments:
+        r: [float] right ascension of the object being plotted.
+        d: [float] declination of the object being plotted.
+        plot_format: [str] format to write out - any format supported by matplotlib.
+
+    Return:
+        plt: [object] matplotlib plot.
+        plot_filename: [string] path to saved plot.
+    """
+
+
+    if r is None or d is None:
+        return None, ""
+    r, d = round(r, 2), round(d, 2)
+    if len(contact_sheet_array) and len(headings_list) and len(position_list):
+        plt.figure(figsize=(16, 12))
+        axes = plt.gca()
+
+        plot_filename = "{}_r_{}_d_{}_jd_{}_{}_contact_sheet.{}".format(config.stationID,
+                                                                        r, d, e_jd, l_jd, plot_format)
+        axes.imshow(contact_sheet_array, cmap='gray')
+        start_time = rmsTimeExtractor(headings_list[0]).strftime("%Y-%m-%d %H:%M:%S")
+        end_time = rmsTimeExtractor(headings_list[-1]).strftime("%Y-%m-%d %H:%M:%S")
+        axes.set_title("{} RA {}, Dec {} from {} to {}".format(config.stationID, r, d, start_time, end_time))
+        axes.title.set_size(20)
+        plt.xticks(position_list, headings_list, color='black', fontweight='normal', fontsize='10',
+                   horizontalalignment='center',  rotation=90)
+        return plt, plot_filename
+    else:
+        return None, ""
+
+def assembleContactSheet(thumbnail_list, x_across=None, border = 1):
+
+    """
+    Give a list of thumbnails, assemble into a "contact sheet".
+
+    Arguments:
+        thumbnail_list: [list] list of image data.
+
+    Keyword arguments:
+        x_across: [int] horizontal width of the plot, default None calculates golden ratio.
+        border: [int] separation between thumbnails.
+
+    Return:
+        contact_sheet_array: [array] array of the image.
+        headings_list: [list] list of the date of the fits file for the image at the top of each column.
+        position_list: [list] list of the plot coordinates for the headings.
+    """
+
+    contact_sheet_array, headings_list, position_list  = None, [], []
+    thumbnail_count = len(thumbnail_list)
+    if thumbnail_count < 1:
+        return [], [], []
+
+    fits, thumbnail = thumbnail_list[0]
+
+    y_res, x_res = len(thumbnail) + border * 2, len(thumbnail[0]) + border * 2
+    pixels = y_res * x_res * thumbnail_count
+    if x_across is None:
+        # We are free to calculate our own dimensions, so use golden ratio
+        across, down = areaToGoldenRatioXY(pixels)
+        across = int(np.ceil(across / x_res) * x_res)
+        down = int(np.ceil(down / y_res) * y_res)
+
+        #create an array of zeros
+        contact_sheet_array = np.zeros((across, down))
+
+        tn = 0
+
+        for y in range(0, down, y_res):
+            if tn == thumbnail_count:
+                break
+            fits, _ = thumbnail_list[tn]
+            headings_list.append(rmsTimeExtractor(fits).strftime("%Y%m%d_%H%M%S"))
+            position_list.append(y)
+            for x in range(0, across, x_res):
+                if tn == thumbnail_count:
+                    break
+
+                fits, thumbnail = thumbnail_list[tn]
+                contact_sheet_array[x + border:x + x_res - border, y + border:y + y_res - border] = thumbnail
+                tn += 1
+
+
+    return contact_sheet_array, headings_list, position_list
+
+def jd2RMSStyle(jd):
+    """
+    Given a Julian date, return an RMS style date string
+
+    Arguments:
+        jd: [float] Julian date
+
+    Return:
+        rms_style_date:[str]
+    """
+
+    year,month,day,hour,minute,second,microsecond = jd2Date(jd)
+    rms_style_date = "{:04d}{:02d}{:02d}_{:02d}{:02d}{:02d}".format(year,month,day,hour,minute,second)
+    return rms_style_date
+
+def areaToGoldenRatioXY(count, rotate=False):
+    """
+    Given a number of squares, compute the sides of a golden ratio rectangle to contain those squares.
+
+    Arguments:
+
+        count:[float] number of squares
+    Keyword arguments:
+        rotate:[bool] Optional, default false, rotate the sides
+
+    Returns:
+        across:[int] Number of squares across
+        down:[int] Number of squares down
+    """
+
+    gr = (1 + 5 ** 0.5) / 2
+    down = np.ceil((count * gr) ** 0.5)
+
+    if down < 1:
+        return 0, 0
+
+    across = np.ceil(count / down)
+
+    if rotate:
+        return int(down), int(across)
+    else:
+        return int(across), int(down)
+
+
+def getFitsPathsAndCoordsTLE(config, e):
+    """
+    Arguments:
+        config: [config] RMS config instance for the event.
+        e: [object] Event, which must contain two line elements
+
+
+    Return:
+        fits_paths_and_coordinates:[list] of [fits_path, x, y] where x and y are the coordinates of tle on image
+    """
+
+    # Create target object
+    t = ephem.readtle(e.tle_0, e.tle_1, e.tle_2)
+    o = ephem.Observer()
+    o.lat, o.lon, o.elevation = config.latitude, config.longitude, config.elevation
+
+    full_path_to_captured = os.path.expanduser(os.path.join(config.data_dir, config.captured_dir))
+    directories_to_search = filterDirectoriesByJD(full_path_to_captured, e.jd_start, e.jd_end)
+    stationID = config.stationID
+
+    fits_paths_and_coordinates = []
+    for directory in directories_to_search:
+        mask_path = os.path.join(directory, config.mask_file)
+        default_mask_path = os.path.join(getRmsRootDir(), config.mask_file)
+        if os.path.exists(mask_path):
+            mask = loadMask(mask_path)
+        elif os.path.exists(default_mask_path):
+            mask = loadMask(default_mask_path)
+
+
+
+        pp_path = os.path.join(directory, config.platepar_name)
+        if os.path.exists(pp_path):
+            pp = Platepar()
+            pp.read(pp_path)
+        elif os.path.exists(os.path.join(getRmsRootDir(), config.platepar_name)):
+            pp = Platepar()
+            pp.read(os.path.join(getRmsRootDir(), config.platepar_name))
+        elif pp is None:
+            continue
+
+        directory_list = os.listdir(directory)
+        directory_list.sort()
+        for file_name in directory_list:
+            if file_name.startswith('FF') and file_name.endswith('.fits') and len(file_name.split('_')) == 6:
+                if file_name.split('_')[1] == stationID:
+                    o.date = getMiddleTimeFF(file_name, config.fps, dt_obj=True)
+                    t.compute(o)
+                    r, d = np.degrees(t.ra), np.degrees(t.dec)
+
+                    if r is None and d is None:
+                        contains_radec, x, y = True, 0, 0
+                    else:
+                        contains_radec, x, y = plateparFitsContainsRaDec(r, d, pp, file_name,
+                                                                         config.mask_file, check_mask=True, mask=mask)
+                    if contains_radec:
+                        fits_paths_and_coordinates.append([os.path.join(directory,file_name), x, y])
+
+    return fits_paths_and_coordinates
+
+
+
+def getFitsPathsAndCoordsRadec(config, earliest_jd, latest_jd, r=None, d=None):
+    """
+    Arguments:
+        config: [config] RMS config instance for the event.
+        earliest_jd: [float] Earliest JD considered.
+        latest_jd: [float] Latest JD to be considered.
+    Keyword arguments
+        r: [float] Optional, default None - right ascension, degrees, of object of interest
+        d: [float] Optional, default None - declination, degrees, of object of interest
+
+    Return:
+        fits_paths_and_coordinates:[list] of [fits_path, x, y] where x and y are the coordinates of radec on image
+    """
+
+
+    full_path_to_captured = os.path.expanduser(os.path.join(config.data_dir, config.captured_dir))
+    directories_to_search = filterDirectoriesByJD(full_path_to_captured, earliest_jd, latest_jd)
+
+    stationID = config.stationID
+
+
+    fits_paths_and_coordinates = []
+    for directory in directories_to_search:
+        mask_path = os.path.join(directory, config.mask_file)
+        default_mask_path = os.path.join(getRmsRootDir(), config.mask_file)
+        if os.path.exists(mask_path):
+            mask = loadMask(mask_path)
+        elif os.path.exists(default_mask_path):
+            mask = loadMask(default_mask_path)
+
+
+
+        pp_path = os.path.join(directory, config.platepar_name)
+        if os.path.exists(pp_path):
+            pp = Platepar()
+            pp.read(pp_path)
+        elif os.path.exists(os.path.join(getRmsRootDir(), config.platepar_name)):
+            pp = Platepar()
+            pp.read(os.path.join(getRmsRootDir(), config.platepar_name))
+        elif pp is None:
+            continue
+
+        directory_list = os.listdir(directory)
+        directory_list.sort()
+        for file_name in directory_list:
+            if file_name.startswith('FF') and file_name.endswith('.fits') and len(file_name.split('_')) == 6:
+                if file_name.split('_')[1] == stationID:
+                    if r is None and d is None:
+                        contains_radec, x, y = True, 0, 0
+                    else:
+
+                        contains_radec, x, y = plateparFitsContainsRaDec(r, d, pp, file_name,
+                                                                         config.mask_file, check_mask=True, mask=mask)
+                    if contains_radec:
+                        fits_paths_and_coordinates.append([os.path.join(directory,file_name), x, y])
+
+    return fits_paths_and_coordinates
+
+def createThumbnails(config, r, d, earliest_jd=0, latest_jd=np.inf, max_thumbnails=100):
+    """
+    Create thumbnails of an object excised from fits files between earliest and latest JD.
+
+    Arguments:
+        config: [config] RMS config instance for the event.
+        r: [float] right ascension of object in degrees.
+        d: [float] declination of object in degrees.
+        earliest_jd: [float] earliest jd considered.
+        latest_jd: [float] latest jd considered.
+
+    Keyword arguments:
+        max_thumbnails: [int] Optional, default 100
+
+    Return:
+        thumbnail_list: [list] list of thumbnails.
+    """
+
+    # get the paths to all the fits files in the jd window
+    log.info("Looking for fits files between {} and {} at {},{}".format(jd2Date(earliest_jd, dt_obj=True), jd2Date(latest_jd, dt_obj=True), r, d))
+    path_coords_list = getFitsPathsAndCoordsRadec(config, earliest_jd, latest_jd, r, d)
+    log.info("Got a list of length {}".format(len(path_coords_list)))
+    # initialise a list to hold the cropped image data
+    thumbnail_list = []
+    fits_len = len(path_coords_list)
+    if fits_len == 0:
+        log.info("Did not find ra, dec {:.2f},{:.2f}".format(r, d, fits_len))
+    elif fits_len == 1:
+        log.info("Found ra,dec ({:.2f},{:.2f}) degrees in {} fits file".format(r, d, fits_len))
+    else:
+        log.info("Found ra,dec ({:.2f},{:.2f}) degrees in {} fits files".format(r, d, fits_len))
+
+
+    path_coords_list = shortenList(path_coords_list, max_thumbnails)
+    fits_len = len(path_coords_list)
+    processed, increment = 0, int(fits_len / 4)
+    increment = max(increment,1)
+
+    for fits_path, x, y in path_coords_list:
+        if processed % increment == 0:
+            log.info("Processed {} out of {} thumbnails".format(processed, fits_len))
+        thumbnail_list.append([fits_path, readCroppedFF(fits_path, x, y)])
+        processed += 1
+
+    return thumbnail_list
+
+
+def shortenList(input_list, length):
+    """
+    Given a list and a target length return a list which is of that length by picking
+    values from the list at appropriate points. It will not extend a list.
+
+    Arguments:
+        input_list: [list] List to be changed
+        length: [int] desired length
+
+    Returns:
+        [list] list of items
+    """
+
+    output_list = []
+    list_len = len(input_list)
+    # Guard against divide by 0
+    if length == 0:
+        return output_list
+    elif list_len > length:
+        step_size_float = list_len / length
+        next_item_count_float, item_count_int = 0, 0
+        for p in input_list:
+            if next_item_count_float <= item_count_int:
+                output_list.append(p)
+                next_item_count_float += step_size_float
+            item_count_int += 1
+
+
+    else:
+        output_list = input_list
+    return output_list
+
+
+def saveThumbnailsRaDec(r, d, e_jd=0, l_jd=np.inf, config=None, file_path=None, max_thumbnails=1000):
+    """
+    Given a right ascension and declination in degrees, plot thumbnails excised from fits files.
+
+    Arguments:
+        r: [float] right ascension, degrees, of object.
+        d: [float] declination, degrees, of object.
+
+    Keyword arguments:
+
+        e_jd: [float] optional, default 0, earliest JD of interest.
+        l_jd: [float] optional, default infinity, latest JD interest.
+        config: [config] optional, RMS config instance for the event.
+        file_path: [string] optional, file path to be written.
+        max_thumbnails: [int] optional, default 100, maximum number of thumbnails
+
+    Return:
+        filename: [string] location where thumbnails have been saved.
+    """
+
+    target_dir = os.path.dirname(file_path)
+    if not os.path.exists(target_dir):
+        mkdirP(target_dir)
+
+    thumbnail_list = createThumbnails(config, r, d, earliest_jd=e_jd, latest_jd=l_jd, max_thumbnails=max_thumbnails)
+    contact_sheet, headings_list, position_list = assembleContactSheet(thumbnail_list)
+    plt, fn = renderContactSheet(config, e_jd, l_jd, contact_sheet, headings_list, position_list, r, d)
+    if plt is None:
+        return None
+    else:
+        filename = fn if file_path is None else file_path
+        plt.savefig(filename)
+        log.info("RaDec thumbnails saved at {}".format(filename))
+        return filename
+
+def exciseFromFF(ff, x_centre, y_centre, width = 50, height = 50, allow_drift_in=False):
+    """
+    Given a fits structure, and coordinates in that structure, excise a part of that image.
+
+    Arguments:
+        ff: [struct] FITS data.
+        x_centre: [int] x centre of image to be excised.
+        y_centre: [int] y centre of image to be excised.
+
+    Keyword arguments:
+        width: [int] Optional, default 50 - width of image to be excised.
+        height: [int] Optional, default 50 - height of image to be excised.
+        allow_drift_in: [bool] Optional, default false. If True move excised image away from edge to avoid.
+
+    Returns:
+        ff_excised: [img] Array of intensities, width x height excised from ff.
+    """
+
+    # Get resolution
+    x_res, y_res = ff.ncols, ff.nrows
+
+    if allow_drift_in:
+        # This allows an object to drift into the field of view
+        # Establish where we can safely place the centre
+        x_centre = max(0.5 * width, x_centre)
+        x_centre = min(x_res - 0.5 * width, x_centre)
+        y_centre = max(0.5 * height, y_centre)
+        y_centre = min(y_res - 0.5 * height, y_centre)
+
+        # Compute crop bounds
+        x_min, y_min = round(x_centre - 0.5 * width), round(y_centre - 0.5 * height)
+        x_max, y_max = x_min + width, y_min + height
+
+        # Crop into a new array
+        print("Cropping from {},{} to {},{}".format(x_min, x_max, y_min, y_max))
+        ff_excised = ff.maxpixel[y_min:y_max, x_min:x_max]
+
+    else:
+        # This always keeps the centre of the target in the centre of thumbnail
+        # This allows an object to drift into the field of view
+        # Establish where we can safely place the centre
+
+
+        x_min, y_min = round(x_centre - 0.5 * width), round(y_centre - 0.5 * height)
+        x_max, y_max = x_min + width, y_min + height
+
+        if 0 < x_min and x_max < x_res and  0 < y_min and y_max < y_res:
+            # This is the simple case, the cropped section is fully contained within the source
+            ff_excised = ff.maxpixel[y_min:y_max, x_min:x_max]
+        else:
+            # Create a new array of zero
+            ff_excised = np.zeros((height, width))
+            for y_source in range (y_min, y_max):
+                for x_source in range (x_min, x_max):
+                    if 0 < y_source and y_source < y_res and 0 < x_source and x_source < x_res:
+                        x_dest, y_dest = x_source - x_min, y_source - y_min
+                        ff_excised[y_dest, x_dest] = ff.maxpixel[y_source, x_source]
+
+    return ff_excised
+
+def readCroppedFF(path, x, y, width=20, height=20, allow_drift_in = False):
+    """
+    Given a path to a fits file, and coordinates in that image, excise a part of that image.
+
+    Arguments:
+        path [string]: full path to the ff file to be read
+        x [int]: x coordinates of the centre of the cropped region
+        y [int]: y coordinates of the centre of the cropped region
+        width [int]: optional, default 50, width of crop
+        height [int]: optional, default 50, height of crop
+    Returns:
+        [array] : 2D array of pixel intensities
+    """
+
+    ff = read(os.path.dirname(path), os.path.basename(path), memmap=False)
+
+    if ff is None:
+        return ff
+
+    return exciseFromFF(ff, x, y, width, height, allow_drift_in)
+
+def filterDirByJD(directory_path, config, e_jd, l_jd):
+    """
+    Passed a directory path, filter the contents only for files which end in .fits,
+    start with FF_XX0001, where XX0001 is the station code, and are within the jd window.
+
+    Arguments:
+        directory_path: [str] Path to the directory to be filtered.
+        config: [config] RMS config instance.
+        e_jd: [float] the earliest JD to be considered.
+        l_jd: [float] the latest JD to be considered.
+
+    Return:
+        filtered_fits: [list] list of the filenames of the fits files which are within the window.
+    """
+
+    filtered_fits = []
+    directory_list = os.listdir(directory_path)
+    station_code = config.stationID
+    for fits_file in directory_list:
+        # Get date_time jd of this file
+        if fits_file.startswith("FF_{}".format(station_code)) and fits_file.endswith(".fits"):
+            date_time, jd = rmsTimeExtractor(fits_file, asTuple=True)
+            # Skip anything which is not in the time window
+            if not (e_jd < jd < l_jd):
+                continue
+            filtered_fits.append(fits_file)
+
+    filtered_fits.sort()
+
+    return filtered_fits
+
+def filterDirectoriesByJD(path, earliest_jd, latest_jd = None):
+
+    """
+    Returns a list of directories inclusive of the earliest and latest jd
+    The earliest directory returned will be the first directory dated
+    before the earliest jd.
+    The latest directory returned will be the last directory dated before
+    the latest jd
+
+    Arguments:
+        path [string]: path to directory to be filtered.
+        earliest_jd [float]: earliest jd to include.
+
+    Keyword arugments:
+        latest_jd [float]: latest jd to include, if none then only the directory containing earliest is returned
+
+    Returns:
+        filtered list of directories
+    """
+    latest_jd = earliest_jd if latest_jd is None else latest_jd
+    directory_list = []
+    path = os.path.expanduser(path)
+    if not os.path.exists(path):
+        return directory_list
+    for obj in os.listdir(os.path.expanduser(path)):
+        if os.path.isdir(os.path.join(path, obj)):
+            directory_list.append(os.path.join(path, obj))
+
+    directory_list.sort(reverse=True)
+
+    filtered_by_jd = []
+    for directory in directory_list:
+
+        # Get the jd of this directory, if it can't be parsed then continue
+        jd_dir = rmsTimeExtractor(directory, asJD=True)
+
+        if jd_dir is None:
+            continue
+
+        # If the start time of this directory is less than the latest_target append to the list
+        if jd_dir < latest_jd:
+            #log.info("Directory {} has a jd of {}, adding.".format(directory, jd_dir))
+            filtered_by_jd.append(directory)
+
+        # As soon as a directory has been added which is before the earliest_jd
+        # stop appending break the loop; everything else has already been processed
+        if rmsTimeExtractor(directory, asJD=True) < earliest_jd:
+            break
+
+
+    # Sort the list so that the oldest is at the top.
+    filtered_by_jd.sort()
+    #log.info("Searched for directories between jd {:.2f}, {:.2f}".format(earliest_jd, latest_jd))
+    for directory in filtered_by_jd:
+        jd_dir = rmsTimeExtractor(directory, asJD=True)
+        #log.info("Directory {} has a jd of {:.2f}, between {:.2f} and {:.2f} added".format(os.path.basename(directory), jd_dir, earliest_jd, latest_jd))
+
+    return filtered_by_jd
 
 def latLonAlt2ECEFDeg(lat, lon, h):
     """ Convert geographical coordinates to Earth centered - Earth fixed coordinates.
@@ -2878,7 +4377,7 @@ def testIndividuals(logging = True):
 
     if testsanitise():
         if logging:
-            log.info("santise passed tests")
+            log.info("sanitise passed tests")
     else:
         log.error("sanitise failed tests")
         individuals_success = False
@@ -2986,8 +4485,10 @@ if __name__ == "__main__":
     cml_args = arg_parser.parse_args()
 
     # Load the config file
-    syscon = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath('.'))
-
+    if cml_args.config is None:
+        syscon = cr.loadConfigFromDirectory(os.path.abspath('.'))
+    else:
+        syscon = cr.parse(os.path.expanduser(cml_args.config[0]))
     # Set the web page to monitor
 
     if testIndividuals():
@@ -3012,8 +4513,9 @@ if __name__ == "__main__":
 
         log.info("Nothing found at {}".format(syscon.event_monitor_webpage))
 
-    if cml_args.delete_db and os.path.isfile(syscon.event_monitor_db_path):
-        os.unlink(syscon.event_monitor_db_path)
+    event_monitor_db_path = os.path.join(os.path.expanduser(syscon.data_dir), syscon.event_monitor_db_name)
+    if cml_args.delete_db and os.path.isfile(event_monitor_db_path):
+        os.unlink(event_monitor_db_path)
 
     em = EventMonitor(syscon)
 
