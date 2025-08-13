@@ -1442,19 +1442,10 @@ PY
     
     if [ "$build_success" = false ]; then
         print_status "error" "Build failed after $max_build_attempts attempts."
-        print_status "warning" "Attempting to restore previous version..."
-        
-        # Try to rollback to previous commit if available
-        if [ -n "${ORIGINAL_COMMIT:-}" ] && [ "$ORIGINAL_COMMIT" != "unknown" ]; then
-            print_status "info" "Rolling back to previous commit: $ORIGINAL_COMMIT"
-            if git reset --hard "$ORIGINAL_COMMIT" 2>/dev/null; then
-                print_status "warning" "Rolled back to previous version. Update failed but system should be functional."
-                restore_files || print_status "warning" "Failed to restore config files"
-                return
-            fi
-        fi
-        
-        print_status "error" "Build recovery failed. Manual intervention may be required."
+        # Do NOT try to rollback with git reset - this could destroy custom files
+        # The files have already been restored and verified at this point
+        print_status "error" "Manual intervention may be required."
+        print_status "info" "Your configuration files are intact."
         print_status "info" "Backup files are available in: $RMSBACKUPDIR"
         exit 1
     fi
