@@ -124,7 +124,7 @@ class AstraConfigDialog(QDialog):
         # === Kalman Filter Settings ===
         self.kalman_fields = {}
         kalman_defaults = {
-            "Monotonicity": "True", "sigma_xy (px)": "0.1", "sigma_vxy (%) [0,1]": "0.001", "save results" : "False"
+            "Monotonicity": "True", "sigma_xy (px)": "0.1", "sigma_vxy (%)": "0.1", "save results" : "False"
         }
 
         # === PARAMETER GUIDE ===
@@ -156,7 +156,7 @@ class AstraConfigDialog(QDialog):
         KALMAN_TT = {
             "Monotonicity": "Enforce monotonic motion along dominant axis (True/False).",
             "sigma_xy (px)": "STD of position estimate errors (px).",
-            "sigma_vxy (%) [0,1]": "STD of velocity estimate errors (px/frame).",
+            "sigma_vxy (%)": "STD of velocity estimate errors (in percent).",
             "save results" : "Save the uncertainties from the kalman filter into a .csv file"
         }
 

@@ -92,7 +92,7 @@ class ASTRA:
             'monotonicity': self.astra_config['kalman']['Monotonicity'].lower() == 'true',
             'use_accel': False,
             'sigma_xy': float(self.astra_config['kalman']['sigma_xy (px)']),
-            'sigma_vxy_perc': float(self.astra_config['kalman']['sigma_vxy (%) [0,1]']),
+            'sigma_vxy_perc': float(self.astra_config['kalman']['sigma_vxy (%)']),
             'save results' : self.astra_config['kalman']["save results"].lower() == 'true'
         }
 
@@ -1569,7 +1569,7 @@ class ASTRA:
         avrg_velocity = np.mean(np.diff(np.linalg.norm(measurements, axis=1)) / np.diff(times))  # px/s
 
         # Instantiate process noise covariance
-        sigma_vxy = self.kalman_settings['sigma_vxy_perc'] * avrg_velocity
+        sigma_vxy = self.kalman_settings['sigma_vxy_perc']/100 * avrg_velocity
         sigma_xy = self.kalman_settings['sigma_xy'] 
 
         Q_base = np.array([
