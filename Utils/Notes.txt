@@ -7,6 +7,7 @@ TODO:
             -If does not improve star masking issues, bridge gaps with kalman
         -run computeintensitysum() etc after running ASTRA/Kalman
         -Look into correcting photometry pixels post-kalman filter
+        -replace data_dict accesses in init to .get
     KALMAN:
 
     PIPELINE:
@@ -16,3 +17,20 @@ TODO:
 NOTE:
     -in future versions ASTRA can be configued to run multiple passes to improve quality in low-pick events
     -getting warnings during ani saving that matplotlib will likely fail out of thread, no errors encountered though.
+
+FROM ASTRA:
+SNR update on frame 37: intensity sum =    19935, source px count =   131, background lvl =  2541.00, background stddev =  91.72, SNR = 16.53
+SNR update on frame 38: intensity sum =    33721, source px count =   119, background lvl =  2563.00, background stddev = 131.11, SNR = 21.84
+SNR update on frame 39: intensity sum =    57148, source px count =   135, background lvl =  2566.50, background stddev =  86.27, SNR = 48.15
+SNR update on frame 40: intensity sum =    94929, source px count =   145, background lvl =  2575.00, background stddev = 108.39, SNR = 64.41
+SNR update on frame 41: intensity sum =    88848, source px count =   132, background lvl =  2583.50, background stddev = 103.73, SNR = 65.32
+SNR update on frame 42: intensity sum =    39355, source px count =   125, background lvl =  2591.00, background stddev =  93.85, SNR = 32.52
+SNR update on frame 43: intensity sum =    22107, source px count =   106, background lvl =  2600.00, background stddev =  94.41, SNR = 19.83
+FROM SKYFIT2:
+SNR update: intensity sum =    19935, source px count =   131, background lvl =  2544.00, background stddev =  91.52, SNR = 16.55
+SNR update: intensity sum =    33721, source px count =   119, background lvl =  2561.00, background stddev = 1090.42, SNR = 2.83
+SNR update: intensity sum =    57148, source px count =   135, background lvl =  2568.00, background stddev =  98.09, SNR = 43.80
+SNR update: intensity sum =    94929, source px count =   145, background lvl =  2580.00, background stddev = 489.52, SNR = 16.00
+SNR update: intensity sum =    88848, source px count =   132, background lvl =  2583.00, background stddev = 130.94, SNR = 54.14
+SNR update: intensity sum =    39355, source px count =   125, background lvl =  2597.00, background stddev =  93.85, SNR = 32.52
+SNR update: intensity sum =    22107, source px count =   106, background lvl =  2609.00, background stddev =  94.41, SNR = 19.83

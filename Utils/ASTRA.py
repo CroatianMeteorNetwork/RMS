@@ -141,9 +141,9 @@ class ASTRA:
         }
         self.total_frames = self.pick_frame_indices[-1] - self.pick_frame_indices[0]
 
-        # 1. Processes all frames by background subtracting, masking starsm and saving the avepixel_background
+        # 1. Processes all frames by background subtracting, masking starsm and saving the avepixel_background. Also correct all frames with dark/flat and gamma corerction
         try:
-            self.avepixel_background, self.subtracted_frames = self.processImageData(self.img_obj, self.frames)
+            self.avepixel_background, self.subtracted_frames, self.frames = self.processImageData(self.img_obj, self.frames)
         except Exception as e:
             print(f'Error processing image data: {e}')
 
@@ -234,16 +234,60 @@ class ASTRA:
                 - subtracted_frames (numpy.masked_array): A masked array of shape (N, w, h) containing the subtracted frames with star masking applied.
         """
 
+        corrected_frames = []
+        subtracted_frames = []
+        masked_frames = []
+
+        # 2) -- Correct all frames
+        try:
+            for frame in frames:
+                
+                # Apply dark if available
+                if self.dark is not None:
+                    corrected_frame = Image.applyDark(frame, self.dark)
+                
+                # Apply flat if available
+                if self.flat_struct is not None:
+                    corrected_frame = Image.applyFlat(corrected_frame, self.flat_struct)
+
+                if self.flat_struct is not None or self.dark is not None:
+                    # Apply gamma correction
+                    corrected_frame = Image.gammaCorrectionImage(corrected_frame, self.skyfit_config.gamma, bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
+                else:
+                    corrected_frame = Image.gammaCorrectionImage(frame, self.skyfit_config.gamma, bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
+
+                # Append corrected frame
+                corrected_frames.append(corrected_frame)
+        except Exception as e:
+            print(f"Error correcting frames: {e}")
+
         # 1) -- Background Subtraction --
         try:
             # Load background using RMS
             fake_ff_obj = img_obj.loadChunk()
             avepixel_background = fake_ff_obj.avepixel
-            subtracted_frames = frames.copy() - avepixel_background
+            corrected_frames = np.array(corrected_frames)
 
-            # Clip subtracted frames & background to above zero
+            # Correct avepixel_background
+            if self.dark is not None:
+                corrected_avepixel = Image.applyDark(avepixel_background, self.dark)
+
+            if self.flat_struct is not None:
+                corrected_avepixel = Image.applyFlat(corrected_avepixel, self.flat_struct)
+            
+            if self.dark is not None or self.flat_struct is not None:
+                corrected_avepixel = Image.gammaCorrectionImage(corrected_avepixel, self.skyfit_config.gamma, bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
+
+            else:
+                corrected_avepixel = Image.gammaCorrectionImage(avepixel_background, self.skyfit_config.gamma, bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
+            
+            corrected_avepixel = np.clip(corrected_avepixel, 0, None)
+
+            # Subtract frames
+            subtracted_frames = corrected_frames.copy() - corrected_avepixel.copy()
+
+            # Clip subtracted frames to above zero
             subtracted_frames = np.clip(subtracted_frames, 0, None)
-            avepixel_background = np.clip(avepixel_background, 0, None)
 
         except Exception as e:
             raise Exception(f"Error loading background or subtracting frames: {e}")
@@ -251,24 +295,27 @@ class ASTRA:
         # 2) -- Star Masking --
 
         # Calculate std of background
-        background_std = np.std(avepixel_background)
-        background_mean = np.mean(avepixel_background)
+        background_std = np.std(corrected_avepixel)
+        background_mean = np.mean(corrected_avepixel)
 
         # Calculate the masking threshold
         threshold = background_mean + self.BACKGROUND_STD_THRESHOLD * background_std
 
         # Mask values exceeding the threshold
-        ave_mask = np.ma.MaskedArray(avepixel_background > threshold)
+        ave_mask = np.ma.MaskedArray(corrected_avepixel > threshold)
 
         # Tries to implement mask
         try:
             subtracted_frames = np.ma.masked_array(subtracted_frames, 
                                                    mask=np.repeat(ave_mask[np.newaxis, :, :], subtracted_frames.shape[0], axis=0))
+            corrected_avepixel = np.ma.masked_array(corrected_avepixel, mask=ave_mask)
+            masked_frames = np.ma.masked_array(corrected_frames, 
+                                                    mask=np.repeat(ave_mask[np.newaxis, :, :], corrected_frames.shape[0], axis=0))
         except Exception as e:
             raise Exception(f"Error applying mask to subtracted frames: {e}")
         
         # 3) -- Returns Data --
-        return avepixel_background, subtracted_frames
+        return corrected_avepixel, subtracted_frames, masked_frames
 
 
     def cropAllMeteorFrames(self, pick_frame_indices, picks):
@@ -461,7 +508,7 @@ class ASTRA:
             photom_pixels = self.computePhotometryPixels(fit_imgs[i], cropped_frames[i], crop_vars[i])
 
             # Calculate SNR, and photom values
-            snr = self.computeIntensitySum(photom_pixels, (refined_params[i, 2], refined_params[i, 3]), frames[pick_frame_indices[i]])
+            snr = self.computeIntensitySum(photom_pixels, self.translatePicksToGlobal((refined_params[i, 2], refined_params[i, 3]), crop_vars[i]), frames[pick_frame_indices[i]])
             
             # Determine SNR - DEPRECIATED
             # snr = self.calculateSNR(fit_imgs[i], frames[pick_frame_indices[i]], cropped_frames[i], crop_vars[i])
@@ -1784,51 +1831,34 @@ class ASTRA:
 
         # Limit the size to be within the bounds
         if x_min < 0: x_min = 0
-        if x_max > raw_frame.shape[0]: x_max = raw_frame.shape[0]
+        if x_max > raw_frame.shape[1]: x_max = raw_frame.shape[1]
         if y_min < 0: y_min = 0
-        if y_max > raw_frame.shape[1]: y_max = raw_frame.shape[1]
+        if y_max > raw_frame.shape[0]: y_max = raw_frame.shape[0]
 
         # Take only the colored part
         mask_img = np.ones_like(raw_frame)
-        mask_img[x_arr, y_arr] = 0
+        mask_img[y_arr, x_arr] = 0
         masked_img = np.ma.masked_array(raw_frame, mask_img)
-        crop_img = masked_img[x_min:x_max, y_min:y_max]
-
-        # Perform gamma correction on the colored part
-        crop_img = Image.gammaCorrectionImage(crop_img, self.skyfit_config.gamma, bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
+        crop_img = masked_img[y_min:y_max, x_min:x_max]
 
         # Mask out the colored in pixels
         mask_img_bg = np.zeros_like(raw_frame)
-        mask_img_bg[x_arr, y_arr] = 1
+        mask_img_bg[y_arr, x_arr] = 1
 
         # Take the image where the colored part is masked out and crop the surroundings
         masked_img_bg = np.ma.masked_array(raw_frame, mask_img_bg)
-        crop_bg = masked_img_bg[x_min:x_max, y_min:y_max]
-
-        # Perform gamma correction on the background
-        crop_bg = Image.gammaCorrectionImage(crop_bg, self.skyfit_config.gamma, bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
-
-        # Compute the median background
-        background_lvl = np.ma.median(crop_bg)
-
-        if self.dark is not None:
-            avepixel = Image.applyDark(avepixel, self.dark)
-        if self.flat_struct is not None:
-            avepixel = Image.applyFlat(avepixel, self.flat_struct)
-
+        crop_bg = masked_img_bg[y_min:y_max, x_min:x_max]
         
         # Mask out the colored in pixels
-        avepixel_masked = np.ma.masked_array(avepixel, mask_img)
-        avepixel_crop = avepixel_masked[x_min:x_max, y_min:y_max]
+        avepixel_masked = np.ma.masked_array(avepixel, mask_img_bg)
+        avepixel_crop_no_color = avepixel_masked[y_min:y_max, x_min:x_max]
+        avepixel_crop_color = np.ma.masked_array(avepixel, mask_img)[y_min:y_max, x_min:x_max]
 
-        # Perform gamma correction on the avepixel crop
-        avepixel_crop = Image.gammaCorrectionImage(avepixel_crop, self.skyfit_config.gamma, bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
+        # Compute background level
+        background_lvl = np.ma.median(avepixel_crop_no_color)
 
-        background_lvl = np.ma.median(avepixel_crop)
-
-        # Subtract the avepixel crop from the data crop, clip the negative values to 0 and
-        #  sum up the intensity
-        crop_img_nobg = crop_img.astype(float) - avepixel_crop
+        # Subtract the avepixel crop from the data crop, clip the negative values to 0 and sum up the intensity
+        crop_img_nobg = crop_img.astype(float) - avepixel_crop_color.astype(float)
         crop_img_nobg = np.clip(crop_img_nobg, 0, None)
         intensity_sum = np.ma.sum(crop_img_nobg)
 
