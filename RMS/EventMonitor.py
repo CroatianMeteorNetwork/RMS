@@ -34,7 +34,7 @@ import string
 import ephem
 
 
-from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, correctVignetting
+from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, correctVignetting, extinctionCorrectionApparentToTrue
 from matplotlib import pyplot as plt
 from RMS.Routines.MaskImage import loadMask
 from Utils.FOVSkyMap import plotFOVSkyMap
@@ -2147,11 +2147,12 @@ class EventMonitor(multiprocessing.Process):
         generic_file_name = "{}_{}.png".format(sys_con.stationID, e.suffix)
         thumbnail_file_name = "thumbnail_{}".format(generic_file_name)
         calstar_assisted_thumbnail_file_name = "calstar_assisted_thumbnail_{}".format(generic_file_name)
-        magnitudes_chart_file_name = "magnitudes_{}".format(generic_file_name)
+        magnitudes_time_chart_file_name = "magnitudes_time_{}".format(generic_file_name)
+        magnitudes_elevation_chart_file_name = "magnitudes_elevation_{}".format(generic_file_name)
 
         with tempfile.TemporaryDirectory() as radec_event_dir:
             thumbnail_file_path = os.path.join(radec_event_dir, thumbnail_file_name)
-            magnitudes_chart_file_path = os.path.join(radec_event_dir, magnitudes_chart_file_name)
+            magnitudes_chart_file_path = os.path.join(radec_event_dir, magnitudes_time_chart_file_name)
 
             file_list = []
             file_path = os.path.join(radec_event_dir, thumbnail_file_name)
@@ -2193,10 +2194,16 @@ class EventMonitor(multiprocessing.Process):
                 with open(json_name, 'w') as f:
                     json.dump(mags_radec_dict, f)
                 file_list.append(json_name)
-                magnitudes_chart_file_path = dictToMagnitudePlot(sys_con, mags_radec_dict, e, file_path=magnitudes_chart_file_path)
+                magnitudes_chart_file_path = dictToMagnitudeTimePlot(sys_con, mags_radec_dict, e, file_path=magnitudes_chart_file_path)
 
                 if magnitudes_chart_file_path is not None:
                     file_list.append(magnitudes_chart_file_path)
+
+                elevations_magnitudes_chart_file_path = dictToMagnitudeElevationPlot(sys_con, mags_radec_dict, e, file_path=magnitudes_elevation_chart_file_path)
+
+                if elevations_magnitudes_chart_file_path is not None:
+                    file_list.append(elevations_magnitudes_chart_file_path)
+
 
                 calstar_assisted_thumbnails_path = os.path.join(radec_event_dir, calstar_assisted_thumbnail_file_name)
                 file_list.append(dictToThumbnails(sys_con, mags_radec_dict, e, calstar_assisted_thumbnails_path))
@@ -2466,8 +2473,56 @@ def dictToThumbnails(config, observations_dict, event, file_path=None):
         log.info("CALSTAR calibrated thumbnails saved at {}".format(file_path))
     return file_path
 
+def renderMagnitudeElevationPlot(config, magnitude_list, elevation_list, e_jd, l_jd, r, d, plot_format=".png"):
+    """
+    Given a config file, magnitude list, elevation list render a plot showing magnitude variation against time.
 
-def renderMagnitudePlot(config, magnitude_list, elevation_list, e_jd, l_jd, r, d, plot_format=".png"):
+    Arguments:
+        config: [config] RMS Config instance.
+        magnitude_list: [list] List of magnitudes.
+        elevation_list: [list] List of elevations relative to local horizon.
+        e_jd: [float] Earliest time in julian date, only used for title.
+        l_jd: [float] Latest time in julian date, only used for title.
+        r: [float] Right ascension, only used for title.
+        d: [float] Declination, only user for title.
+
+    Keyword arguments:
+        plot_format: [str] Optional, default png.
+
+    Returns:
+        plt: [object] Matplot plot instance.
+        plot_filename: [str] Filename where the plot was saved.
+    """
+    if len(magnitude_list):
+        x_vals, y_vals = [], []
+        plot_filename = "{}_r_{}_d_{}_jd_{}_{}_magnitude_elevation.{}".format(config.stationID, r, d, e_jd, l_jd, plot_format)
+        for jd, mag in magnitude_list:
+            x_vals.append(mag)
+
+        for elevation in elevation_list:
+            y_vals.append(elevation)
+
+
+        title = "Plot of magnitudes at RA {} Dec {}".format(r, d)
+        plt.figure(figsize=(areaToGoldenRatioXY(16 * 12, rotate=True)))
+
+        plt.plot(marker='o', edgecolor='k', label='Elevation', s=100, c='none', zorder=3)
+        ax = plt.gca()
+        plt.scatter(x_vals, y_vals, zorder=3)
+
+        plt.xlabel("Magnitude")
+        plt.ylabel("Elevation (degrees)")
+
+        plt.title(title)
+
+        return plt, plot_filename
+
+    else:
+        return None, None
+
+
+
+def renderMagnitudeTimePlot(config, magnitude_list, elevation_list, e_jd, l_jd, r, d, plot_format=".png"):
     """
     Given a config file, magnitude list, elevation list render a plot showing magnitude variation against time.
 
@@ -2527,7 +2582,7 @@ def renderMagnitudePlot(config, magnitude_list, elevation_list, e_jd, l_jd, r, d
         return None, None
 
 
-def dictToMagnitudePlot(config, observations_dict, event, file_path=None):
+def dictToMagnitudeElevationPlot(config, observations_dict, event, file_path=None):
     """
     Given a config file, an observations dict, and an event specification return the path to a plot.
 
@@ -2557,8 +2612,52 @@ def dictToMagnitudePlot(config, observations_dict, event, file_path=None):
         r = observations['coords']['equatorial']['ra']
         d = observations['coords']['equatorial']['dec']
 
+    plt, fn = renderMagnitudeElevationPlot(config, magnitude_list, elevation_list, event.jd_start, event.jd_end, round(r, 2), round(d, 2))
 
-    plt, fn = renderMagnitudePlot(config, magnitude_list, elevation_list, event.jd_start, event.jd_end, round(r, 2), round(d, 2))
+    if plt is None:
+        print("No observations found - cannot plot")
+        return
+    else:
+        file_path = fn if file_path is None else file_path
+        plt.savefig(file_path)
+        log.info("Magnitude plot saved at {}".format(file_path))
+    return file_path
+
+
+
+
+
+def dictToMagnitudeTimePlot(config, observations_dict, event, file_path=None):
+    """
+    Given a config file, an observations dict, and an event specification return the path to a plot.
+
+    Arguments:
+        config: [object] RMS config instance.
+        observations_dict: [dict] Dictionary of observations.
+        event: [object] Event specification instance.
+
+    Keyword Arguments:
+        file_path: [str] Path to the location where the plot should be saved.
+
+    Return:
+        file_path: [str] Path to the location where the file was actually saved.
+    """
+
+    magnitude_list, elevation_list = [], []
+    if not len(observations_dict):
+        return None
+
+    # Initialise variables
+    r, d, plt = 0,0, None
+
+    for j in observations_dict:
+        observations = observations_dict.get(j)
+        magnitude_list.append([j, observations['photometry']['mag']])
+        elevation_list.append(observations['coords']['horizontal']['el'])
+        r = observations['coords']['equatorial']['ra']
+        d = observations['coords']['equatorial']['dec']
+
+    plt, fn = renderMagnitudeTimePlot(config, magnitude_list, elevation_list, event.jd_start, event.jd_end, round(r, 2), round(d, 2))
 
     if plt is None:
         print("No observations found - cannot plot")
@@ -2790,34 +2889,39 @@ def calstarRaDecToDict(data_dir_path, config, pp, pp_recal_json, r_target, d_tar
             continue
         # Overwrite vignetting coefficient with platepar value
 
-        jd_list, y_list, x_list, bg_list, amp_list, FWHM_list, snr_list, NSatPx_list = [], [], [], [], [], [], [], []
+        jd_list, y_list, x_list, intens_sum_list, bg_lvl_list, amp_list, FWHM_list, snr_list, NSatPx_list = (
+            [], [], [], [], [], [], [], [], [])
 
         # Build up lists of data for this image
-        for y, x, bg_intensity, amplitude, FWHM, bg_intensity, snr, NSatPx in star_list:
+        for y, x, intens_sum, amplitude, FWHM, bg_lvl, snr, NSatPx in star_list:
             jd_list.append(jd)
             x_list.append(x)
             y_list.append(y)
-            bg_list.append(bg_intensity)
+            intens_sum_list.append(intens_sum)
+            bg_lvl_list.append(bg_lvl)
             amp_list.append(amplitude)
             FWHM_list.append(FWHM)
             snr_list.append(snr)
             NSatPx_list.append(NSatPx)
 
         # Convert to arrays
-        jd_arr, x_data, y_data, level_data = np.array(jd_list), np.array(x_list), np.array(y_list), np.array(bg_list)
+        jd_arr, x_data, y_data, level_data = np.array(jd_list), np.array(x_list), np.array(y_list), np.array(intens_sum_list)
 
         # Process data into RaDec and apply magnitude corrections
-        jd, ra, dec, mag = xyToRaDecPP(jd_arr, x_data, y_data, level_data, pp,
+        jd, ra, dec, mag_arr = xyToRaDecPP(jd_arr, x_data, y_data, level_data, pp,
                                        jd_time=True, extinction_correction=True, measurement=True)
 
-        for j, x, y, r, d, bg, amp, FWHM, mag, x_cs, y_cs, snr, NSatPX in zip(jd, x_list, y_list, ra, dec, bg_list,
-                                                                 amp_list, FWHM_list, mag, x_list,
+        for j, x, y, intens_sum, r, d, bg, amp, FWHM, mag, x_cs, y_cs, snr, NSatPX in zip(jd, x_list, y_list,
+                                                                intens_sum_list, ra, dec, bg_lvl_list,
+                                                                 amp_list, FWHM_list, mag_arr, x_list,
                                                                  y_list, snr_list, NSatPx_list):
             az, el = raDec2AltAz(r, d, j, pp.lat, pp.lon)
             radius = np.hypot(y - pp.Y_res / 2, x - pp.X_res / 2)
             actual_deviation_degrees = angularSeparationDeg(r_target, d_target, r, d)
             vignetting, offset = pp.vignetting_coeff, pp.mag_lev
-            mag_recalc = 0 - 2.5 * np.log10(correctVignetting(bg, radius, vignetting)) + offset
+            mag_recalc = 0 - 2.5 * np.log10(correctVignetting(intens_sum, radius, vignetting)) + offset
+            mag_recalc = extinctionCorrectionApparentToTrue([mag_recalc], [x], [y], j, pp)[0]
+
             if mag == np.inf:
                 continue
 
