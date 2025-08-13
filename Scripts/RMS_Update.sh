@@ -1194,6 +1194,9 @@ main() {
         fi
         RMS_BRANCH=$(git rev-parse --abbrev-ref HEAD)   # Update to actual branch we're on
         resolve_branch_remote "$RMS_BRANCH"
+    else
+        # No switch mode - ensure we still resolve the remote for the current branch
+        resolve_branch_remote "$RMS_BRANCH"
     fi
 
     # Check if updates are needed (compare HEAD to remote ref)
