@@ -7,8 +7,6 @@ import os
 import copy
 import math
 
-
-from RMS.GeoidHeightEGM96 import mslToWGS84Height
 from RMS.Astrometry.Conversions import jd2Date
 from RMS.Astrometry.ApplyAstrometry import rotationWrtHorizon, rotationWrtStandard
 
@@ -116,8 +114,7 @@ def writeCAL(night_dir, config, platepar):
             - math.cos(math.radians(platepar.pos_angle_ref))*y_prime
 
     # Compute WGS84 height
-    height_wgs84 = mslToWGS84Height(math.radians(platepar.lat), math.radians(platepar.lon),
-                                    platepar.elev, config)
+    height_wgs84 = platepar.height_wgs84
     print(platepar.lat, platepar.lon, platepar.elev)
     print("Height wgs84 = ", height_wgs84)
 
