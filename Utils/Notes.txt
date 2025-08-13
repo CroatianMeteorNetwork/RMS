@@ -34,3 +34,11 @@ SNR update: intensity sum =    94929, source px count =   145, background lvl = 
 SNR update: intensity sum =    88848, source px count =   132, background lvl =  2583.00, background stddev = 130.94, SNR = 54.14
 SNR update: intensity sum =    39355, source px count =   125, background lvl =  2597.00, background stddev =  93.85, SNR = 32.52
 SNR update: intensity sum =    22107, source px count =   106, background lvl =  2609.00, background stddev =  94.41, SNR = 19.83
+FROM MANUAL SKYFIT2:
+SNR update: intensity sum =    16136, source px count =    80, background lvl =  2545.00, background stddev =  87.14, SNR = 17.74
+SNR update: intensity sum =    28845, source px count =    77, background lvl =  2560.00, background stddev = 1179.80, SNR = 2.78
+SNR update: intensity sum =    47670, source px count =    75, background lvl =  2570.00, background stddev =  96.23, SNR = 49.30
+SNR update: intensity sum =    81519, source px count =    80, background lvl =  2582.00, background stddev = 149.98, SNR = 56.42
+SNR update: intensity sum =    78553, source px count =    77, background lvl =  2586.00, background stddev = 144.25, SNR = 57.29
+SNR update: intensity sum =    33699, source px count =    77, background lvl =  2597.00, background stddev =  99.75, SNR = 33.70
+SNR update: intensity sum =    18490, source px count =    69, background lvl =  2608.00, background stddev =  96.51, SNR = 20.16
