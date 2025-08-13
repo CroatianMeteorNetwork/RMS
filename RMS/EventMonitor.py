@@ -2862,7 +2862,7 @@ def calstarRaDecToDict(data_dir_path, config, pp, pp_recal_json, r_target, d_tar
                                                    "p_vig": vignetting,
                                                    "snr": snr,
                                                    "nsatpx": NSatPX},
-                                    "deviation_from_camera_centre_degrees": actual_deviation_degrees,
+                                    "deviation_from_expected_centre_degrees": actual_deviation_degrees,
                                     "pixels": readCroppedFF(path_to_ff, x_centre, y_centre).tolist()}
 
                 # This has an image, so overwrite something without an image
@@ -2892,7 +2892,7 @@ def calstarRaDecToDict(data_dir_path, config, pp, pp_recal_json, r_target, d_tar
                                                     "p_vig": vignetting,
                                                     "snr": snr,
                                                     "nsatpx": NSatPX},
-                                    "deviation_from_camera_centre_degrees": actual_deviation_degrees}
+                                    "deviation_from_expected_centre_degrees": actual_deviation_degrees}
                 # Only add if this j is not already in the dict
                 if j not in sequence_dict:
                     sequence_dict[j] = observation_dict
