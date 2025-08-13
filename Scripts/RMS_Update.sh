@@ -1292,7 +1292,19 @@ main() {
         # Re-exec preserves file descriptors (including our flock) and arguments
         # Handle arithmetic safely in case of unexpected values
         if next_count=$((REEXEC_COUNT+1)) 2>/dev/null; then
-            exec env REEXEC_COUNT="$next_count" "$SELF" "$@"
+            # Construct new arguments for re-exec
+            # If we selected a branch interactively, pass it explicitly
+            if [ "$SWITCH_MODE" = "interactive" ] && [ -n "$RMS_BRANCH" ]; then
+                # Build new argument list preserving --force if present
+                local new_args=("--switch" "$RMS_BRANCH")
+                if [ "$FORCE_UPDATE" = true ]; then
+                    new_args+=("--force")
+                fi
+                exec env REEXEC_COUNT="$next_count" "$SELF" "${new_args[@]}"
+            else
+                # Use original arguments
+                exec env REEXEC_COUNT="$next_count" "$SELF" "$@"
+            fi
         else
             print_status "warning" "Failed to increment REEXEC_COUNT, continuing with current version..."
         fi
