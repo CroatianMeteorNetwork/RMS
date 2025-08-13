@@ -23,7 +23,7 @@ class ASTRA:
 
         # Try loading initial data
         try:
-            self.astra_config = data_dict["config"]  # Load ASTRA configuration from data_dict
+            self.astra_config = data_dict["astra_config"]  # Load ASTRA configuration from data_dict
         except KeyError:
             print("Warning, 'config' key not found in passed data_dict. Aborting process")
             return
