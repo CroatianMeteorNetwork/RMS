@@ -2149,11 +2149,15 @@ class EventMonitor(multiprocessing.Process):
         calstar_assisted_thumbnail_file_name = "calstar_assisted_thumbnail_{}".format(generic_file_name)
         magnitudes_time_chart_file_name = "magnitudes_time_{}".format(generic_file_name)
         magnitudes_elevation_chart_file_name = "magnitudes_elevation_{}".format(generic_file_name)
+        magnitudes_azimuth_chart_file_name = "magnitudes_azimuth_{}".format(generic_file_name)
+        magnitudes_azimuth_elevation_chart_file_name = "magnitudes_azimuth_elevation_{}".format(generic_file_name)
 
         with tempfile.TemporaryDirectory() as radec_event_dir:
             thumbnail_file_path = os.path.join(radec_event_dir, thumbnail_file_name)
             magnitudes_chart_file_path = os.path.join(radec_event_dir, magnitudes_time_chart_file_name)
             magnitudes_elevation_chart_file_path = os.path.join(radec_event_dir, magnitudes_elevation_chart_file_name)
+            magnitudes_azimuth_chart_file_path = os.path.join(radec_event_dir, magnitudes_azimuth_chart_file_name)
+            magnitudes_azimuth_elevation_chart_file_path = os.path.join(radec_event_dir, magnitudes_azimuth_elevation_chart_file_name)
 
             file_list = []
             file_path = os.path.join(radec_event_dir, thumbnail_file_name)
@@ -2200,10 +2204,26 @@ class EventMonitor(multiprocessing.Process):
                 if magnitudes_chart_file_path is not None:
                     file_list.append(magnitudes_chart_file_path)
 
-                magnitudes_elevation_chart_file_path = dictToMagnitudeElevationPlot(sys_con, mags_radec_dict, e, file_path=magnitudes_elevation_chart_file_path)
+                magnitudes_elevation_chart_file_path = dictToMagnitudeElevationPlot(sys_con, pp, mags_radec_dict, e, file_path=magnitudes_elevation_chart_file_path)
 
                 if magnitudes_elevation_chart_file_path is not None:
                     file_list.append(magnitudes_elevation_chart_file_path)
+
+
+                magnitudes_azimuth_chart_file_path = dictToMagnitudeAzimuthPlot(sys_con, pp, mags_radec_dict, e,
+                                                                                    file_path=magnitudes_azimuth_chart_file_path)
+
+                if magnitudes_azimuth_chart_file_path is not None:
+                    file_list.append(magnitudes_azimuth_chart_file_path)
+
+
+
+                magnitudes_azimuth_elevation_chart_file_path = dictToMagnitudeAzimuthElevationPlot(sys_con, pp, mags_radec_dict, e,
+                                                                                    file_path=magnitudes_azimuth_elevation_chart_file_path)
+
+                if magnitudes_azimuth_elevation_chart_file_path is not None:
+                    file_list.append(magnitudes_azimuth_elevation_chart_file_path)
+
 
 
                 calstar_assisted_thumbnails_path = os.path.join(radec_event_dir, calstar_assisted_thumbnail_file_name)
@@ -2474,7 +2494,54 @@ def dictToThumbnails(config, observations_dict, event, file_path=None):
         log.info("CALSTAR calibrated thumbnails saved at {}".format(file_path))
     return file_path
 
-def renderMagnitudeElevationPlot(config, magnitude_list, elevation_list, e_jd, l_jd, r, d, plot_format=".png"):
+
+def dictToMagnitudeAzimuthElevationPlot(config, pp, observations_dict, event, file_path=None):
+    """
+    Given a config file, an observations dict, and an event specification return the path to a plot.
+
+    Arguments:
+        config: [object] RMS config instance.
+        observations_dict: [dict] Dictionary of observations.
+        event: [object] Event specification instance.
+
+    Keyword Arguments:
+        file_path: [str] Path to the location where the plot should be saved.
+
+    Return:
+        file_path: [str] Path to the location where the file was actually saved.
+    """
+
+    magnitude_list, azimuth_list, elevation_list = [], [], []
+    if not len(observations_dict):
+        return None
+
+    # Initialise variables
+    r, d, plt = 0,0, None
+
+    for j in observations_dict:
+        observations = observations_dict.get(j)
+        magnitude_list.append(observations['photometry']['mag'])
+
+        azimuth_list.append((observations['coords']['horizontal']['az'] - 180) % 360 - 180 )
+        elevation_list.append(observations['coords']['horizontal']['el'])
+        #azimuth_list.append((observations['coords']['image_coords_from_calstar']['x'])) # - 180) % 360 - 180)
+        #elevation_list.append(observations['coords']['image_coords_from_calstar']['y'])
+        r = observations['coords']['equatorial']['ra']
+        d = observations['coords']['equatorial']['dec']
+
+    plt, fn = renderMagnitudeAzElPlot(config, pp, magnitude_list, azimuth_list, elevation_list, event.jd_start, event.jd_end, round(r, 2), round(d, 2))
+
+    if plt is None:
+        print("No observations found - cannot plot")
+        return
+    else:
+        file_path = fn if file_path is None else file_path
+        plt.savefig(file_path)
+        log.info("Magnitude elevation plot saved at {}".format(file_path))
+    return file_path
+
+
+def renderMagnitudeAzElPlot(config, pp, magnitude_list, az_list, el_list , e_jd, l_jd, r, d, plot_format=".png"):
     """
     Given a config file, magnitude list, elevation list render a plot showing magnitude variation against time.
 
@@ -2494,25 +2561,29 @@ def renderMagnitudeElevationPlot(config, magnitude_list, elevation_list, e_jd, l
         plt: [object] Matplot plot instance.
         plot_filename: [str] Filename where the plot was saved.
     """
+
+
     if len(magnitude_list):
-        x_vals, y_vals = [], []
-        plot_filename = "{}_r_{}_d_{}_jd_{}_{}_magnitude_elevation.{}".format(config.stationID, r, d, e_jd, l_jd, plot_format)
-        for jd, mag in magnitude_list:
-            y_vals.append(mag)
+        x_vals, y_vals, jd_vals = [], [], []
+        plot_filename = "{}_r_{}_d_{}_jd_{}_{}_magnitude_azimuth_elevation.{}".format(config.stationID, r, d, e_jd, l_jd, plot_format)
 
-        for elevation in elevation_list:
-            x_vals.append(elevation)
+        for elevation in el_list:
+            y_vals.append(elevation - pp.alt_centre)
 
+        for azimuth in az_list:
+            x_vals.append(azimuth - pp.az_centre)
 
-        title = "Plot of magnitudes at RA {} Dec {}".format(r, d)
+        title = "{} plot of magnitudes against azimuth and elevation at RA {} Dec {} between jd {:2f} and {:2f}".format(config.stationID,r, d, e_jd, l_jd)
         plt.figure(figsize=(areaToGoldenRatioXY(16 * 12, rotate=True)))
 
-        plt.plot(marker='o', edgecolor='k', label='Elevation', s=100, c='none', zorder=3)
+        plt.plot(marker='o', edgecolor='k', label='Magnitude', s=100, c='none', zorder=3)
         ax = plt.gca()
-        plt.scatter(x_vals, y_vals, zorder=3)
+        plt.scatter(x_vals, y_vals, c=magnitude_list, zorder=3)
+        plt.colorbar(label="Magnitude")
+        plt.xlabel("Azimuth normalised to camera pointing of {:.1f} degrees +ve from North".format(pp.az_centre))
+        plt.ylabel("Elevation normalised to camera pointing of {:.1f} degrees above horizon".format(pp.alt_centre))
 
-        plt.ylabel("Magnitude")
-        plt.xlabel("Elevation (degrees)")
+
 
         plt.title(title)
 
@@ -2520,6 +2591,125 @@ def renderMagnitudeElevationPlot(config, magnitude_list, elevation_list, e_jd, l
 
     else:
         return None, None
+
+
+def renderMagnitudeElevationPlot(config, pp, magnitude_list, elevation_list, e_jd, l_jd, r, d, plot_format=".png"):
+    """
+    Given a config file, magnitude list, elevation list render a plot showing magnitude variation against time.
+
+    Arguments:
+        config: [config] RMS Config instance.
+        magnitude_list: [list] List of magnitudes.
+        elevation_list: [list] List of elevations relative to local horizon.
+        e_jd: [float] Earliest time in julian date, only used for title.
+        l_jd: [float] Latest time in julian date, only used for title.
+        r: [float] Right ascension, only used for title.
+        d: [float] Declination, only user for title.
+
+    Keyword arguments:
+        plot_format: [str] Optional, default png.
+
+    Returns:
+        plt: [object] Matplot plot instance.
+        plot_filename: [str] Filename where the plot was saved.
+    """
+
+
+    if len(magnitude_list):
+        x_vals, y_vals, jd_vals = [], [], []
+        plot_filename = "{}_r_{}_d_{}_jd_{}_{}_magnitude_elevation.{}".format(config.stationID, r, d, e_jd, l_jd, plot_format)
+        for jd, mag in magnitude_list:
+            jd_vals.append(jd)
+            y_vals.append(mag)
+
+        median_jd =  (min(jd_vals) + max(jd_vals)) /2
+
+        jd_vals_norm = []
+        for jd in jd_vals:
+            jd_vals_norm.append(jd - median_jd)
+
+
+
+        for elevation in elevation_list:
+            x_vals.append(elevation - pp.alt_centre)
+
+
+        title = "{} plot of magnitudes against elevation at RA {} Dec {}".format(config.stationID,r, d)
+        plt.figure(figsize=(areaToGoldenRatioXY(16 * 12, rotate=True)))
+
+        plt.plot(marker='o', edgecolor='k', label='Elevation', s=100, c='none', zorder=3)
+        ax = plt.gca()
+        plt.scatter(x_vals, y_vals, c=jd_vals_norm,  zorder=3)
+        plt.colorbar(label="Time (jd) - normalise on {:.2f}".format(median_jd))
+        plt.ylabel("Magnitude")
+        plt.xlabel("Elevation normalised to camera pointing of {:.1f} degrees above horizon".format(pp.alt_centre))
+
+        plt.title(title)
+
+        return plt, plot_filename
+
+    else:
+        return None, None
+
+
+def renderMagnitudeAzimuthPlot(config, pp, magnitude_list, azimuth_list, e_jd, l_jd, r, d, plot_format=".png"):
+    """
+    Given a config file, magnitude list, elevation list render a plot showing magnitude variation against time.
+
+    Arguments:
+        config: [config] RMS Config instance.
+        magnitude_list: [list] List of magnitudes.
+        azimuth_list: [list] List of azimuth relative to local horizon.
+        e_jd: [float] Earliest time in julian date, only used for title.
+        l_jd: [float] Latest time in julian date, only used for title.
+        r: [float] Right ascension, only used for title.
+        d: [float] Declination, only user for title.
+
+    Keyword arguments:
+        plot_format: [str] Optional, default png.
+
+    Returns:
+        plt: [object] Matplot plot instance.
+        plot_filename: [str] Filename where the plot was saved.
+    """
+
+
+    if len(magnitude_list):
+        x_vals, y_vals, jd_vals = [], [], []
+        plot_filename = "{}_r_{}_d_{}_jd_{}_{}_magnitude_azimuth.{}".format(config.stationID, r, d, e_jd, l_jd, plot_format)
+        for jd, mag in magnitude_list:
+            jd_vals.append(jd)
+            y_vals.append(mag)
+
+        median_jd =  (min(jd_vals) + max(jd_vals)) /2
+
+        jd_vals_norm = []
+        for jd in jd_vals:
+            jd_vals_norm.append(jd - median_jd)
+
+
+
+        for azimuth in azimuth_list:
+            x_vals.append(azimuth - pp.az_centre)
+
+
+        title = "{} plot of magnitudes against azimuth at RA {} Dec {}".format(config.stationID,r, d)
+        plt.figure(figsize=(areaToGoldenRatioXY(16 * 12, rotate=True)))
+
+        plt.plot(marker='o', edgecolor='k', label='Azimuth', s=100, c='none', zorder=3)
+        ax = plt.gca()
+        plt.scatter(x_vals, y_vals, c=jd_vals_norm,  zorder=3)
+        plt.colorbar(label="Time (jd) - normalise on {:.2f}".format(median_jd))
+        plt.ylabel("Magnitude")
+        plt.xlabel("Azimuth normalised to camera pointing of {:.1f} clockwise degrees from North".format(pp.alt_centre))
+
+        plt.title(title)
+
+        return plt, plot_filename
+
+    else:
+        return None, None
+
 
 
 
@@ -2551,7 +2741,7 @@ def renderMagnitudeTimePlot(config, magnitude_list, elevation_list, e_jd, l_jd, 
             y_vals.append(mag)
 
         start_time, end_time = min(x_vals).strftime("%Y-%m-%d %H:%M:%S"), max(x_vals).strftime("%Y-%m-%d %H:%M:%S")
-        title = "Plot of magnitudes at RA {} Dec {} from {} to {}".format(r, d, start_time, end_time)
+        title = "{} plot of magnitudes against time at RA {} Dec {} from {} to {}".format(config.stationID, r, d, start_time, end_time)
         plt.figure(figsize=(areaToGoldenRatioXY(16 * 12, rotate=True)))
 
         plt.plot(marker='o', edgecolor='k', label='Elevation', s=100, c='none', zorder=3)
@@ -2583,7 +2773,7 @@ def renderMagnitudeTimePlot(config, magnitude_list, elevation_list, e_jd, l_jd, 
         return None, None
 
 
-def dictToMagnitudeElevationPlot(config, observations_dict, event, file_path=None):
+def dictToMagnitudeElevationPlot(config, pp, observations_dict, event, file_path=None):
     """
     Given a config file, an observations dict, and an event specification return the path to a plot.
 
@@ -2613,7 +2803,7 @@ def dictToMagnitudeElevationPlot(config, observations_dict, event, file_path=Non
         r = observations['coords']['equatorial']['ra']
         d = observations['coords']['equatorial']['dec']
 
-    plt, fn = renderMagnitudeElevationPlot(config, magnitude_list, elevation_list, event.jd_start, event.jd_end, round(r, 2), round(d, 2))
+    plt, fn = renderMagnitudeElevationPlot(config, pp, magnitude_list, elevation_list, event.jd_start, event.jd_end, round(r, 2), round(d, 2))
 
     if plt is None:
         print("No observations found - cannot plot")
@@ -2621,8 +2811,51 @@ def dictToMagnitudeElevationPlot(config, observations_dict, event, file_path=Non
     else:
         file_path = fn if file_path is None else file_path
         plt.savefig(file_path)
-        log.info("Magnitude plot saved at {}".format(file_path))
+        log.info("Magnitude elevation plot saved at {}".format(file_path))
     return file_path
+
+
+def dictToMagnitudeAzimuthPlot(config, pp, observations_dict, event, file_path=None):
+    """
+    Given a config file, an observations dict, and an event specification return the path to a plot.
+
+    Arguments:
+        config: [object] RMS config instance.
+        observations_dict: [dict] Dictionary of observations.
+        event: [object] Event specification instance.
+
+    Keyword Arguments:
+        file_path: [str] Path to the location where the plot should be saved.
+
+    Return:
+        file_path: [str] Path to the location where the file was actually saved.
+    """
+
+    magnitude_list, azimuth_list = [], []
+    if not len(observations_dict):
+        return None
+
+    # Initialise variables
+    r, d, plt = 0,0, None
+
+    for j in observations_dict:
+        observations = observations_dict.get(j)
+        magnitude_list.append([j, observations['photometry']['mag']])
+        azimuth_list.append(observations['coords']['horizontal']['az'])
+        r = observations['coords']['equatorial']['ra']
+        d = observations['coords']['equatorial']['dec']
+
+    plt, fn = renderMagnitudeAzimuthPlot(config, pp, magnitude_list, azimuth_list, event.jd_start, event.jd_end, round(r, 2), round(d, 2))
+
+    if plt is None:
+        print("No observations found - cannot plot")
+        return
+    else:
+        file_path = fn if file_path is None else file_path
+        plt.savefig(file_path)
+        log.info("Magnitude azimuth plot saved at {}".format(file_path))
+    return file_path
+
 
 
 
@@ -2923,23 +3156,24 @@ def calstarRaDecToDict(data_dir_path, config, pp, pp_recal_json, r_target, d_tar
             mag_recalc = 0 - 2.5 * np.log10(correctVignetting(intens_sum, radius, vignetting)) + offset
             mag_recalc = extinctionCorrectionApparentToTrue([mag_recalc], [x], [y], j, pp)[0]
 
-            if mag == np.inf:
+            if mag == np.inf or actual_deviation_degrees >= search_sky_radius_degrees:
                 continue
 
-            if actual_deviation_degrees < search_sky_radius_degrees:
-                path_to_ff = os.path.join(data_dir_path, fits_file)
-                if os.path.exists(path_to_ff):
-                    path_to_ff = path_to_ff
 
-                else:
-                    fits_time_jd = rmsTimeExtractor(path_to_ff, asJD=True)
-                    path_to_ff = getFitsPaths(captured_directory_path, fits_time_jd)
-                    if len(path_to_ff):
-                        path_to_ff = path_to_ff[0]
-                    else:
-                        path_to_ff = None
+    
+
+            path_to_ff = os.path.join(data_dir_path, fits_file)
+            if os.path.exists(path_to_ff):
+                path_to_ff = path_to_ff
+
             else:
-                path_to_ff = None
+                fits_time_jd = rmsTimeExtractor(path_to_ff, asJD=True)
+                path_to_ff = getFitsPaths(captured_directory_path, fits_time_jd)
+                if len(path_to_ff):
+                    path_to_ff = path_to_ff[0]
+                else:
+                    path_to_ff = None
+
 
             x_from_radec_arr, y_from_radec_arr = raDecToXYPP(np.array([r]), np.array([d]), np.array([j]), pp)
             x_from_radec, y_from_radec = x_from_radec_arr[0], y_from_radec_arr[0]
@@ -2948,6 +3182,7 @@ def calstarRaDecToDict(data_dir_path, config, pp, pp_recal_json, r_target, d_tar
             else:
 
                 x_centre, y_centre = round(x_from_radec), round(y_from_radec)
+
 
 
             if path_to_ff is not None:
