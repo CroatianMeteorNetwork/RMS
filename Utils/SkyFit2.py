@@ -2071,6 +2071,15 @@ class PlateTool(QtWidgets.QMainWindow):
             elevation_list.append(alt)
 
 
+        # Skip the photometry if there are no stars
+        if len(star_coords) == 0:
+            
+            self.photom_fit_stddev = None
+            self.photom_fit_resids = []
+
+            return
+
+
         self.residual_text.clear()
 
         # Compute apparent magnitude corrected for extinction
