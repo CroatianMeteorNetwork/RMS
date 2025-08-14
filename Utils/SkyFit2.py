@@ -3927,43 +3927,64 @@ class PlateTool(QtWidgets.QMainWindow):
                     print('Current line: {}'.format(self.img.img_handle.current_line))
                     self.img.nextLine()
 
+            # Launch ASTRA GUI
             elif event.key() == QtCore.Qt.Key_K and (modifiers == QtCore.Qt.ControlModifier):
-                # ASTRA Addition - Justin DT
+                
+                # Set class variable to store previous picks for astra/kalman reversion.
                 self.previous_picks = []
+
                 # Set saturation threshold as a class var
                 self.saturation_threshold = int(round(0.98*(2**self.config.bit_depth - 1)))
+
                 if hasattr(self, "astra_dialog"):
+
+                    # If ASTRA dialog exists, close it
                     if self.astra_dialog is not None:
                         self.astra_dialog.close()
                         self.astra_dialog = None
+                    
+                    # If ASTRA is None, open GUI
                     else:
-                        self.open_astra_gui()
-                        self.astra_dialog.finished.connect(self.clear_astra_dialog_reference)
+                        self.openAstraGUI()
+                        self.astra_dialog.finished.connect(self.clearAstraDialogReference)
                 else:
-                    self.open_astra_gui()
-                    self.astra_dialog.finished.connect(self.clear_astra_dialog_reference)
+                    # Else open ASTRA GUI
+                    self.openAstraGUI()
+                    self.astra_dialog.finished.connect(self.clearAstraDialogReference)
 
-    def clear_astra_dialog_reference(self):
+    def clearAstraDialogReference(self):
+        """Clears the reference to the ASTRA GUI"""
         self.astra_dialog = None
 
     def clearAllPicks(self):
-        # ASTRA Addition - Justin DT
-        """Clears all meteor picks."""
+        """Clears the pick_list, and updates the GUI."""
+
+        # Clear all picks
         self.pick_list = {}
+
+        # Update GUI to remove drawn picks
         self.updatePicks()
 
-    def open_astra_gui(self):
+    def openAstraGUI(self):
+        """Opens the ASTRA dialog box on another thread to ensure SkyFit2 responsiveness."""
+
+        # Launch the ASTRA Dialog on a seperate thread, with callbacks for buttons
         self.astra_dialog = launch_astra_gui(
             run_astra_callback=None,
             run_kalman_callback=self.run_kalman_from_config,
-            run_load_callback=self.load_picks_from_file,
+            run_load_callback=self.loadPicksFromFile,
             skyfit_instance=self
         )
+
         # Update ASTRA/Kalman ready status
         self.checkKalmanCanRun()
         self.checkASTRACanRun()
         
-    def load_picks_from_file(self, config):
+    def loadPicksFromFile(self, config):
+        """Loads picks and associated values from either ECSV or DetApp txt file.
+        args: 
+            config (dict) : Config returned from the ASTRA GUI
+        """
 
         # Unpack file path
         file_path = config["file_path"]
@@ -3972,9 +3993,6 @@ class PlateTool(QtWidgets.QMainWindow):
         if not os.path.exists(file_path):
             print(f'ERROR: No Valid ECSV or .txt file selected')
             return
-        
-        # Check if the file camera code matches the frames loaded
-
         
         # DetApp picks in a ev*.txt files
         if file_path.startswith('ev') and file_path.endswith('.txt'):
@@ -4019,7 +4037,7 @@ class PlateTool(QtWidgets.QMainWindow):
             )
             return
 
-        # Add previous picks to list
+        # Add previous picks to list, if the pick is non-empty
         if np.array(
             sorted(
             k for k in self.pick_list.keys()
@@ -4039,7 +4057,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateGreatCircle()
 
         # Print out added centroids
-        for i, k in enumerate(pick_list.keys()):
+        for k in pick_list.keys():
             print(f'Added centroid at ({pick_list[k]["x_centroid"]}, {pick_list[k]["y_centroid"]}) on frame {k}')
         
         # Finally update the GUI picks
@@ -4056,6 +4074,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def checkKalmanCanRun(self):
         """Checks if kalman filter can be run, updates astra GUI"""
+        
         # Unpack picks with non-None values
         keys = np.array(
             sorted(
@@ -4072,31 +4091,51 @@ class PlateTool(QtWidgets.QMainWindow):
         if keys.size >= 5:  
             tt = 'Ready to run.'
             self.astra_dialog.set_kalman_status(True, tt)
+
         # Minimum amount of points to run
         elif keys.size >= 3:
             tt = 'Ready to run. WARNING: Kalman should be generally run with at least 5 points.'
             self.astra_dialog.set_kalman_status("WARN", tt)
+
         # Not enough points to run
         else:
             tt = 'Not ready. Kalman requires at least 3 points (generally >= 5 points).'
             self.astra_dialog.set_kalman_status(False, tt)
 
     def reverseASTRAPicks(self):
+        """Reverts the ASTRA picks to the previous state of picks."""
+        
+        # Only revert if picks are non-empty
         if not self.previous_picks == []:
+
+            # Pop newest pick off stack
             old_picks = self.previous_picks.pop()
+
+            # Clear old picks
             self.clearAllPicks()
+
+            # Restore old picks
             for frame_num in old_picks.keys():
                 self.pick_list[frame_num] = old_picks[frame_num]
-                self.tab.debruijn.modifyRow(frame_num, 1)
+
+            # Update picks in GUI
             self.updateGreatCircle()
             self.updatePicks()
+
+            # Print out reverted picks confirmation
             print(f'Reverted picks to previous state with {len(old_picks.keys())} picks.')
+        
+        # Update if picks can be reverted again
         self.checkPickRevertCanRun()
             
     def checkPickRevertCanRun(self):
+        """Checks if reverseASTRAPicks() can be run, connected to ASTRA GUI"""
+
         if self.previous_picks == []:
+            # If previous picks are empty, set revert status to False
             self.astra_dialog.set_revert_status(False)
         else:
+            # If previous picks are not empty, set revert status to True
             self.astra_dialog.set_revert_status(True)
 
     def checkASTRACanRun(self):
