@@ -2042,7 +2042,6 @@ class PlateTool(QtWidgets.QMainWindow):
         snr_list = []
         saturation_list = []
 
-
         for paired_star in self.paired_stars.allCoords():
 
             img_star, catalog_star = paired_star
@@ -4032,7 +4031,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Print out added centroids
         for i, k in enumerate(pick_list.keys()):
-            self.tab.debruijn.modifyRow(k, 1)
             print(f'Added centroid at ({pick_list[k]["x_centroid"]}, {pick_list[k]["y_centroid"]}) on frame {k}')
         
         # Finally update the GUI picks
@@ -4245,7 +4243,6 @@ class PlateTool(QtWidgets.QMainWindow):
                 'saturated': False,
             }
             self.pick_list[pick_frame_indices[i]] = pick
-            self.tab.debruijn.modifyRow(pick_frame_indices[i], 1)
             self.updateGreatCircle()
             print(f'Added centroid at ({pick["x_centroid"]}, {pick["y_centroid"]}) on frame {pick_frame_indices[i]}')
         self.updatePicks()
@@ -4318,7 +4315,6 @@ class PlateTool(QtWidgets.QMainWindow):
         for i in range(len(pick_frame_indices)):
             self.pick_list[pick_frame_indices[i]]["x_centroid"] = xypicks[i][0]
             self.pick_list[pick_frame_indices[i]]["y_centroid"] = xypicks[i][1]
-            self.tab.debruijn.modifyRow(pick_frame_indices[i], 1)
             self.updateGreatCircle()
             print(f'Adjusted centroid at ({xypicks[i][0]}, {xypicks[i][1]}) on frame {pick_frame_indices[i]}')
         self.updatePicks()
@@ -6409,9 +6405,11 @@ class PlateTool(QtWidgets.QMainWindow):
         fig_a.show()
 
 
-    def computeIntensitySum(self):
+    def computeIntensitySum(self, star_mask_coeff=3):
         """ Compute the background subtracted sum of intensity of colored pixels. The background is estimated
             as the median of near pixels that are not colored.
+            args:
+                star_mask_coeff (float): Multiples of STD above mean to consider a pixel as a star (masked).
         """
 
         # Find the pick done on the current frame
@@ -6511,9 +6509,13 @@ class PlateTool(QtWidgets.QMainWindow):
                 if self.flat_struct is not None:
                     avepixel = applyFlat(avepixel, self.flat_struct)
 
-                
-                # Mask out the colored in pixels
-                avepixel_masked = np.ma.masked_array(avepixel, mask_img)
+                # Create an additional mask, masking stars above 3 sigma brightness
+                star_mask = np.zeros_like(avepixel, dtype=int)
+                star_mask[avepixel > (np.mean(avepixel) + star_mask_coeff * np.std(avepixel))] = 1
+                crop_star_mask = star_mask[x_min:x_max, y_min:y_max]
+
+                # Add the star mask & mask_img to the avepixel mask
+                avepixel_masked = np.ma.masked_array(avepixel, mask_img | star_mask)
                 avepixel_crop = avepixel_masked[x_min:x_max, y_min:y_max]
 
                 # Perform gamma correction on the avepixel crop
@@ -6521,8 +6523,15 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 background_lvl = np.ma.median(avepixel_crop)
 
-                # Subtract the avepixel crop from the data crop, clip the negative values to 0 and
-                #  sum up the intensity
+                # Correct the crop_img with star_mask
+                crop_mask_img = mask_img[x_min:x_max, y_min:y_max]
+                crop_img = np.ma.masked_array(crop_img, crop_mask_img | crop_star_mask)
+
+                # Correct the crop_bg with star_mask
+                crop_mask_img_bg = mask_img_bg[x_min:x_max, y_min:y_max]
+                crop_bg = np.ma.masked_array(crop_bg, crop_mask_img_bg | crop_star_mask)
+
+                # Subtract the avepixel crop from the data crop, clip the negative values to 0 and sum up the intensity
                 crop_img_nobg = crop_img.astype(float) - avepixel_crop
                 crop_img_nobg = np.clip(crop_img_nobg, 0, None)
                 intensity_sum = np.ma.sum(crop_img_nobg)

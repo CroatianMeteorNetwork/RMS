@@ -44,3 +44,11 @@ SNR update: intensity sum =    81519, source px count =    80, background lvl = 
 SNR update: intensity sum =    78553, source px count =    77, background lvl =  2586.00, background stddev = 144.25, SNR = 57.29
 SNR update: intensity sum =    33699, source px count =    77, background lvl =  2597.00, background stddev =  99.75, SNR = 33.70
 SNR update: intensity sum =    18490, source px count =    69, background lvl =  2608.00, background stddev =  96.51, SNR = 20.16
+POST SKYFIT2 STAR MASK FIX:
+SNR update: intensity sum =    19723, source px count =   128, background lvl =  2544.00, background stddev =  91.53, SNR = 16.56
+SNR update: intensity sum =    33498, source px count =   116, background lvl =  2561.00, background stddev = 130.93, SNR = 22.00
+SNR update: intensity sum =    57148, source px count =   135, background lvl =  2568.00, background stddev =  86.27, SNR = 48.15
+SNR update: intensity sum =    94622, source px count =   142, background lvl =  2579.50, background stddev = 105.29, SNR = 66.33
+SNR update: intensity sum =    88848, source px count =   132, background lvl =  2583.00, background stddev = 103.73, SNR = 65.32
+SNR update: intensity sum =    39614, source px count =   128, background lvl =  2597.50, background stddev =  93.77, SNR = 32.37
+SNR update: intensity sum =    22107, source px count =   106, background lvl =  2609.00, background stddev =  94.41, SNR = 19.83
