@@ -4179,11 +4179,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.img_handle.setFrame(0)  # Reset to the first frame
         frame_count = sum(1 for name in os.listdir(self.dir_path) if 'dump' in name)
 
-        # Load the first frame
-        frame = self.img_handle.loadFrame()
-
         # Init a numpy array with the correct size and type
-        frames = np.zeros((frame_count, frame.shape[0], frame.shape[1]), dtype=frame.dtype)
+        frames = np.zeros((frame_count, *self.img_handle.loadFrame().shape), dtype=np.float32)
 
         for i in range(frame_count):
             frames[i] = self.img_handle.loadFrame()

@@ -170,10 +170,10 @@ class ASTRA:
         
         # 5. save animation
         if self.save_animation:
-            try:
-                self.saveAni(self.data_path)
-            except Exception as e:
-                print(f'Error saving animation: {e}')
+            # try:
+            self.saveAni(self.data_path)
+            # except Exception as e:
+            #     print(f'Error saving animation: {e}')
 
         # Set progress to 100
         self.updateProgress(100)
@@ -336,12 +336,8 @@ class ASTRA:
 
         # 1) -- Unpack variables & Calculate seed picks/frames--
         seed_picks_global, seed_indices = self.select_seed_triplet(picks, pick_frame_indices)
-        # Calculate omega (angle) with respect to +x axis, in the direction of -y
-        dx = picks[-1][0] - picks[0][0]
-        dy = picks[-1][1] - picks[0][1]
-        omega = np.arctan2(dy, dx) % (2 * np.pi)
-        print(omega)
-
+        omega = np.arctan2(picks[-1][1] - picks[0][1], -picks[-1][0] + picks[0][0])  % (2*np.pi)
+        
         if self.verbose:
             print(f"Starting recursive cropping with {len(seed_indices)} seed picks at indices {seed_indices} and omega {omega} radians.")
 
@@ -553,20 +549,20 @@ class ASTRA:
         # Save copies before indexing to avoid recursion errors
         fit_imgs_copy = fit_imgs.copy()
         cropped_frames_copy = cropped_frames.copy()
-        times_copy = times.copy()
         photometry_pixels_copy = self.photometry_pixels.copy()
 
         # Remove low-SNR frames from fit_imgs and cropped_frames
         fit_imgs = [fit_imgs_copy[i] for i in range(len(fit_imgs_copy)) if not snr_rejection_bool[i]]
         cropped_frames = [cropped_frames_copy[i] for i in range(len(cropped_frames_copy)) if not snr_rejection_bool[i]]
-        times = [times_copy[i] for i in range(len(times_copy)) if not snr_rejection_bool[i]]
         self.photometry_pixels = [photometry_pixels_copy[i] for i in range(len(photometry_pixels_copy)) if not snr_rejection_bool[i]]
-
         # Translate to global coordinates as new variable
         global_picks = np.array([self.movePickToEdge(self.translatePicksToGlobal((refined_params[i, 2], refined_params[i, 3]), crop_vars[i]),
                                                      self.omega,
                                                      refined_params[i][4],
                                                      directions = self.directions) for i in range(len(refined_params))])
+
+        # Compute times of frames
+        times = np.array([(self.img_obj.frame_dt_dict[k]) for k in pick_frame_indices])
 
         # Save all as instance variables
         self.refined_fit_params, self.fit_imgs, self.cropped_frames, self.crop_vars, self.pick_frame_indices, self.global_picks, self.fit_costs, self.times, self.snr = (
@@ -585,6 +581,7 @@ class ASTRA:
         from datetime import datetime
 
         import matplotlib
+        current_backend = matplotlib.get_backend()
         matplotlib.use("Agg")  # headless-safe backend
         from matplotlib.figure import Figure
         from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
@@ -601,7 +598,7 @@ class ASTRA:
             outdir = os.path.join(root, f"ASTRA_frames_{datetime.now():%Y%m%d_%H%M%S}")
             os.makedirs(outdir, exist_ok=True)
 
-            n_crops = len(self.cropped_frames)
+            n_crops = len(self.times)
             if n_crops == 0:
                 return
 
@@ -678,11 +675,11 @@ class ASTRA:
                 # Explicitly clear to free memory in long sequences
                 fig.clf()
 
-                # Optional: print where they went
-                print(f"Saved {n_crops} JPEGs to: {outdir}")
+            # Optional: print where they went
+            print(f"Saved {n_crops} JPEGs to: {outdir}")
 
         # Revert backend so parent class can still use matplotlib
-        matplotlib.use("module://matplotlib_inline.backend_inline")
+        matplotlib.use(current_backend)
 
     # 2) -- Calculation/Conversion Methods --
 
@@ -995,14 +992,11 @@ class ASTRA:
 
         # Calculate magnitudes of all norms
         global_centroids = all_params[:, 2:4] + xymin
-        print("GLOVAL CENTROIDS: ", global_centroids)
-        print("CYMIN, ", xymin)
 
         # NOTE : sorting is likely not needed, but it is here to ensure the splines are calculated in the correct order
         global_centroids = global_centroids[np.argsort(global_centroids[:, 0])]
         deltas = global_centroids[1:] - global_centroids[:-1]
         norms = np.linalg.norm(deltas, axis=1)
-        print("NORMS:", norms)
 
         # Ensure level_sums has only values above zero
         level_sums = np.clip(level_sums, 1e-6, None)
