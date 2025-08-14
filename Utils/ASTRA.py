@@ -99,7 +99,8 @@ class ASTRA:
             "ftol_iter": ftol_iter,
             "bh_strategy": bh_strategy,
             "vh_strategy": vh_strategy,
-            "explorative_coeff": explorative_coeff
+            "explorative_coeff": explorative_coeff,
+            "oob_penalty" : 1e6
         }
 
         # Settings and padding coefficients for cropping
@@ -1015,7 +1016,7 @@ class ASTRA:
         std_ave = np.std(masked_avebk[masked_avebk > 0])
 
         # Crop the masked frame to the percentile threshold defined by P_thresh
-        masked_cropped[masked_cropped < np.ma.percentile(masked_cropped, float(self.astra_config['astra']['photom_thresh']))] = 0
+        masked_cropped[masked_cropped < np.nanpercentile(masked_cropped, float(self.astra_config['astra']['photom_thresh']))] = 0
 
         # Count the non-zero values in the masked cropped frame, and calculate the level sum
         nonzero_count = np.count_nonzero(masked_cropped)
@@ -2070,7 +2071,7 @@ class ASTRA:
         # Mask cropped frame with fit image to remove the background
         masked_cropped = fit_img * cropped_frame
 
-        masked_cropped[masked_cropped < np.ma.percentile(masked_cropped, float(self.astra_config['astra']['photom_thresh']))] = 0
+        masked_cropped[masked_cropped < np.nanpercentile(masked_cropped, float(self.astra_config['astra']['photom_thresh']))] = 0
 
         # binarize mask_cropped
         masked_cropped[masked_cropped > 0] = 1
