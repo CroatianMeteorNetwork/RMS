@@ -91,22 +91,36 @@ class AstraConfigDialog(QDialog):
             group = QGroupBox(title)
             layout = QGridLayout()
             tts = tooltips or {}
+
+            def _is_bool_like(val: str) -> bool:
+                return isinstance(val, str) and val.strip().lower() in ("true", "false")
+
             for idx, (key, default) in enumerate(defaults.items()):
-                key_html = to_html_math(key)                 
+                key_html = to_html_math(key)
                 label = QLabel(key_html.replace('</span></body></html>', ':</span></body></html>'))
-                # tooltips: format if present
+
+                # tooltip
                 tt_raw = tts.get(key, "")
                 tt_html = to_html_math(tt_raw) if tt_raw else ""
                 if tt_html:
                     label.setToolTip(tt_html)
 
-                field = QLineEdit(default)
+                # >>> create the right editor
+                if _is_bool_like(default):
+                    field = QComboBox()
+                    field.addItems(["True", "False"])
+                    # set initial selection based on the default
+                    field.setCurrentText("True" if str(default).strip().lower() == "true" else "False")
+                else:
+                    field = QLineEdit(default)
+
                 if tt_html:
                     field.setToolTip(tt_html)
 
                 layout.addWidget(label, idx // 2, (idx % 2) * 2)
                 layout.addWidget(field, idx // 2, (idx % 2) * 2 + 1)
                 field_dict[key] = field
+
             group.setLayout(layout)
             return group
 
@@ -296,11 +310,15 @@ class AstraConfigDialog(QDialog):
         self.progress_bar.setValue(value)
     
     def store_config(self):
+        def _value_of(w):
+            # QComboBox has currentText(); QLineEdit has text()
+            return w.currentText() if hasattr(w, "currentText") else w.text()
+
         self.config = {
             "file_path": self.selected_file_label.text(),
-            "pso": {k: v.text() for k, v in self.pso_fields.items()},
-            "astra": {k: v.text() for k, v in self.astra_fields.items()},
-            "kalman": {k: v.text() for k, v in self.kalman_fields.items()}
+            "pso":   {k: _value_of(v) for k, v in self.pso_fields.items()},
+            "astra": {k: _value_of(v) for k, v in self.astra_fields.items()},
+            "kalman":{k: _value_of(v) for k, v in self.kalman_fields.items()},
         }
 
     def get_config(self):
@@ -329,6 +347,7 @@ class AstraConfigDialog(QDialog):
         self.run_astra_btn.setEnabled(False)
         self.run_kalman_btn.setEnabled(False)
         self.file_picker_button.setEnabled(False)
+        self.set_prev_picks_button.setEnabled(False)
 
         self.worker.progress.connect(self.update_progress)
 
@@ -351,6 +370,7 @@ class AstraConfigDialog(QDialog):
         # Restore interactivity if ASTRA/Kalman can run
         self.worker.finished.connect(lambda: self.skyfit_instance.checkASTRACanRun())
         self.worker.finished.connect(lambda: self.skyfit_instance.checkKalmanCanRun())
+        self.worker.finished.connect(lambda: self.skyfit_instance.checkPickRevertCanRun())
 
 
         self.thread.start()
@@ -365,6 +385,7 @@ class AstraConfigDialog(QDialog):
         self.run_kalman_btn.setEnabled(False)
         self.run_astra_btn.setEnabled(False)
         self.file_picker_button.setEnabled(False)
+        self.set_prev_picks_button.setEnabled(False)
 
         self.kalman_worker = KalmanWorker(self.skyfit_instance, self.config)
         self.kalman_worker.progress.connect(self.update_progress)
@@ -375,6 +396,7 @@ class AstraConfigDialog(QDialog):
         # Restore interactivity if ASTRA/Kalman can run
         self.kalman_worker.finished.connect(lambda: self.skyfit_instance.checkASTRACanRun())
         self.kalman_worker.finished.connect(lambda: self.skyfit_instance.checkKalmanCanRun())
+        self.kalman_worker.finished.connect(lambda: self.skyfit_instance.checkPickRevertCanRun())
         self.kalman_worker.finished.connect(lambda: self.update_progress(100))
         self.kalman_worker.start()
 

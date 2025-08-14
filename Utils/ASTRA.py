@@ -24,99 +24,185 @@ class ASTRA:
 
         # -- Constants & Settings --
 
-        # Try loading initial data
-        try:
-            self.astra_config = data_dict["astra_config"]  # Load ASTRA configuration from data_dict
-        except KeyError:
-            print("Warning, 'config' key not found in passed data_dict. Aborting process")
-            return
-        
+        # Load astra config
+        self.astra_config = data_dict.get("astra_config", {})  # Load ASTRA configuration from data_dict
+
         # Initialize callback and set progress to 0
         self.progress_callback = progress_callback
         if self.progress_callback is not None:
             self.progress_callback(0)  # Initialize progress to 0
 
         # 1) Image Data Processing Constants/Settings
-        self.BACKGROUND_STD_THRESHOLD = float(self.astra_config['astra']['star_thresh']) # multiple of std dev to mask pixels above
-        self.saturation_threshold = float(data_dict["saturation_threshold"]) # Saturation threshold for EMCCD cameras, used to mask saturated pixels
+        star_thresh = self.astra_config.get('astra', {}).get('star_thresh', 3)
+        if 'star_thresh' not in self.astra_config.get('astra', {}):
+            print("star_thresh value not provided, defaulting to 3")
+        self.BACKGROUND_STD_THRESHOLD = float(star_thresh) # multiple of std dev to mask pixels above
+
+        self.saturation_threshold = float(data_dict.get("saturation_threshold", 1e6))
+        if "saturation_threshold" not in data_dict:
+            print("saturation_threshold value not provided, defaulting to 1e6")
 
         # 2) PSO Constants/Settings
-
-        # Represents the multiples of their standard deviations that the parameters are allowed to deviate within in the second pass gaussian
+        std_parameter_constraint = float(self.astra_config.get('pso', {}).get('P_sigma', 3))
+        if 'P_sigma' not in self.astra_config.get('pso', {}):
+            print("P_sigma value not provided, defaulting to 3")
         self.std_parameter_constraint = [
-            float(self.astra_config['pso']['P_sigma']), # level_sum
-            float(self.astra_config['pso']['P_sigma']), # height / sigma_y
-            float(self.astra_config['pso']['P_sigma']), # x0
-            float(self.astra_config['pso']['P_sigma']), # y0
-            float(self.astra_config['pso']['P_sigma'])  # length / sigma_x
+            std_parameter_constraint, # level_sum
+            std_parameter_constraint, # height / sigma_y
+            std_parameter_constraint, # x0
+            std_parameter_constraint, # y0
+            std_parameter_constraint  # length / sigma_x
         ]
 
         # The settings passed onto the PSO on the first pass
+        w = float(self.astra_config.get('pso', {}).get('w (0-1)', 0.9))
+        if 'w (0-1)' not in self.astra_config.get('pso', {}):
+            print("w (0-1) value not provided, defaulting to 0.9")
+        c1 = float(self.astra_config.get('pso', {}).get('c_1 (0-1)', 0.4))
+        if 'c_1 (0-1)' not in self.astra_config.get('pso', {}):
+            print("c_1 (0-1) value not provided, defaulting to 0.4")
+        c2 = float(self.astra_config.get('pso', {}).get('c_2 (0-1)', 0.3))
+        if 'c_2 (0-1)' not in self.astra_config.get('pso', {}):
+            print("c_2 (0-1) value not provided, defaulting to 0.3")
+        max_iter = int(self.astra_config.get('pso', {}).get('max itter', 100))
+        if 'max itter' not in self.astra_config.get('pso', {}):
+            print("max itter value not provided, defaulting to 100")
+        n_particles = int(self.astra_config.get('pso', {}).get('n_particles', 100))
+        if 'n_particles' not in self.astra_config.get('pso', {}):
+            print("n_particles value not provided, defaulting to 100")
+        velocity_coeff = float(self.astra_config.get('pso', {}).get('V_c (0-1)', 0.3))
+        if 'V_c (0-1)' not in self.astra_config.get('pso', {}):
+            print("V_c (0-1) value not provided, defaulting to 0.3")
+        ftol = float(self.astra_config.get('pso', {}).get('ftol', 1e-4))
+        if 'ftol' not in self.astra_config.get('pso', {}):
+            print("ftol value not provided, defaulting to 1e-4")
+        ftol_iter = int(self.astra_config.get('pso', {}).get('ftol_itter', 25))
+        if 'ftol_itter' not in self.astra_config.get('pso', {}):
+            print("ftol_itter value not provided, defaulting to 25")
+        bh_strategy = self.astra_config.get('pso', {}).get('bh_strategy', 'nearest')
+        vh_strategy = self.astra_config.get('pso', {}).get('vh_strategy', 'invert')
+        explorative_coeff = float(self.astra_config.get('pso', {}).get('expl_c', 3.0))
+        if 'expl_c' not in self.astra_config.get('pso', {}):
+            print("expl_c value not provided, defaulting to 3.0")
+
         self.first_pass_settings = {
             "residuals_method" : 'abs', # method for calculating residuals
-            "oob_penalty" : 1e6, # penalty for out-of-bounds particles
-            "options": {"w": float(self.astra_config['pso']['w (0-1)']), # cognitive component
-                        "c1": float(self.astra_config['pso']['c_1 (0-1)']), # social component
-                        "c2": float(self.astra_config['pso']['c_2 (0-1)'])}, # inertia weight
-            "max_iter": int(self.astra_config['pso']['max itter']), # maximum iterations
-            "n_particles": int(self.astra_config['pso']['n_particles']), # number of particles
-            "Velocity_coeff": float(self.astra_config['pso']['V_c (0-1)']), # percentage of parameter range for velocity clamp
-            "ftol" : float(self.astra_config['pso']['ftol']), # function tolerance for convergence
-            "ftol_iter" : int(self.astra_config['pso']['ftol_itter']), # number of iterations for function tolerance
-            "bh_strategy": 'nearest', # best-historical strategy
-            "vh_strategy": 'invert', # velocity-historical strategy
-            "explorative_coeff" : float(self.astra_config['pso']['expl_c']) #Number of std to enforce when generating initial particles (3 is a good value)
+            "options": {
+            "w": w,
+            "c1": c1,
+            "c2": c2
+            },
+            "max_iter": max_iter,
+            "n_particles": n_particles,
+            "Velocity_coeff": velocity_coeff,
+            "ftol": ftol,
+            "ftol_iter": ftol_iter,
+            "bh_strategy": bh_strategy,
+            "vh_strategy": vh_strategy,
+            "explorative_coeff": explorative_coeff
         }
 
         # Settings and padding coefficients for cropping
+        initial_padding_coeff = float(self.astra_config.get('astra', {}).get('P_crop', 1.5))
+        if 'P_crop' not in self.astra_config.get('astra', {}):
+            print("P_crop value not provided, defaulting to 1.5")
+        recursive_padding_coeff = float(self.astra_config.get('astra', {}).get('P_crop', 1.5))
+        # No need to print again, already checked above
+        init_sigma_guess = float(self.astra_config.get('astra', {}).get('sigma_init (px)', 2))
+        if 'sigma_init (px)' not in self.astra_config.get('astra', {}):
+            print("sigma_init (px) value not provided, defaulting to 2")
+        max_sigma_coeff = float(self.astra_config.get('astra', {}).get('sigma_max', 1.2))
+        if 'sigma_max' not in self.astra_config.get('astra', {}):
+            print("sigma_max value not provided, defaulting to 1.2")
+        max_length_coeff = float(self.astra_config.get('astra', {}).get('L_max', 1.5))
+        if 'L_max' not in self.astra_config.get('astra', {}):
+            print("L_max value not provided, defaulting to 1.5")
+
         self.cropping_settings = {
-            'initial_padding_coeff': float(self.astra_config['astra']['P_crop']), # Multiples of max sigma and length to pad the crop for middle frames
-            'recursive_padding_coeff': float(self.astra_config['astra']['P_crop']), # Multiples of max sigma and length to pad the crop for recursive cropping
-            'init_sigma_guess' : float(self.astra_config['astra']['sigma_init (px)']), # The initial guess for sigma in the middle frames
-            'max_sigma_coeff' : float(self.astra_config['astra']['sigma_max']), # Multiples of the p0 sigma to define as a maximum value
-            'max_length_coeff' : float(self.astra_config['astra']['L_max']) # Multiples of the p0 length to define as a maximum value
+            'initial_padding_coeff': initial_padding_coeff,
+            'recursive_padding_coeff': recursive_padding_coeff,
+            'init_sigma_guess': init_sigma_guess,
+            'max_sigma_coeff': max_sigma_coeff,
+            'max_length_coeff': max_length_coeff
         }
 
         # 3) Second-Pass Local Optimization Constants/Settings
-
-        # The settings passed onto the local optimizer on the second pass
-        # NOTE depreciated, using local not dual PSO
         self.second_pass_settings = {
-            "residuals_method" : 'abs_squared', # method for calculating residuals
-            "method" : 'L-BFGS-B', # method for optimization
-            "oob_penalty" : 1e6, # penalty for out-of-bounds function evaluations
+            "residuals_method" : 'abs_squared',
+            "method" : 'L-BFGS-B',
+            "oob_penalty" : 1e6,
         }
 
         # 4) Kalman Settings
+        monotonicity = self.astra_config.get('kalman', {}).get('Monotonicity', 'true').lower() == 'true'
+        if 'Monotonicity' not in self.astra_config.get('kalman', {}):
+            print("Monotonicity value not provided, defaulting to true")
+        sigma_xy = float(self.astra_config.get('kalman', {}).get('sigma_xy (px)', 0.25))
+        if 'sigma_xy (px)' not in self.astra_config.get('kalman', {}):
+            print("sigma_xy (px) value not provided, defaulting to 0.25")
+        sigma_vxy_perc = float(self.astra_config.get('kalman', {}).get('sigma_vxy (%)', 50))
+        if 'sigma_vxy (%)' not in self.astra_config.get('kalman', {}):
+            print("sigma_vxy (%) value not provided, defaulting to 50")
+        save_results = self.astra_config.get('kalman', {}).get('save results', 'false').lower() == 'true'
+        if 'save results' not in self.astra_config.get('kalman', {}):
+            print("save results value not provided, defaulting to false")
+
         self.kalman_settings = {
-            'monotonicity': self.astra_config['kalman']['Monotonicity'].lower() == 'true',
+            'monotonicity': monotonicity,
             'use_accel': False,
-            'sigma_xy': float(self.astra_config['kalman']['sigma_xy (px)']),
-            'sigma_vxy_perc': float(self.astra_config['kalman']['sigma_vxy (%)']),
-            'save results' : self.astra_config['kalman']["save results"].lower() == 'true'
+            'sigma_xy': sigma_xy,
+            'sigma_vxy_perc': sigma_vxy_perc,
+            'save results': save_results
         }
 
-        # The SNR threshold for rejecting low SNR frames
-        self.SNR_threshold = float(self.astra_config['astra']['min SNR'])
+        min_snr = float(self.astra_config.get('astra', {}).get('min SNR', 5))
+        if 'min SNR' not in self.astra_config.get('astra', {}):
+            print("min SNR value not provided, defaulting to 5")
+        self.SNR_threshold = min_snr
 
         # -- Data Attributes --
-        # Unpack data from the data_dict
+        self.data_dict = data_dict
+        self.img_obj = data_dict.get("img_obj", None)
+        if "img_obj" not in data_dict:
+            print("img_obj value not provided, defaulting to None")
+        self.frames = data_dict.get("frames", [])
+        if "frames" not in data_dict:
+            print("frames value not provided, defaulting to []")
+        self.times = data_dict.get("times", [])
+        if "times" not in data_dict:
+            print("times value not provided, defaulting to []")
 
-        self.data_dict = data_dict # Data dictionary containing all necessary data
-        self.img_obj = data_dict["img_obj"] # Image object containing frame data and metadata
-        self.frames = data_dict["frames"] # Numpy array of image frames (N, w, h)
-        self.times = data_dict["times"] # Numpy array of times corresponding to the picks (N,)
+        self.picks = np.array(data_dict.get("picks", []))
+        if "picks" not in data_dict:
+            print("picks value not provided, defaulting to []")
+        self.pick_frame_indices = data_dict.get("pick_frame_indices", []).tolist()
+        if "pick_frame_indices" not in data_dict:
+            print("pick_frame_indices value not provided, defaulting to []")
 
-        # Loads all picks & pick_frame_indices
-        self.picks = np.array(data_dict["picks"]) # Numpy array of DetApp picks (N, 2) where each row is (x, y) coordinates
-        self.pick_frame_indices = data_dict["pick_frame_indices"].tolist() # List of frame indices corresponding to the picks
+        verbose_val = self.astra_config.get('astra', {}).get('Verbose', 'false').lower()
+        if 'Verbose' not in self.astra_config.get('astra', {}):
+            print("Verbose value not provided, defaulting to false")
+        self.verbose = verbose_val == 'true'
 
-        self.verbose = self.astra_config['astra']['Verbose'].lower() == 'true'
-        self.save_animation = self.astra_config['astra']['Save Animation'].lower() == 'true'
-        self.data_path = self.data_dict['data_path']
-        self.dark = data_dict['dark']
-        self.flat_struct = data_dict['flat']
-        self.skyfit_config = data_dict['img_config']
+        save_animation_val = self.astra_config.get('astra', {}).get('Save Animation', 'false').lower()
+        if 'Save Animation' not in self.astra_config.get('astra', {}):
+            print("Save Animation value not provided, defaulting to false")
+        self.save_animation = save_animation_val == 'true'
+
+        self.data_path = self.data_dict.get('data_path', '')
+        if "data_path" not in self.data_dict:
+            print("data_path value not provided, defaulting to ''")
+        self.dark = data_dict.get('dark', None)
+        if "dark" not in data_dict:
+            print("dark value not provided, defaulting to None")
+        self.flat_struct = data_dict.get('flat', None)
+        if "flat" not in data_dict:
+            print("flat value not provided, defaulting to None")
+        self.skyfit_config = data_dict.get('img_config', None)
+        if "img_config" not in data_dict:
+            print("img_config value not provided, defaulting to None")
+
+
 
 
     def process(self):
@@ -571,75 +657,110 @@ class ASTRA:
         return self.refined_fit_params, self.fit_imgs, self.cropped_frames, self.crop_vars, self.pick_frame_indices, self.global_picks, self.fit_costs, self.times, self.abs_level_sums
 
     def saveAni(self, data_path):
-        import matplotlib.pyplot as plt
-        import matplotlib.animation as animation
+        """
+        Save all ASTRA/Kalman visualization frames as individual JPEG files.
+        Thread-safe, cross-platform, no external encoders required.
+        """
         import os
-        import datetime
+        import threading
+        from datetime import datetime
 
-        picks = self.global_picks
-        method = 'GAUSSIAN'
+        import matplotlib
+        matplotlib.use("Agg")  # headless-safe backend
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
-        fig_dir = os.path.join(data_path, "ASTRA_figures")
-        if not os.path.exists(fig_dir):
-            os.makedirs(fig_dir)
+        # ---- thread safety (one-at-a-time per instance) ----
+        if not hasattr(self, "_save_lock"):
+            self._save_lock = threading.RLock()
 
-        # Make dest path
-        now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        dest_path = os.path.join(fig_dir, f"ASTRA_masking_{now_str}.mp4")
+        with self._save_lock:
+            picks = self.global_picks
 
-        fig, axs = plt.subplots(1, 3, figsize=(12, 6))
-        fig.suptitle("Gaussian Fits", fontsize=16)
+            # Output folder: {data_path}/ASTRA_Kalman_Results/ASTRA_frames_YYYYmmdd_HHMMSS
+            root = os.path.join(data_path, "ASTRA_Kalman_Results")
+            outdir = os.path.join(root, f"ASTRA_frames_{datetime.now():%Y%m%d_%H%M%S}")
+            os.makedirs(outdir, exist_ok=True)
 
-        n_crops = len(self.cropped_frames)
+            n_crops = len(self.cropped_frames)
+            if n_crops == 0:
+                return
 
-        def update(i: int) -> None:
-            crop = self.cropped_frames[i]
-            crop_vars = self.crop_vars[i]
-            fit = self.fit_imgs[i]
-            fit_params = self.refined_fit_params[i]
-            snr = self.snr[i]
-            x, y = self.translatePicksToGlobal(picks[i], crop_vars, global_to_local=True)
-            frame_num = self.pick_frame_indices[i]
-            time = self.times[i]
+            # Render & save each frame independently (no shared pyplot state)
+            for i in range(n_crops):
+                crop       = np.asarray(self.cropped_frames[i])
+                crop_vars  = self.crop_vars[i]
+                fit        = np.asarray(self.fit_imgs[i])
+                fit_params = self.refined_fit_params[i]
+                snr_val    = float(self.snr[i])
+                frame_num  = int(self.pick_frame_indices[i])
+                time_val   = self.times[i]
 
-            # Add title indicating rejection status and index number
-            fig.suptitle(f"Crop {i}:, SNR: {snr:.2f}", fontsize=14)
+                # translate pick to local crop coords for plotting
+                try:
+                    x, y = self.translatePicksToGlobal(picks[i], crop_vars, global_to_local=True)
+                except Exception:
+                    # fall back: no overlay if translation fails
+                    x, y = None, None
 
-            # Display fit parameters at the bottom of the figure
-            # Clear previous figtext annotations to avoid overlap
-            for txt in fig.texts:
-                txt.remove()
-            plt.figtext(0.5, 0.01, f"Frame number: {frame_num}, Time: {time}, Level Sum: {fit_params[0]:.2f}, Sigma: {fit_params[1]:.2f}, "
-                                   f"x0: {fit_params[2]:.2f}, y0: {fit_params[3]:.2f}, L: {fit_params[4]:.2f}",
-                        ha="center", fontsize=12)
+                # Build a fresh Figure per frame (thread-safe)
+                fig = Figure(figsize=(12, 6), dpi=100)
+                _ = FigureCanvas(fig)
+                axs = fig.subplots(1, 3)
 
-            # left: crop image
-            ax1 = axs[0]
-            ax1.clear()
-            ax1.set_title(f"Crop {i}")
-            ax1.imshow(crop, vmin=0, vmax=np.max(crop), cmap='gray')
-            ax1.plot(x, y, "ro", markersize=5)
+                # Title + footer text (no pyplot)
+                fig.suptitle(f"Crop {i} — SNR: {snr_val:.2f}", fontsize=14)
 
-            # middle: overlay fit point
-            ax2 = axs[1]
-            ax2.clear()
-            ax2.set_title("Gaussian Fit")
-            ax2.imshow(fit, vmin=0, vmax=np.max(fit), cmap='gray')
-            ax2.plot(x, y, "ro", markersize=5)
+                # left: crop image
+                ax1 = axs[0]
+                ax1.set_title(f"Crop {i}")
+                ax1.imshow(crop, cmap="gray", vmin=0, vmax=np.max(crop) if crop.size else 1)
+                if x is not None and y is not None:
+                    ax1.plot(x, y, "ro", markersize=5)
 
-            # right: fit residuals
-            abs_res = np.abs(crop - fit)
-            ax3 = axs[2]
-            ax3.clear()
-            ax3.set_title("Fit Residuals")
-            ax3.imshow(abs_res, vmin=np.min(abs_res), vmax=np.max(abs_res), cmap='coolwarm')
+                # middle: fit image
+                ax2 = axs[1]
+                ax2.set_title("Gaussian Fit")
+                ax2.imshow(fit, cmap="gray", vmin=0, vmax=np.max(fit) if fit.size else 1)
+                if x is not None and y is not None:
+                    ax2.plot(x, y, "ro", markersize=5)
 
-        def animate(i: int) -> None:
-            update(i % n_crops)
+                # right: residuals
+                ax3 = axs[2]
+                ax3.set_title("Fit Residuals")
+                abs_res = np.abs(crop - fit) if (crop.shape == fit.shape) else np.zeros_like(crop)
+                vmin = np.min(abs_res) if abs_res.size else 0
+                vmax = np.max(abs_res) if abs_res.size else 1
+                ax3.imshow(abs_res, cmap="coolwarm", vmin=vmin, vmax=vmax)
 
-        ani = animation.FuncAnimation(fig, animate, frames=n_crops, interval=1000, repeat=True)
+                # footer with params
+                # (avoid fig.text removal loops; just write once)
+                fig.text(
+                    0.5, 0.02,
+                    f"Frame: {frame_num}  •  Time: {time_val}  •  "
+                    f"Level Sum: {fit_params[0]:.2f}  •  Sigma: {fit_params[1]:.2f}  •  "
+                    f"x0: {fit_params[2]:.2f}  •  y0: {fit_params[3]:.2f}  •  L: {fit_params[4]:.2f}",
+                    ha="center", va="center", fontsize=10
+                )
 
-        ani.save(dest_path, writer='ffmpeg', fps=1)
+                # Make a portable file name
+                fname = f"{i:04d}_frame{frame_num}.jpg"
+                fpath = os.path.join(outdir, fname)
+
+                # Save as JPEG (Pillow via Matplotlib); set reasonable quality
+                fig.savefig(
+                    fpath,
+                    format="jpg",
+                    bbox_inches="tight",
+                    dpi=100,
+                    pil_kwargs={"quality": 95, "optimize": True}
+                )
+
+                # Explicitly clear to free memory in long sequences
+                fig.clf()
+
+            # Optional: print where they went
+            print(f"Saved {n_crops} JPEGs to: {outdir}")
 
     # 2) -- Calculation/Conversion Methods --
 
@@ -894,7 +1015,7 @@ class ASTRA:
         std_ave = np.std(masked_avebk[masked_avebk > 0])
 
         # Crop the masked frame to the percentile threshold defined by P_thresh
-        masked_cropped[masked_cropped < np.percentile(masked_cropped, float(self.astra_config['astra']['photom_thresh']))] = 0
+        masked_cropped[masked_cropped < np.ma.percentile(masked_cropped, float(self.astra_config['astra']['photom_thresh']))] = 0
 
         # Count the non-zero values in the masked cropped frame, and calculate the level sum
         nonzero_count = np.count_nonzero(masked_cropped)
@@ -1562,8 +1683,6 @@ class ASTRA:
 
 
     def computeQBase(self, measurements, times):
-        # TRANSlATE ALL INTO PIXELS / SECOND
-        # px / frame * frame/seconds
 
         # Calculate average velocity (px/s)
         x_meas = measurements[:, 0]
@@ -1575,8 +1694,6 @@ class ASTRA:
 
         # Take the geometric mean of the velocities as the average
         avrg_velocity = np.hypot(x_fit[0], y_fit[0])  # Geometric mean of x and y velocities
-
-        print(f"Average velocity: {avrg_velocity:.2f} px/s")
 
         # Instantiate process noise covariance
         sigma_vxy = self.kalman_settings['sigma_vxy_perc']/100 * avrg_velocity
@@ -1777,7 +1894,7 @@ class ASTRA:
                     for step in self.progressed_frames.keys()
                 ) / self.total_frames * 100
                 self.progress_callback(int(current_percentage))
-        if self.mode == 'Kalman' is not None:
+        if self.mode == 'Kalman':
             if self.progress_callback is not None:
                 current_percentage = (self.exec_count / self.total_exec) * 100
                 self.progress_callback(int(current_percentage))
@@ -1953,7 +2070,7 @@ class ASTRA:
         # Mask cropped frame with fit image to remove the background
         masked_cropped = fit_img * cropped_frame
 
-        masked_cropped[masked_cropped < np.percentile(masked_cropped, float(self.astra_config['astra']['photom_thresh']))] = 0
+        masked_cropped[masked_cropped < np.ma.percentile(masked_cropped, float(self.astra_config['astra']['photom_thresh']))] = 0
 
         # binarize mask_cropped
         masked_cropped[masked_cropped > 0] = 1
@@ -2014,12 +2131,12 @@ class ASTRA:
             data['smoothed vy'].append(x_smooth[i][3])
             data['smoothed ax'].append(x_smooth[i][4])
             data['smoothed ay'].append(x_smooth[i][5])
-            data['kalman uncertainty/STD (x)'].append(np.sqrt(p_smooth[i][0][0]))
-            data['kalman uncertainty/STD (y)'].append(np.sqrt(p_smooth[i][1][1]))
-            data['kalman uncertainty/STD (vx)'].append(np.sqrt(p_smooth[i][2][2]))
-            data['kalman uncertainty/STD (vy)'].append(np.sqrt(p_smooth[i][3][3]))
-            data['kalman uncertainty/STD (ax)'].append(np.sqrt(p_smooth[i][4][4]))
-            data['kalman uncertainty/STD (ay)'].append(np.sqrt(p_smooth[i][5][5]))
+            data['kalman uncertainty/STD (x)'].append(np.sqrt(np.abs(p_smooth[i][0][0])))
+            data['kalman uncertainty/STD (y)'].append(np.sqrt(np.abs(p_smooth[i][1][1])))
+            data['kalman uncertainty/STD (vx)'].append(np.sqrt(np.abs(p_smooth[i][2][2])))
+            data['kalman uncertainty/STD (vy)'].append(np.sqrt(np.abs(p_smooth[i][3][3])))
+            data['kalman uncertainty/STD (ax)'].append(np.sqrt(np.abs(p_smooth[i][4][4])))
+            data['kalman uncertainty/STD (ay)'].append(np.sqrt(np.abs(p_smooth[i][5][5])))
 
         # Add header row for Q_base and R std values
         std_q_base = np.sqrt(np.diag(self.Q_base))

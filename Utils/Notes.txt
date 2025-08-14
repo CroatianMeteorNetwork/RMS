@@ -1,20 +1,14 @@
 TODO:
     GENERAL:
         -Put sidebar button to open Astra
-        -Add option to save ASTRA animation
     ASTRA:
-        -Improve SNR calculation using SkyFit2 functions   
-            -If does not improve star masking issues, bridge gaps with kalman
-        -run computeintensitysum() etc after running ASTRA/Kalman
         -Look into correcting photometry pixels post-kalman filter
-        -replace data_dict accesses in init to .get
     KALMAN:
 
     PIPELINE:
         -look into replaceing SNR rejection with model residuals and SNR mix
 
-    -Look into SNR issues in skyfit
-    -Look into bug where photom is not loaded from plate
+    -Fix ASTRA ani saving, just save frames instead and do not use the one module since it is linux only
 
 NOTE:
     -in future versions ASTRA can be configued to run multiple passes to improve quality in low-pick events

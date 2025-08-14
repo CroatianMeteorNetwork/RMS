@@ -4238,7 +4238,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Deep copy to avoid storing references to mutable objects
             self.previous_picks.append(copy.deepcopy(self.pick_list))
 
-        # Add ASTRA picks to the pick list
+        # Add ASTRA picks to th e pick list
         self.clearAllPicks()  # Clear previous picks
         for i in range(len(global_picks)):
             pick = {
