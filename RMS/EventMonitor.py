@@ -2200,10 +2200,10 @@ class EventMonitor(multiprocessing.Process):
                 if magnitudes_chart_file_path is not None:
                     file_list.append(magnitudes_chart_file_path)
 
-                elevations_magnitudes_chart_file_path = dictToMagnitudeElevationPlot(sys_con, mags_radec_dict, e, file_path=magnitudes_elevation_chart_file_path)
+                magnitudes_elevation_chart_file_path = dictToMagnitudeElevationPlot(sys_con, mags_radec_dict, e, file_path=magnitudes_elevation_chart_file_path)
 
-                if elevations_magnitudes_chart_file_path is not None:
-                    file_list.append(elevations_magnitudes_chart_file_path)
+                if magnitudes_elevation_chart_file_path is not None:
+                    file_list.append(magnitudes_elevation_chart_file_path)
 
 
                 calstar_assisted_thumbnails_path = os.path.join(radec_event_dir, calstar_assisted_thumbnail_file_name)
@@ -2498,10 +2498,10 @@ def renderMagnitudeElevationPlot(config, magnitude_list, elevation_list, e_jd, l
         x_vals, y_vals = [], []
         plot_filename = "{}_r_{}_d_{}_jd_{}_{}_magnitude_elevation.{}".format(config.stationID, r, d, e_jd, l_jd, plot_format)
         for jd, mag in magnitude_list:
-            x_vals.append(mag)
+            y_vals.append(mag)
 
         for elevation in elevation_list:
-            y_vals.append(elevation)
+            x_vals.append(elevation)
 
 
         title = "Plot of magnitudes at RA {} Dec {}".format(r, d)
@@ -2511,8 +2511,8 @@ def renderMagnitudeElevationPlot(config, magnitude_list, elevation_list, e_jd, l
         ax = plt.gca()
         plt.scatter(x_vals, y_vals, zorder=3)
 
-        plt.xlabel("Magnitude")
-        plt.ylabel("Elevation (degrees)")
+        plt.ylabel("Magnitude")
+        plt.xlabel("Elevation (degrees)")
 
         plt.title(title)
 
