@@ -10,42 +10,27 @@ import cv2
 
 class ASTRA:
 
-    def __init__(self, data_dict, progress_callback=None):
+    def __init__(self, img_obj, frames, picks, pick_frame_indices, times, astra_config,
+                 saturation_threshold, data_path, camera_config, dark, flat, progress_callback=None):
         """
         ASTRA : Astrometric Streak Tracking and Refinement Algorithm
-        A class for proccessing meteor picks in EMCCD data, using a recursive algorithm to retreive accurate picks automatically.
-        ________________________
-        Initializes the ASTRA object with the provided data dictionary and progress callback.
-
-        Args:
-            data_dict (dict): A dictionary containing the necessary data for processing:
-            progress_callback (callable, optional): A callback function to update progress. Defaults to None.
+        Initializes the ASTRA object with the provided parameters.
         """
-
         # -- Constants & Settings --
 
-        # Load astra config
-        self.astra_config = data_dict.get("astra_config", {})  # Load ASTRA configuration from data_dict
+        self.astra_config = astra_config
 
         # Initialize callback and set progress to 0
         self.progress_callback = progress_callback
         if self.progress_callback is not None:
-            self.progress_callback(0)  # Initialize progress to 0
+            self.progress_callback(0)
 
         # 1) Image Data Processing Constants/Settings
-        star_thresh = self.astra_config.get('astra', {}).get('star_thresh', 3)
-        if 'star_thresh' not in self.astra_config.get('astra', {}):
-            print("star_thresh value not provided, defaulting to 3")
-        self.BACKGROUND_STD_THRESHOLD = float(star_thresh) # multiple of std dev to mask pixels above
-
-        self.saturation_threshold = float(data_dict.get("saturation_threshold", 1e6))
-        if "saturation_threshold" not in data_dict:
-            print("saturation_threshold value not provided, defaulting to 1e6")
+        self.BACKGROUND_STD_THRESHOLD = float(self.astra_config.get('astra', {}).get('star_thresh', 3))
+        self.saturation_threshold = float(saturation_threshold)
 
         # 2) PSO Constants/Settings
         std_parameter_constraint = float(self.astra_config.get('pso', {}).get('P_sigma', 3))
-        if 'P_sigma' not in self.astra_config.get('pso', {}):
-            print("P_sigma value not provided, defaulting to 3")
         self.std_parameter_constraint = [
             std_parameter_constraint, # level_sum
             std_parameter_constraint, # height / sigma_y
@@ -54,43 +39,24 @@ class ASTRA:
             std_parameter_constraint  # length / sigma_x
         ]
 
-        # The settings passed onto the PSO on the first pass
         w = float(self.astra_config.get('pso', {}).get('w (0-1)', 0.9))
-        if 'w (0-1)' not in self.astra_config.get('pso', {}):
-            print("w (0-1) value not provided, defaulting to 0.9")
         c1 = float(self.astra_config.get('pso', {}).get('c_1 (0-1)', 0.4))
-        if 'c_1 (0-1)' not in self.astra_config.get('pso', {}):
-            print("c_1 (0-1) value not provided, defaulting to 0.4")
         c2 = float(self.astra_config.get('pso', {}).get('c_2 (0-1)', 0.3))
-        if 'c_2 (0-1)' not in self.astra_config.get('pso', {}):
-            print("c_2 (0-1) value not provided, defaulting to 0.3")
         max_iter = int(self.astra_config.get('pso', {}).get('max itter', 100))
-        if 'max itter' not in self.astra_config.get('pso', {}):
-            print("max itter value not provided, defaulting to 100")
         n_particles = int(self.astra_config.get('pso', {}).get('n_particles', 100))
-        if 'n_particles' not in self.astra_config.get('pso', {}):
-            print("n_particles value not provided, defaulting to 100")
         velocity_coeff = float(self.astra_config.get('pso', {}).get('V_c (0-1)', 0.3))
-        if 'V_c (0-1)' not in self.astra_config.get('pso', {}):
-            print("V_c (0-1) value not provided, defaulting to 0.3")
         ftol = float(self.astra_config.get('pso', {}).get('ftol', 1e-4))
-        if 'ftol' not in self.astra_config.get('pso', {}):
-            print("ftol value not provided, defaulting to 1e-4")
         ftol_iter = int(self.astra_config.get('pso', {}).get('ftol_itter', 25))
-        if 'ftol_itter' not in self.astra_config.get('pso', {}):
-            print("ftol_itter value not provided, defaulting to 25")
         bh_strategy = self.astra_config.get('pso', {}).get('bh_strategy', 'nearest')
         vh_strategy = self.astra_config.get('pso', {}).get('vh_strategy', 'invert')
         explorative_coeff = float(self.astra_config.get('pso', {}).get('expl_c', 3.0))
-        if 'expl_c' not in self.astra_config.get('pso', {}):
-            print("expl_c value not provided, defaulting to 3.0")
 
         self.first_pass_settings = {
-            "residuals_method" : 'abs', # method for calculating residuals
+            "residuals_method": 'abs',
             "options": {
-            "w": w,
-            "c1": c1,
-            "c2": c2
+                "w": w,
+                "c1": c1,
+                "c2": c2
             },
             "max_iter": max_iter,
             "n_particles": n_particles,
@@ -100,24 +66,15 @@ class ASTRA:
             "bh_strategy": bh_strategy,
             "vh_strategy": vh_strategy,
             "explorative_coeff": explorative_coeff,
-            "oob_penalty" : 1e6
+            "oob_penalty": 1e6
         }
 
         # Settings and padding coefficients for cropping
         initial_padding_coeff = float(self.astra_config.get('astra', {}).get('P_crop', 1.5))
-        if 'P_crop' not in self.astra_config.get('astra', {}):
-            print("P_crop value not provided, defaulting to 1.5")
         recursive_padding_coeff = float(self.astra_config.get('astra', {}).get('P_crop', 1.5))
-        # No need to print again, already checked above
         init_sigma_guess = float(self.astra_config.get('astra', {}).get('sigma_init (px)', 2))
-        if 'sigma_init (px)' not in self.astra_config.get('astra', {}):
-            print("sigma_init (px) value not provided, defaulting to 2")
         max_sigma_coeff = float(self.astra_config.get('astra', {}).get('sigma_max', 1.2))
-        if 'sigma_max' not in self.astra_config.get('astra', {}):
-            print("sigma_max value not provided, defaulting to 1.2")
         max_length_coeff = float(self.astra_config.get('astra', {}).get('L_max', 1.5))
-        if 'L_max' not in self.astra_config.get('astra', {}):
-            print("L_max value not provided, defaulting to 1.5")
 
         self.cropping_settings = {
             'initial_padding_coeff': initial_padding_coeff,
@@ -129,24 +86,16 @@ class ASTRA:
 
         # 3) Second-Pass Local Optimization Constants/Settings
         self.second_pass_settings = {
-            "residuals_method" : 'abs_squared',
-            "method" : 'L-BFGS-B',
-            "oob_penalty" : 1e6,
+            "residuals_method": 'abs_squared',
+            "method": 'L-BFGS-B',
+            "oob_penalty": 1e6,
         }
 
         # 4) Kalman Settings
         monotonicity = self.astra_config.get('kalman', {}).get('Monotonicity', 'true').lower() == 'true'
-        if 'Monotonicity' not in self.astra_config.get('kalman', {}):
-            print("Monotonicity value not provided, defaulting to true")
         sigma_xy = float(self.astra_config.get('kalman', {}).get('sigma_xy (px)', 0.25))
-        if 'sigma_xy (px)' not in self.astra_config.get('kalman', {}):
-            print("sigma_xy (px) value not provided, defaulting to 0.25")
         sigma_vxy_perc = float(self.astra_config.get('kalman', {}).get('sigma_vxy (%)', 50))
-        if 'sigma_vxy (%)' not in self.astra_config.get('kalman', {}):
-            print("sigma_vxy (%) value not provided, defaulting to 50")
         save_results = self.astra_config.get('kalman', {}).get('save results', 'false').lower() == 'true'
-        if 'save results' not in self.astra_config.get('kalman', {}):
-            print("save results value not provided, defaulting to false")
 
         self.kalman_settings = {
             'monotonicity': monotonicity,
@@ -156,55 +105,20 @@ class ASTRA:
             'save results': save_results
         }
 
-        min_snr = float(self.astra_config.get('astra', {}).get('min SNR', 5))
-        if 'min SNR' not in self.astra_config.get('astra', {}):
-            print("min SNR value not provided, defaulting to 5")
-        self.SNR_threshold = min_snr
+        self.SNR_threshold = float(self.astra_config.get('astra', {}).get('min SNR', 5))
 
         # -- Data Attributes --
-        self.data_dict = data_dict
-        self.img_obj = data_dict.get("img_obj", None)
-        if "img_obj" not in data_dict:
-            print("img_obj value not provided, defaulting to None")
-        self.frames = data_dict.get("frames", [])
-        if "frames" not in data_dict:
-            print("frames value not provided, defaulting to []")
-        self.times = data_dict.get("times", [])
-        if "times" not in data_dict:
-            print("times value not provided, defaulting to []")
-
-        self.picks = np.array(data_dict.get("picks", []))
-        if "picks" not in data_dict:
-            print("picks value not provided, defaulting to []")
-        self.pick_frame_indices = data_dict.get("pick_frame_indices", []).tolist()
-        if "pick_frame_indices" not in data_dict:
-            print("pick_frame_indices value not provided, defaulting to []")
-
-        verbose_val = self.astra_config.get('astra', {}).get('Verbose', 'false').lower()
-        if 'Verbose' not in self.astra_config.get('astra', {}):
-            print("Verbose value not provided, defaulting to false")
-        self.verbose = verbose_val == 'true'
-
-        save_animation_val = self.astra_config.get('astra', {}).get('Save Animation', 'false').lower()
-        if 'Save Animation' not in self.astra_config.get('astra', {}):
-            print("Save Animation value not provided, defaulting to false")
-        self.save_animation = save_animation_val == 'true'
-
-        self.data_path = self.data_dict.get('data_path', '')
-        if "data_path" not in self.data_dict:
-            print("data_path value not provided, defaulting to ''")
-        self.dark = data_dict.get('dark', None)
-        if "dark" not in data_dict:
-            print("dark value not provided, defaulting to None")
-        self.flat_struct = data_dict.get('flat', None)
-        if "flat" not in data_dict:
-            print("flat value not provided, defaulting to None")
-        self.skyfit_config = data_dict.get('img_config', None)
-        if "img_config" not in data_dict:
-            print("img_config value not provided, defaulting to None")
-
-
-
+        self.img_obj = img_obj
+        self.frames = frames
+        self.times = times
+        self.picks = np.array(picks)
+        self.pick_frame_indices = list(pick_frame_indices)
+        self.verbose = str(self.astra_config.get('astra', {}).get('Verbose', 'false')).lower() == 'true'
+        self.save_animation = str(self.astra_config.get('astra', {}).get('Save Animation', 'false')).lower() == 'true'
+        self.data_path = data_path
+        self.dark = dark
+        self.flat_struct = flat
+        self.skyfit_config = camera_config
 
     def process(self):
         """
@@ -422,7 +336,11 @@ class ASTRA:
 
         # 1) -- Unpack variables & Calculate seed picks/frames--
         seed_picks_global, seed_indices = self.select_seed_triplet(picks, pick_frame_indices)
-        omega = np.arctan2(picks[-1][1] - picks[0][1], -picks[-1][0] + picks[0][0])  % (2*np.pi)
+        # Calculate omega (angle) with respect to +x axis, in the direction of -y
+        dx = picks[-1][0] - picks[0][0]
+        dy = picks[-1][1] - picks[0][1]
+        omega = np.arctan2(dy, dx) % (2 * np.pi)
+        print(omega)
 
         if self.verbose:
             print(f"Starting recursive cropping with {len(seed_indices)} seed picks at indices {seed_indices} and omega {omega} radians.")
@@ -760,8 +678,11 @@ class ASTRA:
                 # Explicitly clear to free memory in long sequences
                 fig.clf()
 
-            # Optional: print where they went
-            print(f"Saved {n_crops} JPEGs to: {outdir}")
+                # Optional: print where they went
+                print(f"Saved {n_crops} JPEGs to: {outdir}")
+
+        # Revert backend so parent class can still use matplotlib
+        matplotlib.use("module://matplotlib_inline.backend_inline")
 
     # 2) -- Calculation/Conversion Methods --
 
@@ -1074,11 +995,14 @@ class ASTRA:
 
         # Calculate magnitudes of all norms
         global_centroids = all_params[:, 2:4] + xymin
+        print("GLOVAL CENTROIDS: ", global_centroids)
+        print("CYMIN, ", xymin)
 
         # NOTE : sorting is likely not needed, but it is here to ensure the splines are calculated in the correct order
         global_centroids = global_centroids[np.argsort(global_centroids[:, 0])]
         deltas = global_centroids[1:] - global_centroids[:-1]
         norms = np.linalg.norm(deltas, axis=1)
+        print("NORMS:", norms)
 
         # Ensure level_sums has only values above zero
         level_sums = np.clip(level_sums, 1e-6, None)

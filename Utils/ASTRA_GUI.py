@@ -433,7 +433,7 @@ class AstraWorker(QObject):
 
         # Run ASTRA here, directly in worker
         from .ASTRA import ASTRA
-        astra = ASTRA(data_dict, progress_callback=self.progress.emit)
+        astra = ASTRA(**data_dict, progress_callback=self.progress.emit)
         astra.process()
 
         # Handle results via callback

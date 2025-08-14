@@ -8,7 +8,6 @@ TODO:
     PIPELINE:
         -look into replaceing SNR rejection with model residuals and SNR mix
 
-    -Fix ASTRA ani saving, just save frames instead and do not use the one module since it is linux only
 
 NOTE:
     -in future versions ASTRA can be configued to run multiple passes to improve quality in low-pick events

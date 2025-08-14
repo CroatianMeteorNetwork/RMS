@@ -4053,11 +4053,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Send console and GUI updates
         print(f'Loaded {len(pick_list.keys())} picks from {file_path}!')
-        qmessagebox(
-            title='Picks Loaded Successfully',
-            message=f'Successfully loaded {len(pick_list.keys())} picks from {file_path}!',
-            message_type='info'
-        )
 
     def checkKalmanCanRun(self):
         """Checks if kalman filter can be run, updates astra GUI"""
@@ -4213,7 +4208,7 @@ class PlateTool(QtWidgets.QMainWindow):
             "astra_config" : astra_config,
             "saturation_threshold" : self.saturation_threshold,
             "data_path" : self.dir_path,
-            "img_config" : self.config,
+            "camera_config" : self.config,
             "dark" : self.dark if hasattr(self, 'dark') else None,
             "flat" : self.flat_struct if hasattr(self, 'flat_struct') else None
         }
@@ -4272,10 +4267,6 @@ class PlateTool(QtWidgets.QMainWindow):
         # Print and open dialog showing ASTRA has been run
         print(f'Loaded {len(pick_frame_indices)} Picks from ASTRA! Minimum SNR of {astra_config["astra"]["min SNR"]}')
 
-        qmessagebox(title="ASTRA Finished Processing",
-                    message=f'Loaded {len(pick_frame_indices)} Picks from ASTRA! Minimum SNR of {astra_config["astra"]["min SNR"]}',
-                    message_type='info')
-
     def run_kalman_from_config(self, astra_config, progress_callback=None):
         print("Running Kalman with:", astra_config)   
 
@@ -4301,13 +4292,13 @@ class PlateTool(QtWidgets.QMainWindow):
             "astra_config" : astra_config,
             "saturation_threshold" : self.saturation_threshold,
             "data_path" : self.dir_path,
-            "img_config" : self.config,
+            "camera_config" : self.config,
             "dark" : None,
             "flat" : None
         }
 
 
-        tempASTRA = ASTRA(data_dict, progress_callback=progress_callback)
+        tempASTRA = ASTRA(**data_dict, progress_callback=progress_callback)
 
         xypicks, _ = tempASTRA.runKalman(
             measurements=measurements,
@@ -4343,14 +4334,9 @@ class PlateTool(QtWidgets.QMainWindow):
             self.checkPickRevertCanRun()
 
         if astra_config['kalman']['save results'].lower() == 'true':
-            qmessagebox(title="Kalman Finished Processing",
-                message=f'Saved to CSV & Loaded {len(pick_frame_indices)} Picks from Kalman Smoothing.',
-                message_type='info')
+            print(f'Saved to CSV & Loaded {len(pick_frame_indices)} Picks from Kalman Smoothing.')
         else:
-            # Open dialog box to show done
-            qmessagebox(title="Kalman Finished Processing",
-                        message=f'Loaded {len(pick_frame_indices)} Picks from Kalman Smoothing!',
-                        message_type='info')
+            print(f'Loaded {len(pick_frame_indices)} Picks from Kalman Smoothing!')
 
     def loadTXT(self, txt_file_path):
         # ASTRA Addition - Justin DT
