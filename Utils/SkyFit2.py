@@ -4537,18 +4537,18 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Converts times into frame indices, accounting for floating-point errors
             pick_frame_indices = []
-            for time in pick_frame_times:
-                try:
-                    pick_frame_indices.append(self.img_handle.frame_dt_list.index(time))
-                except ValueError:
-                    try:
-                        # Account for floating-point errors by replacing the time with a close match
-                        pick_frame_indices.append(self.img_handle.frame_dt_list.index(time + datetime.timedelta(microseconds=1)))
-                    except ValueError:
-                        try:
-                            pick_frame_indices.append(self.img_handle.frame_dt_list.index(time - datetime.timedelta(microseconds=1)))
-                        except ValueError:
-                            raise ValueError(f'Time {time} not found in frame_dt_list. Please check the time format or the frame_dt_list.')
+            frame_count = sum(1 for name in os.listdir(self.dir_path) if 'dump' in name)
+            time_idx = 0
+            for i in range(frame_count):
+                frame_time = self.img_handle.currentFrameTime(frame_no=i, dt_obj = True)
+                time = pick_frame_times[time_idx]
+                if frame_time == time or \
+                    frame_time == time + datetime.timedelta(microseconds=1) or \
+                    frame_time == time - datetime.timedelta(microseconds=1):
+                    pick_frame_indices.append(i)
+                    time_idx += 1
+                if time_idx >= len(pick_frame_times):
+                    break
 
             # if arrays are different dimensions raise error
             if len(picks) != len(pick_frame_indices):
