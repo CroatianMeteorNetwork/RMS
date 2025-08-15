@@ -137,7 +137,8 @@ class AstraConfigDialog(QDialog):
         astra_defaults = {
             "star_thresh": "3", "min SNR": "5",
             "P_crop": "1.5", "sigma_init (px)": "2", "sigma_max": "1.2",
-            "L_max": "1.5", "Verbose": "False", "photom_thresh" : "0.65", "Save Animation": "False"
+            "L_max": "1.5", "Verbose": "False", "photom_thresh" : "0.65", 
+            "Save Animation": "False", "CE_coeff" : "3"
         }
 
         # === Kalman Filter Settings ===
@@ -169,7 +170,8 @@ class AstraConfigDialog(QDialog):
             "L_max": "Max length multiplier (upper bound).",
             "photom_thresh": "Luminosity threshold for photometry pixels (fraction of peak).",
             "Verbose": "Verbose console logging (True/False).",
-            "Save Animation" : "Save animation showing fit, crop, and residuals for each frame."
+            "Save Animation" : "Save animation showing fit, crop, and residuals for each frame.",
+            "CE_coeff" : "Multiples of fitted length (STD) to place leading edge from center pick"
         }
 
         KALMAN_TT = {

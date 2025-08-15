@@ -75,6 +75,7 @@ class ASTRA:
         init_sigma_guess = float(self.astra_config.get('astra', {}).get('sigma_init (px)', 2))
         max_sigma_coeff = float(self.astra_config.get('astra', {}).get('sigma_max', 1.2))
         max_length_coeff = float(self.astra_config.get('astra', {}).get('L_max', 1.5))
+        self.CE_coeff = float(self.astra_config.get('astra', {}).get('CE_coeff', 3))
 
         self.cropping_settings = {
             'initial_padding_coeff': initial_padding_coeff,
@@ -546,6 +547,10 @@ class ASTRA:
         self.background_levels = np.array(self.background_levels)[~snr_rejection_bool]
         self.saturated_bool_list = np.array(self.saturated_bool_list)[~snr_rejection_bool]
 
+        # Clip SNR & level sums to 1 to avoid division errors upstream
+        frame_snr_values = np.clip(frame_snr_values, 1, None)
+        self.abs_level_sums = np.clip(self.abs_level_sums, 1, None)
+
         # Save copies before indexing to avoid recursion errors
         fit_imgs_copy = fit_imgs.copy()
         cropped_frames_copy = cropped_frames.copy()
@@ -559,7 +564,8 @@ class ASTRA:
         global_picks = np.array([self.movePickToEdge(self.translatePicksToGlobal((refined_params[i, 2], refined_params[i, 3]), crop_vars[i]),
                                                      self.omega,
                                                      refined_params[i][4],
-                                                     directions = self.directions) for i in range(len(refined_params))])
+                                                     directions = self.directions,
+                                                     CE_coeff=self.CE_coeff) for i in range(len(refined_params))])
 
         # Compute times of frames
         times = np.array([(self.img_obj.frame_dt_dict[k]) for k in pick_frame_indices])
@@ -753,7 +759,7 @@ class ASTRA:
             return (x_global, y_global)
     
 
-    def movePickToEdge(self, center_pick, omega, length, directions=(1, 1)):
+    def movePickToEdge(self, center_pick, omega, length, directions=(1, 1), CE_coeff=None):
         """
         Moves the center pick to the leading edge of the crop based on the fitted parameters.
         Args:
@@ -767,6 +773,10 @@ class ASTRA:
 
         # Unpack picks
         x0, y0 = center_pick
+
+        if CE_coeff is not None:
+            # Add length adjustment
+            length = (length / 3) * CE_coeff
 
         # Calculate the offset
         x_midpoint_offset = (length / 2) * np.abs(np.cos(omega)) * directions[0]
@@ -893,82 +903,6 @@ class ASTRA:
 
         # Return the new picks
         return (next_x, next_y)
-
-
-    def calculateSNR(self, fit_img, frame, cropped_frame, crop_vars):
-        # DEPRECATED
-        """
-        Calculates the Signal-to-Noise Ratio (SNR) for a given fit image and frame.
-        Args:
-            fit_img (numpy.ndarray): The fit image containing the fitted gaussian.
-            frame (numpy.ndarray): The original frame from which the fit image was derived.
-            cropped_frame (numpy.ndarray): The cropped frame containing the region of interest.
-            crop_vars (tuple): A tuple containing the crop variables (x_min, x_max, y_min, y_max).
-        Returns:
-            float: The calculated SNR value.
-        """
-        
-        # Round crop variables to integers for indexing
-        _, _, x_min, x_max, y_min, y_max = map(int, crop_vars.copy())
-
-        # Copy fit image, cropped_frame, and avepixel_background to avoid modifying the original data
-        fit_img = fit_img.copy()
-        cropped_frame = cropped_frame.copy()
-        avebk = self.avepixel_background.copy()
-
-        # Clip fit image to zero and one
-        fit_img[fit_img <= 1] = 0
-        fit_img[fit_img > 1] = 1
-
-        # Mask cropped frame with fit image to remove the background
-        masked_cropped = fit_img * cropped_frame
-
-        # Invert fit_img: 1 becomes 0, 0 becomes 1
-        inverted_fit_img = 1 - fit_img.copy()
-
-        # Mask the avebk with the inverted fit image to remove the streak
-        masked_avebk = inverted_fit_img * avebk[y_min:y_max, x_min:x_max]
-
-        # Calculate the median and standard deviation of the masked average background
-        median_ave = np.median(masked_avebk[masked_avebk > 0])
-        std_ave = np.std(masked_avebk[masked_avebk > 0])
-
-        # Crop the masked frame to the percentile threshold defined by P_thresh
-        masked_cropped[masked_cropped < np.nanpercentile(masked_cropped, float(self.astra_config['astra']['photom_thresh']))] = 0
-
-        # Count the non-zero values in the masked cropped frame, and calculate the level sum
-        nonzero_count = np.count_nonzero(masked_cropped)
-        level_sum = np.ma.sum(masked_cropped)
-
-        # Find all indices of non-zero values for the photometry pixels
-        nonzero_indices = np.argwhere(masked_cropped > 0)
-        
-        # Convert photometry pixels to global coordinates and adjust indices
-        nonzero_indices[:, 0] += y_min
-        nonzero_indices[:, 1] += x_min
-        photometry_pixels = [tuple(idx[::-1]) for idx in nonzero_indices]
-
-        # Check if any of the photometry pixels are saturated
-        saturated_bool = np.any(frame[photometry_pixels] >= self.saturation_threshold)
-
-        # Append data to instance variables
-        self.photometry_pixels.append(photometry_pixels)
-        self.saturated_bool_list.append(saturated_bool)
-        self.abs_level_sums.append(level_sum)
-        self.background_levels.append(median_ave)
-
-        # Print debug information if verbose is enabled
-        if self.verbose:
-            print(f"Level sum: {level_sum}, STD ave: {std_ave}, Nonzero count: {nonzero_count}, Background std: {median_ave}, Saturated: {saturated_bool}")
-
-        # Finally calculate SNR
-        return signalToNoise(
-            level_sum,
-            nonzero_count,
-            median_ave,
-            std_ave
-    )
-
 
     # 3) -- Helper Methods --
 
