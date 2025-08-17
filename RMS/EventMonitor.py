@@ -3738,7 +3738,7 @@ def getFitsPathsAndCoordsRadec(config, earliest_jd, latest_jd, r=None, d=None):
 
     return fits_paths_and_coordinates
 
-def createThumbnails(config, r, d, earliest_jd=0, latest_jd=np.inf, max_thumbnails=1000):
+def createThumbnails(config, r, d, earliest_jd=0, latest_jd=np.inf, max_thumbnails=1000, write_log=False):
     """
     Create thumbnails of an object excised from fits files between earliest and latest JD.
 
@@ -3751,24 +3751,28 @@ def createThumbnails(config, r, d, earliest_jd=0, latest_jd=np.inf, max_thumbnai
 
     Keyword arguments:
         max_thumbnails: [int] Optional, default 100
+        write_log: [bool] Optional, default False, write to logger
 
     Return:
         thumbnail_list: [list] list of thumbnails.
     """
 
     # get the paths to all the fits files in the jd window
-    log.info("Looking for fits files between {} and {} at {},{}".format(jd2Date(earliest_jd, dt_obj=True), jd2Date(latest_jd, dt_obj=True), r, d))
+    if write_log:
+        log.info("Looking for fits files between {} and {} at {},{}".format(jd2Date(earliest_jd, dt_obj=True), jd2Date(latest_jd, dt_obj=True), r, d))
     path_coords_list = getFitsPathsAndCoordsRadec(config, earliest_jd, latest_jd, r, d)
-    log.info("Got a list of length {}".format(len(path_coords_list)))
+    if write_log:
+        log.info("Got a list of length {}".format(len(path_coords_list)))
     # initialise a list to hold the cropped image data
     thumbnail_list = []
     fits_len = len(path_coords_list)
-    if fits_len == 0:
-        log.info("Did not find ra, dec {:.2f},{:.2f}".format(r, d, fits_len))
-    elif fits_len == 1:
-        log.info("Found ra,dec ({:.2f},{:.2f}) degrees in {} fits file".format(r, d, fits_len))
-    else:
-        log.info("Found ra,dec ({:.2f},{:.2f}) degrees in {} fits files".format(r, d, fits_len))
+    if write_log:
+        if fits_len == 0
+            log.info("Did not find ra, dec {:.2f},{:.2f}".format(r, d, fits_len))
+        elif fits_len == 1:
+            log.info("Found ra,dec ({:.2f},{:.2f}) degrees in {} fits file".format(r, d, fits_len))
+        else:
+            log.info("Found ra,dec ({:.2f},{:.2f}) degrees in {} fits files".format(r, d, fits_len))
 
 
     path_coords_list = shortenList(path_coords_list, max_thumbnails)
@@ -3778,7 +3782,8 @@ def createThumbnails(config, r, d, earliest_jd=0, latest_jd=np.inf, max_thumbnai
 
     for fits_path, x, y in path_coords_list:
         if processed % increment == 0:
-            log.info("Processed {} out of {} thumbnails".format(processed, fits_len))
+            if write_log:
+                log.info("Processed {} out of {} thumbnails".format(processed, fits_len))
         thumbnail_list.append([fits_path, readCroppedFF(fits_path, x, y)])
         processed += 1
 
