@@ -1,5 +1,5 @@
 # RPi Meteor Station
-# Copyright (C) 2023
+# Copyright (C) 2025
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -92,6 +92,9 @@ EM_RAISE = False
 # Reference event
 
 # Required
+
+# Either
+
 EventTime                : 20230821_110845	#Time as YYYYMMDD_HHMMSS
 TimeTolerance (s)        : 20			    #Width of time to take
 EventLat (deg +N)        : -33			    #Event start latitude
@@ -108,6 +111,15 @@ EventHt2 (km)            : 90			    #Event height standard deviation
 #Or
 EventAzim                : 45			    #Azimuth from North +E from point of view of object
 EventElev		         : 20			    #Elevation as perceived by observer on ground, hence always +ve
+
+#Or
+
+# Atria 
+Ra			            : 252.17
+Dec		                : -69.07
+JDStart			        : 2454424.25
+JDEnd			        : 2453771.29
+END
 
 #Optional
 EventCartStd		     : 10000		    #Event start cartesian standard deviation (m)
@@ -164,12 +176,11 @@ class EventContainer(object):
         self.suffix = "event"
 
     def setValue(self, variable_name, value):
-
-        """ Receive a name and value pair, and put them into this event
+        """ Receive a name and value pair, and put them into this event.
 
         Arguments:
-            variable_name: Name of the variable
-            value        : Value to be assigned
+            variable_name: Name of the variable.
+            value        : Value to be assigned.
 
         Return:
             Nothing
@@ -244,12 +255,12 @@ class EventContainer(object):
 
     def eventToString(self):
 
-        """ Turn an event into a string
+        """ Turn an event into a string.
 
         Arguments:
 
         Return:
-            String representation of an event
+            String representation of an event.
         """
 
         output = "# Required \n"
@@ -310,8 +321,7 @@ class EventContainer(object):
 
     def isReasonable(self):
 
-        """ Check if self is reasonable, and optionally try to fix it up
-            Crucially, this function prevents any excessive requests being made that may compromise capture
+        """ Check if self is reasonable.
 
         Arguments:
 
@@ -341,9 +351,9 @@ class EventContainer(object):
     def hasCartSD(self):
 
         """
-        Event contains any non-zero cartesian deviation parameters
+        True if event contains any non-zero cartesian deviation parameters
 
-        returns:
+        Return:
             [bool]
 
         """
@@ -355,7 +365,7 @@ class EventContainer(object):
         """
         Event contains any non-zero polar deviation parameters
 
-        returns:
+        Return:
             [bool]
 
         """
@@ -375,13 +385,13 @@ class EventContainer(object):
     def appendPopulation(self, population, population_size):
 
         """
-        Append to a population identical copies of self event
+        Append to a population identical copies of self event.
 
         arguments:
-            population: [list] population of events
+            population: [list] population of events.
 
         return:
-            population [list] population of events
+            population [list] population of events.
 
         """
 
@@ -392,10 +402,10 @@ class EventContainer(object):
     def eventToECEFVector(self):
 
         """
-        Return ECEF vector (meters) representation of search trajectory
+        Return ECEF vector (meters) representation of search trajectory.
 
         return:
-            [vector] ECEF vector
+            [vector] ECEF vector.
         """
 
         v1 = latLonAlt2ECEFDeg(self.lat, self.lon, self.ht * 1000)
@@ -410,8 +420,8 @@ class EventContainer(object):
         If this fails, just return the point.
 
         arguments:
-            pt: [vector] vector
-            std: [float] sigma to apply
+            pt: [vector] vector.
+            std: [float] sigma to apply.
 
         """
 
@@ -424,13 +434,13 @@ class EventContainer(object):
 
         """
         Apply standard deviation to the Cartesian coordinate of a population of trajectories
-        Take the absolute value, in case a negative value was passed
+        Take the absolute value, in case a negative value was passed.
 
         arguments:
-            population: [list] population of events
+            population: [list] population of events.
 
-        returns:
-            population: [list] population of events
+        Return:
+            population: [list] population of events.
 
         """
 
@@ -451,14 +461,14 @@ class EventContainer(object):
 
         """
         Apply standard deviation to the Polar coordinates of a population of trajectories
-        This function can handle negative standard deviations
+        This function can handle negative standard deviations.
 
         arguments:
-            population: [list] of events
-            seed: optional, set the seed for the standard deviation generation
+            population: [list] of events.
+            seed: optional, set the seed for the standard deviation generation.
 
-        returns:
-            population: [list] of events
+        Return:
+            population: [list] of events.
 
         """
 
@@ -484,8 +494,8 @@ class EventContainer(object):
 
         Arguments:
 
-        Returns: [bool]
-            True if end point latitudes or longitudes or heights are not zero
+        Return: [bool]
+            True if end point latitudes or longitudes or heights are not zero.
 
         """
 
@@ -499,16 +509,16 @@ class EventContainer(object):
     def limitAzEl(self, min_elev_hard, min_elev, prob_elev, max_elev):
 
         """
-        Acts on self to correct any strange elevations
+        Acts on self to correct any strange elevations.
 
         Arguments
-            min_elev_hard: [float] minimum elevation considered reasonable
-            min_elev: [float] minimum elevation considered correct
-            prob_elev: [float] set any unreasonable elevations
-            max_elev: [float] maximum elevation considered reasonable
+            min_elev_hard: [float] minimum elevation considered reasonable.
+            min_elev: [float] minimum elevation considered correct.
+            prob_elev: [float] set any unreasonable elevations.
+            max_elev: [float] maximum elevation considered reasonable.
 
-        Returns:
-            Nothing
+        Return:
+            Nothing.
 
         """
 
@@ -526,15 +536,15 @@ class EventContainer(object):
 
         """
         Adjust default illuminated flight heights to match event specification. Leave a gap
-        between the observation and the limit to allow accurate angles to be calculated
+        between the observation and the limit to allow accurate angles to be calculated.
 
         Arguments
-            observd_ht: [float] height of observation
-            min_lum_flt_ht: [float] minimum expected illuminated flight
-            max_lum_flt_ht: [float] maximum expected illuminated flight
-            gap : [float] minimum gap between the observed_bt and either of the limits
+            observd_ht: [float] height of observation.
+            min_lum_flt_ht: [float] minimum expected illuminated flight.
+            max_lum_flt_ht: [float] maximum expected illuminated flight.
+            gap : [float] minimum gap between the observed_bt and either of the limits.
 
-            All must be specified with the same unit multiplier
+            All must be specified with the same unit multiplier.
 
         """
 
@@ -547,20 +557,18 @@ class EventContainer(object):
 
         """
         For an event containing a trajectory specified with two lat,lon, heights, calculate the range from
-        the observed point to the maximum luminous flight height, and to the minimum luminous flight height
+        the observed point to the maximum luminous flight height, and to the minimum luminous flight height.
 
         arguments:
-            obsvd_lat : [float] latitude (degrees) of observed point
-            obsvd_lon : [float] longitude (degrees) of observed point
-            obsvd_ht : [float] height (meters) of observed point
-            min_lum_flt_ht: [float] height (meters) of minimum luminous flight
-            max_lum_flt_ht: [float] height (meters) of maximum luminous flight
+            obsvd_lat : [float] latitude (degrees) of observed point.
+            obsvd_lon : [float] longitude (degrees) of observed point.
+            obsvd_ht : [float] height (meters) of observed point.
+            min_lum_flt_ht: [float] height (meters) of minimum luminous flight.
+            max_lum_flt_ht: [float] height (meters) of maximum luminous flight.
 
-        returns:
-            bwd_range : [float] range (meters) from observed point to maximum luminous height
-            fwd_range : [float] range (meters) from observed point to minimum luminous height
-
-
+        Return:
+            bwd_range : [float] range (meters) from observed point to maximum luminous height.
+            fwd_range : [float] range (meters) from observed point to minimum luminous height.
         """
 
         # Find range to maximum heights in reverse trajectory direction
@@ -586,21 +594,20 @@ class EventContainer(object):
     def addElevationRange(self, population, ob_ev, min_elevation):
 
         """
-        Take a single observed point on a trajectory, and a minimum elevation
+        Take a single observed point on a trajectory, and a minimum elevation.
         Create a population of trajectories from the min_elevation through to observed elevation
         in steps of 1 degree.
 
         The trajectories pivot around the observed lat, lon and height, and this function checks that
-        this point is close to all the produced trajectories
+        this point is close to all the produced trajectories.
 
         arguments:
-            population: [list] list of trajectories to be appended to
-            ob_ev: An observed event, specified as a lat (degrees), lon (degrees), ht (km) and elevation (degrees)
-            min_elevation: [degrees] observed elevation, which will always be the minimum
+            population: [list] list of trajectories to append to.
+            ob_ev: An observed event, specified as a lat (degrees), lon (degrees), ht (km) and elevation (degrees).
+            min_elevation: [degrees] observed elevation, which will always be the minimum.
 
-        returns:
-            population: [list] list of trajectories
-
+        Return:
+            population: [list] list of trajectories.
         """
 
 
@@ -637,15 +644,15 @@ class EventContainer(object):
         azimuth and elevation. One application for this function could be to extend a trajectory to the expected
         limits of illuminated flight.
 
-        arguments:
-            bwd_range: [float] range (meters) to extend a trajectory backwards - in line with the trajectory
-            fwd_range: [float] range (meters) to extend a trajectory forwards - in line with the trajectory
-            obsvd_lat: [float] observed latitude (degrees) of reference point
-            obsvd_lon: [float] observed longitude (degrees) of reference point
-            obsvd_ht: [float] observed height (metres) of reference point
+        Arguments:
+            bwd_range: [float] range (meters) to extend a trajectory backwards - in line with the trajectory.
+            fwd_range: [float] range (meters) to extend a trajectory forwards - in line with the trajectory.
+            obs_lat: [float] observed latitude (degrees) of reference point.
+            obs_lon: [float] observed longitude (degrees) of reference point.
+            obs_ht: [float] observed height (metres) of reference point.
 
-        reurns:
-            nothing
+        Return:
+            Nothjing
 
         """
 
@@ -812,14 +819,15 @@ class EventMonitor(multiprocessing.Process):
 
         arguments:
 
-        returns:
+        Return:
             conn: [connection] connection to database if success else None
 
         """
 
         # Create the EventMonitor database
         if test_mode:
-            self.event_monitor_db_path = os.path.expanduser(os.path.join(self.syscon.data_dir, self.syscon.event_monitor_db_name))
+            self.event_monitor_db_path = os.path.expanduser(os.path.join(
+                str(self.syscon.data_dir), str(self.syscon.event_monitor_db_name)))
             if os.path.exists(self.event_monitor_db_path):
                 os.unlink(self.event_monitor_db_path)
 
@@ -835,7 +843,7 @@ class EventMonitor(multiprocessing.Process):
             log.error("Failed to create event_monitor database")
             return None
 
-        # Returns true if the table event_monitor exists in the database
+        # Return true if the table event_monitor exists in the database
         try:
             tables = conn.cursor().execute(
                 """SELECT name FROM sqlite_master WHERE type = 'table' and name = 'event_monitor';""").fetchall()
@@ -941,7 +949,7 @@ class EventMonitor(multiprocessing.Process):
         Args:
             conn: Connection to the EventMonitor database
 
-        Returns: Nothing
+        Return: Nothing
 
         """
 
@@ -1089,7 +1097,10 @@ class EventMonitor(multiprocessing.Process):
         """
         Returns True if an event is already in the database. Checks most of the parameters.
 
-        returns:
+        Arguments:
+            event: [object] Event instance
+
+        Return:
             exists: [bool]
 
         """
@@ -1549,7 +1560,8 @@ class EventMonitor(multiprocessing.Process):
         # iterate across the folders in CapturedFiles and convert the directory time to posix time
         if os.path.exists(os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir)):
             for night_directory in os.listdir(
-                    os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir)):
+                    os.path.join(os.path.expanduser(str(self.config.data_dir)),
+                                 str(self.config.captured_dir))):
                 # Skip over any directory which does not start with the stationID and warn
                 if night_directory[0:len(self.config.stationID)] != self.config.stationID:
                     continue
@@ -1664,7 +1676,7 @@ class EventMonitor(multiprocessing.Process):
             rp: [platepar] reference platepar
             event: [event] event of interest
 
-        Returns:
+        Return:
             points_in_fov: [integer] the number of points out of 100 in the field of view
             start_distance: [float] the distance in metres from the station to the trajectory start
             start_angle: [float] the angle between the vector from the station to start of the trajectory
@@ -1727,7 +1739,7 @@ class EventMonitor(multiprocessing.Process):
         Args:
             event: [event] Calculate if the trajectory of this event passed through the field of view
 
-        Returns:
+        Return:
             pts_in_FOV: [integer] Number of points of the trajectory split into 100 parts
                                    apparently in the FOV of the camera
             sta_dist: [float] Distance from station to the start of the trajectory
@@ -1759,7 +1771,7 @@ class EventMonitor(multiprocessing.Process):
             no_upload: [bool] if True do everything apart from uploading
             test_mode: [bool] if True prevents upload
 
-        Returns:
+        Return:
             uploadstatus: [bool] status of upload
 
         """
@@ -1848,7 +1860,6 @@ class EventMonitor(multiprocessing.Process):
                     log.error("fr_file {}".format(fr_file))
 
         if True:
-            image_note = event.suffix
             batchFFtoImage(os.path.join(this_event_directory), "jpg", add_timestamp=True,
                            ff_component='maxpixel')
 
@@ -1905,7 +1916,7 @@ class EventMonitor(multiprocessing.Process):
                     # Exit loop if upload was successful
                     break
                 else:
-                    retry_delay = (retry * 180 * (1+ random.random()))
+                    retry_delay = (retry * 180 * (1 + random.random()))
                     log.error("Upload failed on attempt {}. Retry after {:.1f} seconds.".format(retry, retry_delay))
                     time.sleep(retry_delay)
                     log.info("Retrying upload of {}. This is retry {}".format(event_monitor_directory, retry))
@@ -2180,7 +2191,7 @@ class EventMonitor(multiprocessing.Process):
             log.info("Thumbnail file path {}".format(thumbnail_file_path))
             if thumbnail_file_path is not None:
 
-                log.info("Thumbnail path was not none")
+
                 # Produce a skymap
                 pp_dict, config_dict, mask_dict = {}, {}, {}
                 pp = Platepar()
@@ -2277,10 +2288,10 @@ class EventMonitor(multiprocessing.Process):
     def checkEvents(self, ev_con, test_mode = False):
 
         """
-        argunments:
+        Arguments:
             ev_con: configuration object at the time of this event
 
-        returns:
+        Return:
             Nothing
         """
 
@@ -2386,7 +2397,7 @@ class EventMonitor(multiprocessing.Process):
             end_time: time to start checking to
             testmode: [bool] if set true looks for a local file, rather than a web address
 
-        Returns:
+        Return:
             Nothing
         """
 
@@ -2549,7 +2560,7 @@ def renderMagnitudeAzElPlot(config, pp, magnitude_list, az_list, el_list , e_jd,
     Arguments:
         config: [config] RMS Config instance.
         magnitude_list: [list] List of magnitudes.
-        elevation_list: [list] List of elevations relative to local horizon.
+        el_list: [list] List of elevations relative to local horizon.
         e_jd: [float] Earliest time in julian date, only used for title.
         l_jd: [float] Latest time in julian date, only used for title.
         r: [float] Right ascension, only used for title.
@@ -2558,7 +2569,7 @@ def renderMagnitudeAzElPlot(config, pp, magnitude_list, az_list, el_list , e_jd,
     Keyword arguments:
         plot_format: [str] Optional, default png.
 
-    Returns:
+    Return:
         plt: [object] Matplot plot instance.
         plot_filename: [str] Filename where the plot was saved.
     """
@@ -2584,10 +2595,7 @@ def renderMagnitudeAzElPlot(config, pp, magnitude_list, az_list, el_list , e_jd,
         plt.xlabel("Azimuth normalised to camera pointing of {:.1f} degrees +ve from North".format(pp.az_centre))
         plt.ylabel("Elevation normalised to camera pointing of {:.1f} degrees above horizon".format(pp.alt_centre))
 
-
-
         plt.title(title)
-
         return plt, plot_filename
 
     else:
@@ -2610,7 +2618,7 @@ def renderMagnitudeElevationPlot(config, pp, magnitude_list, elevation_list, e_j
     Keyword arguments:
         plot_format: [str] Optional, default png.
 
-    Returns:
+    Return:
         plt: [object] Matplot plot instance.
         plot_filename: [str] Filename where the plot was saved.
     """
@@ -2669,7 +2677,7 @@ def renderMagnitudeAzimuthPlot(config, pp, magnitude_list, azimuth_list, e_jd, l
     Keyword arguments:
         plot_format: [str] Optional, default png.
 
-    Returns:
+    Return:
         plt: [object] Matplot plot instance.
         plot_filename: [str] Filename where the plot was saved.
     """
@@ -2730,7 +2738,7 @@ def renderMagnitudeTimePlot(config, magnitude_list, elevation_list, e_jd, l_jd, 
     Keyword arguments:
         plot_format: [str] Optional, default png.
 
-    Returns:
+    Return:
         plt: [object] Matplot plot instance.
         plot_filename: [str] Filename where the plot was saved.
     """
@@ -2850,7 +2858,7 @@ def dictToMagnitudeAzimuthPlot(config, pp, observations_dict, event, file_path=N
 
     if plt is None:
         print("No observations found - cannot plot")
-        return
+        return None
     else:
         file_path = fn if file_path is None else file_path
         plt.savefig(file_path)
@@ -2916,7 +2924,7 @@ def filterCalstarByJD(calstar, config, e_jd, l_jd):
         e_jd: [float] Earliest julian date.
         l_jd: [float] Latest julian date.
 
-    Returns:
+    Return:
         fits_paths: [list] List of full paths to the fits files within jd range.
     """
 
@@ -2949,7 +2957,7 @@ def getFitsPaths(path_to_search, jd_start, jd_end=None, prefix="FF", extension="
         prefix: [str] Optional default FF
         extension: [str] Optional default fits
 
-    Returns:
+    Return:
         fits_paths: [list] A list of all the fits files between the JD range
     """
     directories_to_search = filterDirectoriesByJD(path_to_search, jd_start, jd_end)
@@ -2988,7 +2996,7 @@ def dictMagsRaDec(config, r, d, e_jd=0, l_jd=np.inf):
         observation_sequence_dict: [dict] JD is key, contains information about observations.
     """
 
-    full_path_to_archived = os.path.expanduser(os.path.join(config.data_dir, config.archived_dir))
+    full_path_to_archived = os.path.expanduser(os.path.join(str(config.data_dir), str(config.archived_dir)))
     full_path_to_default_platepar = os.path.join(getRmsRootDir(), config.platepar_name)
 
 
@@ -3262,7 +3270,7 @@ def rmsTimeExtractor(rms_time, asTuple = False, asJD = False, delimiter = None):
         asJD: [bool] Optional, default False, return as a Julian Date
         delimiter: [str] Optional, default None, delimiter to use. If not given, will guess based on first non alpha numeric
 
-    Returns:
+    Return:
         time: [various] Time extracted from string
     """
 
@@ -3356,16 +3364,18 @@ def rmsTimeExtractor(rms_time, asTuple = False, asJD = False, delimiter = None):
 def checkMaskxy(x, y, mask_path, mask=None):
 
     """
-    Discover if a point on an image is visible through the mask
+    True if Point x,y is clear of the mask. If no mask is found at mask_path, returns True
 
-    Args:
+    Arguments:
         x: [int] x coordinate on image.
         y: [int] y coordinate on image.
-        mask_path: [str] Path to a mask.
-        mask: [struct] Mask structure - saves time by passing the mask if same mask is used repeatedly.
+        mask_path: [str] Path to a mask, not used if a mask is passed.
 
-    Returns:
-        [bool]: True if visible, else false
+    Keyword Arguments:
+        mask: [struct] Mask structure, optional, default none. Saves time.
+
+    Return:
+        [bool]: True if visible, else False.
     """
 
     if mask is None:
@@ -3571,7 +3581,7 @@ def areaToGoldenRatioXY(count, rotate=False):
     Keyword arguments:
         rotate:[bool] Optional, default false, rotate the sides
 
-    Returns:
+    Return:
         across:[int] Number of squares across
         down:[int] Number of squares down
     """
@@ -3606,7 +3616,7 @@ def getFitsPathsAndCoordsTLE(config, e):
     o = ephem.Observer()
     o.lat, o.lon, o.elevation = config.latitude, config.longitude, config.elevation
 
-    full_path_to_captured = os.path.expanduser(os.path.join(config.data_dir, config.captured_dir))
+    full_path_to_captured = os.path.expanduser(os.path.join(str(config.data_dir), str(config.captured_dir)))
     directories_to_search = filterDirectoriesByJD(full_path_to_captured, e.jd_start, e.jd_end)
     stationID = config.stationID
 
@@ -3614,6 +3624,7 @@ def getFitsPathsAndCoordsTLE(config, e):
     for directory in directories_to_search:
         mask_path = os.path.join(directory, config.mask_file)
         default_mask_path = os.path.join(getRmsRootDir(), config.mask_file)
+        mask = None
         if os.path.exists(mask_path):
             mask = loadMask(mask_path)
         elif os.path.exists(default_mask_path):
@@ -3622,6 +3633,7 @@ def getFitsPathsAndCoordsTLE(config, e):
 
 
         pp_path = os.path.join(directory, config.platepar_name)
+        pp = None
         if os.path.exists(pp_path):
             pp = Platepar()
             pp.read(pp_path)
@@ -3682,9 +3694,8 @@ def getFitsPathsAndCoordsRadec(config, earliest_jd, latest_jd, r=None, d=None):
         elif os.path.exists(default_mask_path):
             mask = loadMask(default_mask_path)
 
-
-
         pp_path = os.path.join(directory, config.platepar_name)
+        pp = None
         if os.path.exists(pp_path):
             pp = Platepar()
             pp.read(pp_path)
@@ -3766,7 +3777,7 @@ def shortenList(input_list, length):
         input_list: [list] List to be changed
         length: [int] desired length
 
-    Returns:
+    Return:
         [list] list of items
     """
 
@@ -3839,7 +3850,7 @@ def exciseFromFF(ff, x_centre, y_centre, width = 50, height = 50, allow_drift_in
         height: [int] Optional, default 50 - height of image to be excised.
         allow_drift_in: [bool] Optional, default false. If True move excised image away from edge to avoid.
 
-    Returns:
+    Return:
         ff_excised: [img] Array of intensities, width x height excised from ff.
     """
 
@@ -3895,7 +3906,7 @@ def readCroppedFF(path, x, y, width=20, height=20, allow_drift_in = False):
         y [int]: y coordinates of the centre of the cropped region
         width [int]: optional, default 50, width of crop
         height [int]: optional, default 50, height of crop
-    Returns:
+    Return:
         [array] : 2D array of pixel intensities
     """
 
@@ -3953,7 +3964,7 @@ def filterDirectoriesByJD(path, earliest_jd, latest_jd = None):
     Keyword arugments:
         latest_jd [float]: latest jd to include, if none then only the directory containing earliest is returned
 
-    Returns:
+    Return:
         filtered list of directories
     """
     latest_jd = earliest_jd if latest_jd is None else latest_jd
@@ -4038,7 +4049,7 @@ def calculateClosestPoint(beg_lat, beg_lon, beg_ele, end_lat, end_lon, end_ele, 
             ref_lon: [float] Station longitude
             ref_ele: [float] Station height
 
-        Returns:
+        Return:
             start_dis: Distance from station to start of trajectory
             end_dist: Distance from station to end of trajectory
             closest_dist: Distance at the closest point (possibly outside the start and end)
@@ -4078,7 +4089,7 @@ def revAz(azim):
 
         arguments:
             azim: [float] azimuth in degrees
-        returns:
+        return:
             azim_rev: [float] azimuth in the reverse direction in degrees
 
         """
@@ -4093,7 +4104,7 @@ def ecefV2LatLonAlt(ecef_vect):
 
         arguments: ecef_vector
 
-        returns: lat,lon,ht
+        return: lat,lon,ht
 
         """
 
@@ -4120,7 +4131,7 @@ def platepar2AltAz(rp):
     arguments:
         rp: Platepar
 
-    returns:
+    Return:
         Ra_d : [degrees] Ra of the platepar at its creation date
         dec_d : [degrees] Dec of the platepar at its creation date
         JD : [float] JD of the platepar creation
@@ -4163,7 +4174,7 @@ def convertGMNTimeToPOSIX(timestring):
     arguments:
         timestring: [string] time represented as a string e.g. 20230527_032115
 
-    returns:
+    Return:
         posix compatible time
     """
 
@@ -4188,7 +4199,7 @@ def createATestEvent07():
 
     arguments:
 
-    returns:
+    Return:
         event: [event]
 
     """
@@ -4224,7 +4235,7 @@ def createATestEvent08():
 
     arguments:
 
-    returns:
+    Return:
         event: [event]
 
     """
@@ -4270,7 +4281,7 @@ def gcDistDeg(lat1, lon1, lat2, lon2):
         lat2: [float] latitude of point 2 (degrees)
         lon2: [float] latitude of point 2 (degrees)
 
-    returns:
+    ReturnReturn:
         [float] great circle distance (km)
 
 
