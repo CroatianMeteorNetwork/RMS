@@ -2152,6 +2152,7 @@ class EventMonitor(multiprocessing.Process):
         magnitudes_azimuth_chart_file_name = "magnitudes_azimuth_{}".format(generic_file_name)
         magnitudes_azimuth_elevation_chart_file_name = "magnitudes_azimuth_elevation_{}".format(generic_file_name)
 
+
         with tempfile.TemporaryDirectory() as radec_event_dir:
             thumbnail_file_path = os.path.join(radec_event_dir, thumbnail_file_name)
             magnitudes_chart_file_path = os.path.join(radec_event_dir, magnitudes_time_chart_file_name)
