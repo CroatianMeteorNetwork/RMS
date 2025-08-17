@@ -560,10 +560,10 @@ if __name__ == "__main__":
             print("Loaded platepar for {:s}: {:s}".format(pp.station_code, pp_path))
             platepars[pp.station_code] = pp
 
-            if cml_args.show_ip:
-                if os.path.exists(config_path):
-                    configs[pp.station_code] = cr.parse(config_path)
-                    print("Loaded config for   {:s}: {:s}".format(pp.station_code, config_path))
+
+            if os.path.exists(config_path):
+                configs[pp.station_code] = cr.parse(config_path)
+                print("Loaded config for   {:s}: {:s}".format(pp.station_code, config_path))
 
             # Also add a mask if it's available
             if config.mask_file in file_list:
