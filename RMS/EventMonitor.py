@@ -2544,7 +2544,7 @@ def dictToMagnitudeAzimuthElevationPlot(config, pp, observations_dict, event, fi
     for j in observations_dict:
         observations = observations_dict.get(j)
         magnitude_list.append(observations['photometry']['mag'])
-        azimuth_list.append(((observations['coords']['horizontal']['az'] - 180) % 360) - 180 )
+        azimuth_list.append(observations['coords']['horizontal']['az'])
         elevation_list.append(observations['coords']['horizontal']['el'])
         r = observations['coords']['equatorial']['ra']
         d = observations['coords']['equatorial']['dec']
@@ -2587,7 +2587,7 @@ def renderMagnitudeAzElPlot(config, pp, magnitude_list, az_list, el_list , e_jd,
             y_vals.append(elevation - pp.alt_centre)
 
         for azimuth in az_list:
-            x_vals.append(azimuth - pp.az_centre)
+            x_vals.append((((azimuth - pp.az_centre) -180 ) % 360) - 180 )
 
         title = "{} plot of magnitudes against azimuth and elevation at RA {} Dec {} between jd {:2f} and {:2f}".format(config.stationID,r, d, e_jd, l_jd)
         log.info(title)
@@ -2705,7 +2705,7 @@ def renderMagnitudeAzimuthPlot(config, pp, magnitude_list, azimuth_list, e_jd, l
 
 
         for azimuth in azimuth_list:
-            x_vals.append(azimuth - pp.az_centre)
+            x_vals.append((((azimuth - pp.az_centre) - 180 ) % 360 ) - 180)
 
 
         title = "{} plot of magnitudes against azimuth at RA {} Dec {}".format(config.stationID,r, d)
@@ -2724,8 +2724,6 @@ def renderMagnitudeAzimuthPlot(config, pp, magnitude_list, azimuth_list, e_jd, l
 
     else:
         return None, None
-
-
 
 
 def renderMagnitudeTimePlot(config, magnitude_list, elevation_list, e_jd, l_jd, r, d, plot_format=".png"):
