@@ -2544,7 +2544,7 @@ def dictToMagnitudeAzimuthElevationPlot(config, pp, observations_dict, event, fi
     for j in observations_dict:
         observations = observations_dict.get(j)
         magnitude_list.append(observations['photometry']['mag'])
-        azimuth_list.append((observations['coords']['horizontal']['az'] - 180) % 360 - 180 )
+        azimuth_list.append(((observations['coords']['horizontal']['az'] - 180) % 360) - 180 )
         elevation_list.append(observations['coords']['horizontal']['el'])
         r = observations['coords']['equatorial']['ra']
         d = observations['coords']['equatorial']['dec']
