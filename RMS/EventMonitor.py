@@ -4822,7 +4822,7 @@ if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser(description="""Check a web page for trajectories, and upload relevant data. \
         """, formatter_class=argparse.RawTextHelpFormatter)
 
-    arg_parser.add_argument('-c', '--config', nargs=*, metavar='CONFIG_PATH', type=str,
+    arg_parser.add_argument('-c', '--config', metavar='CONFIG_PATH', type=str,
                             help="Path to a config file which will be used instead of the default one.")
 
     arg_parser.add_argument('-o', '--oneshot', dest='one_shot', default=False, action="store_true",
