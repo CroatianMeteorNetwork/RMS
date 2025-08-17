@@ -3767,7 +3767,7 @@ def createThumbnails(config, r, d, earliest_jd=0, latest_jd=np.inf, max_thumbnai
     thumbnail_list = []
     fits_len = len(path_coords_list)
     if write_log:
-        if fits_len == 0
+        if fits_len == 0:
             log.info("Did not find ra, dec {:.2f},{:.2f}".format(r, d, fits_len))
         elif fits_len == 1:
             log.info("Found ra,dec ({:.2f},{:.2f}) degrees in {} fits file".format(r, d, fits_len))
