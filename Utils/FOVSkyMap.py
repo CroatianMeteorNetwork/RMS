@@ -7,8 +7,9 @@ from matplotlib.ticker import StrMethodFormatter
 from RMS.Routines.FOVArea import fovArea
 from RMS.Routines.FOVSkyArea import fovSkyArea
 
-from RMS.Astrometry.Conversions import latLonAlt2ECEF, ECEF2AltAz, raDec2AltAz, datetime2JD
+from RMS.Astrometry.Conversions import latLonAlt2ECEF, ECEF2AltAz, raDec2AltAz, datetime2JD, jd2Date
 import ephem
+import os
 
 # Approximate duration of a lunar month in seconds
 LUNAR_MONTH_PERIOD_SECONDS = int(29.5 * 24 * 60 * 60)
@@ -108,10 +109,10 @@ def plotSun(ax, configs, show_sun, station_code, sun_plotted):
             ax.scatter(sun_azim_list, sun_elev_list, color='yellow')
     return sun_plotted
 
-def plotRaDec(ax, configs, show_radec, radec_list, radec_name_list, station_code, radec_plotted):
+def plotRaDec(ax, configs, show_radec, radec_list, radec_name_list, station_code, radec_plotted, jd_start=None, jd_end=None):
 
     """
-        Plots the position of a radec point every minute for the next 24 hours, as long as Sun is
+        Plots the position of a radec point every minute for the next 24 hours, or jd range specified, as long as Sun is
         below local horizon
 
         Arguments:
@@ -120,6 +121,10 @@ def plotRaDec(ax, configs, show_radec, radec_list, radec_name_list, station_code
             show_radec: [bool] whether to show radec
             station_code: [str] station code
             radec_plotted: [bool] if True, radec will not be plotted again, if False, radec will be plotted
+
+        Keyword arguments:
+            jd_start: Optional, default None, start of the jd range to plot the radec
+            jd_end: Optional, default None, start of the jd range to plot the radec
 
         Return:
             radec_plotted: [bool] Generally returned true, unless the sun never set, or the object
@@ -133,15 +138,21 @@ def plotRaDec(ax, configs, show_radec, radec_list, radec_name_list, station_code
         o.long = str(c.longitude)
         o.elevation = c.elevation
 
-        # Use the current time
-        current_time = datetime.datetime.now(datetime.timezone.utc)
+        if jd_start is None or jd_end is None:
+            # Use the current time
+            start_time = datetime.datetime.now(datetime.timezone.utc)
+            duration_seconds = DAY_IN_SECONDS
+        else:
+            start_time = jd2Date(jd_start, UT_corr=0, dt_obj=True)
+            end_time = jd2Date(jd_end, UT_corr=0, dt_obj=True)
+            duration_seconds = (end_time - start_time).total_seconds()
 
         # Title the plot. If only RADEC is give, then put that in the title.
         if len(radec_name_list) == 1 and len(radec_list):
-            ax.set_title("Plot of {} RADEC ({:.1f},{:.1f}) degrees starting at {} ".format(radec_name_list[0], radec_list[0][0], radec_list[0][1], current_time.replace(microsecond=0)), fontsize=10)
+            ax.set_title("Plot of {} RADEC ({:.1f},{:.1f}) degrees starting at {} ".format(radec_name_list[0], radec_list[0][0], radec_list[0][1], start_time.replace(microsecond=0)), fontsize=10)
         else:
             ax.set_title(
-                "Plot of {} objects starting at {} ".format(len(radec_name_list), current_time.replace(microsecond=0)), fontsize=10)
+                "Plot of {} objects starting at {} ".format(len(radec_name_list), start_time.replace(microsecond=0)), fontsize=10)
 
         object_rise, object_set = False, False
         for radec, radec_name in zip(radec_list, radec_name_list):
@@ -149,10 +160,10 @@ def plotRaDec(ax, configs, show_radec, radec_list, radec_name_list, station_code
             change_state, plot_arrow, plot_count, last_values_initialized = True, False, 1, False
             last_plotted_initialized = False
 
-            for elapsed_time in range(0, DAY_IN_SECONDS, 60):
+            for elapsed_time in range(0, duration_seconds, 60):
 
                 # Initialize the observer
-                time_to_evaluate = current_time + datetime.timedelta(seconds=elapsed_time)
+                time_to_evaluate = start_time + datetime.timedelta(seconds=elapsed_time)
                 time_str = time_to_evaluate.strftime('%H:%M')
                 o.date = time_to_evaluate
                 sun = ephem.Sun(o)
@@ -175,8 +186,9 @@ def plotRaDec(ax, configs, show_radec, radec_list, radec_name_list, station_code
                                     xytext=start,
                                     arrowprops=dict(arrowstyle='->', color='orange', lw=2))
                         plot_count = 0
-                    # Annotate the plot with information at dusk, dawn, and each rise and set of the object
-                    if last_values_initialized:
+                    # Annotate the plot with information at dusk, dawn, and each rise and set of the object, provided
+                    # plot is not more than 1.5 days
+                    if last_values_initialized and duration_seconds < 1.5 * DAY_IN_SECONDS:
                         if change_state:
                             change_state = False
 
@@ -213,10 +225,11 @@ def plotRaDec(ax, configs, show_radec, radec_list, radec_name_list, station_code
                     radec_elev_list.append(el)
 
                     # Store previous plotted values to use for arrow directions etc
-                    last_plotted_az, _last_plotted_az = az, _az
-                    last_plotted_el, _last_plotted_el = el, _el
-                    last_plotted_sun_alt, last_plotted_time_str = sun.alt, time_str
-                    last_plotted_initialized = True
+                    if last_values_initialized:
+                        last_plotted_az, _last_plotted_az = az, _az
+                        last_plotted_el, _last_plotted_el = el, _el
+                        last_plotted_sun_alt, last_plotted_time_str = sun.alt, time_str
+                        last_plotted_initialized = True
 
                     # Increment the plot counter, used for plotting arrows
                     plot_count += 1
@@ -251,7 +264,7 @@ def plotRaDec(ax, configs, show_radec, radec_list, radec_name_list, station_code
 def plotFOVSkyMap(platepars, configs, out_dir, north_up=False, show_pointing=False, show_fov=False,
                   rotate_text=False, flip_text=False, show_ip=False, show_coordinates=False, masks=None,
                   output_file_name="fov_sky_map.png", show_sun=False, show_moon=False,
-                  show_radec=False, radec_list=[], radec_name_list=[]):
+                  show_radec=False, radec_list=[], radec_name_list=[], jd_start=None, jd_end=None):
     """ Plot all given platepar files on an Alt/Az sky map.
 
 
@@ -372,7 +385,7 @@ def plotFOVSkyMap(platepars, configs, out_dir, north_up=False, show_pointing=Fal
 
         sun_plotted = plotSun(ax, configs, show_sun, station_code, sun_plotted)
         moon_plotted = plotMoon(ax, configs, show_moon, station_code, moon_plotted)
-        radec_plotted = plotRaDec(ax, configs, show_radec, radec_list, radec_name_list, station_code, radec_plotted)
+        radec_plotted = plotRaDec(ax, configs, show_radec, radec_list, radec_name_list, station_code, radec_plotted, jd_start, jd_end)
 
         if station_code in configs:
             c = configs[station_code]
@@ -566,7 +579,7 @@ if __name__ == "__main__":
                   flip_text=cml_args.flip_text, output_file_name=output_file_name,
                   show_ip=cml_args.show_ip, show_coordinates=cml_args.show_coordinates,
                   show_sun=cml_args.show_sun, show_moon=cml_args.show_moon,
-                  show_radec=show_radec, radec_list=radec_list, radec_name_list=radec_name_list)
+                  show_radec=show_radec, radec_list=radec_list, radec_name_list=radec_name_list, jd_start=None, jd_end=None)
 
 
 
