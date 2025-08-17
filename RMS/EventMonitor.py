@@ -2985,7 +2985,7 @@ def getFitsPaths(path_to_search, jd_start, jd_end=None, prefix="FF", extension="
     return fits_paths
 
 
-def dictMagsRaDec(config, r, d, e_jd=0, l_jd=np.inf):
+def dictMagsRaDec(config, r, d, e_jd=0, l_jd=np.inf, max_number_of_images=2000):
     """
     Given a config, radec and an optional JD range, return a dictionary of observation information.
 
@@ -3011,13 +3011,24 @@ def dictMagsRaDec(config, r, d, e_jd=0, l_jd=np.inf):
     number_of_directories_to_search, directories_searched = len(directories_to_search), 0
     for search_dir in directories_to_search:
         image_count = 0
+        keys_of_images_list = []
         for j in observation_sequence_dict:
             if 'pixels' in observation_sequence_dict[j]:
                 image_count += 1
+                keys_of_images_list.append(j)
 
-        if image_count > 1000:
-            log.info("Sequence dict is getting dangerously large - aborting at {} images".format(image_count))
-            break
+        if image_count > max_number_of_images:
+            log.info("Sequence dict contains {} images, deleting {} images to reach {}"
+                     .format(image_count, image_count - max_number_of_images, max_number_of_images))
+
+            while image_count > max_number_of_images:
+                random_image_key = random.choice(keys_of_images_list)
+                image_count -= 1
+                value = observation_sequence_dict.pop(random_image_key)
+                index_from_image_list = keys_of_images_list.index(random_image_key)
+                keys_of_images_list.pop(index_from_image_list)
+                del random_image_key, value
+
         else:
             log.info("Sequence dict has {} images".format(image_count))
 
@@ -3727,7 +3738,7 @@ def getFitsPathsAndCoordsRadec(config, earliest_jd, latest_jd, r=None, d=None):
 
     return fits_paths_and_coordinates
 
-def createThumbnails(config, r, d, earliest_jd=0, latest_jd=np.inf, max_thumbnails=100):
+def createThumbnails(config, r, d, earliest_jd=0, latest_jd=np.inf, max_thumbnails=1000):
     """
     Create thumbnails of an object excised from fits files between earliest and latest JD.
 
