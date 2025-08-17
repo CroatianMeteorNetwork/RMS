@@ -2229,7 +2229,7 @@ class EventMonitor(multiprocessing.Process):
                     file_list.append(magnitudes_azimuth_chart_file_path)
 
 
-
+                log.info("Started work on azimuth elevation chart")
                 magnitudes_azimuth_elevation_chart_file_path = dictToMagnitudeAzimuthElevationPlot(sys_con, pp, mags_radec_dict, e,
                                                                                     file_path=magnitudes_azimuth_elevation_chart_file_path)
 
@@ -2523,6 +2523,7 @@ def dictToMagnitudeAzimuthElevationPlot(config, pp, observations_dict, event, fi
         file_path: [str] Path to the location where the file was actually saved.
     """
 
+    log.info("Entered dictToMag function")
     magnitude_list, azimuth_list, elevation_list = [], [], []
     if not len(observations_dict):
         return None
@@ -2530,21 +2531,21 @@ def dictToMagnitudeAzimuthElevationPlot(config, pp, observations_dict, event, fi
     # Initialise variables
     r, d, plt = 0,0, None
 
+    log.info("Working on {} observations".format(len(observations_dict)))
     for j in observations_dict:
         observations = observations_dict.get(j)
         magnitude_list.append(observations['photometry']['mag'])
-
         azimuth_list.append((observations['coords']['horizontal']['az'] - 180) % 360 - 180 )
         elevation_list.append(observations['coords']['horizontal']['el'])
-        #azimuth_list.append((observations['coords']['image_coords_from_calstar']['x'])) # - 180) % 360 - 180)
-        #elevation_list.append(observations['coords']['image_coords_from_calstar']['y'])
         r = observations['coords']['equatorial']['ra']
         d = observations['coords']['equatorial']['dec']
 
+    log.info("Calling render")
     plt, fn = renderMagnitudeAzElPlot(config, pp, magnitude_list, azimuth_list, elevation_list, event.jd_start, event.jd_end, round(r, 2), round(d, 2))
 
+    log.info("Starting plotting")
     if plt is None:
-        print("No observations found - cannot plot")
+        log.info("No observations found - cannot plot")
         return
     else:
         file_path = fn if file_path is None else file_path
@@ -2574,8 +2575,9 @@ def renderMagnitudeAzElPlot(config, pp, magnitude_list, az_list, el_list , e_jd,
         plot_filename: [str] Filename where the plot was saved.
     """
 
-
+    log.info("Entered render")
     if len(magnitude_list):
+        log.info("Working on {} data points".format(len(magnitude_list)))
         x_vals, y_vals, jd_vals = [], [], []
         plot_filename = "{}_r_{}_d_{}_jd_{}_{}_magnitude_azimuth_elevation.{}".format(config.stationID, r, d, e_jd, l_jd, plot_format)
 
@@ -2585,7 +2587,9 @@ def renderMagnitudeAzElPlot(config, pp, magnitude_list, az_list, el_list , e_jd,
         for azimuth in az_list:
             x_vals.append(azimuth - pp.az_centre)
 
+        log.info("Constructing title")
         title = "{} plot of magnitudes against azimuth and elevation at RA {} Dec {} between jd {:2f} and {:2f}".format(config.stationID,r, d, e_jd, l_jd)
+        log.info(title)
         plt.figure(figsize=(areaToGoldenRatioXY(16 * 12, rotate=True)))
 
         plt.plot(marker='o', edgecolor='k', label='Magnitude', s=100, c='none', zorder=3)
@@ -2595,10 +2599,12 @@ def renderMagnitudeAzElPlot(config, pp, magnitude_list, az_list, el_list , e_jd,
         plt.xlabel("Azimuth normalised to camera pointing of {:.1f} degrees +ve from North".format(pp.az_centre))
         plt.ylabel("Elevation normalised to camera pointing of {:.1f} degrees above horizon".format(pp.alt_centre))
 
+        log.info("About to plot")
         plt.title(title)
         return plt, plot_filename
 
     else:
+        log.info("Wento the the None, None path")
         return None, None
 
 
@@ -3685,7 +3691,7 @@ def getFitsPathsAndCoordsRadec(config, earliest_jd, latest_jd, r=None, d=None):
     stationID = config.stationID
 
 
-    fits_paths_and_coordinates = []
+    fits_paths_and_coordinates, mask = [], None
     for directory in directories_to_search:
         mask_path = os.path.join(directory, config.mask_file)
         default_mask_path = os.path.join(getRmsRootDir(), config.mask_file)
@@ -4771,8 +4777,6 @@ def testIndividuals(logging = True):
         log.error("GC Dist failed test")
         individuals_success = False
 
-
-
     if testEventToECEFVector():
         if logging:
             log.info("eventToECEFVector passed tests")
@@ -4818,7 +4822,7 @@ if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser(description="""Check a web page for trajectories, and upload relevant data. \
         """, formatter_class=argparse.RawTextHelpFormatter)
 
-    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
+    arg_parser.add_argument('-c', '--config', nargs=*, metavar='CONFIG_PATH', type=str,
                             help="Path to a config file which will be used instead of the default one.")
 
     arg_parser.add_argument('-o', '--oneshot', dest='one_shot', default=False, action="store_true",
@@ -4838,7 +4842,7 @@ if __name__ == "__main__":
 
     # Load the config file
     if cml_args.config is None:
-        syscon = cr.loadConfigFromDirectory(os.path.abspath('.'))
+        syscon = cr.parse(os.path.join(os.getcwd(),".config"))
     else:
         syscon = cr.parse(os.path.expanduser(cml_args.config[0]))
     # Set the web page to monitor
