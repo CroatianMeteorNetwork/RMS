@@ -2985,7 +2985,7 @@ def getFitsPaths(path_to_search, jd_start, jd_end=None, prefix="FF", extension="
     return fits_paths
 
 
-def dictMagsRaDec(config, r, d, e_jd=0, l_jd=np.inf, max_number_of_images=2000):
+def dictMagsRaDec(config, r, d, e_jd=0, l_jd=np.inf, max_number_of_images=2000, write_log=False):
     """
     Given a config, radec and an optional JD range, return a dictionary of observation information.
 
@@ -2995,8 +2995,9 @@ def dictMagsRaDec(config, r, d, e_jd=0, l_jd=np.inf, max_number_of_images=2000):
         d: [float] Declination, degrees.
 
     Keyword arguments:
-        e_jd: Earliest Julian date, optional default 0.
-        l_jd: Latest Julian date, optional default infinity.
+        e_jd: [float] Earliest Julian date, optional default 0.
+        l_jd: [float] Latest Julian date, optional default infinity.
+        write_log: [bool] Optional, default falsem, write to logs
 
     Return:
         observation_sequence_dict: [dict] JD is key, contains information about observations.
@@ -3030,7 +3031,8 @@ def dictMagsRaDec(config, r, d, e_jd=0, l_jd=np.inf, max_number_of_images=2000):
                 del random_image_key, value
 
         else:
-            log.info("Sequence dict has {} images".format(image_count))
+            if write_log:
+                log.info("Sequence dict has {} images".format(image_count))
 
         dir_jd = rmsTimeExtractor(search_dir, asJD=True)
         directories_searched += 1
@@ -3095,7 +3097,8 @@ def dictMagsRaDec(config, r, d, e_jd=0, l_jd=np.inf, max_number_of_images=2000):
 
 
         if dict_from_calstar is not None:
-            log.info("Sequence dict update start - total entries {}".format(len(observation_sequence_dict)))
+            if write_log:
+                log.info("Sequence dict update start - total entries {}".format(len(observation_sequence_dict)))
             observation_sequence_dict.update(dict_from_calstar)
 
     return observation_sequence_dict
@@ -3103,7 +3106,7 @@ def dictMagsRaDec(config, r, d, e_jd=0, l_jd=np.inf, max_number_of_images=2000):
 
 
 def calstarRaDecToDict(data_dir_path, config, pp, pp_recal_json, r_target, d_target, e_jd, l_jd, calstar,
-                       search_sky_radius_degrees=1, centre_on_calstar_coords=True):
+                       search_sky_radius_degrees=1, centre_on_calstar_coords=True, write_log=False):
     """
     Return a dictionary of information about observations drawn from radec files, and excised images from fits files.
 
@@ -3266,11 +3269,11 @@ def calstarRaDecToDict(data_dir_path, config, pp, pp_recal_json, r_target, d_tar
                     total_observations += 1
 
 
-
-    log.info("From this directory:")
-    log.info("  Observations with images    {}".format(observations_with_image_count))
-    log.info("  Observations without images {}".format(observations_without_image_count))
-    log.info("  Total observations:         {}".format(total_observations))
+    if write_log:
+        log.info("From this directory:")
+        log.info("  Observations with images    {}".format(observations_with_image_count))
+        log.info("  Observations without images {}".format(observations_without_image_count))
+        log.info("  Total observations:         {}".format(total_observations))
 
     return sequence_dict
 
