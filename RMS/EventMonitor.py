@@ -2199,7 +2199,7 @@ class EventMonitor(multiprocessing.Process):
                 file_list.append(thumbnail_file_path)
 
             json_name = os.path.join(radec_event_dir, "{}.{}".format(e.suffix,"json"))
-            mags_radec_dict = dictMagsRaDec(sys_con, e.ra, e.dec, e.jd_start, e.jd_end, write_log=True)
+            mags_radec_dict = dictMagsRaDec(sys_con, e.ra, e.dec, e.jd_start, e.jd_end, write_log=False)
 
             if thumbnail_file_path is not None:
 
