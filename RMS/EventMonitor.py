@@ -3084,8 +3084,6 @@ def dictMagsRaDec(config, r, d, e_jd=0, l_jd=np.inf, max_number_of_images=2000, 
         calstar_name = "CALSTARS_{}_{}_{}_{}.txt".format(config.stationID,session_date, session_time, session_microseconds)
         full_path_calstar = os.path.join(search_dir, calstar_name)
         if os.path.exists(full_path_calstar):
-            if write_log:
-                log.info("Reading in {}".format(os.path.basename(full_path_calstar)))
             calstars_path, calstars_name = os.path.dirname(full_path_calstar), os.path.basename(full_path_calstar)
             calstar = readCALSTARS(calstars_path, calstars_name)
 
@@ -3184,8 +3182,11 @@ def calstarRaDecToDict(data_dir_path, config, pp, pp_recal_json, r_target, d_tar
             radius = np.hypot(y - pp.Y_res / 2, x - pp.X_res / 2)
             actual_deviation_degrees = angularSeparationDeg(r_target, d_target, r, d)
             vignetting, offset = pp.vignetting_coeff, pp.mag_lev
-            mag_recalc = 0 - 2.5 * np.log10(correctVignetting(intens_sum, radius, vignetting)) + offset
-            mag_recalc = extinctionCorrectionApparentToTrue([mag_recalc], [x], [y], j, pp)[0]
+            if correctVignetting(intens_sum, radius, vignetting) > 0.00001
+                mag_recalc = 0 - 2.5 * np.log10(correctVignetting(intens_sum, radius, vignetting)) + offset
+                mag_recalc = extinctionCorrectionApparentToTrue([mag_recalc], [x], [y], j, pp)[0]
+            else:
+                mag_recalc = 0
 
             if mag == np.inf or actual_deviation_degrees >= search_sky_radius_degrees:
                 continue
