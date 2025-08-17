@@ -1821,7 +1821,7 @@ class EventMonitor(multiprocessing.Process):
                     pack_size += os.path.getsize(file)
                 else:
                     log.info("File {} was not found, not adding to size.".format(file))
-        if write.log:
+        if write_log:
             log.info("File pack ({:.0f}MB) assembly started".format(pack_size/1024/1024))
 
         # Don't upload things which are too large
@@ -2322,9 +2322,7 @@ class EventMonitor(multiprocessing.Process):
                 if in_future:
                     continue
             elif observed_event.jd_start != 0 and observed_event.jd_end !=0:
-                log.info("JD start and end specified {}, {}.".format(observed_event.jd_start, observed_event.jd_end))
                 if observed_event.ra != 0 and observed_event.dec !=0:
-                    log.info("Ra and Dec specified".format(observed_event.ra, observed_event.dec))
                     future_events, in_future = self.processRaDecEvent(observed_event, future_events, ev_con, check_time_start, test_mode)
                     if in_future:
                         continue
@@ -3019,7 +3017,7 @@ def dictMagsRaDec(config, r, d, e_jd=0, l_jd=np.inf, max_number_of_images=2000, 
 
         if image_count > max_number_of_images:
             if write_log:
-                log.info("Sequence dict contains {} images, deleting {} images to reach {}"
+                log.info("Sequence dict contains {} images, deleting {} images, selected at random to reach {}"
                      .format(image_count, image_count - max_number_of_images, max_number_of_images))
 
             while image_count > max_number_of_images:
@@ -3100,8 +3098,6 @@ def dictMagsRaDec(config, r, d, e_jd=0, l_jd=np.inf, max_number_of_images=2000, 
 
 
         if dict_from_calstar is not None:
-            if write_log:
-                log.info("Sequence dict update start - total entries {}".format(len(observation_sequence_dict)))
             observation_sequence_dict.update(dict_from_calstar)
 
     return observation_sequence_dict
