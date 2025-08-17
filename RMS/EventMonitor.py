@@ -3074,7 +3074,8 @@ def dictMagsRaDec(config, r, d, e_jd=0, l_jd=np.inf, max_number_of_images=2000, 
         else:
             continue
 
-        log.info("Searching directory {} jd={:.2f}, {} of {} for radec:({:.1f},{:.1f}) degrees, camera az,el:({:.1f},{:.1f}) degrees"
+        if write_log:
+            log.info("Searching directory {} jd={:.2f}, {} of {} for radec:({:.1f},{:.1f}) degrees, camera az,el:({:.1f},{:.1f}) degrees"
                  .format(os.path.basename(search_dir), dir_jd, directories_searched, number_of_directories_to_search, r,
                          d, pp.az_centre, pp.alt_centre))
 
@@ -3085,12 +3086,14 @@ def dictMagsRaDec(config, r, d, e_jd=0, l_jd=np.inf, max_number_of_images=2000, 
         calstar_name = "CALSTARS_{}_{}_{}_{}.txt".format(config.stationID,session_date, session_time, session_microseconds)
         full_path_calstar = os.path.join(search_dir, calstar_name)
         if os.path.exists(full_path_calstar):
-            log.info("Reading in {}".format(os.path.basename(full_path_calstar)))
+            if write_log:
+                log.info("Reading in {}".format(os.path.basename(full_path_calstar)))
             calstars_path, calstars_name = os.path.dirname(full_path_calstar), os.path.basename(full_path_calstar)
             calstar = readCALSTARS(calstars_path, calstars_name)
 
         else:
-            log.warnings("Did not find {:s} in {:s}".format(calstar_name, search_dir))
+            if write_log:
+                log.warnings("Did not find {:s} in {:s}".format(calstar_name, search_dir))
             continue
 
         dict_from_calstar = calstarRaDecToDict(full_path, config, pp, pp_recal_json, r, d, e_jd, l_jd, calstar)
@@ -3128,19 +3131,22 @@ def calstarRaDecToDict(data_dir_path, config, pp, pp_recal_json, r_target, d_tar
     Return:
         sequence_dict: [dict] Key JD of observation information from this station.
     """
-    log.info("Search CALSTARS file for ra,dec:({:.2f},{:.2f})".format(r_target, d_target))
+
+    if write_log:
+        log.info("Search CALSTARS file for ra,dec:({:.2f},{:.2f})".format(r_target, d_target))
     observations_with_image_count, observations_without_image_count, total_observations = 0, 0, 0
     captured_directory_path = os.path.join(config.data_dir, config.captured_dir)
     candidate_fits = filterCalstarByJD(calstar, config, e_jd, l_jd)
 
-
-    log.info("Processing {} candidate fits files".format(len(candidate_fits)))
+    if write_log:
+        log.info("Processing {} candidate fits files".format(len(candidate_fits)))
     sequence_dict = dict()
     iteration_counter, step = 0, round(len(candidate_fits) / 5)
     for fits_file, star_list in candidate_fits:
         iteration_counter += 1
         if iteration_counter % step == 0:
-            log.info("Working on fits {} of {}".format(iteration_counter, len(candidate_fits)))
+            if write_log:
+                log.info("Working on fits {} of {}".format(iteration_counter, len(candidate_fits)))
         date_time, jd = rmsTimeExtractor(fits_file, asTuple=True)
         if pp_recal_json is not None:
             if fits_file in pp_recal_json:
@@ -3973,7 +3979,7 @@ def filterDirByJD(directory_path, config, e_jd, l_jd):
 
     return filtered_fits
 
-def filterDirectoriesByJD(path, earliest_jd, latest_jd = None):
+def filterDirectoriesByJD(path, earliest_jd, latest_jd = None, write_log=False):
 
     """
     Returns a list of directories inclusive of the earliest and latest jd
@@ -3987,7 +3993,8 @@ def filterDirectoriesByJD(path, earliest_jd, latest_jd = None):
         earliest_jd [float]: earliest jd to include.
 
     Keyword arugments:
-        latest_jd [float]: latest jd to include, if none then only the directory containing earliest is returned
+        latest_jd: [float] latest jd to include, if none then only the directory containing earliest is returned
+        write_logs: [bool] optional, default False, write logs
 
     Return:
         filtered list of directories
@@ -4014,7 +4021,8 @@ def filterDirectoriesByJD(path, earliest_jd, latest_jd = None):
 
         # If the start time of this directory is less than the latest_target append to the list
         if jd_dir < latest_jd:
-            #log.info("Directory {} has a jd of {}, adding.".format(directory, jd_dir))
+            if write_log:
+                log.info("Directory {} has a jd of {}, adding.".format(directory, jd_dir))
             filtered_by_jd.append(directory)
 
         # As soon as a directory has been added which is before the earliest_jd
@@ -4025,10 +4033,12 @@ def filterDirectoriesByJD(path, earliest_jd, latest_jd = None):
 
     # Sort the list so that the oldest is at the top.
     filtered_by_jd.sort()
-    #log.info("Searched for directories between jd {:.2f}, {:.2f}".format(earliest_jd, latest_jd))
+    if write_log:
+        log.info("Searched for directories between jd {:.2f}, {:.2f}".format(earliest_jd, latest_jd))
     for directory in filtered_by_jd:
         jd_dir = rmsTimeExtractor(directory, asJD=True)
-        #log.info("Directory {} has a jd of {:.2f}, between {:.2f} and {:.2f} added".format(os.path.basename(directory), jd_dir, earliest_jd, latest_jd))
+        if write_log:
+            log.info("Directory {} has a jd of {:.2f}, between {:.2f} and {:.2f} added".format(os.path.basename(directory), jd_dir, earliest_jd, latest_jd))
 
     return filtered_by_jd
 
