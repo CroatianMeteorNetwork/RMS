@@ -1658,8 +1658,8 @@ class EventMonitor(multiprocessing.Process):
         file_list = []
 
         file_list += self.findEventFiles(event, self.getDirectoryList(event), [".fits", ".bin"])
-        #have to use system .config file_name here because we have not yet identified the files for the event
-        #log.info("Using {} as .config file name".format(self.syscon.config_file_name))
+        
+        # Have to use system .config file_name here because we have not yet identified the files for the event
         if len(self.getDirectoryList(event)) > 0:
             file_list += self.getFile(os.path.basename(self.syscon.config_file_name), self.getDirectoryList(event)[0])
             file_list += [self.getPlateparFilePath(event)]
@@ -1758,7 +1758,7 @@ class EventMonitor(multiprocessing.Process):
         pts_in_FOV, sta_dist, sta_ang, end_dist, end_ang, fov_RA, fov_DEC = self.trajectoryVisible(rp, event)
         return pts_in_FOV, sta_dist, sta_ang, end_dist, end_ang, fov_RA, fov_DEC
 
-    def doUpload(self, event, evcon, file_list, keep_files=False, no_upload=False, test_mode=False):
+    def doUpload(self, event, evcon, file_list, keep_files=False, no_upload=False, test_mode=False, write_log=False):
 
         """Move all the files to a single directory. Make MP4s, stacks and jpgs
            Archive into a bz2 file and upload, using paramiko. Delete all working folders.
@@ -1798,7 +1798,8 @@ class EventMonitor(multiprocessing.Process):
                                 .format(sanitise(evcon.network_name),sanitise(evcon.camera_group_name), this_event_directory))
         else:
             this_event_directory = os.path.join(event_monitor_directory, upload_filename, sanitise(evcon.stationID))
-            log.info("Network and group not defined so creating {}".format(this_event_directory))
+            if write_log:
+                log.info("Network and group not defined so creating {}".format(this_event_directory))
 
         # get rid of the eventdirectory, should never be needed
         if not keep_files:
@@ -1820,23 +1821,28 @@ class EventMonitor(multiprocessing.Process):
                     pack_size += os.path.getsize(file)
                 else:
                     log.info("File {} was not found, not adding to size.".format(file))
-        log.info("File pack ({:.0f}MB) assembly started".format(pack_size/1024/1024))
+        if write.log:
+            log.info("File pack ({:.0f}MB) assembly started".format(pack_size/1024/1024))
 
         # Don't upload things which are too large
         if pack_size > 1000*1024*1024:
-            log.error("File pack too large")
+            log.warning("File pack too large")
             return False
 
         for file in file_list:
             if file is None:
-                log.info("None file passed - ignoring")
+                if write_log:
+                    log.info("None file passed - ignoring")
             else:
                 if os.path.exists(file):
-                    log.info("Adding {} to payload at {}".format(os.path.basename(file), os.path.basename(this_event_directory)))
+                    if write_log:
+                        log.info("Adding {} to payload at {}".format(os.path.basename(file), os.path.basename(this_event_directory)))
                     shutil.copy(file, this_event_directory)
                 else:
-                    log.info("Not adding {} to payload as file not found".format(file))
-        log.info("File pack assembled")
+                    if write_log:
+                        log.info("Not adding {} to payload as file not found".format(file))
+        if write_log:
+            log.info("File pack assembled")
 
         stackFFs(this_event_directory, "jpg", captured_stack=True, print_progress=False)
 
@@ -1850,10 +1856,12 @@ class EventMonitor(multiprocessing.Process):
                 ff_file = convertFRNameToFF(fr_file)
 
                 try:
-                    log.info("this_event_directory {}".format(this_event_directory))
-                    log.info("ff_file {}, fr_file {}".format(ff_file, fr_file))
+                    if write_log:
+                        log.info("this_event_directory {}".format(this_event_directory))
+                        log.info("ff_file {}, fr_file {}".format(ff_file, fr_file))
                     view(this_event_directory, ff_file, fr_file, self.syscon, hide=True, add_timestamp=True, extract_format="mp4")
                 except:
+            
                     log.error("Converting {} to mp4 failed".format(file))
                     log.error("this_event_directory {}".format(this_event_directory))
                     log.error("convertFRNameToFF {}".format(ff_file))
@@ -1873,12 +1881,13 @@ class EventMonitor(multiprocessing.Process):
 
         if not test_mode:
             if os.path.isdir(event_monitor_directory) and upload_filename != "":
-             log.info("Making archive of {}".format(os.path.join(event_monitor_directory, upload_filename)))
-             base_name = os.path.join(event_monitor_directory,upload_filename)
-             root_dir = os.path.join(event_monitor_directory,upload_filename)
-             archive_name = shutil.make_archive(base_name, 'bztar', root_dir, logger=log)
+                if write_log:
+                    log.info("Making archive of {}".format(os.path.join(event_monitor_directory, upload_filename)))
+                base_name = os.path.join(event_monitor_directory,upload_filename)
+                root_dir = os.path.join(event_monitor_directory,upload_filename)
+                archive_name = shutil.make_archive(base_name, 'bztar', root_dir, logger=log)
             else:
-             log.info("Not making an archive of {}, not sensible.".format(os.path.join(event_monitor_directory)))
+                log.info("Not making an archive of {}, not sensible.".format(os.path.join(event_monitor_directory)))
 
         # Remove the directory where the files were assembled
         if not keep_files:
@@ -1893,7 +1902,8 @@ class EventMonitor(multiprocessing.Process):
             # Progressively lengthen the delay time, with some random element
             # Return the status of the upload
             # Don't include a delay before uploading
-            log.info("Upload of {} - first attempt".format(event_monitor_directory))
+            if write_log:
+                log.info("Upload of {} - first attempt".format(event_monitor_directory))
             for retry in range(1,30):
                 archives = glob.glob(os.path.join(event_monitor_directory,"*.bz2"))
 
@@ -2003,9 +2013,11 @@ class EventMonitor(multiprocessing.Process):
                 self.markEventAsProcessed(observed_event)
                 return future_events, in_future
             else:
-                log.info("Event at {} required FR file and file was found".format(observed_event.dt))
+                if write_log:
+                    log.info("Event at {} required FR file and file was found".format(observed_event.dt))
         else:
-            log.info("FR file not required for event at {}".format(observed_event.dt))
+            if write_log:
+                log.info("FR file not required for event at {}".format(observed_event.dt))
 
         # If there is a .config file then parse it as evcon - not the station config
         for file in file_list:
@@ -2028,10 +2040,12 @@ class EventMonitor(multiprocessing.Process):
         event_population = []
         # If we have any standard deviation definitions then create a population of 1000, else create a population of 1
         if observed_event.hasCartSD() or observed_event.hasPolarSD():
-            log.info("Working with standard deviations")
+            if write_log:
+                log.info("Working with standard deviations")
             event_population = observed_event.appendPopulation(event_population, 1000)
         else:
-            log.info("Working without standard deviations")
+            if write_log:
+                log.info("Working without standard deviations")
             event_population = observed_event.appendPopulation(event_population, 1)
 
         # Apply SD to the population
@@ -2044,7 +2058,8 @@ class EventMonitor(multiprocessing.Process):
 
         # Add trajectories with elevations from observed value to 15 deg
         if observed_event.elev_is_max:
-            log.info("Rotating trajectory around observed point")
+            if write_log:
+                log.info("Rotating trajectory around observed point")
             event_population = observed_event.addElevationRange(event_population, observed_event, 15)
 
         # Start testing trajectories from the population
@@ -2178,17 +2193,14 @@ class EventMonitor(multiprocessing.Process):
 
             thumbnail_file_path = saveThumbnailsRaDec(e.ra, e.dec, e.jd_start, e.jd_end, config=sys_con, file_path=thumbnail_file_path)
             if thumbnail_file_path is None:
-                log.info("No thumbnail returned for this event")
-
                 return future_events, in_future
 
             else:
                 file_list.append(thumbnail_file_path)
 
             json_name = os.path.join(radec_event_dir, "{}.{}".format(e.suffix,"json"))
-            mags_radec_dict = dictMagsRaDec(sys_con, e.ra, e.dec, e.jd_start, e.jd_end)
-            log.info("Returned from dictMagsRaDec")
-            log.info("Thumbnail file path {}".format(thumbnail_file_path))
+            mags_radec_dict = dictMagsRaDec(sys_con, e.ra, e.dec, e.jd_start, e.jd_end, write_log=True)
+
             if thumbnail_file_path is not None:
 
 
@@ -2229,7 +2241,7 @@ class EventMonitor(multiprocessing.Process):
                     file_list.append(magnitudes_azimuth_chart_file_path)
 
 
-                log.info("Started work on azimuth elevation chart")
+
                 magnitudes_azimuth_elevation_chart_file_path = dictToMagnitudeAzimuthElevationPlot(sys_con, pp, mags_radec_dict, e,
                                                                                     file_path=magnitudes_azimuth_elevation_chart_file_path)
 
@@ -2523,7 +2535,7 @@ def dictToMagnitudeAzimuthElevationPlot(config, pp, observations_dict, event, fi
         file_path: [str] Path to the location where the file was actually saved.
     """
 
-    log.info("Entered dictToMag function")
+
     magnitude_list, azimuth_list, elevation_list = [], [], []
     if not len(observations_dict):
         return None
@@ -2531,7 +2543,6 @@ def dictToMagnitudeAzimuthElevationPlot(config, pp, observations_dict, event, fi
     # Initialise variables
     r, d, plt = 0,0, None
 
-    log.info("Working on {} observations".format(len(observations_dict)))
     for j in observations_dict:
         observations = observations_dict.get(j)
         magnitude_list.append(observations['photometry']['mag'])
@@ -2539,18 +2550,13 @@ def dictToMagnitudeAzimuthElevationPlot(config, pp, observations_dict, event, fi
         elevation_list.append(observations['coords']['horizontal']['el'])
         r = observations['coords']['equatorial']['ra']
         d = observations['coords']['equatorial']['dec']
-
-    log.info("Calling render")
     plt, fn = renderMagnitudeAzElPlot(config, pp, magnitude_list, azimuth_list, elevation_list, event.jd_start, event.jd_end, round(r, 2), round(d, 2))
 
-    log.info("Starting plotting")
     if plt is None:
-        log.info("No observations found - cannot plot")
         return
     else:
         file_path = fn if file_path is None else file_path
         plt.savefig(file_path)
-        log.info("Magnitude elevation plot saved at {}".format(file_path))
     return file_path
 
 
@@ -2575,9 +2581,7 @@ def renderMagnitudeAzElPlot(config, pp, magnitude_list, az_list, el_list , e_jd,
         plot_filename: [str] Filename where the plot was saved.
     """
 
-    log.info("Entered render")
     if len(magnitude_list):
-        log.info("Working on {} data points".format(len(magnitude_list)))
         x_vals, y_vals, jd_vals = [], [], []
         plot_filename = "{}_r_{}_d_{}_jd_{}_{}_magnitude_azimuth_elevation.{}".format(config.stationID, r, d, e_jd, l_jd, plot_format)
 
@@ -2587,7 +2591,6 @@ def renderMagnitudeAzElPlot(config, pp, magnitude_list, az_list, el_list , e_jd,
         for azimuth in az_list:
             x_vals.append(azimuth - pp.az_centre)
 
-        log.info("Constructing title")
         title = "{} plot of magnitudes against azimuth and elevation at RA {} Dec {} between jd {:2f} and {:2f}".format(config.stationID,r, d, e_jd, l_jd)
         log.info(title)
         plt.figure(figsize=(areaToGoldenRatioXY(16 * 12, rotate=True)))
@@ -2599,12 +2602,11 @@ def renderMagnitudeAzElPlot(config, pp, magnitude_list, az_list, el_list , e_jd,
         plt.xlabel("Azimuth normalised to camera pointing of {:.1f} degrees +ve from North".format(pp.az_centre))
         plt.ylabel("Elevation normalised to camera pointing of {:.1f} degrees above horizon".format(pp.alt_centre))
 
-        log.info("About to plot")
         plt.title(title)
         return plt, plot_filename
 
     else:
-        log.info("Wento the the None, None path")
+
         return None, None
 
 
@@ -2765,7 +2767,6 @@ def renderMagnitudeTimePlot(config, magnitude_list, elevation_list, e_jd, l_jd, 
         plt.gca().invert_yaxis()
         plt.colorbar(label="Elevation from Horizontal (degrees)")
         seconds_of_observation = (max(x_vals) - min(x_vals)).total_seconds()
-        log.info("Seconds of observation is {}".format(seconds_of_observation))
         seconds_of_observation = max(1,seconds_of_observation)
         interval_between_ticks = seconds_of_observation / 6
         tick_offsets = np.arange(0, seconds_of_observation, interval_between_ticks)
@@ -2821,12 +2822,10 @@ def dictToMagnitudeElevationPlot(config, pp, observations_dict, event, file_path
     plt, fn = renderMagnitudeElevationPlot(config, pp, magnitude_list, elevation_list, event.jd_start, event.jd_end, round(r, 2), round(d, 2))
 
     if plt is None:
-        print("No observations found - cannot plot")
         return
     else:
         file_path = fn if file_path is None else file_path
         plt.savefig(file_path)
-        log.info("Magnitude elevation plot saved at {}".format(file_path))
     return file_path
 
 
@@ -2863,12 +2862,12 @@ def dictToMagnitudeAzimuthPlot(config, pp, observations_dict, event, file_path=N
     plt, fn = renderMagnitudeAzimuthPlot(config, pp, magnitude_list, azimuth_list, event.jd_start, event.jd_end, round(r, 2), round(d, 2))
 
     if plt is None:
-        print("No observations found - cannot plot")
+        
         return None
     else:
         file_path = fn if file_path is None else file_path
         plt.savefig(file_path)
-        log.info("Magnitude azimuth plot saved at {}".format(file_path))
+        
     return file_path
 
 
@@ -2909,12 +2908,12 @@ def dictToMagnitudeTimePlot(config, observations_dict, event, file_path=None):
     plt, fn = renderMagnitudeTimePlot(config, magnitude_list, elevation_list, event.jd_start, event.jd_end, round(r, 2), round(d, 2))
 
     if plt is None:
-        print("No observations found - cannot plot")
+        
         return
     else:
         file_path = fn if file_path is None else file_path
         plt.savefig(file_path)
-        log.info("Magnitude plot saved at {}".format(file_path))
+        
     return file_path
 
 
@@ -3019,7 +3018,8 @@ def dictMagsRaDec(config, r, d, e_jd=0, l_jd=np.inf, max_number_of_images=2000, 
                 keys_of_images_list.append(j)
 
         if image_count > max_number_of_images:
-            log.info("Sequence dict contains {} images, deleting {} images to reach {}"
+            if write_log:
+                log.info("Sequence dict contains {} images, deleting {} images to reach {}"
                      .format(image_count, image_count - max_number_of_images, max_number_of_images))
 
             while image_count > max_number_of_images:
@@ -3864,7 +3864,6 @@ def saveThumbnailsRaDec(r, d, e_jd=0, l_jd=np.inf, config=None, file_path=None, 
     else:
         filename = fn if file_path is None else file_path
         plt.savefig(filename)
-        log.info("RaDec thumbnails saved at {}".format(filename))
         return filename
 
 def exciseFromFF(ff, x_centre, y_centre, width = 50, height = 50, allow_drift_in=False):
