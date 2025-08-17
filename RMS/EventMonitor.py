@@ -2980,7 +2980,7 @@ def getFitsPaths(path_to_search, jd_start, jd_end=None, prefix="FF", extension="
     return fits_paths
 
 
-def dictMagsRaDec(config, r, d, e_jd=0, l_jd=np.inf, max_number_of_images=2000, write_log=False):
+def dictMagsRaDec(config, r, d, e_jd=0, l_jd=np.inf, max_number_of_images=300, write_log=False):
     """
     Given a config, radec and an optional JD range, return a dictionary of observation information.
 
@@ -3742,7 +3742,7 @@ def getFitsPathsAndCoordsRadec(config, earliest_jd, latest_jd, r=None, d=None):
 
     return fits_paths_and_coordinates
 
-def createThumbnails(config, r, d, earliest_jd=0, latest_jd=np.inf, max_thumbnails=1000, write_log=False):
+def createThumbnails(config, r, d, earliest_jd=0, latest_jd=np.inf, max_thumbnails=200, write_log=False):
     """
     Create thumbnails of an object excised from fits files between earliest and latest JD.
 
