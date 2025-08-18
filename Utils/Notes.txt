@@ -1,47 +1,49 @@
-TODO:
-    GENERAL:
-        -Put sidebar button to open Astra
-    ASTRA:
-        -Look into correcting photometry pixels post-kalman filter
-    KALMAN:
-
-    PIPELINE:
-        -look into replaceing SNR rejection with model residuals and SNR mix
 
 
-NOTE:
-    -in future versions ASTRA can be configued to run multiple passes to improve quality in low-pick events
-    -getting warnings during ani saving that matplotlib will likely fail out of thread, no errors encountered though.
+ASTRA GUI:
 
-FROM ASTRA:
-SNR update on frame 37: intensity sum =    19935, source px count =   131, background lvl =  2541.00, background stddev =  91.72, SNR = 16.53
-SNR update on frame 38: intensity sum =    33721, source px count =   119, background lvl =  2563.00, background stddev = 131.11, SNR = 21.84
-SNR update on frame 39: intensity sum =    57148, source px count =   135, background lvl =  2566.50, background stddev =  86.27, SNR = 48.15
-SNR update on frame 40: intensity sum =    94929, source px count =   145, background lvl =  2575.00, background stddev = 108.39, SNR = 64.41
-SNR update on frame 41: intensity sum =    88848, source px count =   132, background lvl =  2583.50, background stddev = 103.73, SNR = 65.32
-SNR update on frame 42: intensity sum =    39355, source px count =   125, background lvl =  2591.00, background stddev =  93.85, SNR = 32.52
-SNR update on frame 43: intensity sum =    22107, source px count =   106, background lvl =  2600.00, background stddev =  94.41, SNR = 19.83
-FROM SKYFIT2:
-SNR update: intensity sum =    19935, source px count =   131, background lvl =  2544.00, background stddev =  91.52, SNR = 16.55
-SNR update: intensity sum =    33721, source px count =   119, background lvl =  2561.00, background stddev = 1090.42, SNR = 2.83
-SNR update: intensity sum =    57148, source px count =   135, background lvl =  2568.00, background stddev =  98.09, SNR = 43.80
-SNR update: intensity sum =    94929, source px count =   145, background lvl =  2580.00, background stddev = 489.52, SNR = 16.00
-SNR update: intensity sum =    88848, source px count =   132, background lvl =  2583.00, background stddev = 130.94, SNR = 54.14
-SNR update: intensity sum =    39355, source px count =   125, background lvl =  2597.00, background stddev =  93.85, SNR = 32.52
-SNR update: intensity sum =    22107, source px count =   106, background lvl =  2609.00, background stddev =  94.41, SNR = 19.83
-FROM MANUAL SKYFIT2:
-SNR update: intensity sum =    16136, source px count =    80, background lvl =  2545.00, background stddev =  87.14, SNR = 17.74
-SNR update: intensity sum =    28845, source px count =    77, background lvl =  2560.00, background stddev = 1179.80, SNR = 2.78
-SNR update: intensity sum =    47670, source px count =    75, background lvl =  2570.00, background stddev =  96.23, SNR = 49.30
-SNR update: intensity sum =    81519, source px count =    80, background lvl =  2582.00, background stddev = 149.98, SNR = 56.42
-SNR update: intensity sum =    78553, source px count =    77, background lvl =  2586.00, background stddev = 144.25, SNR = 57.29
-SNR update: intensity sum =    33699, source px count =    77, background lvl =  2597.00, background stddev =  99.75, SNR = 33.70
-SNR update: intensity sum =    18490, source px count =    69, background lvl =  2608.00, background stddev =  96.51, SNR = 20.16
-POST SKYFIT2 STAR MASK FIX:
-SNR update: intensity sum =    19723, source px count =   128, background lvl =  2544.00, background stddev =  91.53, SNR = 16.56
-SNR update: intensity sum =    33498, source px count =   116, background lvl =  2561.00, background stddev = 130.93, SNR = 22.00
-SNR update: intensity sum =    57148, source px count =   135, background lvl =  2568.00, background stddev =  86.27, SNR = 48.15
-SNR update: intensity sum =    94622, source px count =   142, background lvl =  2579.50, background stddev = 105.29, SNR = 66.33
-SNR update: intensity sum =    88848, source px count =   132, background lvl =  2583.00, background stddev = 103.73, SNR = 65.32
-SNR update: intensity sum =    39614, source px count =   128, background lvl =  2597.50, background stddev =  93.77, SNR = 32.37
-SNR update: intensity sum =    22107, source px count =   106, background lvl =  2609.00, background stddev =  94.41, SNR = 19.83
+    Buttons:
+
+    Settings:
+        -second pass std parameter constraint
+        -star background thresholding coeff
+        -SNR reject threshold
+        -Verbose
+
+        
+        PSO Settings
+            -OOB penalty
+            -Options (c1, c2, w)
+            -max itters
+            -n particles
+            -parameter space velocity coeff
+            -ftol
+            -ftol itters
+            -explorative coeff
+        
+        Cropping Settings
+            -padding coeff
+            -init sigma gues
+            -max sigma coeff
+            -max length coeff
+
+        Second pass Settings
+            -oob penalty
+
+        Kalman:
+            -Typ sigma
+            -motonicity
+            -use_accel
+
+    THere is a one frame offset near the start
+
+    !!!NOTE: SNR bkrnd is calculated using AVE in skyfit but was told to use frame in ASTRA
+
+    STEPS:
+        -bugfixing
+        -push low-snr capability
+        -remove star no-picking error
+        -reduce random crashes
+        -clean code
+        -possibly look at filling low-snr points during transit with kalman points
+    -Magnitudes do not match up
