@@ -397,6 +397,20 @@ def setNetworkParam(cam, opts):
 
     elif fld == 'setTimezone':
         val = opts[2]
+        data_dict = cam.get_info("NetWork.NetNTP")
+        print("Data dict: {}".format(data_dict))
+        existing_timezone = data_dict.get('TimeZone')
+        print("Existing timezone: {}".format(existing_timezone))
+        if existing_timezone is not None:
+            if existing_timezone != val:
+                reboot_time = cam.get_info("General.AutoMaintain")['AutoRebootHour']
+                reboot_day = cam.get_info("General.AutoMaintain")['AutoRebootDay']
+                timezone_change = int(val) - existing_timezone
+                reboot_time_compensated = reboot_time - timezone_change
+                log.info('Setting timezone to {}'.format(val))
+                log.info('Consider adjusting camera reboot time of {} to {} using command :'.format(reboot_time, reboot_time_compensated))
+                log.info('  python -m Utils.CameraControl SetAutoReboot {},{}'.format(reboot_day, reboot_time_compensated))
+
         cam.set_info("NetWork.NetNTP.TimeZone", val)
 
     elif fld == 'EnableNTP':
@@ -590,23 +604,36 @@ def setAutoReboot(cam, opts):
     info = cam.get_info("General.AutoMaintain") 
     # print(json.dumps(info, ensure_ascii=False, indent=4, sort_keys=True))
     if len(opts) < 1:
-        log.info('usage: setAutoReboot dayofweek,hour')
+        log.info('usage: SetAutoReboot dayofweek,hour')
         log.info('  where dayofweek is Never EveryDay Monday Tuesday etc')
-        log.info('  and hour is a number between 0 and 23')
+        log.info('  and hour is a number between 0 and 23 or "noon" for station solar noon')
         return
     spls = opts[0].split(',')
     day = spls[0]
     hour = 0
     if len(spls) > 1:
-        hour = int(spls[1])
+        hour = spls[1]
     valid_days = [
         'Everyday','Monday','Tuesday','Wednesday','Thursday','Friday',
         'Saturday','Sunday','Never'
     ]
+
+    if hour == "noon":
+        camera_time_offset = computeCameraTimeOffset(cam)
+        if camera_time_offset is None:
+            log.warning("Unable to retrieve camera time, aborting")
+            return
+        # compute station noon from longitude, and wrap to 24 hour window
+        station_noon_in_utc = int(12 - config.longitude / 15) % 24
+        station_noon_in_machine_time = station_noon_in_utc + camera_time_offset
+        hour = round(station_noon_in_machine_time,0) % 24
+
+    hour = int(hour)
+
     if day not in valid_days or hour < 0 or hour > 23:
         log.info('usage: SetAutoReboot dayofweek,hour')
         log.info('  where dayofweek is Never, Everyday, Monday, Tuesday, Wednesday etc')
-        log.info('  and hour is a number between 0 and 23')
+        log.info('  and hour is a number between 0 and 23 or "noon" for station solar noon')
         return
 
     info["AutoRebootDay"] = day
@@ -781,6 +808,30 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
                     reqtime = datetime.datetime.strptime(opts[1], '%Y%m%d_%H%M%S')
                 except:
                     reqtime = datetime.datetime.now()
+                time_before_adjustment = datetime.datetime.strptime(str(cam.get_time()), '%Y-%m-%d %H:%M:%S')
+                time_increment_hrs = (reqtime - time_before_adjustment).total_seconds() / 3600
+
+                if abs(time_increment_hrs) > 1:
+                    reboot_time = cam.get_info("General.AutoMaintain")['AutoRebootHour']
+                    reboot_day = cam.get_info("General.AutoMaintain")['AutoRebootDay']
+                    reboot_time_compensated = round(reboot_time - time_increment_hrs) % 24
+                    if time_increment_hrs > 0:
+
+                        if round(time_increment_hrs,2) != 1:
+                            log.info("Moving camera clock forwards by {} hours.".format(round(time_increment_hrs,2)))
+                        else:
+                            log.info("Moving camera clock forwards by {} hour.".format(round(time_increment_hrs, 2)))
+                    else:
+
+                        if round(time_increment_hrs,2) != 1:
+                            log.info("Moving camera clock backwards by {} hours.".format(round(time_increment_hrs,2)))
+                        else:
+                            log.info("Moving camera clock backwards by {} hour.".format(round(time_increment_hrs, 2)))
+                    if reboot_time != reboot_time_compensated:
+                        sleep(0.1) # Needed to make the logs get written in the correct order
+                        log.info("Reboot time is hour {}, consider setting to hour {} using command: ".format(reboot_time,reboot_time_compensated))
+                        log.info("  python -m Utils.CameraControl SetAutoReboot {},{}".format(reboot_day, reboot_time_compensated))
+
                 cam.set_time(reqtime)
                 log.info('time set to %s', reqtime)
         else:
@@ -859,6 +910,25 @@ def cameraControlV2(config, cmd, opts=''):
 
     cameraControl(camera_ip, cmd, opts, camera_settings_path=camera_settings_path)
 
+def computeCameraTimeOffset(cam):
+    """
+    Compute camera time offset.
+
+    Returns:
+        Time offset of camera relative to UTC in hours. If the call fails, return None
+    """
+
+    utc_time_naive = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+    try:
+        camera_time_naive = datetime.datetime.strptime(str(cam.get_time()), "%Y-%m-%d %H:%M:%S")
+    except:
+        camera_time_naive = None
+        return None
+
+    camera_time_offset = round((camera_time_naive - utc_time_naive).total_seconds() / 3600,2)
+
+    # wrap to +/- 12
+    return ((camera_time_offset + 12) % 24) - 12
 
 if __name__ == '__main__':
     """Main function
@@ -866,6 +936,8 @@ if __name__ == '__main__':
         command - the command you want to execute
         opts - optional list of fields and a value to pass to SetParam
     """
+
+
 
     # list of supported commands
     cmd_list = [
@@ -921,6 +993,8 @@ if __name__ == '__main__':
     log_manager = LoggingManager()
     log_manager.initLogging(config, log_file_prefix='camControl_')
     log = getLogger("logger")
+
+
 
 
     if cmd not in cmd_list:
