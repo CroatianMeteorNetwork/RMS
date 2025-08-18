@@ -3,7 +3,7 @@ The files are arranged in the same structure as used by the multi-cam linux proj
 
 Extract the files using the command 
 
-tar xf stations.tar.bz2
+tar -xf stations.tar.bz2
 
 And optionally, move the created folder with
 
