@@ -4,9 +4,11 @@ import scipy.optimize
 import scipy.stats
 import scipy.special
 from RMS.Routines.Image import signalToNoise
-from pyswarms.single.global_best import GlobalBestPSO
 from RMS.Routines import Image
 import cv2
+
+# DNOTE: Package not included in RMS install, implement check
+from pyswarms.single.global_best import GlobalBestPSO
 
 class ASTRA:
 
@@ -346,11 +348,7 @@ class ASTRA:
 
         # Estimate the length (take largest value to be safe)
         init_length = np.max([np.linalg.norm(seed_picks_global[0] - seed_picks_global[1]),
-                                np.linalg.norm(seed_picks_global[1] - seed_picks_global[2])])
-        
-        # Determine the omega (angle) based on detapp
-        # NOTE: If a method other than detapp is used, this omega will need to be refined as it is crucial in estimation yet does not differ
-        
+                                np.linalg.norm(seed_picks_global[1] - seed_picks_global[2])])        
 
         # Instantiate omega as a instance variable
         self.omega = omega
@@ -361,7 +359,6 @@ class ASTRA:
         self.directions = directions
 
         # 3) -- Instantiate nessesary instance arrays --
-        # NOTE: times will also need to be here for full DetApp independance
         self.cropped_frames = [None] * len(seed_indices) # (N, w, h) array of cropped frames
         self.first_pass_params = np.zeros((len(seed_indices), 5), dtype=np.float32) # (N, 5) array of first pass parameters (level_sum, height, x0)
         self.crop_vars = np.zeros((len(seed_indices), 6), dtype=np.float32) # (N, 6) array of crop variables (cx, cy, xmin, xmax, ymin, ymax)
@@ -1139,7 +1136,6 @@ class ASTRA:
             raise Exception(f"Error running PSO: {e}")
         
         # Raise warnings if best_pos is out of bounds
-        # NOTE: Change to actual warnings.warning later
         for i, (val, lower, upper) in enumerate(zip(best_pos, bounds[0], bounds[1])):
             if val < lower or val > upper:
                 print(f"Warning: Parameter {i} (value: {val}) is outside the bounds [{lower}, {upper}]")
@@ -1441,7 +1437,6 @@ class ASTRA:
         best_fit, _ = self.GaussianPSO(cropped_frame, omega, directions, estim_next_params=est_next_params)
 
         # Update instance variables with gaussian parameters
-        # NOTE: if there is to be no DetApp reliance pick_frame_indices also needs to be updated to include the frame_index
         if forward_pass:
             self.cropped_frames.append(cropped_frame)
             self.crop_vars = np.vstack([self.crop_vars, crop_vars])

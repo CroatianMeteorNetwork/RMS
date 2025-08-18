@@ -18,6 +18,9 @@ import matplotlib.gridspec as gridspec
 import scipy.optimize
 import pyqtgraph as pg
 import random
+import csv
+import copy
+
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
@@ -52,10 +55,9 @@ import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
 
-import csv
+# DNOTE: local imports since not included in package, change to regular later
 from .ASTRA import ASTRA
-from .ASTRA_GUI import launch_astra_gui, AstraConfigDialog, AstraWorker, KalmanWorker
-import copy
+from .ASTRA_GUI import launchASTRAGUI
 
 
 class QFOVinputDialog(QtWidgets.QDialog):
@@ -3969,9 +3971,9 @@ class PlateTool(QtWidgets.QMainWindow):
         """Opens the ASTRA dialog box on another thread to ensure SkyFit2 responsiveness."""
 
         # Launch the ASTRA Dialog on a seperate thread, with callbacks for buttons
-        self.astra_dialog = launch_astra_gui(
+        self.astra_dialog = launchASTRAGUI(
             run_astra_callback=None,
-            run_kalman_callback=self.run_kalman_from_config,
+            run_kalman_callback=self.runKalmanFromConfig,
             run_load_callback=self.loadPicksFromFile,
             skyfit_instance=self
         )
@@ -4090,17 +4092,17 @@ class PlateTool(QtWidgets.QMainWindow):
         # Enough points for a good run
         if keys.size >= 5:  
             tt = 'Ready to run.'
-            self.astra_dialog.set_kalman_status(True, tt)
+            self.astra_dialog.setKalmanStatus(True, tt)
 
         # Minimum amount of points to run
         elif keys.size >= 3:
             tt = 'Ready to run. WARNING: Kalman should be generally run with at least 5 points.'
-            self.astra_dialog.set_kalman_status("WARN", tt)
+            self.astra_dialog.setKalmanStatus("WARN", tt)
 
         # Not enough points to run
         else:
             tt = 'Not ready. Kalman requires at least 3 points (generally >= 5 points).'
-            self.astra_dialog.set_kalman_status(False, tt)
+            self.astra_dialog.setKalmanStatus(False, tt)
 
     def reverseASTRAPicks(self):
         """Reverts the ASTRA picks to the previous state of picks."""
@@ -4133,10 +4135,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
         if self.previous_picks == []:
             # If previous picks are empty, set revert status to False
-            self.astra_dialog.set_revert_status(False)
+            self.astra_dialog.setRevertStatus(False)
         else:
             # If previous picks are not empty, set revert status to True
-            self.astra_dialog.set_revert_status(True)
+            self.astra_dialog.setRevertStatus(True)
 
     def checkASTRACanRun(self):
         """Checks if ASTRA can be run, updates astra GUI"""
@@ -4182,31 +4184,38 @@ class PlateTool(QtWidgets.QMainWindow):
             middle_points_bool = False
             middle_includes_ends_bool = False
 
+        # True if there are ending points which are not part of any sequence of picks (distinct)
         ending_points_bool = True if (len(keys) >= 2 and keys[0] + 1 != keys[-1]) else False
 
+        # If there are only three points
         if middle_includes_both_ends_bool:
             tt = "Ready to run. WARNING: Three middle picks includes both endpoints, ASTRA will only process the three points"
-            self.astra_dialog.set_astra_status('WARN', tt)
+            self.astra_dialog.setASTRAStatus('WARN', tt)
 
+        # If there are not enough consecutive points
         elif middle_points_bool:
             # Picks include three in middle, and two endpoints
             tt = "Ready to run, there are at least three consecutive points and two endpoints"
-            self.astra_dialog.set_astra_status(True, tt)
+            self.astra_dialog.setASTRAStatus(True, tt)
         
+        # If the three middle points includes one, but not both endpoints
         elif middle_includes_ends_bool:
             # Picks include three in the middle, which are part of the endpoints
             tt = "Ready to run. WARNING: Three consecutive middle points includes end-points - ASTRA will stop at either beginning/end of middle points."
-            self.astra_dialog.set_astra_status('WARN', tt)
+            self.astra_dialog.setASTRAStatus('WARN', tt)
         
         else:
+            # If there are only distinct ending points selected, and no consequitive middle points
             if ending_points_bool:
                 tt = "Not ready. End points selected, please pick three consecutive frames at high-SNR."
-                self.astra_dialog.set_astra_status(False, tt)
+                self.astra_dialog.setASTRAStatus(False, tt)
+            # If there are no picks, or no messages triggered (not ready)
             else:
                 tt = "Not ready. Select three consecutive frames at high SNR, and the start/end frames of the streak"
-                self.astra_dialog.set_astra_status(False, tt)
+                self.astra_dialog.setASTRAStatus(False, tt)
 
-    def prepare_astra_data(self, astra_config):
+    def prepareASTRAData(self, astra_config):
+        """Prepares data from SkyFit2 class vars for ASTRA"""
 
         print("Running ASTRA with:", astra_config)
 
@@ -4221,20 +4230,24 @@ class PlateTool(QtWidgets.QMainWindow):
         # Init a numpy array with the correct size and type
         frames = np.zeros((frame_count, *self.img_handle.loadFrame().shape), dtype=np.float32)
 
+        # Load all frames in to an array
         for i in range(frame_count):
             frames[i] = self.img_handle.loadFrame()
             self.img_handle.nextFrame()
             
         self.img_handle.setFrame(temp_curr_frame)  # Reset to the original frame
-        # Load all times
+
+        # Load the keys for picks which are not empty (not just photometry picks)
         pick_frame_indices = np.array(
             [key for key in self.pick_list.keys()
              if self.pick_list[key]['x_centroid'] is not None and self.pick_list[key]['y_centroid'] is not None],
             dtype=int
         )
+
+        # Load times of all picks
         times = np.array([(self.img_handle.frame_dt_dict[k]) for k in pick_frame_indices])
 
-        # Package data for ASTRA, from DetApp
+        # Package data for ASTRA - import later using dict comprehension
         data_dict = {
             "img_obj" : self.img_handle,
             "frames" : frames,
@@ -4248,12 +4261,14 @@ class PlateTool(QtWidgets.QMainWindow):
             "dark" : self.dark if hasattr(self, 'dark') else None,
             "flat" : self.flat_struct if hasattr(self, 'flat_struct') else None
         }
-        # Package data for ASTRA, from manual picks
 
         return data_dict
 
 
-    def integrate_astra_results(self, astra):
+    def integrateASTRAResults(self, astra):
+        """Integrates ASTRA results into the SkyFit2 instance."""
+
+        # Instantiate vars from astra class vars
         pick_frame_indices = astra.pick_frame_indices
         global_picks = astra.global_picks
         snrs = astra.snr
@@ -4276,7 +4291,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Deep copy to avoid storing references to mutable objects
             self.previous_picks.append(copy.deepcopy(self.pick_list))
 
-        # Add ASTRA picks to th e pick list
+        # Add ASTRA picks to the pick list
         self.clearAllPicks()  # Clear previous picks
         for i in range(len(global_picks)):
             pick = {
@@ -4289,9 +4304,15 @@ class PlateTool(QtWidgets.QMainWindow):
                 'snr': snrs[i],
                 'saturated': False,
             }
+
+            # Assign pick to skyfit pick list
             self.pick_list[pick_frame_indices[i]] = pick
-            self.updateGreatCircle()
+
+            # Print added message
             print(f'Added centroid at ({pick["x_centroid"]}, {pick["y_centroid"]}) on frame {pick_frame_indices[i]}')
+
+        # Update picks on GUI and update greatCircle
+        self.updateGreatCircle()
         self.updatePicks()
 
         # Update Kalman/ASTRA Ready status if instance exists
@@ -4300,25 +4321,29 @@ class PlateTool(QtWidgets.QMainWindow):
             self.checkKalmanCanRun()
             self.checkPickRevertCanRun()
 
-        # Print and open dialog showing ASTRA has been run
+        # Print message telling ASTRA has been run
         print(f'Loaded {len(pick_frame_indices)} Picks from ASTRA! Minimum SNR of {astra_config["astra"]["min SNR"]}')
 
-    def run_kalman_from_config(self, astra_config, progress_callback=None):
-        print("Running Kalman with:", astra_config)   
+    def runKalmanFromConfig(self, astra_config, progress_callback=None):
+        """Runs the Kalman filter with the given ASTRA configuration."""
+        
+        print("Running Kalman with:", astra_config)
 
         # Sort pick list according to keys
         self.pick_list = dict(sorted(self.pick_list.items()))
 
+        # Take only keys of non-empty picks (not just photometry)
         pick_frame_indices = np.array(
             [key for key in self.pick_list.keys()
              if self.pick_list[key]['x_centroid'] is not None and self.pick_list[key]['y_centroid'] is not None],
             dtype=int
         )
 
+        # Prepare measurements and times for Kalman filter
         measurements = [(self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid']) for key in pick_frame_indices]
         times = [self.img_handle.frame_dt_dict[key] for key in pick_frame_indices]
 
-        # Dummy dict to instantiate ASTRA object
+        # Dummy dict to instantiate ASTRA object (pass on unnessesary args as empty objects) DNOTE: Could use different __init__ or optional args, this is a simple workaround
         data_dict = {
             "img_obj" : 0,
             "frames" : [],
@@ -4333,9 +4358,10 @@ class PlateTool(QtWidgets.QMainWindow):
             "flat" : None
         }
 
-
+        # Instantiate a temporary ASTRA instance
         tempASTRA = ASTRA(**data_dict, progress_callback=progress_callback)
 
+        # Run Kalman on the ASTRA instance, extract new picks
         xypicks, _ = tempASTRA.runKalman(
             measurements=measurements,
             times=times)
@@ -4354,14 +4380,20 @@ class PlateTool(QtWidgets.QMainWindow):
             # Deep copy to avoid storing references to mutable objects
             self.previous_picks.append(copy.deepcopy(self.pick_list))
 
-        print(f'Kalman filter applied to {len(xypicks)} picks!')   
+        # Print message to show Kalman has been applied
+        print(f'Kalman filter applied to {len(xypicks)} picks!')
+
+        # Adjust all picks positions   
         for i in range(len(pick_frame_indices)):
             self.pick_list[pick_frame_indices[i]]["x_centroid"] = xypicks[i][0]
             self.pick_list[pick_frame_indices[i]]["y_centroid"] = xypicks[i][1]
-            self.updateGreatCircle()
+
+            # Print adjustment message
             print(f'Adjusted centroid at ({xypicks[i][0]}, {xypicks[i][1]}) on frame {pick_frame_indices[i]}')
+
+        # Update picks on GUI and greatCircle
+        self.updateGreatCircle()
         self.updatePicks()
-        print(f'Loaded {len(pick_frame_indices)} picks from Kalman Smoothing!')
 
         # Update kalman/astra readiness if instance exists
         if hasattr(self, 'astra_dialog') and self.astra_dialog is not None:
@@ -4369,20 +4401,19 @@ class PlateTool(QtWidgets.QMainWindow):
             self.checkKalmanCanRun()
             self.checkPickRevertCanRun()
 
+        # Print message showing kalman finished
         if astra_config['kalman']['save results'].lower() == 'true':
             print(f'Saved to CSV & Loaded {len(pick_frame_indices)} Picks from Kalman Smoothing.')
         else:
             print(f'Loaded {len(pick_frame_indices)} Picks from Kalman Smoothing!')
 
     def loadTXT(self, txt_file_path):
-        # ASTRA Addition - Justin DT
         """
         Loads the TXT file and adds the relevant info to pick_list
         Args:
             txt_file_path (str): Path to the TXT file to load
         Returns:
-            picks (np.ndarray): (N, 2) array of (x, y) picks
-            pick_frame_indices (np.ndarray): (N,) array of frame indices for each pick
+            picks (dict): (N : [8]) dict following same format as self.pick_list 
         """
 
         picks = [] # (N, x, y) array of picks
@@ -4445,6 +4476,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             return pick_list
 
+        # Raise error message
         except Exception as e:
             qmessagebox(title="File Read Error", 
                         message=f"Unknown Error reading TXT file, check correct file loaded.: {str(e)}",
@@ -4452,15 +4484,12 @@ class PlateTool(QtWidgets.QMainWindow):
             return None
 
     def loadECSV(self, ECSV_file_path):
-        # ASTRA Addition - Justin DT
         """
         Loads the ECSV file and adds the relevant info to pick_list
         Args:
             ECSV_file_path (str): Path to the ECSV file to load
         Returns:
-            picks (np.ndarray): (N, 2) array of (x, y) picks
-            pick_frame_indices (np.ndarray): (N,) array of frame indices for each pick
-            mags (np.ndarray): (N,) array of magnitudes for each pick
+            picks (dict): (N : [8]) dict following same format as self.pick_list 
         """
 
         # Instantiate arrays to be populated
@@ -4560,6 +4589,8 @@ class PlateTool(QtWidgets.QMainWindow):
             pick_list = {frame: pick for frame, pick in zip(pick_frame_indices, picks)}
 
             return pick_list
+        
+        # Raise error box
         except Exception as e:
             qmessagebox(title='File Read Error',
                         message=f"Unknown Error reading TXT file, check correct file loaded.: {str(e)}",

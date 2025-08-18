@@ -9,7 +9,27 @@ import html, re
 
 
 class AstraConfigDialog(QDialog):
+    """
+    A dialog window for configuring and running ASTRA (Astrometric Streak Tracking and Refinement Algorithm).
+    
+    This dialog provides a GUI for:
+    - Loading pick data from ECSV/TXT files
+    - Configuring PSO (Particle Swarm Optimization) parameters
+    - Setting ASTRA algorithm parameters
+    - Configuring Kalman filter settings
+    - Running ASTRA and Kalman filter processing
+    - Monitoring progress and status
+    
+    Args:
+        run_load_callback: Callback function for loading pick data
+        run_astra_callback: Callback function for running ASTRA
+        run_kalman_callback: Callback function for running Kalman filter
+        skyfit_instance: Instance of the main SkyFit application
+        parent: Parent widget
+    """
+
     def __init__(self, run_load_callback=None, run_astra_callback=None, run_kalman_callback=None, skyfit_instance=None, parent=None):
+
         super().__init__(parent)
         self.setWindowTitle("ASTRA Configuration")
         self.setMinimumWidth(900)
@@ -42,7 +62,7 @@ class AstraConfigDialog(QDialog):
         # Create two rows: first for file picker, second for revert button
         file_picker_layout = QHBoxLayout()
         self.file_picker_button = QPushButton("SELECT ECSV/TXT FILE")
-        self.file_picker_button.clicked.connect(self.select_file)
+        self.file_picker_button.clicked.connect(self.selectFile)
         file_picker_layout.addWidget(self.file_picker_button)
         pick_layout.addLayout(file_picker_layout)
 
@@ -60,7 +80,7 @@ class AstraConfigDialog(QDialog):
         "psi":"ψ","omega":"ω",
         }
         
-        def to_html_math(s: str) -> str:
+        def toHTMLMath(s: str) -> str:
             t = html.escape(s)
 
             # 1) underscores → HTML subscript tags
@@ -87,7 +107,7 @@ class AstraConfigDialog(QDialog):
 
             return t
 
-        def add_grid_fields(field_dict, defaults, title, tooltips=None):
+        def addGridFields(field_dict, defaults, title, tooltips=None):
             group = QGroupBox(title)
             layout = QGridLayout()
             tts = tooltips or {}
@@ -96,12 +116,12 @@ class AstraConfigDialog(QDialog):
                 return isinstance(val, str) and val.strip().lower() in ("true", "false")
 
             for idx, (key, default) in enumerate(defaults.items()):
-                key_html = to_html_math(key)
+                key_html = toHTMLMath(key)
                 label = QLabel(key_html.replace('</span></body></html>', ':</span></body></html>'))
 
                 # tooltip
                 tt_raw = tts.get(key, "")
-                tt_html = to_html_math(tt_raw) if tt_raw else ""
+                tt_html = toHTMLMath(tt_raw) if tt_raw else ""
                 if tt_html:
                     label.setToolTip(tt_html)
 
@@ -182,13 +202,13 @@ class AstraConfigDialog(QDialog):
         }
 
         main_layout.addWidget(
-            add_grid_fields(self.pso_fields, pso_defaults, "PSO PARAMETER SETTINGS", PSO_TT)
+            addGridFields(self.pso_fields, pso_defaults, "PSO PARAMETER SETTINGS", PSO_TT)
         )
         main_layout.addWidget(
-            add_grid_fields(self.astra_fields, astra_defaults, "ASTRA PARAMETER SETTINGS", ASTRA_TT)
+            addGridFields(self.astra_fields, astra_defaults, "ASTRA PARAMETER SETTINGS", ASTRA_TT)
         )
         main_layout.addWidget(
-            add_grid_fields(self.kalman_fields, kalman_defaults, "KALMAN FILTER SETTINGS", KALMAN_TT)
+            addGridFields(self.kalman_fields, kalman_defaults, "KALMAN FILTER SETTINGS", KALMAN_TT)
         )
 
         # === Progress Bar ===
@@ -225,8 +245,8 @@ class AstraConfigDialog(QDialog):
         self.run_kalman_btn = QPushButton("RUN KALMAN")
         self.run_astra_btn = QPushButton("RUN ASTRA")
         self.run_kalman_btn = QPushButton("RUN KALMAN")
-        self.run_astra_btn.clicked.connect(self.start_astra_thread)
-        self.run_kalman_btn.clicked.connect(self.start_kalman_thread)
+        self.run_astra_btn.clicked.connect(self.startASTRAThread)
+        self.run_kalman_btn.clicked.connect(self.startKalmanThread)
         btn_layout.addWidget(self.run_astra_btn)
         btn_layout.addWidget(self.run_kalman_btn)
         main_layout.addLayout(btn_layout)
@@ -234,19 +254,20 @@ class AstraConfigDialog(QDialog):
         # Move REVERT button below RUN ASTRA/KALMAN buttons as one row
         revert_layout = QHBoxLayout()
         self.set_prev_picks_button = QPushButton("REVERT ASTRA/KALMAN PICKS")
-        self.set_prev_picks_button.clicked.connect(self.set_previous_picks)
+        self.set_prev_picks_button.clicked.connect(self.setPreviousPicks)
         revert_layout.addWidget(self.set_prev_picks_button)
         main_layout.addLayout(revert_layout)
 
 
         # Now that buttons exist, set initial status
-        self.set_astra_status(False)  # Default to not ready (red)
-        self.set_kalman_status(False)  # Default to not ready (red)
-        self.set_revert_status(False)  # Default to not ready (disabled)
+        self.setASTRAStatus(False)  # Default to not ready (red)
+        self.setKalmanStatus(False)  # Default to not ready (red)
+        self.setRevertStatus(False)  # Default to not ready (disabled)
 
         self.setLayout(main_layout)
 
-    def select_file(self):
+    def selectFile(self):
+        """Opens dialog to select ECSV/txt file"""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Select the ECSV or TXT file",
@@ -255,14 +276,17 @@ class AstraConfigDialog(QDialog):
         )
         if file_path:
             self.selected_file_label.setText(file_path)
-            self.store_config()
+            self.storeConfig()
             if self.load_picks_callback:
                 self.load_picks_callback(self.config)
 
-    def set_revert_status(self, ready):
+    def setRevertStatus(self, ready):
+        """
+        Sets the revert status button state.
+        """
         self.set_prev_picks_button.setEnabled(ready)
 
-    def set_astra_status(self, ready, hover_text=""):
+    def setASTRAStatus(self, ready, hover_text=""):
         """
         Sets the ASTRA status dot color: green if ready, red if not.
         If ready == "WARN", sets color to yellow and text to READY.
@@ -285,7 +309,7 @@ class AstraConfigDialog(QDialog):
         self.astra_status_dot.setToolTip(hover_text or "")
         self.run_astra_btn.setEnabled(enable_btn)
 
-    def set_kalman_status(self, ready, hover_text=""):
+    def setKalmanStatus(self, ready, hover_text=""):
         """
         Sets the Kalman status dot color: green if ready, red if not.
         Optionally sets a tooltip (hover text) to inform the user.
@@ -308,10 +332,17 @@ class AstraConfigDialog(QDialog):
         self.kalman_status_dot.setToolTip(hover_text or "")
         self.run_kalman_btn.setEnabled(enable_btn)
 
-    def update_progress(self, value):
+    def updateProgress(self, value):
+        """Sets the progress bar to a given value
+        args:
+            - value (int): The value to set the progress bar to (0-100).
+        """
         self.progress_bar.setValue(value)
     
-    def store_config(self):
+    def storeConfig(self):
+        """
+        Stores the current configuration from the UI elements.
+        """
         def _value_of(w):
             # QComboBox has currentText(); QLineEdit has text()
             return w.currentText() if hasattr(w, "currentText") else w.text()
@@ -323,23 +354,17 @@ class AstraConfigDialog(QDialog):
             "kalman":{k: _value_of(v) for k, v in self.kalman_fields.items()},
         }
 
-    def get_config(self):
+    def getConfig(self):
+        """Returns the ASTRA config object."""
+        self.storeConfig()
         return self.config
     
-    def run_astra(self):
-        self.store_config()
-        if self.run_astra_callback:
-            self.run_astra_callback(self.config)
+    def startASTRAThread(self):
+        """Creates and runs an ASTRA process on a seperate worker thread"""
 
-    def run_kalman(self):
-        self.store_config()
-        if self.run_kalman_callback:
-            self.run_kalman_callback(self.config)
-
-    def start_astra_thread(self):
         from PyQt5 import QtCore
-        self.store_config()
-        config = self.get_config()
+        self.storeConfig()
+        config = self.getConfig()
 
         self.thread = QThread()
         self.worker = AstraWorker(config, self.skyfit_instance)
@@ -351,12 +376,12 @@ class AstraConfigDialog(QDialog):
         self.file_picker_button.setEnabled(False)
         self.set_prev_picks_button.setEnabled(False)
 
-        self.worker.progress.connect(self.update_progress)
+        self.worker.progress.connect(self.updateProgress)
 
         self.thread.started.connect(self.worker.run)
 
         self.worker.results_ready.connect(
-            self.skyfit_instance.integrate_astra_results, 
+            self.skyfit_instance.integrateASTRAResults, 
             QtCore.Qt.QueuedConnection
         )
 
@@ -377,12 +402,15 @@ class AstraConfigDialog(QDialog):
 
         self.thread.start()
 
-    def set_previous_picks(self):
+    def setPreviousPicks(self):
+        """Hits parent instance to revert picks to previous state"""
         self.skyfit_instance.reverseASTRAPicks()
 
-    def start_kalman_thread(self):
-        self.store_config()
-        self.config = self.get_config()
+    def startKalmanThread(self):
+        """Creates and runs a Kalman process on a separate worker thread"""
+
+        self.storeConfig()
+        self.config = self.getConfig()
 
         self.run_kalman_btn.setEnabled(False)
         self.run_astra_btn.setEnabled(False)
@@ -390,7 +418,7 @@ class AstraConfigDialog(QDialog):
         self.set_prev_picks_button.setEnabled(False)
 
         self.kalman_worker = KalmanWorker(self.skyfit_instance, self.config)
-        self.kalman_worker.progress.connect(self.update_progress)
+        self.kalman_worker.progress.connect(self.updateProgress)
 
         # Restore interactivity
         self.kalman_worker.finished.connect(lambda: self.file_picker_button.setEnabled(True))
@@ -399,10 +427,11 @@ class AstraConfigDialog(QDialog):
         self.kalman_worker.finished.connect(lambda: self.skyfit_instance.checkASTRACanRun())
         self.kalman_worker.finished.connect(lambda: self.skyfit_instance.checkKalmanCanRun())
         self.kalman_worker.finished.connect(lambda: self.skyfit_instance.checkPickRevertCanRun())
-        self.kalman_worker.finished.connect(lambda: self.update_progress(100))
+        self.kalman_worker.finished.connect(lambda: self.updateProgress(100))
         self.kalman_worker.start()
 
 class KalmanWorker(QThread):
+    """Worker thread for running Kalman filter."""
     progress = pyqtSignal(int)
     finished = pyqtSignal()
 
@@ -412,10 +441,11 @@ class KalmanWorker(QThread):
         self.config = config
 
     def run(self):
-        self.skyfit_instance.run_kalman_from_config(self.config, progress_callback=self.progress.emit)
+        self.skyfit_instance.runKalmanFromConfig(self.config, progress_callback=self.progress.emit)
         self.finished.emit()
 
 class AstraWorker(QObject):
+    """Worker thread for running ASTRA."""
     finished = pyqtSignal()
     progress = pyqtSignal(int)
     results_ready = pyqtSignal(object)
@@ -427,7 +457,7 @@ class AstraWorker(QObject):
 
     def run(self):
         # Prepare data
-        data_dict = self.skyfit_instance.prepare_astra_data(self.config)
+        data_dict = self.skyfit_instance.prepareASTRAData(self.config)
 
         if data_dict is False:
             self.finished.emit()
@@ -442,7 +472,7 @@ class AstraWorker(QObject):
         self.results_ready.emit(astra)
         self.finished.emit()
 
-def launch_astra_gui(run_astra_callback=None,
+def launchASTRAGUI(run_astra_callback=None,
                      run_kalman_callback=None,
                      run_load_callback=None,
                      parent=None,
@@ -458,7 +488,7 @@ def launch_astra_gui(run_astra_callback=None,
     return dialog
 
 if __name__ == "__main__":
-    config = launch_astra_gui()
+    config = launchASTRAGUI()
     if config:
         print("Returned config from GUI:")
         for section, values in config.items():
