@@ -2150,7 +2150,7 @@ class EventMonitor(multiprocessing.Process):
         magnitudes_elevation_chart_file_name = "magnitudes_elevation_{}".format(generic_file_name)
         magnitudes_azimuth_chart_file_name = "magnitudes_azimuth_{}".format(generic_file_name)
         magnitudes_azimuth_elevation_chart_file_name = "magnitudes_azimuth_elevation_{}".format(generic_file_name)
-
+        magnitudes_histogram_chart_file_name = "magnitudes_histogram_{}".format(generic_file_name)
 
         with tempfile.TemporaryDirectory() as radec_event_dir:
             thumbnail_file_path = os.path.join(radec_event_dir, thumbnail_file_name)
@@ -2158,6 +2158,7 @@ class EventMonitor(multiprocessing.Process):
             magnitudes_elevation_chart_file_path = os.path.join(radec_event_dir, magnitudes_elevation_chart_file_name)
             magnitudes_azimuth_chart_file_path = os.path.join(radec_event_dir, magnitudes_azimuth_chart_file_name)
             magnitudes_azimuth_elevation_chart_file_path = os.path.join(radec_event_dir, magnitudes_azimuth_elevation_chart_file_name)
+            magnitudes_histogram_chart_file_path = os.path.join(radec_event_dir, magnitudes_histogram_chart_file_name)
 
             file_list = []
             file_path = os.path.join(radec_event_dir, thumbnail_file_name)
@@ -2221,7 +2222,11 @@ class EventMonitor(multiprocessing.Process):
                 if magnitudes_azimuth_elevation_chart_file_path is not None:
                     file_list.append(magnitudes_azimuth_elevation_chart_file_path)
 
+                magnitudes_histogram_chart_file_path = dictToMagnitudeHistogram(sys_con, mags_radec_dict, e,
+                                                                                    file_path=magnitudes_histogram_chart_file_path)
 
+                if magnitudes_histogram_chart_file_path is not None:
+                    file_list.append(magnitudes_histogram_chart_file_path)
 
                 calstar_assisted_thumbnails_path = os.path.join(radec_event_dir, calstar_assisted_thumbnail_file_name)
                 file_list.append(dictToThumbnails(sys_con, mags_radec_dict, e, calstar_assisted_thumbnails_path))
@@ -2733,6 +2738,48 @@ def renderMagnitudeTimePlot(config, magnitude_list, elevation_list, e_jd, l_jd, 
     else:
         return None, None
 
+def renderMagnitudeHistogram(config, magnitude_list, e_jd, l_jd, r, d, plot_format=".png"):
+    """
+    Given a config file, magnitude list, elevation list render a plot showing magnitude variation against time.
+
+    Arguments:
+        config: [config] RMS Config instance.
+        magnitude_list: [list] List of magnitudes.
+        e_jd: [float] Earliest time in julian date, only used for title.
+        l_jd: [float] Latest time in julian date, only used for title.
+                r: [float] Right ascension, only used for title.
+        d: [float] Declination, only user for title.
+
+    Keyword arguments:
+        plot_format: [str] Optional, default png.
+
+    Return:
+        plt: [object] Matplot plot instance.
+        plot_filename: [str] Filename where the plot was saved.
+    """
+    if len(magnitude_list):
+        x_vals, y_vals = [], []
+        plot_filename = "{}_r_{}_d_{}_jd_{}_{}_magnitude_histogram.{}".format(config.stationID, r, d, e_jd, l_jd, plot_format)
+        for jd, mag in magnitude_list:
+            x_vals.append(jd2Date(float(jd), dt_obj=True))
+            y_vals.append(mag)
+
+        start_time, end_time = min(x_vals).strftime("%Y-%m-%d %H:%M:%S"), max(x_vals).strftime("%Y-%m-%d %H:%M:%S")
+        title = "{} Histogram of magnitudes at RA {} Dec {} from JD {} to {}".format(config.stationID, r, d,
+                                                                                          start_time, end_time)
+        plt.figure(figsize=(areaToGoldenRatioXY(16 * 12, rotate=True)))
+
+        plt.hist(y_vals, bins=30, edgecolor='k', label='Magnitude')
+        plt.xlabel("Magnitude")
+        plt.ylabel("Frequency")
+
+        plt.title(title)
+
+        return plt, plot_filename
+
+    else:
+        return None, None
+
 
 def dictToMagnitudeElevationPlot(config, pp, observations_dict, event, file_path=None):
     """
@@ -2815,11 +2862,6 @@ def dictToMagnitudeAzimuthPlot(config, pp, observations_dict, event, file_path=N
 
     return file_path
 
-
-
-
-
-
 def dictToMagnitudeTimePlot(config, observations_dict, event, file_path=None):
     """
     Given a config file, an observations dict, and an event specification return the path to a plot.
@@ -2861,6 +2903,45 @@ def dictToMagnitudeTimePlot(config, observations_dict, event, file_path=None):
 
     return file_path
 
+def dictToMagnitudeHistogram(config, observations_dict, event, file_path=None):
+    """
+    Given a config file, an observations dict, and an event specification return the path to a plot.
+
+    Arguments:
+        config: [object] RMS config instance.
+        observations_dict: [dict] Dictionary of observations.
+        event: [object] Event specification instance.
+
+    Keyword Arguments:
+        file_path: [str] Path to the location where the plot should be saved.
+
+    Return:
+        file_path: [str] Path to the location where the file was actually saved.
+    """
+
+    magnitude_list, elevation_list = [], []
+    if not len(observations_dict):
+        return None
+
+    # Initialise variables
+    r, d, plt = 0,0, None
+
+    for j in observations_dict:
+        observations = observations_dict.get(j)
+        magnitude_list.append([j, observations['photometry']['mag']])
+        r = observations['coords']['equatorial']['ra']
+        d = observations['coords']['equatorial']['dec']
+
+    plt, fn = renderMagnitudeHistogram(config, magnitude_list, event.jd_start, event.jd_end, r, d)
+
+    if plt is None:
+
+        return
+    else:
+        file_path = fn if file_path is None else file_path
+        plt.savefig(file_path)
+
+    return file_path
 
 
 
