@@ -1175,7 +1175,7 @@ class EventMonitor(multiprocessing.Process):
             sql_statement += "EventLat2, EventLat2Std, EventLon2, EventLon2Std,EventHt2, EventHt2Std, EventCart2Std,    \n"
             sql_statement += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax,    \n"
             sql_statement += "processedstatus, uploadedstatus, uuid, RespondTo, StationsRequired, RequireFR, \n"
-            sql_statement += "Ra, Dec, JDStart, JDEnd\n"
+            sql_statement += "Ra, Dec, JDStart, JDEnd, \n"
             sql_statement += "timeadded)                                           \n"
 
             sql_statement += "VALUES "
