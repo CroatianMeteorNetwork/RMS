@@ -6588,12 +6588,12 @@ class PlateTool(QtWidgets.QMainWindow):
                     avepixel = applyFlat(avepixel, self.flat_struct)
 
                 # Create an additional mask, masking stars above 3 sigma brightness
-                star_mask = np.zeros_like(avepixel, dtype=int)
+                star_mask = np.zeros_like(avepixel.copy(), dtype=int)
                 star_mask[avepixel > (np.mean(avepixel) + star_mask_coeff * np.std(avepixel))] = 1
                 crop_star_mask = star_mask[x_min:x_max, y_min:y_max]
 
                 # Add the star mask & mask_img to the avepixel mask
-                avepixel_masked = np.ma.masked_array(avepixel, mask_img | star_mask)
+                avepixel_masked = np.ma.masked_array(avepixel, mask_img)
                 avepixel_crop = avepixel_masked[x_min:x_max, y_min:y_max]
 
                 # Perform gamma correction on the avepixel crop
@@ -6603,10 +6603,27 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # Correct the crop_img with star_mask
                 crop_mask_img = mask_img[x_min:x_max, y_min:y_max]
-                crop_img = np.ma.masked_array(crop_img, crop_mask_img | crop_star_mask)
+                crop_img = np.ma.masked_array(crop_img, crop_mask_img)
+                from matplotlib import pyplot as plt
+                plt.figure(figsize=(12, 5))
+                plt.subplot(1, 2, 1)
+                plt.imshow(crop_mask_img, cmap='grey', vmin=0, vmax=1)
+                plt.title('Crop Mask Image')
+                plt.colorbar()
+                    
+                plt.subplot(1, 2, 2)
+                plt.imshow(star_mask, cmap='grey', vmin=0, vmax=1)
+                print(crop_star_mask)
+                plt.title('Crop Star Mask')
+                plt.colorbar()
+                
+                plt.tight_layout()
+                plt.show()
+                # EVERYTHING IS MAKED AT THIS POINT
 
                 # Replace photometry pixels that are masked by a star with the median value of the photom. area
                 photom_star_masked_indices = np.where(crop_mask_img != crop_star_mask)
+                print(photom_star_masked_indices)
 
                 # Apply correction only if the streak intersects a star
                 if len(photom_star_masked_indices[0]) > 0:
@@ -6653,6 +6670,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Count the number of pixels in the photometric area
             source_px_count = np.ma.sum(~crop_img.mask)
+            # from matplotlib import pyplot as plt
+            plt.imshow(~crop_img.mask, cmap='grey')
+            plt.show()
 
             # Compute the signal to noise ratio using the CCD equation
             snr = signalToNoise(intensity_sum, source_px_count, background_lvl, background_stddev)

@@ -10,9 +10,9 @@ from datetime import datetime
 import matplotlib        
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
-import datetime
 import csv
 import os
+import copy
 
 
 # DNOTE: Package not included in RMS install, implement check
@@ -254,6 +254,8 @@ class ASTRA:
         corrected_frames = []
         subtracted_frames = []
         masked_frames = []
+
+        self.uncorr_frames = copy.deepcopy(frames)  # Store uncorrected frames for later use
 
         # 2) -- Correct all frames
         try:
@@ -520,7 +522,7 @@ class ASTRA:
             photom_pixels = self.computePhotometryPixels(fit_imgs[i], cropped_frames[i], crop_vars[i])
 
             # Calculate SNR, and photom values
-            snr = self.computeIntensitySum(photom_pixels, self.translatePicksToGlobal((refined_params[i, 2], refined_params[i, 3]), crop_vars[i]), frames[pick_frame_indices[i]])
+            snr = self.computeIntensitySum(photom_pixels, self.translatePicksToGlobal((refined_params[i, 2], refined_params[i, 3]), crop_vars[i]), frames[pick_frame_indices[i]], self.uncorr_frames[i])
             
             # Determine SNR - DEPRECIATED
             # snr = self.calculateSNR(fit_imgs[i], frames[pick_frame_indices[i]], cropped_frames[i], crop_vars[i])
@@ -1800,13 +1802,13 @@ class ASTRA:
         seed_picks = p_sorted[start:start+3]
         return seed_picks, seed_pick_frame_indices
 
-    def computeIntensitySum(self, photom_pixels, global_centroid, raw_frame):
+    def computeIntensitySum(self, photom_pixels, global_centroid, corr_frame, uncorr_frame):
         """ Compute the background subtracted sum of intensity of colored pixels. The background is estimated
             as the median of near pixels that are not colored.
         """
 
         x_arr, y_arr = np.array(photom_pixels).T
-        raw_frame = raw_frame.copy()
+        corr_frame = corr_frame.copy()
         avepixel = self.avepixel_background.copy()
 
         # Take a window twice the size of the colored pixels
@@ -1820,22 +1822,41 @@ class ASTRA:
 
         # Limit the size to be within the bounds
         if x_min < 0: x_min = 0
-        if x_max > raw_frame.shape[1]: x_max = raw_frame.shape[1]
+        if x_max > corr_frame.shape[1]: x_max = corr_frame.shape[1]
         if y_min < 0: y_min = 0
-        if y_max > raw_frame.shape[0]: y_max = raw_frame.shape[0]
+        if y_max > corr_frame.shape[0]: y_max = corr_frame.shape[0]
 
         # Take only the colored part
-        mask_img = np.ones_like(raw_frame)
+        mask_img = np.ones_like(corr_frame)
         mask_img[y_arr, x_arr] = 0
-        masked_img = np.ma.masked_array(raw_frame, mask_img)
+        masked_img = np.ma.masked_array(corr_frame, mask_img)
         crop_img = masked_img[y_min:y_max, x_min:x_max]
+        crop_img_uncorr = np.ma.masked_array(uncorr_frame, mask_img)
+        crop_img_uncorr = crop_img_uncorr[y_min:y_max, x_min:x_max]
+
+        # # Replace photometry pixels that are masked by a star with the median value of the photom. area
+        # cropped_star_mask = self.avepixel_background.copy().mask[y_min:y_max, x_min:x_max]
+        # photom_star_masked_indices = np.where(crop_img.mask != cropped_star_mask)
+
+        # # Apply correction only if the streak intersects a star
+        # if len(photom_star_masked_indices[0]) > 0:
+
+        #     # Calulate masked median
+        #     masked_stars_streak_median = np.ma.median(crop_img)
+
+        #     # Unmask those areas
+        #     crop_img.mask[photom_star_masked_indices] = False
+
+        #     # Replace with median
+        #     crop_img[photom_star_masked_indices] = masked_stars_streak_median
+
 
         # Mask out the colored in pixels
-        mask_img_bg = np.zeros_like(raw_frame)
+        mask_img_bg = np.zeros_like(corr_frame)
         mask_img_bg[y_arr, x_arr] = 1
 
         # Take the image where the colored part is masked out and crop the surroundings
-        masked_img_bg = np.ma.masked_array(raw_frame, mask_img_bg)
+        masked_img_bg = np.ma.masked_array(corr_frame, mask_img_bg)
         crop_bg = masked_img_bg[y_min:y_max, x_min:x_max]
         
         # Mask out the colored in pixels
@@ -1876,7 +1897,7 @@ class ASTRA:
         saturation_threshold = int(0.98*(2**self.skyfit_config.bit_depth))
 
         # If at least 2 pixels are saturated in the photometric area, mark the pick as saturated
-        if np.sum(crop_img > saturation_threshold) >= 2:
+        if np.sum(crop_img_uncorr > saturation_threshold) >= 2:
             saturated_bool = True
         else:
             saturated_bool = False
@@ -1951,7 +1972,7 @@ class ASTRA:
             os.makedirs(fig_dir)
 
         # Make dest path
-        now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         data = {"time (sec since start)" : [],
                 "original x" : [],
