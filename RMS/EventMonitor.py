@@ -2932,7 +2932,7 @@ def dictToMagnitudeHistogram(config, observations_dict, event, file_path=None):
         r = observations['coords']['equatorial']['ra']
         d = observations['coords']['equatorial']['dec']
 
-    plt, fn = renderMagnitudeHistogram(config, magnitude_list, event.jd_start, event.jd_end, r, d)
+    plt, fn = renderMagnitudeHistogram(config, magnitude_list, event.jd_start, event.jd_end, round(r,2), round(d,2))
 
     if plt is None:
 
