@@ -5180,7 +5180,6 @@ class PlateTool(QtWidgets.QMainWindow):
             img_handle = detectInputTypeFile(self.input_path, self.config, beginning_time=beginning_time, 
                                              flipud=self.flipud)
 
-
         self.img_handle = img_handle
 
 
@@ -5476,7 +5475,7 @@ class PlateTool(QtWidgets.QMainWindow):
             initial_file = self.dir_path
 
         flat_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the flat field file", initial_file,
-                                                      "Image files (*.png *.jpg *.bmp);;All files (*)")[0]
+                                                    "Image files (*.png *.jpg *.bmp);;All files (*)")[0]
 
         if not flat_file:
             return False, None
@@ -6605,6 +6604,21 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Correct the crop_img with star_mask
                 crop_mask_img = mask_img[x_min:x_max, y_min:y_max]
                 crop_img = np.ma.masked_array(crop_img, crop_mask_img | crop_star_mask)
+
+                # Replace photometry pixels that are masked by a star with the median value of the photom. area
+                photom_star_masked_indices = np.where(crop_mask_img != crop_star_mask)
+
+                # Apply correction only if the streak intersects a star
+                if len(photom_star_masked_indices[0]) > 0:
+
+                    # Calulate masked median
+                    masked_stars_streak_median = np.ma.median(crop_img)
+
+                    # Unmask those areas
+                    crop_img.mask[photom_star_masked_indices] = False
+
+                    # Replace with median
+                    crop_img[photom_star_masked_indices] = masked_stars_streak_median
 
                 # Correct the crop_bg with star_mask
                 crop_mask_img_bg = mask_img_bg[x_min:x_max, y_min:y_max]
