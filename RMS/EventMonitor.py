@@ -158,10 +158,9 @@ class EventContainer(object):
         self.stations_required = ""
         self.respond_to = ""
 
-        # For radec or tle specification
+        # For radec
         self.jd_start, self.jd_end = 0, 0
         self.ra, self.dec = 0, 0
-        self.tle_0, self.tle_1, self.tle_2 = "", "", ""
 
         # These are internal control properties
         self.uuid = ""
@@ -226,9 +225,7 @@ class EventContainer(object):
             self.jd_end = float(value) if "JDEnd" == variable_name else self.jd_end
             self.ra = float(value) if "Ra" == variable_name else self.ra
             self.dec = float(value) if "Dec" == variable_name else self.dec
-            self.tle_0 = str(value) if "tle_0" == variable_name else self.tle_0
-            self.tle_1 = str(value) if "tle_1" == variable_name else self.tle_1
-            self.tle_2 = str(value) if "tle_2" == variable_name else self.tle_2
+
 
         # Optional parameters for defining trajectory by a start point, and a direction
         if "EventAzim" == variable_name:
@@ -301,12 +298,9 @@ class EventContainer(object):
         output += ("Start Angle              : {:3.2f}\n".format(self.start_angle))
         output += ("End Distance (km)        : {:3.2f}\n".format(self.end_distance / 1000))
         output += ("End Angle                : {:3.2f}\n".format(self.end_angle))
-        output += "# RaDEC and TLE events     \n"
+        output += "# RaDEC events     \n"
         output += ("JD_Start                 : {:3.2f}\n".format(self.jd_start))
         output += ("JD_End                   : {:3.2f}\n".format(self.jd_end))
-        output += ("TLE_0                    : {}\n".format(self.tle_0))
-        output += ("TLE_1                    : {}\n".format(self.tle_1))
-        output += ("TLE_2                    : {}\n".format(self.tle_2))
         output += ("RA                       : {:3.2f}\n".format(self.ra))
         output += ("Dec                      : {:3.2f}\n".format(self.dec))
 
@@ -339,12 +333,6 @@ class EventContainer(object):
             reasonable = False if self.close_radius > self.far_radius else reasonable
         else:
             reasonable = False if self.jd_end < self.jd_start else reasonable
-            if self.tle_0 == "" or self.tle_1 == "" or self.tle_2 == "":
-                reasonable = False if self.ra == 0 or self.dec == 0 else reasonable
-            else:
-                reasonable = False if self.tle_0 == "" else reasonable
-                reasonable = False if self.tle_1 == "" else reasonable
-                reasonable = False if self.tle_2 == "" else reasonable
 
         return reasonable
 
@@ -973,18 +961,6 @@ class EventMonitor(multiprocessing.Process):
             log.info("Missing db column Dec")
             self.addDBcol("Dec","REAL")
 
-        if not self.checkDBcol(conn,"TLE_0"):
-            log.info("Missing db column TLE_0")
-            self.addDBcol("TLE_0","TEXT")
-
-        if not self.checkDBcol(conn,"TLE_1"):
-            log.info("Missing db column TLE_1")
-            self.addDBcol("TLE_1","TEXT")
-
-        if not self.checkDBcol(conn,"TLE_2"):
-            log.info("Missing db column TLE_2")
-            self.addDBcol("TLE_2","TEXT")
-
         if not self.checkDBcol(conn,"RequireFR"):
             log.info("Missing db column RequireFR")
             self.addDBcol("RequireFR","bool")
@@ -1129,9 +1105,6 @@ class EventMonitor(multiprocessing.Process):
         sql_statement += "JDEnd = '{}'                  AND \n".format(event.jd_end)
         sql_statement += "Ra = '{}'                     AND \n".format(event.ra)
         sql_statement += "Dec = '{}'                    AND \n".format(event.dec)
-        sql_statement += "TLE_0 = '{}'                  AND \n".format(event.tle_0)
-        sql_statement += "TLE_1 = '{}'                  AND \n".format(event.tle_1)
-        sql_statement += "TLE_2 = '{}'                  AND \n".format(event.tle_2)
 
         sql_statement += "RespondTo = '{}'                  \n".format(event.respond_to)
 
@@ -1202,7 +1175,7 @@ class EventMonitor(multiprocessing.Process):
             sql_statement += "EventLat2, EventLat2Std, EventLon2, EventLon2Std,EventHt2, EventHt2Std, EventCart2Std,    \n"
             sql_statement += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax,    \n"
             sql_statement += "processedstatus, uploadedstatus, uuid, RespondTo, StationsRequired, RequireFR, \n"
-            sql_statement += "Ra, Dec, JDStart, JDEnd, tle_0, tle_1, tle_2, \n"
+            sql_statement += "Ra, Dec, JDStart, JDEnd\n"
             sql_statement += "timeadded)                                           \n"
 
             sql_statement += "VALUES "
@@ -1217,7 +1190,7 @@ class EventMonitor(multiprocessing.Process):
                                                                       event.elev_std,
                                                                       qry_elev_is_max)
             sql_statement += "{},  {}, '{}', '{}', '{}' , '{}', \n".format(0, 0,uuid.uuid4(), event.respond_to, event.stations_required, event.require_FR)
-            sql_statement += "{}, {}, '{}', '{}', '{}' , '{}', '{}',  \n".format(event.ra, event.dec, event.jd_start, event.jd_end, event.tle_0, event.tle_1, event.tle_2)
+            sql_statement += "{}, {}, '{}', '{}', \n".format(event.ra, event.dec, event.jd_start, event.jd_end)
             sql_statement += "CURRENT_TIMESTAMP ) \n"
 
             try:
@@ -1459,7 +1432,7 @@ class EventMonitor(multiprocessing.Process):
         sql_query_cols += "EventLat2, EventLat2Std, EventLon2, EventLon2Std,EventHt2, EventHt2Std, "
         sql_query_cols += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax, RespondTo, StationsRequired,"
         sql_query_cols += "EventCartStd, EventCart2Std, RequireFR,"
-        sql_query_cols += "JDStart, JDEnd, Ra, Dec, tle_0, tle_1, tle_2"
+        sql_query_cols += "JDStart, JDEnd, Ra, Dec"
         sql_statement += sql_query_cols
         sql_statement += " \n"
         sql_statement += "FROM event_monitor "
@@ -2275,25 +2248,6 @@ class EventMonitor(multiprocessing.Process):
 
         return future_events, in_future
 
-    def processTLEEvent(self, e, future_events, ev_con, check_time_start, test_mode):
-
-        log.info("Starting work on a TLE specified event")
-        log.info("JD_start  :   {}".format(e.jd_start))
-        log.info("JD_end    :   {}".format(e.jd_end))
-        log.info("tle_0     :   {}".format(e.tle_0))
-        log.info("tle_1     :   {}".format(e.tle_1))
-        log.info("tle_2     :   {}".format(e.tle_2))
-
-        e.dt = jd2RMSStyle(e.jd_end)
-        future_events, in_future = self.handleFutureEvents(e, future_events)
-        e.dt = jd2RMSStyle(e.jd_start)
-        if in_future:
-            return future_events, in_future
-        #file_coordinate_list = getFitsPathsAndCoordsTLE(ev_con, e)
-
-
-
-        return future_events, in_future
 
 
 
@@ -2324,11 +2278,6 @@ class EventMonitor(multiprocessing.Process):
             elif observed_event.jd_start != 0 and observed_event.jd_end !=0:
                 if observed_event.ra != 0 and observed_event.dec !=0:
                     future_events, in_future = self.processRaDecEvent(observed_event, future_events, ev_con, check_time_start, test_mode)
-                    if in_future:
-                        continue
-                elif observed_event.tle_0 != "" and observed_event.tle_1 != "" and observed_event.tle_2 != "":
-                    log.info("TLE event specified")
-                    future_events, in_future = self.processTLEEvent(observed_event, future_events, ev_con, check_time_start, test_mode)
                     if in_future:
                         continue
 
@@ -3619,71 +3568,6 @@ def areaToGoldenRatioXY(count, rotate=False):
         return int(down), int(across)
     else:
         return int(across), int(down)
-
-
-def getFitsPathsAndCoordsTLE(config, e):
-    """
-    Arguments:
-        config: [config] RMS config instance for the event.
-        e: [object] Event, which must contain two line elements
-
-
-    Return:
-        fits_paths_and_coordinates:[list] of [fits_path, x, y] where x and y are the coordinates of tle on image
-    """
-
-    # Create target object
-    t = ephem.readtle(e.tle_0, e.tle_1, e.tle_2)
-    o = ephem.Observer()
-    o.lat, o.lon, o.elevation = config.latitude, config.longitude, config.elevation
-
-    full_path_to_captured = os.path.expanduser(os.path.join(str(config.data_dir), str(config.captured_dir)))
-    directories_to_search = filterDirectoriesByJD(full_path_to_captured, e.jd_start, e.jd_end)
-    stationID = config.stationID
-
-    fits_paths_and_coordinates = []
-    for directory in directories_to_search:
-        mask_path = os.path.join(directory, config.mask_file)
-        default_mask_path = os.path.join(getRmsRootDir(), config.mask_file)
-        mask = None
-        if os.path.exists(mask_path):
-            mask = loadMask(mask_path)
-        elif os.path.exists(default_mask_path):
-            mask = loadMask(default_mask_path)
-
-
-
-        pp_path = os.path.join(directory, config.platepar_name)
-        pp = None
-        if os.path.exists(pp_path):
-            pp = Platepar()
-            pp.read(pp_path)
-        elif os.path.exists(os.path.join(getRmsRootDir(), config.platepar_name)):
-            pp = Platepar()
-            pp.read(os.path.join(getRmsRootDir(), config.platepar_name))
-        elif pp is None:
-            continue
-
-        directory_list = os.listdir(directory)
-        directory_list.sort()
-        for file_name in directory_list:
-            if file_name.startswith('FF') and file_name.endswith('.fits') and len(file_name.split('_')) == 6:
-                if file_name.split('_')[1] == stationID:
-                    o.date = getMiddleTimeFF(file_name, config.fps, dt_obj=True)
-                    t.compute(o)
-                    r, d = np.degrees(t.ra), np.degrees(t.dec)
-
-                    if r is None and d is None:
-                        contains_radec, x, y = True, 0, 0
-                    else:
-                        contains_radec, x, y = plateparFitsContainsRaDec(r, d, pp, file_name,
-                                                                         config.mask_file, check_mask=True, mask=mask)
-                    if contains_radec:
-                        fits_paths_and_coordinates.append([os.path.join(directory,file_name), x, y])
-
-    return fits_paths_and_coordinates
-
-
 
 def getFitsPathsAndCoordsRadec(config, earliest_jd, latest_jd, r=None, d=None):
     """
