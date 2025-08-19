@@ -1,4 +1,3 @@
-import os
 import numpy as np
 import scipy.optimize
 import scipy.stats
@@ -6,9 +5,21 @@ import scipy.special
 from RMS.Routines.Image import signalToNoise
 from RMS.Routines import Image
 import cv2
+import threading
+from datetime import datetime
+import matplotlib        
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+import datetime
+import csv
+import os
+
 
 # DNOTE: Package not included in RMS install, implement check
-from pyswarms.single.global_best import GlobalBestPSO
+try:
+    from pyswarms.single.global_best import GlobalBestPSO
+except Exception as e:
+    print('ASTRA cannot be run, pyswarms not installed')
 
 class ASTRA:
 
@@ -579,15 +590,8 @@ class ASTRA:
         Save all ASTRA/Kalman visualization frames as individual JPEG files.
         Thread-safe, cross-platform, no external encoders required.
         """
-        import os
-        import threading
-        from datetime import datetime
-
-        import matplotlib
         current_backend = matplotlib.get_backend()
         matplotlib.use("Agg")  # headless-safe backend
-        from matplotlib.figure import Figure
-        from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
         # ---- thread safety (one-at-a-time per instance) ----
         if not hasattr(self, "_save_lock"):
@@ -1940,9 +1944,7 @@ class ASTRA:
         return photometry_pixels
 
     def saveKalmanUncertaintiesToCSV(self, data_path, times, measurements, x_smooth, p_smooth):
-        import os
-        import datetime
-        import csv
+
 
         fig_dir = os.path.join(data_path, "ASTRA_Kalman_Results")
         if not os.path.exists(fig_dir):

@@ -56,8 +56,13 @@ pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
 
 # DNOTE: local imports since not included in package, change to regular later
-from .ASTRA import ASTRA
-from .ASTRA_GUI import launchASTRAGUI
+try:
+    from Utils.ASTRA import ASTRA
+    from Utils.ASTRA_GUI import launchASTRAGUI
+    ASTRA_IMPORTED = True
+except Exception as e:
+    ASTRA_IMPORTED = False
+    print('ASTRA import error: likely pyswarms not installed')
 
 
 class QFOVinputDialog(QtWidgets.QDialog):
@@ -3932,27 +3937,32 @@ class PlateTool(QtWidgets.QMainWindow):
             # Launch ASTRA GUI
             elif event.key() == QtCore.Qt.Key_K and (modifiers == QtCore.Qt.ControlModifier):
                 
-                # Set class variable to store previous picks for astra/kalman reversion.
-                self.previous_picks = []
+                if ASTRA_IMPORTED:
+                    # Set class variable to store previous picks for astra/kalman reversion.
+                    self.previous_picks = []
 
-                # Set saturation threshold as a class var
-                self.saturation_threshold = int(round(0.98*(2**self.config.bit_depth - 1)))
+                    # Set saturation threshold as a class var
+                    self.saturation_threshold = int(round(0.98*(2**self.config.bit_depth - 1)))
 
-                if hasattr(self, "astra_dialog"):
+                    if hasattr(self, "astra_dialog"):
 
-                    # If ASTRA dialog exists, close it
-                    if self.astra_dialog is not None:
-                        self.astra_dialog.close()
-                        self.astra_dialog = None
-                    
-                    # If ASTRA is None, open GUI
+                        # If ASTRA dialog exists, close it
+                        if self.astra_dialog is not None:
+                            self.astra_dialog.close()
+                            self.astra_dialog = None
+                        
+                        # If ASTRA is None, open GUI
+                        else:
+                            self.openAstraGUI()
+                            self.astra_dialog.finished.connect(self.clearAstraDialogReference)
                     else:
+                        # Else open ASTRA GUI
                         self.openAstraGUI()
                         self.astra_dialog.finished.connect(self.clearAstraDialogReference)
                 else:
-                    # Else open ASTRA GUI
-                    self.openAstraGUI()
-                    self.astra_dialog.finished.connect(self.clearAstraDialogReference)
+                    qmessagebox(title="ASTRA is not available",
+                                message='ASTRA was not correctly imported, check pyswarms is installed. Aborted open ASTRA GUI process.',
+                                message_type='error')
 
     def clearAstraDialogReference(self):
         """Clears the reference to the ASTRA GUI"""

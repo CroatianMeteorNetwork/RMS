@@ -4,8 +4,9 @@ from PyQt5.QtWidgets import (
     QProgressBar, QTextEdit, QApplication, QWidget, QGridLayout
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject
-from .ASTRA import ASTRA  
+from Utils.ASTRA import ASTRA  
 import html, re
+from PyQt5 import QtCore
 
 
 class AstraConfigDialog(QDialog):
@@ -362,7 +363,6 @@ class AstraConfigDialog(QDialog):
     def startASTRAThread(self):
         """Creates and runs an ASTRA process on a seperate worker thread"""
 
-        from PyQt5 import QtCore
         self.storeConfig()
         config = self.getConfig()
 
@@ -464,7 +464,6 @@ class AstraWorker(QObject):
             return
 
         # Run ASTRA here, directly in worker
-        from .ASTRA import ASTRA
         astra = ASTRA(**data_dict, progress_callback=self.progress.emit)
         astra.process()
 
