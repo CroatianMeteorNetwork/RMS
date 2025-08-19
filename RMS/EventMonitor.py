@@ -1953,7 +1953,7 @@ class EventMonitor(multiprocessing.Process):
         return future_events, in_future
 
 
-    def processLatLonEvent(self, observed_event, future_events, ev_con, check_time_start, test_mode=False):
+    def processLatLonEvent(self, observed_event, future_events, ev_con, check_time_start, test_mode=False, write_log=False):
 
         # check to see if the end of this event is in the future, if it is then do not process
         # if the end of the event is before the next scheduled execution of event monitor loop,
@@ -3612,8 +3612,12 @@ def getFitsPathsAndCoordsRadec(config, earliest_jd, latest_jd, r=None, d=None):
 
         directory_list = os.listdir(directory)
         directory_list.sort()
+
         for file_name in directory_list:
             if file_name.startswith('FF') and file_name.endswith('.fits') and len(file_name.split('_')) == 6:
+                if not earliest_jd < rmsTimeExtractor(file_name, asJD=True) < latest_jd:
+                    continue
+
                 if file_name.split('_')[1] == stationID:
                     if r is None and d is None:
                         contains_radec, x, y = True, 0, 0
@@ -3900,7 +3904,7 @@ def filterDirectoriesByJD(path, earliest_jd, latest_jd = None, write_log=False):
         # If the start time of this directory is less than the latest_target append to the list
         if jd_dir < latest_jd:
             if write_log:
-                log.info("Directory {} has a jd of {}, adding.".format(directory, jd_dir))
+                log.info("Object {} has a jd of {}, adding.".format(directory, jd_dir))
             filtered_by_jd.append(directory)
 
         # As soon as a directory has been added which is before the earliest_jd
