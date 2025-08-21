@@ -244,8 +244,6 @@ class AstraConfigDialog(QDialog):
         btn_layout = QHBoxLayout()
         self.run_astra_btn = QPushButton("RUN ASTRA")
         self.run_kalman_btn = QPushButton("RUN KALMAN")
-        self.run_astra_btn = QPushButton("RUN ASTRA")
-        self.run_kalman_btn = QPushButton("RUN KALMAN")
         self.run_astra_btn.clicked.connect(self.startASTRAThread)
         self.run_kalman_btn.clicked.connect(self.startKalmanThread)
         btn_layout.addWidget(self.run_astra_btn)

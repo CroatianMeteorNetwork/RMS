@@ -4007,7 +4007,7 @@ class PlateTool(QtWidgets.QMainWindow):
             return
         
         # DetApp picks in a ev*.txt files
-        if file_path.startswith('ev') and file_path.endswith('.txt'):
+        if os.path.basename(file_path).startswith('ev') and os.path.basename(file_path).endswith('.txt'):
             
             # Create a temp pick_list
             pick_list = {}
