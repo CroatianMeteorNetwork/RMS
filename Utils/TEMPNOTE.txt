@@ -1,0 +1,16 @@
+Changes before merge:
+    -Change all class vars to be instantiated at the init of PlateTool()
+        -Also adjust their later defs. & utilizations to reflect this
+    -Change Avepixel to use the median value rather than mean
+    -Investigate photometry and SNR calculatiosn to ensure it is correct 
+        -SNR especially seems to be off
+    -Add values utilized in Mag/SNR calculations in SaveAni
+    -Implement modular (if name is main) utiliztion into ASTRA
+    -Structure all imports in order of native -> imported -> internal
+    -Break all lines beyond 110 charecters to maintain readibility
+    -Include & Update all docstrings into ASTRA and ASTRA GUI
+    -Add guide.md for ASTRA in guides (Also document future improvements, and how future improvements should be implemented)
+    -Make Kalman functions in ASTRA standalone
+    -Put ASTRA_GUI into SkyFit2 file
+    -Look into solving length over-estimation in low-SNR frames
+        -Add penalty function of STD of photometric area?
