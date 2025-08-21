@@ -353,6 +353,12 @@ class Config:
         # days of logfiles to keep
         self.logdays_to_keep = 30
 
+        # Console logging level
+        self.console_log_level = 'INFO'
+
+        # Log file logging level
+        self.log_file_log_level = 'DEBUG'
+
         # Toggle logging stdout messages
         self.log_stdout = False
 
@@ -982,6 +988,16 @@ def parseCapture(config, parser):
     if parser.has_option(section, "logdays_to_keep"):
         config.logdays_to_keep = int(parser.get(section, "logdays_to_keep"))
 
+    log_level_mapping = { 0: 'CRITICAL',1: 'ERROR',2: 'WARNING',3: 'INFO',4: 'DEBUG'}
+    
+    if parser.has_option(section, "console_log_level"):
+        config.console_log_level = parser.getint(section, "console_log_level")
+        config.console_log_level = log_level_mapping[min(max(config.console_log_level, 0), 4)]
+
+    if parser.has_option(section, "log_file_log_level"):
+        config.log_file_log_level = parser.getint(section, "log_file_log_level")
+        config.log_file_log_level = log_level_mapping[min(max(config.log_file_log_level, 0), 4)]
+
     if parser.has_option(section, "log_stdout"):
         config.log_stdout = parser.getboolean(section, "log_stdout")
 
@@ -1133,8 +1149,15 @@ def parseCapture(config, parser):
     if parser.has_option(section, "gst_decoder"):
         config.gst_decoder = parser.get(section, "gst_decoder")
 
-    if parser.has_option(section, "camera_settings_path"):
+    if parser.has_option(section, "camera_settings_path") and os.path.isfile(parser.get(section, "camera_settings_path")):
         config.camera_settings_path = parser.get(section, "camera_settings_path")
+    else:
+        station_specific_file = os.path.expanduser(os.path.join(config.config_file_path,'camera_settings.json'))
+        if os.path.isfile(station_specific_file):
+            config.camera_settings_path = station_specific_file
+        else:    
+            config.camera_settings_path = './camera_settings.json'
+    print(f'Camera settings file: {config.camera_settings_path}')
 
     if parser.has_option(section, "initialize_camera"):
         config.initialize_camera = parser.getboolean(section, "initialize_camera")
