@@ -4609,7 +4609,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Raise error box
         except Exception as e:
             qmessagebox(title='File Read Error',
-                        message=f"Unknown Error reading TXT file, check correct file loaded.: {str(e)}",
+                        message=f"Unknown Error reading ECSV file, check correct file loaded.: {str(e)}",
                         message_type="error")
             return None
 
