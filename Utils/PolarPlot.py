@@ -20,7 +20,7 @@ import os
 import pickle
 import argparse
 import subprocess
-
+import cv2
 import numpy as np
 import RMS.ConfigReader as cr
 import datetime
@@ -461,7 +461,7 @@ def makeUpload(source_path, upload_to):
         print("Upload failed with {}".format(e))
 
 
-def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=False, repeat=False, period=120, print_activity=False, size=500, stack_depth=3, upload=None):
+def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=False, repeat=False, period=120, print_activity=False, size=500, stack_depth=3, upload=None, annotate=True):
 
     """
 
@@ -477,6 +477,7 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
         size: [int] Optional default 500, size of both axes.
         stack_depth: [int] Optional default 3, number of images to stack.
         upload: [str] Optional, default None, if set where to upload finished image to.
+        annotate: [bool] Optional, default True, annotate image.
 
     Return:
         Nothing.
@@ -519,7 +520,7 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
 
     stations_as_text = ""
     for s in stations_info_dict.keys():
-        stations_as_text = "{}, {}".format(stations_as_text,s)
+        stations_as_text = "{}, {}".format(stations_as_text,s.strip())
 
     if len(stations_as_text):
         stations_as_text = stations_as_text[1:]
@@ -532,10 +533,9 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
         next_iteration_start_time += datetime.timedelta(seconds=period)
         # Compute epoch for this image
         target_image_time = datetime.datetime.now(tz=datetime.timezone.utc) - datetime.timedelta(seconds=20)
-        target_image_time = datetime.datetime(year=2025, month=8, day=20,hour=13,minute=45,second=00, tzinfo=datetime.timezone.utc)
-        annotation_text = "{} Stations: {} Lat: {:.3f} Lon: {:.3f}".format(
-            target_image_time.replace(microsecond=0), stations_as_text, cam_coords[0], cam_coords[1])
+        annotation_text_l1 = "{}".format(target_image_time.replace(microsecond=0), stations_as_text, cam_coords[0], cam_coords[1])
 
+        annotation_text_l2 = "{} Lat:{:.3f} deg Lon:{:.3f} deg".format(stations_as_text, cam_coords[0], cam_coords[1])
 
         # Get the fits files as a stack of fits, one per camera
         fits_array = np.stack(getFitsAsList(getFitsFiles(transformation_layer_list, stations_info_dict, target_image_time), stations_info_dict), axis=0)
@@ -589,6 +589,16 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
 
 
         target_image_array = target_image_array.astype(np.uint8)
+
+        if annotate:
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.4
+            thickness = 1
+            position_l1 = (25, size_y - 30)
+            cv2.putText(target_image_array, annotation_text_l1, position_l1, font, font_scale, (25, 25, 25), thickness, cv2.LINE_AA)
+            position_l2 = (25, size_y - 10)
+            cv2.putText(target_image_array, annotation_text_l2, position_l2, font, font_scale, (25, 25, 25), thickness, cv2.LINE_AA)
+
         imageio.imwrite(output_path, target_image_array)
         if print_activity:
             print("Plotted in {:.1f} seconds".format((datetime.datetime.now(tz=datetime.timezone.utc) - this_iteration_start_time).total_seconds()))
@@ -641,6 +651,10 @@ if __name__ == "__main__":
     arg_parser.add_argument('-u', '--upload', dest='upload', type=str, nargs=1,
                             help="Remote address to upload finished image to.")
 
+    arg_parser.add_argument('-a', '--annotate', dest='annotate', default=False, action="store_true",
+                            help="Annotate plot with image time, stations used, and projection origin.")
+
+
 
     cml_args = arg_parser.parse_args()
 
@@ -677,4 +691,8 @@ if __name__ == "__main__":
     else:
         upload = cml_args.upload[0]
 
-    SkyPolarProjection(config_paths, path_to_transform, force_recomputation=force_recomputation, repeat=repeat, period=period, print_activity=not quiet, size=size, stack_depth=stack_depth, upload=upload)
+    annotate = cml_args.annotate
+
+    SkyPolarProjection(config_paths, path_to_transform, force_recomputation=force_recomputation,
+                       repeat=repeat, period=period, print_activity=not quiet,
+                       size=size, stack_depth=stack_depth, upload=upload, annotate=annotate)
