@@ -158,7 +158,7 @@ class AstraConfigDialog(QDialog):
         astra_defaults = {
             "star_thresh": "3", "min SNR": "5",
             "P_crop": "1.5", "sigma_init (px)": "2", "sigma_max": "1.2",
-            "L_max": "1.5", "Verbose": "False", "photom_thresh" : "0.65", 
+            "L_max": "1.5", "Verbose": "False", "photom_thresh" : "0.05", 
             "Save Animation": "False", "CE_coeff" : "3"
         }
 
@@ -364,6 +364,13 @@ class AstraConfigDialog(QDialog):
         """Creates and runs an ASTRA process on a seperate worker thread"""
 
         self.storeConfig()
+        errors = self.checkConfig()
+        if errors != {}:
+            self.skyfit_instance.setMessageBox(title="ASTRA Configuration Error",
+                                             message="\n".join(errors.values()),
+                                             type='error')
+            return
+
         config = self.getConfig()
 
         self.thread = QThread()
@@ -406,10 +413,100 @@ class AstraConfigDialog(QDialog):
         """Hits parent instance to revert picks to previous state"""
         self.skyfit_instance.reverseASTRAPicks()
 
+    def checkConfig(self):
+        """Checks the config only has valid values"""
+        config = self.getConfig()
+
+        pso_ranges_and_types = {
+            "w (0-1)": (0.0, 1.0, float),
+            "c_1 (0-1)": (0.0, 1.0, float),
+            "c_2 (0-1)": (0.0, 1.0, float),
+            "max itter": (1, None, int),
+            "n_particles": (1, None, int),
+            "V_c (0-1)": (0.0, 1.0, float),
+            "ftol": (0.0, 100.0, float),
+            "ftol_itter": (1, None, int),
+            "expl_c": (1.0, None, float),
+            "P_sigma": (0.0, None, float)
+        }
+
+        astra_ranges_and_types = {
+            "star_thresh": (0, None, float), "min SNR": (0, None, float),
+            "P_crop": (0, None, float), "sigma_init (px)": (0.1, None, float), "sigma_max": (1, None, float),
+            "L_max": (1, None, float), "Verbose": (True, False, bool), "photom_thresh": (0, 1, float),
+            "Save Animation": (True, False, bool), "CE_coeff": (0, None, float)
+        }
+
+        kalman_ranges_and_types = {
+            "Monotonicity": (True, False, bool), "sigma_xy (px)": (0, None, float), "sigma_vxy (%)": (0, 100, float), "save results": (True, False, bool)
+        }
+
+        errors = {}
+
+        # Check PSO parameters
+        for param, (min_val, max_val, param_type) in pso_ranges_and_types.items():
+            value_str = config["pso"].get(param, "")
+            try:
+                if param_type == bool:
+                    value = value_str.strip().lower() == "true"
+                    if value not in [True, False]:
+                        errors[f"pso.{param}"] = f"{param} must be True or False, got {value_str}"
+                else:
+                    value = param_type(value_str)
+                    if min_val is not None and value < min_val:
+                        errors[f"pso.{param}"] = f"{param} must be >= {min_val}, got {value}"
+                    elif max_val is not None and value > max_val:
+                        errors[f"pso.{param}"] = f"{param} must be <= {max_val}, got {value}"
+            except (ValueError, TypeError):
+                errors[f"pso.{param}"] = f"{param} must be {param_type.__name__}, got {value_str}"
+
+        # Check ASTRA parameters
+        for param, (min_val, max_val, param_type) in astra_ranges_and_types.items():
+            value_str = config["astra"].get(param, "")
+            try:
+                if param_type == bool:
+                    value = value_str.strip().lower() == "true"
+                    if value not in [True, False]:
+                        errors[f"astra.{param}"] = f"{param} must be True or False, got {value_str}"
+                else:
+                    value = param_type(value_str)
+                    if min_val is not None and value < min_val:
+                        errors[f"astra.{param}"] = f"{param} must be >= {min_val}, got {value}"
+                    elif max_val is not None and value > max_val:
+                        errors[f"astra.{param}"] = f"{param} must be <= {max_val}, got {value}"
+            except (ValueError, TypeError):
+                errors[f"astra.{param}"] = f"{param} must be {param_type.__name__}, got {value_str}"
+
+        # Check Kalman parameters
+        for param, (min_val, max_val, param_type) in kalman_ranges_and_types.items():
+            value_str = config["kalman"].get(param, "")
+            try:
+                if param_type == bool:
+                    value = value_str.strip().lower() == "true"
+                    if value not in [True, False]:
+                        errors[f"kalman.{param}"] = f"{param} must be True or False, got {value_str}"
+                else:
+                    value = param_type(value_str)
+                    if min_val is not None and value < min_val:
+                        errors[f"kalman.{param}"] = f"{param} must be >= {min_val}, got {value}"
+                    elif max_val is not None and value > max_val:
+                        errors[f"kalman.{param}"] = f"{param} must be <= {max_val}, got {value}"
+            except (ValueError, TypeError):
+                errors[f"kalman.{param}"] = f"{param} must be {param_type.__name__}, got {value_str}"
+
+        return errors
+
+
     def startKalmanThread(self):
         """Creates and runs a Kalman process on a separate worker thread"""
 
         self.storeConfig()
+        errors = self.checkConfig()
+        if errors != {}:
+            self.skyfit_instance.setMessageBox(title="ASTRA Configuration Error",
+                                             message="\n".join(errors.values()),
+                                             type='error')
+            return
         self.config = self.getConfig()
 
         self.run_kalman_btn.setEnabled(False)

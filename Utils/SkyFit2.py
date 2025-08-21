@@ -4334,6 +4334,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # Print message telling ASTRA has been run
         print(f'Loaded {len(pick_frame_indices)} Picks from ASTRA! Minimum SNR of {astra_config["astra"]["min SNR"]}')
 
+    def setMessageBox(self, title, message, type):
+        """Target function for ASTRA_GUI to set message boxes."""
+        qmessagebox(title=title, message=message, message_type=type)
+
     def runKalmanFromConfig(self, astra_config, progress_callback=None):
         """Runs the Kalman filter with the given ASTRA configuration."""
         
@@ -6604,26 +6608,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Correct the crop_img with star_mask
                 crop_mask_img = mask_img[x_min:x_max, y_min:y_max]
                 crop_img = np.ma.masked_array(crop_img, crop_mask_img)
-                from matplotlib import pyplot as plt
-                plt.figure(figsize=(12, 5))
-                plt.subplot(1, 2, 1)
-                plt.imshow(crop_mask_img, cmap='grey', vmin=0, vmax=1)
-                plt.title('Crop Mask Image')
-                plt.colorbar()
-                    
-                plt.subplot(1, 2, 2)
-                plt.imshow(star_mask, cmap='grey', vmin=0, vmax=1)
-                print(crop_star_mask)
-                plt.title('Crop Star Mask')
-                plt.colorbar()
-                
-                plt.tight_layout()
-                plt.show()
-                # EVERYTHING IS MAKED AT THIS POINT
 
                 # Replace photometry pixels that are masked by a star with the median value of the photom. area
-                photom_star_masked_indices = np.where(crop_mask_img != crop_star_mask)
-                print(photom_star_masked_indices)
+                photom_star_masked_indices = np.where(crop_mask_img == 0 & crop_star_mask == 1)
 
                 # Apply correction only if the streak intersects a star
                 if len(photom_star_masked_indices[0]) > 0:

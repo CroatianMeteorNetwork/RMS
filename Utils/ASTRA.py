@@ -1943,7 +1943,7 @@ class ASTRA:
         # Mask cropped frame with fit image to remove the background
         masked_cropped = fit_img * cropped_frame
 
-        masked_cropped[masked_cropped < np.nanpercentile(masked_cropped, float(self.astra_config['astra']['photom_thresh']))] = 0
+        masked_cropped[masked_cropped < np.nanpercentile(masked_cropped, float(self.astra_config['astra']['photom_thresh'])*100)] = 0
 
         # binarize mask_cropped
         masked_cropped[masked_cropped > 0] = 1
