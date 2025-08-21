@@ -611,6 +611,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.photom_fit_stddev = None
         self.photom_fit_resids = None
 
+        # Compute the saturation threshold
+        self.saturation_threshold = int(round(0.98*(2**self.config.bit_depth - 1)))
+    
         ###################################################################################################
 
 
@@ -663,14 +666,46 @@ class PlateTool(QtWidgets.QMainWindow):
         # Load distortion type index
         self.dist_type_index = self.platepar.distortion_type_list.index(self.platepar.distortion_type)
 
-
         ###################################################################################################
+
+        # Initialize the ASTRA dialog reference
+        self.astra_dialog = None
+        self.astra_config_params = None
 
         print()
 
         # INIT WINDOW
         if startUI:
             self.setupUI()
+
+
+        ###################################################################################################
+
+        # Automatically load the flat and bias in UWO data mode
+        if self.usingUWOData():
+            _, self.flat_struct = self.loadFlat()
+            _, self.dark = self.loadDark()
+
+                        
+            # Set focus back on the SkyFit window
+            self.activateWindow()
+
+            # Apply the dark to the flat if the flatbiassub flag is set
+            if self.flatbiassub and (self.flat_struct is not None):
+                
+                self.flat_struct.applyDark(self.dark)
+
+                self.img.flat_struct = self.flat_struct
+                self.img_zoom.flat_struct = self.flat_struct
+
+
+            self.img.dark = self.dark
+            self.img_zoom.dark = self.dark
+
+            self.img_zoom.flat_struct = self.flat_struct
+            self.img.flat_struct = self.flat_struct
+            self.img_zoom.reloadImage()
+            self.img.reloadImage()
 
 
     def setFPS(self):
@@ -2827,6 +2862,14 @@ class PlateTool(QtWidgets.QMainWindow):
         if not hasattr(self, "flatbiassub"):
             self.flatbiassub = False
 
+
+        # Add the possibily missing variables for ASTRA
+        if not hasattr(self, "astra_dialog"):
+            self.astra_dialog = None
+
+        if not hasattr(self, "astra_config_params"):
+            self.astra_config_params = None
+
         # If the paired stars are a list (old version), reset it to a new version where it's an object
         if isinstance(self.paired_stars, list):
 
@@ -3178,7 +3221,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Load the dark
         elif event.key() == QtCore.Qt.Key_D and (modifiers == QtCore.Qt.ControlModifier):
             
-            _, self.dark = self.loadDark()
+            _, self.dark = self.loadDark(force_dialog=True)
 
             # Set focus back on the SkyFit window
             self.activateWindow()
@@ -3208,7 +3251,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Load the flat
         elif event.key() == QtCore.Qt.Key_F and (modifiers == QtCore.Qt.ControlModifier):
             
-            _, self.flat_struct = self.loadFlat()
+            _, self.flat_struct = self.loadFlat(force_dialog=True)
 
             # Set focus back on the SkyFit window
             self.activateWindow()
@@ -3932,36 +3975,28 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.img.nextLine()
 
             # Launch ASTRA GUI
-            elif event.key() == QtCore.Qt.Key_K and (modifiers == QtCore.Qt.ControlModifier):
+            elif (event.key() == QtCore.Qt.Key_K) and (modifiers == QtCore.Qt.ControlModifier):
                 
                 if ASTRA_IMPORTED:
+
                     # Set class variable to store previous picks for astra/kalman reversion.
                     if not hasattr(self, "previous_picks"):
                         self.previous_picks = []
-
-                    # Set saturation threshold as a class var
-                    self.saturation_threshold = int(round(0.98*(2**self.config.bit_depth - 1)))
-
-                    if hasattr(self, "astra_dialog"):
-
-                        # If ASTRA dialog exists, close it
-                        if self.astra_dialog is not None:
-                            self.astra_config_params = self.astra_dialog.getConfig()
-                            self.astra_dialog.close()
-                            self.astra_dialog = None
+                    
+                    # If the ASTRA dialog does not exist, create it
+                    if not hasattr(self, "astra_dialog") or self.astra_dialog is None:
                         
-                        # If ASTRA is None, open GUI
-                        else:
-                            self.openAstraGUI()
-                            self.astra_dialog.finished.connect(self.clearAstraDialogReference)
-                            if hasattr(self, "astra_config_params"):
-                                self.astra_dialog.setConfig(self.astra_config_params)
-                    else:
-                        # Else open ASTRA GUI
                         self.openAstraGUI()
                         self.astra_dialog.finished.connect(self.clearAstraDialogReference)
-                        if hasattr(self, "astra_config_params"):
+                        
+                        if self.astra_config_params is not None:
                             self.astra_dialog.setConfig(self.astra_config_params)
+                    
+                    # If the dialog already exists, just show it
+                    else:
+                        self.astra_config_params = self.astra_dialog.getConfig()
+                        self.astra_dialog.close()
+                        self.clearAstraDialogReference()
 
                 else:
                     qmessagebox(title="ASTRA is not available",
@@ -3970,6 +4005,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def clearAstraDialogReference(self):
         """Clears the reference to the ASTRA GUI"""
+
         self.astra_dialog = None
 
     def clearAllPicks(self):
@@ -3991,6 +4027,10 @@ class PlateTool(QtWidgets.QMainWindow):
             run_load_callback=self.loadPicksFromFile,
             skyfit_instance=self
         )
+
+        self.checkASTRACanRun()
+        self.checkPickRevertCanRun()
+        self.checkKalmanCanRun()
     
     def loadPicksFromFile(self, config):
         """Loads picks and associated values from either ECSV or DetApp txt file.
@@ -4012,8 +4052,8 @@ class PlateTool(QtWidgets.QMainWindow):
             # Create a temp pick_list
             pick_list = {}
 
-            # Load all picks and indices from loadTXT
-            pick_list = self.loadTXT(file_path)
+            # Load all picks and indices from loadEvTxt
+            pick_list = self.loadEvTxt(file_path)
 
         # Open ECSV file (even if it doesn't have an .ecsv extension)
         else:
@@ -4038,7 +4078,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Check if the returned values from load are None
         if pick_list is None:
-            return # Warning was raised in loadTXT/loadECSV
+            return # Warning was raised in loadEvTxt/loadECSV
 
         # Check if the pick list is empty
         if pick_list == {}:
@@ -4421,11 +4461,11 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             print(f'Loaded {len(pick_frame_indices)} Picks from Kalman Smoothing!')
 
-    def loadTXT(self, txt_file_path):
+    def loadEvTxt(self, txt_file_path):
         """
-        Loads the TXT file and adds the relevant info to pick_list
+        Loads the Ev*.txt file and adds the relevant info to pick_list
         Args:
-            txt_file_path (str): Path to the TXT file to load
+            txt_file_path (str): Path to the Ev*.txt file to load
         Returns:
             picks (dict): (N : [8]) dict following same format as self.pick_list 
         """
@@ -4438,7 +4478,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Wrap in try except for uncaught errors
         try:
-            # Opens and pareses pick file
+            # Opens and parses pick file
             with open(txt_file_path, 'r') as file:
                 for i, line in enumerate(file):
                     if line.strip() and not line.startswith('#'):
@@ -5270,7 +5310,7 @@ class PlateTool(QtWidgets.QMainWindow):
         return catalog_stars
 
 
-    def loadPlatepar(self, update=False, platepar_file = None):
+    def loadPlatepar(self, update=False, platepar_file=None):
         """
         Open a file dialog and ask user to open the platepar file, changing self.platepar and self.platepar_file
 
@@ -5469,22 +5509,58 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateDistortion()
 
 
-    def loadFlat(self):
+    def usingUWOData(self):
+        """ Return True if using any UWO instrument data. """
+
+        if self.img_handle is None:
+            return False
+
+        if self.img_handle.input_type == 'images':
+            if self.img_handle.uwo_png_mode:
+                return True
+
+        elif self.img_handle.input_type == 'vid':
+                return True
+
+        return False
+
+
+    def loadFlat(self, force_dialog=False):
         """ Open a file dialog and ask user to load a flat field. """
 
-        # Check if flat exists in the folder, and set it as the default file name if it does
-        if self.config.flat_file in os.listdir(self.dir_path):
-            initial_file = os.path.join(self.dir_path, self.config.flat_file)
-        else:
-            initial_file = self.dir_path
+        file_names_to_check = [
+            self.config.flat_file
+            ]
+        
+        # If we're running in the UWO mode or using a .vid file, add the UWO flat file name
+        if self.usingUWOData():
+            file_names_to_check.append('flat.png')
 
-        flat_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the flat field file", initial_file,
+        # Check if any of the flat files exist in the folder
+        initial_file = None
+        for file_name in file_names_to_check:
+            if file_name in os.listdir(self.dir_path):
+                initial_file = os.path.join(self.dir_path, file_name)
+                break
+
+
+        # If using UWO files, automatically load the flat file and skip the dialog
+        if not force_dialog and self.usingUWOData() and initial_file is not None:
+            flat_file = initial_file
+
+        else:
+
+            if initial_file is None:
+                initial_file = self.dir_path
+
+            # Open the file dialog to select the flat field file
+            flat_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the flat field file", initial_file,
                                                     "Image files (*.png *.jpg *.bmp);;All files (*)")[0]
 
         if not flat_file:
             return False, None
 
-        print(flat_file)
+        print("Loading the flat file:", flat_file)
 
         try:
             # Load the flat, byteswap the flat if vid file is used or UWO png
@@ -5523,22 +5599,42 @@ class PlateTool(QtWidgets.QMainWindow):
         return flat_file, flat
 
 
-    def loadDark(self):
+    def loadDark(self, force_dialog=False):
         """ Open a file dialog and ask user to load a dark frame. """
 
-        # Check if dark exists in the folder, and set it as the default file name if it does
-        if self.config.dark_file in os.listdir(self.dir_path):
-            initial_file = os.path.join(self.dir_path, self.config.dark_file)
-        else:
-            initial_file = self.dir_path
+        file_names_to_check = [
+            self.config.dark_file
+            ]
 
-        dark_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the dark frame file", initial_file,
-                                                      "Image files (*.png *.jpg *.bmp *.nef *.cr2);;All files (*)")[0]
+        # If we're running in the UWO mode or using a .vid file, add the UWO dark file name
+        if self.usingUWOData():
+            file_names_to_check.append('bias.png')
+            file_names_to_check.append('dark.png')
+
+        # Locate the dark frame file in the folder
+        initial_file = None
+        for file_name in file_names_to_check:
+            if file_name in os.listdir(self.dir_path):
+                initial_file = os.path.join(self.dir_path, file_name)
+                break            
+
+        # If using UWO files, automatically load the dark file and skip the dialog
+        if not force_dialog and self.usingUWOData() and initial_file is not None:
+            dark_file = initial_file
+
+        else:
+            
+            if initial_file is None:
+                initial_file = self.dir_path
+
+            # Open the file dialog to select the dark frame file
+            dark_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the dark frame file", 
+                initial_file, "Image files (*.png *.jpg *.bmp *.nef *.cr2);;All files (*)")[0]
 
         if not dark_file:
             return False, None
 
-        print(dark_file)
+        print("Loading the dark frame file:", dark_file)
 
         try:
 
@@ -5736,14 +5832,11 @@ class PlateTool(QtWidgets.QMainWindow):
         ######################################################################################################
         # If 10 or more pixels are saturated (within 2% of the maximum value), mark the pick as saturated
 
-        # Compute the saturation threshold
-        saturation_threshold = int(round(0.98*(2**self.config.bit_depth - 1)))
-
         # Count the number of pixels above the saturation threshold (original non-gramma corrected image)
         # Apply the mask to only include the pixels within the star aperture radius
-        saturated_count = np.sum(img_crop_orig[aperture_mask == 1] > saturation_threshold)
+        saturated_count = np.sum(img_crop_orig[aperture_mask == 1] > self.saturation_threshold)
 
-        # print("Saturation threshold: {:.2f}, count: {:d}".format(saturation_threshold, saturated_count))
+        # print("Saturation threshold: {:.2f}, count: {:d}".format(self.saturation_threshold, saturated_count))
 
         # If 2 or more pixels are saturated, mark the pick as saturated
         min_saturated_px_count = 2
@@ -6593,7 +6686,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # Create an additional mask, masking stars above 3 sigma brightness
                 star_mask = np.zeros_like(avepixel.copy(), dtype=int)
-                star_mask[avepixel > (np.mean(avepixel) + star_mask_coeff * np.std(avepixel))] = 1
+                star_mask[avepixel > (np.median(avepixel) + star_mask_coeff*np.std(avepixel))] = 1
                 crop_star_mask = star_mask[x_min:x_max, y_min:y_max]
 
                 # Add the star mask & mask_img to the avepixel mask
@@ -6670,11 +6763,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
             ### Determine if there is any saturation in the measured photometric area
 
-            # Compute the saturation threshold
-            saturation_threshold = int(0.98*(2**self.config.bit_depth))
-
             # If at least 2 pixels are saturated in the photometric area, mark the pick as saturated
-            if np.sum(crop_img > saturation_threshold) >= 2:
+            if np.sum(crop_img > self.saturation_threshold) >= 2:
                 pick['saturated'] = True
             else:
                 pick['saturated'] = False

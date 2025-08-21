@@ -4,7 +4,7 @@ from PyQt5.QtWidgets import (
     QProgressBar, QTextEdit, QApplication, QWidget, QGridLayout
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject
-from Utils.ASTRA import ASTRA  
+from Utils.Astra import ASTRA  
 import html, re
 from PyQt5 import QtCore
 

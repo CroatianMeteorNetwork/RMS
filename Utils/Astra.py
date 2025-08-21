@@ -314,7 +314,7 @@ class ASTRA:
 
         # Calculate std of background
         background_std = np.std(corrected_avepixel)
-        background_mean = np.mean(corrected_avepixel)
+        background_mean = np.median(corrected_avepixel)
 
         # Calculate the masking threshold
         threshold = background_mean + self.BACKGROUND_STD_THRESHOLD * background_std
