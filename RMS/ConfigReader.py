@@ -989,15 +989,10 @@ def parseCapture(config, parser):
     if parser.has_option(section, "logdays_to_keep"):
         config.logdays_to_keep = int(parser.get(section, "logdays_to_keep"))
 
+    log_level_mapping = { 0: 'CRITICAL', 1: 'ERROR', 2: 'WARNING', 3: 'INFO', 4: 'DEBUG'}
+    
     if parser.has_option(section, "console_log_level"):
         config.console_log_level = parser.getint(section, "console_log_level")
-        log_level_mapping = {
-            0: 'CRITICAL',
-            1: 'ERROR',
-            2: 'WARNING',
-            3: 'INFO',
-            4: 'DEBUG'
-        }
         config.console_log_level = log_level_mapping[min(max(config.console_log_level, 0), 4)]
 
     if parser.has_option(section, "log_file_log_level"):
