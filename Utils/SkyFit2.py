@@ -12,13 +12,10 @@ import collections
 import glob
 
 import numpy as np
-import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-import scipy.optimize
 import pyqtgraph as pg
 import random
-import csv
 import copy
 
 
@@ -56,9 +53,10 @@ pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
 
 try:
-    from Utils.ASTRA import ASTRA
-    from Utils.ASTRA_GUI import launchASTRAGUI
+    from Utils.Astra import ASTRA
+    from Utils.AstraGUI import launchASTRAGUI
     ASTRA_IMPORTED = True
+
 except Exception as e:
     ASTRA_IMPORTED = False
     print(f'ASTRA import error: {e}')
