@@ -15,11 +15,10 @@ import os
 import copy
 
 
-# DNOTE: Package not included in RMS install, implement check
 try:
     from pyswarms.single.global_best import GlobalBestPSO
 except Exception as e:
-    print('ASTRA cannot be run, pyswarms not installed')
+    print(f'ASTRA cannot be run, pyswarms not installed: {e}')
 
 class ASTRA:
 
@@ -184,10 +183,10 @@ class ASTRA:
         
         # 5. save animation
         if self.save_animation:
-            # try:
-            self.saveAni(self.data_path)
-            # except Exception as e:
-            #     print(f'Error saving animation: {e}')
+            try:
+                self.saveAni(self.data_path)
+            except Exception as e:
+                print(f'Error saving animation: {e}')
 
         # Set progress to 100
         self.updateProgress(100)

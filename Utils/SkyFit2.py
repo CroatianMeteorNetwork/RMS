@@ -55,14 +55,13 @@ import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
 
-# DNOTE: local imports since not included in package, change to regular later
 try:
     from Utils.ASTRA import ASTRA
     from Utils.ASTRA_GUI import launchASTRAGUI
     ASTRA_IMPORTED = True
 except Exception as e:
     ASTRA_IMPORTED = False
-    print('ASTRA import error: likely pyswarms not installed')
+    print(f'ASTRA import error: {e}')
 
 
 class QFOVinputDialog(QtWidgets.QDialog):
@@ -4360,7 +4359,7 @@ class PlateTool(QtWidgets.QMainWindow):
         measurements = [(self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid']) for key in pick_frame_indices]
         times = [self.img_handle.frame_dt_dict[key] for key in pick_frame_indices]
 
-        # Dummy dict to instantiate ASTRA object (pass on unnessesary args as empty objects) DNOTE: Could use different __init__ or optional args, this is a simple workaround
+        # Dummy dict to instantiate ASTRA object (pass unnecessary args as empty objects) DNOTE: Could use different __init__ or optional args, this is a simple workaround
         data_dict = {
             "img_obj" : 0,
             "frames" : [],
@@ -6660,7 +6659,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Count the number of pixels in the photometric area
             source_px_count = np.ma.sum(~crop_img.mask)
-            # from matplotlib import pyplot as plt
 
             # Compute the signal to noise ratio using the CCD equation
             snr = signalToNoise(intensity_sum, source_px_count, background_lvl, background_stddev)
