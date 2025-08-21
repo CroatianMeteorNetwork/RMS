@@ -3939,7 +3939,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 
                 if ASTRA_IMPORTED:
                     # Set class variable to store previous picks for astra/kalman reversion.
-                    self.previous_picks = []
+                    if not hasattr(self, "previous_picks"):
+                        self.previous_picks = []
 
                     # Set saturation threshold as a class var
                     self.saturation_threshold = int(round(0.98*(2**self.config.bit_depth - 1)))
@@ -3948,6 +3949,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
                         # If ASTRA dialog exists, close it
                         if self.astra_dialog is not None:
+                            self.astra_config_params = self.astra_dialog.getConfig()
                             self.astra_dialog.close()
                             self.astra_dialog = None
                         
@@ -3955,10 +3957,15 @@ class PlateTool(QtWidgets.QMainWindow):
                         else:
                             self.openAstraGUI()
                             self.astra_dialog.finished.connect(self.clearAstraDialogReference)
+                            if hasattr(self, "astra_config_params"):
+                                self.astra_dialog.setConfig(self.astra_config_params)
                     else:
                         # Else open ASTRA GUI
                         self.openAstraGUI()
                         self.astra_dialog.finished.connect(self.clearAstraDialogReference)
+                        if hasattr(self, "astra_config_params"):
+                            self.astra_dialog.setConfig(self.astra_config_params)
+
                 else:
                     qmessagebox(title="ASTRA is not available",
                                 message='ASTRA was not correctly imported, check pyswarms is installed. Aborted open ASTRA GUI process.',
@@ -3987,11 +3994,7 @@ class PlateTool(QtWidgets.QMainWindow):
             run_load_callback=self.loadPicksFromFile,
             skyfit_instance=self
         )
-
-        # Update ASTRA/Kalman ready status
-        self.checkKalmanCanRun()
-        self.checkASTRACanRun()
-        
+    
     def loadPicksFromFile(self, config):
         """Loads picks and associated values from either ECSV or DetApp txt file.
         args: 
@@ -6610,7 +6613,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 crop_img = np.ma.masked_array(crop_img, crop_mask_img)
 
                 # Replace photometry pixels that are masked by a star with the median value of the photom. area
-                photom_star_masked_indices = np.where(crop_mask_img == 0 & crop_star_mask == 1)
+                photom_star_masked_indices = np.where((crop_mask_img == 0) & (crop_star_mask == 1))
 
                 # Apply correction only if the streak intersects a star
                 if len(photom_star_masked_indices[0]) > 0:
@@ -6658,8 +6661,6 @@ class PlateTool(QtWidgets.QMainWindow):
             # Count the number of pixels in the photometric area
             source_px_count = np.ma.sum(~crop_img.mask)
             # from matplotlib import pyplot as plt
-            plt.imshow(~crop_img.mask, cmap='grey')
-            plt.show()
 
             # Compute the signal to noise ratio using the CCD equation
             snr = signalToNoise(intensity_sum, source_px_count, background_lvl, background_stddev)

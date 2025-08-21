@@ -265,6 +265,9 @@ class AstraConfigDialog(QDialog):
 
         self.setLayout(main_layout)
 
+    def setConfig(self, config):
+        self.config = config
+
     def selectFile(self):
         """Opens dialog to select ECSV/txt file"""
         file_path, _ = QFileDialog.getOpenFileName(
