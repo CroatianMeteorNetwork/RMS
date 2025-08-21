@@ -1,18 +1,20 @@
+import os
+import csv
+import copy
+from datetime import datetime
+import threading
+
 import numpy as np
 import scipy.optimize
 import scipy.stats
 import scipy.special
-from RMS.Routines.Image import signalToNoise
-from RMS.Routines import Image
 import cv2
-import threading
-from datetime import datetime
 import matplotlib        
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
-import csv
-import os
-import copy
+
+from RMS.Routines.Image import signalToNoise
+from RMS.Routines import Image
 
 
 try:
@@ -269,10 +271,18 @@ class ASTRA:
                     corrected_frame = Image.applyFlat(corrected_frame, self.flat_struct)
 
                 if self.flat_struct is not None or self.dark is not None:
+                    
                     # Apply gamma correction
-                    corrected_frame = Image.gammaCorrectionImage(corrected_frame, self.skyfit_config.gamma, bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
+                    corrected_frame = Image.gammaCorrectionImage(
+                        corrected_frame, self.skyfit_config.gamma, 
+                        bp=0, wp=(2**self.skyfit_config.bit_depth - 1)
+                        )
+
                 else:
-                    corrected_frame = Image.gammaCorrectionImage(frame, self.skyfit_config.gamma, bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
+
+                    corrected_frame = Image.gammaCorrectionImage(
+                        frame, self.skyfit_config.gamma, bp=0, wp=(2**self.skyfit_config.bit_depth - 1)
+                        )
 
                 # Append corrected frame
                 corrected_frames.append(corrected_frame)
@@ -350,7 +360,8 @@ class ASTRA:
         """
 
         # 1) -- Unpack variables & Calculate seed picks/frames--
-        seed_picks_global, seed_indices = self.select_seed_triplet(picks, pick_frame_indices)
+        seed_picks_global, seed_indices = self.selectSeedTriplet(picks, pick_frame_indices)
+
         omega = np.arctan2(picks[-1][1] - picks[0][1], -picks[-1][0] + picks[0][0])  % (2*np.pi)
         
         if self.verbose:
@@ -386,7 +397,7 @@ class ASTRA:
                                                 omega)
             
             # Run a first-pass Gaussian on the cropped frames
-            self.first_pass_params[i], _ = self.GaussianPSO(self.cropped_frames[i], omega, directions, init_length=init_length)
+            self.first_pass_params[i], _ = self.gaussianPSO(self.cropped_frames[i], omega, directions, init_length=init_length)
 
             # Update progress
             self.progressed_frames['cropping'] += 1
@@ -464,7 +475,7 @@ class ASTRA:
             bounds = self.calculateAdaptiveBounds(first_pass_params, p0, True)
 
             # Perform the local Gaussian fit 
-            fit_params, cost, img = self.LocalGaussianFit(p0, obs_frame, omega, bounds, directions)
+            fit_params, cost, img = self.localGaussianFit(p0, obs_frame, omega, bounds, directions)
 
             # Append results to the lists
             self.refined_fit_params[i] = fit_params
@@ -1001,7 +1012,7 @@ class ASTRA:
         return next_params
 
 
-    def LocalGaussianFit(self, p0, obs_frame, omega, bounds, directions):
+    def localGaussianFit(self, p0, obs_frame, omega, bounds, directions):
 
         # Define initial parameters
         y, x = np.indices(obs_frame.shape)
@@ -1010,7 +1021,7 @@ class ASTRA:
 
         # Instantiate optimizer
         res = scipy.optimize.minimize(
-            fun=self.LocalObjectiveFunction,
+            fun=self.localObjectiveFunction,
             x0=p0,  # Exclude omega from initial guess
             args=(data_tuple, y_obs, 0, omega, bounds, directions),
             method=self.second_pass_settings["method"],
@@ -1021,7 +1032,7 @@ class ASTRA:
         if res.success is False:
             print(f"Warning: Local optimization failed with message: {res.message}. Reverting to initial guess.")
             best_pos = p0
-            best_cost = self.LocalObjectiveFunction(p0, data_tuple, y_obs, 0, omega, bounds, directions)
+            best_cost = self.localObjectiveFunction(p0, data_tuple, y_obs, 0, omega, bounds, directions)
         else:
             # Get best cost and position
             best_pos = res.x
@@ -1040,7 +1051,7 @@ class ASTRA:
         return best_pos, best_cost, img
 
         
-    def GaussianPSO(self, cropped_frame, omega, directions, estim_next_params=None, init_length=None):
+    def gaussianPSO(self, cropped_frame, omega, directions, estim_next_params=None, init_length=None):
         """
         Performs a Particle Swarm Optimization (PSO) to fit a moving Gaussian to the cropped frame.
         Args:
@@ -1127,7 +1138,7 @@ class ASTRA:
 
             # Solve optimizer
             best_cost, best_pos = optimizer.optimize(
-                objective_func = self.PSOObjectiveFunction,
+                objective_func = self.psoObjectiveFunction,
                 iters = self.first_pass_settings["max_iter"],
                 verbose = self.verbose,
                 data_tuple = data_tuple,
@@ -1148,7 +1159,7 @@ class ASTRA:
         return best_pos, best_cost
 
 
-    def PSOObjectiveFunction(self, params, data_tuple, y_obs, a0, omega, bounds, directions):
+    def psoObjectiveFunction(self, params, data_tuple, y_obs, a0, omega, bounds, directions):
         """ 
         Objective function for the PSO optimization, calculating the residuals based on the moving Gaussian fit.
         Args:
@@ -1200,7 +1211,7 @@ class ASTRA:
         return residuals
     
 
-    def LocalObjectiveFunction(self, params, data_tuple, y_obs, a0, omega, bounds, directions):
+    def localObjectiveFunction(self, params, data_tuple, y_obs, a0, omega, bounds, directions):
         """
         Objective function for the local optimization, calculating the residuals based on the moving Gaussian fit.
         Args:
@@ -1412,7 +1423,8 @@ class ASTRA:
         return pos
 
 
-    def recursiveCroppingAlgorithm(self, frame_index, est_center_global, paramter_estimation_functions, omega, directions, forward_pass = False):
+    def recursiveCroppingAlgorithm(self, frame_index, est_center_global, paramter_estimation_functions, omega, 
+                                   directions, forward_pass=False):
         """
         Recursive cropping algorithm to refine the meteor crops based on the estimated parameters.
         Args:
@@ -1439,7 +1451,7 @@ class ASTRA:
                                                                     omega)
         
         # Run a PSO on the cropped frame
-        best_fit, _ = self.GaussianPSO(cropped_frame, omega, directions, estim_next_params=est_next_params)
+        best_fit, _ = self.gaussianPSO(cropped_frame, omega, directions, estim_next_params=est_next_params)
 
         # Update instance variables with gaussian parameters
         if forward_pass:
@@ -1752,7 +1764,8 @@ class ASTRA:
                 current_percentage = (self.exec_count / self.total_exec) * 100
                 self.progress_callback(int(current_percentage))
 
-    def select_seed_triplet(self, picks, pick_frame_indices):
+    def selectSeedTriplet(self, picks, pick_frame_indices):
+
         # Convert & validate
         p = np.asarray(picks)
         f = np.asarray(pick_frame_indices)
@@ -1963,8 +1976,9 @@ class ASTRA:
 
         return photometry_pixels
 
-    def saveKalmanUncertaintiesToCSV(self, data_path, times, measurements, x_smooth, p_smooth):
 
+
+    def saveKalmanUncertaintiesToCSV(self, data_path, times, measurements, x_smooth, p_smooth):
 
         fig_dir = os.path.join(data_path, "ASTRA_Kalman_Results")
         if not os.path.exists(fig_dir):
