@@ -2,6 +2,7 @@ import os
 import csv
 import copy
 from datetime import datetime
+import datetime as dt
 import threading
 
 import numpy as np
@@ -13,14 +14,18 @@ import matplotlib
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
-from RMS.Routines.Image import signalToNoise
+from RMS.Routines.Image import signalToNoise, loadDark, loadFlat
 from RMS.Routines import Image
-
+from RMS.Formats.FrameInterface import InputTypeImages
+from RMS.ConfigReader import loadConfigFromDirectory
+from Utils.SkyFit2 import Platepar
 
 try:
     from pyswarms.single.global_best import GlobalBestPSO
 except Exception as e:
     print(f'ASTRA cannot be run, pyswarms not installed: {e}')
+
+
 
 class ASTRA:
 
@@ -2579,3 +2584,441 @@ class ASTRA:
             print("Warning: save_path is None, not saving results.")
         
         return x_smooth, p_smooth, Q_base, R, norm_times
+
+
+
+class Dataloader:
+    """
+    Loads the following from a data path to instantiate an ASTRA process:
+    - img_obj: InputTypeImages
+    - frames: numpy array (Nxwxh)
+    - picks: numpy array (Nx2)
+    - pick_frame_indices: numpy array (N)
+    - times: numpy array (N)
+    - saturation_threshold (np.float64)
+    - save_path
+    - camera_config (config obj)
+    - dark
+    - flat
+    - platepar
+    """
+
+    def __init__(self, astra_config):
+        self.tavis_path = astra_config['01G']
+        self.elgin_path = astra_config['02G']
+        self.error_log = astra_config['error']
+        self.data_dict = {
+            "01G" : {
+                "img_obj": None,
+                "frames": None,
+                "picks": None,
+                "pick_frame_indices": None,
+                "times": None,
+                "saturation_threshold": None,
+                "camera_config": None,
+                "dark": None,
+                "flat": None,
+                "platepar" : None
+            },
+            "02G" : {
+                "img_obj": None,
+                "frames": None,
+                "picks": None,
+                "pick_frame_indices": None,
+                "times": None,
+                "saturation_threshold": None,
+                "camera_config": None,
+                "dark": None,
+                "flat": None,
+                "platepar" : None
+            }
+        }
+
+        success_bool_Tav = self.parseDirectory(self.tavis_path, '01G')
+        success_bool_Elg = self.parseDirectory(self.elgin_path, '02G')
+
+        if success_bool_Tav and success_bool_Elg:
+            self.res = True
+
+        else:
+            # If any errors, write to error log
+            with open(self.error_log, 'a') as f:
+                f.write(f"Error loading data from {self.tavis_path} or {self.elgin_path}\n")
+            self.res = False
+
+    def parseDirectory(self, path, code):
+
+        config_path = None
+        txt_path = None
+        dark_name = None
+        flat_name = None
+        platepar_path = None
+
+        # Load file paths
+        for file_name in os.listdir(path):
+
+            # Get config
+            if file_name.endswith('.config'):
+                config_path = os.path.join(path, file_name)
+            # Get dark/bias
+            elif file_name.startswith('dark') or file_name.startswith('bias'):
+                dark_name = file_name
+            # Get flat
+            elif file_name.startswith('flat'):
+                flat_name = file_name
+            # Get picks
+            elif file_name.endswith('.ecsv'):
+                picks_path = os.path.join(path, file_name)
+            elif file_name.endswith('.txt') and file_name.startswith('ev'):
+                txt_path = os.path.join(path, file_name)
+            # Get platepar
+            elif file_name.endswith('.cal'):
+                platepar_path = os.path.join(path, file_name)
+        b = True
+        # Load all
+
+        if config_path is not None:
+            config = loadConfigFromDirectory('.', config_path)
+        else:
+            raise FileNotFoundError(f"No config file found in {path}")
+
+        try:
+            config = loadConfigFromDirectory('.', config_path)
+            frames, img_obj = self.loadFrames(path, config)
+            dark = np.array(loadDark(path, dark_name, byteswap=b), dtype=np.float32)
+            flat = loadFlat(path, flat_name, byteswap=b)
+            picks, pick_frame_indices, times = self.loadECSV(picks_path, path, img_obj)
+            saturation_threshold = int(round(0.98*(2**config.bit_depth - 1)))
+            platepar = Platepar()
+            platepar.read(platepar_path)
+        except Exception as e:
+            print(f"Error loading files from {path}: {e}")
+            return False
+
+        self.data_dict[code] = {
+            "img_obj": img_obj,
+            "frames": frames,
+            "picks": picks,
+            "pick_frame_indices": pick_frame_indices,
+            "times": times,
+            "saturation_threshold": saturation_threshold,
+            "camera_config": config,
+            "dark": dark,
+            "flat": flat,
+            "platepar": platepar
+        }
+
+        # return true if no errors
+        return True
+
+    def loadECSV(self, ECSV_file_path, dir_path, img_obj):
+        # ASTRA Addition - Justin DT
+        """
+        Loads the ECSV file and adds the relevant info to pick_list
+        Args:
+            ECSV_file_path (str): Path to the ECSV file to load
+        Returns:
+            picks (np.ndarray): (N, 2) array of (x, y) picks
+            pick_frame_indices (np.ndarray): (N,) array of frame indices for each pick
+            mags (np.ndarray): (N,) array of magnitudes for each pick
+        """
+
+        # Instantiate arrays to be populated
+        picks = []  # N x args_dict array for addCentroid
+        pick_frame_indices = []  # (N,) array of frame indices
+        pick_frame_times = []  # (N,) array of frame times
+
+        # Opens and parses the ECSV file
+        with open(ECSV_file_path, 'r') as file:
+
+            # Read the file contents
+            contents = file.readlines()
+    
+            # Temp bool to get the column names
+            first_bool = False
+
+            # Process the contents
+            for line in contents:
+
+                # Clean the line
+                line = [part.strip() for part in line.split(',') if part]
+
+                # Skip header lines
+                if line[0].startswith('#'):
+                    continue
+
+                if first_bool == False:
+                    # Set first bool to True so header is not unpacked twice
+                    first_bool = True
+
+                    # Unpack column names
+                    column_names = line
+
+                    # Map column names to their indices
+                    pick_frame_times_idx = column_names.index('datetime') if 'datetime' in column_names else None
+                    x_ind = column_names.index('x_image') if 'x_image' in column_names else None
+                    y_ind = column_names.index('y_image') if 'y_image' in column_names else None
+                    background_ind = column_names.index('background_pixel_value') if 'background_pixel_value' in column_names else None
+                    sat_ind = column_names.index('saturated_pixels') if 'saturated_pixels' in column_names else None
+                    snr_ind = column_names.index('snr') if 'snr' in column_names else None
+
+                    continue
+
+                else:
+                    # Unpack line
+
+                    # Populate arrays
+                    cx, cy = float(line[x_ind]), float(line[y_ind])
+                    pick_frame_times.append(datetime.strptime(line[pick_frame_times_idx], '%Y-%m-%dT%H:%M:%S.%f'))
+
+                    # Load in pick parameters, use default for other values
+                    picks.append([cx, cy])
+
+        # Converts times into frame indices, accounting for floating-point errors
+        pick_frame_indices = []
+        frame_count = sum(1 for name in os.listdir(dir_path) if 'dump' in name)
+        time_idx = 0
+        for i in range(frame_count):
+            frame_time = img_obj.currentFrameTime(frame_no=i, dt_obj = True)
+            time = pick_frame_times[time_idx]
+            if frame_time == time or \
+                frame_time == time + dt.timedelta(microseconds=1) or \
+                frame_time == time - dt.timedelta(microseconds=1):
+                pick_frame_indices.append(i)
+                time_idx += 1
+            if time_idx >= len(pick_frame_times):
+                break
+        
+        return np.array(picks), np.array(pick_frame_indices), np.array(pick_frame_times)
+    
+    def loadEvTxt(self, txt_file_path, img_handle):
+        """
+        Loads the Ev*.txt file and adds the relevant info to pick_list
+        Args:
+            txt_file_path (str): Path to the Ev*.txt file to load
+        Returns:
+            picks (dict): (N : [8]) dict following same format as self.pick_list 
+        """
+
+        picks = [] # (N, x, y) array of picks
+        pick_frame_indices = [] # (N,) array of frame indices
+        pick_frame_times = []
+
+        # Temp bool to extract header line
+        first_bool = False
+
+        # Wrap in try except for uncaught errors
+        try:
+            # Opens and parses pick file
+            with open(txt_file_path, 'r') as file:
+                for i, line in enumerate(file):
+                    if line.strip() and not line.startswith('#'):
+
+                        # Clean the line
+                        line = [part.strip() for part in line.split() if part]
+
+                        # Unpack the header
+                        if first_bool == False:
+                            first_bool = True
+
+                            # Unpack header info
+                            column_names = [part.strip() for part in temp_line.split()[1:] if part]
+
+                            # Extract indices
+                            frame_number_idx = column_names.index('fr') if 'fr' in column_names else None
+                            x_centroid_idx = column_names.index('cx') if 'cx' in column_names else None
+                            y_centroid_idx = column_names.index('cy') if 'cy' in column_names else None
+
+                            # Raise error if not found in txt file
+                            if frame_number_idx is None or x_centroid_idx is None or y_centroid_idx is None:
+                                raise ValueError("TXT file must contain 'fr', 'cx', and 'cy' columns.")
+                        
+                        else:
+                            # Unpack the pick
+                            frame_number = int(line[frame_number_idx])
+                            cx, cy = float(line[x_centroid_idx]), float(line[y_centroid_idx])
+
+                            picks.append([cx, cy])
+                            pick_frame_indices.append(frame_number)
+                            pick_frame_times.append([(img_handle.frame_dt_dict[frame_number])])
+
+                    # Store a temp line to hit previous for col names
+                    temp_line = line
+
+            return np.array(picks), np.array(pick_frame_indices), np.array(pick_frame_times)
+
+        # Raise error message
+        except Exception as e:
+            raise ValueError(f"Error reading TXT file: {str(e)}")
+
+    def loadFrames(self, path, config):
+
+        # Count frames
+        frame_count = sum(1 for name in os.listdir(path) if 'dump' in name)
+
+        img_obj = InputTypeImages(path, config)
+        print(img_obj.loadFrame().dtype)
+        frames = np.zeros((frame_count, *img_obj.loadFrame().shape), dtype=np.float32)
+        for i in range(frame_count):
+            frames[i] = img_obj.loadFrame(fr_no=i)
+
+        return frames, img_obj
+
+# Terminal call functions
+def checkAstraConfig(astra_config):
+    """Checks the config only has valid values"""
+    config = astra_config
+    pso_ranges_and_types = {
+        "w (0-1)": (0.0, 1.0, float),
+        "c_1 (0-1)": (0.0, 1.0, float),
+        "c_2 (0-1)": (0.0, 1.0, float),
+        "max itter": (1, None, int),
+        "n_particles": (1, None, int),
+        "V_c (0-1)": (0.0, 1.0, float),
+        "ftol": (0.0, 100.0, float),
+        "ftol_itter": (1, None, int),
+        "expl_c": (1.0, None, float),
+        "P_sigma": (0.0, None, float)
+    }
+
+    astra_ranges_and_types = {
+        "star_thresh": (0, None, float), "min SNR": (0, None, float),
+        "P_crop": (0, None, float), "sigma_init (px)": (0.1, None, float), "sigma_max": (1, None, float),
+        "L_max": (1, None, float), "Verbose": (True, False, bool), "photom_thresh": (0, 1, float),
+        "Save Animation": (True, False, bool), "CE_coeff": (0, None, float)
+    }
+
+    kalman_ranges_and_types = {
+        "Monotonicity": (True, False, bool), "sigma_xy (px)": (0, None, float), 
+        "sigma_vxy (%)": (0, 100, float), "save results": (True, False, bool)
+    }
+
+    errors = {}
+
+    # Check PSO parameters
+    for param, (min_val, max_val, param_type) in pso_ranges_and_types.items():
+        value_str = config["pso"].get(param, "")
+        try:
+            if param_type == bool:
+                value = value_str.strip().lower() == "true"
+                if value not in [True, False]:
+                    errors[f"pso.{param}"] = f"{param} must be True or False, got {value_str}"
+            else:
+                value = param_type(value_str)
+                if min_val is not None and value < min_val:
+                    errors[f"pso.{param}"] = f"{param} must be >= {min_val}, got {value}"
+                elif max_val is not None and value > max_val:
+                    errors[f"pso.{param}"] = f"{param} must be <= {max_val}, got {value}"
+        except (ValueError, TypeError):
+            errors[f"pso.{param}"] = f"{param} must be {param_type.__name__}, got {value_str}"
+
+    # Check ASTRA parameters
+    for param, (min_val, max_val, param_type) in astra_ranges_and_types.items():
+        value_str = config["astra"].get(param, "")
+        try:
+            if param_type == bool:
+                value = value_str.strip().lower() == "true"
+                if value not in [True, False]:
+                    errors[f"astra.{param}"] = f"{param} must be True or False, got {value_str}"
+            else:
+                value = param_type(value_str)
+                if min_val is not None and value < min_val:
+                    errors[f"astra.{param}"] = f"{param} must be >= {min_val}, got {value}"
+                elif max_val is not None and value > max_val:
+                    errors[f"astra.{param}"] = f"{param} must be <= {max_val}, got {value}"
+        except (ValueError, TypeError):
+            errors[f"astra.{param}"] = f"{param} must be {param_type.__name__}, got {value_str}"
+
+    # Check Kalman parameters
+    for param, (min_val, max_val, param_type) in kalman_ranges_and_types.items():
+        value_str = config["kalman"].get(param, "")
+        try:
+            if param_type == bool:
+                value = value_str.strip().lower() == "true"
+                if value not in [True, False]:
+                    errors[f"kalman.{param}"] = f"{param} must be True or False, got {value_str}"
+            else:
+                value = param_type(value_str)
+                if min_val is not None and value < min_val:
+                    errors[f"kalman.{param}"] = f"{param} must be >= {min_val}, got {value}"
+                elif max_val is not None and value > max_val:
+                    errors[f"kalman.{param}"] = f"{param} must be <= {max_val}, got {value}"
+        except (ValueError, TypeError):
+            errors[f"kalman.{param}"] = f"{param} must be {param_type.__name__}, got {value_str}"
+
+    return errors
+
+
+if __name__ == "__main__":
+
+    # first check if two events, if yes then compute both else just one
+    # args:
+        # file directory
+        # astra_config path (optional)
+        # run kalman (optional)
+
+    # To determine if there is more than one event, check for children directories that have a config in them
+    from argparse import ArgumentParser
+    import json
+
+    parser = ArgumentParser(description="Process some events.")
+    parser.add_argument("file_directory", type=str, help="Path to the file directory")
+    parser.add_argument("--astra_config", type=str, help="ASTRA_config dict or Path to the ASTRA config json")
+    parser.add_argument("--run_kalman", default=False, action="store_true", help="Whether to run Kalman filter")
+    parser.add_argument("--save_animation", default=False, action="store_true", help="Whether to save animation of frame fitting")
+    parser.add_argument("--verbose", default=False, action="store_true", help="Whether to print verbose output")
+    # MAYBE SEPERATE KALMAN AND ASTRA ENTIRELY TO ALLOW KALMAN TO BE RUN ON MANUAL PICKING
+    args = parser.parse_args()
+
+    # Check filepath
+    if not os.path.exists(args.file_directory):
+        raise FileNotFoundError(f"File directory not found: {args.file_directory}")
+    else:
+        file_path = args.file_directory
+
+    # Check save_animation
+    if args.save_animation is True:
+        save_animation = True
+
+    # Check verbose
+    if args.verbose is True:
+        verbose = True
+
+    # Load and check astra_config
+    if args.astra_config:
+
+        # Load if a json file
+        if args.astra_config.endswith(".json"):
+            with open(args.astra_config, "r") as f:
+                astra_config = json.load(f)
+
+        # If dict, open as a dict
+        else:
+            try:
+                astra_config = json.loads(args.astra_config)
+            except Exception as e:
+                raise ValueError(f"Invalid ASTRA config format. Must either be path to JSON (with quotes escaped) or a valid dictionary: {e}")
+
+        # If astra_config provided, check values
+        try:
+            errors = checkAstraConfig(astra_config)
+        except Exception as e:
+            print(f"Error processing astra_config, check Astra.py execution header for proper format: {e}")
+            raise
+        if errors:
+            print("Unexpected astra_config items or values")
+            for key, error in errors.items():
+                print(f"astra_config error: {key}: {error}")
+            raise ValueError("Invalid astra_config values. See errors above.")
+
+    else:
+        print("No ASTRA config provided. Using default configuration.")
+        astra_config = {'file_path': file_path, 
+                        'pso': {'w (0-1)': 0.9, 'c_1 (0-1)': 0.45, 'c_2 (0-1)': 0.25, 'max itter': 125, 
+                                'n_particles': 125, 'V_c (0-1)': 0.3, 'ftol': 1e-4, 'ftol_itter': 25, 
+                                'expl_c': 3, 'P_sigma': 3}, 
+                        'astra': {'star_thresh': 3, 'min SNR': 5, 'P_crop': 1.5, 'sigma_init (px)': 2, 
+                                  'sigma_max': 1.2, 'L_max': 1.5, 'Verbose': verbose, 'photom_thresh': 0.05, 
+                                  'Save Animation': save_animation, 'CE_coeff': 3}, 
+                        'kalman': {'Monotonicity': True, 'sigma_xy (px)': 0.5, 'sigma_vxy (%)': 100, 
+                                   'save results': False}}

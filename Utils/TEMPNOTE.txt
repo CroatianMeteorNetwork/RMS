@@ -1,9 +1,6 @@
 Changes before merge:
     -Implement modular (if name is main) utiliztion into ASTRA
-    -Structure all imports in order of native -> imported -> internal
     -Add guide.md for ASTRA in guides (Also document future improvements, and how future improvements should be implemented)
-    -Make Kalman functions in ASTRA standalone
-    -Put ASTRA_GUI into SkyFit2 file
 
     -Look into solving length over-estimation in low-SNR frames
         -Add penalty function of STD of photometric area?
