@@ -22,11 +22,14 @@ import argparse
 import subprocess
 import cv2
 import numpy as np
+from ephem import julian_date
+
 import RMS.ConfigReader as cr
 import datetime
 import pathlib
 import time
 import imageio as imageio
+import tqdm
 
 from RMS.Astrometry.Conversions import altAz2RADec, jd2Date, date2JD
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP
@@ -36,9 +39,7 @@ from RMS.Math import angularSeparationDeg
 from RMS.Misc import mkdirP
 from RMS.Routines.MaskImage import loadMask
 
-
-
-def getStationsInfoDict(path_list=None, print_activity=True):
+def getStationsInfoDict(path_list=None, print_activity=False):
 
     """
     Either load configs from a given path_list, or look for configs in a multi_cam linux
@@ -268,75 +269,79 @@ def makeTransformation(stations_info_dict, size_x, size_y, minimum_elevation_deg
     transformation_layer_list, transformation_layer = [], 0
 
     # Form the transformation, working across stations, and then stacked images
+
+    station_stack_count_list = []
     for station in stations_info_dict:
         for stack_count in range(0, stack_depth):
+            station_stack_count_list.append([station, stack_count])
 
-            # Get the source platepar
-            pp_source = stations_info_dict[station]['pp']
+    for station, stack_count in tqdm.tqdm(station_stack_count_list):
+        # Get the source platepar
+        pp_source = stations_info_dict[station]['pp']
 
-            # Compute the time offset - +ve is always forward in time
-            time_offset_seconds = 0 - time_steps_seconds * stack_count
-            offset_date = jd2Date(pp_source.JD, dt_obj=True) + datetime.timedelta(seconds=time_offset_seconds)
+        # Compute the time offset - +ve is always forward in time
+        time_offset_seconds = 0 - time_steps_seconds * stack_count
+        offset_date = jd2Date(pp_source.JD, dt_obj=True) + datetime.timedelta(seconds=time_offset_seconds)
 
-            # Convert the source image time to Julian Date relative to platepar reference
-            jd_source = date2JD(offset_date.year, offset_date.month, offset_date.day, offset_date.hour, offset_date.minute, offset_date.second, int(offset_date.microsecond / 1000))
+        # Convert the source image time to Julian Date relative to platepar reference
+        jd_source = date2JD(offset_date.year, offset_date.month, offset_date.day, offset_date.hour, offset_date.minute, offset_date.second, int(offset_date.microsecond / 1000))
 
-            if print_activity:
-                print("Making transformation for {:s} with a time offset of {:.1f} seconds - {}".format(station.lower(), 0 - time_offset_seconds, jd2Date(jd_source)))
+        if print_activity:
+            print("Making transformation for {:s} with a time offset of {:.1f} seconds - {}".format(station.lower(), 0 - time_offset_seconds, jd2Date(jd_source)))
 
-            # Get the centre of the platepar at creation time in JD - not compensated for time offsets
-            _, r_source, d_source, _ = xyToRaDecPP([pp_source.JD], [pp_source.X_res / 2], [pp_source.Y_res / 2], [1], pp_source, jd_time=True)
-            r_list, d_list, x_dest_list, y_dest_list = [], [], [], []
+        # Get the centre of the platepar at creation time in JD - not compensated for time offsets
+        _, r_source, d_source, _ = xyToRaDecPP([pp_source.JD], [pp_source.X_res / 2], [pp_source.Y_res / 2], [1], pp_source, jd_time=True)
+        r_list, d_list, x_dest_list, y_dest_list = [], [], [], []
 
-            for y_dest in range(0, size_y + 1):
-                for x_dest in range(0, size_x + 1):
-                    _x, _y, = x_dest - origin_x, y_dest - origin_y
+        for y_dest in range(0, size_y + 1):
+            for x_dest in range(0, size_x + 1):
+                _x, _y, = x_dest - origin_x, y_dest - origin_y
 
-                    # Convert the target image (polar projection on cartesian axis) into azimuth and elevation
-                    el_deg = 90 - np.hypot(_x * pixel_to_radius_scale_factor_x, _y * pixel_to_radius_scale_factor_y)
-                    az_deg = np.degrees(np.arctan2(_x, _y))
+                # Convert the target image (polar projection on cartesian axis) into azimuth and elevation
+                el_deg = 90 - np.hypot(_x * pixel_to_radius_scale_factor_x, _y * pixel_to_radius_scale_factor_y)
+                az_deg = np.degrees(np.arctan2(_x, _y))
 
-                    # Store
-                    az_vals_deg[y_dest, x_dest], el_vals_deg[y_dest, x_dest] = az_deg, el_deg
+                # Store
+                az_vals_deg[y_dest, x_dest], el_vals_deg[y_dest, x_dest] = az_deg, el_deg
 
-                    # Convert to ra and dec at the destination, including any time offset
-                    r_dest, d_dest = altAz2RADec(az_deg, el_deg, jd_source, target_lat, target_lon)
+                # Convert to ra and dec at the destination, including any time offset
+                r_dest, d_dest = altAz2RADec(az_deg, el_deg, jd_source, target_lat, target_lon)
 
-                    # This time delta changes the position of the source pixel
-                    ang_sep_deg = angularSeparationDeg(r_dest, d_dest, r_source, d_source)
+                # This time delta changes the position of the source pixel
+                ang_sep_deg = angularSeparationDeg(r_dest, d_dest, r_source, d_source)
 
-                    # Is this still in the FoV
-                    if ang_sep_deg > np.hypot(pp_source.fov_h, pp_source.fov_v) / 2:
-                        continue
-
-                    # Compute radec from azimuth and elevation at original platepar time
-                    r, d = altAz2RADec(az_deg, el_deg, pp_source.JD, pp_source.lat, pp_source.lon)
-                    r_list.append(r)
-                    d_list.append(d)
-                    x_dest_list.append(size_x - x_dest)
-                    y_dest_list.append(size_y - y_dest)
-
-            # Compute source image pixels with the time offset
-            x_source_array, y_source_array = raDecToXYPP(np.array(r_list), np.array(d_list), jd_source, pp_source)
-
-
-            for x_source_float, y_source_float, x_dest, y_dest in zip(x_source_array, y_source_array, x_dest_list, y_dest_list):
-
-                x_source, y_source = int(x_source_float), int(y_source_float)
-                if not (0 < x_source < pp_source.X_res and 0 < y_source < pp_source.Y_res):
+                # Is this still in the FoV
+                if ang_sep_deg > np.hypot(pp_source.fov_h, pp_source.fov_v) / 2:
                     continue
 
-                m = stations_info_dict[station]['mask']
-                if m is not None:
-                    if m[y_source, x_source] != 255:
-                        continue
+                # Compute radec from azimuth and elevation at original platepar time
+                r, d = altAz2RADec(az_deg, el_deg, pp_source.JD, pp_source.lat, pp_source.lon)
+                r_list.append(r)
+                d_list.append(d)
+                x_dest_list.append(size_x - x_dest)
+                y_dest_list.append(size_y - y_dest)
 
-                station_index = stations_list.index(station)
-                source_coordinates_list.append([transformation_layer, int(x_source), int(y_source)])
-                dest_coordinates_list.append([x_dest, y_dest])
+        # Compute source image pixels with the time offset
+        x_source_array, y_source_array = raDecToXYPP(np.array(r_list), np.array(d_list), jd_source, pp_source)
 
-            transformation_layer_list.append([station, time_offset_seconds])
-            transformation_layer += 1
+
+        for x_source_float, y_source_float, x_dest, y_dest in zip(x_source_array, y_source_array, x_dest_list, y_dest_list):
+
+            x_source, y_source = int(x_source_float), int(y_source_float)
+            if not (0 < x_source < pp_source.X_res and 0 < y_source < pp_source.Y_res):
+                continue
+
+            m = stations_info_dict[station]['mask']
+            if m is not None:
+                if m[y_source, x_source] != 255:
+                    continue
+
+            station_index = stations_list.index(station)
+            source_coordinates_list.append([transformation_layer, int(x_source), int(y_source)])
+            dest_coordinates_list.append([x_dest, y_dest])
+
+        transformation_layer_list.append([station, time_offset_seconds])
+        transformation_layer += 1
 
     source_coordinates_array = np.array(source_coordinates_list)
     dest_coordinates_array = np.array(dest_coordinates_list)
@@ -431,6 +436,10 @@ def getFitsAsList(stations_files_list, stations_info_dict, print_activity=False)
             max_pixel = ff.maxpixel
             compensation_value = np.mean(max_pixel)
             compensated_image = max_pixel - compensation_value
+            min_threshold, max_threshold = np.percentile(compensated_image, 90), np.percentile(compensated_image, 99.5)
+            if min_threshold == max_threshold:
+                return np.zeros_like(arr)
+            compensated_image = (255 * (compensated_image - min_threshold) / (max_threshold - min_threshold)) - 128
 
             fits_list.append(compensated_image)
 
@@ -461,7 +470,9 @@ def makeUpload(source_path, upload_to):
         print("Upload failed with {}".format(e))
 
 
-def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=False, repeat=False, period=120, print_activity=False, size=500, stack_depth=3, upload=None, annotate=True):
+def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=False, repeat=False, period=120,
+                       print_activity=False, size=500, stack_depth=3, upload=None, annotate=True,
+                       min_elevation=20, timelapse_start=None, timelapse_end=None, julian_date=None):
 
     """
 
@@ -524,7 +535,6 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
 
     if len(stations_as_text):
         stations_as_text = stations_as_text[1:]
-    print("stations: {}".format(stations_as_text))
 
 
 
@@ -654,7 +664,15 @@ if __name__ == "__main__":
     arg_parser.add_argument('-a', '--annotate', dest='annotate', default=False, action="store_true",
                             help="Annotate plot with image time, stations used, and projection origin.")
 
+    arg_parser.add_argument('-v', '--elevation', dest='elevation', nargs=1, type=float, default=[20],
+                            help="Minimum elevation to use for the plot")
 
+    arg_parser.add_argument('-l', '--timelapse', dest='timelapse', nargs='*', type=float,
+                            help="Generate timelapse over the past 24 hours of observations, including spanning"
+                            "directories, or if two julian dates are specified, then timelapse between those two dates")
+
+    arg_parser.add_argument('-j', '--julian-date', dest='julian_date', nargs=1, type=float,
+                            help="Generate a single projection at the specified julian date")
 
     cml_args = arg_parser.parse_args()
 
@@ -693,6 +711,32 @@ if __name__ == "__main__":
 
     annotate = cml_args.annotate
 
+    if cml_args.elevation is None:
+        min_elevation = 20
+    else:
+        min_elevation = cml_args.elevation[0] if cml_args.elevation[0] > 0 else 0
+
+    if cml_args.timelapse is None:
+        timelapse_start = None
+        timelapse_end = None
+    else:
+        if len(cml_args.timelapse) == 0:
+            timelapse_end = date2JD(*(datetime.datetime.now(datetime.timezone.utc).timetuple()[:6]))
+            timelapse_start = timelapse_end - 1
+
+
+        elif len(cml_args.timelapse) == 1:
+            timelapse_start = cml_args.timelapse[0]
+            timelapse_end = None
+        elif len(cml_args.timelapse) == 2:
+            timelapse_start = cml_args.timelapse[0]
+            timelapse_end = cml_args.timelapse[1]
+
+    if cml_args.julian_date is not None:
+        julian_date = cml_args.julian_date[0]
+
     SkyPolarProjection(config_paths, path_to_transform, force_recomputation=force_recomputation,
                        repeat=repeat, period=period, print_activity=not quiet,
-                       size=size, stack_depth=stack_depth, upload=upload, annotate=annotate)
+                       size=size, stack_depth=stack_depth, upload=upload, annotate=annotate,
+                       min_elevation=min_elevation, timelapse_start=timelapse_start, timelapse_end=timelapse_end,
+                       julian_date=julian_date)
