@@ -231,7 +231,7 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
 
     # Compute the number of years from J2000
     years_from_J2000 = (ts - J2000).total_seconds()/(365.25*24*3600)
-    log.info('Loading star catalog with years from J2000: {:.2f}'.format(years_from_J2000))
+    # log.info('Loading star catalog with years from J2000: {:.2f}'.format(years_from_J2000))
 
     # Try to optimize the catalog limiting magnitude until the number of image and catalog stars are matched
     maxiter = 10
@@ -295,7 +295,7 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
         else:
             config.catalog_mag_limit -= mag_step
 
-    log.info('Final catalog limiting magnitude: {:.3f}'.format(config.catalog_mag_limit))
+    # log.info('Final catalog limiting magnitude: {:.3f}'.format(config.catalog_mag_limit))
 
 
     # Find the transform between the image coordinates and predicted platepar coordinates
