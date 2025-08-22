@@ -1101,7 +1101,7 @@ class InputTypeVideo(InputType):
 
 
 class InputTypeUWOVid(InputType):
-    def __init__(self, file_path, config, detection=False, chunk_frames=128):
+    def __init__(self, file_path, config, detection=False, chunk_frames=128, flipud=False):
         """ Input file type handle for UWO .vid files.
         
         Arguments:
@@ -1128,6 +1128,8 @@ class InputTypeUWOVid(InputType):
         if chunk_frames is None:
             chunk_frames = 128
         self.chunk_frames = chunk_frames
+
+        self.flipud = flipud
 
         self.ff = None
 
@@ -1270,6 +1272,10 @@ class InputTypeUWOVid(InputType):
             # Add the unix time to list
             self.frame_chunk_unix_times.append(unix_time)
 
+            # Flip the frame if needed
+            if self.flipud:
+                frame = np.flipud(frame)
+
             # Add frame for FF processing (the frame should already be uint16)
             ff_struct_fake.addFrame(frame)
 
@@ -1355,6 +1361,10 @@ class InputTypeUWOVid(InputType):
         unix_time_lst = (self.vid.ts, self.vid.tu)
         if unix_time_lst not in self.utime_frame_dict:
             self.utime_frame_dict[self.current_frame] = unix_time_lst
+
+        # Flip the frame if needed
+        if self.flipud:
+            frame = np.flipud(frame)
 
         return frame
 

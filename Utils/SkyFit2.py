@@ -4454,7 +4454,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         img_handle = None
 
-        # Load a state file
+        # Load a data file
         if os.path.isfile(self.input_path):
             img_handle = detectInputTypeFile(self.input_path, self.config, beginning_time=beginning_time, 
                                              flipud=self.flipud)
