@@ -569,7 +569,7 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
 
         target_image_array = np.divide(target_image_array_uncompensated, intensity_scaling_array.T)
 
-        min_threshold, max_threshold = np.percentile(intensities, 90), np.percentile(intensities, 99.5)
+        min_threshold, max_threshold = np.percentile(intensities, 90), np.percentile(intensities, 99.95)
 
         print(min_threshold, max_threshold)
 
