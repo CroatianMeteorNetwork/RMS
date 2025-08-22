@@ -31,6 +31,10 @@ from RMS.Formats.Vid import VidStruct
 from RMS.GeoidHeightEGM96 import wgs84toMSLHeight
 from RMS.Routines import Image
 from RMS.Routines.GstreamerCapture import GstVideoFile
+from RMS.Logger import getLogger
+
+# Get the logger from the main module
+log = getLogger("logger")
 
 
 # If there is not display, messagebox will simply print to the console
@@ -198,12 +202,12 @@ class InputTypeFRFF(InputType):
         self.byteswap = False
 
         if self.single_ff:
-            print('Using file:', self.dir_path)
+            log.debug('Using file: {}'.format(self.dir_path))
         else:
             if use_fr_files:
-                print('Using FF and/or FR files from:', self.dir_path)
+                log.debug('Using FF and/or FR files from: {}'.format(self.dir_path))
             else:
-                print('Using FF files from:', self.dir_path)
+                log.debug('Using FF files from: {}'.format(self.dir_path))
 
 
         # List of FF and FR file names
@@ -1097,7 +1101,7 @@ class InputTypeVideo(InputType):
 
 
 class InputTypeUWOVid(InputType):
-    def __init__(self, file_path, config, detection=False, chunk_frames=128):
+    def __init__(self, file_path, config, detection=False, chunk_frames=128, flipud=False):
         """ Input file type handle for UWO .vid files.
         
         Arguments:
@@ -1124,6 +1128,8 @@ class InputTypeUWOVid(InputType):
         if chunk_frames is None:
             chunk_frames = 128
         self.chunk_frames = chunk_frames
+
+        self.flipud = flipud
 
         self.ff = None
 
@@ -1266,6 +1272,10 @@ class InputTypeUWOVid(InputType):
             # Add the unix time to list
             self.frame_chunk_unix_times.append(unix_time)
 
+            # Flip the frame if needed
+            if self.flipud:
+                frame = np.flipud(frame)
+
             # Add frame for FF processing (the frame should already be uint16)
             ff_struct_fake.addFrame(frame)
 
@@ -1351,6 +1361,10 @@ class InputTypeUWOVid(InputType):
         unix_time_lst = (self.vid.ts, self.vid.tu)
         if unix_time_lst not in self.utime_frame_dict:
             self.utime_frame_dict[self.current_frame] = unix_time_lst
+
+        # Flip the frame if needed
+        if self.flipud:
+            frame = np.flipud(frame)
 
         return frame
 
@@ -2464,7 +2478,7 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
         # If FR files are not used, only check for FF files
         if not use_fr_files:
             if not any([validFFName(ff_file) for ff_file in os.listdir(input_dir)]):
-                print("No FF files found in directory!")
+                log.info("No FF files found in directory!")
                 return None
 
 

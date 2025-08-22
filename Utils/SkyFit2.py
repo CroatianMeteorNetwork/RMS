@@ -5194,7 +5194,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         img_handle = None
 
-        # Load a state file
+        # Load a data file
         if os.path.isfile(self.input_path):
             img_handle = detectInputTypeFile(self.input_path, self.config, beginning_time=beginning_time, 
                                              flipud=self.flipud)
@@ -6759,9 +6759,23 @@ class PlateTool(QtWidgets.QMainWindow):
             # Set the SNR to the pick
             pick['snr'] = snr
 
-            # Debug print
-            print("SNR update: intensity sum = {:8d}, source px count = {:5d}, background lvl = {:8.2f}, background stddev = {:6.2f}, SNR = {:.2f}".format(
-                intensity_sum, source_px_count, background_lvl, background_stddev, snr))
+
+
+            ### Debug print ###
+
+            time_data = [self.img_handle.currentFrameTime()]
+
+            # Compute measured RA/Dec from image coordinates
+            _, _, _, mag_data = xyToRaDecPP(time_data, [pick['x_centroid']],
+                [pick['y_centroid']], [pick['intensity_sum']], self.platepar, measurement=True)
+            
+            # print(self.platepar)
+
+            print("intens sum = {:8d}, px count = {:5d}, bg lvl = {:8.2f}, bg std = {:6.2f}, SNR = {:.2f}, Mag = {:.2f}".format(
+                intensity_sum, source_px_count, background_lvl, background_stddev, snr, mag_data[0]))
+
+            ### ###
+
 
             ### Determine if there is any saturation in the measured photometric area
 
@@ -7242,6 +7256,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # If SNR is None, then set the random error to 0
                 mag_err_random = 0
+                pick['snr'] = 1.0
 
             else:
 

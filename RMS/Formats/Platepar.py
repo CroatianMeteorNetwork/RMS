@@ -1468,6 +1468,18 @@ class Platepar(object):
                 )
             )
 
+        # Add the photometric parameters
+        out_str += "Photometry:\n"
+        out_str += "    Slope     = {:6.3f}\n".format(self.mag_0)
+        out_str += "    Zeropoint = {:6.3f} +/- {:.3f}\n".format(self.mag_lev, self.mag_lev_stddev)
+        out_str += "    Gamma     = {:6.3f}\n".format(self.gamma)
+        out_str += "    Vignetting coeff = {:6.3f}\n".format(self.vignetting_coeff)
+        out_str += "    Vignetting fixed = {:s}\n".format(
+            "True" if self.vignetting_fixed else "False"
+        )
+        out_str += "    Extinction scale = {:6.3f}\n".format(self.extinction_scale)
+
+
         return out_str
 
 

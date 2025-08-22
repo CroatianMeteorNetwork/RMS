@@ -74,11 +74,6 @@ else:
 if not os.getenv('GST_DEBUG', default=None):
     os.environ['GST_DEBUG'] = '2'
 
-_rms_logging_queue = None
-_rms_listener_process = None
-_rms_init_lock = threading.Lock()
-_rms_logger_initialized = False
-
 # Add a default stderr handler for pre-initialization log messages
 _default_handler = logging.StreamHandler(sys.stderr)
 _default_formatter = logging.Formatter('%(message)s')
@@ -87,16 +82,9 @@ _pre_init_logger = logging.getLogger()
 _pre_init_logger.addHandler(_default_handler)
 _pre_init_logger.setLevel(logging.INFO)
 
-# Initialize set of directories to filter in
-ALLOWED_DIRS = set()
-
-# This handler will be removed when proper logging is initialized
-
-
 ##############################################################################
 # HELPERS
 ##############################################################################
-
 class LoggerWriter:
     """ Used to redirect stdout/stderr to the log.
     """
@@ -134,15 +122,22 @@ class InRmsFilter(logging.Filter):
       reside under site-packages) are discarded.
     - Records from RMS codebase are allowed through.
     """
+    def __init__(self, config):
+        super(InRmsFilter, self).__init__()
+        self.config = config
+
+        # Initialize allowed directories
+        self.allowed_dirs, self.site_dirs = getWhiteAndBlackLists(self.config)
+
     def filter(self, record):
         p = os.path.realpath(record.pathname)
 
         # reject std-lib / third-party
-        if any(_inside(p, sd) for sd in SITE_DIRS):
+        if any(_inside(p, sd) for sd in self.site_dirs):
             return False
 
         # accept RMS tree **or** external scripts directory
-        return any(_inside(p, root) for root in ALLOWED_DIRS)
+        return any(_inside(p, root) for root in self.allowed_dirs)
 
 
 # Reproduced from RMS.Misc due to circular import issue
@@ -267,50 +262,201 @@ def gstDebugLogger(category, level, file, function, line, obj, message, user_dat
 ##############################################################################
 
 class CustomHandler(logging.handlers.TimedRotatingFileHandler):
-    """ Custom handler for rotating log files.
-    
-    The live file: log_XX0000_20241229_112347.log
-    On rollover: log_XX0000_20241229_112347-[29_1123-to-30_1123].log
     """
-    def __init__(self, station_id, start_time_str, *args, **kwargs):
+    Custom handler for rotating log files where the new file's name
+    reflects the start time of the new logging period, without renaming old files.
+    
+    On rollover, it closes the current log file and creates a new one with a
+    filename timestamped to the beginning of the new logging interval.
+    """
+    def __init__(self, station_id, log_file_prefix, filename, when='H', interval=24, utc=True, **kwargs):
+        """
+        Initializes the handler.
+        
+        Args:
+            station_id (str): The station ID to embed in the filename.
+            log_file_prefix (str): A prefix for the log filename.
+            filename (str): The initial full path to the log file.
+            when, interval, utc, **kwargs: Standard TimedRotatingFileHandler arguments.
+        """
         self.station_id = station_id
-        self.start_time_str = start_time_str
-        super(CustomHandler, self).__init__(*args, **kwargs)
-        self.suffix = "%Y%m%d_%H%M%S"
-        self.namer = self._rename_on_rollover
+        self.log_file_prefix = log_file_prefix
+        self.sequence_number = 1  # Initialize sequence counter
 
-    def _rename_on_rollover(self, default_name):
-        # Parse the default filename
-        base_dir, base_file = os.path.split(default_name)
-        base_noext, dot, start_time_str = base_file.rpartition('.')
+        # The namer/rotator attributes are not used since we override doRollover.
+        super(CustomHandler, self).__init__(
+            filename=filename, when=when, interval=interval, utc=utc, **kwargs
+        )
+
+    def doRollover(self):
+        """
+        Handles rollover by closing the current file and opening a new one with an
+        updated timestamp in its name.
+        """
+        # Close the current file stream
+        if self.stream:
+            self.stream.close()
+            self.stream = None
+
+        # Increment sequence number for the new file
+        self.sequence_number += 1
+
+        # The 'rolloverAt' time is the scheduled time for the rollover, which is
+        # the exact start time for the new log file.
+        rollover_time_s = self.rolloverAt
         
-        if base_noext.endswith('.log'):
-            base_noext = base_noext[:-4]
+        if self.utc:
+            time_tuple = time.gmtime(rollover_time_s)
+        else:
+            time_tuple = time.localtime(rollover_time_s)
         
-        # Calculate time range for the log file
-        start_time = datetime.datetime.strptime(start_time_str, "%Y%m%d_%H%M%S")
-        end_time = UTCFromTimestamp.utcfromtimestamp(self.rolloverAt)
+        # Format the time for the new filename
+        new_time_str = time.strftime("%Y%m%d_%H%M%S", time_tuple)
+
+        # Construct the new base filename in the same directory.
+        # This is the crucial step that changes the name of the NEXT log file.
+        self.baseFilename = os.path.join(
+            os.path.dirname(self.baseFilename),
+            "{}log_{}_{}_{:03d}.log".format(self.log_file_prefix, self.station_id, new_time_str, self.sequence_number)
+        )
         
-        # Format the new filename with time range
-        start_str = start_time.strftime("%d_%H%M")
-        end_str = end_time.strftime("%d_%H%M")
-        new_name = "{}-[{}-to-{}].log".format(base_noext, start_str, end_str)
+        # Open the new log file stream using the updated baseFilename.
+        self.stream = self._open()
+
+        # Calculate the time for the next rollover.
+        # This logic is adapted from the standard library to ensure correctness.
+        currentTime = int(time.time())
+        newRolloverAt = self.computeRollover(currentTime)
+        while newRolloverAt <= currentTime:
+            newRolloverAt = newRolloverAt + self.interval
+
+        # Handle potential Daylight Saving Time shifts for certain rollover schedules
+        if (self.when == 'MIDNIGHT' or self.when.startswith('W')) and not self.utc:
+            dstNow = time.localtime(currentTime)[-1]
+            dstAtRollover = time.localtime(newRolloverAt)[-1]
+            if dstNow != dstAtRollover:
+                if not dstNow:
+                    addend = -3600
+                else:
+                    addend = 3600
+                newRolloverAt += addend
         
-        return os.path.join(base_dir, new_name)
+        self.rolloverAt = newRolloverAt
+
+
+
+class LoggingManager:
+    """Manages the lifecycle of the multiprocessing logger."""
+    def __init__(self):
+        self.logging_queue = None
+        self.listener_process = None
+        self.is_initialized = False
+        self.init_lock = threading.Lock()
+
+    def initLogging(self, config, log_file_prefix="", safedir=None, 
+                    console_level=logging.INFO, file_level=logging.DEBUG):
+        """ 
+        Spawns the listener process and configures logging. This method is designed to be called once in 
+        the main process.
+        
+        Arguments:
+            config: [Config] Configuration object.
+
+        Keyword Arguments:
+            log_file_prefix: [str] Prefix for the log file name.
+            safedir: [str] Safe directory to use if the log directory is not writable.
+            console_level: [int] Logging level for the console output. E.g. logging.INFO
+            file_level: [int] Logging level for the file output. E.g. logging.DEBUG
+
+        """
+
+        # Helper function to get logging level from a string
+        def get_log_level(level_str, default=logging.INFO):
+            level_map = {
+                "DEBUG": logging.DEBUG, "INFO": logging.INFO, "WARNING": logging.WARNING,
+                "ERROR": logging.ERROR, "CRITICAL": logging.CRITICAL
+            }
+            return level_map.get(str(level_str).upper(), default)
+
+        # If levels are not passed as arguments, get them from the config file
+        if console_level is None:
+            console_level = get_log_level(config.console_log_level, logging.INFO)
+        
+        if file_level is None:
+            file_level = get_log_level(config.log_file_log_level, logging.DEBUG)
+
+
+        with self.init_lock:
+            if self.is_initialized:
+                return
+
+            # Remove any default handlers from the root logger
+            main_logger = logging.getLogger()
+            for handler in main_logger.handlers[:]:
+                main_logger.removeHandler(handler)
+
+            # Spawn the listener process
+            self.logging_queue = multiprocessing.Queue(-1)
+            self.listener_process = multiprocessing.Process(
+                target=_listener_process,
+                args=(self.logging_queue, config, log_file_prefix, safedir, console_level, file_level)
+            )
+            self.listener_process.daemon = True
+            self.listener_process.start()
+            
+            # Configure the queue handler in the main process
+            qh = logging.handlers.QueueHandler(self.logging_queue)
+            qh.setFormatter(logging.Formatter('%(message)s'))
+            qh.addFilter(InRmsFilter(config))
+
+            # Replace root handlers with our queue handler
+            main_logger.handlers = [qh]
+            main_logger.setLevel(min(console_level, file_level)) # Keep root logger permissive
+            main_logger.propagate = False
+
+            # Redirect standard streams
+            sys.stderr = LoggerWriter(main_logger, logging.WARNING)
+            if config.log_stdout:
+                sys.stdout = LoggerWriter(main_logger, logging.INFO)
+
+            self.is_initialized = True
+            main_logger.debug("initLogging completed; queue listener started.")
+
+            # Register the instance's shutdown method for clean exit
+            atexit.register(self.shutdownLogging)
+
+    def shutdownLogging(self):
+        """
+        Handles cleanup of logging resources. Stops the listener process.
+        """
+        with self.init_lock:
+            if not self.is_initialized:
+                return
+            
+            # Stop the listener process
+            if self.listener_process and self.listener_process.is_alive():
+                print("Shutting down logging...") # Added for visibility during shutdown
+                self.logging_queue.put(None)  # Sentinel to stop the listener loop
+                self.listener_process.join(timeout=5)
+                if self.listener_process.is_alive():
+                    self.listener_process.terminate()
+            
+            self.is_initialized = False
+            print("Logging shutdown complete.")
 
 
 ##############################################################################
 # LISTENER SIDE
 ##############################################################################
 
-def _listener_configurer(config, log_file_prefix, safedir):
+def _listener_configurer(config, log_file_prefix, safedir, console_level=logging.INFO, file_level=logging.DEBUG):
     """ Set up the root logger with a TimedRotatingFileHandler. 
     This runs in the separate listener process.
     """
     # Set DEBUG on root logger - this is the master filter for all handlers
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.DEBUG)
-
+    
     # Set up log directory
     log_path = os.path.join(config.data_dir, config.log_dir)
 
@@ -335,25 +481,36 @@ def _listener_configurer(config, log_file_prefix, safedir):
             log_path = safedir
             mkdirP(log_path)
 
-    # Generate log filename with timestamp
+    # Generate log filename with timestamp and initial sequence number
     start_time_str = RmsDateTime.utcnow().strftime("%Y%m%d_%H%M%S")
-    logfile_name = "{}log_{}_{}.log".format(log_file_prefix, config.stationID, start_time_str)
+    logfile_name = "{}log_{}_{}_{:03d}.log".format(log_file_prefix, config.stationID, start_time_str, 1)
     full_path = os.path.join(log_path, logfile_name)
+
+    # If RMS is to reboot daily, set the rollover time to 25 hours to prevent log fracturing before a new
+    # capture session starts
+    if config.reboot_after_processing:
+        rollover_interval = 30
+    else:
+        rollover_interval = 24
 
     # Initialize file and console handlers
     handler = CustomHandler(
         station_id=config.stationID,
-        start_time_str=start_time_str,
+        log_file_prefix=log_file_prefix,
         filename=full_path,
         when='H',
-        interval=24,
+        interval=rollover_interval,
         utc=True
     )
     console = logging.StreamHandler(sys.stdout)
 
+    # Set different levels for each handler
+    handler.setLevel(file_level)
+    console.setLevel(console_level)
+    
     # Add filters to both handlers
-    handler.addFilter(InRmsFilter())
-    console.addFilter(InRmsFilter())
+    handler.addFilter(InRmsFilter(config))
+    console.addFilter(InRmsFilter(config))
 
     # Set common formatter for both handlers
     formatter = logging.Formatter(
@@ -371,151 +528,77 @@ def _listener_configurer(config, log_file_prefix, safedir):
     root_logger.debug("Log listener configured. Current file: %s", full_path)
 
 
-def _listener_process(queue, config, log_file_prefix, safedir):
+def _listener_process(queue, config, log_file_prefix, safedir, console_level=logging.INFO, file_level=logging.DEBUG):
     """ Target function for the logging listener process.
-    Ignores SIGINT and runs QueueListener for async logging.
+    Ignores SIGINT and processes messages in strict FIFO order.
     """
     import signal
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
     # Configure the listener process
     logging.Formatter.converter = time.gmtime
-    _listener_configurer(config, log_file_prefix, safedir)
+    _listener_configurer(config, log_file_prefix, safedir, console_level, file_level)
 
-    # Start queue listener
     main_logger = logging.getLogger()
-    queue_listener = logging.handlers.QueueListener(queue, *main_logger.handlers)
-    queue_listener.start()
+    handlers = tuple(main_logger.handlers)  # stable snapshot
 
-    # Keep the process alive
+    # Single consumer: preserves FIFO order
     while True:
         try:
             record = queue.get()
-            if record is None:  # Shutdown sentinel
+            if record is None:       # shutdown sentinel
                 break
-            queue_listener.handle(record)
+            # Process record through each handler that accepts its level
+            for h in handlers:
+                if record.levelno >= h.level:
+                    h.handle(record)
         except Exception as e:
             print("Error in listener process: {}".format(e))
             continue
 
-    queue_listener.stop()
+    # Flush all handlers on shutdown
+    for h in handlers:
+        try: 
+            h.flush()
+        except: 
+            pass
 
 
 ##############################################################################
 # PUBLIC ENTRY POINT
 ##############################################################################
 
-def initLogging(config, log_file_prefix="", safedir=None, level=logging.DEBUG):
-    """ Called once in the MAIN process (e.g. StartCapture.py).
-    Spawns the listener process and configures logging.
-
-    Arguments:
-        config: [object] RMS config object
-        log_file_prefix: [str] Optional prefix for log filenames
-        safedir: [str] Fallback directory if normal log_path is unwritable
-        level: [int] Logging level for the main logger (defaults to DEBUG)
+def getWhiteAndBlackLists(config):
+    """ 
+    Returns the whitelisted RMS root and external script directories, and the blacklisted 
+    site-packages directories.
+    
+    Return:
+        (set, set) Tuple of whitelisted and blacklisted directories
     """
-    global _rms_logging_queue, _rms_listener_process, _rms_logger_initialized
-    global RMS_ROOT, SITE_DIRS, ALLOWED_DIRS
-
     # Whitelist RMS root and external script directories
-    RMS_ROOT = os.path.realpath(getRmsRootDir())
-    ALLOWED_DIRS = {RMS_ROOT}
+    rms_root = os.path.realpath(getRmsRootDir())
+    allowed_dirs = {rms_root}
     ext = config.external_script_path
     if ext:
         ext_root = os.path.realpath(ext)
-        if not os.path.isdir(ext_root):          # it's a .py file
+        if not os.path.isdir(ext_root):
             ext_root = os.path.dirname(ext_root)
-        ALLOWED_DIRS.add(ext_root)
+        allowed_dirs.add(ext_root)
 
     # Blacklist site-packages directories (with Py2 fallback)
     try:
         site_packages = site.getsitepackages()
-        user_site    = site.getusersitepackages()
+        user_site     = site.getusersitepackages()
     except (AttributeError, IOError):
         from distutils.sysconfig import get_python_lib
         site_packages = [get_python_lib()]
-        user_site     = getattr(site, 'USER_SITE',
-                                 get_python_lib(prefix=sys.prefix))
+        user_site     = getattr(site, 'USER_SITE', get_python_lib(prefix=sys.prefix))
 
-    SITE_DIRS = set(os.path.realpath(p) for p in site_packages)
-    SITE_DIRS.add(os.path.realpath(user_site))
+    site_dirs = set(os.path.realpath(p) for p in site_packages)
+    site_dirs.add(os.path.realpath(user_site))
 
-    # Ensure we only init once
-    with _rms_init_lock:
-        if _rms_logger_initialized:
-            return
-
-    # Remove any default handlers
-    main_logger = logging.getLogger()
-    for handler in main_logger.handlers[:]:
-        main_logger.removeHandler(handler)
-
-    # Spawn listener process
-    _rms_logging_queue = multiprocessing.Queue(-1)
-    _rms_listener_process = multiprocessing.Process(
-        target=_listener_process,
-        args=(_rms_logging_queue, config, log_file_prefix, safedir)
-    )
-    _rms_listener_process.daemon = True
-    _rms_listener_process.start()
-
-    # Keep root logger permissive
-    main_logger.setLevel(level)
-
-    # Configure queue handler (backport for Py2)
-    try:
-        QueueHandler = logging.handlers.QueueHandler
-    except AttributeError:
-        class QueueHandler(logging.Handler):
-            """Minimal backport of Python3's QueueHandler."""
-            def __init__(self, queue):
-                super(QueueHandler, self).__init__()
-                self.queue = queue
-            def emit(self, record):
-                try:
-                    self.queue.put(record)
-                except Exception:
-                    self.handleError(record)
-
-    qh = QueueHandler(_rms_logging_queue)
-    qh.setFormatter(logging.Formatter('%(message)s'))
-    qh.addFilter(InRmsFilter())
-
-    # Replace root handlers with our queue handler
-    main_logger.handlers = [qh]
-
-    # Redirect standard streams into the logger
-    sys.stderr = LoggerWriter(main_logger, logging.WARNING)
-    if config.log_stdout:
-        sys.stdout = LoggerWriter(main_logger, logging.INFO)
-
-    main_logger.propagate = False
-    _rms_logger_initialized = True
-    main_logger.debug("initLogging completed; queue listener started.")
-
-    # Ensure clean shutdown
-    atexit.register(shutdownLogging)
-
-
-
-def shutdownLogging():
-    """ Handles cleanup of logging resources.
-    Stops the listener process and resets the logging state.
-    """
-    global _rms_logging_queue, _rms_listener_process, _rms_logger_initialized
-    with _rms_init_lock:
-        if not _rms_logger_initialized:
-            return
-        
-        # Stop the listener process
-        if _rms_listener_process and _rms_listener_process.is_alive():
-            _rms_logging_queue.put(None)  # Sentinel
-            _rms_listener_process.join(timeout=5)
-            if _rms_listener_process.is_alive():
-                _rms_listener_process.terminate()
-        
-        _rms_logger_initialized = False
+    return allowed_dirs, site_dirs
 
 
 def getLogger(name=None, level="DEBUG", stdout=False):
@@ -546,3 +629,48 @@ def getLogger(name=None, level="DEBUG", stdout=False):
         logger.addHandler(out_hdlr)
 
     return logger
+
+
+##############################################################################
+# BACKWARD COMPATIBILITY WITH OLD initLogging FUNCTION
+##############################################################################
+
+# Create a global instance of LoggingManager for backward compatibility
+_global_logging_manager = LoggingManager()
+
+def initLogging(config, log_file_prefix="", safedir=None, level=logging.DEBUG):
+    """
+    Backward compatibility wrapper for the old initLogging function.
+    
+    This function maintains the same interface as the old initLogging but delegates
+    to the new LoggingManager implementation.
+    
+    Arguments:
+        config: [object] RMS config object
+        log_file_prefix: [str] Optional prefix for log filenames
+        safedir: [str] Fallback directory if normal log_path is unwritable
+        level: [int] Logging level for the main logger (defaults to DEBUG)
+    """
+    # The old implementation used a single level parameter for both console and file
+    # For backward compatibility, we'll use the provided level for both
+    console_level = level
+    file_level = level
+    
+    # Check if config has the new log level attributes
+    # If so, use them; otherwise fall back to the provided level
+    if hasattr(config, 'console_log_level'):
+        # The new initLogging will handle parsing these from config
+        console_level = None
+    
+    if hasattr(config, 'log_file_log_level'):
+        # The new initLogging will handle parsing these from config
+        file_level = None
+    
+    # Call the new implementation through the global manager instance
+    _global_logging_manager.initLogging(
+        config=config,
+        log_file_prefix=log_file_prefix,
+        safedir=safedir,
+        console_level=console_level,
+        file_level=file_level
+    )
