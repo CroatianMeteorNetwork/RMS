@@ -29,7 +29,6 @@ import datetime
 import pathlib
 import time
 import imageio as imageio
-import tqdm
 
 from RMS.Astrometry.Conversions import altAz2RADec, jd2Date, date2JD
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP
@@ -275,7 +274,7 @@ def makeTransformation(stations_info_dict, size_x, size_y, minimum_elevation_deg
         for stack_count in range(0, stack_depth):
             station_stack_count_list.append([station, stack_count])
 
-    for station, stack_count in tqdm.tqdm(station_stack_count_list):
+    for station, stack_count in station_stack_count_list:
         # Get the source platepar
         pp_source = stations_info_dict[station]['pp']
 
@@ -328,7 +327,7 @@ def makeTransformation(stations_info_dict, size_x, size_y, minimum_elevation_deg
         for x_source_float, y_source_float, x_dest, y_dest in zip(x_source_array, y_source_array, x_dest_list, y_dest_list):
 
             x_source, y_source = int(x_source_float), int(y_source_float)
-            if not (0 < x_source < pp_source.X_res and 0 < y_source < pp_source.Y_res):
+            if not (20 < x_source < (pp_source.X_res - 20) and 20 < y_source < (pp_source.Y_res - 20)):
                 continue
 
             m = stations_info_dict[station]['mask']
@@ -472,7 +471,7 @@ def makeUpload(source_path, upload_to):
 
 def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=False, repeat=False, period=120,
                        print_activity=False, size=500, stack_depth=3, upload=None, annotate=True,
-                       min_elevation=20, timelapse_start=None, timelapse_end=None, julian_date=None):
+                       min_elevation=20, timelapse_start=None, timelapse_end=None, target_jd=None):
 
     """
 
@@ -493,6 +492,7 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
     Return:
         Nothing.
     """
+
 
 
 
@@ -534,7 +534,7 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
         stations_as_text = "{}, {}".format(stations_as_text,s.strip())
 
     if len(stations_as_text):
-        stations_as_text = stations_as_text[1:]
+        stations_as_text = stations_as_text[2:]
 
 
 
@@ -542,17 +542,23 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
         this_iteration_start_time = next_iteration_start_time
         next_iteration_start_time += datetime.timedelta(seconds=period)
         # Compute epoch for this image
-        target_image_time = datetime.datetime.now(tz=datetime.timezone.utc) - datetime.timedelta(seconds=20)
-        annotation_text_l1 = "{}".format(target_image_time.replace(microsecond=0), stations_as_text, cam_coords[0], cam_coords[1])
+        if target_jd is None:
+            target_image_time = datetime.datetime.now(tz=datetime.timezone.utc) - datetime.timedelta(seconds=20)
+        else:
+            target_image_time = jd2Date(target_jd, dt_obj=True)
+            repeat = False
 
-        annotation_text_l2 = "{} Lat:{:.3f} deg Lon:{:.3f} deg".format(stations_as_text, cam_coords[0], cam_coords[1])
+        annotation_text_l1 = "{} Stack depth {:.0f}".format(target_image_time.replace(microsecond=0), len(transformation_layer_list) / len(stations_info_dict))
+        print(annotation_text_l1)
+
+        annotation_text_l2 = "Lat:{:.3f} deg Lon:{:.3f} deg {}".format(cam_coords[0], cam_coords[1], stations_as_text)
 
         # Get the fits files as a stack of fits, one per camera
         fits_array = np.stack(getFitsAsList(getFitsFiles(transformation_layer_list, stations_info_dict, target_image_time), stations_info_dict), axis=0)
 
         # Form the uncompensated and target image arrays
-        target_image_array, target_image_array_uncompensated = np.full_like(intensity_scaling_array, 0 - 128), np.zeros_like(
-            intensity_scaling_array)
+        target_image_array, target_image_array_uncompensated = np.full_like(intensity_scaling_array, 0-255), np.full_like(
+            intensity_scaling_array, 0 - 255)
 
         # Unwrap the source coordinates array into component lists
         camera_no, source_y, source_x = source_coordinates_array.T
@@ -561,20 +567,16 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
         target_y, target_x = dest_coordinates_array.T
 
         # Build the uncompensated image by mappings coordinates from each camera
-        # target_image_array_uncompensated[target_x, target_y] = fits_array[camera_no, source_x, source_y]
-
         intensities = fits_array[camera_no, source_x, source_y]
 
+        # Stack the images
         np.add.at(target_image_array_uncompensated, (target_x, target_y), intensities)
 
-        target_image_array = np.divide(target_image_array_uncompensated, intensity_scaling_array.T)
+        target_image_array = np.divide(target_image_array_uncompensated, intensity_scaling_array)
 
-        min_threshold, max_threshold = np.percentile(intensities, 90), np.percentile(intensities, 99.95)
-
-        print(min_threshold, max_threshold)
+        # Perform compensation
+        min_threshold, max_threshold = np.percentile(intensities, 50), np.percentile(intensities, 99.5)
         target_image_array = np.clip(254 * (target_image_array - min_threshold) / (max_threshold - min_threshold), 0, 255)
-
-        print(np.min(target_image_array), np.max(target_image_array))
 
         if output_file_name is None:
             mkdirP(os.path.expanduser("~/RMS_data/PolarPlot/Projection/"))
@@ -601,12 +603,12 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
 
         if annotate:
             font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 0.4
+            font_scale = 0.3
             thickness = 1
-            position_l1 = (25, size_y - 30)
-            cv2.putText(target_image_array, annotation_text_l1, position_l1, font, font_scale, (25, 25, 25), thickness, cv2.LINE_AA)
-            position_l2 = (25, size_y - 10)
-            cv2.putText(target_image_array, annotation_text_l2, position_l2, font, font_scale, (25, 25, 25), thickness, cv2.LINE_AA)
+            position_l1 = (3, size_y - 20)
+            cv2.putText(target_image_array, annotation_text_l1, position_l1, font, font_scale, (55, 55, 55), thickness, cv2.LINE_AA)
+            position_l2 = (3, size_y - 5)
+            cv2.putText(target_image_array, annotation_text_l2, position_l2, font, font_scale, (55, 55, 55), thickness, cv2.LINE_AA)
 
         imageio.imwrite(output_path, target_image_array)
         if print_activity:
@@ -731,11 +733,13 @@ if __name__ == "__main__":
             timelapse_start = cml_args.timelapse[0]
             timelapse_end = cml_args.timelapse[1]
 
-    if cml_args.julian_date is not None:
-        julian_date = cml_args.julian_date[0]
+    if cml_args.julian_date is None:
+        target_jd = None
+    else:
+        target_jd = cml_args.julian_date[0]
 
     SkyPolarProjection(config_paths, path_to_transform, force_recomputation=force_recomputation,
                        repeat=repeat, period=period, print_activity=not quiet,
                        size=size, stack_depth=stack_depth, upload=upload, annotate=annotate,
                        min_elevation=min_elevation, timelapse_start=timelapse_start, timelapse_end=timelapse_end,
-                       julian_date=julian_date)
+                       target_jd=target_jd)
