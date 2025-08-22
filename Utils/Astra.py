@@ -221,33 +221,24 @@ class ASTRA:
 
         # 1. Processes all frames by background subtracting, masking starsm and saving the avepixel_background 
         # Also correct all frames with dark/flat and gamma corerction
-        try:
-            self.avepixel_background, self.subtracted_frames, self.frames = self.processImageData(
+        #try:
+        self.avepixel_background, self.subtracted_frames, self.frames = self.processImageData(
                                                                     self.img_obj, 
                                                                     self.frames
                                                                     )
-        except Exception as e:
-            print(f'Error processing image data: {e}')
+        # except Exception as e:
+        #     print(f'Error processing image data: {e}')
 
         # 2. Recursively crop & fit a moving gaussian across whole event
-        try:
-            self.cropAllMeteorFrames(self.pick_frame_indices, self.picks)
-        except Exception as e:
-            print(f'Error cropping and fitting meteor frames: {e}')
+        self.cropAllMeteorFrames(self.pick_frame_indices, self.picks)
 
         # 3. Refine the moving gaussian fit by using a local optimizer
-        try:
-            self.refineAllMeteorCrops(self.first_pass_params, self.cropped_frames, 
-                                      self.omega, self.directions)
-        except Exception as e:
-            print(f'Error refining meteor crops: {e}')
+        self.refineAllMeteorCrops(self.first_pass_params, self.cropped_frames, 
+                                    self.omega, self.directions)
 
         # 4. Remove picks with low SNR and out-of-bounds picks, refactors into global coordinates
-        try:
-            self.removeLowSNRPicks(self.refined_fit_params, self.fit_imgs, self.frames, self.cropped_frames, 
-                                   self.crop_vars, self.pick_frame_indices, self.fit_costs, self.times)
-        except Exception as e:
-            print(f'Error removing low SNR picks: {e}')
+        self.removeLowSNRPicks(self.refined_fit_params, self.fit_imgs, self.frames, self.cropped_frames, 
+                                self.crop_vars, self.pick_frame_indices, self.fit_costs, self.times)
         
         # 5. save animation
         if self.save_animation:
@@ -383,37 +374,34 @@ class ASTRA:
             print(f"Error correcting frames: {e}")
 
         # 1) -- Background Subtraction --
-        try:
-            # Load background using RMS
-            fake_ff_obj = img_obj.loadChunk()
-            avepixel_background = fake_ff_obj.avepixel
-            corrected_frames = np.array(corrected_frames)
+        # Load background using RMS
+        fake_ff_obj = img_obj.loadChunk()
+        avepixel_background = fake_ff_obj.avepixel
+        corrected_frames = np.array(corrected_frames)
 
-            # Correct avepixel_background
-            if self.dark is not None:
-                corrected_avepixel = Image.applyDark(avepixel_background, self.dark)
+        # Correct avepixel_background
+        if self.dark is not None:
+            corrected_avepixel = Image.applyDark(avepixel_background, self.dark)
 
-            if self.flat_struct is not None:
-                corrected_avepixel = Image.applyFlat(corrected_avepixel, self.flat_struct)
-            
-            if self.dark is not None or self.flat_struct is not None:
-                corrected_avepixel = Image.gammaCorrectionImage(corrected_avepixel, self.skyfit_config.gamma, 
-                                                            bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
+        if self.flat_struct is not None:
+            corrected_avepixel = Image.applyFlat(corrected_avepixel, self.flat_struct)
+        
+        if self.dark is not None or self.flat_struct is not None:
+            corrected_avepixel = Image.gammaCorrectionImage(corrected_avepixel, self.skyfit_config.gamma, 
+                                                        bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
 
-            else:
-                corrected_avepixel = Image.gammaCorrectionImage(avepixel_background, self.skyfit_config.gamma, 
-                                                            bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
-            
-            corrected_avepixel = np.clip(corrected_avepixel, 0, None)
+        else:
+            corrected_avepixel = Image.gammaCorrectionImage(avepixel_background, self.skyfit_config.gamma, 
+                                                        bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
+        
+        corrected_avepixel = np.clip(corrected_avepixel, 0, None)
 
-            # Subtract frames
-            subtracted_frames = corrected_frames.copy() - corrected_avepixel.copy()
+        # Subtract frames
+        subtracted_frames = corrected_frames.copy() - corrected_avepixel.copy()
 
-            # Clip subtracted frames to above zero
-            subtracted_frames = np.clip(subtracted_frames, 0, None)
+        # Clip subtracted frames to above zero
+        subtracted_frames = np.clip(subtracted_frames, 0, None)
 
-        except Exception as e:
-            raise Exception(f"Error loading background or subtracting frames: {e}")
         
         # 2) -- Star Masking --
 
@@ -428,16 +416,13 @@ class ASTRA:
         ave_mask = np.ma.MaskedArray(corrected_avepixel > threshold)
 
         # Tries to implement mask
-        try:
-            subtracted_frames = np.ma.masked_array(subtracted_frames, 
-                                                   mask=np.repeat(ave_mask[np.newaxis, :, :], 
-                                                    subtracted_frames.shape[0], axis=0))
-            corrected_avepixel = np.ma.masked_array(corrected_avepixel, mask=ave_mask)
-            masked_frames = np.ma.masked_array(corrected_frames, 
-                                                    mask=np.repeat(ave_mask[np.newaxis, :, :], 
-                                                    corrected_frames.shape[0], axis=0))
-        except Exception as e:
-            raise Exception(f"Error applying mask to subtracted frames: {e}")
+        subtracted_frames = np.ma.masked_array(subtracted_frames, 
+                                                mask=np.repeat(ave_mask[np.newaxis, :, :], 
+                                                subtracted_frames.shape[0], axis=0))
+        corrected_avepixel = np.ma.masked_array(corrected_avepixel, mask=ave_mask)
+        masked_frames = np.ma.masked_array(corrected_frames, 
+                                                mask=np.repeat(ave_mask[np.newaxis, :, :], 
+                                                corrected_frames.shape[0], axis=0))
         
         # 3) -- Returns Data --
         return corrected_avepixel, subtracted_frames, masked_frames
@@ -754,9 +739,15 @@ class ASTRA:
         times = np.array([(self.img_obj.frame_dt_dict[k]) for k in pick_frame_indices])
 
         # Save all as instance variables
-        (self.refined_fit_params, self.fit_imgs, self.cropped_frames, self.crop_vars, self.pick_frame_indices, 
-        self.global_picks, self.fit_costs, self.times, self.snr) = (refined_params, fit_imgs, cropped_frames, 
-                            crop_vars, pick_frame_indices, global_picks, fit_costs, times, frame_snr_values)
+        self.refined_fit_params = refined_params
+        self.fit_imgs = fit_imgs
+        self.cropped_frames = cropped_frames
+        self.crop_vars = crop_vars
+        self.pick_frame_indices = pick_frame_indices
+        self.global_picks = global_picks
+        self.fit_costs = fit_costs
+        self.times = times
+        self.snr = frame_snr_values
 
         # Return all
         return (self.refined_fit_params, self.fit_imgs, self.cropped_frames, self.crop_vars, 

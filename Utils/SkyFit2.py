@@ -4289,20 +4289,20 @@ class PlateTool(QtWidgets.QMainWindow):
         # Sort pick list according to keys
         self.pick_list = dict(sorted(self.pick_list.items()))
 
-        # Load all frames
-        temp_curr_frame = self.img_handle.current_frame
-        self.img_handle.setFrame(0)  # Reset to the first frame
-        frame_count = sum(1 for name in os.listdir(self.dir_path) if 'dump' in name)
+        # # Load all frames
+        # temp_curr_frame = self.img_handle.current_frame
+        # self.img_handle.setFrame(0)  # Reset to the first frame
+        # frame_count = seld.img_handle
 
-        # Init a numpy array with the correct size and type
-        frames = np.zeros((frame_count, *self.img_handle.loadFrame().shape), dtype=np.float32)
+        # # Init a numpy array with the correct size and type
+        # frames = np.zeros((frame_count, *self.img_handle.loadFrame().shape), dtype=np.float32)
 
-        # Load all frames in to an array
-        for i in range(frame_count):
-            frames[i] = self.img_handle.loadFrame()
-            self.img_handle.nextFrame()
+        # # Load all frames in to an array
+        # for i in range(frame_count):
+        #     frames[i] = self.img_handle.loadFrame()
+        #     self.img_handle.nextFrame()
             
-        self.img_handle.setFrame(temp_curr_frame)  # Reset to the original frame
+        # self.img_handle.setFrame(temp_curr_frame)  # Reset to the original frame
 
         # Load the keys for picks which are not empty (not just photometry picks)
         pick_frame_indices = np.array(
@@ -4312,8 +4312,34 @@ class PlateTool(QtWidgets.QMainWindow):
             dtype=int
         )
 
+        ### Only load the frames of interest ###
+
+        # Get the minimum and maximum frames
+        min_frame = min(pick_frame_indices)
+        max_frame = max(pick_frame_indices)
+        
+        temp_curr_frame = self.img_handle.current_frame
+        
+        frames = np.zeros((max_frame - min_frame + 1, *self.img_handle.loadFrame().shape), dtype=np.float32)
+        
+        # Load the frames
+        for i, fr in enumerate(range(min_frame, max_frame + 1)):
+
+            # Set the current frame to fr
+            self.img_handle.setFrame(fr)
+
+            # Load the frame into the array
+            frames[i] = self.img_handle.loadFrame().astype(np.float32)
+
+        # Reset to the original frame
+        self.img_handle.setFrame(temp_curr_frame)
+
+        ### ###
+
+
+
         # Load times of all picks
-        times = np.array([(self.img_handle.frame_dt_dict[k]) for k in pick_frame_indices])
+        times = np.array([self.img_handle.currentFrameTime(frame_no=fr, dt_obj=True) for fr in pick_frame_indices])
 
         # Package data for ASTRA - import later using dict comprehension
         data_dict = {
@@ -4418,7 +4444,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Prepare measurements and times for Kalman filter
         measurements = [(self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid']) 
                             for key in pick_frame_indices]
-        times = [self.img_handle.frame_dt_dict[key] for key in pick_frame_indices]
+        times = [self.img_handle.currentFrameTime(frame_no=fr, dt_obj=True) for fr in pick_frame_indices]
 
         # Dummy dict to instantiate ASTRA object (pass unnecessary args as empty objects) 
             # NOTE: Static methods in ASTRA could be used, but would not update the progress bar
@@ -4654,7 +4680,7 @@ class PlateTool(QtWidgets.QMainWindow):
             frame_count = sum(1 for name in os.listdir(self.dir_path) if 'dump' in name)
             time_idx = 0
             for i in range(frame_count):
-                frame_time = self.img_handle.currentFrameTime(frame_no=i, dt_obj = True)
+                frame_time = self.img_handle.currentFrameTime(frame_no=i, dt_obj=True)
                 time = pick_frame_times[time_idx]
                 if frame_time == time or \
                     frame_time == time + datetime.timedelta(microseconds=1) or \
