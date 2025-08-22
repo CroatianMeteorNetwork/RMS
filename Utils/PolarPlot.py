@@ -551,7 +551,7 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
         fits_array = np.stack(getFitsAsList(getFitsFiles(transformation_layer_list, stations_info_dict, target_image_time), stations_info_dict), axis=0)
 
         # Form the uncompensated and target image arrays
-        target_image_array, target_image_array_uncompensated = np.zeros_like(intensity_scaling_array), np.zeros_like(
+        target_image_array, target_image_array_uncompensated = np.full_like(intensity_scaling_array, 0 - 128), np.zeros_like(
             intensity_scaling_array)
 
         # Unwrap the source coordinates array into component lists
@@ -572,7 +572,6 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
         min_threshold, max_threshold = np.percentile(intensities, 90), np.percentile(intensities, 99.95)
 
         print(min_threshold, max_threshold)
-
         target_image_array = np.clip(254 * (target_image_array - min_threshold) / (max_threshold - min_threshold), 0, 255)
 
         print(np.min(target_image_array), np.max(target_image_array))
