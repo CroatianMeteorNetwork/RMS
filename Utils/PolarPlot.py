@@ -388,6 +388,9 @@ def getFitsFiles(transformation_layer_list, stations_info_dict, target_image_tim
             if dir_time < target_image_time:
                 break
 
+        if print_activity:
+            print("Using {}".format(captured_dir))
+
         dir_files = sorted(os.listdir(os.path.join(captured_dir_path, captured_dir)))
 
         min_time_delta = np.inf
