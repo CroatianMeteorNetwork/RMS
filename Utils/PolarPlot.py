@@ -677,6 +677,7 @@ def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_el
         list_ra_.append(np.degrees(ra_rads_))
         list_dec_.append(np.degrees(dec_rads_))
 
+
     array_ra, array_dec = np.array(list_ra), np.array(list_dec)
     array_ra_, array_dec_ = np.array(list_ra_), np.array(list_dec_)
 
@@ -699,7 +700,7 @@ def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_el
     """
     origin_x, origin_y = size_x / 2, size_y / 2
 
-    correction_factor = np.sin(np.radians(90 - minimum_elevation_deg))
+    correction_factor = np.sin(np.radians(90 - minimum_elevation_deg)) * 0.9
 
     for alt, az, alt_, az_ in constellation_alt_az_above_horizon:
 
