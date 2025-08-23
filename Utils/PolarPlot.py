@@ -22,7 +22,7 @@ import argparse
 import subprocess
 import cv2
 import numpy as np
-from shapely import measurement
+
 
 import RMS.ConfigReader as cr
 import datetime
