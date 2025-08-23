@@ -542,7 +542,7 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
         if target_jd is None:
             target_image_time = datetime.datetime.now(tz=datetime.timezone.utc) - datetime.timedelta(seconds=20)
         else:
-            target_image_time = jd2Date(target_jd, dt_obj=True)
+            target_image_time = jd2Date(target_jd, dt_obj=True).astimezone(datetime.timezone.utc)
             repeat = False
 
         annotation_text_l1 = "{} Stack depth {:.0f}".format(target_image_time.replace(microsecond=0), len(transformation_layer_list) / len(stations_info_dict))
