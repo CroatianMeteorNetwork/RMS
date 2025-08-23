@@ -31,7 +31,7 @@ import time
 import imageio as imageio
 
 from RMS.Astrometry.Conversions import altAz2RADec, jd2Date, date2JD
-from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP
+from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, correctVignetting
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.Platepar import Platepar
 from RMS.Math import angularSeparationDeg
@@ -327,7 +327,7 @@ def makeTransformation(stations_info_dict, size_x, size_y, minimum_elevation_deg
         for x_source_float, y_source_float, x_dest, y_dest in zip(x_source_array, y_source_array, x_dest_list, y_dest_list):
 
             x_source, y_source = int(x_source_float), int(y_source_float)
-            if not (20 < x_source < (pp_source.X_res - 20) and 20 < y_source < (pp_source.Y_res - 20)):
+            if not (0 < x_source < (pp_source.X_res - 0) and 0 < y_source < (pp_source.Y_res - 0)):
                 continue
 
             m = stations_info_dict[station]['mask']
@@ -336,7 +336,9 @@ def makeTransformation(stations_info_dict, size_x, size_y, minimum_elevation_deg
                     continue
 
             station_index = stations_list.index(station)
-            source_coordinates_list.append([transformation_layer, int(x_source), int(y_source)])
+            radius = np.hypot((x_source - pp_source.X_res) ** 2, (y_source - pp_source.Y_res) ** 2) ** 0.5
+            vignetting_factor = correctVignetting(1,  radius, pp_source.vignetting_coeff)
+            source_coordinates_list.append([int(transformation_layer), int(x_source), int(y_source), vignetting_factor])
             dest_coordinates_list.append([x_dest, y_dest])
 
         transformation_layer_list.append([station, time_offset_seconds])
@@ -471,7 +473,7 @@ def makeUpload(source_path, upload_to):
 
 def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=False, repeat=False, period=120,
                        print_activity=False, size=500, stack_depth=3, upload=None, annotate=True,
-                       min_elevation=20, timelapse_start=None, timelapse_end=None, target_jd=None):
+                       min_elevation=20, timelapse_start=None, timelapse_end=None, target_jd=None, minimum_elevation_deg=20):
 
     """
 
@@ -493,14 +495,10 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
         Nothing.
     """
 
-
-
-
-
     # Load the config files into a dict
     stations_info_dict = getStationsInfoDict(config_paths)
     size_x, size_y = size, size
-    minimum_elevation_deg = 20
+
 
     # Load transform and check matches image size
     if os.path.exists(path_to_transform) and not force_recomputation:
@@ -515,11 +513,9 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
                 if print_activity:
                     print("Requested image size does not match size of intensity scaling array  - recomputing transform")
 
-
-
     if not os.path.exists(path_to_transform) or force_recomputation:
         transformation_layer_list, source_coordinates_array, dest_coordinates_array, intensity_scaling_array, cam_coords =  \
-            makeTransformation(stations_info_dict, size_x, size_y, minimum_elevation_deg, print_activity=print_activity, stack_depth=stack_depth)
+            makeTransformation(stations_info_dict, size_x, size_y, minimum_elevation_deg=minimum_elevation_deg, print_activity=print_activity, stack_depth=stack_depth)
         transform_data = [stations_info_dict, transformation_layer_list, source_coordinates_array, dest_coordinates_array,
                           intensity_scaling_array, cam_coords]
 
@@ -561,16 +557,16 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
             intensity_scaling_array, 0 - 255)
 
         # Unwrap the source coordinates array into component lists
-        camera_no, source_y, source_x = source_coordinates_array.T
+        camera_no, source_y, source_x, vignetting_factor_array = source_coordinates_array.T
 
         # And the destination coordinates list
         target_y, target_x = dest_coordinates_array.T
 
         # Build the uncompensated image by mappings coordinates from each camera
-        intensities = fits_array[camera_no, source_x, source_y]
+        intensities = fits_array[list(map(int, camera_no)), list(map(int, source_x)), list(map(int, source_y))]
 
         # Stack the images
-        np.add.at(target_image_array_uncompensated, (target_x, target_y), intensities)
+        np.add.at(target_image_array_uncompensated, (target_x, target_y), intensities * vignetting_factor_array)
 
         target_image_array = np.divide(target_image_array_uncompensated, intensity_scaling_array)
 
@@ -665,7 +661,10 @@ if __name__ == "__main__":
     arg_parser.add_argument('-a', '--annotate', dest='annotate', default=False, action="store_true",
                             help="Annotate plot with image time, stations used, and projection origin.")
 
-    arg_parser.add_argument('-v', '--elevation', dest='elevation', nargs=1, type=float, default=[20],
+    arg_parser.add_argument('-n', '--constellations', dest='constellations', default=False, action="store_true",
+                            help="Annotate plot with constellations.")
+
+    arg_parser.add_argument('-e', '--elevation', dest='elevation', nargs=1, type=float, default=[20],
                             help="Minimum elevation to use for the plot")
 
     arg_parser.add_argument('-l', '--timelapse', dest='timelapse', nargs='*', type=float,
@@ -713,9 +712,9 @@ if __name__ == "__main__":
     annotate = cml_args.annotate
 
     if cml_args.elevation is None:
-        min_elevation = 20
+        minimum_elevation_deg = 20
     else:
-        min_elevation = cml_args.elevation[0] if cml_args.elevation[0] > 0 else 0
+        minimum_elevation_deg = cml_args.elevation[0] if cml_args.elevation[0] > 0 else 0
 
     if cml_args.timelapse is None:
         timelapse_start = None
@@ -738,8 +737,9 @@ if __name__ == "__main__":
     else:
         target_jd = cml_args.julian_date[0]
 
+
     SkyPolarProjection(config_paths, path_to_transform, force_recomputation=force_recomputation,
                        repeat=repeat, period=period, print_activity=not quiet,
                        size=size, stack_depth=stack_depth, upload=upload, annotate=annotate,
-                       min_elevation=min_elevation, timelapse_start=timelapse_start, timelapse_end=timelapse_end,
-                       target_jd=target_jd)
+                       timelapse_start=timelapse_start, timelapse_end=timelapse_end,
+                       target_jd=target_jd, minimum_elevation_deg=minimum_elevation_deg)
