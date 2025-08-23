@@ -445,19 +445,15 @@ def getFitsAsList(stations_files_list, stations_info_dict, print_activity=False)
             ff = readFF(os.path.dirname(f), os.path.basename(f))
 
             max_pixel = ff.maxpixel
-
-            min_max_pixel = np.min(max_pixel).astype(np.uint32)
-            max_max_pixel = np.max(max_pixel).astype(np.uint32)
-            mean_max_pixel = (min_max_pixel + max_max_pixel) / 2
-
-
-            compensated_image = max_pixel - mean_max_pixel
-            min_threshold, max_threshold = np.percentile(compensated_image, 0), np.percentile(compensated_image, 100)
+            compensation_value = np.mean(max_pixel)
+            compensated_image = max_pixel - compensation_value
+            min_threshold, max_threshold = np.percentile(compensated_image, 90), np.percentile(compensated_image, 99.9)
             if min_threshold == max_threshold:
-                compensated_image =  np.full_like(compensated_image, 0)
+                compensated_image =  np.full_like(compensated_image, 128)
             else:
-                compensated_image = (256 * (compensated_image - min_threshold) / (max_threshold - min_threshold)) - 128
-            fits_list.append(compensated_image.astype(float))
+                compensated_image = (2 ** 16 * (compensated_image - min_threshold) / (max_threshold - min_threshold)) - 2 ** 15
+
+            fits_list.append(compensated_image)
 
     return fits_list
 
@@ -573,7 +569,7 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
 
         # Form the uncompensated and target image arrays
         target_image_array, target_image_array_uncompensated = np.full_like(intensity_scaling_array, 0), np.full_like(
-            intensity_scaling_array, 0).astype(np.uint32)
+            intensity_scaling_array, 0)
 
         # Unwrap the source coordinates array into component lists
         camera_no, source_y, source_x, vignetting_factor_array = source_coordinates_array.T
@@ -582,25 +578,20 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
         target_y, target_x = dest_coordinates_array.T
 
         # Build the uncompensated image by mappings coordinates from each camera
-        intensities = fits_array[list(map(int, camera_no)), list(map(int, source_x)), list(map(int, source_y))].astype(np.float32)
+        intensities = fits_array[list(map(int, camera_no)), list(map(int, source_x)), list(map(int, source_y))]
 
         # Stack the images
         np.add.at(target_image_array_uncompensated, (target_x, target_y), intensities * vignetting_factor_array)
 
-
-        min_intensity = np.min(target_image_array_uncompensated)
-        max_intensity = np.max(target_image_array_uncompensated)
+        div_zero_replacement = np.min(intensities)
         target_image_array = np.divide(target_image_array_uncompensated,
                                        intensity_scaling_array,
-                                       out=np.full_like(target_image_array_uncompensated, min_intensity, dtype=float),
-                                       where=intensity_scaling_array!=0).astype(np.uint32)
-
-        min_intensity = np.min(target_image_array)
-        max_intensity = np.max(target_image_array)
+                                       out=np.full_like(target_image_array_uncompensated, div_zero_replacement, dtype=float),
+                                       where=intensity_scaling_array!=0)
 
         # Perform compensation
-        min_threshold, max_threshold = np.percentile(target_image_array, 80), np.percentile(target_image_array, 100)
-        target_image_array = np.clip(128 * (target_image_array - min_threshold) / (max_threshold - min_threshold), 0, 128)
+        min_threshold, max_threshold = np.percentile(intensities, 50), np.percentile(intensities, 99.975)
+        target_image_array = np.clip(255 * (target_image_array - min_threshold) / (max_threshold - min_threshold), 0, 255)
 
         if output_file_name is None:
             mkdirP(os.path.expanduser("~/RMS_data/PolarPlot/Projection/"))
