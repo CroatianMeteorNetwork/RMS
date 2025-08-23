@@ -405,7 +405,10 @@ def getFitsFiles(transformation_layer_list, stations_info_dict, target_image_tim
 
         stations_files_list.append([s, closest_fits_file_full_path])
         if print_activity:
-            print("Added {}".format(os.path.basename(closest_fits_file_full_path)))
+            if closest_fits_file_full_path is None:
+                print("Could not find a file for {} for stations {}".format(target_image_time + datetime.timedelta(seconds=time_offset_seconds), s))
+            else:
+                print("Added {}".format(os.path.basename(closest_fits_file_full_path)))
 
     return stations_files_list
 
