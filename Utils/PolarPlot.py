@@ -30,7 +30,7 @@ import pathlib
 import time
 import imageio as imageio
 
-from RMS.Astrometry.Conversions import altAz2RADec, raDec2AltAz, jd2Date, date2JD
+from RMS.Astrometry.Conversions import altAz2RADec, raDec2AltAz, jd2Date, date2JD, J2000_JD
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, correctVignetting
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.Platepar import Platepar
@@ -664,12 +664,21 @@ def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_el
     print("Getting constellation coordinates at jd {} for location lat: {} lon: {}".format(jd, cam_coords[0], cam_coords[1]))
     constellations_path = os.path.join(os.path.expanduser("~/source/RMS/share/constellation_lines.csv"))
     lines = np.loadtxt(constellations_path, delimiter=",")
-    array_ra_od, array_dec_od, array_ra_od_ ,array_dec_od_ = lines[:, 0], lines[:, 1], lines[:, 2], lines[:, 3]
+    array_ra_j2000, array_dec_j2000, array_ra_j2000_ ,array_dec_j2000_ = lines[:, 0], lines[:, 1], lines[:, 2], lines[:, 3]
 
-    for ra_od, dec_od_, ra_od_, dec_od_ in zip(array_ra_od, array_dec_od, array_ra_od_, array_dec_od_):
-        equatorialCoordPrecession()
+    j2000=2451545
 
+    list_ra, list_dec, list_ra_, list_dec_ = [], [], [] ,[]
+    for ra_od, dec_od, ra_od_, dec_od_ in zip(array_ra_j2000, array_dec_j2000, array_ra_j2000_, array_dec_j2000_):
+        ra_rads, dec_rads = equatorialCoordPrecession(j2000, jd, np.radians(ra_od), np.radians(dec_od))
+        ra_rads_, dec_rads_ = equatorialCoordPrecession(j2000, jd, np.radians(ra_od_), np.radians(dec_od_))
+        list_ra.append(np.degrees(ra_rads))
+        list_dec.append(np.degrees(dec_rads))
+        list_ra_.append(np.degrees(ra_rads_))
+        list_dec_.append(np.degrees(dec_rads_))
 
+    array_ra, array_dec = np.array(list_ra), np.array(list_dec)
+    array_ra_, array_dec_ = np.array(list_ra_), np.array(list_dec_)
 
     array_az, array_alt = raDec2AltAz(array_ra, array_dec, jd, lat, lon)
     array_az_, array_alt_ = raDec2AltAz(array_ra_ ,array_dec_ , jd, lat, lon)
@@ -691,6 +700,7 @@ def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_el
     origin_x, origin_y = size_x / 2, size_y / 2
 
     correction_factor = np.sin(np.radians(90 - minimum_elevation_deg))
+
     for alt, az, alt_, az_ in constellation_alt_az_above_horizon:
 
 
