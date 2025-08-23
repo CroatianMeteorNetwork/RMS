@@ -552,7 +552,8 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
         if target_jd is None:
             target_image_time = datetime.datetime.now(tz=datetime.timezone.utc) - datetime.timedelta(seconds=20)
         else:
-            target_image_time = jd2Date(target_jd, dt_obj=True).astimezone(datetime.timezone.utc)
+            target_image_time = jd2Date(target_jd, dt_obj=True).replace(tzinfo=datetime.timezone.utc)
+
             if print_activity:
                 print("Target image time from julian date {} is {}".format(target_jd, target_image_time))
             repeat = False
