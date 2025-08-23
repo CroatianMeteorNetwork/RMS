@@ -255,7 +255,7 @@ def makeTransformation(stations_info_dict, size_x, size_y, minimum_elevation_deg
     elevation_range = 2 * (90 - minimum_elevation_deg)
     pixel_to_radius_scale_factor_x = elevation_range / size_x
     pixel_to_radius_scale_factor_y = elevation_range / size_y
-    az_vals_deg, el_vals_deg = np.zeros((size_x + 1, size_y + 1)), np.zeros((size_x + 1, size_y + 1))
+    az_vals_deg, el_vals_deg = np.zeros((size_x, size_y)), np.zeros((size_x, size_y))
 
     # Make transform from target image coordinates to az and el.
     stations_list = sorted(list(stations_info_dict.keys()))
@@ -293,8 +293,8 @@ def makeTransformation(stations_info_dict, size_x, size_y, minimum_elevation_deg
         _, r_source, d_source, _ = xyToRaDecPP([pp_source.JD], [pp_source.X_res / 2], [pp_source.Y_res / 2], [1], pp_source, jd_time=True, extinction_correction=False, measurement=False)
         r_list, d_list, x_dest_list, y_dest_list = [], [], [], []
 
-        for y_dest in range(0, size_y + 1):
-            for x_dest in range(0, size_x + 1):
+        for y_dest in range(0, size_y):
+            for x_dest in range(0, size_x):
                 _x, _y, = x_dest - origin_x, y_dest - origin_y
 
                 # Convert the target image (polar projection on cartesian axis) into azimuth and elevation
@@ -731,10 +731,10 @@ def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_el
 
         # Convert the target image (polar projection on cartesian axis) into azimuth and elevation
         el_test = 90 - np.hypot((x - origin_x) * pixel_to_radius_scale_factor_x, (y - origin_y) * pixel_to_radius_scale_factor_y)
-        az_test = np.degrees(np.arctan2(x, y))
+        az_test = np.degrees(np.arctan2(x - origin_x, y - origin_y))
 
-        el_test_ = 90 - np.hypot(x_ * pixel_to_radius_scale_factor_x, y_ * pixel_to_radius_scale_factor_y)
-        az_test_ = np.degrees(np.arctan2(x_, y_))
+        el_test_ = 90 - np.hypot((x_ -origin_x) * pixel_to_radius_scale_factor_x, (y_ - origin_y) * pixel_to_radius_scale_factor_y)
+        az_test_ = np.degrees(np.arctan2(x_ - origin_x, y_ - origin_y))
 
         print(az, az_test, alt, el_test, az_, az_test_, alt_, el_test_)
 
