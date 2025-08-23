@@ -447,11 +447,11 @@ def getFitsAsList(stations_files_list, stations_info_dict, print_activity=False)
             max_pixel = ff.maxpixel
             compensation_value = np.mean(max_pixel)
             compensated_image = max_pixel - compensation_value
-            min_threshold, max_threshold = np.percentile(compensated_image, 90), np.percentile(compensated_image, 99.5)
+            min_threshold, max_threshold = np.percentile(compensated_image, 90), np.percentile(compensated_image, 99.9)
             if min_threshold == max_threshold:
                 compensated_image =  np.full_like(compensated_image, 128)
             else:
-                compensated_image = (255 * (compensated_image - min_threshold) / (max_threshold - min_threshold)) - 128
+                compensated_image = (2 ** 16 * (compensated_image - min_threshold) / (max_threshold - min_threshold)) - 2 ** 15
 
             fits_list.append(compensated_image)
 
@@ -589,8 +589,8 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
                                        where=intensity_scaling_array!=0)
 
         # Perform compensation
-        min_threshold, max_threshold = np.percentile(intensities, 50), np.percentile(intensities, 99.5)
-        target_image_array = np.clip(254 * (target_image_array - min_threshold) / (max_threshold - min_threshold), 0, 255)
+        min_threshold, max_threshold = np.percentile(intensities, 50), np.percentile(intensities, 99.95)
+        target_image_array = np.clip(255 * (target_image_array - min_threshold) / (max_threshold - min_threshold), 0, 255)
 
         if output_file_name is None:
             mkdirP(os.path.expanduser("~/RMS_data/PolarPlot/Projection/"))
