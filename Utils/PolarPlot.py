@@ -589,7 +589,7 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
                                        where=intensity_scaling_array!=0).astype(float)
 
         # Perform compensation
-        min_threshold, max_threshold = np.percentile(intensities, 80), np.percentile(intensities, 99.75)
+        min_threshold, max_threshold = np.percentile(intensities, 80), np.percentile(intensities, 99.85)
         target_image_array = np.clip(255 * (target_image_array - min_threshold) / (max_threshold - min_threshold), 0, 255)
 
         if output_file_name is None:
