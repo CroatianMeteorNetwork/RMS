@@ -22,7 +22,7 @@ import argparse
 import subprocess
 import cv2
 import numpy as np
-from ephem import julian_date
+
 
 import RMS.ConfigReader as cr
 import datetime
@@ -30,7 +30,7 @@ import pathlib
 import time
 import imageio as imageio
 
-from RMS.Astrometry.Conversions import altAz2RADec, jd2Date, date2JD
+from RMS.Astrometry.Conversions import altAz2RADec, raDec2AltAz, jd2Date, date2JD
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, correctVignetting
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.Platepar import Platepar
@@ -354,7 +354,7 @@ def makeTransformation(stations_info_dict, size_x, size_y, minimum_elevation_deg
 
     return transformation_layer_list, source_coordinates_array, dest_coordinates_array, intensity_scaling_array, [target_lat, target_lon, target_ele]
 
-def getFitsFiles(transformation_layer_list, stations_info_dict, target_image_time, print_activity=False):
+def getFitsFiles(transformation_layer_list, stations_info_dict, target_image_time, print_activity=True):
     """
     Get the paths to fits files, in the same order as stations_list using info from stations_info_dict around target_image time.
 
@@ -413,7 +413,7 @@ def getFitsFiles(transformation_layer_list, stations_info_dict, target_image_tim
             if closest_fits_file_full_path is None:
                 print("Could not find a file for {} for stations {}".format(target_image_time + datetime.timedelta(seconds=time_offset_seconds), s))
             else:
-                print("Added {}".format(os.path.basename(closest_fits_file_full_path)))
+                print("Added {} with a time delta of {} seconds".format(os.path.basename(closest_fits_file_full_path), min_time_delta))
 
     return stations_files_list
 
@@ -484,7 +484,7 @@ def makeUpload(source_path, upload_to):
 def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=False, repeat=False, period=120,
                        print_activity=False, size=500, stack_depth=3, upload=None, annotate=True, minimum_elevation_deg=20,
                        timelapse_start=None, timelapse_end=None, seconds_per_frame=None,
-                       target_jd=None, compensation=[50, 80, 80, 99.75]):
+                       target_jd=None, compensation=[50, 80, 80, 99.75], plot_constellations=True):
 
     """
 
@@ -545,6 +545,7 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
 
 
 
+
     while True:
         this_iteration_start_time = next_iteration_start_time
         next_iteration_start_time += datetime.timedelta(seconds=period)
@@ -565,6 +566,12 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
 
         # Get the fits files as a stack of fits, one per camera
         fits_array = np.stack(getFitsAsList(getFitsFiles(transformation_layer_list, stations_info_dict, target_image_time), stations_info_dict, compensation=compensation), axis=0)
+
+        target_image_time_jd = date2JD(*(target_image_time.timetuple()[:6]))
+        print(target_image_time)
+        print(target_image_time_jd)
+
+
 
         # Form the uncompensated and target image arrays
         target_image_array, target_image_array_uncompensated = np.full_like(intensity_scaling_array, 0), np.full_like(
@@ -591,6 +598,12 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
         # Perform compensation
         min_threshold, max_threshold = np.percentile(intensities, float(compensation[2])), np.percentile(intensities, compensation[3])
         target_image_array = np.clip(255 * (target_image_array - min_threshold) / (max_threshold - min_threshold), 0, 255)
+
+        if plot_constellations:
+            constellation_coordinates_list = getConstellationsImageCoordinates(target_image_time_jd, cam_coords, size_x,
+                                                                           size_y, minimum_elevation_deg)
+            for x, y, x_, y_ in constellation_coordinates_list:
+                cv2.line(target_image_array, (x, y), (x_, y_), 20, 1)
 
         if output_file_name is None:
             mkdirP(os.path.expanduser("~/RMS_data/PolarPlot/Projection/"))
@@ -639,6 +652,62 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
             return target_image_array
 
         time.sleep(max((next_iteration_start_time - datetime.datetime.now(tz=datetime.timezone.utc)).total_seconds(),0))
+
+def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_elevation_deg):
+
+    lat, lon = cam_coords[0], cam_coords[1]
+
+
+
+    print("Getting constellation coordinates at jd {} for location lat: {} lon: {}".format(jd, cam_coords[0], cam_coords[1]))
+    constellations_path = os.path.join(os.path.expanduser("~/source/RMS/share/constellation_lines.csv"))
+    lines = np.loadtxt(constellations_path, delimiter=",")
+    array_ra, array_dec, array_ra_ ,array_dec_ = lines[:, 0], lines[:, 1], lines[:, 2], lines[:, 3]
+    array_az, array_alt = raDec2AltAz(array_ra, array_dec, jd, lat, lon)
+    array_az_, array_alt_ = raDec2AltAz(array_ra_ ,array_dec_ , jd, lat, lon)
+    con = np.stack([array_alt, array_az, array_alt_, array_az_], axis=1)
+    constellation_alt_az_above_horizon = con[(con[:, 0] >= 20) & (con[:, 2] >= 20)]
+
+
+
+
+    image_coordinates = []
+
+    elevation_range = 2 * (90 - minimum_elevation_deg)
+    pixel_to_radius_scale_factor_x = elevation_range / size_x
+    pixel_to_radius_scale_factor_y = elevation_range / size_y
+
+
+
+    """
+    el_deg = 90 - np.hypot(_x * pixel_to_radius_scale_factor_x, _y * pixel_to_radius_scale_factor_y)
+    az_deg = np.degrees(np.arctan2(_x, _y))
+    """
+    origin_x, origin_y = size_x / 2, size_y / 2
+
+    for alt, az, alt_, az_ in constellation_alt_az_above_horizon:
+
+
+        target_image_x = origin_x - ((np.cos(np.radians(alt)) * np.sin(np.radians(az)))) * origin_x
+        target_image_y = origin_y - ((np.cos(np.radians(alt)) * np.cos(np.radians(az)))) * origin_y
+        target_image_x_ = origin_x - ((np.cos(np.radians(alt_)) * np.sin(np.radians(az_)))) * origin_x
+        target_image_y_ = origin_y - ((np.cos(np.radians(alt_)) * np.cos(np.radians(az_)))) * origin_y
+
+        image_coordinates.append([int(target_image_x), int(target_image_y), int(target_image_x_), int(target_image_y_)])
+
+        pass
+
+
+    if False:
+        img=np.zeros((size_x, size_y), dtype=np.uint8)
+
+        for x, y, x_, y_ in image_coordinates:
+            cv2.line(img, (x, y), (x_, y_), 20, 1 )
+
+        imageio.imwrite('cons.png', img)
+
+    return image_coordinates
+
 
 if __name__ == "__main__":
 
@@ -733,7 +802,7 @@ if __name__ == "__main__":
     annotate = cml_args.annotate
 
     if cml_args.elevation is None:
-        minimum_elevation_deg = 20
+        minimum_elevation_deg = 0
     else:
         minimum_elevation_deg = cml_args.elevation[0] if cml_args.elevation[0] > 0 else 0
 
@@ -775,10 +844,11 @@ if __name__ == "__main__":
     else:
         compensation = cml_args.compensation
 
-    print(compensation)
+    plot_constellations = cml_args.constellations
 
     SkyPolarProjection(config_paths, path_to_transform, force_recomputation=force_recomputation,
                        repeat=repeat, period=period, print_activity=not quiet,
                        size=size, stack_depth=stack_depth, upload=upload, annotate=annotate,
                        timelapse_start=timelapse_start, timelapse_end=timelapse_end, seconds_per_frame = seconds_per_frame,
-                       target_jd=target_jd, minimum_elevation_deg=minimum_elevation_deg, compensation=compensation)
+                       target_jd=target_jd, minimum_elevation_deg=minimum_elevation_deg, compensation=compensation,
+                       plot_constellations=plot_constellations)
