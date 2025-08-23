@@ -354,7 +354,7 @@ def makeTransformation(stations_info_dict, size_x, size_y, minimum_elevation_deg
 
     return transformation_layer_list, source_coordinates_array, dest_coordinates_array, intensity_scaling_array, [target_lat, target_lon, target_ele]
 
-def getFitsFiles(transformation_layer_list, stations_info_dict, target_image_time, print_activity=True):
+def getFitsFiles(transformation_layer_list, stations_info_dict, target_image_time, print_activity=False):
     """
     Get the paths to fits files, in the same order as stations_list using info from stations_info_dict around target_image time.
 
