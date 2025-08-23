@@ -438,9 +438,9 @@ def getFitsAsList(stations_files_list, stations_info_dict, print_activity=False)
             compensation_value = np.mean(max_pixel)
             compensated_image = max_pixel - compensation_value
             min_threshold, max_threshold = np.percentile(compensated_image, 90), np.percentile(compensated_image, 99.5)
-            if min_threshold == max_threshold:
-                return np.zeros_like(compensated_image)
-            compensated_image = (255 * (compensated_image - min_threshold) / (max_threshold - min_threshold)) - 128
+            #if min_threshold == max_threshold:
+            #    return np.zeros_like(compensated_image)
+            #compensated_image = (255 * (compensated_image - min_threshold) / (max_threshold - min_threshold)) - 128
 
             fits_list.append(compensated_image)
 
