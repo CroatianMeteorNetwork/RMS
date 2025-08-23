@@ -22,7 +22,7 @@ import argparse
 import subprocess
 import cv2
 import numpy as np
-
+from shapely import measurement
 
 import RMS.ConfigReader as cr
 import datetime
@@ -290,7 +290,7 @@ def makeTransformation(stations_info_dict, size_x, size_y, minimum_elevation_deg
             print("Making transformation for {:s} with a time offset of {:.1f} seconds - {}".format(station.lower(), 0 - time_offset_seconds, jd2Date(jd_source)))
 
         # Get the centre of the platepar at creation time in JD - not compensated for time offsets
-        _, r_source, d_source, _ = xyToRaDecPP([pp_source.JD], [pp_source.X_res / 2], [pp_source.Y_res / 2], [1], pp_source, jd_time=True)
+        _, r_source, d_source, _ = xyToRaDecPP([pp_source.JD], [pp_source.X_res / 2], [pp_source.Y_res / 2], [1], pp_source, jd_time=True, extinction_correction=False, measurement=False)
         r_list, d_list, x_dest_list, y_dest_list = [], [], [], []
 
         for y_dest in range(0, size_y + 1):
@@ -604,7 +604,7 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
             constellation_coordinates_list = getConstellationsImageCoordinates(target_image_time_jd, cam_coords, size_x,
                                                                            size_y, minimum_elevation_deg)
             for x, y, x_, y_ in constellation_coordinates_list:
-                cv2.line(target_image_array, (x, y), (x_, y_), 20, 1)
+                cv2.line(target_image_array, (x, y), (x_, y_), 18, 1)
 
         if output_file_name is None:
             mkdirP(os.path.expanduser("~/RMS_data/PolarPlot/Projection/"))
@@ -669,6 +669,9 @@ def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_el
     j2000=2451545
 
     list_ra, list_dec, list_ra_, list_dec_ = [], [], [] ,[]
+
+
+
     for ra_od, dec_od, ra_od_, dec_od_ in zip(array_ra_j2000, array_dec_j2000, array_ra_j2000_, array_dec_j2000_):
         ra_rads, dec_rads = equatorialCoordPrecession(j2000, jd, np.radians(ra_od), np.radians(dec_od))
         ra_rads_, dec_rads_ = equatorialCoordPrecession(j2000, jd, np.radians(ra_od_), np.radians(dec_od_))
@@ -678,13 +681,20 @@ def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_el
         list_dec_.append(np.degrees(dec_rads_))
 
 
+    if False:
+        list_ra = [220.35]
+        list_dec = [-60.92]
+        list_ra_ = [211.4]
+        list_dec_ = [-60.50]
+
+
     array_ra, array_dec = np.array(list_ra), np.array(list_dec)
     array_ra_, array_dec_ = np.array(list_ra_), np.array(list_dec_)
 
     array_az, array_alt = raDec2AltAz(array_ra, array_dec, jd, lat, lon)
     array_az_, array_alt_ = raDec2AltAz(array_ra_ ,array_dec_ , jd, lat, lon)
     con = np.stack([array_alt, array_az, array_alt_, array_az_], axis=1)
-    constellation_alt_az_above_horizon = con[(con[:, 0] >= 20) & (con[:, 2] >= 20)]
+    constellation_alt_az_above_horizon = con[(con[:, 0] >= 40) & (con[:, 2] >= 40)]
 
 
 
@@ -698,24 +708,50 @@ def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_el
     el_deg = 90 - np.hypot(_x * pixel_to_radius_scale_factor_x, _y * pixel_to_radius_scale_factor_y)
     az_deg = np.degrees(np.arctan2(_x, _y))
     """
+
+    print("Creating constellation data for an image of size {},{}".format(size_x, size_y))
     origin_x, origin_y = size_x / 2, size_y / 2
 
-    correction_factor = np.sin(np.radians(90 - minimum_elevation_deg)) * 0.9
+    elevation_range = 2 * (90 - minimum_elevation_deg)
+    pixel_to_radius_scale_factor_x = elevation_range / size_x
+    pixel_to_radius_scale_factor_y = elevation_range / size_y
 
     for alt, az, alt_, az_ in constellation_alt_az_above_horizon:
 
+        az_rad, alt_rad, az_rad_, alt_rad_ = np.radians(az), np.radians(alt), np.radians(az_), np.radians(alt_)
 
-        target_image_x = origin_x - ((np.cos(np.radians(alt)) * np.sin(np.radians(az)))) * origin_x * correction_factor
-        target_image_y = origin_y - ((np.cos(np.radians(alt)) * np.cos(np.radians(az)))) * origin_y * correction_factor
-        target_image_x_ = origin_x - ((np.cos(np.radians(alt_)) * np.sin(np.radians(az_)))) * origin_x * correction_factor
-        target_image_y_ = origin_y - ((np.cos(np.radians(alt_)) * np.cos(np.radians(az_)))) * origin_y * correction_factor
 
-        image_coordinates.append([int(target_image_x), int(target_image_y), int(target_image_x_), int(target_image_y_)])
+
+        x = origin_x - 60 * (np.cos(alt_rad) * np.sin(az_rad)) / pixel_to_radius_scale_factor_x
+        y = origin_y - 60 * (np.cos(alt_rad) * np.cos(az_rad)) / pixel_to_radius_scale_factor_y
+        x_ = origin_x - 60 * (np.cos(alt_rad_) * np.sin(az_rad_))  / pixel_to_radius_scale_factor_x
+        y_ = origin_y - 60 * (np.cos(alt_rad_) *  np.cos(az_rad_))  / pixel_to_radius_scale_factor_y
+
+
+
+        # Convert the target image (polar projection on cartesian axis) into azimuth and elevation
+        el_test = 90 - np.hypot((x - origin_x) * pixel_to_radius_scale_factor_x, (y - origin_y) * pixel_to_radius_scale_factor_y)
+        az_test = np.degrees(np.arctan2(x, y))
+
+        el_test_ = 90 - np.hypot(x_ * pixel_to_radius_scale_factor_x, y_ * pixel_to_radius_scale_factor_y)
+        az_test_ = np.degrees(np.arctan2(x_, y_))
+
+        print(az, az_test, alt, el_test, az_, az_test_, alt_, el_test_)
+
+
+        if False:
+            x = origin_x - ((np.cos(np.radians(alt)) * np.sin(np.radians(az)))) * origin_x * correction_factor
+            y = origin_y - ((np.cos(np.radians(alt)) * np.cos(np.radians(az)))) * origin_y * correction_factor
+            x_ = origin_x - ((np.cos(np.radians(alt_)) * np.sin(np.radians(az_)))) * origin_x * correction_factor
+            y_ = origin_y - ((np.cos(np.radians(alt_)) * np.cos(np.radians(az_)))) * origin_y * correction_factor
+
+
+        image_coordinates.append([int(x), int(y), int(x_), int(y_)])
 
         pass
 
 
-    if False:
+    if True:
         img=np.zeros((size_x, size_y), dtype=np.uint8)
 
         for x, y, x_, y_ in image_coordinates:
