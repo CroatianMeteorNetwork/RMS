@@ -370,6 +370,8 @@ def getFitsFiles(transformation_layer_list, stations_info_dict, target_image_tim
 
     stations_files_list = []
     for s, time_offset_seconds in transformation_layer_list:
+        if print_activity:
+            print("Looking for fits files in station {} time offset {} from {}".format(s, time_offset_seconds, target_image_time))
         c = stations_info_dict[s]['config']
         captured_dir_path = os.path.join(c.data_dir, c.captured_dir)
         captured_dirs = sorted(os.listdir(captured_dir_path), reverse=True)
