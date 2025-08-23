@@ -694,7 +694,7 @@ def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_el
     array_az, array_alt = raDec2AltAz(array_ra, array_dec, jd, lat, lon)
     array_az_, array_alt_ = raDec2AltAz(array_ra_ ,array_dec_ , jd, lat, lon)
     con = np.stack([array_alt, array_az, array_alt_, array_az_], axis=1)
-    constellation_alt_az_above_horizon = con[(con[:, 0] >= 40) & (con[:, 2] >= 40)]
+    constellation_alt_az_above_horizon = con[(con[:, 0] >= 45) & (con[:, 2] >= 45)]
 
 
 
