@@ -554,7 +554,7 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
         fits_array = np.stack(getFitsAsList(getFitsFiles(transformation_layer_list, stations_info_dict, target_image_time), stations_info_dict), axis=0)
 
         # Form the uncompensated and target image arrays
-        target_image_array, target_image_array_uncompensated = np.full_like(intensity_scaling_array, 0-255), np.full_like(
+        target_image_array, target_image_array_uncompensated = np.full_like(intensity_scaling_array, 0 - 128), np.full_like(
             intensity_scaling_array, 0 - 255)
 
         # Unwrap the source coordinates array into component lists
