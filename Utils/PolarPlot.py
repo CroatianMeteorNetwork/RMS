@@ -327,7 +327,7 @@ def makeTransformation(stations_info_dict, size_x, size_y, minimum_elevation_deg
         for x_source_float, y_source_float, x_dest, y_dest in zip(x_source_array, y_source_array, x_dest_list, y_dest_list):
 
             x_source, y_source = int(x_source_float), int(y_source_float)
-            if not (0 < x_source < (pp_source.X_res - 0) and 0 < y_source < (pp_source.Y_res - 0)):
+            if not (5 < x_source < (pp_source.X_res - 5) and 5 < y_source < (pp_source.Y_res - 5)):
                 continue
 
             m = stations_info_dict[station]['mask']
@@ -418,7 +418,7 @@ def getFitsFiles(transformation_layer_list, stations_info_dict, target_image_tim
     return stations_files_list
 
 
-def getFitsAsList(stations_files_list, stations_info_dict, print_activity=False):
+def getFitsAsList(stations_files_list, stations_info_dict, print_activity=False, compensation=[50,80]):
     """
     Given a list of lists of stations and paths to fits files, return a list of images from
     the fits compensated to an average intensity of zero.
@@ -446,7 +446,7 @@ def getFitsAsList(stations_files_list, stations_info_dict, print_activity=False)
 
             max_pixel = ff.maxpixel.astype(np.float32)
             compensated_image = max_pixel
-            min_threshold, max_threshold = np.percentile(compensated_image, 50), np.percentile(compensated_image, 90)
+            min_threshold, max_threshold = np.percentile(compensated_image, compensation[0]), np.percentile(compensated_image, compensation[1])
             if min_threshold == max_threshold:
                 compensated_image =  np.full_like(compensated_image, 128)
             else:
@@ -484,7 +484,7 @@ def makeUpload(source_path, upload_to):
 def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=False, repeat=False, period=120,
                        print_activity=False, size=500, stack_depth=3, upload=None, annotate=True, minimum_elevation_deg=20,
                        timelapse_start=None, timelapse_end=None, seconds_per_frame=None,
-                       target_jd=None):
+                       target_jd=None, compensation=[50, 80, 80, 99.75]):
 
     """
 
@@ -564,7 +564,7 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
         annotation_text_l2 = "Lat:{:.3f} deg Lon:{:.3f} deg {}".format(cam_coords[0], cam_coords[1], stations_as_text)
 
         # Get the fits files as a stack of fits, one per camera
-        fits_array = np.stack(getFitsAsList(getFitsFiles(transformation_layer_list, stations_info_dict, target_image_time), stations_info_dict), axis=0)
+        fits_array = np.stack(getFitsAsList(getFitsFiles(transformation_layer_list, stations_info_dict, target_image_time), stations_info_dict, compensation=compensation), axis=0)
 
         # Form the uncompensated and target image arrays
         target_image_array, target_image_array_uncompensated = np.full_like(intensity_scaling_array, 0), np.full_like(
@@ -589,7 +589,7 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
                                        where=intensity_scaling_array!=0).astype(float)
 
         # Perform compensation
-        min_threshold, max_threshold = np.percentile(intensities, 80), np.percentile(intensities, 99.85)
+        min_threshold, max_threshold = np.percentile(intensities, float(compensation[2])), np.percentile(intensities, compensation[3])
         target_image_array = np.clip(255 * (target_image_array - min_threshold) / (max_threshold - min_threshold), 0, 255)
 
         if output_file_name is None:
@@ -692,6 +692,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-j', '--julian-date', dest='julian_date', nargs=1, type=float,
                             help="Generate a single projection at the specified julian date")
 
+    arg_parser.add_argument('-m', '--compensation', dest='compensation', nargs=4, type=float,
+                            help="Image compensation values 50 80 90 99.85 work well")
+
     cml_args = arg_parser.parse_args()
 
 
@@ -767,9 +770,15 @@ if __name__ == "__main__":
     else:
         target_jd = cml_args.julian_date[0]
 
+    if cml_args.compensation is None:
+        compensation = [80, 95, 50, 99.995]
+    else:
+        compensation = cml_args.compensation
+
+    print(compensation)
 
     SkyPolarProjection(config_paths, path_to_transform, force_recomputation=force_recomputation,
                        repeat=repeat, period=period, print_activity=not quiet,
                        size=size, stack_depth=stack_depth, upload=upload, annotate=annotate,
                        timelapse_start=timelapse_start, timelapse_end=timelapse_end, seconds_per_frame = seconds_per_frame,
-                       target_jd=target_jd, minimum_elevation_deg=minimum_elevation_deg)
+                       target_jd=target_jd, minimum_elevation_deg=minimum_elevation_deg, compensation=compensation)
