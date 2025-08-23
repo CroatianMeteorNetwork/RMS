@@ -37,6 +37,7 @@ from RMS.Formats.Platepar import Platepar
 from RMS.Math import angularSeparationDeg
 from RMS.Misc import mkdirP
 from RMS.Routines.MaskImage import loadMask
+from RMS.Astrometry.CyFunctions import equatorialCoordPrecession
 
 def getStationsInfoDict(path_list=None, print_activity=False):
 
@@ -659,10 +660,17 @@ def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_el
 
 
 
+
     print("Getting constellation coordinates at jd {} for location lat: {} lon: {}".format(jd, cam_coords[0], cam_coords[1]))
     constellations_path = os.path.join(os.path.expanduser("~/source/RMS/share/constellation_lines.csv"))
     lines = np.loadtxt(constellations_path, delimiter=",")
-    array_ra, array_dec, array_ra_ ,array_dec_ = lines[:, 0], lines[:, 1], lines[:, 2], lines[:, 3]
+    array_ra_od, array_dec_od, array_ra_od_ ,array_dec_od_ = lines[:, 0], lines[:, 1], lines[:, 2], lines[:, 3]
+
+    for ra_od, dec_od_, ra_od_, dec_od_ in zip(array_ra_od, array_dec_od, array_ra_od_, array_dec_od_):
+        equatorialCoordPrecession()
+
+
+
     array_az, array_alt = raDec2AltAz(array_ra, array_dec, jd, lat, lon)
     array_az_, array_alt_ = raDec2AltAz(array_ra_ ,array_dec_ , jd, lat, lon)
     con = np.stack([array_alt, array_az, array_alt_, array_az_], axis=1)
@@ -673,9 +681,6 @@ def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_el
 
     image_coordinates = []
 
-    elevation_range = 2 * (90 - minimum_elevation_deg)
-    pixel_to_radius_scale_factor_x = elevation_range / size_x
-    pixel_to_radius_scale_factor_y = elevation_range / size_y
 
 
 
@@ -685,13 +690,14 @@ def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_el
     """
     origin_x, origin_y = size_x / 2, size_y / 2
 
+    correction_factor = np.sin(np.radians(90 - minimum_elevation_deg))
     for alt, az, alt_, az_ in constellation_alt_az_above_horizon:
 
 
-        target_image_x = origin_x - ((np.cos(np.radians(alt)) * np.sin(np.radians(az)))) * origin_x
-        target_image_y = origin_y - ((np.cos(np.radians(alt)) * np.cos(np.radians(az)))) * origin_y
-        target_image_x_ = origin_x - ((np.cos(np.radians(alt_)) * np.sin(np.radians(az_)))) * origin_x
-        target_image_y_ = origin_y - ((np.cos(np.radians(alt_)) * np.cos(np.radians(az_)))) * origin_y
+        target_image_x = origin_x - ((np.cos(np.radians(alt)) * np.sin(np.radians(az)))) * origin_x * correction_factor
+        target_image_y = origin_y - ((np.cos(np.radians(alt)) * np.cos(np.radians(az)))) * origin_y * correction_factor
+        target_image_x_ = origin_x - ((np.cos(np.radians(alt_)) * np.sin(np.radians(az_)))) * origin_x * correction_factor
+        target_image_y_ = origin_y - ((np.cos(np.radians(alt_)) * np.cos(np.radians(az_)))) * origin_y * correction_factor
 
         image_coordinates.append([int(target_image_x), int(target_image_y), int(target_image_x_), int(target_image_y_)])
 
