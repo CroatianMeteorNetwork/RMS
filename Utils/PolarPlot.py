@@ -348,7 +348,7 @@ def makeTransformation(stations_info_dict, size_x, size_y, minimum_elevation_deg
     dest_coordinates_array = np.array(dest_coordinates_list)
 
     pairs, counts = np.unique(dest_coordinates_array, axis=0, return_counts=True)
-    intensity_scaling_array = np.ones((size_x + 1, size_y + 1))
+    intensity_scaling_array = np.zeros((size_x + 1, size_y + 1))
     for pair, count in zip(pairs, counts):
         intensity_scaling_array[pair[1]][pair[0]] = count
 
@@ -554,8 +554,8 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
         fits_array = np.stack(getFitsAsList(getFitsFiles(transformation_layer_list, stations_info_dict, target_image_time), stations_info_dict), axis=0)
 
         # Form the uncompensated and target image arrays
-        target_image_array, target_image_array_uncompensated = np.full_like(intensity_scaling_array, 0 - 128), np.full_like(
-            intensity_scaling_array, 0 - 255)
+        target_image_array, target_image_array_uncompensated = np.full_like(intensity_scaling_array, 0), np.full_like(
+            intensity_scaling_array, 0)
 
         # Unwrap the source coordinates array into component lists
         camera_no, source_y, source_x, vignetting_factor_array = source_coordinates_array.T
@@ -569,7 +569,11 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
         # Stack the images
         np.add.at(target_image_array_uncompensated, (target_x, target_y), intensities * vignetting_factor_array)
 
-        target_image_array = np.divide(target_image_array_uncompensated, intensity_scaling_array)
+        div_zero_replacement = np.min(intensities)
+        target_image_array = np.divide(target_image_array_uncompensated,
+                                       intensity_scaling_array,
+                                       out=np.full_like(target_image_array_uncompensated, div_zero_replacement, dtype=float),
+                                       where=intensity_scaling_array!=0)
 
         # Perform compensation
         min_threshold, max_threshold = np.percentile(intensities, 50), np.percentile(intensities, 99.5)
