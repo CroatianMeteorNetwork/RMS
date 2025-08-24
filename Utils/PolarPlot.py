@@ -624,7 +624,7 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
             position_l2 = (3, size_y - 5)
             cv2.putText(target_image_array, annotation_text_l2, position_l2, font, font_scale, (55, 55, 55), thickness, cv2.LINE_AA)
 
-        if write_image:
+        if write_image and (output_path.endswith(".png") or output_path.endswith(".bmp")):
             imageio.imwrite(output_path, target_image_array)
         if print_activity:
             print("Plotted in {:.1f} seconds".format((datetime.datetime.now(tz=datetime.timezone.utc) - this_iteration_start_time).total_seconds()))
