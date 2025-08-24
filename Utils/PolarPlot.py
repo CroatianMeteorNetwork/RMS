@@ -350,7 +350,7 @@ def makeTransformation(stations_info_dict, size_x, size_y, minimum_elevation_deg
     dest_coordinates_array = np.array(dest_coordinates_list)
 
     pairs, counts = np.unique(dest_coordinates_array, axis=0, return_counts=True)
-    intensity_scaling_array = np.zeros((size_x + 1, size_y + 1))
+    intensity_scaling_array = np.zeros((size_x, size_y))
     for pair, count in zip(pairs, counts):
         intensity_scaling_array[pair[1]][pair[0]] = count
 
@@ -520,7 +520,8 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
             if stations_info_dict_loaded.keys() != stations_info_dict.keys():
                 force_recomputation = True
 
-            if size != intensity_scaling_array.shape[0] - 1:
+
+            if size != intensity_scaling_array.shape[0]:
                 force_recomputation = True
                 if print_activity:
                     print("Requested image size does not match size of intensity scaling array  - recomputing transform")
@@ -942,7 +943,7 @@ if __name__ == "__main__":
                 print(frame_time_obj, target_jd)
                 pass
 
-                print("Making frame at JD {}".format(jd2Date(target_jd, dt_obj=True)))
+                print("Making frame at time {}".format(jd2Date(target_jd, dt_obj=True)))
                 writer.append_data(SkyPolarProjection(config_paths, path_to_transform, force_recomputation=force_recomputation,
                                         repeat=repeat, period=period, print_activity=not quiet,
                                         size=size, stack_depth=stack_depth, upload=upload, annotate=annotate,
