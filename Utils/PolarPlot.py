@@ -294,8 +294,8 @@ def makeTransformation(stations_info_dict, size_x, size_y, minimum_elevation_deg
         _, r_source, d_source, _ = xyToRaDecPP([pp_source.JD], [pp_source.X_res / 2], [pp_source.Y_res / 2], [1], pp_source, jd_time=True, extinction_correction=False, measurement=False)
         r_list, d_list, x_dest_list, y_dest_list = [], [], [], []
 
-        for y_dest in range(0, size_y):
-            for x_dest in range(0, size_x):
+        for y_dest in range(1, size_y - 1):
+            for x_dest in range(1, size_x - 1):
                 _x, _y, = x_dest - origin_x, y_dest - origin_y
 
                 # Convert the target image (polar projection on cartesian axis) into azimuth and elevation
