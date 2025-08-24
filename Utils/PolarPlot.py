@@ -17,6 +17,7 @@
 from __future__ import print_function
 
 import os
+import sys
 import pickle
 import argparse
 import subprocess
@@ -484,8 +485,7 @@ def makeUpload(source_path, upload_to):
 
 def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=False, repeat=False, period=120,
                        print_activity=False, size=500, stack_depth=3, upload=None, annotate=True, minimum_elevation_deg=20,
-                       timelapse_start=None, timelapse_end=None, seconds_per_frame=None,
-                       target_jd=None, compensation=[50, 80, 80, 99.75], plot_constellations=True):
+                       target_jd=None, compensation=[50, 80, 80, 99.75], plot_constellations=True, write_image=True):
 
     """
 
@@ -504,7 +504,7 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
         annotate: [bool] Optional, default True, annotate image.
 
     Return:
-        Array of image.
+        target_image_array: [bool] Array of image.
     """
 
     # Load the config files into a dict
@@ -606,22 +606,7 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
             for x, y, x_, y_ in constellation_coordinates_list:
                 cv2.line(target_image_array, (x, y), (x_, y_), 18, 1)
 
-        if output_file_name is None:
-            mkdirP(os.path.expanduser("~/RMS_data/PolarPlot/Projection/"))
-            output_path = os.path.expanduser(
-                "~/RMS_data/PolarPlot/Projection/{}.png".format(target_image_time.strftime("%Y%m%d_%H%M%S")))
-        else:
-            if os.path.exists(os.path.expanduser(output_file_name)):
-                if os.path.isdir(os.path.expanduser(output_file_name)):
-                    output_path = os.path.join(os.path.expanduser(output_file_name),
-                                               "{}.png".format(target_image_time.strftime("%Y%m%d_%H%M%S")))
-                else:
-                    output_path = os.path.expanduser(output_file_name)
-            elif not os.path.exists(os.path.dirname(os.path.expanduser(output_file_name))):
-                mkdirP(os.path.dirname(os.path.expanduser(output_file_name)))
-                output_path = os.path.expanduser(output_file_name)
-            else:
-                output_path = os.path.expanduser(output_file_name)
+
 
         if print_activity:
             print("Writing output to {:s}".format(output_path))
@@ -638,10 +623,12 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
             position_l2 = (3, size_y - 5)
             cv2.putText(target_image_array, annotation_text_l2, position_l2, font, font_scale, (55, 55, 55), thickness, cv2.LINE_AA)
 
-        imageio.imwrite(output_path, target_image_array)
+        if write_image:
+            imageio.imwrite(output_path, target_image_array)
         if print_activity:
             print("Plotted in {:.1f} seconds".format((datetime.datetime.now(tz=datetime.timezone.utc) - this_iteration_start_time).total_seconds()))
-            print("Next run at {}".format(next_iteration_start_time.replace(microsecond=0)))
+            if repeat:
+                print("Next run at {}".format(next_iteration_start_time.replace(microsecond=0)))
 
         if upload is not None:
             if print_activity:
@@ -736,7 +723,7 @@ def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_el
         el_test_ = 90 - np.hypot((x_ -origin_x) * pixel_to_radius_scale_factor_x, (y_ - origin_y) * pixel_to_radius_scale_factor_y)
         az_test_ = np.degrees(np.arctan2(x_ - origin_x, y_ - origin_y))
 
-        print(az, az_test, alt, el_test, az_, az_test_, alt_, el_test_)
+
 
 
         if False:
@@ -820,10 +807,9 @@ if __name__ == "__main__":
     cml_args = arg_parser.parse_args()
 
 
-    if cml_args.output_file_name is None:
-        output_file_name = None
-    else:
-        output_file_name = cml_args.output_file_name[0]
+
+
+
     path_to_transform = os.path.expanduser("~/RMS_data/camera_combination.transform")
     force_recomputation = cml_args.transform
     repeat = cml_args.repeat
@@ -861,31 +847,40 @@ if __name__ == "__main__":
 
     # Initialise values - these should never be used
     timelapse_start, timelapse_end, seconds_per_frame = None, None, None
+    make_timelapse = False
+
 
     if cml_args.timelapse is None:
         timelapse_start = None
         timelapse_end = None
         seconds_per_frame = None
+
     else:
         if len(cml_args.timelapse) == 0:
             timelapse_end = date2JD(*(datetime.datetime.now(datetime.timezone.utc).timetuple()[:6]))
             timelapse_start = timelapse_end - 1
             seconds_per_frame = 256/25
+            make_timelapse = True
 
         elif len(cml_args.timelapse) == 1:
             timelapse_start = cml_args.timelapse[0]
-            timelapse_end = None
+            timelapse_end = date2JD(*(datetime.datetime.now(datetime.timezone.utc).timetuple()[:6]))
             seconds_per_frame = 256 / 25
+            make_timelapse = True
+
 
         elif len(cml_args.timelapse) == 2:
             timelapse_start = cml_args.timelapse[0]
             timelapse_end = cml_args.timelapse[1]
             seconds_per_frame = 256 / 25
+            make_timelapse = True
+
 
         elif len(cml_args.timelapse) == 3:
             timelapse_start = cml_args.timelapse[0]
             timelapse_end = cml_args.timelapse[1]
             seconds_per_frame = cml_args.timelapse[2]
+            make_timelapse = True
 
     if cml_args.julian_date is None:
         target_jd = None
@@ -899,9 +894,67 @@ if __name__ == "__main__":
 
     plot_constellations = cml_args.constellations
 
+    if cml_args.output_file_name is None:
+        output_file_name = None
+    else:
+        output_file_name = os.path.expanduser(cml_args.output_file_name[0])
+
+
+    if output_file_name is None:
+        mkdirP(os.path.expanduser("~/RMS_data/PolarPlot/Projection/"))
+        if make_timelapse:
+            output_path = os.path.expanduser(
+                "~/RMS_data/PolarPlot/Projection/JD_{}_timelapse.png".format(timelapse_start))
+
+        else:
+            output_path = os.path.expanduser(
+                "~/RMS_data/PolarPlot/Projection/{}.png".format(target_image_time.strftime("%Y%m%d_%H%M%S")))
+
+    else:
+        if os.path.exists(os.path.expanduser(output_file_name)):
+            if os.path.isdir(os.path.expanduser(output_file_name)):
+                if make_timelapse:
+                    output_path = os.path.expanduser(
+                        "~/RMS_data/PolarPlot/Projection/JD_{}_timelapse.png".format(timelapse_start))
+                else:
+                    output_path = os.path.join(os.path.expanduser(output_file_name),
+                                           "{}.png".format(target_image_time.strftime("%Y%m%d_%H%M%S")))
+            else:
+                output_path = os.path.expanduser(output_file_name)
+        elif not os.path.exists(os.path.dirname(os.path.expanduser(output_file_name))):
+            mkdirP(os.path.dirname(os.path.expanduser(output_file_name)))
+            output_path = os.path.expanduser(output_file_name)
+        else:
+            output_path = os.path.expanduser(output_file_name)
+
+    if make_timelapse:
+        repeat = False
+        timelapse_frames = []
+        frame_count = int(((jd2Date(timelapse_end, dt_obj=True) - jd2Date(timelapse_start, dt_obj=True)).total_seconds()) / seconds_per_frame)
+        start_time_obj =  datetime.datetime(*jd2Date(timelapse_start, dt_obj=True).timetuple()[:6])
+        print("Output file name is {}".format(output_file_name))
+        with imageio.get_writer(output_file_name, fps=30, codec="libx264", quality=8) as writer:
+            for frame_no in range(0, frame_count):
+                frame_time_obj = start_time_obj  + datetime.timedelta(seconds = frame_no * seconds_per_frame)
+                target_jd = date2JD(*frame_time_obj.timetuple()[:6])
+                print(frame_time_obj, target_jd)
+                pass
+
+                print("Making frame at JD {}".format(jd2Date(target_jd, dt_obj=True)))
+                writer.append_data(SkyPolarProjection(config_paths, path_to_transform, force_recomputation=force_recomputation,
+                                        repeat=repeat, period=period, print_activity=not quiet,
+                                        size=size, stack_depth=stack_depth, upload=upload, annotate=annotate,
+                                        target_jd=target_jd, minimum_elevation_deg=minimum_elevation_deg,
+                                        compensation=compensation, write_image=False,
+                                        plot_constellations=plot_constellations).astype(np.uint8))
+                # If recomputation was forced, then only do it once
+                force_recomputation = False
+
+        sys.exit()
+
+
     SkyPolarProjection(config_paths, path_to_transform, force_recomputation=force_recomputation,
                        repeat=repeat, period=period, print_activity=not quiet,
                        size=size, stack_depth=stack_depth, upload=upload, annotate=annotate,
-                       timelapse_start=timelapse_start, timelapse_end=timelapse_end, seconds_per_frame = seconds_per_frame,
                        target_jd=target_jd, minimum_elevation_deg=minimum_elevation_deg, compensation=compensation,
                        plot_constellations=plot_constellations)
