@@ -630,7 +630,7 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
             if repeat:
                 print("Next run at {}".format(next_iteration_start_time.replace(microsecond=0)))
 
-        if upload is not None:
+        if upload is not None and not make_timelapse:
             if print_activity:
                 print("Uploading to {}".format(upload))
             makeUpload(output_path, upload)
@@ -640,6 +640,8 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
             return target_image_array
 
         time.sleep(max((next_iteration_start_time - datetime.datetime.now(tz=datetime.timezone.utc)).total_seconds(),0))
+
+
 
 def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_elevation_deg):
 
@@ -949,6 +951,15 @@ if __name__ == "__main__":
                                         plot_constellations=plot_constellations).astype(np.uint8))
                 # If recomputation was forced, then only do it once
                 force_recomputation = False
+
+
+        if upload is not None and make_timelapse:
+            if print_activity:
+                print("Uploading to {}".format(upload))
+            makeUpload(output_path, upload)
+            if print_activity:
+                print("Uploaded")
+
 
         sys.exit()
 
