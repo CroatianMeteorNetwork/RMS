@@ -386,6 +386,11 @@ def makeTransformation(stations_info_dict, size_x, size_y, minimum_elevation_deg
                 el_deg = 90 - np.hypot(_x * pixel_to_radius_scale_factor_x, _y * pixel_to_radius_scale_factor_y)
                 az_deg = np.degrees(np.arctan2(_x, _y))
 
+                # el_deg, az_deg = cartesianToAltAz(x_dest, y_dest, 0, size_x, 0, size_y, minimum_elevation_deg)
+
+
+                # print(x_dest, y_dest )
+
                 # Store
                 az_vals_deg[y_dest, x_dest], el_vals_deg[y_dest, x_dest] = az_deg, el_deg
 
@@ -790,14 +795,14 @@ def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_el
     for alt, az, alt_, az_ in constellation_alt_az_above_horizon:
 
         x, y = altAzToCartesian(az, alt, 0, size_x, 0, size_y, 20)
-        alt_check, az_check = cartesianToAltAz(x, y, 0, size_x, 0, size_y, 20 )
 
+        alt_check, az_check = cartesianToAltAz(x, y, 0, size_x, 0, size_y, 20 )
         print(alt, alt_check, az, az_check)
 
 
         x_, y_ = altAzToCartesian(az_, alt_, 0, size_x, 0, size_y, 20)
-        alt_check_, az_check_ = cartesianToAltAz(x_, y_, 0, size_x, 0, size_y, 20 )
 
+        alt_check_, az_check_ = cartesianToAltAz(x_, y_, 0, size_x, 0, size_y, 20 )
         print(alt_, alt_check_, az_, az_check_)
 
         image_coordinates.append([int(x), int(y), int(x_), int(y_)])
@@ -805,7 +810,7 @@ def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_el
         pass
 
 
-    if True:
+    if False:
         img=np.zeros((size_x, size_y), dtype=np.uint8)
 
         for x, y, x_, y_ in image_coordinates:
