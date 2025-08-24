@@ -41,6 +41,89 @@ from RMS.Misc import mkdirP
 from RMS.Routines.MaskImage import loadMask
 from RMS.Astrometry.CyFunctions import equatorialCoordPrecession
 
+
+def cartesianToAltAz(x, y, dimension_x_min, dimension_x_max, dimension_y_min, dimension_y_max,  minimum_elevation_deg):
+
+    """
+    Convert Cartesian coordinates (x, y) on a polar plot to azimuth and altitude angles.
+
+    Arguments:
+        x: [int] x coordinate
+        y: [int] y coordinate
+        dimension_x_min: [int] minimum x value
+        dimension_x_max: [int] maximum x value
+        dimension_y_min: [int] minimum y value
+        dimension_y_max: [int] maximum y value
+        minimum_elevation_deg: [float] minimum elevation degrees
+
+    Return:
+        alt_deg   : Altitude angle in degrees (from horizon up)
+        az_deg    : Azimuth angle in degrees (0° = right, 90° = up)
+
+    """
+    # Normalize coordinates to center
+    x0 = (dimension_x_min + dimension_x_max) / 2
+    y0 = (dimension_y_min + dimension_y_max) / 2
+    dx = x - x0
+    dy = (dimension_y_max - y) - y0
+
+    # Compute azimuth (angle around center)
+    az_rad = np.arctan2(dy, dx)
+    az_deg = np.degrees(az_rad) % 360
+
+    # Compute radial distance from center
+    r = np.sqrt(dx ** 2 + dy ** 2)
+    rmax = np.sqrt(((dimension_x_max - x0) ** 2 + (dimension_y_max - y0) ** 2))
+
+    # Map radius to altitude (center = 90°, edge = min_elev_deg)
+    alt_deg = 90 - (90 - minimum_elevation_deg) * (r / rmax)
+    alt_deg = np.clip(alt_deg, minimum_elevation_deg, 90)
+
+    return alt_deg, (az_deg - 90) % 360
+
+
+def altAzToCartesian(az_deg, alt_deg, dimension_x_min, dimension_x_max, dimension_y_min, dimension_y_max,  minimum_elevaton_deg):
+    """
+    Convert azimuth and altitude angles to Cartesian coordinates on a polar plot.
+
+    Arguments:
+        alt_deg   : Altitude angle in degrees (from horizon up)
+        az_deg    : Azimuth angle in degrees (0° = right, 90° = up)
+        dimension_x_min: [int] minimum x value
+        dimension_x_max: [int] maximum x value
+        dimension_y_min: [int] minimum y value
+        dimension_y_max: [int] maximum y value
+        minimum_elevation_deg: [float] minimum elevation degrees
+
+    Return:
+        x: [int] x coordinate
+        y: [int] y coordinate
+    """
+
+    az_deg += 90
+
+    # Center of the plot
+    x0 = (dimension_x_min + dimension_x_max) / 2
+    y0 = (dimension_y_min + dimension_y_max) / 2
+
+    # Max radius from center to edge
+    rmax = np.sqrt((dimension_x_max - x0) ** 2 + (dimension_y_max - y0) ** 2)
+
+    # Convert altitude to radial distance
+    r = rmax * (90 - alt_deg) / (90 - minimum_elevaton_deg)
+
+    # Convert azimuth to angle in radians
+    az_rad = np.radians(az_deg)
+
+    # Compute Cartesian coordinates
+    x = x0 + r * np.cos(az_rad)
+    y = y0 - r * np.sin(az_rad)
+
+
+
+    return x, y
+
+
 def getStationsInfoDict(path_list=None, print_activity=False):
 
     """
@@ -641,7 +724,7 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
 
 
 
-def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_elevation_deg, print_activity=False):
+def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_elevation_deg, print_activity=True):
 
     lat, lon = cam_coords[0], cam_coords[1]
 
@@ -706,33 +789,16 @@ def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_el
 
     for alt, az, alt_, az_ in constellation_alt_az_above_horizon:
 
-        az_rad, alt_rad, az_rad_, alt_rad_ = np.radians(az), np.radians(alt), np.radians(az_), np.radians(alt_)
+        x, y = altAzToCartesian(az, alt, 0, size_x, 0, size_y, 20)
+        alt_check, az_check = cartesianToAltAz(x, y, 0, size_x, 0, size_y, 20 )
+
+        print(alt, alt_check, az, az_check)
 
 
+        x_, y_ = altAzToCartesian(az_, alt_, 0, size_x, 0, size_y, 20)
+        alt_check_, az_check_ = cartesianToAltAz(x_, y_, 0, size_x, 0, size_y, 20 )
 
-        x = origin_x - 60 * (np.cos(alt_rad) * np.sin(az_rad)) / pixel_to_radius_scale_factor_x
-        y = origin_y - 60 * (np.cos(alt_rad) * np.cos(az_rad)) / pixel_to_radius_scale_factor_y
-        x_ = origin_x - 60 * (np.cos(alt_rad_) * np.sin(az_rad_))  / pixel_to_radius_scale_factor_x
-        y_ = origin_y - 60 * (np.cos(alt_rad_) *  np.cos(az_rad_))  / pixel_to_radius_scale_factor_y
-
-
-
-        # Convert the target image (polar projection on cartesian axis) into azimuth and elevation
-        el_test = 90 - np.hypot((x - origin_x) * pixel_to_radius_scale_factor_x, (y - origin_y) * pixel_to_radius_scale_factor_y)
-        az_test = np.degrees(np.arctan2(x - origin_x, y - origin_y))
-
-        el_test_ = 90 - np.hypot((x_ -origin_x) * pixel_to_radius_scale_factor_x, (y_ - origin_y) * pixel_to_radius_scale_factor_y)
-        az_test_ = np.degrees(np.arctan2(x_ - origin_x, y_ - origin_y))
-
-
-
-
-        if False:
-            x = origin_x - ((np.cos(np.radians(alt)) * np.sin(np.radians(az)))) * origin_x * correction_factor
-            y = origin_y - ((np.cos(np.radians(alt)) * np.cos(np.radians(az)))) * origin_y * correction_factor
-            x_ = origin_x - ((np.cos(np.radians(alt_)) * np.sin(np.radians(az_)))) * origin_x * correction_factor
-            y_ = origin_y - ((np.cos(np.radians(alt_)) * np.cos(np.radians(az_)))) * origin_y * correction_factor
-
+        print(alt_, alt_check_, az_, az_check_)
 
         image_coordinates.append([int(x), int(y), int(x_), int(y_)])
 
