@@ -563,7 +563,7 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
             repeat = False
 
         annotation_text_l1 = "{} Stack depth {:.0f}".format(target_image_time.replace(microsecond=0), len(transformation_layer_list) / len(stations_info_dict))
-        print(annotation_text_l1)
+
 
         annotation_text_l2 = "Lat:{:.3f} deg Lon:{:.3f} deg {}".format(cam_coords[0], cam_coords[1], stations_as_text)
 
@@ -571,10 +571,6 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
         fits_array = np.stack(getFitsAsList(getFitsFiles(transformation_layer_list, stations_info_dict, target_image_time), stations_info_dict, compensation=compensation), axis=0)
 
         target_image_time_jd = date2JD(*(target_image_time.timetuple()[:6]))
-        print(target_image_time)
-        print(target_image_time_jd)
-
-
 
         # Form the uncompensated and target image arrays
         target_image_array, target_image_array_uncompensated = np.full_like(intensity_scaling_array, 0), np.full_like(
@@ -645,14 +641,14 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
 
 
 
-def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_elevation_deg):
+def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_elevation_deg, print_activity=False):
 
     lat, lon = cam_coords[0], cam_coords[1]
 
 
 
-
-    print("Getting constellation coordinates at jd {} for location lat: {} lon: {}".format(jd, cam_coords[0], cam_coords[1]))
+    if print_activity:
+        print("Getting constellation coordinates at jd {} for location lat: {} lon: {}".format(jd, cam_coords[0], cam_coords[1]))
     constellations_path = os.path.join(os.path.expanduser("~/source/RMS/share/constellation_lines.csv"))
     lines = np.loadtxt(constellations_path, delimiter=",")
     array_ra_j2000, array_dec_j2000, array_ra_j2000_ ,array_dec_j2000_ = lines[:, 0], lines[:, 1], lines[:, 2], lines[:, 3]
@@ -699,8 +695,9 @@ def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_el
     el_deg = 90 - np.hypot(_x * pixel_to_radius_scale_factor_x, _y * pixel_to_radius_scale_factor_y)
     az_deg = np.degrees(np.arctan2(_x, _y))
     """
+    if print_activity:
+        print("Creating constellation data for an image of size {},{}".format(size_x, size_y))
 
-    print("Creating constellation data for an image of size {},{}".format(size_x, size_y))
     origin_x, origin_y = size_x / 2, size_y / 2
 
     elevation_range = 2 * (90 - minimum_elevation_deg)
