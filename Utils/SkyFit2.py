@@ -47,6 +47,7 @@ from RMS.Routines.MaskImage import getMaskFile
 from RMS.Routines import RollingShutterCorrection
 from RMS.Routines.MaskImage import loadMask, MaskStructure, getMaskFile
 from RMS.Misc import maxDistBetweenPoints, getRmsRootDir
+from Utils.KalmanFilter import KalmanFilter
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
@@ -4286,24 +4287,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
         print("Running ASTRA with:", astra_config)
 
-        # Sort pick list according to keys
-        self.pick_list = dict(sorted(self.pick_list.items()))
-
-        # # Load all frames
-        # temp_curr_frame = self.img_handle.current_frame
-        # self.img_handle.setFrame(0)  # Reset to the first frame
-        # frame_count = seld.img_handle
-
-        # # Init a numpy array with the correct size and type
-        # frames = np.zeros((frame_count, *self.img_handle.loadFrame().shape), dtype=np.float32)
-
-        # # Load all frames in to an array
-        # for i in range(frame_count):
-        #     frames[i] = self.img_handle.loadFrame()
-        #     self.img_handle.nextFrame()
-            
-        # self.img_handle.setFrame(temp_curr_frame)  # Reset to the original frame
-
         # Load the keys for picks which are not empty (not just photometry picks)
         pick_frame_indices = np.array(
             [key for key in self.pick_list.keys()
@@ -4312,34 +4295,30 @@ class PlateTool(QtWidgets.QMainWindow):
             dtype=int
         )
 
-        ### Only load the frames of interest ###
-
-        # Get the minimum and maximum frames
+        # Load only frames of intrest
         min_frame = min(pick_frame_indices)
         max_frame = max(pick_frame_indices)
-        
+
+        # Sort pick list according to keys
+        self.pick_list = dict(sorted(self.pick_list.items()))
+
+        # Load all frames
         temp_curr_frame = self.img_handle.current_frame
-        
-        frames = np.zeros((max_frame - min_frame + 1, *self.img_handle.loadFrame().shape), dtype=np.float32)
-        
-        # Load the frames
-        for i, fr in enumerate(range(min_frame, max_frame + 1)):
+        self.img_handle.setFrame(0)  # Reset to the first frame
+        frame_count = pick_frame_indices.shape[0]
 
-            # Set the current frame to fr
-            self.img_handle.setFrame(fr)
+        # Init a numpy array with the correct size and type
+        frames = np.zeros((frame_count, *self.img_handle.loadFrame().shape), dtype=np.float32)
 
-            # Load the frame into the array
-            frames[i] = self.img_handle.loadFrame().astype(np.float32)
-
-        # Reset to the original frame
-        self.img_handle.setFrame(temp_curr_frame)
-
-        ### ###
-
+        # Load all frames in to an array
+        for i in range(min_frame, max_frame + 1):
+            frames[i] = self.img_handle.loadFrame(fr_no=i)
+            
+        self.img_handle.setFrame(temp_curr_frame)  # Reset to the original frame
 
 
         # Load times of all picks
-        times = np.array([self.img_handle.currentFrameTime(frame_no=fr, dt_obj=True) for fr in pick_frame_indices])
+        times = np.array([(self.img_handle.frame_dt_dict[k]) for k in pick_frame_indices])
 
         # Package data for ASTRA - import later using dict comprehension
         data_dict = {
@@ -4430,6 +4409,9 @@ class PlateTool(QtWidgets.QMainWindow):
         
         print("Running Kalman with:", astra_config)
 
+        if progress_callback is not None:
+            progress_callback(0)
+
         # Sort pick list according to keys
         self.pick_list = dict(sorted(self.pick_list.items()))
 
@@ -4444,31 +4426,27 @@ class PlateTool(QtWidgets.QMainWindow):
         # Prepare measurements and times for Kalman filter
         measurements = [(self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid']) 
                             for key in pick_frame_indices]
-        times = [self.img_handle.currentFrameTime(frame_no=fr, dt_obj=True) for fr in pick_frame_indices]
+        times = [self.img_handle.frame_dt_dict[key] for key in pick_frame_indices]
 
-        # Dummy dict to instantiate ASTRA object (pass unnecessary args as empty objects) 
-            # NOTE: Static methods in ASTRA could be used, but would not update the progress bar
-        data_dict = {
-            "img_obj" : 0,
-            "frames" : [],
-            "picks" : [],
-            "pick_frame_indices" : np.array([]),
-            "times" : times,
-            "astra_config" : astra_config,
-            "saturation_threshold" : self.saturation_threshold,
-            "data_path" : self.dir_path,
-            "camera_config" : self.config,
-            "dark" : None,
-            "flat" : None
-        }
-
-        # Instantiate a temporary ASTRA instance
-        tempASTRA = ASTRA(**data_dict, progress_callback=progress_callback)
+        # Extract kalman settings from astra_config
+        sigma_xy = astra_config['kalman']['sigma_xy (px)']
+        perc_sigma_vxy = astra_config['kalman']['perc_sigma_vxy (%)']
+        monotonicity = astra_config['kalman']['Monotonicity']
+        save_stats_results = astra_config['kalman']['save results']
 
         # Run Kalman on the ASTRA instance, extract new picks
-        xypicks, _ = tempASTRA.runKalman(
+        kalman = KalmanFilter(
+            sigma_xy=sigma_xy,
+            perc_sigma_vxy=perc_sigma_vxy,
             measurements=measurements,
-            times=times)
+            times=times,
+            monotonicity=monotonicity,
+            save_stats_results=save_stats_results
+        )
+
+        x_smooth, _, _, _ , _ = kalman.run()
+
+        xypicks = x_smooth[0:2]
         
         # Add previous picks to list
         if np.array(
@@ -4510,6 +4488,9 @@ class PlateTool(QtWidgets.QMainWindow):
             print(f'Saved to CSV & Loaded {len(pick_frame_indices)} Picks from Kalman Smoothing.')
         else:
             print(f'Loaded {len(pick_frame_indices)} Picks from Kalman Smoothing!')
+        
+        if progress_callback is not None:
+            progress_callback(100)
 
     def loadEvTxt(self, txt_file_path):
         """
@@ -4587,13 +4568,20 @@ class PlateTool(QtWidgets.QMainWindow):
                         message_type="error")
             return None
 
-    def loadECSV(self, ECSV_file_path):
+    # Make static so other programs can use the same function (namely KalmanFilter)
+    @staticmethod
+    def loadECSV(self=None, ECSV_file_path=None):
         """
         Loads the ECSV file and adds the relevant info to pick_list
         Args:
-            ECSV_file_path (str): Path to the ECSV file to load
+            self (PlateTool : optional): PlateTool object if used within SkyFit2
+            ECSV_file_path (str : optional): Path to the ECSV file to load
         Returns:
-            picks (dict): (N : [8]) dict following same format as self.pick_list 
+            if self: # Return as a skyfit pick_list dict
+                picks (dict): (N : [8]) dict following same format as self.pick_list 
+            else: # Return times and measurements
+                frame_times (np.ndarray) : N, array of measurement times
+                measurements (np.ndarray) : N x 2 array of x,y measurements
         """
 
         # Instantiate arrays to be populated
@@ -4676,36 +4664,50 @@ class PlateTool(QtWidgets.QMainWindow):
                         })
 
             # Converts times into frame indices, accounting for floating-point errors
-            pick_frame_indices = []
-            frame_count = sum(1 for name in os.listdir(self.dir_path) if 'dump' in name)
-            time_idx = 0
-            for i in range(frame_count):
-                frame_time = self.img_handle.currentFrameTime(frame_no=i, dt_obj=True)
-                time = pick_frame_times[time_idx]
-                if frame_time == time or \
-                    frame_time == time + datetime.timedelta(microseconds=1) or \
-                    frame_time == time - datetime.timedelta(microseconds=1):
-                    pick_frame_indices.append(i)
-                    time_idx += 1
-                if time_idx >= len(pick_frame_times):
-                    break
+            if self is not None:
+                pick_frame_indices = []
+                frame_count = self.img_handle.total_frames
+                time_idx = 0
+                for i in range(frame_count):
+                    frame_time = self.img_handle.currentFrameTime(frame_no=i, dt_obj = True)
+                    time = pick_frame_times[time_idx]
+                    if frame_time == time or \
+                        frame_time == time + datetime.timedelta(microseconds=1) or \
+                        frame_time == time - datetime.timedelta(microseconds=1):
+                        pick_frame_indices.append(i)
+                        time_idx += 1
+                    if time_idx >= len(pick_frame_times):
+                        break
 
-            # if arrays are different dimensions raise error
-            if len(picks) != len(pick_frame_indices):
-                qmessagebox(title="Pick/Frame Index Mismatch",
-                            message="Mismatch between number of picks and frame indices. " \
-                            "Please check the ECSV file for frame-time mismatch errors.",
-                            message_type="error")
-                return None
-            pick_list = {frame: pick for frame, pick in zip(pick_frame_indices, picks)}
+                # if arrays are different dimensions raise error
+                if len(picks) != len(pick_frame_indices):
+                    qmessagebox(title="Pick/Frame Index Mismatch",
+                                message="Mismatch between number of picks and frame indices. " \
+                                "Please check the ECSV file for frame-time mismatch errors.",
+                                message_type="error")
+                    return None
+                
+                pick_list = {frame: pick for frame, pick in zip(pick_frame_indices, picks)}
 
-            return pick_list
-        
+                return pick_list
+
+            # Else return in non-skyfit style
+            else:
+                return np.array(pick_frame_times), np.array([[pick['x_centroid'], pick['y_centroid']] for pick in picks])
+            
         # Raise error box
         except Exception as e:
-            qmessagebox(title='File Read Error',
-                        message=f"Unknown Error reading ECSV file, check correct file loaded.: {str(e)}",
-                        message_type="error")
+
+            # Raise dialog if in skyfit2
+            if self is not None:
+                qmessagebox(title='File Read Error',
+                            message=f"Unknown Error reading ECSV file, check correct file loaded.: {str(e)}",
+                            message_type="error")
+
+            # else raise regular error
+            else:
+                raise Exception(f"Unknown Error reading ECSV file: {str(e)}")
+            
             return None
 
 
@@ -5251,7 +5253,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         img_handle = None
 
-        # Load a data file
+        # Load a state file
         if os.path.isfile(self.input_path):
             img_handle = detectInputTypeFile(self.input_path, self.config, beginning_time=beginning_time, 
                                              flipud=self.flipud)
@@ -6816,23 +6818,9 @@ class PlateTool(QtWidgets.QMainWindow):
             # Set the SNR to the pick
             pick['snr'] = snr
 
-
-
-            ### Debug print ###
-
-            time_data = [self.img_handle.currentFrameTime()]
-
-            # Compute measured RA/Dec from image coordinates
-            _, _, _, mag_data = xyToRaDecPP(time_data, [pick['x_centroid']],
-                [pick['y_centroid']], [pick['intensity_sum']], self.platepar, measurement=True)
-            
-            # print(self.platepar)
-
-            print("intens sum = {:8d}, px count = {:5d}, bg lvl = {:8.2f}, bg std = {:6.2f}, SNR = {:.2f}, Mag = {:.2f}".format(
-                intensity_sum, source_px_count, background_lvl, background_stddev, snr, mag_data[0]))
-
-            ### ###
-
+            # Debug print
+            print("SNR update: intensity sum = {:8d}, source px count = {:5d}, background lvl = {:8.2f}, background stddev = {:6.2f}, SNR = {:.2f}".format(
+                intensity_sum, source_px_count, background_lvl, background_stddev, snr))
 
             ### Determine if there is any saturation in the measured photometric area
 
@@ -7330,7 +7318,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # If SNR is None, then set the random error to 0
                 mag_err_random = 0
-                pick['snr'] = 1.0
 
             else:
 
@@ -8090,7 +8077,7 @@ if ASTRA_IMPORTED:
 
             kalman_ranges_and_types = {
                 "Monotonicity": (True, False, bool), "sigma_xy (px)": (0, None, float), 
-                "sigma_vxy (%)": (0, 100, float), "save results": (True, False, bool)
+                "sigma_vxy (%)": (0, None, float), "save results": (True, False, bool)
             }
 
             errors = {}

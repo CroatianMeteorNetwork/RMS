@@ -146,20 +146,6 @@ class ASTRA:
             "oob_penalty": 1e6,
         }
 
-        # 4) Kalman Settings
-        monotonicity = self.astra_config.get('kalman', {}).get('Monotonicity', 'true').lower() == 'true'
-        sigma_xy = float(self.astra_config.get('kalman', {}).get('sigma_xy (px)', 0.25))
-        sigma_vxy_perc = float(self.astra_config.get('kalman', {}).get('sigma_vxy (%)', 50))
-        save_results = self.astra_config.get('kalman', {}).get('save results', 'false').lower() == 'true'
-
-        self.kalman_settings = {
-            'monotonicity': monotonicity,
-            'use_accel': False,
-            'sigma_xy': sigma_xy,
-            'sigma_vxy_perc': sigma_vxy_perc,
-            'save results': save_results
-        }
-
         self.SNR_threshold = float(self.astra_config.get('astra', {}).get('min SNR', 5))
 
         # -- Data Attributes --
@@ -221,24 +207,33 @@ class ASTRA:
 
         # 1. Processes all frames by background subtracting, masking starsm and saving the avepixel_background 
         # Also correct all frames with dark/flat and gamma corerction
-        #try:
-        self.avepixel_background, self.subtracted_frames, self.frames = self.processImageData(
+        try:
+            self.avepixel_background, self.subtracted_frames, self.frames = self.processImageData(
                                                                     self.img_obj, 
                                                                     self.frames
                                                                     )
-        # except Exception as e:
-        #     print(f'Error processing image data: {e}')
+        except Exception as e:
+            print(f'Error processing image data: {e}')
 
         # 2. Recursively crop & fit a moving gaussian across whole event
-        self.cropAllMeteorFrames(self.pick_frame_indices, self.picks)
+        try:
+            self.cropAllMeteorFrames(self.pick_frame_indices, self.picks)
+        except Exception as e:
+            print(f'Error cropping and fitting meteor frames: {e}')
 
         # 3. Refine the moving gaussian fit by using a local optimizer
-        self.refineAllMeteorCrops(self.first_pass_params, self.cropped_frames, 
-                                    self.omega, self.directions)
+        try:
+            self.refineAllMeteorCrops(self.first_pass_params, self.cropped_frames, 
+                                      self.omega, self.directions)
+        except Exception as e:
+            print(f'Error refining meteor crops: {e}')
 
         # 4. Remove picks with low SNR and out-of-bounds picks, refactors into global coordinates
-        self.removeLowSNRPicks(self.refined_fit_params, self.fit_imgs, self.frames, self.cropped_frames, 
-                                self.crop_vars, self.pick_frame_indices, self.fit_costs, self.times)
+        try:
+            self.removeLowSNRPicks(self.refined_fit_params, self.fit_imgs, self.frames, self.cropped_frames, 
+                                   self.crop_vars, self.pick_frame_indices, self.fit_costs, self.times)
+        except Exception as e:
+            print(f'Error removing low SNR picks: {e}')
         
         # 5. save animation
         if self.save_animation:
@@ -255,58 +250,6 @@ class ASTRA:
 
 
     # 1) -- Functional Methods --
-
-    def runKalman(self, measurements, times):
-        """
-        Run the Kalman smoother on finalized edge picks.
-
-        This method is a progress-reporting wrapper that computes normalized time,
-        derives R and Q_base from data, calls the internal Kalman routine, and
-        returns smoothed picks and covariances.
-
-        Args:
-            measurements (array-like): Global edge picks, shape (K, 2).
-            times (Sequence[datetime.datetime]): Per-pick timestamps, length K.
-
-        Returns:
-            tuple[np.ndarray, np.ndarray]:
-                - smooth_picks: Smoothed (x, y) picks, shape (K, 2).
-                - smooth_P: Smoothed covariance per time step, shape (K, d, d).
-
-        Raises:
-            Exception: If Kalman computation fails (R/Q construction or filter/smoother).
-        """
-
-        # Instantiate variables to store progress
-        self.mode = 'Kalman'  # Set the mode to Kalman for processing
-        self.exec_count = 0
-        self.total_exec = 1  # Initialize total execution count to avoid division by zero
-        self.updateProgress()
-
-        # Add another multiple of frames to process if the monotonicity is enabled
-        if self.kalman_settings['monotonicity']:
-            time_coeff = 3
-        else:
-            time_coeff = 2
-
-        # Set progress to 0
-        if self.progress_callback is not None:
-            self.progress_callback(0)
-
-        # Try to run kalman filter
-        try:
-            self.total_exec = len(times) * time_coeff
-            smooth_picks, smooth_P = self.applyKalmanFilter(measurements, times)
-        except Exception as e:
-            print(f'Error applying Kalman filter: {e}')
-
-        # Set progress bar to 100
-        self.exec_count = self.total_exec
-        self.updateProgress()
-
-        # Return adjusted picks and covariance matrix
-        return smooth_picks, smooth_P
-    
 
     def processImageData(self, img_obj, frames):
         """
@@ -374,34 +317,37 @@ class ASTRA:
             print(f"Error correcting frames: {e}")
 
         # 1) -- Background Subtraction --
-        # Load background using RMS
-        fake_ff_obj = img_obj.loadChunk()
-        avepixel_background = fake_ff_obj.avepixel
-        corrected_frames = np.array(corrected_frames)
+        try:
+            # Load background using RMS
+            fake_ff_obj = img_obj.loadChunk()
+            avepixel_background = fake_ff_obj.avepixel
+            corrected_frames = np.array(corrected_frames)
 
-        # Correct avepixel_background
-        if self.dark is not None:
-            corrected_avepixel = Image.applyDark(avepixel_background, self.dark)
+            # Correct avepixel_background
+            if self.dark is not None:
+                corrected_avepixel = Image.applyDark(avepixel_background, self.dark)
 
-        if self.flat_struct is not None:
-            corrected_avepixel = Image.applyFlat(corrected_avepixel, self.flat_struct)
-        
-        if self.dark is not None or self.flat_struct is not None:
-            corrected_avepixel = Image.gammaCorrectionImage(corrected_avepixel, self.skyfit_config.gamma, 
-                                                        bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
+            if self.flat_struct is not None:
+                corrected_avepixel = Image.applyFlat(corrected_avepixel, self.flat_struct)
+            
+            if self.dark is not None or self.flat_struct is not None:
+                corrected_avepixel = Image.gammaCorrectionImage(corrected_avepixel, self.skyfit_config.gamma, 
+                                                            bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
 
-        else:
-            corrected_avepixel = Image.gammaCorrectionImage(avepixel_background, self.skyfit_config.gamma, 
-                                                        bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
-        
-        corrected_avepixel = np.clip(corrected_avepixel, 0, None)
+            else:
+                corrected_avepixel = Image.gammaCorrectionImage(avepixel_background, self.skyfit_config.gamma, 
+                                                            bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
+            
+            corrected_avepixel = np.clip(corrected_avepixel, 0, None)
 
-        # Subtract frames
-        subtracted_frames = corrected_frames.copy() - corrected_avepixel.copy()
+            # Subtract frames
+            subtracted_frames = corrected_frames.copy() - corrected_avepixel.copy()
 
-        # Clip subtracted frames to above zero
-        subtracted_frames = np.clip(subtracted_frames, 0, None)
+            # Clip subtracted frames to above zero
+            subtracted_frames = np.clip(subtracted_frames, 0, None)
 
+        except Exception as e:
+            raise Exception(f"Error loading background or subtracting frames: {e}")
         
         # 2) -- Star Masking --
 
@@ -416,13 +362,16 @@ class ASTRA:
         ave_mask = np.ma.MaskedArray(corrected_avepixel > threshold)
 
         # Tries to implement mask
-        subtracted_frames = np.ma.masked_array(subtracted_frames, 
-                                                mask=np.repeat(ave_mask[np.newaxis, :, :], 
-                                                subtracted_frames.shape[0], axis=0))
-        corrected_avepixel = np.ma.masked_array(corrected_avepixel, mask=ave_mask)
-        masked_frames = np.ma.masked_array(corrected_frames, 
-                                                mask=np.repeat(ave_mask[np.newaxis, :, :], 
-                                                corrected_frames.shape[0], axis=0))
+        try:
+            subtracted_frames = np.ma.masked_array(subtracted_frames, 
+                                                   mask=np.repeat(ave_mask[np.newaxis, :, :], 
+                                                    subtracted_frames.shape[0], axis=0))
+            corrected_avepixel = np.ma.masked_array(corrected_avepixel, mask=ave_mask)
+            masked_frames = np.ma.masked_array(corrected_frames, 
+                                                    mask=np.repeat(ave_mask[np.newaxis, :, :], 
+                                                    corrected_frames.shape[0], axis=0))
+        except Exception as e:
+            raise Exception(f"Error applying mask to subtracted frames: {e}")
         
         # 3) -- Returns Data --
         return corrected_avepixel, subtracted_frames, masked_frames
@@ -739,15 +688,9 @@ class ASTRA:
         times = np.array([(self.img_obj.frame_dt_dict[k]) for k in pick_frame_indices])
 
         # Save all as instance variables
-        self.refined_fit_params = refined_params
-        self.fit_imgs = fit_imgs
-        self.cropped_frames = cropped_frames
-        self.crop_vars = crop_vars
-        self.pick_frame_indices = pick_frame_indices
-        self.global_picks = global_picks
-        self.fit_costs = fit_costs
-        self.times = times
-        self.snr = frame_snr_values
+        (self.refined_fit_params, self.fit_imgs, self.cropped_frames, self.crop_vars, self.pick_frame_indices, 
+        self.global_picks, self.fit_costs, self.times, self.snr) = (refined_params, fit_imgs, cropped_frames, 
+                            crop_vars, pick_frame_indices, global_picks, fit_costs, times, frame_snr_values)
 
         # Return all
         return (self.refined_fit_params, self.fit_imgs, self.cropped_frames, self.crop_vars, 
@@ -1853,67 +1796,6 @@ class ASTRA:
                                         forward_pass=forward_pass,
                                         )
     
-    
-    def applyKalmanFilter(self, global_edge_picks, times):
-        """
-        Apply a (constant-velocity or accel-disabled) Kalman smoother to edge picks.
-
-        Prepares measurement/temporal arrays, normalizes time (s), constructs
-        measurement noise R from line-fit residual variance, constructs process noise
-        Q_base from average velocity and configured sigmas, then runs the filter/smoother.
-
-        Args:
-            global_edge_picks (array-like): Global edge picks, shape (K, 2).
-            times (Sequence[datetime.datetime]): Timestamps per pick, length K.
-
-        Returns:
-            tuple[np.ndarray, np.ndarray]:
-                - x_smooth: Smoothed states/picks, shape (K, d_state) or (K, 2).
-                - p_smooth: Smoothed covariances, shape (K, d_state, d_state).
-
-        Raises:
-            ValueError: If times/picks lengths mismatch or time normalization fails.
-            RuntimeError: If the filter or smoother fails internally.
-        """
-
-        # Prepare the measurements and noise covariance matrices
-        measurements = np.array(global_edge_picks)
-        times = np.array(times)
-
-        # Normalize times
-        t0 = times[0]  # Use the first time as the reference
-        normalized_times = np.array([
-            (t - t0).total_seconds()
-            for t in times
-        ])
-        self.exec_count += 1
-        self.updateProgress()
-
-        R = self.computeR(measurements, normalized_times)
-        Q_base = self.computeQBase(measurements, normalized_times, self.kalman_settings['sigma_xy'], self.kalman_settings['sigma_vxy_perc'])
-        self.exec_count += 2
-        self.updateProgress()
-    
-        # Call the Kalman filter function
-        x_smooth, p_smooth = self.kalmanFilterCA(
-            measurements,
-            normalized_times,
-            Q_base=Q_base,
-            R=R,
-            monotonicity=self.kalman_settings['monotonicity'],
-            use_accel=self.kalman_settings['use_accel']
-        )
-
-        if self.kalman_settings['save results']:
-            self.saveKalmanUncertaintiesToCSV(self.data_path, normalized_times, measurements, 
-                                              x_smooth, p_smooth, Q_base, R)
-
-        self.smoothed_picks = x_smooth[:, :2]  # Extract smoothed positions (x, y)
-        self.smoothed_covars = p_smooth[:, :2, :2]  # Extract smoothed position covariances
-
-        return self.smoothed_picks, self.smoothed_covars
-
-
     def updateProgress(self, progress=None):
         """
         Calculates approx. progress based on either Gaussian or Kalman mode. Updates the progress callback.
@@ -2205,377 +2087,6 @@ class ASTRA:
         photometry_pixels = [tuple(idx[::-1]) for idx in nonzero_indices]
 
         return photometry_pixels
-    
-    # --- Kalman Methods --- 
-
-    @staticmethod
-    def computeQBase(measurements, times, sigma_xy, perc_sigma_vxy):
-        """
-        Build a process-noise covariance base matrix for the Kalman model.
-
-        Estimates average velocity from linear fits of x(t) and y(t), derives a
-        velocity std (as a percentage of average speed), and forms a 6×6 Q_base
-        with position variances `sigma_xy^2`, velocity variances `sigma_vxy^2`,
-        and identity accel variance placeholders (ignored when `use_accel=False`).
-
-        Args:
-            measurements (np.ndarray): (K, 2) positions (x, y).
-            times (np.ndarray): (K,) times in seconds (normalized).
-            perc_sigma_vxy (float): Percent of average velocity as velocity std.
-            sigma_xy (float): Position std [px].
-
-        Returns:
-            np.ndarray: Q_base, shape (6, 6).
-        """
-
-        # Calculate average velocity (px/s)
-        x_meas = measurements[:, 0]
-        y_meas = measurements[:, 1]
-        
-        # Fit a line through time vs coordinates to estimate average velocity
-        x_fit = np.polyfit(times, x_meas, 1)
-        y_fit = np.polyfit(times, y_meas, 1)
-
-        # Take the geometric mean of the velocities as the average
-        avrg_velocity = np.hypot(x_fit[0], y_fit[0])  # Geometric mean of x and y velocities
-
-        # Instantiate process noise covariance
-        sigma_vxy = perc_sigma_vxy/100 * avrg_velocity
-
-        Q_base = np.array([
-            [sigma_xy**2, 0 ,0 ,0 ,0 ,0],
-            [0, sigma_xy**2, 0 ,0 ,0 ,0],
-            [0, 0, sigma_vxy**2, 0 ,0 ,0],
-            [0, 0, 0, sigma_vxy**2, 0 ,0],
-            [0, 0, 0, 0, 1, 0], #Default accel to 1 since it will be ignoreed in Use_Accel=False
-            [0, 0, 0, 0, 0, 1]
-        ])
-
-        return Q_base
-
-    @staticmethod
-    def computeR(measurements, times):
-        """
-        Estimate measurement noise covariance R from line-fit residuals.
-
-        Fits x(t) and y(t) independently with a line, computes residual std devs,
-        and returns a 2×2 diagonal covariance matrix.
-
-        Args:
-            measurements (np.ndarray): (K, 2) positions (x, y).
-            times (np.ndarray): (K,) times in seconds (normalized).
-
-        Returns:
-            np.ndarray: R, shape (2, 2).
-        """
-
-        # fit x and y vs time to a line
-        x_fit = np.polyfit(times, measurements[:, 0], 1)
-        y_fit = np.polyfit(times, measurements[:, 1], 1)
-
-        # Calculate all residuals between fit and measurements
-        x_residuals = measurements[:, 0] - np.polyval(x_fit, times)
-        y_residuals = measurements[:, 1] - np.polyval(y_fit, times)
-
-        # Calculate the STD of residuals
-        x_std = np.std(x_residuals)
-        y_std = np.std(y_residuals)
-
-        # Form R as a 2x2 array of diagonal variances
-        R = np.array([[x_std**2, 0], 
-                      [0, y_std**2]])
-        
-        return R
-
-    @staticmethod
-    def kalmanFilterCA(measurements, times, Q_base, R, monotonicity, use_accel, epsilon=1e-6):
-        """
-        Kalman filter with Rauch–Tung–Striebel (RTS) smoothing using a constant-acceleration model.
-        Handles irregular time intervals between measurements by recomputing dynamics at each step.
-
-        Arguments:
-        measurements: [ndarray] Nx2 array of (x, y) position observations.
-        times: [ndarray] N-length array of observation timestamps (monotonically increasing).
-        Q_base: [ndarray] 6x6 baseline process noise covariance matrix (assumed per unit time).
-        R: [ndarray] 2x2 measurement noise covariance matrix (for x and y).
-
-        Keyword arguments:
-        monotonicity: [bool] If True, enforces monotonic motion along dominant axis (optional constraint).
-        epsilon: [float] Threshold to prevent false violations due to floating-point error. 
-        Used for enforcing monotonicity.
-        use_accel: [bool] If True, enables acceleration estimation instead of constant velocity.
-
-        Return:
-        x_smooth, P_smooth: [tuple of ndarrays]
-        - x_smooth: Nx6 array of smoothed state vectors [x, y, vx, vy, ax, ay].
-        - P_smooth: Nx6x6 array of smoothed state covariance matrices.
-        """
-        N = len(measurements)  # Number of time steps
-        H = np.array([
-            [1, 0, 0, 0, 0, 0],  # x position
-            [0, 1, 0, 0, 0, 0]   # y position
-        ])
-        I = np.eye(6)  # Identity matrix for 6D state space
-        x_pred = np.zeros((N, 6))  # Predicted state (prior)
-        P_pred = np.zeros((N, 6, 6))  # Predicted covariance
-        x_forward = np.zeros((N, 6))  # Filtered state (posterior)
-        P_forward = np.zeros((N, 6, 6))  # Filtered covariance
-
-        # --- INITIAL STATE ESTIMATION ---
-        if N >= 3:
-            dt_est = (times[2] - times[0]) / 2
-            vx0 = (measurements[2, 0] - measurements[0, 0]) / (2 * dt_est)
-            vy0 = (measurements[2, 1] - measurements[0, 1]) / (2 * dt_est)
-            ax0 = (measurements[2, 0] - 2 * measurements[1, 0] + measurements[0, 0]) / (dt_est ** 2)
-            ay0 = (measurements[2, 1] - 2 * measurements[1, 1] + measurements[0, 1]) / (dt_est ** 2)
-        else:
-            dt_est = times[1] - times[0]
-            vx0 = (measurements[1, 0] - measurements[0, 0]) / dt_est
-            vy0 = (measurements[1, 1] - measurements[0, 1]) / dt_est
-            ax0 = 0.0
-            ay0 = 0.0
-
-        x0 = np.array([measurements[0, 0], measurements[0, 1], vx0, vy0, ax0, ay0])
-        P0 = np.zeros((6, 6))
-        P0[0:2, 0:2] = R
-        P0[2:4, 2:4] = (2 * R) / (dt_est ** 2)
-        P0[4:6, 4:6] = (6 * R) / (dt_est ** 4)
-
-        x_est = x0.copy()
-        P_est = P0.copy()
-        x_forward[0] = x0
-        P_forward[0] = P0
-        x_pred[0] = x0
-        P_pred[0] = P0
-
-        # -------- FORWARD KALMAN FILTER PASS --------
-        for k in range(1, N):
-            dt = times[k] - times[k - 1]
-            if use_accel:
-                A = np.array([
-                    [1, 0, dt, 0, 0.5 * dt ** 2, 0],
-                    [0, 1, 0, dt, 0, 0.5 * dt ** 2],
-                    [0, 0, 1, 0, dt, 0],
-                    [0, 0, 0, 1, 0, dt],
-                    [0, 0, 0, 0, 1, 0],
-                    [0, 0, 0, 0, 0, 1]
-                ])
-            else:
-                A = np.array([
-                    [1, 0, dt, 0, 0, 0],
-                    [0, 1, 0, dt, 0, 0],
-                    [0, 0, 1, 0, 0, 0],
-                    [0, 0, 0, 1, 0, 0],
-                    [0, 0, 0, 0, 0, 0],
-                    [0, 0, 0, 0, 0, 0]
-                ])
-
-            Q = Q_base * dt
-            x_pred[k] = A @ x_est
-            P_pred[k] = A @ P_est @ A.T + Q
-            z = measurements[k]
-            y = z - H @ x_pred[k]
-            S = H @ P_pred[k] @ H.T + R
-            K = P_pred[k] @ H.T @ np.linalg.solve(S, np.eye(2))
-            x_est = x_pred[k] + K @ y
-            P_est = (I - K @ H) @ P_pred[k]
-            x_forward[k] = x_est
-            P_forward[k] = P_est
-
-        # -------- BACKWARD PASS (RTS SMOOTHING) --------
-        x_smooth = np.zeros_like(x_forward)
-        P_smooth = np.zeros_like(P_forward)
-        x_smooth[-1] = x_forward[-1]
-        P_smooth[-1] = P_forward[-1]
-
-        for k in range(N - 2, -1, -1):
-            dt = times[k + 1] - times[k]
-            A = np.array([
-                [1, 0, dt, 0, 0.5 * dt ** 2, 0],
-                [0, 1, 0, dt, 0, 0.5 * dt ** 2],
-                [0, 0, 1, 0, dt, 0],
-                [0, 0, 0, 1, 0, dt],
-                [0, 0, 0, 0, 1, 0],
-                [0, 0, 0, 0, 0, 1]
-            ])
-            G = P_forward[k] @ A.T @ np.linalg.inv(P_pred[k + 1])
-            x_smooth[k] = x_forward[k] + G @ (x_smooth[k + 1] - x_pred[k + 1])
-            P_smooth[k] = P_forward[k] + G @ (P_smooth[k + 1] - P_pred[k + 1]) @ G.T
-
-        # -------- OPTIONAL MONOTONICITY ENFORCEMENT --------
-        if monotonicity:
-            dx_total = x_smooth[-1, 0] - x_smooth[0, 0]
-            dy_total = x_smooth[-1, 1] - x_smooth[0, 1]
-            if abs(dx_total) >= abs(dy_total):
-                dominant = 0
-                velocity_idx = 2
-            else:
-                dominant = 1
-                velocity_idx = 3
-            direction = np.sign(x_smooth[-1, dominant] - x_smooth[0, dominant])
-            for k in range(1, N):
-                if direction > 0 and x_smooth[k, dominant] + epsilon < x_smooth[k - 1, dominant]:
-                    x_smooth[k, dominant] = x_smooth[k - 1, dominant]
-                    x_smooth[k, velocity_idx] = 0.0
-                elif direction < 0 and x_smooth[k, dominant] - epsilon > x_smooth[k - 1, dominant]:
-                    x_smooth[k, dominant] = x_smooth[k - 1, dominant]
-                    x_smooth[k, velocity_idx] = 0.0
-
-        return x_smooth, P_smooth
-
-    @staticmethod
-    def saveKalmanUncertaintiesToCSV(data_path, times, measurements, x_smooth, p_smooth, Q_base, R):
-        """
-        Save Kalman smoothing results, uncertainties, and noise model parameters to CSV.
-
-        Creates a timestamped CSV file under `<data_path>/ASTRA_Kalman_Results/` containing:
-            - Per-frame times (seconds since start).
-            - Original measurements (x, y).
-            - Smoothed state estimates (x, y, vx, vy, ax, ay).
-            - Kalman uncertainty (per-state standard deviations from `p_smooth`).
-            - Header rows with square-root diagonal values of `Q_base` and `R`.
-
-        Args:
-            data_path (str | os.PathLike): Root directory for output CSV.
-            times (Sequence[float]): Relative times (s since start) for each state.
-            measurements (np.ndarray): Original measurements, shape (K, 2).
-            x_smooth (np.ndarray): Smoothed state estimates, shape (K, 6):
-                [x, y, vx, vy, ax, ay].
-            p_smooth (np.ndarray): Smoothed state covariances, shape (K, 6, 6).
-            Q_base (np.ndarray): Process noise base matrix, shape (6, 6).
-            R (np.ndarray): Measurement noise covariance, shape (2, 2).
-
-        Returns:
-            None. Writes CSV to disk.
-
-        Raises:
-            OSError: If directories or CSV file cannot be created.
-            ValueError: If array shapes are inconsistent.
-        """
-
-        fig_dir = os.path.join(data_path, "ASTRA_Kalman_Results")
-        if not os.path.exists(fig_dir):
-            os.makedirs(fig_dir)
-
-        # Make dest path
-        now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-        data = {"time (sec since start)" : [],
-                "original x" : [],
-                "original y" : [],
-                "smoothed x" : [],
-                "smoothed y" : [],
-                "smoothed vx" : [],
-                "smoothed vy" : [],
-                "smoothed ax" : [],
-                "smoothed ay" : [],
-                "kalman uncertainty/STD (x)" : [],
-                "kalman uncertainty/STD (y)" : [],
-                "kalman uncertainty/STD (vx)" : [],
-                "kalman uncertainty/STD (vy)" : [],
-                "kalman uncertainty/STD (ax)" : [],
-                "kalman uncertainty/STD (ay)" : []
-                }
-         
-        #  populate data dict
-        for i in range(len(times)):
-            data['time (sec since start)'].append(times[i])
-            data['original x'].append(measurements[i][0])
-            data['original y'].append(measurements[i][1])
-            data['smoothed x'].append(x_smooth[i][0])
-            data['smoothed y'].append(x_smooth[i][1])
-            data['smoothed vx'].append(x_smooth[i][2])
-            data['smoothed vy'].append(x_smooth[i][3])
-            data['smoothed ax'].append(x_smooth[i][4])
-            data['smoothed ay'].append(x_smooth[i][5])
-            data['kalman uncertainty/STD (x)'].append(np.sqrt(np.abs(p_smooth[i][0][0])))
-            data['kalman uncertainty/STD (y)'].append(np.sqrt(np.abs(p_smooth[i][1][1])))
-            data['kalman uncertainty/STD (vx)'].append(np.sqrt(np.abs(p_smooth[i][2][2])))
-            data['kalman uncertainty/STD (vy)'].append(np.sqrt(np.abs(p_smooth[i][3][3])))
-            data['kalman uncertainty/STD (ax)'].append(np.sqrt(np.abs(p_smooth[i][4][4])))
-            data['kalman uncertainty/STD (ay)'].append(np.sqrt(np.abs(p_smooth[i][5][5])))
-
-        # Add header row for Q_base and R std values
-        std_q_base = np.sqrt(np.diag(Q_base))
-        std_r = np.sqrt(np.diag(R))
-        header_q_base = ["Q_base STD (x)", "Q_base STD (y)", 
-                         "Q_base STD (vx)", "Q_base STD (vy)", 
-                         "Q_base STD (ax)", "Q_base STD (ay)"]
-        header_r = ["R STD (x)", "R STD (y)"]
-
-        # Write header row to CSV before the main data
-        csv_path = os.path.join(fig_dir, f"kalman_results_{now_str}.csv")
-        with open(csv_path, 'w', newline='') as csvfile:
-            writer = csv.writer(csvfile)
-            # Write Q_base std header and values
-            writer.writerow(header_q_base)
-            writer.writerow([f"{v:.6f}" for v in std_q_base])
-            # Write R std header and values
-            writer.writerow(header_r)
-            writer.writerow([f"{v:.6f}" for v in std_r])
-            # Write main data header
-            writer.writerow(list(data.keys()))
-            # Write main data rows
-            for i in range(len(times)):
-                writer.writerow([data[key][i] for key in data.keys()])
-
-        print(f"Kalman results saved to {csv_path}")
-
-    @staticmethod
-    def runKalmanStatic(times, measurements, sigmaxy, perc_sigma_xy, 
-                        save_results=False, save_path=None, use_accel=False, monotonicity=True, epsilon=1e-6):
-        """
-        Run the Kalman smoother as a static pipeline for given measurements.
-
-        Normalizes times to seconds since first frame, constructs process noise `Q_base`
-        and measurement noise `R`, runs the constant-velocity Kalman filter/smoother,
-        and optionally saves results to CSV.
-
-        Args:
-            times (Sequence[datetime.datetime]): Absolute timestamps, length K.
-            measurements (np.ndarray): Original measurements, shape (K, 2).
-            sigmaxy (float): Position standard deviation [px].
-            perc_sigma_xy (float): Velocity std as a percent of average velocity.
-            save_results (bool): If True, save CSV of results.
-            save_path (str | os.PathLike | None): Directory for saving CSV if
-                `save_results=True`. If None, no file is written.
-            use_accel (bool): If True, use acceleration states (constant-accel model);
-                if False, constant-velocity model.
-            monotonicity (bool): If True, enforce monotonic motion along dominant axis.
-            epsilon (float): Numerical tolerance for monotonicity enforcement.
-
-        Returns:
-            tuple:
-                x_smooth (np.ndarray): Smoothed state estimates, shape (K, 6).
-                p_smooth (np.ndarray): Smoothed covariance estimates, shape (K, 6, 6).
-                Q_base (np.ndarray): Process noise covariance base, shape (6, 6).
-                R (np.ndarray): Measurement noise covariance, shape (2, 2).
-                norm_times (list[float]): Relative times [s].
-
-        Raises:
-            RuntimeError: If Kalman filter computation fails.
-            ValueError: If inputs have inconsistent lengths.
-        """
-
-        # Normalize times to start
-        norm_times = [(t - times[0]).total_seconds() for t in times]
-
-        # Compute Kalman matricies
-        Q_base = ASTRA.computeQBase(measurements, norm_times, sigmaxy, perc_sigma_xy)
-        R = ASTRA.computeR(measurements, norm_times)
-
-        x_smooth, p_smooth = ASTRA.kalmanFilterCA(
-            measurements, norm_times, Q_base, R, 
-            use_accel=use_accel, monotonicity=monotonicity, epsilon=epsilon
-        )
-
-        if save_results and save_path is not None:
-            ASTRA.saveKalmanUncertaintiesToCSV(save_path, times, measurements, x_smooth, p_smooth, Q_base, R)
-        if save_results and save_path is None:
-            print("Warning: save_path is None, not saving results.")
-        
-        return x_smooth, p_smooth, Q_base, R, norm_times
-
 
 
 class Dataloader:
