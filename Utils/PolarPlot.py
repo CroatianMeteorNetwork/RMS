@@ -30,6 +30,7 @@ import datetime
 import pathlib
 import time
 import imageio as imageio
+import tqdm
 
 from RMS.Astrometry.Conversions import altAz2RADec, raDec2AltAz, jd2Date, date2JD, J2000_JD
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, correctVignetting
@@ -936,14 +937,13 @@ if __name__ == "__main__":
         frame_count = int(((jd2Date(timelapse_end, dt_obj=True) - jd2Date(timelapse_start, dt_obj=True)).total_seconds()) / seconds_per_frame)
         start_time_obj =  datetime.datetime(*jd2Date(timelapse_start, dt_obj=True).timetuple()[:6])
         print("Output file name is {}".format(output_file_name))
-        with imageio.get_writer(output_file_name, fps=30, codec="libx264", quality=8) as writer:
-            for frame_no in range(0, frame_count):
+        with imageio.get_writer(output_file_name, fps=25, codec="libx264", quality=8) as writer:
+            for frame_no in tqdm.tqdm(range(0, frame_count)):
                 frame_time_obj = start_time_obj  + datetime.timedelta(seconds = frame_no * seconds_per_frame)
                 target_jd = date2JD(*frame_time_obj.timetuple()[:6])
-                print(frame_time_obj, target_jd)
-                pass
 
-                print("Making frame at time {}".format(jd2Date(target_jd, dt_obj=True)))
+                if print_activity:
+                    print("Making frame at time {}".format(jd2Date(target_jd, dt_obj=True)))
                 writer.append_data(SkyPolarProjection(config_paths, path_to_transform, force_recomputation=force_recomputation,
                                         repeat=repeat, period=period, print_activity=not quiet,
                                         size=size, stack_depth=stack_depth, upload=upload, annotate=annotate,
