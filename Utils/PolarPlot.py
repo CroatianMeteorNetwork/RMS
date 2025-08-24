@@ -73,11 +73,11 @@ def cartesianToAltAz(x, y, dimension_x_min, dimension_x_max, dimension_y_min, di
 
     # Compute radial distance from center
     r = np.sqrt(dx ** 2 + dy ** 2)
-    rmax = np.sqrt(((dimension_x_max - x0) ** 2 + (dimension_y_max - y0) ** 2))
+    rmax = min(dimension_x_max - x0, dimension_y_max - y0)
 
     # Map radius to altitude (center = 90°, edge = min_elev_deg)
     alt_deg = 90 - (90 - minimum_elevation_deg) * (r / rmax)
-    alt_deg = np.clip(alt_deg, minimum_elevation_deg, 90)
+    # alt_deg = np.clip(alt_deg, minimum_elevation_deg, 90)
 
     return alt_deg, (az_deg - 90) % 360
 
@@ -107,7 +107,7 @@ def altAzToCartesian(az_deg, alt_deg, dimension_x_min, dimension_x_max, dimensio
     y0 = (dimension_y_min + dimension_y_max) / 2
 
     # Max radius from center to edge
-    rmax = np.sqrt((dimension_x_max - x0) ** 2 + (dimension_y_max - y0) ** 2)
+    rmax = min(dimension_x_max - x0, dimension_y_max - y0)
 
     # Convert altitude to radial distance
     r = rmax * (90 - alt_deg) / (90 - minimum_elevaton_deg)
@@ -380,13 +380,14 @@ def makeTransformation(stations_info_dict, size_x, size_y, minimum_elevation_deg
 
         for y_dest in range(1, size_y - 1):
             for x_dest in range(1, size_x - 1):
-                _x, _y, = x_dest - origin_x, y_dest - origin_y
+                # _x, _y, = x_dest - origin_x, y_dest - origin_y
 
                 # Convert the target image (polar projection on cartesian axis) into azimuth and elevation
-                el_deg = 90 - np.hypot(_x * pixel_to_radius_scale_factor_x, _y * pixel_to_radius_scale_factor_y)
-                az_deg = np.degrees(np.arctan2(_x, _y))
+                # el_deg = 90 - np.hypot(_x * pixel_to_radius_scale_factor_x, _y * pixel_to_radius_scale_factor_y)
+                # az_deg = np.degrees(np.arctan2(_x, _y))
 
-                # el_deg, az_deg = cartesianToAltAz(x_dest, y_dest, 0, size_x, 0, size_y, minimum_elevation_deg)
+                el_deg, az_deg = cartesianToAltAz(x_dest, y_dest, 0, size_x, 0, size_y, minimum_elevation_deg)
+
 
 
                 # print(x_dest, y_dest )
@@ -408,8 +409,10 @@ def makeTransformation(stations_info_dict, size_x, size_y, minimum_elevation_deg
                 r, d = altAz2RADec(az_deg, el_deg, pp_source.JD, pp_source.lat, pp_source.lon)
                 r_list.append(r)
                 d_list.append(d)
-                x_dest_list.append(size_x - x_dest)
-                y_dest_list.append(size_y - y_dest)
+                # x_dest_list.append(size_x - x_dest)
+                # y_dest_list.append(size_y - y_dest)
+                x_dest_list.append(x_dest)
+                y_dest_list.append(y_dest)
 
         # Compute source image pixels with the time offset
         x_source_array, y_source_array = raDecToXYPP(np.array(r_list), np.array(d_list), jd_source, pp_source)
@@ -445,7 +448,7 @@ def makeTransformation(stations_info_dict, size_x, size_y, minimum_elevation_deg
 
     return transformation_layer_list, source_coordinates_array, dest_coordinates_array, intensity_scaling_array, [target_lat, target_lon, target_ele]
 
-def getFitsFiles(transformation_layer_list, stations_info_dict, target_image_time, print_activity=False):
+def getFitsFiles(transformation_layer_list, stations_info_dict, target_image_time, print_activity=True):
     """
     Get the paths to fits files, in the same order as stations_list using info from stations_info_dict around target_image time.
 
@@ -573,7 +576,7 @@ def makeUpload(source_path, upload_to):
 
 
 def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=False, repeat=False, period=120,
-                       print_activity=False, size=500, stack_depth=3, upload=None, annotate=True, minimum_elevation_deg=20,
+                       print_activity=True, size=500, stack_depth=3, upload=None, annotate=True, minimum_elevation_deg=20,
                        target_jd=None, compensation=[50, 80, 80, 99.75], plot_constellations=True, write_image=True):
 
     """
@@ -690,7 +693,7 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
             constellation_coordinates_list = getConstellationsImageCoordinates(target_image_time_jd, cam_coords, size_x,
                                                                            size_y, minimum_elevation_deg)
             for x, y, x_, y_ in constellation_coordinates_list:
-                cv2.line(target_image_array, (x, y), (x_, y_), 18, 1)
+                cv2.line(target_image_array, (x, y), (x_, y_), 12, 1)
 
 
 
@@ -733,7 +736,7 @@ def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_el
 
     lat, lon = cam_coords[0], cam_coords[1]
 
-
+    minimum_elevation_deg = max(minimum_elevation_deg, 10)
 
     if print_activity:
         print("Getting constellation coordinates at jd {} for location lat: {} lon: {}".format(jd, cam_coords[0], cam_coords[1]))
@@ -769,15 +772,9 @@ def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_el
     array_az, array_alt = raDec2AltAz(array_ra, array_dec, jd, lat, lon)
     array_az_, array_alt_ = raDec2AltAz(array_ra_ ,array_dec_ , jd, lat, lon)
     con = np.stack([array_alt, array_az, array_alt_, array_az_], axis=1)
-    constellation_alt_az_above_horizon = con[(con[:, 0] >= 45) & (con[:, 2] >= 45)]
-
-
-
+    constellation_alt_az_above_horizon = con[(con[:, 0] >= minimum_elevation_deg) & (con[:, 2] >= minimum_elevation_deg)]
 
     image_coordinates = []
-
-
-
 
     """
     el_deg = 90 - np.hypot(_x * pixel_to_radius_scale_factor_x, _y * pixel_to_radius_scale_factor_y)
