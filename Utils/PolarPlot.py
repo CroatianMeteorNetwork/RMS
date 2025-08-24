@@ -732,7 +732,7 @@ def SkyPolarProjection(config_paths, path_to_transform, force_recomputation=Fals
 
 
 
-def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_elevation_deg, print_activity=True):
+def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_elevation_deg, print_activity=False):
 
     lat, lon = cam_coords[0], cam_coords[1]
 
