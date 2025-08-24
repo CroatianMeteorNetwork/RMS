@@ -793,14 +793,14 @@ def getConstellationsImageCoordinates(jd, cam_coords, size_x, size_y, minimum_el
 
         x, y = altAzToCartesian(az, alt, 0, size_x, 0, size_y, 20)
 
-        alt_check, az_check = cartesianToAltAz(x, y, 0, size_x, 0, size_y, 20 )
-        print(alt, alt_check, az, az_check)
+        #alt_check, az_check = cartesianToAltAz(x, y, 0, size_x, 0, size_y, 20 )
+        #print(alt, alt_check, az, az_check)
 
 
         x_, y_ = altAzToCartesian(az_, alt_, 0, size_x, 0, size_y, 20)
 
-        alt_check_, az_check_ = cartesianToAltAz(x_, y_, 0, size_x, 0, size_y, 20 )
-        print(alt_, alt_check_, az_, az_check_)
+        #alt_check_, az_check_ = cartesianToAltAz(x_, y_, 0, size_x, 0, size_y, 20 )
+        #print(alt_, alt_check_, az_, az_check_)
 
         image_coordinates.append([int(x), int(y), int(x_), int(y_)])
 
