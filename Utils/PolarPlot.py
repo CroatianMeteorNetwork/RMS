@@ -811,8 +811,8 @@ if __name__ == "__main__":
 
 
 
-
-
+    quiet = cml_args.quiet
+    print_activity = not quiet
     path_to_transform = os.path.expanduser("~/RMS_data/camera_combination.transform")
     force_recomputation = cml_args.transform
     repeat = cml_args.repeat
