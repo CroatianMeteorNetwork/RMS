@@ -2346,7 +2346,7 @@ class Dataloader:
 
                             picks.append([cx, cy])
                             pick_frame_indices.append(frame_number)
-                            pick_frame_times.append([(img_handle.frame_dt_dict[frame_number])])
+                            pick_frame_times.append([(img_handle.currentFrameTime(frame_no=frame_number, dt_obj=True))])
 
                     # Store a temp line to hit previous for col names
                     temp_line = line

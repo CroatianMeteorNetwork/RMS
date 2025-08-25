@@ -4334,7 +4334,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         # Load times of all picks
-        times = np.array([(self.img_handle.frame_dt_dict[k]) for k in pick_frame_indices])
+        times = np.array([self.img_handle.currentFrameTime(i, dt_obj=True) for i in pick_frame_indices])
 
         # Package data for ASTRA - import later using dict comprehension
         data_dict = {
@@ -4445,7 +4445,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Prepare measurements and times for Kalman filter
         measurements = [(self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid']) 
                             for key in pick_frame_indices]
-        times = [self.img_handle.frame_dt_dict[key] for key in pick_frame_indices]
+        times = [self.img_handle.currentFrameTime(key, dt_obj=True) for key in pick_frame_indices]
 
         # Extract kalman settings from astra_config
         sigma_xy = astra_config['kalman']['sigma_xy (px)']
