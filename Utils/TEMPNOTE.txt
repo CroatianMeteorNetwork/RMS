@@ -7,4 +7,7 @@ Changes before merge:
     -Investigate photometry and SNR calculatiosn to ensure it is correct 
         -SNR especially seems to be off
 
-    -Investigate issues with .Vid files
+
+    -Make ASTRA state changing, and add access functions
+    -Change ASTRA to only load relevant frames and dump stack after (save memory)
+    -Change CE_coeff to simpler method (leading edge, center, custom)
