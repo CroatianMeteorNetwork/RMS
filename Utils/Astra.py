@@ -151,7 +151,7 @@ class ASTRA:
             "oob_penalty": 1e6,
         }
 
-        self.SNR_threshold = float(self.astra_config.get('astra', {}).get('min SNR', 5))
+        self.snr_threshold = float(self.astra_config.get('astra', {}).get('min SNR', 5))
 
         # -- Data Attributes --
         self.img_obj = img_obj
@@ -640,13 +640,22 @@ class ASTRA:
             idx = i - 1 if i > 0 else 0
 
             # Reject SNR below the threshold
-            if snr < self.SNR_threshold:
+            if snr < self.snr_threshold:
                 snr_rejection_bool[i] = True
+
+                if self.verbose:
+                    print(f"Rejecting frame {i} with SNR {snr} below threshold {self.snr_threshold}.")
+
             # Check if the streak is outside the streak
             elif not self.checkStreakInBounds(
                     self.translatePicksToGlobal((refined_params[i, 2], refined_params[i, 3]), crop_vars[i]),
                     refined_params[idx, 4], refined_params[idx, 1], self.omega, self.directions):
                 snr_rejection_bool[i] = True
+
+                if self.verbose:
+                    print(f"Rejecting frame {i} with out-of-bounds pick "
+                          f"{self.translatePicksToGlobal((refined_params[i, 2], refined_params[i, 3]), crop_vars[i])}.")
+
             # If passes all checks, append SNR and level sum
             else:
                 frame_snr_values.append(snr)
@@ -656,7 +665,7 @@ class ASTRA:
             self.updateProgress()
 
         # Print number of rejected frames
-        print(f"Rejected {np.sum(snr_rejection_bool)} frames with SNR below {self.SNR_threshold}.")
+        print(f"Rejected {np.sum(snr_rejection_bool)} frames with SNR below {self.snr_threshold}.")
             
         # Reject bad frames by removing indexes of low-SNR frames
         refined_params = self.refined_fit_params[~snr_rejection_bool]
@@ -855,34 +864,38 @@ class ASTRA:
             bool: True if fully in-bounds (with buffer), False otherwise.
         """
 
-
         # Define return bool
         in_bounds = True
 
         # Calculate front and back of the streak
         edge_pick_back = self.movePickToEdge(global_pick, omega, prev_length, directions=directions)
-        edge_pick_front = self.movePickToEdge(global_pick, omega, prev_length, 
+        edge_pick_front = self.movePickToEdge(global_pick, omega, prev_length,
                                               directions=tuple(-x for x in list(directions)))
 
-        # Calculate the top and bottom of the streak (only check a single sigma, 
+        # Calculate the top and bottom of the streak (only check a single sigma,
         # as long as there is clearence for center pick it is okay)
-        top_pick = self.movePickToEdge(global_pick, omega+(np.pi / 2), prev_sigma, 
+        top_pick = self.movePickToEdge(global_pick, omega+(np.pi / 2), prev_sigma,
                                        directions=(directions[0], -directions[1]))
-        bottom_pick = self.movePickToEdge(global_pick, omega+(np.pi / 2), prev_sigma, 
+        bottom_pick = self.movePickToEdge(global_pick, omega+(np.pi / 2), prev_sigma,
                                           directions=(-directions[0], directions[1]))
 
         # Package all picks into a list
         bounding_points = [edge_pick_back, edge_pick_front, top_pick, bottom_pick]
+        
+        # Get correct image dimensions
+        height, width = self.frames.shape[1], self.frames.shape[2]
 
         # Check if any of the bounding points are out of bounds
-        if np.any([point[0] < 0 or point[0] >= self.frames.shape[1] or point[1] < 0 or 
-                   point[1] >= self.frames.shape[2] for point in bounding_points]):
+        # Correctly compare x (point[0]) with width and y (point[1]) with height.
+        if np.any([point[0] < 0 or point[0] >= width or point[1] < 0 or
+                   point[1] >= height for point in bounding_points]):
             in_bounds = False
 
         # Check if pick is close enough to edge to be considered OOB
         edge_buffer = 3  # pixels
-        if (global_pick[0] < edge_buffer or global_pick[0] >= self.frames.shape[1] - edge_buffer or
-            global_pick[1] < edge_buffer or global_pick[1] >= self.frames.shape[2] - edge_buffer):
+        # Correctly compare x (global_pick[0]) with width and y (global_pick[1]) with height.
+        if (global_pick[0] < edge_buffer or global_pick[0] >= width - edge_buffer or
+            global_pick[1] < edge_buffer or global_pick[1] >= height - edge_buffer):
             in_bounds = False
 
         # Return the in_bounds bool
