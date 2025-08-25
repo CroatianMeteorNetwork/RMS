@@ -129,7 +129,12 @@ class ASTRA:
         init_sigma_guess = float(self.astra_config.get('astra', {}).get('sigma_init (px)', 2))
         max_sigma_coeff = float(self.astra_config.get('astra', {}).get('sigma_max', 1.2))
         max_length_coeff = float(self.astra_config.get('astra', {}).get('L_max', 1.5))
-        self.CE_coeff = float(self.astra_config.get('astra', {}).get('CE_coeff', 3))
+        if self.astra_config.get('astra', {}).get('pick_offset') == "leading-edge":
+            self.pick_offset = 3
+        elif self.astra_config.get('astra', {}).get('pick_offset') == "middle":
+            self.pick_offset = 0
+        else:
+            self.pick_offset = float(self.astra_config.get('astra', {}).get('pick_offset', 3))
 
         self.cropping_settings = {
             'initial_padding_coeff': initial_padding_coeff,
@@ -683,7 +688,7 @@ class ASTRA:
                     self.omega,
                     refined_params[i][4],
                     directions=self.directions,
-                    CE_coeff=self.CE_coeff) for i in range(len(refined_params))])
+                    pick_offset=self.pick_offset) for i in range(len(refined_params))])
 
         # Save all as instance variables
         self.refined_fit_params = refined_params
@@ -917,20 +922,20 @@ class ASTRA:
             return (x_global, y_global)
     
 
-    def movePickToEdge(self, center_pick, omega, length, directions=(1, 1), CE_coeff=None):
+    def movePickToEdge(self, center_pick, omega, length, directions=(1, 1), pick_offset=None):
         """
         Move a center pick to the leading edge of the streak.
 
         Computes a half-length offset along `omega` using direction multipliers,
-        optionally scaled by `CE_coeff` for “center-to-edge” behavior.
+        optionally scaled by `pick_offset` for “center-to-edge” behavior.
 
         Args:
             center_pick (tuple[float, float]): Center (x0, y0).
             omega (float): Track angle [rad].
             length (float): Fitted length.
             directions (tuple[int, int]): Multipliers (+1/-1) for x and y axes.
-            CE_coeff (float | None): Optional center-to-edge coefficient; if provided,
-                the used length is `(length/3) * CE_coeff`.
+            pick_offset (float | None): Optional center-to-edge coefficient; if provided,
+                the used length is `(length/3) * pick_offset`.
 
         Returns:
             tuple[float, float]: Edge (x, y).
@@ -940,9 +945,9 @@ class ASTRA:
         # Unpack picks
         x0, y0 = center_pick
 
-        if CE_coeff is not None:
+        if pick_offset is not None:
             # Add length adjustment
-            length = (length / 3) * CE_coeff
+            length = (length / 3) * pick_offset
 
         # Calculate the offset
         x_midpoint_offset = (length / 2) * np.abs(np.cos(omega)) * directions[0]
@@ -2391,7 +2396,7 @@ def checkAstraConfig(astra_config):
         "star_thresh": (0, None, float), "min SNR": (0, None, float),
         "P_crop": (0, None, float), "sigma_init (px)": (0.1, None, float), "sigma_max": (1, None, float),
         "L_max": (1, None, float), "Verbose": (True, False, bool), "photom_thresh": (0, 1, float),
-        "Save Animation": (True, False, bool), "CE_coeff": (0, None, float)
+        "Save Animation": (True, False, bool), "pick_offset": (0, None, float)
     }
 
     kalman_ranges_and_types = {
@@ -2525,6 +2530,6 @@ if __name__ == "__main__":
                                 'expl_c': 3, 'P_sigma': 3}, 
                         'astra': {'star_thresh': 3, 'min SNR': 5, 'P_crop': 1.5, 'sigma_init (px)': 2, 
                                   'sigma_max': 1.2, 'L_max': 1.5, 'Verbose': verbose, 'photom_thresh': 0.05, 
-                                  'Save Animation': save_animation, 'CE_coeff': 3}, 
+                                  'Save Animation': save_animation, 'pick_offset': 3}, 
                         'kalman': {'Monotonicity': True, 'sigma_xy (px)': 0.5, 'sigma_vxy (%)': 100, 
                                    'save results': False}}

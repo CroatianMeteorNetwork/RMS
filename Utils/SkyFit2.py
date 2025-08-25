@@ -7793,7 +7793,7 @@ if ASTRA_IMPORTED:
                 "star_thresh": "3", "min SNR": "5",
                 "P_crop": "1.5", "sigma_init (px)": "2", "sigma_max": "1.2",
                 "L_max": "1.5", "Verbose": "False", "photom_thresh" : "0.05", 
-                "Save Animation": "False", "CE_coeff" : "3"
+                "Save Animation": "False", "pick_offset" : "leading-edge"
             }
 
             # === Kalman Filter Settings ===
@@ -7826,7 +7826,7 @@ if ASTRA_IMPORTED:
                 "photom_thresh": "Luminosity threshold for photometry pixels (fraction of peak).",
                 "Verbose": "Verbose console logging (True/False).",
                 "Save Animation" : "Save animation showing fit, crop, and residuals for each frame.",
-                "CE_coeff" : "Multiples of fitted length (STD) to place leading edge from center pick"
+                "pick_offset" : "['leading-edge', 'middle', <custom float>] : Multiples of fitted length (STD) to place leading edge from center pick"
             }
 
             KALMAN_TT = {
@@ -8049,6 +8049,14 @@ if ASTRA_IMPORTED:
         def setPreviousPicks(self):
             """Hits parent instance to revert picks to previous state"""
             self.skyfit_instance.reverseASTRAPicks()
+        
+        def checkFloat(self, value):
+            """Checks if a value is castable to float"""
+            try:
+                float(value)
+                return True
+            except (ValueError, TypeError):
+                return False
 
         def checkConfig(self):
             """Checks the config only has valid values"""
@@ -8071,7 +8079,7 @@ if ASTRA_IMPORTED:
                 "star_thresh": (0, None, float), "min SNR": (0, None, float),
                 "P_crop": (0, None, float), "sigma_init (px)": (0.1, None, float), "sigma_max": (1, None, float),
                 "L_max": (1, None, float), "Verbose": (True, False, bool), "photom_thresh": (0, 1, float),
-                "Save Animation": (True, False, bool), "CE_coeff": (0, None, float)
+                "Save Animation": (True, False, bool), "pick_offset": (["leading-edge", "middle", "custom"], None, str)
             }
 
             kalman_ranges_and_types = {
@@ -8101,8 +8109,12 @@ if ASTRA_IMPORTED:
             # Check ASTRA parameters
             for param, (min_val, max_val, param_type) in astra_ranges_and_types.items():
                 value_str = config["astra"].get(param, "")
-                try:
-                    if param_type == bool:
+                try:    
+                    if param == "pick_offset":
+                        value = value_str
+                        if value not in ["leading-edge", "middle"] and self.checkFloat(value) is False:
+                            errors[f"astra.{param}"] = f"{param} must be one of ['leading-edge', 'middle', 'custom'], got {value_str}"
+                    elif param_type == bool:
                         value = value_str.strip().lower() == "true"
                         if value not in [True, False]:
                             errors[f"astra.{param}"] = f"{param} must be True or False, got {value_str}"
