@@ -4305,16 +4305,12 @@ class PlateTool(QtWidgets.QMainWindow):
         # Sort pick list according to keys
         self.pick_list = dict(sorted(self.pick_list.items()))
 
-        # Load all frames
-        temp_curr_frame = self.img_handle.current_frame
-        self.img_handle.setFrame(0)  # Reset to the first frame
-        frame_count = pick_frame_indices.shape[0]
-        total_frame_count = self.img_handle.total_frames
-
         # Init a numpy array with the correct size and type
-        frames = np.zeros((frame_count, *self.img_handle.loadFrame().shape), dtype=np.float32)
-        
+        frames = np.zeros((max_frame - min_frame + 1, 
+                           self.img_handle.nrows, self.img_handle.ncols), dtype=np.float32)
+
         # Load the frames
+        temp_curr_frame = self.img_handle.current_frame
         for i, fr in enumerate(range(min_frame, max_frame + 1)):
 
             # Set the current frame to fr
