@@ -4306,16 +4306,22 @@ class PlateTool(QtWidgets.QMainWindow):
         temp_curr_frame = self.img_handle.current_frame
         self.img_handle.setFrame(0)  # Reset to the first frame
         frame_count = pick_frame_indices.shape[0]
+        total_frame_count = self.img_handle.total_frames
 
         # Init a numpy array with the correct size and type
         frames = np.zeros((frame_count, *self.img_handle.loadFrame().shape), dtype=np.float32)
-
+        
         # Load all frames in to an array
-        for i in range(min_frame, max_frame + 1):
-            frames[i] = self.img_handle.loadFrame(fr_no=i)
-            
+        for i, fr_no in enumerate(range(min_frame, max_frame + 1)):
+            frames[i] = self.img_handle.loadFrame(fr_no=fr_no)
+
         self.img_handle.setFrame(temp_curr_frame)  # Reset to the original frame
 
+        # populate empty array of all frames with used frames to retain indexing in ASTRA
+            # ASTRA indexing using relevant frames and their original indices, this is a quick fix
+        all_frames = np.zeros((total_frame_count, *frames[0].shape), dtype=np.float32)
+        all_frames[min_frame:max_frame + 1] = frames
+        frames = all_frames
 
         # Load times of all picks
         times = np.array([(self.img_handle.frame_dt_dict[k]) for k in pick_frame_indices])
@@ -4430,7 +4436,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Extract kalman settings from astra_config
         sigma_xy = astra_config['kalman']['sigma_xy (px)']
-        perc_sigma_vxy = astra_config['kalman']['perc_sigma_vxy (%)']
+        perc_sigma_vxy = astra_config['kalman']['sigma_vxy (%)']
         monotonicity = astra_config['kalman']['Monotonicity']
         save_stats_results = astra_config['kalman']['save results']
 
@@ -4441,13 +4447,15 @@ class PlateTool(QtWidgets.QMainWindow):
             measurements=measurements,
             times=times,
             monotonicity=monotonicity,
-            save_stats_results=save_stats_results
+            save_stats_results=save_stats_results,
+            data_path=self.dir_path
         )
 
         x_smooth, _, _, _ , _ = kalman.run()
 
-        xypicks = x_smooth[0:2]
-        
+        xypicks = x_smooth[:, :2]
+
+
         # Add previous picks to list
         if np.array(
             sorted(
@@ -4568,20 +4576,13 @@ class PlateTool(QtWidgets.QMainWindow):
                         message_type="error")
             return None
 
-    # Make static so other programs can use the same function (namely KalmanFilter)
-    @staticmethod
-    def loadECSV(self=None, ECSV_file_path=None):
+    def loadECSV(self, ECSV_file_path):
         """
         Loads the ECSV file and adds the relevant info to pick_list
         Args:
-            self (PlateTool : optional): PlateTool object if used within SkyFit2
-            ECSV_file_path (str : optional): Path to the ECSV file to load
+            ECSV_file_path (str): Path to the ECSV file to load
         Returns:
-            if self: # Return as a skyfit pick_list dict
-                picks (dict): (N : [8]) dict following same format as self.pick_list 
-            else: # Return times and measurements
-                frame_times (np.ndarray) : N, array of measurement times
-                measurements (np.ndarray) : N x 2 array of x,y measurements
+            picks (dict): (N : [8]) dict following same format as self.pick_list 
         """
 
         # Instantiate arrays to be populated
@@ -4664,52 +4665,37 @@ class PlateTool(QtWidgets.QMainWindow):
                         })
 
             # Converts times into frame indices, accounting for floating-point errors
-            if self is not None:
-                pick_frame_indices = []
-                frame_count = self.img_handle.total_frames
-                time_idx = 0
-                for i in range(frame_count):
-                    frame_time = self.img_handle.currentFrameTime(frame_no=i, dt_obj = True)
-                    time = pick_frame_times[time_idx]
-                    if frame_time == time or \
-                        frame_time == time + datetime.timedelta(microseconds=1) or \
-                        frame_time == time - datetime.timedelta(microseconds=1):
-                        pick_frame_indices.append(i)
-                        time_idx += 1
-                    if time_idx >= len(pick_frame_times):
-                        break
+            pick_frame_indices = []
+            frame_count = sum(1 for name in os.listdir(self.dir_path) if 'dump' in name)
+            time_idx = 0
+            for i in range(frame_count):
+                frame_time = self.img_handle.currentFrameTime(frame_no=i, dt_obj=True)
+                time = pick_frame_times[time_idx]
+                if frame_time == time or \
+                    frame_time == time + datetime.timedelta(microseconds=1) or \
+                    frame_time == time - datetime.timedelta(microseconds=1):
+                    pick_frame_indices.append(i)
+                    time_idx += 1
+                if time_idx >= len(pick_frame_times):
+                    break
 
-                # if arrays are different dimensions raise error
-                if len(picks) != len(pick_frame_indices):
-                    qmessagebox(title="Pick/Frame Index Mismatch",
-                                message="Mismatch between number of picks and frame indices. " \
-                                "Please check the ECSV file for frame-time mismatch errors.",
-                                message_type="error")
-                    return None
-                
-                pick_list = {frame: pick for frame, pick in zip(pick_frame_indices, picks)}
+            # if arrays are different dimensions raise error
+            if len(picks) != len(pick_frame_indices):
+                qmessagebox(title="Pick/Frame Index Mismatch",
+                            message="Mismatch between number of picks and frame indices. " \
+                            "Please check the ECSV file for frame-time mismatch errors.",
+                            message_type="error")
+                return None
+            pick_list = {frame: pick for frame, pick in zip(pick_frame_indices, picks)}
 
-                return pick_list
-
-            # Else return in non-skyfit style
-            else:
-                return np.array(pick_frame_times), np.array([[pick['x_centroid'], pick['y_centroid']] for pick in picks])
-            
+            return pick_list
+        
         # Raise error box
         except Exception as e:
-
-            # Raise dialog if in skyfit2
-            if self is not None:
-                qmessagebox(title='File Read Error',
-                            message=f"Unknown Error reading ECSV file, check correct file loaded.: {str(e)}",
-                            message_type="error")
-
-            # else raise regular error
-            else:
-                raise Exception(f"Unknown Error reading ECSV file: {str(e)}")
-            
+            qmessagebox(title='File Read Error',
+                        message=f"Unknown Error reading ECSV file, check correct file loaded.: {str(e)}",
+                        message_type="error")
             return None
-
 
 
     def keyReleaseEvent(self, event):
