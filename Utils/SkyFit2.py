@@ -4309,6 +4309,9 @@ class PlateTool(QtWidgets.QMainWindow):
         frames = np.zeros((max_frame - min_frame + 1, 
                            self.img_handle.nrows, self.img_handle.ncols), dtype=np.float32)
 
+        print("Loading {:d} frames from {} to {}...".format(
+            frames.shape[0], min_frame, max_frame))
+
         # Load the frames
         temp_curr_frame = self.img_handle.current_frame
         for i, fr in enumerate(range(min_frame, max_frame + 1)):
@@ -4318,6 +4321,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Load the frame into the array
             frames[i] = self.img_handle.loadFrame().astype(np.float32)
+
+            print("\rLoaded frame {:4d}/{:d}".format(i + 1, frames.shape[0]), end='', flush=True)
 
         # Reset to the original frame
         self.img_handle.setFrame(temp_curr_frame)
