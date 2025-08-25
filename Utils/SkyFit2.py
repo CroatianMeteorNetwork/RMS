@@ -47,6 +47,7 @@ from RMS.Routines.MaskImage import getMaskFile
 from RMS.Routines import RollingShutterCorrection
 from RMS.Routines.MaskImage import loadMask, MaskStructure, getMaskFile
 from RMS.Misc import maxDistBetweenPoints, getRmsRootDir
+from Utils.KalmanFilter import KalmanFilter
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
@@ -4297,15 +4298,21 @@ class PlateTool(QtWidgets.QMainWindow):
             dtype=int
         )
 
-        ### Only load the frames of interest ###
-
-        # Get the minimum and maximum frames
+        # Load only frames of intrest
         min_frame = min(pick_frame_indices)
         max_frame = max(pick_frame_indices)
-        
+
+        # Sort pick list according to keys
+        self.pick_list = dict(sorted(self.pick_list.items()))
+
+        # Load all frames
         temp_curr_frame = self.img_handle.current_frame
-        
-        frames = np.zeros((max_frame - min_frame + 1, *self.img_handle.loadFrame().shape), dtype=np.float32)
+        self.img_handle.setFrame(0)  # Reset to the first frame
+        frame_count = pick_frame_indices.shape[0]
+        total_frame_count = self.img_handle.total_frames
+
+        # Init a numpy array with the correct size and type
+        frames = np.zeros((frame_count, *self.img_handle.loadFrame().shape), dtype=np.float32)
         
         # Load the frames
         for i, fr in enumerate(range(min_frame, max_frame + 1)):
@@ -4327,7 +4334,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         # Load times of all picks
-        times = np.array([self.img_handle.currentFrameTime(frame_no=fr, dt_obj=True) for fr in pick_frame_indices])
+        times = np.array([(self.img_handle.frame_dt_dict[k]) for k in pick_frame_indices])
 
         # Package data for ASTRA - import later using dict comprehension
         data_dict = {
@@ -4421,6 +4428,9 @@ class PlateTool(QtWidgets.QMainWindow):
         
         print("Running Kalman with:", astra_config)
 
+        if progress_callback is not None:
+            progress_callback(0)
+
         # Sort pick list according to keys
         self.pick_list = dict(sorted(self.pick_list.items()))
 
@@ -4435,33 +4445,30 @@ class PlateTool(QtWidgets.QMainWindow):
         # Prepare measurements and times for Kalman filter
         measurements = [(self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid']) 
                             for key in pick_frame_indices]
-        times = [self.img_handle.currentFrameTime(frame_no=fr, dt_obj=True) for fr in pick_frame_indices]
+        times = [self.img_handle.frame_dt_dict[key] for key in pick_frame_indices]
 
-        # Dummy dict to instantiate ASTRA object (pass unnecessary args as empty objects) 
-            # NOTE: Static methods in ASTRA could be used, but would not update the progress bar
-        data_dict = {
-            "img_obj" : 0,
-            "frames" : [],
-            "picks" : [],
-            "pick_frame_indices" : np.array([]),
-            "first_pick_global_index" : 0,
-            "times" : times,
-            "astra_config" : astra_config,
-            "saturation_threshold" : self.saturation_threshold,
-            "data_path" : self.dir_path,
-            "camera_config" : self.config,
-            "dark" : None,
-            "flat" : None
-        }
-
-        # Instantiate a temporary ASTRA instance
-        tempASTRA = ASTRA(**data_dict, progress_callback=progress_callback)
+        # Extract kalman settings from astra_config
+        sigma_xy = astra_config['kalman']['sigma_xy (px)']
+        perc_sigma_vxy = astra_config['kalman']['sigma_vxy (%)']
+        monotonicity = astra_config['kalman']['Monotonicity']
+        save_stats_results = astra_config['kalman']['save results']
 
         # Run Kalman on the ASTRA instance, extract new picks
-        xypicks, _ = tempASTRA.runKalman(
+        kalman = KalmanFilter(
+            sigma_xy=sigma_xy,
+            perc_sigma_vxy=perc_sigma_vxy,
             measurements=measurements,
-            times=times)
-        
+            times=times,
+            monotonicity=monotonicity,
+            save_stats_results=save_stats_results,
+            data_path=self.dir_path
+        )
+
+        x_smooth, _, _, _ , _ = kalman.run()
+
+        xypicks = x_smooth[:, :2]
+
+
         # Add previous picks to list
         if np.array(
             sorted(
@@ -4502,6 +4509,9 @@ class PlateTool(QtWidgets.QMainWindow):
             print(f'Saved to CSV & Loaded {len(pick_frame_indices)} Picks from Kalman Smoothing.')
         else:
             print(f'Loaded {len(pick_frame_indices)} Picks from Kalman Smoothing!')
+        
+        if progress_callback is not None:
+            progress_callback(100)
 
     def loadEvTxt(self, txt_file_path):
         """
@@ -4699,7 +4709,6 @@ class PlateTool(QtWidgets.QMainWindow):
                         message=f"Unknown Error reading ECSV file, check correct file loaded.: {str(e)}",
                         message_type="error")
             return None
-
 
 
     def keyReleaseEvent(self, event):
@@ -5243,7 +5252,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         img_handle = None
 
-        # Load a data file
+        # Load a state file
         if os.path.isfile(self.input_path):
             img_handle = detectInputTypeFile(self.input_path, self.config, beginning_time=beginning_time, 
                                              flipud=self.flipud)
@@ -6808,23 +6817,9 @@ class PlateTool(QtWidgets.QMainWindow):
             # Set the SNR to the pick
             pick['snr'] = snr
 
-
-
-            ### Debug print ###
-
-            time_data = [self.img_handle.currentFrameTime()]
-
-            # Compute measured RA/Dec from image coordinates
-            _, _, _, mag_data = xyToRaDecPP(time_data, [pick['x_centroid']],
-                [pick['y_centroid']], [pick['intensity_sum']], self.platepar, measurement=True)
-            
-            # print(self.platepar)
-
-            print("intens sum = {:8d}, px count = {:5d}, bg lvl = {:8.2f}, bg std = {:6.2f}, SNR = {:.2f}, Mag = {:.2f}".format(
-                intensity_sum, source_px_count, background_lvl, background_stddev, snr, mag_data[0]))
-
-            ### ###
-
+            # Debug print
+            print("SNR update: intensity sum = {:8d}, source px count = {:5d}, background lvl = {:8.2f}, background stddev = {:6.2f}, SNR = {:.2f}".format(
+                intensity_sum, source_px_count, background_lvl, background_stddev, snr))
 
             ### Determine if there is any saturation in the measured photometric area
 
@@ -7322,7 +7317,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # If SNR is None, then set the random error to 0
                 mag_err_random = 0
-                pick['snr'] = 1.0
 
             else:
 
@@ -8082,7 +8076,7 @@ if ASTRA_IMPORTED:
 
             kalman_ranges_and_types = {
                 "Monotonicity": (True, False, bool), "sigma_xy (px)": (0, None, float), 
-                "sigma_vxy (%)": (0, 100, float), "save results": (True, False, bool)
+                "sigma_vxy (%)": (0, None, float), "save results": (True, False, bool)
             }
 
             errors = {}

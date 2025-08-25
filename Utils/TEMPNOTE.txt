@@ -7,4 +7,4 @@ Changes before merge:
     -Investigate photometry and SNR calculatiosn to ensure it is correct 
         -SNR especially seems to be off
 
-
+    -Investigate issues with .Vid files
