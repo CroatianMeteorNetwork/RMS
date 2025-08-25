@@ -4289,21 +4289,6 @@ class PlateTool(QtWidgets.QMainWindow):
         # Sort pick list according to keys
         self.pick_list = dict(sorted(self.pick_list.items()))
 
-        # # Load all frames
-        # temp_curr_frame = self.img_handle.current_frame
-        # self.img_handle.setFrame(0)  # Reset to the first frame
-        # frame_count = seld.img_handle
-
-        # # Init a numpy array with the correct size and type
-        # frames = np.zeros((frame_count, *self.img_handle.loadFrame().shape), dtype=np.float32)
-
-        # # Load all frames in to an array
-        # for i in range(frame_count):
-        #     frames[i] = self.img_handle.loadFrame()
-        #     self.img_handle.nextFrame()
-            
-        # self.img_handle.setFrame(temp_curr_frame)  # Reset to the original frame
-
         # Load the keys for picks which are not empty (not just photometry picks)
         pick_frame_indices = np.array(
             [key for key in self.pick_list.keys()
@@ -4334,7 +4319,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # Reset to the original frame
         self.img_handle.setFrame(temp_curr_frame)
 
-        astra_frame_indices = range(max_frame - min_frame + 1)
+        # Frame indices relative to the first picked frame
+        astra_frame_indices = [fr - pick_frame_indices[0] for fr in pick_frame_indices]
 
         ### ###
 
@@ -4349,6 +4335,7 @@ class PlateTool(QtWidgets.QMainWindow):
             "frames" : frames,
             "picks" : [[self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid']] 
                         for key in pick_frame_indices],
+            "first_pick_global_index" : pick_frame_indices[0],
             "pick_frame_indices" : astra_frame_indices,
             "times" : times,
             "astra_config" : astra_config,
@@ -4366,6 +4353,7 @@ class PlateTool(QtWidgets.QMainWindow):
         """Integrates ASTRA results into the SkyFit2 instance."""
 
         # Instantiate vars from astra class vars
+        first_pick_global_index = astra.first_pick_global_index
         pick_frame_indices = astra.pick_frame_indices
         global_picks = astra.global_picks
         snrs = astra.snr
@@ -4403,11 +4391,12 @@ class PlateTool(QtWidgets.QMainWindow):
             }
 
             # Assign pick to skyfit pick list
-            self.pick_list[pick_frame_indices[i]] = pick
+            pick_frame = first_pick_global_index + pick_frame_indices[i]
+            self.pick_list[pick_frame] = pick
 
             # Print added message
             print(f'Added centroid at ({pick["x_centroid"]}, {pick["y_centroid"]}) '
-                  f'on frame {pick_frame_indices[i]}')
+                  f'on frame {pick_frame}')
 
         # Update picks on GUI and update greatCircle
         self.updateGreatCircle()
@@ -4455,6 +4444,7 @@ class PlateTool(QtWidgets.QMainWindow):
             "frames" : [],
             "picks" : [],
             "pick_frame_indices" : np.array([]),
+            "first_pick_global_index" : 0,
             "times" : times,
             "astra_config" : astra_config,
             "saturation_threshold" : self.saturation_threshold,

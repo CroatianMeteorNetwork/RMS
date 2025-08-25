@@ -29,7 +29,7 @@ except Exception as e:
 
 class ASTRA:
 
-    def __init__(self, img_obj, frames, picks, pick_frame_indices, times, astra_config,
+    def __init__(self, img_obj, frames, picks, pick_frame_indices, first_pick_global_index, times, astra_config,
                  saturation_threshold, data_path, camera_config, dark, flat, progress_callback=None):
         """
         ASTRA: Astrometric Streak Tracking and Refinement Algorithm.
@@ -168,6 +168,7 @@ class ASTRA:
         self.times = times
         self.picks = np.array(picks)
         self.pick_frame_indices = list(pick_frame_indices)
+        self.first_pick_global_index = first_pick_global_index
         self.verbose = str(self.astra_config.get('astra', {}).get('Verbose', 'false')).lower() == 'true'
         self.save_animation = str(self.astra_config.get('astra', {}).get('Save Animation', 'false')
                                         ).lower() == 'true'
@@ -743,7 +744,7 @@ class ASTRA:
         self.pick_frame_indices = pick_frame_indices
         self.global_picks = global_picks
         self.fit_costs = fit_costs
-        self.times = self.times[~snr_rejection_bool]
+        self.times = [self.img_obj.currentFrameTime(frame_no=i, dt_obj = True) for i in pick_frame_indices + self.first_pick_global_index]
         self.snr = frame_snr_values
 
         # Return all
