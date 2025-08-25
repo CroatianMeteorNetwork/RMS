@@ -6771,7 +6771,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
 
-def handleBZ2(bz2_path):
+def handleBZ2(bz2_path, mask_path):
     """Passed a path to a bz2 file, unpack and prepare a working area for PlateTool, and launch.
 
     Arguments:
@@ -6796,7 +6796,13 @@ def handleBZ2(bz2_path):
                 print("No config file found in {}".format(bz2_basename))
                 print("Quitting")
                 exit()
-            mask_path = os.path.join(working_dir, config.mask_file)
+            if mask_path is None:
+                mask_path = os.path.join(working_dir, config.mask_file)
+            else:
+                if os.path.isfile(os.path.expanduser(mask_path)):
+                    mask_path = os.path.expanduser(mask_path)
+                else:
+                    mask_path = os.path.join(os.path.expanduser(mask_path), config.mask_file)
             if os.path.exists(mask_path):
                 mask = getMaskFile(".", config)
 
@@ -7785,7 +7791,7 @@ if __name__ == '__main__':
             plate_tool.loadState(dir_path, state_name, beginning_time=beginning_time, mask=mask)
 
         elif cml_args.input_path.endswith('.bz2'):
-            handleBZ2(cml_args.input_path)
+            handleBZ2(cml_args.input_path, cml_args.mask)
 
         elif isLoginPath(cml_args.input_path):
             handleLoginPath(cml_args.input_path, cml_args.number_of_fits)
