@@ -735,9 +735,6 @@ class ASTRA:
                     directions=self.directions,
                     CE_coeff=self.CE_coeff) for i in range(len(refined_params))])
 
-        # Compute times of frames
-        times = np.array([(self.img_obj.frame_dt_dict[k]) for k in pick_frame_indices])
-
         # Save all as instance variables
         self.refined_fit_params = refined_params
         self.fit_imgs = fit_imgs
@@ -746,7 +743,7 @@ class ASTRA:
         self.pick_frame_indices = pick_frame_indices
         self.global_picks = global_picks
         self.fit_costs = fit_costs
-        self.times = times
+        self.times = self.times[~snr_rejection_bool]
         self.snr = frame_snr_values
 
         # Return all

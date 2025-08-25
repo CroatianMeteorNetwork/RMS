@@ -4334,6 +4334,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # Reset to the original frame
         self.img_handle.setFrame(temp_curr_frame)
 
+        astra_frame_indices = range(max_frame - min_frame + 1)
+
         ### ###
 
 
@@ -4347,7 +4349,7 @@ class PlateTool(QtWidgets.QMainWindow):
             "frames" : frames,
             "picks" : [[self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid']] 
                         for key in pick_frame_indices],
-            "pick_frame_indices" : pick_frame_indices,
+            "pick_frame_indices" : astra_frame_indices,
             "times" : times,
             "astra_config" : astra_config,
             "saturation_threshold" : self.saturation_threshold,
