@@ -7745,8 +7745,9 @@ if __name__ == '__main__':
         cml_args.input_path = os.path.expanduser(cml_args.input_path)
         config_path_list = []
 
-        if os.path.isfile(cml_args.mask) or cml_args.mask.endswith(".bmp"):
-            cml_args.mask = os.path.dirname(cml_args.mask)
+        if not cml_args.mask is None:
+            if os.path.isfile(cml_args.mask) or cml_args.mask.endswith(".bmp"):
+                cml_args.mask = os.path.dirname(cml_args.mask)
 
 
 
