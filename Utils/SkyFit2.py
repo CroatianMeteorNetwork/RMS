@@ -4298,33 +4298,8 @@ class PlateTool(QtWidgets.QMainWindow):
             dtype=int
         )
 
-        # Load only frames of intrest
-        min_frame = min(pick_frame_indices)
-        max_frame = max(pick_frame_indices)
-
         # Sort pick list according to keys
         self.pick_list = dict(sorted(self.pick_list.items()))
-
-        # Load all frames
-        temp_curr_frame = self.img_handle.current_frame
-        self.img_handle.setFrame(0)  # Reset to the first frame
-        frame_count = pick_frame_indices.shape[0]
-        total_frame_count = self.img_handle.total_frames
-
-        # Init a numpy array with the correct size and type
-        frames = np.zeros((frame_count, *self.img_handle.loadFrame().shape), dtype=np.float32)
-        
-        # Load the frames
-        for i, fr in enumerate(range(min_frame, max_frame + 1)):
-
-            # Set the current frame to fr
-            self.img_handle.setFrame(fr)
-
-            # Load the frame into the array
-            frames[i] = self.img_handle.loadFrame().astype(np.float32)
-
-        # Reset to the original frame
-        self.img_handle.setFrame(temp_curr_frame)
 
         # Frame indices relative to the first picked frame
         astra_frame_indices = [fr - pick_frame_indices[0] for fr in pick_frame_indices]
@@ -4339,7 +4314,6 @@ class PlateTool(QtWidgets.QMainWindow):
         # Package data for ASTRA - import later using dict comprehension
         data_dict = {
             "img_obj" : self.img_handle,
-            "frames" : frames,
             "picks" : [[self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid']] 
                         for key in pick_frame_indices],
             "first_pick_global_index" : pick_frame_indices[0],

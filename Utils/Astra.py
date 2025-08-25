@@ -29,7 +29,7 @@ except Exception as e:
 
 class ASTRA:
 
-    def __init__(self, img_obj, frames, picks, pick_frame_indices, first_pick_global_index, times, astra_config,
+    def __init__(self, img_obj, picks, pick_frame_indices, first_pick_global_index, times, astra_config,
                  saturation_threshold, data_path, camera_config, dark, flat, progress_callback=None):
         """
         ASTRA: Astrometric Streak Tracking and Refinement Algorithm.
@@ -155,7 +155,6 @@ class ASTRA:
 
         # -- Data Attributes --
         self.img_obj = img_obj
-        self.frames = frames
         self.times = times
         self.picks = np.array(picks)
         self.pick_frame_indices = list(pick_frame_indices)
@@ -211,21 +210,17 @@ class ASTRA:
         }
         self.total_frames = self.pick_frame_indices[-1] - self.pick_frame_indices[0]
 
-        # 1. Processes all frames by background subtracting, masking starsm and saving the avepixel_background 
-        # Also correct all frames with dark/flat and gamma corerction
+        # 1. Gets corrected background and star_mask for later corrections 
         try:
-            self.avepixel_background, self.subtracted_frames, self.frames = self.processImageData(
-                                                                    self.img_obj, 
-                                                                    self.frames
-                                                                    )
+            self.processImageData()
         except Exception as e:
             print(f'Error processing image data: {e}')
 
         # 2. Recursively crop & fit a moving gaussian across whole event
-        try:
-            self.cropAllMeteorFrames(self.pick_frame_indices, self.picks)
-        except Exception as e:
-            print(f'Error cropping and fitting meteor frames: {e}')
+        # try:
+        self.cropAllMeteorFrames()
+        # except Exception as e:
+        #     print(f'Error cropping and fitting meteor frames: {e}')
 
         # 3. Refine the moving gaussian fit by using a local optimizer
         try:
@@ -235,11 +230,11 @@ class ASTRA:
             print(f'Error refining meteor crops: {e}')
 
         # 4. Remove picks with low SNR and out-of-bounds picks, refactors into global coordinates
-        try:
-            self.removeLowSNRPicks(self.refined_fit_params, self.fit_imgs, self.frames, self.cropped_frames, 
-                                   self.crop_vars, self.pick_frame_indices, self.fit_costs, self.times)
-        except Exception as e:
-            print(f'Error removing low SNR picks: {e}')
+        # try:
+        self.removeLowSNRPicks(self.refined_fit_params, self.fit_imgs, self.cropped_frames, 
+                                self.crop_vars, self.pick_frame_indices, self.fit_costs, self.times)
+        # except Exception as e:
+        #     print(f'Error removing low SNR picks: {e}')
         
         # 5. save animation
         if self.save_animation:
@@ -257,7 +252,7 @@ class ASTRA:
 
     # 1) -- Functional Methods --
 
-    def processImageData(self, img_obj, frames):
+    def processImageData(self):
         """
         Correct frames, subtract background, and apply star masking.
 
@@ -284,50 +279,11 @@ class ASTRA:
             Exception: On background load/subtraction or mask application failure.
         """
 
-
-        corrected_frames = []
-        subtracted_frames = []
-        masked_frames = []
-
-        self.uncorr_frames = copy.deepcopy(frames)  # Store uncorrected frames for later use
-
-        # 2) -- Correct all frames
-        try:
-            for frame in frames:
-                
-                # Apply dark if available
-                if self.dark is not None:
-                    corrected_frame = Image.applyDark(frame, self.dark)
-                
-                # Apply flat if available
-                if self.flat_struct is not None:
-                    corrected_frame = Image.applyFlat(corrected_frame, self.flat_struct)
-
-                if self.flat_struct is not None or self.dark is not None:
-                    
-                    # Apply gamma correction
-                    corrected_frame = Image.gammaCorrectionImage(
-                        corrected_frame, self.skyfit_config.gamma, 
-                        bp=0, wp=(2**self.skyfit_config.bit_depth - 1)
-                        )
-
-                else:
-
-                    corrected_frame = Image.gammaCorrectionImage(
-                        frame, self.skyfit_config.gamma, bp=0, wp=(2**self.skyfit_config.bit_depth - 1)
-                        )
-
-                # Append corrected frame
-                corrected_frames.append(corrected_frame)
-        except Exception as e:
-            print(f"Error correcting frames: {e}")
-
         # 1) -- Background Subtraction --
         try:
             # Load background using RMS
-            fake_ff_obj = img_obj.loadChunk()
+            fake_ff_obj = self.img_obj.loadChunk()
             avepixel_background = fake_ff_obj.avepixel
-            corrected_frames = np.array(corrected_frames)
 
             # Correct avepixel_background
             if self.dark is not None:
@@ -344,13 +300,7 @@ class ASTRA:
                 corrected_avepixel = Image.gammaCorrectionImage(avepixel_background, self.skyfit_config.gamma, 
                                                             bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
             
-            corrected_avepixel = np.clip(corrected_avepixel, 0, None)
-
-            # Subtract frames
-            subtracted_frames = corrected_frames.copy() - corrected_avepixel.copy()
-
-            # Clip subtracted frames to above zero
-            subtracted_frames = np.clip(subtracted_frames, 0, None)
+            self.corrected_avepixel = np.clip(corrected_avepixel, 0, None)
 
         except Exception as e:
             raise Exception(f"Error loading background or subtracting frames: {e}")
@@ -365,25 +315,10 @@ class ASTRA:
         threshold = background_mean + self.BACKGROUND_STD_THRESHOLD * background_std
 
         # Mask values exceeding the threshold
-        ave_mask = np.ma.MaskedArray(corrected_avepixel > threshold)
-
-        # Tries to implement mask
-        try:
-            subtracted_frames = np.ma.masked_array(subtracted_frames, 
-                                                   mask=np.repeat(ave_mask[np.newaxis, :, :], 
-                                                    subtracted_frames.shape[0], axis=0))
-            corrected_avepixel = np.ma.masked_array(corrected_avepixel, mask=ave_mask)
-            masked_frames = np.ma.masked_array(corrected_frames, 
-                                                    mask=np.repeat(ave_mask[np.newaxis, :, :], 
-                                                    corrected_frames.shape[0], axis=0))
-        except Exception as e:
-            raise Exception(f"Error applying mask to subtracted frames: {e}")
-        
-        # 3) -- Returns Data --
-        return corrected_avepixel, subtracted_frames, masked_frames
+        self.star_mask = np.ma.MaskedArray(corrected_avepixel > threshold)        
 
 
-    def cropAllMeteorFrames(self, pick_frame_indices, picks):
+    def cropAllMeteorFrames(self):
         """ 
         Recursively crop all meteor frames and fit a moving Gaussian (first pass).
 
@@ -414,10 +349,10 @@ class ASTRA:
         """
 
         # 1) -- Unpack variables & Calculate seed picks/frames--
-        seed_picks_global, seed_indices = self.selectSeedTriplet(picks, pick_frame_indices)
+        seed_picks_global, seed_indices = self.selectSeedTriplet(self.picks, self.pick_frame_indices)
 
-        omega = np.arctan2(picks[-1][1] - picks[0][1], -picks[-1][0] + picks[0][0])  % (2*np.pi)
-        
+        omega = np.arctan2(self.picks[-1][1] - self.picks[0][1], -self.picks[-1][0] + self.picks[0][0])  % (2*np.pi)
+
         if self.verbose:
             print(f"Starting recursive cropping with {len(seed_indices)} seed picks at indices" 
                   f"{seed_indices} and omega {omega} radians.")
@@ -447,12 +382,14 @@ class ASTRA:
         # (N, 6) array of crop variables (cx, cy, xmin, xmax, ymin, ymax)
         self.crop_vars = np.zeros((len(seed_indices), 6), dtype=np.float32) 
 
+        seed_subtracted_frames = self.getFrame(seed_indices)
+
         # # 4) -- Process each seed pick to kick-start recursion --
         for i in range(len(seed_indices)):
-
+            print(seed_indices[i] + self.first_pick_global_index, self.estimateCenter(seed_picks_global[i], omega, init_length, directions=directions))
             # Crop initial frames
             self.cropped_frames[i], self.crop_vars[i] = self.cropFrameToGaussian(
-                        self.subtracted_frames[seed_indices[i]],
+                        seed_subtracted_frames[i],
                         self.estimateCenter(seed_picks_global[i], omega, init_length, directions=directions),
                         self.cropping_settings["init_sigma_guess"],
                         init_length * self.cropping_settings["max_length_coeff"],
@@ -574,7 +511,7 @@ class ASTRA:
         return self.refined_fit_params, self.fit_costs, self.fit_imgs
 
 
-    def removeLowSNRPicks(self, refined_params, fit_imgs, frames, cropped_frames, crop_vars, 
+    def removeLowSNRPicks(self, refined_params, fit_imgs, cropped_frames, crop_vars, 
                           pick_frame_indices, fit_costs, times):
         """
         Filter out low-SNR or out-of-bounds picks and materialize global outputs.
@@ -625,14 +562,17 @@ class ASTRA:
         # Itterate over each frame
         for i in range(len(fit_imgs)):
 
+            frame_idx = pick_frame_indices[i]
+            frame, uncorr_frame = self.getFrame(frame_idx, include_raw=True)
+
             # Calculate photom_pixels
             photom_pixels = self.computePhotometryPixels(fit_imgs[i], cropped_frames[i], crop_vars[i])
 
             # Calculate SNR, and photom values
             snr = self.computeIntensitySum(photom_pixels, 
                     self.translatePicksToGlobal((refined_params[i, 2], refined_params[i, 3]), crop_vars[i]), 
-                    frames[pick_frame_indices[i]], self.uncorr_frames[i])
-            
+                    frame, uncorr_frame)
+
             # Determine SNR - DEPRECIATED
             # snr = self.calculateSNR(fit_imgs[i], frames[pick_frame_indices[i]], cropped_frames[i], crop_vars[i])
 
@@ -875,14 +815,14 @@ class ASTRA:
         bounding_points = [edge_pick_back, edge_pick_front, top_pick, bottom_pick]
 
         # Check if any of the bounding points are out of bounds
-        if np.any([point[0] < 0 or point[0] >= self.frames.shape[1] or point[1] < 0 or 
-                   point[1] >= self.frames.shape[2] for point in bounding_points]):
+        if np.any([point[0] < 0 or point[0] >= self.corrected_avepixel.shape[0] or point[1] < 0 or 
+                   point[1] >= self.corrected_avepixel.shape[1] for point in bounding_points]):
             in_bounds = False
 
         # Check if pick is close enough to edge to be considered OOB
         edge_buffer = 3  # pixels
-        if (global_pick[0] < edge_buffer or global_pick[0] >= self.frames.shape[1] - edge_buffer or
-            global_pick[1] < edge_buffer or global_pick[1] >= self.frames.shape[2] - edge_buffer):
+        if (global_pick[0] < edge_buffer or global_pick[0] >= self.corrected_avepixel.shape[1] - edge_buffer or
+            global_pick[1] < edge_buffer or global_pick[1] >= self.corrected_avepixel.shape[2] - edge_buffer):
             in_bounds = False
 
         # Return the in_bounds bool
@@ -1543,9 +1483,6 @@ class ASTRA:
         """
 
 
-        # Copy subframe to avoid reference errors
-        sub_frame = sub_frame.copy()
-
         # Determine maximum size values
         if cropping_settings is None:
             max_sigma = max_sigma * self.cropping_settings['max_sigma_coeff']
@@ -1703,6 +1640,82 @@ class ASTRA:
         # Return the generated particles
         return pos
 
+    def getFrame(self, fr_no, include_raw=False, crop_vars=None):
+        """
+        Loads the frame number from the img_obj and returns the subtracted, and cropped if vars are passed on
+        """
+
+        # Adjust to total frame index
+        fr_no = [x + self.first_pick_global_index for x in fr_no] if isinstance(fr_no, (list, np.ndarray)) \
+            else fr_no + self.first_pick_global_index
+
+        # Operate on list of frames
+        if isinstance(fr_no, (list, np.ndarray)):
+            frames, raw_frames = [], []
+            for fr in fr_no:
+                # Load frame
+                frame = self.img_obj.loadFrame(fr_no=fr)
+
+                # Store raw frame if include_raw
+                raw_frame = copy.deepcopy(frame) if include_raw else None
+
+                # Correct frame
+                frame = self.correctFrame(frame)
+
+                # Crop if requested
+                if crop_vars is not None:
+                    cx, cy, xmin, xmax, ymin, ymax = crop_vars
+                    frame = frame[ymin:ymax, xmin:xmax]
+
+                frames.append(frame)
+                raw_frames.append(raw_frame)
+
+            if include_raw:
+                return np.array(frames), np.array(raw_frames)
+            else:
+                return frames
+        # Operate on a single frame
+        else:
+            frame = self.img_obj.loadFrame(fr_no=fr_no)
+
+            # Store raw frame if include_raw
+            raw_frame = copy.deepcopy(frame) if include_raw else None
+
+            # Correct frame
+            frame = self.correctFrame(frame)
+
+            # Crop if requested
+            if crop_vars is not None:
+                cx, cy, xmin, xmax, ymin, ymax = crop_vars
+                frame = frame[ymin:ymax, xmin:xmax]
+            
+            if include_raw:
+                return np.array(frame), np.array(raw_frame)
+            else:
+                return np.array(frame)
+
+
+    def correctFrame(self, frame):
+
+        # 1. correct using dark, flat, gamma
+        if self.dark is not None:
+            corr_frame = Image.applyDark(frame, self.dark)
+        if self.flat_struct is not None:
+            corr_frame = Image.applyFlat(corr_frame, self.flat_struct)
+        if self.dark is not None or self.flat_struct is not None:
+            corr_frame = Image.gammaCorrectionImage(corr_frame, self.skyfit_config.gamma,
+                                                    bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
+        else:
+            corr_frame = Image.gammaCorrectionImage(frame, self.skyfit_config.gamma,
+                                                    bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
+        
+        # 2. Background subtraction
+        sub_frame = np.clip((corr_frame - self.corrected_avepixel), 0, None)
+
+        # 3. Star masking
+        final_frame = np.ma.masked_array(sub_frame, mask=self.star_mask)
+
+        return final_frame
 
     def recursiveCroppingAlgorithm(self, frame_index, est_center_global, paramter_estimation_functions, omega, 
                                    directions, forward_pass=False):
@@ -1727,7 +1740,6 @@ class ASTRA:
             None
         """
 
-
         if frame_index > max(self.pick_frame_indices) or frame_index < min(self.pick_frame_indices):
             return
 
@@ -1738,7 +1750,7 @@ class ASTRA:
                                                       )
 
         # Crop the frame around the new center
-        cropped_frame, crop_vars = self.cropFrameToGaussian(self.subtracted_frames[frame_index], 
+        cropped_frame, crop_vars = self.cropFrameToGaussian(self.getFrame(frame_index), 
                                     est_center_global, 
                                     est_next_params['height'] * self.cropping_settings['max_sigma_coeff'], 
                                     est_next_params['length'] * self.cropping_settings['max_length_coeff'],
@@ -1933,7 +1945,7 @@ class ASTRA:
 
         x_arr, y_arr = np.array(photom_pixels).T
         corr_frame = corr_frame.copy()
-        avepixel = self.avepixel_background.copy()
+        avepixel = self.corrected_avepixel.copy()
 
         # Take a window twice the size of the colored pixels
         x_color_size = np.max(x_arr) - np.min(x_arr)
@@ -1959,7 +1971,7 @@ class ASTRA:
         crop_img_uncorr = crop_img_uncorr[y_min:y_max, x_min:x_max]
 
         # Replace photometry pixels that are masked by a star with the median value of the photom. area
-        cropped_star_mask = self.avepixel_background.copy().mask[y_min:y_max, x_min:x_max]
+        cropped_star_mask = self.star_mask[y_min:y_max, x_min:x_max]
         photom_star_masked_indices = np.where((crop_img.mask == 0) & (cropped_star_mask == 1))
 
         # Apply correction only if the streak intersects a star

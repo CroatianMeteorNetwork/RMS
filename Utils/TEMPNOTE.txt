@@ -10,4 +10,3 @@ Changes before merge:
 
     -Make ASTRA state changing, and add access functions
     -Change ASTRA to only load relevant frames and dump stack after (save memory)
-    -Change CE_coeff to simpler method (leading edge, center, custom)
