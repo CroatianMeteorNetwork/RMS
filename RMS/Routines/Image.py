@@ -719,8 +719,13 @@ def applyFlat(img, flat_struct):
     img = flat_struct.flat_avg*img.astype(np.float64)/flat_struct.flat_img
 
     # Limit the image values to image type range
-    dtype_info = np.iinfo(input_type)
-    img = np.clip(img, dtype_info.min, dtype_info.max)
+    if np.issubdtype(input_type, np.integer):
+        info = np.iinfo(input_type)
+    elif np.issubdtype(input_type, np.floating):
+        info = np.finfo(input_type)
+    else:
+        raise TypeError(f"Unsupported dtype: {input_type}")
+    img = np.clip(img, info.min, info.max)
 
     # Make sure the output array is the same as the input type
     img = img.astype(input_type)

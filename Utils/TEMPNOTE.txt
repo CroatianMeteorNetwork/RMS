@@ -1,0 +1,12 @@
+Changes before merge:
+    -Implement modular (if name is main) utiliztion into ASTRA
+    -Add guide.md for ASTRA in guides (Also document future improvements, and how future improvements should be implemented)
+
+    -Look into solving length over-estimation in low-SNR frames
+        -Add penalty function of STD of photometric area?
+    -Investigate photometry and SNR calculatiosn to ensure it is correct 
+        -SNR especially seems to be off
+
+
+    -Make ASTRA state changing, and add access functions
+    -Change ASTRA to only load relevant frames and dump stack after (save memory)
