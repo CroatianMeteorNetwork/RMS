@@ -1665,10 +1665,16 @@ class ASTRA:
 
         # Operate on list of frames
         if isinstance(fr_no, (list, np.ndarray)):
+
             frames, raw_frames = [], []
+
+            first_frame_num = self.img_obj.current_frame
+
             for fr in fr_no:
+                
                 # Load frame
-                frame = self.img_obj.loadFrame(fr_no=fr).astype(np.float32)
+                self.img_obj.setFrame(fr)
+                frame = self.img_obj.loadFrame().astype(np.float32)
 
                 # Store raw frame if include_raw
                 raw_frame = copy.deepcopy(frame) if include_raw else None
@@ -1684,13 +1690,21 @@ class ASTRA:
                 frames.append(frame)
                 raw_frames.append(raw_frame)
 
+
+            # Reset to first frame
+            self.img_obj.setFrame(first_frame_num)
+
             if include_raw:
                 return np.array(frames), np.array(raw_frames)
             else:
                 return frames
+
         # Operate on a single frame
         else:
-            frame = self.img_obj.loadFrame(fr_no=fr_no).astype(np.float32)
+            first_frame_num = self.img_obj.current_frame
+            self.img_obj.setFrame(fr_no)
+            frame = self.img_obj.loadFrame().astype(np.float32)
+            self.img_obj.setFrame(first_frame_num)
 
             # Store raw frame if include_raw
             raw_frame = copy.deepcopy(frame) if include_raw else None
