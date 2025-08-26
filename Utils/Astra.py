@@ -1,3 +1,4 @@
+import hashlib
 import os
 import csv
 import copy
@@ -10,7 +11,8 @@ import scipy.optimize
 import scipy.stats
 import scipy.special
 import cv2
-import matplotlib        
+import matplotlib
+import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
@@ -282,14 +284,14 @@ class ASTRA:
         try:
             # Load background using RMS
             fake_ff_obj = self.img_obj.loadChunk()
-            avepixel_background = fake_ff_obj.avepixel.T.astype(np.float32)
+            avepixel_background = fake_ff_obj.avepixel.astype(np.float32)
 
             # # Correct avepixel_background
             if self.dark is not None:
-                corrected_avepixel = Image.applyDark(avepixel_background, self.dark)
+                corrected_avepixel = Image.applyDark(avepixel_background.T, self.dark).T
 
             if self.flat_struct is not None:
-                corrected_avepixel = Image.applyFlat(corrected_avepixel, self.flat_struct)
+                corrected_avepixel = Image.applyFlat(corrected_avepixel.T, self.flat_struct).T
             
             if self.dark is not None or self.flat_struct is not None:
                 corrected_avepixel = Image.gammaCorrectionImage(corrected_avepixel, self.skyfit_config.gamma, 
@@ -301,7 +303,7 @@ class ASTRA:
             
             self.corrected_avepixel = np.clip(corrected_avepixel, 0, None)
 
-            self.corrected_avepixel = corrected_avepixel.T
+            self.corrected_avepixel = corrected_avepixel
 
         except Exception as e:
             raise Exception(f"Error loading background or subtracting frames: {e}")
@@ -1670,6 +1672,8 @@ class ASTRA:
 
             first_frame_num = self.img_obj.current_frame
 
+            print("Loading {:d} frames...".format(len(fr_no)))
+
             for fr in fr_no:
                 
                 # Load frame
@@ -1689,6 +1693,8 @@ class ASTRA:
 
                 frames.append(frame)
                 raw_frames.append(raw_frame)
+
+                print("Loading frame {:4d}/{:d}".format(fr, fr_no[-1]), end='' if fr != fr_no[-1] else '\n')
 
 
             # Reset to first frame
@@ -1727,9 +1733,9 @@ class ASTRA:
 
         # 1. correct using dark, flat, gamma
         if self.dark is not None:
-            corr_frame = Image.applyDark(frame.T, self.dark)
+            corr_frame = Image.applyDark(frame.T, self.dark).T
         if self.flat_struct is not None:
-            corr_frame = Image.applyFlat(corr_frame, self.flat_struct)
+            corr_frame = Image.applyFlat(corr_frame.T, self.flat_struct).T
         if self.dark is not None or self.flat_struct is not None:
             corr_frame = Image.gammaCorrectionImage(corr_frame, self.skyfit_config.gamma,
                                                     bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
@@ -1738,11 +1744,37 @@ class ASTRA:
                                                     bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
         
         # 2. Background subtraction
-        sub_frame = corr_frame.T - self.corrected_avepixel
+        sub_frame = corr_frame - self.corrected_avepixel
         sub_frame = np.clip(sub_frame, 0, None)
 
         # 3. Star masking
         final_frame = np.ma.masked_array(sub_frame, mask=self.star_mask)
+
+
+        # # Plot the frame, corrected frame, sub frame, and the final frame on a 2x2 grid
+        # matplotlib.use('Agg')
+        # fig, axs = plt.subplots(2, 3, figsize=(10, 10))
+        # axs[0, 0].imshow(frame, cmap='gray', vmin=np.percentile(frame, 10), vmax=np.percentile(frame, 99))
+        # axs[0, 0].set_title('Original Frame')
+        # axs[0, 1].imshow(corr_frame, cmap='gray', vmin=np.percentile(corr_frame, 10), vmax=np.percentile(corr_frame, 99))
+        # axs[0, 1].set_title('Corrected Frame')
+        # axs[1, 0].imshow(sub_frame, cmap='gray', vmin=np.percentile(sub_frame, 10), vmax=np.percentile(sub_frame, 99))
+        # axs[1, 0].set_title('Background Subtracted Frame')
+        # axs[1, 1].imshow(final_frame, cmap='gray', vmin=np.percentile(final_frame, 10), vmax=np.percentile(final_frame, 99))
+        # axs[1, 1].set_title('Final Frame with Star Mask')
+        # axs[0, 2].imshow(self.corrected_avepixel, cmap='gray', vmin=np.percentile(self.corrected_avepixel, 10), vmax=np.percentile(self.corrected_avepixel, 99))
+        # axs[0, 2].set_title('Corrected Average Pixel')
+        # star_mask_display = np.ma.masked_array(np.zeros_like(self.star_mask), mask=~self.star_mask)
+        # axs[1, 2].imshow(star_mask_display, cmap='gray', vmin=0, vmax=1)
+        # axs[1, 2].set_title('Star Mask')
+
+        # print(self.star_mask, np.max(self.star_mask), np.min(self.star_mask))
+
+        # plt.tight_layout()
+        # import hashlib
+        # hash_name = hashlib.md5(str(frame).encode('utf-8')).hexdigest()
+        # plt.savefig(os.path.join(self.data_path, f'frame_correction_steps_{hash_name}.png'), dpi=300)
+        # plt.close()
 
         return final_frame
 
