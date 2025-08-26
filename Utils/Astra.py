@@ -26,7 +26,6 @@ except Exception as e:
     print(f'ASTRA cannot be run, pyswarms not installed: {e}')
 
 
-
 class ASTRA:
 
     def __init__(self, img_obj, picks, pick_frame_indices, first_pick_global_index, times, astra_config,
@@ -131,7 +130,7 @@ class ASTRA:
         max_length_coeff = float(self.astra_config.get('astra', {}).get('L_max', 1.5))
         if self.astra_config.get('astra', {}).get('pick_offset') == "leading-edge":
             self.pick_offset = 3
-        elif self.astra_config.get('astra', {}).get('pick_offset') == "middle":
+        elif self.astra_config.get('astra', {}).get('pick_offset') == "center":
             self.pick_offset = 0
         else:
             self.pick_offset = float(self.astra_config.get('astra', {}).get('pick_offset', 3))
@@ -283,9 +282,9 @@ class ASTRA:
         try:
             # Load background using RMS
             fake_ff_obj = self.img_obj.loadChunk()
-            avepixel_background = fake_ff_obj.avepixel
+            avepixel_background = fake_ff_obj.avepixel.T.astype(np.float32)
 
-            # Correct avepixel_background
+            # # Correct avepixel_background
             if self.dark is not None:
                 corrected_avepixel = Image.applyDark(avepixel_background, self.dark)
 
@@ -302,20 +301,22 @@ class ASTRA:
             
             self.corrected_avepixel = np.clip(corrected_avepixel, 0, None)
 
+            self.corrected_avepixel = corrected_avepixel.T
+
         except Exception as e:
             raise Exception(f"Error loading background or subtracting frames: {e}")
         
         # 2) -- Star Masking --
 
         # Calculate std of background
-        background_std = np.std(corrected_avepixel)
-        background_mean = np.median(corrected_avepixel)
+        background_std = np.std(self.corrected_avepixel)
+        background_mean = np.median(self.corrected_avepixel)
 
         # Calculate the masking threshold
         threshold = background_mean + self.BACKGROUND_STD_THRESHOLD * background_std
 
         # Mask values exceeding the threshold
-        self.star_mask = np.ma.MaskedArray(corrected_avepixel > threshold)        
+        self.star_mask = np.ma.MaskedArray(self.corrected_avepixel > threshold)        
 
 
     def cropAllMeteorFrames(self):
@@ -1667,7 +1668,7 @@ class ASTRA:
             frames, raw_frames = [], []
             for fr in fr_no:
                 # Load frame
-                frame = self.img_obj.loadFrame(fr_no=fr)
+                frame = self.img_obj.loadFrame(fr_no=fr).astype(np.float32)
 
                 # Store raw frame if include_raw
                 raw_frame = copy.deepcopy(frame) if include_raw else None
@@ -1689,7 +1690,7 @@ class ASTRA:
                 return frames
         # Operate on a single frame
         else:
-            frame = self.img_obj.loadFrame(fr_no=fr_no)
+            frame = self.img_obj.loadFrame(fr_no=fr_no).astype(np.float32)
 
             # Store raw frame if include_raw
             raw_frame = copy.deepcopy(frame) if include_raw else None
@@ -1712,7 +1713,7 @@ class ASTRA:
 
         # 1. correct using dark, flat, gamma
         if self.dark is not None:
-            corr_frame = Image.applyDark(frame, self.dark)
+            corr_frame = Image.applyDark(frame.T, self.dark)
         if self.flat_struct is not None:
             corr_frame = Image.applyFlat(corr_frame, self.flat_struct)
         if self.dark is not None or self.flat_struct is not None:
@@ -1723,7 +1724,8 @@ class ASTRA:
                                                     bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
         
         # 2. Background subtraction
-        sub_frame = np.clip((corr_frame - self.corrected_avepixel), 0, None)
+        sub_frame = corr_frame.T - self.corrected_avepixel
+        sub_frame = np.clip(sub_frame, 0, None)
 
         # 3. Star masking
         final_frame = np.ma.masked_array(sub_frame, mask=self.star_mask)

@@ -7724,7 +7724,10 @@ if ASTRA_IMPORTED:
                 def _is_bool_like(val: str) -> bool:
                     return isinstance(val, str) and val.strip().lower() in ("true", "false")
 
-                for idx, (key, default) in enumerate(defaults.items()):
+                row = 0
+                col = 0
+
+                for key, default in defaults.items():
                     key_html = toHTMLMath(key)
                     label = QLabel(key_html.replace('</span></body></html>', ':</span></body></html>'))
 
@@ -7734,25 +7737,84 @@ if ASTRA_IMPORTED:
                     if tt_html:
                         label.setToolTip(tt_html)
 
-                    # >>> create the right editor
-                    if _is_bool_like(default):
-                        field = QComboBox()
-                        field.addItems(["True", "False"])
-                        # set initial selection based on the default
-                        field.setCurrentText("True" if str(default).strip().lower() == "true" else "False")
+                    # --- Special handling for pick_offset ---
+                    if key == "pick_offset":
+                        # Dropdown: center, leading-edge, custom
+                        combo = QComboBox()
+                        combo.addItems(["center", "leading-edge", "custom"])
+                        # default may be "leading-edge" or "center" or a float-like string
+                        # If default is float-like -> select "custom" and show that value
+                        def _is_floatlike(s):
+                            try:
+                                float(str(s))
+                                return True
+                            except Exception:
+                                return False
+
+                        custom_edit = QLineEdit()
+                        custom_edit.setPlaceholderText("e.g. 0.25")
+                        if str(default) in ("center", "leading-edge"):
+                            combo.setCurrentText(str(default))
+                            custom_edit.setEnabled(False)
+                            custom_edit.setText("")
+                        elif _is_floatlike(default):
+                            combo.setCurrentText("custom")
+                            custom_edit.setEnabled(True)
+                            custom_edit.setText(str(default))
+                        else:
+                            # Fallback
+                            combo.setCurrentText("leading-edge")
+                            custom_edit.setEnabled(False)
+                            custom_edit.setText("")
+
+                        if tt_html:
+                            combo.setToolTip(tt_html)
+                            custom_edit.setToolTip(tt_html)
+
+                        # Toggle custom field
+                        def _on_pick_offset_changed(text):
+                            custom_edit.setEnabled(text == "custom")
+
+                        combo.currentTextChanged.connect(_on_pick_offset_changed)
+
+                        # Place widgets
+                        layout.addWidget(label, row, col)
+                        # Put combo and edit in a small horizontal layout
+                        h = QHBoxLayout()
+                        h.addWidget(combo, 1)
+                        h.addWidget(custom_edit, 1)
+                        layout.addLayout(h, row, col + 1)
+
+                        # Store references (two entries for later resolution)
+                        field_dict["pick_offset_mode"] = combo
+                        field_dict["pick_offset_custom"] = custom_edit
+
                     else:
-                        field = QLineEdit(default)
+                        # --- default behavior for everything else ---
+                        if _is_bool_like(default):
+                            field = QComboBox()
+                            field.addItems(["True", "False"])
+                            field.setCurrentText("True" if str(default).strip().lower() == "true" else "False")
+                        else:
+                            field = QLineEdit(default)
 
-                    if tt_html:
-                        field.setToolTip(tt_html)
+                        if tt_html:
+                            field.setToolTip(tt_html)
 
-                    layout.addWidget(label, idx // 2, (idx % 2) * 2)
-                    layout.addWidget(field, idx // 2, (idx % 2) * 2 + 1)
-                    field_dict[key] = field
+                        layout.addWidget(label, row, col)
+                        layout.addWidget(field, row, col + 1)
+                        field_dict[key] = field
+
+                    # advance grid position (2 columns per row)
+                    if col == 0:
+                        col = 2
+                    else:
+                        col = 0
+                        row += 1
 
                 group.setLayout(layout)
                 return group
-
+            
             # === PSO Settings ===
             self.pso_fields = {}
             pso_defaults = {
@@ -7800,8 +7862,8 @@ if ASTRA_IMPORTED:
                 "photom_thresh": "Luminosity threshold for photometry pixels (fraction of peak).",
                 "Verbose": "Verbose console logging (True/False).",
                 "Save Animation" : "Save animation showing fit, crop, and residuals for each frame.",
-                "pick_offset" : "['leading-edge', 'middle', <custom float>] : Multiples of fitted length (STD) to place leading edge from center pick"
-            }
+                "pick_offset" : "Pick position relative to the Gaussian center along the streak axis. Options: 'center', 'leading-edge', or a custom float (multiples of length STD)."
+            }   
 
             KALMAN_TT = {
                 "Monotonicity": "Enforce monotonic motion along dominant axis (True/False).",
@@ -7959,11 +8021,34 @@ if ASTRA_IMPORTED:
                 # QComboBox has currentText(); QLineEdit has text()
                 return w.currentText() if hasattr(w, "currentText") else w.text()
 
+            # PSO and Kalman straight-through
+            pso = {k: _value_of(v) for k, v in self.pso_fields.items()}
+            kalman = {k: _value_of(v) for k, v in self.kalman_fields.items()}
+
+            # ASTRA: handle pick_offset specially
+            astra = {}
+            for k, v in self.astra_fields.items():
+                if k not in ("pick_offset_mode", "pick_offset_custom"):
+                    astra[k] = _value_of(v)
+
+            # Resolve pick_offset final value
+            if "pick_offset_mode" in self.astra_fields and "pick_offset_custom" in self.astra_fields:
+                mode = self.astra_fields["pick_offset_mode"].currentText()
+                if mode == "custom":
+                    custom_val = self.astra_fields["pick_offset_custom"].text().strip()
+                    # Store the FLOAT STRING itself, NOT the word 'custom'
+                    astra["pick_offset"] = custom_val
+                else:
+                    astra["pick_offset"] = mode
+            else:
+                # Backward-compat fallback
+                astra["pick_offset"] = _value_of(self.astra_fields.get("pick_offset", QLineEdit("leading-edge")))
+
             self.config = {
                 "file_path": self.selected_file_label.text(),
-                "pso":   {k: _value_of(v) for k, v in self.pso_fields.items()},
-                "astra": {k: _value_of(v) for k, v in self.astra_fields.items()},
-                "kalman":{k: _value_of(v) for k, v in self.kalman_fields.items()},
+                "pso":   pso,
+                "astra": astra,
+                "kalman": kalman,
             }
 
         def getConfig(self):
@@ -8053,9 +8138,10 @@ if ASTRA_IMPORTED:
                 "star_thresh": (0, None, float), "min SNR": (0, None, float),
                 "P_crop": (0, None, float), "sigma_init (px)": (0.1, None, float), "sigma_max": (1, None, float),
                 "L_max": (1, None, float), "Verbose": (True, False, bool), "photom_thresh": (0, 1, float),
-                "Save Animation": (True, False, bool), "pick_offset": (["leading-edge", "middle", "custom"], None, str)
+                "Save Animation": (True, False, bool),
+                # NOTE: only 'center' and 'leading-edge' are valid literals; 'custom' is resolved to a float string at store time
+                "pick_offset": (["center", "leading-edge"], None, str)
             }
-
             kalman_ranges_and_types = {
                 "Monotonicity": (True, False, bool), "sigma_xy (px)": (0, None, float), 
                 "sigma_vxy (%)": (0, None, float), "save results": (True, False, bool)
@@ -8083,11 +8169,14 @@ if ASTRA_IMPORTED:
             # Check ASTRA parameters
             for param, (min_val, max_val, param_type) in astra_ranges_and_types.items():
                 value_str = config["astra"].get(param, "")
-                try:    
+                try:
                     if param == "pick_offset":
-                        value = value_str
-                        if value not in ["leading-edge", "middle"] and self.checkFloat(value) is False:
-                            errors[f"astra.{param}"] = f"{param} must be one of ['leading-edge', 'middle', 'custom'], got {value_str}"
+                        value = value_str.strip()
+                        # Allow literals or a float
+                        if value not in ["center", "leading-edge"] and self.checkFloat(value) is False:
+                            errors[f"astra.{param}"] = (
+                                f"{param} must be 'center', 'leading-edge', or a float; got {value_str}"
+                            )
                     elif param_type == bool:
                         value = value_str.strip().lower() == "true"
                         if value not in [True, False]:
