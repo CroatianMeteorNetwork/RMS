@@ -4005,7 +4005,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         if self.astra_config_params is not None:
                             self.astra_dialog.setConfig(self.astra_config_params)
                     
-                    # If the dialog already exists, just show it
+                    # If the dialog already exists, close it
                     else:
                         self.astra_config_params = self.astra_dialog.getConfig()
                         self.astra_dialog.close()
@@ -4041,6 +4041,9 @@ class PlateTool(QtWidgets.QMainWindow):
             run_load_callback=self.loadPicksFromFile,
             skyfit_instance=self
         )
+
+        if self.astra_config_params is not None:
+            self.astra_dialog.setConfig(self.astra_config_params)
 
         self.checkASTRACanRun()
         self.checkPickRevertCanRun()
@@ -7637,9 +7640,31 @@ if ASTRA_IMPORTED:
         """
 
         def __init__(self, run_load_callback=None, run_astra_callback=None, run_kalman_callback=None, 
-                    skyfit_instance=None, parent=None):
+                    skyfit_instance=None, parent=None, on_close_callback=None):
 
             super().__init__(parent)
+
+            # Allow ASTRA to be minimized
+            self.setWindowFlag(QtCore.Qt.Window, True)
+            self.setWindowFlag(QtCore.Qt.WindowSystemMenuHint, True)
+            self.setWindowFlag(QtCore.Qt.WindowMinimizeButtonHint, True)
+            self.setWindowFlag(QtCore.Qt.WindowMaximizeButtonHint, True)
+            self.setWindowFlag(QtCore.Qt.WindowCloseButtonHint, True)
+            self.setWindowFlags(
+                QtCore.Qt.Window
+                | QtCore.Qt.WindowSystemMenuHint
+                | QtCore.Qt.WindowMinimizeButtonHint
+                | QtCore.Qt.WindowMaximizeButtonHint
+                | QtCore.Qt.WindowCloseButtonHint
+            )
+            self.setWindowModality(QtCore.Qt.NonModal)
+
+            # Make ASTRAGUI close gracefully
+            self.on_close_callback = on_close_callback
+            self.thread = None
+            self.worker = None
+            self.kalman_worker = None
+
             self.setWindowTitle("ASTRA Configuration")
             self.setMinimumWidth(900)
             self.config = {}
@@ -7716,13 +7741,30 @@ if ASTRA_IMPORTED:
 
                 return t
 
-            def addGridFields(field_dict, defaults, title, tooltips=None):
+            def addGridFields(field_dict, defaults, title, tooltips=None, on_change=False):
                 group = QGroupBox(title)
                 layout = QGridLayout()
                 tts = tooltips or {}
 
                 def _is_bool_like(val: str) -> bool:
                     return isinstance(val, str) and val.strip().lower() in ("true", "false")
+
+                # helper to connect widget change -> on_change() if provided
+                def _wire_change(widget, kind="auto"):
+                    if not callable(on_change):
+                        return
+                    try:
+                        if isinstance(widget, QLineEdit):
+                            widget.textChanged.connect(lambda *_: on_change())
+                        elif isinstance(widget, QComboBox):
+                            # use currentTextChanged so we react to programmatic + user changes
+                            widget.currentTextChanged.connect(lambda *_: on_change())
+                        else:
+                            # fallback: try generic signals if needed
+                            if hasattr(widget, "editingFinished"):
+                                widget.editingFinished.connect(lambda *_: on_change())
+                    except Exception:
+                        pass
 
                 row = 0
                 col = 0
@@ -7742,8 +7784,7 @@ if ASTRA_IMPORTED:
                         # Dropdown: center, leading-edge, custom
                         combo = QComboBox()
                         combo.addItems(["center", "leading-edge", "custom"])
-                        # default may be "leading-edge" or "center" or a float-like string
-                        # If default is float-like -> select "custom" and show that value
+
                         def _is_floatlike(s):
                             try:
                                 float(str(s))
@@ -7753,6 +7794,7 @@ if ASTRA_IMPORTED:
 
                         custom_edit = QLineEdit()
                         custom_edit.setPlaceholderText("e.g. 0.25")
+
                         if str(default) in ("center", "leading-edge"):
                             combo.setCurrentText(str(default))
                             custom_edit.setEnabled(False)
@@ -7762,7 +7804,6 @@ if ASTRA_IMPORTED:
                             custom_edit.setEnabled(True)
                             custom_edit.setText(str(default))
                         else:
-                            # Fallback
                             combo.setCurrentText("leading-edge")
                             custom_edit.setEnabled(False)
                             custom_edit.setText("")
@@ -7774,20 +7815,28 @@ if ASTRA_IMPORTED:
                         # Toggle custom field
                         def _on_pick_offset_changed(text):
                             custom_edit.setEnabled(text == "custom")
+                            # also notify about change
+                            if callable(on_change):
+                                on_change()
 
                         combo.currentTextChanged.connect(_on_pick_offset_changed)
 
                         # Place widgets
                         layout.addWidget(label, row, col)
-                        # Put combo and edit in a small horizontal layout
                         h = QHBoxLayout()
                         h.addWidget(combo, 1)
                         h.addWidget(custom_edit, 1)
-                        layout.addLayout(h, row, col + 1)
+                        container = QWidget()       
+                        container.setLayout(h)      
+                        layout.addWidget(container, row, col + 1)
 
                         # Store references (two entries for later resolution)
                         field_dict["pick_offset_mode"] = combo
                         field_dict["pick_offset_custom"] = custom_edit
+
+                        # Wire change notifications
+                        _wire_change(combo)
+                        _wire_change(custom_edit)
 
                     else:
                         # --- default behavior for everything else ---
@@ -7805,6 +7854,9 @@ if ASTRA_IMPORTED:
                         layout.addWidget(field, row, col + 1)
                         field_dict[key] = field
 
+                        # Wire change notifications
+                        _wire_change(field)
+
                     # advance grid position (2 columns per row)
                     if col == 0:
                         col = 2
@@ -7813,8 +7865,8 @@ if ASTRA_IMPORTED:
                         row += 1
 
                 group.setLayout(layout)
-                return group
-            
+                return group  # Return the group widget directly
+
             # === PSO Settings ===
             self.pso_fields = {}
             pso_defaults = {
@@ -7841,7 +7893,7 @@ if ASTRA_IMPORTED:
             # === PARAMETER GUIDE ===
             PSO_TT = {
                 "w (0-1)": "PSO particle inertia. Higher = more exploration.",
-                "c_1 (0-1)": "Cognitive weight (pull to particle’s best).",
+                "c_1 (0-1)": "Cognitive weight (pull to particle's best).",
                 "c_2 (0-1)": "Social weight (pull to global best).",
                 "max itter": "Maximum PSO iterations.",
                 "n_particles": "Number of PSO particles.",
@@ -7873,13 +7925,13 @@ if ASTRA_IMPORTED:
             }
 
             main_layout.addWidget(
-                addGridFields(self.pso_fields, pso_defaults, "PSO PARAMETER SETTINGS", PSO_TT)
+                addGridFields(self.pso_fields, pso_defaults, "PSO PARAMETER SETTINGS", PSO_TT, on_change=self.storeConfig)
             )
             main_layout.addWidget(
-                addGridFields(self.astra_fields, astra_defaults, "ASTRA PARAMETER SETTINGS", ASTRA_TT)
+                addGridFields(self.astra_fields, astra_defaults, "ASTRA PARAMETER SETTINGS", ASTRA_TT, on_change=self.storeConfig)
             )
             main_layout.addWidget(
-                addGridFields(self.kalman_fields, kalman_defaults, "KALMAN FILTER SETTINGS", KALMAN_TT)
+                addGridFields(self.kalman_fields, kalman_defaults, "KALMAN FILTER SETTINGS", KALMAN_TT, on_change=self.storeConfig)
             )
 
             # === Progress Bar ===
@@ -7894,7 +7946,7 @@ if ASTRA_IMPORTED:
             # ASTRA status label and dot
             self.astra_status_label = QLabel("ASTRA:")
             self.astra_status_dot = QLabel()
-            
+
             # Kalman status label and dot
             self.kalman_status_label = QLabel("KALMAN:")
             self.kalman_status_dot = QLabel()
@@ -7927,7 +7979,6 @@ if ASTRA_IMPORTED:
             revert_layout.addWidget(self.set_prev_picks_button)
             main_layout.addLayout(revert_layout)
 
-
             # Now that buttons exist, set initial status
             self.setASTRAStatus(False)  # Default to not ready (red)
             self.setKalmanStatus(False)  # Default to not ready (red)
@@ -7936,7 +7987,77 @@ if ASTRA_IMPORTED:
             self.setLayout(main_layout)
 
         def setConfig(self, config):
+            """
+            Updates the configuration and sets all UI elements to match the new config values.
+            
+            Args:
+                config (dict): Configuration dictionary with pso, astra, and kalman settings
+            """
             self.config = config
+            
+            # Update file path if provided
+            if "file_path" in config and config["file_path"]:
+                self.selected_file_label.setText(config["file_path"])
+            
+            # Update PSO fields
+            if "pso" in config:
+                for key, value in config["pso"].items():
+                    if key in self.pso_fields:
+                        if hasattr(self.pso_fields[key], "setCurrentText"):
+                            self.pso_fields[key].setCurrentText(str(value))
+                        else:
+                            self.pso_fields[key].setText(str(value))
+            
+            # Update ASTRA fields, handling pick_offset specially
+            if "astra" in config:
+                for key, value in config["astra"].items():
+                    # Skip special pick_offset handling for now
+                    if key == "pick_offset":
+                        continue
+                    
+                    if key in self.astra_fields:
+                        if hasattr(self.astra_fields[key], "setCurrentText"):
+                            self.astra_fields[key].setCurrentText(str(value))
+                        else:
+                            self.astra_fields[key].setText(str(value))
+                
+                # Special handling for pick_offset
+                if "pick_offset" in config["astra"]:
+                    pick_offset = config["astra"]["pick_offset"]
+                    
+                    # Check if we have the mode + custom fields
+                    if "pick_offset_mode" in self.astra_fields and "pick_offset_custom" in self.astra_fields:
+                        # If pick_offset is "center" or "leading-edge", set mode and clear custom
+                        if pick_offset in ["center", "leading-edge"]:
+                            self.astra_fields["pick_offset_mode"].setCurrentText(pick_offset)
+                            self.astra_fields["pick_offset_custom"].setText("")
+                            self.astra_fields["pick_offset_custom"].setEnabled(False)
+                        # Otherwise it's a custom value
+                        else:
+                            self.astra_fields["pick_offset_mode"].setCurrentText("custom")
+                            self.astra_fields["pick_offset_custom"].setText(str(pick_offset))
+                            self.astra_fields["pick_offset_custom"].setEnabled(True)
+                    # Fallback for backward compatibility
+                    elif "pick_offset" in self.astra_fields:
+                        if hasattr(self.astra_fields["pick_offset"], "setCurrentText"):
+                            self.astra_fields["pick_offset"].setCurrentText(str(pick_offset))
+                        else:
+                            self.astra_fields["pick_offset"].setText(str(pick_offset))
+            
+            # Update Kalman fields
+            if "kalman" in config:
+                for key, value in config["kalman"].items():
+                    if key in self.kalman_fields:
+                        if hasattr(self.kalman_fields[key], "setCurrentText"):
+                            self.kalman_fields[key].setCurrentText(str(value))
+                        else:
+                            self.kalman_fields[key].setText(str(value))
+            
+            # Refresh readiness indicators
+            if hasattr(self.skyfit_instance, "checkASTRACanRun"):
+                self.skyfit_instance.checkASTRACanRun()
+            if hasattr(self.skyfit_instance, "checkKalmanCanRun"):
+                self.skyfit_instance.checkKalmanCanRun()
 
         def selectFile(self):
             """Opens dialog to select ECSV/txt file"""
@@ -7951,6 +8072,65 @@ if ASTRA_IMPORTED:
                 self.storeConfig()
                 if self.load_picks_callback:
                     self.load_picks_callback(self.config)
+
+        def _stopAstraWorker(self, hard_kill_timeout_ms=3000):
+            """Try to stop Astra worker gracefully; escalate if needed."""
+            if hasattr(self, "thread") and self.thread and self.thread.isRunning():
+                try:
+                    if hasattr(self, "worker") and self.worker:
+                        # cooperative stop request
+                        if hasattr(self.worker, "stop"):
+                            self.worker.stop()
+                    # ask the thread to finish its event loop
+                    self.thread.requestInterruption()
+                    self.thread.quit()
+                    if not self.thread.wait(hard_kill_timeout_ms):
+                        # last resort (unsafe): terminate
+                        self.thread.terminate()
+                        self.thread.wait(1000)
+                except Exception:
+                    pass  # don't block close on errors
+
+        def _stopKalmanWorker(self, hard_kill_timeout_ms=3000):
+            if hasattr(self, "kalman_worker") and self.kalman_worker and self.kalman_worker.isRunning():
+                try:
+                    # cooperative stop
+                    if hasattr(self.kalman_worker, "stop"):
+                        self.kalman_worker.stop()
+                    self.kalman_worker.requestInterruption()
+                    self.kalman_worker.quit()
+                    self.kalman_worker.wait(hard_kill_timeout_ms)
+                except Exception:
+                    pass
+
+        def _handleClose(self):
+            # Stop background work
+            self._stopKalmanWorker()
+            self._stopAstraWorker()
+
+            # Fire optional close callback
+            if callable(self.on_close_callback):
+                try:
+                    self.on_close_callback()
+                except Exception:
+                    pass
+
+        def closeEvent(self, event):
+            self._is_closing = True
+            # if you clear the handle on the parent, do it before finished signals run:
+            if self.skyfit_instance is not None and getattr(self.skyfit_instance, "astra_dialog", None) is self:
+                self.skyfit_instance.astra_dialog = None
+
+            print("Closed ASTRA GUI - Aborting all threaded processes")
+            # stop workers (your existing stop logic here)
+            self._stopKalmanWorker()
+            self._stopAstraWorker()
+            super().closeEvent(event)
+
+        def reject(self):
+            # Triggered by ESC / window manager close as well
+            self._handleClose()
+            super().reject()
 
         def setRevertStatus(self, ready):
             """
@@ -8051,6 +8231,10 @@ if ASTRA_IMPORTED:
                 "kalman": kalman,
             }
 
+            # Store config in parent in case of close
+            self.skyfit_instance.astra_config_params = self.config
+
+
         def getConfig(self):
             """Returns the ASTRA config object."""
             self.storeConfig()
@@ -8095,13 +8279,24 @@ if ASTRA_IMPORTED:
             
 
             # Restore interactivity
-            self.worker.finished.connect(lambda: self.file_picker_button.setEnabled(True))
+            self.worker.finished.connect(lambda: (not getattr(self, "_is_closing", False)) and self.file_picker_button.setEnabled(True))
 
-            # Restore interactivity if ASTRA/Kalman can run
-            self.worker.finished.connect(lambda: self.skyfit_instance.checkASTRACanRun())
-            self.worker.finished.connect(lambda: self.skyfit_instance.checkKalmanCanRun())
-            self.worker.finished.connect(lambda: self.skyfit_instance.checkPickRevertCanRun())
-
+            # Only call parent checks if THIS dialog is still the active one
+            self.worker.finished.connect(lambda:
+                (self.skyfit_instance is not None)
+                and (getattr(self.skyfit_instance, "astra_dialog", None) is self)
+                and self.skyfit_instance.checkASTRACanRun()
+            )
+            self.worker.finished.connect(lambda:
+                (self.skyfit_instance is not None)
+                and (getattr(self.skyfit_instance, "astra_dialog", None) is self)
+                and self.skyfit_instance.checkKalmanCanRun()
+            )
+            self.worker.finished.connect(lambda:
+                (self.skyfit_instance is not None)
+                and (getattr(self.skyfit_instance, "astra_dialog", None) is self)
+                and self.skyfit_instance.checkPickRevertCanRun()
+            )
 
             self.thread.start()
 
@@ -8231,17 +8426,29 @@ if ASTRA_IMPORTED:
             self.kalman_worker.progress.connect(self.updateProgress)
 
             # Restore interactivity
-            self.kalman_worker.finished.connect(lambda: self.file_picker_button.setEnabled(True))
+            self.kalman_worker.finished.connect(lambda: (not getattr(self, "_is_closing", False)) and self.file_picker_button.setEnabled(True))
 
-            # Restore interactivity if ASTRA/Kalman can run
-            self.kalman_worker.finished.connect(lambda: self.skyfit_instance.checkASTRACanRun())
-            self.kalman_worker.finished.connect(lambda: self.skyfit_instance.checkKalmanCanRun())
-            self.kalman_worker.finished.connect(lambda: self.skyfit_instance.checkPickRevertCanRun())
-            self.kalman_worker.finished.connect(lambda: self.updateProgress(100))
-            self.kalman_worker.start()
+            self.kalman_worker.finished.connect(lambda:
+                (self.skyfit_instance is not None)
+                and (getattr(self.skyfit_instance, "astra_dialog", None) is self)
+                and self.skyfit_instance.checkASTRACanRun()
+            )
+            self.kalman_worker.finished.connect(lambda:
+                (self.skyfit_instance is not None)
+                and (getattr(self.skyfit_instance, "astra_dialog", None) is self)
+                and self.skyfit_instance.checkKalmanCanRun()
+            )
+            self.kalman_worker.finished.connect(lambda:
+                (self.skyfit_instance is not None)
+                and (getattr(self.skyfit_instance, "astra_dialog", None) is self)
+                and self.skyfit_instance.checkPickRevertCanRun()
+            )
+
+            self.kalman_worker.finished.connect(lambda: (not getattr(self, "_is_closing", False)) and self.updateProgress(100))
+
+            self.kalman_worker.start()  
 
     class KalmanWorker(QThread):
-        """Worker thread for running Kalman filter."""
         progress = pyqtSignal(int)
         finished = pyqtSignal()
 
@@ -8249,13 +8456,30 @@ if ASTRA_IMPORTED:
             super().__init__()
             self.skyfit_instance = skyfit_instance
             self.config = config
+            self._stop = False
+
+        def stop(self):
+            self._stop = True
+
+        def _progress_guard(self, value):
+            if self._stop or self.isInterruptionRequested():
+                raise RuntimeError("Kalman aborted by user")
+            self.progress.emit(value)
 
         def run(self):
-            self.skyfit_instance.runKalmanFromConfig(self.config, progress_callback=self.progress.emit)
-            self.finished.emit()
+            try:
+                if self._stop or self.isInterruptionRequested():
+                    self.finished.emit()
+                    return
+                self.skyfit_instance.runKalmanFromConfig(
+                    self.config, progress_callback=self._progress_guard
+                )
+            except Exception:
+                pass
+            finally:
+                self.finished.emit()
 
     class AstraWorker(QObject):
-        """Worker thread for running ASTRA."""
         finished = pyqtSignal()
         progress = pyqtSignal(int)
         results_ready = pyqtSignal(object)
@@ -8264,34 +8488,62 @@ if ASTRA_IMPORTED:
             super().__init__()
             self.config = config
             self.skyfit_instance = skyfit_instance
+            self._stop = False
+
+        def stop(self):
+            self._stop = True
+
+        def _progress_guard(self, value):
+            # Called by ASTRA during processing
+            if self._stop:
+                raise RuntimeError("ASTRA aborted by user")
+            self.progress.emit(value)
 
         def run(self):
-            # Prepare data
-            data_dict = self.skyfit_instance.prepareASTRAData(self.config)
+            try:
+                # Optional early exit
+                if self._stop:
+                    self.finished.emit()
+                    return
 
-            if data_dict is False:
+                # Prepare data
+                data_dict = self.skyfit_instance.prepareASTRAData(self.config)
+                if data_dict is False or self._stop:
+                    self.finished.emit()
+                    return
+
+                # Import here to avoid circular import at module load time
+                from Utils.Astra import ASTRA
+
+                # Run ASTRA; pass our guard so we can interrupt mid-flight
+                astra = ASTRA(**data_dict, progress_callback=self._progress_guard)
+                if self._stop:
+                    self.finished.emit()
+                    return
+
+                astra.process()  # may call _progress_guard repeatedly
+
+                if not self._stop:
+                    self.results_ready.emit(astra)
+            except Exception as e:
+                # Swallow aborts; you could log 'e' if desired
+                pass
+            finally:
                 self.finished.emit()
-                return
-
-            # Run ASTRA here, directly in worker
-            astra = ASTRA(**data_dict, progress_callback=self.progress.emit)
-            astra.process()
-
-            # Handle results via callback
-            self.results_ready.emit(astra)
-            self.finished.emit()
 
     def launchASTRAGUI(run_astra_callback=None,
                         run_kalman_callback=None,
                         run_load_callback=None,
                         parent=None,
-                        skyfit_instance=None):
+                        skyfit_instance=None,
+                        on_close_callback=None):
         dialog = AstraConfigDialog(
             run_astra_callback=run_astra_callback,
             run_kalman_callback=run_kalman_callback,
             run_load_callback=run_load_callback,
             parent=parent,
-            skyfit_instance=skyfit_instance
+            skyfit_instance=skyfit_instance,
+            on_close_callback=on_close_callback
         )
         dialog.show()
         return dialog

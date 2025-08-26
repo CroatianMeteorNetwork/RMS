@@ -218,10 +218,10 @@ class ASTRA:
             print(f'Error processing image data: {e}')
 
         # 2. Recursively crop & fit a moving gaussian across whole event
-        # try:
-        self.cropAllMeteorFrames()
-        # except Exception as e:
-        #     print(f'Error cropping and fitting meteor frames: {e}')
+        try:
+            self.cropAllMeteorFrames()
+        except Exception as e:
+            print(f'Error cropping and fitting meteor frames: {e}')
 
         # 3. Refine the moving gaussian fit by using a local optimizer
         try:
@@ -231,11 +231,11 @@ class ASTRA:
             print(f'Error refining meteor crops: {e}')
 
         # 4. Remove picks with low SNR and out-of-bounds picks, refactors into global coordinates
-        # try:
-        self.removeLowSNRPicks(self.refined_fit_params, self.fit_imgs, self.cropped_frames, 
-                                self.crop_vars, self.pick_frame_indices, self.fit_costs, self.times)
-        # except Exception as e:
-        #     print(f'Error removing low SNR picks: {e}')
+        try:
+            self.removeLowSNRPicks(self.refined_fit_params, self.fit_imgs, self.cropped_frames, 
+                                    self.crop_vars, self.pick_frame_indices, self.fit_costs, self.times)
+        except Exception as e:
+            print(f'Error removing low SNR picks: {e}')
         
         # 5. save animation
         if self.save_animation:
@@ -389,7 +389,7 @@ class ASTRA:
 
         # # 4) -- Process each seed pick to kick-start recursion --
         for i in range(len(seed_indices)):
-            print(seed_indices[i] + self.first_pick_global_index, self.estimateCenter(seed_picks_global[i], omega, init_length, directions=directions))
+
             # Crop initial frames
             self.cropped_frames[i], self.crop_vars[i] = self.cropFrameToGaussian(
                         seed_subtracted_frames[i],
@@ -2437,7 +2437,7 @@ class Dataloader:
         frame_count = sum(1 for name in os.listdir(path) if 'dump' in name)
 
         img_obj = InputTypeImages(path, config)
-        print(img_obj.loadFrame().dtype)
+
         frames = np.zeros((frame_count, *img_obj.loadFrame().shape), dtype=np.float32)
         for i in range(frame_count):
             frames[i] = img_obj.loadFrame(fr_no=i)
