@@ -1672,8 +1672,6 @@ class ASTRA:
 
             first_frame_num = self.img_obj.current_frame
 
-            print("Loading {:d} frames...".format(len(fr_no)))
-
             for fr in fr_no:
                 
                 # Load frame
@@ -1693,8 +1691,6 @@ class ASTRA:
 
                 frames.append(frame)
                 raw_frames.append(raw_frame)
-
-                print("Loading frame {:4d}/{:d}".format(fr, fr_no[-1]), end='' if fr != fr_no[-1] else '\n')
 
 
             # Reset to first frame
