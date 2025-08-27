@@ -1650,7 +1650,9 @@ def parseMeteorDetection(config, parser):
         config.min_patch_intensity_multiplier = parser.getfloat(section, "min_patch_intensity_multiplier")
 
     if parser.has_option(section, "ml_filter"):
-        config.ml_filter = parser.getfloat(section, "ml_filter")
+        # since most of the old configs have threshold 0.85, and the current model is calibrated to 0.5,
+        # we need to rescale the value here
+        config.ml_filter = parser.getfloat(section, "ml_filter") * 0.5/0.85
 
         # Disable the min_patch_intensity filter if the ML filter is used and the ML library is available
         if TFLITE_AVAILABLE and (config.ml_filter > 0):
