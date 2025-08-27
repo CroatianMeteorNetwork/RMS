@@ -602,10 +602,10 @@ class Config:
         self.min_patch_intensity_multiplier = 0.0
 
         # Filtering by machine learning
-        self.ml_filter = 0.85
+        self.ml_filter = 0.5
 
         # Path to the ML model
-        self.ml_model_path = os.path.join(self.rms_root_dir, "share", "meteorml32.tflite")
+        self.ml_model_path = os.path.join(self.rms_root_dir, "share", "hyper_model.tflite")
 
         # Detection border (in pixels) - detections too close to the border of the mask will be rejected
         self.detection_border = 5
