@@ -4196,6 +4196,8 @@ class PlateTool(QtWidgets.QMainWindow):
             print(f'Reverted picks to previous state with {len(old_picks.keys())} picks.')
         
         # Update if picks can be reverted again
+        self.checkASTRACanRun()
+        self.checkKalmanCanRun()
         self.checkPickRevertCanRun()
             
     def checkPickRevertCanRun(self):
@@ -4301,31 +4303,20 @@ class PlateTool(QtWidgets.QMainWindow):
             dtype=int
         )
 
-        # Sort pick list according to keys
-        self.pick_list = dict(sorted(self.pick_list.items()))
+        # Prepare pick_dict (keys -> frame indexes, values include x,y centroid)
 
-        # Frame indices relative to the first picked frame
-        astra_frame_indices = [fr - pick_frame_indices[0] for fr in pick_frame_indices]
-
-        ### ###
-
-
-
-        # Load times of all picks
-        times = np.array([self.img_handle.currentFrameTime(i, dt_obj=True) for i in pick_frame_indices])
+        pick_dict = {i : {
+            "x_centroid" : self.pick_list[i]['x_centroid'],
+            "y_centroid" : self.pick_list[i]['y_centroid']
+                } for i in pick_frame_indices}
 
         # Package data for ASTRA - import later using dict comprehension
         data_dict = {
             "img_obj" : self.img_handle,
-            "picks" : [[self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid']] 
-                        for key in pick_frame_indices],
-            "first_pick_global_index" : pick_frame_indices[0],
-            "pick_frame_indices" : astra_frame_indices,
-            "times" : times,
+            "pick_dict" : pick_dict,
             "astra_config" : astra_config,
-            "saturation_threshold" : self.saturation_threshold,
             "data_path" : self.dir_path,
-            "camera_config" : self.config,
+            "config" : self.config,
             "dark" : self.dark if hasattr(self, 'dark') else None,
             "flat" : self.flat_struct if hasattr(self, 'flat_struct') else None
         }
@@ -4335,16 +4326,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def integrateASTRAResults(self, astra):
         """Integrates ASTRA results into the SkyFit2 instance."""
-
-        # Instantiate vars from astra class vars
-        first_pick_global_index = astra.first_pick_global_index
-        pick_frame_indices = astra.pick_frame_indices
-        global_picks = astra.global_picks
-        snrs = astra.snr
-        astra_config = astra.astra_config
-        intensity_sums = astra.abs_level_sums
-        background_intensities = astra.background_levels
-        photometry_pixels = astra.photometry_pixels
 
         # Add previous picks to list
         if np.array(
@@ -4362,23 +4343,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Add ASTRA picks to the pick list
         self.clearAllPicks()  # Clear previous picks
-        for i in range(len(global_picks)):
-            pick = {
-                'x_centroid': global_picks[i][0],
-                'y_centroid': global_picks[i][1],
-                'mode': 1,
-                'intensity_sum': intensity_sums[i],
-                'photometry_pixels': photometry_pixels[i],
-                'background_intensity': background_intensities[i],
-                'snr': snrs[i],
-                'saturated': False,
-            }
 
-            # Assign pick to skyfit pick list
-            pick_frame = first_pick_global_index + pick_frame_indices[i]
-            self.pick_list[pick_frame] = pick
+        # Get and set pick_list from ASTRA
+        self.pick_list = astra.getResults(skyfit_format=True)
 
-            # Print added message
+        # Print added message
+        for pick_frame, pick in self.pick_list.items():
             print(f'Added centroid at ({pick["x_centroid"]}, {pick["y_centroid"]}) '
                   f'on frame {pick_frame}')
 
@@ -4393,8 +4363,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.checkPickRevertCanRun()
 
         # Print message telling ASTRA has been run
-        print(f'Loaded {len(pick_frame_indices)} Picks from ASTRA! '
-              f'Minimum SNR of {astra_config["astra"]["min SNR"]}')
+        print(f'Loaded {astra.getTotalPicks()} Picks from ASTRA! '
+              f'Minimum SNR of {astra.getMinSnr()}')
 
     def setMessageBox(self, title, message, type):
         """Target function for ASTRA_GUI to set message boxes."""
@@ -6725,7 +6695,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 crop_star_mask = star_mask[x_min:x_max, y_min:y_max]
 
                 # Add the star mask & mask_img to the avepixel mask
-                avepixel_masked = np.ma.masked_array(avepixel, mask_img)
+                avepixel_masked = np.ma.masked_array(avepixel, mask_img | star_mask)
                 avepixel_crop = avepixel_masked[x_min:x_max, y_min:y_max]
 
                 # Perform gamma correction on the avepixel crop
@@ -6737,7 +6707,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # Correct the crop_img with star_mask
                 crop_mask_img = mask_img[x_min:x_max, y_min:y_max]
-                crop_img = np.ma.masked_array(crop_img, crop_mask_img)
+                crop_img = np.ma.masked_array(crop_img, crop_mask_img | crop_star_mask)
 
                 # Replace photometry pixels that are masked by a star with the median value of the photom. area
                 photom_star_masked_indices = np.where((crop_mask_img == 0) & (crop_star_mask == 1))
@@ -8149,6 +8119,10 @@ if ASTRA_IMPORTED:
                 status_text = "READY"
                 color = "#FFC107"  # Yellow
                 enable_btn = True
+            elif ready == "PROCESSING":
+                status_text = "RUNNING"
+                color = "#2196F3"  # Blue
+                enable_btn = False
             else:
                 status_text = "READY" if ready else "NOT READY"
                 color = "#4CAF50" if ready else "#F44336"  # Green or Red
@@ -8173,6 +8147,10 @@ if ASTRA_IMPORTED:
                 status_text = "READY"
                 color = "#FFC107"  # Yellow
                 enable_btn = True
+            elif ready == "PROCESSING":
+                status_text = "RUNNING"
+                color = "#2196F3"  # Blue
+                enable_btn = False
             else:
                 status_text = "READY" if ready else "NOT READY"
                 color = "#4CAF50" if ready else "#F44336"  # Green or Red
@@ -8262,6 +8240,7 @@ if ASTRA_IMPORTED:
             self.run_kalman_btn.setEnabled(False)
             self.file_picker_button.setEnabled(False)
             self.set_prev_picks_button.setEnabled(False)
+            self.setASTRAStatus("PROCESSING", "ASTRA is running...")
 
             self.worker.progress.connect(self.updateProgress)
 
@@ -8421,6 +8400,7 @@ if ASTRA_IMPORTED:
             self.run_astra_btn.setEnabled(False)
             self.file_picker_button.setEnabled(False)
             self.set_prev_picks_button.setEnabled(False)
+            self.setASTRAStatus("PROCESSING", "ASTRA is running...")
 
             self.kalman_worker = KalmanWorker(self.skyfit_instance, self.config)
             self.kalman_worker.progress.connect(self.updateProgress)
@@ -8474,7 +8454,8 @@ if ASTRA_IMPORTED:
                 self.skyfit_instance.runKalmanFromConfig(
                     self.config, progress_callback=self._progress_guard
                 )
-            except Exception:
+            except Exception as e:
+                print(f'Error running Kalman: {e}')
                 pass
             finally:
                 self.finished.emit()
@@ -8500,36 +8481,37 @@ if ASTRA_IMPORTED:
             self.progress.emit(value)
 
         def run(self):
-            try:
-                # Optional early exit
-                if self._stop:
-                    self.finished.emit()
-                    return
-
-                # Prepare data
-                data_dict = self.skyfit_instance.prepareASTRAData(self.config)
-                if data_dict is False or self._stop:
-                    self.finished.emit()
-                    return
-
-                # Import here to avoid circular import at module load time
-                from Utils.Astra import ASTRA
-
-                # Run ASTRA; pass our guard so we can interrupt mid-flight
-                astra = ASTRA(**data_dict, progress_callback=self._progress_guard)
-                if self._stop:
-                    self.finished.emit()
-                    return
-
-                astra.process()  # may call _progress_guard repeatedly
-
-                if not self._stop:
-                    self.results_ready.emit(astra)
-            except Exception as e:
-                # Swallow aborts; you could log 'e' if desired
-                pass
-            finally:
+            # try:
+            # Optional early exit
+            if self._stop:
+                print('early exit')
                 self.finished.emit()
+                return
+
+            # Prepare data
+            data_dict = self.skyfit_instance.prepareASTRAData(self.config)
+            if data_dict is False or self._stop:
+                print('no data dict')
+                self.finished.emit()
+                return
+
+            # Run ASTRA; pass our guard so we can interrupt mid-flight
+            astra = ASTRA(**data_dict, progress_callback=self._progress_guard)
+            if self._stop:
+                print('interupted')
+                self.finished.emit()
+                return
+
+            astra.process()  # may call _progress_guard repeatedly
+
+            if not self._stop:
+                self.results_ready.emit(astra)
+            # except Exception as e:
+            #     # Swallow aborts; you could log 'e' if desired
+            #     print(f'Error running ASTRA: {e}')
+            #     pass
+            # finally:
+            #     self.finished.emit()
 
     def launchASTRAGUI(run_astra_callback=None,
                         run_kalman_callback=None,

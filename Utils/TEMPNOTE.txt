@@ -2,8 +2,24 @@ Changes before merge:
     -Implement modular (if name is main) utiliztion into ASTRA
     -Add guide.md for ASTRA in guides (Also document future improvements, and how future improvements should be implemented)
 
-    -Look into solving length over-estimation in low-SNR frames
-        -Add penalty function of STD of photometric area?
-
+    -Differing photometrey between ASTRA and Skyfit
+    -Circular import error
 
     -Make ASTRA state changing, and add access functions
+
+SNR update on frame  4: intensity sum =    47690, source px count =   253, background lvl =   699.52, background stddev =  82.04, SNR = 34.35
+SNR update on frame  5: intensity sum =    62141, source px count =   226, background lvl =   702.60, background stddev = 109.66, SNR = 36.25
+SNR update on frame  6: intensity sum =    80009, source px count =   231, background lvl =   697.26, background stddev = 102.67, SNR = 48.91
+SNR update on frame  7: intensity sum =    50744, source px count =   235, background lvl =   695.21, background stddev =  71.84, SNR = 42.48
+SNR update on frame  8: intensity sum =    22721, source px count =   189, background lvl =   693.78, background stddev =  68.78, SNR = 22.20
+SNR update on frame  9: intensity sum =     7705, source px count =   170, background lvl =   690.94, background stddev =  65.14, SNR = 8.37
+SNR update on frame 10: intensity sum =      946, source px count =   176, background lvl =   697.05, background stddev =  74.06, SNR = 0.91
+Background std and intensity sum lower
+SNR update: intensity sum =    78892, source px count =   228, background lvl =   708.00, background stddev = 106.82, SNR = 46.80
+SNR update: intensity sum =   112789, source px count =   246, background lvl =   710.00, background stddev = 115.41, SNR = 59.74
+SNR update: intensity sum =   145806, source px count =   253, background lvl =   703.00, background stddev = 113.91, SNR = 76.77
+SNR update: intensity sum =   161901, source px count =   226, background lvl =   711.00, background stddev = 145.67, SNR = 71.56
+SNR update: intensity sum =   182930, source px count =   231, background lvl =   699.00, background stddev = 147.73, SNR = 78.83
+SNR update: intensity sum =   142812, source px count =   235, background lvl =   693.00, background stddev = 117.39, SNR = 75.86
+SNR update: intensity sum =    90835, source px count =   189, background lvl =   700.00, background stddev = 108.47, SNR = 58.07
+SNR update: intensity sum =    58417, source px count =   170, background lvl =   698.00, background stddev = 110.42, SNR = 38.95

@@ -1,4 +1,3 @@
-import hashlib
 import os
 import csv
 import copy
@@ -30,8 +29,7 @@ except Exception as e:
 
 class ASTRA:
 
-    def __init__(self, img_obj, picks, pick_frame_indices, first_pick_global_index, times, astra_config,
-                 saturation_threshold, data_path, camera_config, dark, flat, progress_callback=None):
+    def __init__(self, img_obj, pick_dict, astra_config, data_path, config, dark, flat, progress_callback=None):
         """
         ASTRA: Astrometric Streak Tracking and Refinement Algorithm.
 
@@ -73,27 +71,32 @@ class ASTRA:
         """
         # -- Constants & Settings --
 
+        # Unpack calculated args
+        self.first_pick_global_index = min(pick_dict.keys())
+        self.pick_frame_indices = [fr_no - self.first_pick_global_index for fr_no in list(pick_dict.keys())]
+        self.picks = np.array([[value["x_centroid"], value["y_centroid"]] for value in pick_dict.values()])
+        self.saturation_threshold = int(round(0.98*(2**config.bit_depth - 1)))
+
+        # Unpack passed args
+        self.config = config
         self.astra_config = astra_config
+        self.data_path = data_path
+        self.dark = dark
+        self.flat_struct = flat
+        self.img_obj = img_obj
 
         # Initialize callback and set progress to 0
         self.progress_callback = progress_callback
         if self.progress_callback is not None:
             self.progress_callback(0)
 
-        # 1) Image Data Processing Constants/Settings
+        # Unpack astra_config parameters
+
+        # Image processing parameters
         self.BACKGROUND_STD_THRESHOLD = float(self.astra_config.get('astra', {}).get('star_thresh', 3))
-        self.saturation_threshold = float(saturation_threshold)
+        self.snr_threshold = float(self.astra_config.get('astra', {}).get('min SNR', 5))
 
-        # 2) PSO Constants/Settings
-        std_parameter_constraint = float(self.astra_config.get('pso', {}).get('P_sigma', 3))
-        self.std_parameter_constraint = [
-            std_parameter_constraint, # level_sum
-            std_parameter_constraint, # height / sigma_y
-            std_parameter_constraint, # x0
-            std_parameter_constraint, # y0
-            std_parameter_constraint  # length / sigma_x
-        ]
-
+        # PSO parameters
         w = float(self.astra_config.get('pso', {}).get('w (0-1)', 0.9))
         c1 = float(self.astra_config.get('pso', {}).get('c_1 (0-1)', 0.4))
         c2 = float(self.astra_config.get('pso', {}).get('c_2 (0-1)', 0.3))
@@ -106,6 +109,26 @@ class ASTRA:
         vh_strategy = self.astra_config.get('pso', {}).get('vh_strategy', 'invert')
         explorative_coeff = float(self.astra_config.get('pso', {}).get('expl_c', 3.0))
 
+        # Settings and padding coefficients for cropping
+        initial_padding_coeff = float(self.astra_config.get('astra', {}).get('P_crop', 1.5))
+        recursive_padding_coeff = float(self.astra_config.get('astra', {}).get('P_crop', 1.5))
+        init_sigma_guess = float(self.astra_config.get('astra', {}).get('sigma_init (px)', 2))
+        max_sigma_coeff = float(self.astra_config.get('astra', {}).get('sigma_max', 1.2))
+        max_length_coeff = float(self.astra_config.get('astra', {}).get('L_max', 1.5))
+        if self.astra_config.get('astra', {}).get('pick_offset') == "leading-edge":
+            self.pick_offset = 3
+        elif self.astra_config.get('astra', {}).get('pick_offset') == "center":
+            self.pick_offset = 0
+        else:
+            self.pick_offset = float(self.astra_config.get('astra', {}).get('pick_offset', 3))
+
+
+        # Boolean attributes
+        self.verbose = str(self.astra_config.get('astra', {}).get('Verbose', 'false')).lower() == 'true'
+        self.save_animation = str(self.astra_config.get('astra', {}).get('Save Animation', 'false')
+                                        ).lower() == 'true'
+
+        # Repack some astra_config parameters
         self.first_pass_settings = {
             "residuals_method": 'abs',
             "options": {
@@ -124,18 +147,16 @@ class ASTRA:
             "oob_penalty": 1e6
         }
 
-        # Settings and padding coefficients for cropping
-        initial_padding_coeff = float(self.astra_config.get('astra', {}).get('P_crop', 1.5))
-        recursive_padding_coeff = float(self.astra_config.get('astra', {}).get('P_crop', 1.5))
-        init_sigma_guess = float(self.astra_config.get('astra', {}).get('sigma_init (px)', 2))
-        max_sigma_coeff = float(self.astra_config.get('astra', {}).get('sigma_max', 1.2))
-        max_length_coeff = float(self.astra_config.get('astra', {}).get('L_max', 1.5))
-        if self.astra_config.get('astra', {}).get('pick_offset') == "leading-edge":
-            self.pick_offset = 3
-        elif self.astra_config.get('astra', {}).get('pick_offset') == "center":
-            self.pick_offset = 0
-        else:
-            self.pick_offset = float(self.astra_config.get('astra', {}).get('pick_offset', 3))
+        # 2) PSO Constants/Settings
+        std_parameter_constraint = float(self.astra_config.get('pso', {}).get('P_sigma', 3))
+        self.std_parameter_constraint = [
+            std_parameter_constraint, # level_sum
+            std_parameter_constraint, # height / sigma_y
+            std_parameter_constraint, # x0
+            std_parameter_constraint, # y0
+            std_parameter_constraint  # length / sigma_x
+        ]
+
 
         self.cropping_settings = {
             'initial_padding_coeff': initial_padding_coeff,
@@ -152,57 +173,6 @@ class ASTRA:
             "oob_penalty": 1e6,
         }
 
-        self.snr_threshold = float(self.astra_config.get('astra', {}).get('min SNR', 5))
-
-        # -- Data Attributes --
-        self.img_obj = img_obj
-        self.times = times
-        self.picks = np.array(picks)
-        self.pick_frame_indices = list(pick_frame_indices)
-        self.first_pick_global_index = first_pick_global_index
-        self.verbose = str(self.astra_config.get('astra', {}).get('Verbose', 'false')).lower() == 'true'
-        self.save_animation = str(self.astra_config.get('astra', {}).get('Save Animation', 'false')
-                                        ).lower() == 'true'
-        self.data_path = data_path
-        self.dark = dark
-        self.flat_struct = flat
-        self.skyfit_config = camera_config
-
-    def process(self):
-        """
-        Run the full ASTRA pipeline on the provided frames/picks.
-
-        Pipeline:
-            1) Preprocess frames (dark/flat correction, gamma, background subtraction,
-            star masking) via `processImageData`.
-            2) Recursively crop and fit a moving Gaussian track across frames using PSO
-            via `cropAllMeteorFrames`.
-            3) Locally refine each PSO solution with L-BFGS-B via `refineAllMeteorCrops`.
-            4) Remove low-SNR or out-of-bounds fits and convert to global coords
-            via `removeLowSNRPicks`.
-            5) Optionally save a diagnostic animation via `saveAni`.
-
-        Returns:
-            ASTRA: The same instance with the following key fields populated:
-                - avepixel_background (np.ndarray): Background model, shape (H, W).
-                - subtracted_frames (np.ma.MaskedArray): BG-subtracted & star-masked frames, shape (N, H, W).
-                - cropped_frames (list[np.ndarray]): Per-pick crops for fitting.
-                - first_pass_params (np.ndarray): PSO fit params per crop, shape (K, 5).
-                - refined_fit_params (np.ndarray): Local-refined params per crop, shape (K, 5).
-                - crop_vars (np.ndarray): Crop bookkeeping (cx, cy, xmin, xmax, ymin, ymax), shape (K, 6).
-                - global_picks (np.ndarray): Edge-aligned global picks, shape (K, 2).
-                - pick_frame_indices (np.ndarray): Frame index per kept crop, shape (K,).
-                - fit_costs (np.ndarray): Objective values per refined crop, shape (K,).
-                - times (np.ndarray): Timestamps per kept crop, shape (K,).
-                - snr (list[float]): SNR per kept crop (post filtering).
-
-        Raises:
-            Exception: If any individual stage throws; errors are caught/logged per step,
-                but uncaught exceptions will propagate.
-        """
-
-        self.mode = 'Gaussian'  # Set the mode to Gaussian for processing
-
         # Instantiate variables to store progress
         self.progressed_frames = {
             'cropping': 0,
@@ -210,46 +180,6 @@ class ASTRA:
             'removing': 0
         }
         self.total_frames = self.pick_frame_indices[-1] - self.pick_frame_indices[0]
-
-        # 1. Gets corrected background and star_mask for later corrections 
-        try:
-            self.processImageData()
-        except Exception as e:
-            print(f'Error processing image data: {e}')
-
-        # 2. Recursively crop & fit a moving gaussian across whole event
-        try:
-            self.cropAllMeteorFrames()
-        except Exception as e:
-            print(f'Error cropping and fitting meteor frames: {e}')
-
-        # 3. Refine the moving gaussian fit by using a local optimizer
-        try:
-            self.refineAllMeteorCrops(self.first_pass_params, self.cropped_frames, 
-                                      self.omega, self.directions)
-        except Exception as e:
-            print(f'Error refining meteor crops: {e}')
-
-        # 4. Remove picks with low SNR and out-of-bounds picks, refactors into global coordinates
-        try:
-            self.removeLowSNRPicks(self.refined_fit_params, self.fit_imgs, self.cropped_frames, 
-                                    self.crop_vars, self.pick_frame_indices, self.fit_costs, self.times)
-        except Exception as e:
-            print(f'Error removing low SNR picks: {e}')
-        
-        # 5. save animation
-        if self.save_animation:
-            try:
-                self.saveAni(self.data_path)
-            except Exception as e:
-                print(f'Error saving animation: {e}')
-
-        # Set progress to 100
-        self.updateProgress(100)
-
-        # 6. Return the ASTRA object for later processing/saving
-        return self
-
 
     # 1) -- Functional Methods --
 
@@ -294,15 +224,17 @@ class ASTRA:
                 corrected_avepixel = Image.applyFlat(corrected_avepixel.T, self.flat_struct).T
             
             if self.dark is not None or self.flat_struct is not None:
-                corrected_avepixel = Image.gammaCorrectionImage(corrected_avepixel, self.skyfit_config.gamma, 
-                                                            bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
+                corrected_avepixel = Image.gammaCorrectionImage(corrected_avepixel, self.config.gamma, 
+                                                            bp=0, wp=(2**self.config.bit_depth - 1))
 
             else:
-                corrected_avepixel = Image.gammaCorrectionImage(avepixel_background, self.skyfit_config.gamma, 
-                                                            bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
+                corrected_avepixel = Image.gammaCorrectionImage(avepixel_background, self.config.gamma, 
+                                                            bp=0, wp=(2**self.config.bit_depth - 1))
             
+            # Clip background to zero
             self.corrected_avepixel = np.clip(corrected_avepixel, 0, None)
 
+            # Set backgrounds as a class var
             self.corrected_avepixel = corrected_avepixel
 
         except Exception as e:
@@ -317,7 +249,7 @@ class ASTRA:
         # Calculate the masking threshold
         threshold = background_mean + self.BACKGROUND_STD_THRESHOLD * background_std
 
-        # Mask values exceeding the threshold
+        # Save star mask as a class variable
         self.star_mask = np.ma.MaskedArray(self.corrected_avepixel > threshold)        
 
 
@@ -385,6 +317,7 @@ class ASTRA:
         # (N, 6) array of crop variables (cx, cy, xmin, xmax, ymin, ymax)
         self.crop_vars = np.zeros((len(seed_indices), 6), dtype=np.float32) 
 
+        # Load in the subtracted seed frames
         seed_subtracted_frames = self.getFrame(seed_indices)
 
         # # 4) -- Process each seed pick to kick-start recursion --
@@ -407,12 +340,12 @@ class ASTRA:
             self.progressed_frames['cropping'] += 1
             self.updateProgress()
             
-        # Update progress   
+        # Verbose output   
         if self.verbose:
             print(f"Finished cropping {len(seed_indices)} frames with est. centroids:" 
                         f"{self.first_pass_params[:, 2:4]}")
 
-        # Instantiate splines
+        # Instantiate parameter estimation functions
         parameter_estimation_functions = self.updateParameterEstimationFunctions(
                                                             self.crop_vars, 
                                                             self.first_pass_params, 
@@ -442,7 +375,7 @@ class ASTRA:
             self.estimateNextParameters(parameter_estimation_functions, 
                                         self.first_pass_params.shape[0], forward_pass=False)['norm'],
             omega,
-            directions=tuple(-x for x in list(directions))
+            directions=tuple(-x for x in list(directions)) # Invert directions
         )
 
         # Begin backwards pass on crop
@@ -450,13 +383,9 @@ class ASTRA:
                                       backward_next_center_global,
                                       parameter_estimation_functions,
                                       omega,
-                                      directions=tuple(-x for x in list(directions)),
+                                      directions=tuple(-x for x in list(directions)), # Invert directions
                                       forward_pass=False,
                                       )
-        
-        # Return modified instance variables
-        return self.cropped_frames, self.first_pass_params, self.crop_vars
-
 
     def refineAllMeteorCrops(self, first_pass_params, cropped_frames, omega, directions):
         """
@@ -511,11 +440,9 @@ class ASTRA:
             self.progressed_frames['refining'] += 1
             self.updateProgress()
 
-        return self.refined_fit_params, self.fit_costs, self.fit_imgs
-
 
     def removeLowSNRPicks(self, refined_params, fit_imgs, cropped_frames, crop_vars, 
-                          pick_frame_indices, fit_costs, times):
+                          pick_frame_indices, fit_costs):
         """
         Filter out low-SNR or out-of-bounds picks and materialize global outputs.
 
@@ -610,7 +537,7 @@ class ASTRA:
         # Print number of rejected frames
         print(f"Rejected {np.sum(snr_rejection_bool)} frames with SNR below {self.snr_threshold}.")
             
-        # Reject bad frames by removing indexes of low-SNR frames
+        # Reject bad frames by removing indexes of low-SNR frames (numpy arrays)
         refined_params = self.refined_fit_params[~snr_rejection_bool]
         crop_vars = crop_vars[~snr_rejection_bool]
         pick_frame_indices = np.array(pick_frame_indices)[~snr_rejection_bool]
@@ -619,9 +546,7 @@ class ASTRA:
         self.background_levels = np.array(self.background_levels)[~snr_rejection_bool]
         self.saturated_bool_list = np.array(self.saturated_bool_list)[~snr_rejection_bool]
 
-        # Clip SNR & level sums to 1 to avoid division errors upstream
-        frame_snr_values = np.clip(frame_snr_values, 1, None)
-        self.abs_level_sums = np.clip(self.abs_level_sums, 1, None)
+        # Reject bad frames for non-numpy arrays
 
         # Save copies before indexing to avoid recursion errors
         fit_imgs_copy = fit_imgs.copy()
@@ -634,7 +559,8 @@ class ASTRA:
                                     if not snr_rejection_bool[i]]
         self.photometry_pixels = [photometry_pixels_copy[i] for i in range(len(photometry_pixels_copy)) 
                                     if not snr_rejection_bool[i]]
-        # Translate to global coordinates as new variable
+
+        # Save all leading edge picks by translating to global and moving to edge
         global_picks = np.array([self.movePickToEdge(
                     self.translatePicksToGlobal((refined_params[i, 2], refined_params[i, 3]), crop_vars[i]),
                     self.omega,
@@ -650,12 +576,12 @@ class ASTRA:
         self.pick_frame_indices = pick_frame_indices
         self.global_picks = global_picks
         self.fit_costs = fit_costs
-        self.times = [self.img_obj.currentFrameTime(frame_no=i, dt_obj = True) for i in pick_frame_indices + self.first_pick_global_index]
-        self.snr = frame_snr_values
 
-        # Return all
-        return (self.refined_fit_params, self.fit_imgs, self.cropped_frames, self.crop_vars, 
-            self.pick_frame_indices, self.global_picks, self.fit_costs, self.times, self.abs_level_sums)
+        # Clip to avoid division errors
+        self.snr = np.clip(frame_snr_values, 1, None)
+        self.abs_level_sums = np.clip(self.abs_level_sums, 1, None)
+
+
 
     def saveAni(self, data_path):
         """
@@ -690,7 +616,7 @@ class ASTRA:
             outdir = os.path.join(root, f"ASTRA_frames_{datetime.now():%Y%m%d_%H%M%S}")
             os.makedirs(outdir, exist_ok=True)
 
-            n_crops = len(self.times)
+            n_crops = len(self.pick_frame_indices)
             if n_crops == 0:
                 return
 
@@ -702,7 +628,6 @@ class ASTRA:
                 fit_params = self.refined_fit_params[i]
                 snr_val    = float(self.snr[i])
                 frame_num  = int(self.pick_frame_indices[i])
-                time_val   = self.times[i]
                 level_sum  = self.abs_level_sums[i]
                 background_std = self.background_levels[i]
                 photom_count = len(np.array(self.photometry_pixels[i]).T[0])
@@ -758,7 +683,7 @@ class ASTRA:
 
                 fig.text(
                     0.5, 0.02,
-                    f"Frame: {frame_num}  •  Time: {time_val}  •  "
+                    f"Frame: {frame_num}  •  "
                     f"Fit Level Sum: {fit_params[0]:.2f}  •  Sigma: {fit_params[1]:.2f}  •  "
                     f"x0: {fit_params[2]:.2f}  •  y0: {fit_params[3]:.2f}  •  L: {fit_params[4]:.2f}",
                     ha="center", va="center", fontsize=10
@@ -1575,7 +1500,6 @@ class ASTRA:
 
         """
 
-        saturation_level = self.saturation_threshold
         x, y = data_tuple
 
         # Rotate the coordinates
@@ -1703,9 +1627,15 @@ class ASTRA:
 
         # Operate on a single frame
         else:
+
+            # Get initial frame num
             first_frame_num = self.img_obj.current_frame
+
+            # Set and load fr_no
             self.img_obj.setFrame(fr_no)
             frame = self.img_obj.loadFrame().astype(np.float32)
+
+            # Reset to the initial frame
             self.img_obj.setFrame(first_frame_num)
 
             # Store raw frame if include_raw
@@ -1733,11 +1663,11 @@ class ASTRA:
         if self.flat_struct is not None:
             corr_frame = Image.applyFlat(corr_frame.T, self.flat_struct).T
         if self.dark is not None or self.flat_struct is not None:
-            corr_frame = Image.gammaCorrectionImage(corr_frame, self.skyfit_config.gamma,
-                                                    bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
+            corr_frame = Image.gammaCorrectionImage(corr_frame, self.config.gamma,
+                                                    bp=0, wp=(2**self.config.bit_depth - 1))
         else:
-            corr_frame = Image.gammaCorrectionImage(frame, self.skyfit_config.gamma,
-                                                    bp=0, wp=(2**self.skyfit_config.bit_depth - 1))
+            corr_frame = Image.gammaCorrectionImage(frame, self.config.gamma,
+                                                    bp=0, wp=(2**self.config.bit_depth - 1))
         
         # 2. Background subtraction
         sub_frame = corr_frame - self.corrected_avepixel
@@ -1746,7 +1676,7 @@ class ASTRA:
         # 3. Star masking
         final_frame = np.ma.masked_array(sub_frame, mask=self.star_mask)
 
-
+        # --DEBUG--
         # # Plot the frame, corrected frame, sub frame, and the final frame on a 2x2 grid
         # matplotlib.use('Agg')
         # fig, axs = plt.subplots(2, 3, figsize=(10, 10))
@@ -1772,6 +1702,7 @@ class ASTRA:
         # plt.savefig(os.path.join(self.data_path, f'frame_correction_steps_{hash_name}.png'), dpi=300)
         # plt.close()
 
+        # Return the frame
         return final_frame
 
     def recursiveCroppingAlgorithm(self, frame_index, est_center_global, paramter_estimation_functions, omega, 
@@ -1797,6 +1728,7 @@ class ASTRA:
             None
         """
 
+        # If the frame is outside the event bounds, quit cropping
         if frame_index > max(self.pick_frame_indices) or frame_index < min(self.pick_frame_indices):
             return
 
@@ -1817,20 +1749,26 @@ class ASTRA:
         # Run a PSO on the cropped frame
         best_fit, _ = self.gaussianPSO(cropped_frame, omega, directions, estim_next_params=est_next_params)
 
-        # Update instance variables with gaussian parameters
+        # If forward pass add new parameters to the end of array to maintain symmetry with pick_frame_indicies
         if forward_pass:
+            
             self.cropped_frames.append(cropped_frame)
             self.crop_vars = np.vstack([self.crop_vars, crop_vars])
             self.first_pass_params = np.vstack([self.first_pass_params, best_fit])
+
+            # If the frame number is not in pick_frame_indices, add it
             if frame_index not in self.pick_frame_indices:
                 self.pick_frame_indices.append(frame_index)
                 self.pick_frame_indices = sorted(self.pick_frame_indices)
 
-
+        # If backwards pass add new parameters to the start of the array to maintain symmetry with pick_frame_indices
         else:
+
             self.cropped_frames.insert(0,cropped_frame)
             self.crop_vars = np.vstack([crop_vars, self.crop_vars])
             self.first_pass_params = np.vstack([best_fit, self.first_pass_params])
+            
+            # If the frame number is not in pick_frame_indices, add it
             if frame_index not in self.pick_frame_indices:
                 self.pick_frame_indices.insert(0, frame_index)
                 self.pick_frame_indices = sorted(self.pick_frame_indices)
@@ -1839,12 +1777,13 @@ class ASTRA:
         parameter_estimation_functions = self.updateParameterEstimationFunctions(
             self.crop_vars, self.first_pass_params, forward_pass=forward_pass)
 
-        # Determine the next center
+        # Translate fit center to global coordinates
         global_best_fit_center = self.translatePicksToGlobal(
             (best_fit[2], best_fit[3]),
             crop_vars
         )
 
+        # Estimate the next frame meteor center
         next_center_global = self.estimateNextCenter(
             global_best_fit_center,
             est_next_params['norm'],
@@ -1852,20 +1791,19 @@ class ASTRA:
             directions=directions
         )
 
-        # Quit condition
+        # Set the pass coeff (index step) based on forward pass or not
         pass_coeff = 1 if forward_pass else -1
 
         # Update progress
         self.progressed_frames['cropping'] += 1
         self.updateProgress()
+
+        # Verbose print
         if self.verbose:
             print(f"Recursive cropping at frame {frame_index} with center {est_center_global} "
                   f"and next center {next_center_global}, Forward pass: {forward_pass}")
-            print(f' Frame index: {frame_index}, Est. Center: {est_center_global}, '
-                  f'Next Center: {next_center_global}, Pass Coeff: {pass_coeff}')
 
-
-        # Recurse
+        # Recurse with next index
         self.recursiveCroppingAlgorithm(frame_index + pass_coeff,
                                         next_center_global,
                                         parameter_estimation_functions,
@@ -1880,26 +1818,35 @@ class ASTRA:
         The progress is calculated based on the number of frames processed in each step and total num frames.
         The weights for each step are defined in the time_weights_gaus dictionary.
         """
+
+        # Weight the different phases of the program by differeing weights
         time_weights_gaus = {
-            'cropping' : 0.7,
-            'refining' : 0.2,
+            'cropping' : 0.8,
+            'refining' : 0.1,
             'removing' : 0.1
         }
 
+        # If available set progress to callback
         if progress is not None and self.progress_callback is not None:
             self.progress_callback(int(progress))
 
-        if self.mode == 'Gaussian':
-            if self.progress_callback is not None:
+        elif self.progress_callback is not None:
+            current_percentage = sum(
+                self.progressed_frames[step] * time_weights_gaus[step]
+                for step in self.progressed_frames.keys()
+            ) / self.total_frames * 100
+            self.progress_callback(int(current_percentage))
+
+        # Else print callback to console
+        if self.progress_callback is None:
+            if progress is not None:
+                print(f'Progress: {progress}%')
+            else:
                 current_percentage = sum(
                     self.progressed_frames[step] * time_weights_gaus[step]
                     for step in self.progressed_frames.keys()
                 ) / self.total_frames * 100
-                self.progress_callback(int(current_percentage))
-        if self.mode == 'Kalman':
-            if self.progress_callback is not None:
-                current_percentage = (self.exec_count / self.total_exec) * 100
-                self.progress_callback(int(current_percentage))
+                print(f'Progress: {current_percentage}%')
 
     def selectSeedTriplet(self, picks, pick_frame_indices):
         """
@@ -1963,153 +1910,428 @@ class ASTRA:
         dist = np.abs(middle_frames - center).astype(np.float64)
 
         # 3) stable tie-breaker: earliest start
-        # Use lexsort with last key as primary: sort by (pref1, dist, starts)
-        # lexsort sorts by last key first, so stack in reverse priority order:
         idx = np.lexsort((starts, dist, pref1))[0]
         start = starts[idx]
 
         seed_pick_frame_indices = keys[start:start+3]
         seed_picks = p_sorted[start:start+3]
+
+        # Return seed_picks and indices (do not need to be stored in memory)
         return seed_picks, seed_pick_frame_indices
 
+    # def computeIntensitySum(self, photom_pixels, global_centroid, corr_frame, uncorr_frame):
+    #     """
+    #     Compute background-subtracted flux, SNR, and saturation flag for a pick region.
+
+    #     Builds a local window around the photometry pixels, replaces star-masked pixels
+    #     with the median of the photometric area, subtracts background from data,
+    #     clips negatives, sums flux, estimates background stats from surrounding pixels,
+    #     computes SNR via a CCD model, and records saturation if ≥2 pixels exceed
+    #     the near-full-scale threshold.
+
+    #     Args:
+    #         photom_pixels (Sequence[tuple[int, int]]): Photometry pixel coords in global space.
+    #         global_centroid (tuple[float, float]): Global center (x, y) for windowing.
+    #         corr_frame (np.ndarray): Corrected data frame, shape (H, W).
+    #         uncorr_frame (np.ndarray): Uncorrected data frame, shape (H, W) for saturation check.
+
+    #     Returns:
+    #         float: Signal-to-noise ratio (CCD-style).
+
+    #     Side Effects:
+    #         Appends to `self.photometry_pixels`, `self.saturated_bool_list`,
+    #         `self.abs_level_sums`, `self.background_levels`.
+
+    #     Raises:
+    #         RuntimeError: If masked arithmetic yields invalid (masked) sums repeatedly.
+    #     """
+
+
+    #     x_arr, y_arr = np.array(photom_pixels).T
+    #     corr_frame = corr_frame.copy()
+    #     avepixel = self.corrected_avepixel.copy()
+
+    #     # Take a window twice the size of the colored pixels
+    #     x_color_size = np.max(x_arr) - np.min(x_arr)
+    #     y_color_size = np.max(y_arr) - np.min(y_arr)
+
+    #     x_min = int(global_centroid[0] - x_color_size)
+    #     x_max = int(global_centroid[0] + x_color_size)
+    #     y_min = int(global_centroid[1] - y_color_size)
+    #     y_max = int(global_centroid[1] + y_color_size)
+
+    #     # Limit the size to be within the bounds
+    #     if x_min < 0: x_min = 0
+    #     if x_max > corr_frame.shape[1]: x_max = corr_frame.shape[1]
+    #     if y_min < 0: y_min = 0
+    #     if y_max > corr_frame.shape[0]: y_max = corr_frame.shape[0]
+
+    #     # Take only the colored part
+    #     mask_img = np.ones_like(corr_frame)
+    #     mask_img[y_arr, x_arr] = 0
+    #     masked_img = np.ma.masked_array(corr_frame, mask_img)
+    #     crop_img = masked_img[y_min:y_max, x_min:x_max]
+    #     crop_img_uncorr = np.ma.masked_array(uncorr_frame, mask_img)
+    #     crop_img_uncorr = crop_img_uncorr[y_min:y_max, x_min:x_max]
+
+    #     # Replace photometry pixels that are masked by a star with the median value of the photom. area
+    #     cropped_star_mask = self.star_mask[y_min:y_max, x_min:x_max]
+    #     photom_star_masked_indices = np.where((crop_img.mask == 0) & (cropped_star_mask == 1))
+
+    #     # Apply correction only if the streak intersects a star
+    #     if len(photom_star_masked_indices[0]) > 0:
+
+    #         # Calulate masked median
+    #         masked_stars_streak_median = np.ma.median(crop_img)
+
+    #         # Unmask those areas
+    #         crop_img.mask[photom_star_masked_indices] = False
+
+    #         # Replace with median
+    #         crop_img[photom_star_masked_indices] = masked_stars_streak_median
+
+
+    #     # Mask out the colored in pixels
+    #     mask_img_bg = np.zeros_like(corr_frame)
+    #     mask_img_bg[y_arr, x_arr] = 1
+
+    #     # Take the image where the colored part is masked out and crop the surroundings
+    #     masked_img_bg = np.ma.masked_array(corr_frame, mask_img_bg | self.star_mask)
+    #     crop_bg = masked_img_bg[y_min:y_max, x_min:x_max]
+        
+    #     # Mask out the colored in pixels
+    #     avepixel_masked = np.ma.masked_array(avepixel, mask_img_bg)
+    #     avepixel_crop_no_color = avepixel_masked[y_min:y_max, x_min:x_max]
+    #     avepixel_crop_color = np.ma.masked_array(avepixel, mask_img)[y_min:y_max, x_min:x_max]
+
+    #     # Compute background level
+    #     background_lvl = np.ma.median(avepixel_crop_no_color)
+
+    #     # Subtract the avepixel crop from the data crop, clip negative values to 0 and sum up the intensity
+    #     crop_img_nobg = crop_img.astype(float) - avepixel_crop_color.astype(float)
+    #     crop_img_nobg = np.clip(crop_img_nobg, 0, None)
+    #     intensity_sum = np.ma.sum(crop_img_nobg)
+
+    #     # Check if the result is masked
+    #     if np.ma.is_masked(intensity_sum):
+    #         # If the result is masked (i.e. error reading pixels), set the intensity sum to 1
+    #         print("Warning: intensity sum is masked, setting to 1") 
+    #         intensity_sum = 1
+    #     else:
+    #         intensity_sum = intensity_sum.astype(int)
+
+    #     ### Measure the SNR of the pick ###
+
+    #     # Compute the standard deviation of the background
+    #     background_stddev = np.ma.std(crop_bg)
+
+    #     # Count the number of pixels in the photometric area
+    #     source_px_count = np.ma.sum(~crop_img.mask)
+
+    #     # Compute the signal to noise ratio using the CCD equation
+    #     snr = signalToNoise(intensity_sum, source_px_count, background_lvl, background_stddev)
+
+    #     ### Determine if there is any saturation in the measured photometric area
+
+    #     # If at least 2 pixels are saturated in the photometric area, mark the pick as saturated
+    #     if np.sum(crop_img_uncorr > self.saturation_threshold) >= 2:
+    #         saturated_bool = True
+    #     else:
+    #         saturated_bool = False
+
+    #     # Append values to class arrays
+    #     self.photometry_pixels.append(photom_pixels)
+    #     self.saturated_bool_list.append(saturated_bool)
+    #     self.abs_level_sums.append(intensity_sum)
+    #     self.background_levels.append(background_lvl)
+
+    #     ## DEBUG - Simplified photometry plots ###
+    #     try:
+    #         # Create directory for photometry diagnostics if it doesn't exist
+    #         photom_dir = os.path.join(self.data_path, "ASTRA_Photometry_Diagnostics")
+    #         os.makedirs(photom_dir, exist_ok=True)
+            
+    #         # Plot title with frame info
+    #         frame_number = self.pick_frame_indices[len(self.photometry_pixels)-1] + self.first_pick_global_index
+            
+    #         # Create a figure with 1x2 grid
+    #         fig, axs = plt.subplots(1, 2, figsize=(10, 5))
+            
+    #         # Plot the mask
+    #         axs[0].imshow(crop_img.mask, cmap='gray')
+    #         axs[0].set_title('crop_img.mask')
+            
+    #         # Plot the background-subtracted image
+    #         # Make a copy of the masked array to avoid read-only issues
+    #         crop_img_nobg_copy = np.array(crop_img_nobg.filled(0))
+    #         axs[1].imshow(crop_img_nobg_copy, cmap='gray',
+    #                        vmin=0, vmax=np.percentile(crop_img_nobg_copy, 99))
+    #         axs[1].set_title('crop_img_nobg')
+            
+    #         # Add frame number as figure title
+    #         fig.suptitle(f"Frame {frame_number}", fontsize=14)
+            
+    #         # Save the figure
+    #         plt.tight_layout()
+    #         fig_path = os.path.join(photom_dir, f"photometry_frame_{frame_number:04d}.jpg")
+    #         plt.savefig(fig_path, dpi=100, bbox_inches='tight', format='jpg')
+    #         plt.close(fig)
+    #     except Exception as e:
+    #         print(f"Warning: Could not save simplified photometry plot for frame {frame_number}: {e}")
+
+    #     # Verbose print
+    #     if self.verbose:
+    #         print("SNR update on frame {:2d}: intensity sum = {:8d}, source px count = {:5d}, " \
+    #         "background lvl = {:8.2f}, background stddev = {:6.2f}, SNR = {:.2f}".format(
+    #             self.pick_frame_indices[self.temp_count], intensity_sum, source_px_count, 
+    #             background_lvl, background_stddev, snr))
+    #         self.temp_count += 1
+
+    #     # return SNR - returned rather than state-set
+    #     return snr
+
     def computeIntensitySum(self, photom_pixels, global_centroid, corr_frame, uncorr_frame):
-        """
-        Compute background-subtracted flux, SNR, and saturation flag for a pick region.
-
-        Builds a local window around the photometry pixels, replaces star-masked pixels
-        with the median of the photometric area, subtracts background from data,
-        clips negatives, sums flux, estimates background stats from surrounding pixels,
-        computes SNR via a CCD model, and records saturation if ≥2 pixels exceed
-        the near-full-scale threshold.
-
-        Args:
-            photom_pixels (Sequence[tuple[int, int]]): Photometry pixel coords in global space.
-            global_centroid (tuple[float, float]): Global center (x, y) for windowing.
-            corr_frame (np.ndarray): Corrected data frame, shape (H, W).
-            uncorr_frame (np.ndarray): Uncorrected data frame, shape (H, W) for saturation check.
-
-        Returns:
-            float: Signal-to-noise ratio (CCD-style).
-
-        Side Effects:
-            Appends to `self.photometry_pixels`, `self.saturated_bool_list`,
-            `self.abs_level_sums`, `self.background_levels`.
-
-        Raises:
-            RuntimeError: If masked arithmetic yields invalid (masked) sums repeatedly.
-        """
+        
+        # Get photometry pixels as as an array of x_indices, and y_indices
+        photom_x_indices, photom_y_indices = np.array(photom_pixels).T
 
 
-        x_arr, y_arr = np.array(photom_pixels).T
-        corr_frame = corr_frame.copy()
-        avepixel = self.corrected_avepixel.copy()
+        # Store a copy of the corrected frame without star_mask to avoid reference errors
+        corrected_frame = np.asarray(corr_frame.data)
 
-        # Take a window twice the size of the colored pixels
-        x_color_size = np.max(x_arr) - np.min(x_arr)
-        y_color_size = np.max(y_arr) - np.min(y_arr)
+        # Store a copy of the uncorrected frame without star_mask to avoid reference errors
+        uncorrected_frame = np.asarray(uncorr_frame)
 
-        x_min = int(global_centroid[0] - x_color_size)
-        x_max = int(global_centroid[0] + x_color_size)
-        y_min = int(global_centroid[1] - y_color_size)
-        y_max = int(global_centroid[1] + y_color_size)
+        # Store a copy of the corrected avepixel to avoid referene errors
+        corrected_avepixel = np.asarray(self.corrected_avepixel)
+
+        # Store a copy of the star mask to avoid reference errors
+        star_mask = np.asarray(self.star_mask).astype(bool)
+
+        # Define a crop window as twice the size of the colored pixels
+        x_color_size = np.max(photom_x_indices) - np.min(photom_x_indices)
+        y_color_size = np.max(photom_y_indices) - np.min(photom_y_indices)
+
+        xmin = int(global_centroid[0] - x_color_size)
+        xmax = int(global_centroid[0] + x_color_size)
+        ymin = int(global_centroid[1] - y_color_size)
+        ymax = int(global_centroid[1] + y_color_size)
 
         # Limit the size to be within the bounds
-        if x_min < 0: x_min = 0
-        if x_max > corr_frame.shape[1]: x_max = corr_frame.shape[1]
-        if y_min < 0: y_min = 0
-        if y_max > corr_frame.shape[0]: y_max = corr_frame.shape[0]
+        if xmin < 0: xmin = 0
+        if xmax > corr_frame.shape[1]: xmax = corr_frame.shape[1]
+        if ymin < 0: ymin = 0
+        if ymax > corr_frame.shape[0]: ymax = corr_frame.shape[0]
 
-        # Take only the colored part
-        mask_img = np.ones_like(corr_frame)
-        mask_img[y_arr, x_arr] = 0
-        masked_img = np.ma.masked_array(corr_frame, mask_img)
-        crop_img = masked_img[y_min:y_max, x_min:x_max]
-        crop_img_uncorr = np.ma.masked_array(uncorr_frame, mask_img)
-        crop_img_uncorr = crop_img_uncorr[y_min:y_max, x_min:x_max]
+        # Get cropped versions of all arrays
+        cropped_corrected_frame = corrected_frame[ymin:ymax, xmin:xmax]
+        cropped_uncorrected_frame = uncorrected_frame[ymin:ymax, xmin:xmax]
+        cropped_corrected_avepixel = corrected_avepixel[ymin:ymax, xmin:xmax]
+        cropped_star_mask = star_mask[ymin:ymax, xmin:xmax]
+
+        # Create combined masks
+
+        # Generate mask for photometry pixels, cropped
+        cropped_mask_photom_included = np.ones_like(corrected_frame) # Create a fully masked array
+        cropped_mask_photom_included[photom_y_indices, photom_x_indices] = 0 # Unmask photometry pixels
+        cropped_mask_photom_included = cropped_mask_photom_included[ymin:ymax, xmin:xmax].astype(bool) # Crop
+
+        # Generate mask excluding photometry pixels, cropped
+        cropped_mask_photom_excluded = np.zeros_like(corrected_frame) # Create a fully unmasked array
+        cropped_mask_photom_excluded[photom_y_indices, photom_x_indices] = 1 # Mask photometry pixels
+        cropped_mask_photom_excluded = cropped_mask_photom_excluded[ymin:ymax, xmin:xmax].astype(bool) # Crop
+
+        # 1) Compute intensity sum
+
+        # Get array of cropped photometric area from the corrected frame
+        photom_included_cropped_corrected_frame = np.ma.masked_array(cropped_corrected_frame, 
+                                                                    mask=cropped_mask_photom_included)
+        
+        # Get array of cropped photometric area from the corrected avepixel
+        photom_included_cropped_corrected_avepixel = np.ma.masked_array(cropped_corrected_avepixel, 
+                                                                        mask=cropped_mask_photom_included)
+
+        # Subtract both to get background subtracted cropped corrected photometric area
+        photom_pixels_nobg = np.clip((photom_included_cropped_corrected_frame - photom_included_cropped_corrected_avepixel), 0, None)
 
         # Replace photometry pixels that are masked by a star with the median value of the photom. area
-        cropped_star_mask = self.star_mask[y_min:y_max, x_min:x_max]
-        photom_star_masked_indices = np.where((crop_img.mask == 0) & (cropped_star_mask == 1))
+
+        # Check where the photometric pixels intersect with the star mask
+        photom_star_masked_indices = np.where((photom_pixels_nobg.mask == 0) & (cropped_star_mask == 1))
 
         # Apply correction only if the streak intersects a star
         if len(photom_star_masked_indices[0]) > 0:
-
             # Calulate masked median
-            masked_stars_streak_median = np.ma.median(crop_img)
+            masked_stars_streak_median = np.ma.median(photom_pixels_nobg)
 
             # Unmask those areas
-            crop_img.mask[photom_star_masked_indices] = False
+            photom_pixels_nobg.mask[photom_star_masked_indices] = False
 
             # Replace with median
-            crop_img[photom_star_masked_indices] = masked_stars_streak_median
+            photom_pixels_nobg[photom_star_masked_indices] = masked_stars_streak_median
 
+        # Sum the array of corrected photometric pixels with the background subtracted
+        intensity_sum = np.ma.sum(photom_pixels_nobg)
 
-        # Mask out the colored in pixels
-        mask_img_bg = np.zeros_like(corr_frame)
-        mask_img_bg[y_arr, x_arr] = 1
+        # 2) Compute background STD
 
-        # Take the image where the colored part is masked out and crop the surroundings
-        masked_img_bg = np.ma.masked_array(corr_frame, mask_img_bg)
-        crop_bg = masked_img_bg[y_min:y_max, x_min:x_max]
+        # Get corrected cropped frame with photometry pixels & stars masked out
+        photom_excluded_sm_cropped_corrected_frame = np.ma.masked_array(cropped_corrected_frame, 
+                                                                        mask=cropped_mask_photom_excluded | cropped_star_mask)
         
-        # Mask out the colored in pixels
-        avepixel_masked = np.ma.masked_array(avepixel, mask_img_bg)
-        avepixel_crop_no_color = avepixel_masked[y_min:y_max, x_min:x_max]
-        avepixel_crop_color = np.ma.masked_array(avepixel, mask_img)[y_min:y_max, x_min:x_max]
-
-        # Compute background level
-        background_lvl = np.ma.median(avepixel_crop_no_color)
-
-        # Subtract the avepixel crop from the data crop, clip negative values to 0 and sum up the intensity
-        crop_img_nobg = crop_img.astype(float) - avepixel_crop_color.astype(float)
-        crop_img_nobg = np.clip(crop_img_nobg, 0, None)
-        intensity_sum = np.ma.sum(crop_img_nobg)
-
-        # Check if the result is masked
-        if np.ma.is_masked(intensity_sum):
-            # If the result is masked (i.e. error reading pixels), set the intensity sum to 1
-            print("Warning: intensity sum is masked, setting to 1") 
-            intensity_sum = 1
-        else:
-            intensity_sum = intensity_sum.astype(int)
-
-        ### Measure the SNR of the pick ###
-
         # Compute the standard deviation of the background
-        background_stddev = np.ma.std(crop_bg)
+        background_stddev = np.ma.std(photom_excluded_sm_cropped_corrected_frame)
 
-        # Count the number of pixels in the photometric area
-        source_px_count = np.ma.sum(~crop_img.mask)
+        # 3) Compute background level
+        
+        # Compute background level using previous masked frame
+        background_lvl = np.ma.median(photom_excluded_sm_cropped_corrected_frame)
 
-        # Compute the signal to noise ratio using the CCD equation
-        snr = signalToNoise(intensity_sum, source_px_count, background_lvl, background_stddev)
+        # 4) Compute source pixel count
 
-        ### Determine if there is any saturation in the measured photometric area
+        source_px_count = np.ma.sum(~photom_pixels_nobg.mask) # Count of unmasked pixels in photometric area
 
-        # Compute the saturation threshold
-        saturation_threshold = int(0.98*(2**self.skyfit_config.bit_depth))
+        # 5) Check for saturation
 
+        # Get cropped photometric area from the uncorrected frame
+        photom_included_cropped_uncorrected_frame = np.ma.masked_array(cropped_uncorrected_frame, 
+                                                                      mask=cropped_mask_photom_included)
+        
         # If at least 2 pixels are saturated in the photometric area, mark the pick as saturated
-        if np.sum(crop_img_uncorr > saturation_threshold) >= 2:
+        if np.sum(photom_included_cropped_uncorrected_frame > self.saturation_threshold) >= 2:
             saturated_bool = True
         else:
             saturated_bool = False
-
-        # Append values to class arrays
+        
+        # Add all to class variable lists
         self.photometry_pixels.append(photom_pixels)
         self.saturated_bool_list.append(saturated_bool)
         self.abs_level_sums.append(intensity_sum)
         self.background_levels.append(background_lvl)
 
-        if self.verbose:
-            print("SNR update on frame {:2d}: intensity sum = {:8d}, source px count = {:5d}, " \
-            "background lvl = {:8.2f}, background stddev = {:6.2f}, SNR = {:.2f}".format(
-                self.pick_frame_indices[self.temp_count], intensity_sum, source_px_count, 
-                background_lvl, background_stddev, snr))
-            self.temp_count += 1
+        # Compute SNR using CCD equation
+        snr = signalToNoise(intensity_sum, source_px_count, background_lvl, background_stddev)
 
-        # return SNR
-        return snr
+        # DEBUG - Save diagnostic photometry images
+        try:
+            # Create directory for photometry diagnostics if it doesn't exist
+            photom_dir = os.path.join(self.data_path, "ASTRA_Photometry_Diagnostics")
+            os.makedirs(photom_dir, exist_ok=True)
+            
+            # Get frame number for filename
+            frame_number = self.pick_frame_indices[len(self.photometry_pixels)-1] + self.first_pick_global_index
+            
+            # Create a figure with a 3x2 grid to show all processing stages
+            fig = Figure(figsize=(15, 10), dpi=100)
+            canvas = FigureCanvas(fig)
+            grid = fig.add_gridspec(3, 2, hspace=0.3, wspace=0.3)
+            
+            # Create all needed axes
+            ax1 = fig.add_subplot(grid[0, 0])  # Original cropped frame
+            ax2 = fig.add_subplot(grid[0, 1])  # Background subtracted
+            ax3 = fig.add_subplot(grid[1, 0])  # Star mask
+            ax4 = fig.add_subplot(grid[1, 1])  # Photometry mask
+            ax5 = fig.add_subplot(grid[2, 0])  # Final photometry pixels
+            ax6 = fig.add_subplot(grid[2, 1])  # Combined result
+            
+            # Show cropped_corrected_frame
+            im1 = ax1.imshow(cropped_corrected_frame, cmap='gray', 
+            vmin=np.percentile(cropped_corrected_frame, 1), 
+            vmax=np.percentile(cropped_corrected_frame, 99))
+            ax1.set_title("Cropped Corrected Frame")
+            fig.colorbar(im1, ax=ax1, shrink=0.7)
+            
+            # Show photometry pixels with background subtracted
+            im2 = ax2.imshow(photom_pixels_nobg.filled(0), cmap='gray',
+            vmin=0,
+            vmax=np.percentile(photom_pixels_nobg.filled(0), 99))
+            ax2.set_title("Background-Subtracted Photometry")
+            fig.colorbar(im2, ax=ax2, shrink=0.7)
+            
+            # Show star mask
+            star_mask_viz = np.ma.masked_array(np.ones_like(cropped_star_mask), mask=~cropped_star_mask)
+            im3 = ax3.imshow(star_mask_viz, cmap='Reds', vmin=0, vmax=1)
+            ax3.set_title("Star Mask")
+            
+            # Show photometry mask (included and excluded)
+            phot_mask_viz = np.ma.masked_array(np.ones_like(cropped_mask_photom_excluded), 
+                mask=~cropped_mask_photom_excluded)
+            im4 = ax4.imshow(phot_mask_viz, cmap='Blues', vmin=0, vmax=1)
+            ax4.set_title("Photometry Mask")
+            
+            # Visualization for final photometry pixels 
+            phot_final = np.zeros_like(cropped_corrected_frame)
+            for p in photom_pixels:
+            # Convert to local coordinates
+                px, py = p[0] - xmin, p[1] - ymin
+                # Check if within crop bounds
+                if 0 <= px < phot_final.shape[1] and 0 <= py < phot_final.shape[0]:
+                    phot_final[py, px] = 1
+            
+            im5 = ax5.imshow(phot_final, cmap='viridis', vmin=0, vmax=1)
+            ax5.set_title("Final Photometry Pixels")
+            
+            # Combined visualization - frame with photometry overlay
+            combined = np.zeros((*cropped_corrected_frame.shape, 3))
+            # Grayscale background
+            normalized = cropped_corrected_frame / (np.percentile(cropped_corrected_frame, 99) + 0.01)
+            normalized = np.clip(normalized, 0, 1)
+            for i in range(3):
+                combined[:,:,i] = normalized
+            
+            # Add red overlay for photometry pixels
+            for p in photom_pixels:
+                px, py = p[0] - xmin, p[1] - ymin
+                if 0 <= px < combined.shape[1] and 0 <= py < combined.shape[0]:
+                    combined[py, px, 0] = 1.0  # Red channel
+                    combined[py, px, 1] = 0.3  # Green channel
+                    combined[py, px, 2] = 0.3  # Blue channel
+            
+            # Add blue overlay for stars
+            for y in range(cropped_star_mask.shape[0]):
+                for x in range(cropped_star_mask.shape[1]):
+                    if cropped_star_mask[y, x]:
+                        combined[y, x, 0] = 0.3  # Red channel
+                        combined[y, x, 1] = 0.3  # Green channel
+                        combined[y, x, 2] = 1.0  # Blue channel
+            
+            im6 = ax6.imshow(combined)
+            ax6.set_title("Combined Visualization")
+            
+            # Add summary stats as figure title
+            fig.suptitle(f"Frame {frame_number} - SNR: {snr:.2f}, Sum: {intensity_sum:.0f}, " + 
+            f"Bg: {background_lvl:.2f}, Pixels: {source_px_count}, " +
+            f"Saturated: {saturated_bool}", fontsize=12)
+            
+            # Save the figure in a thread-safe way
+            lock = threading.Lock()
+            with lock:
+                fig_path = os.path.join(photom_dir, f"photometry_frame_{frame_number:04d}.png")
+                canvas.print_figure(fig_path, dpi=100, bbox_inches='tight')
+            
+            # Explicitly close to free memory
+            fig.clf()
+            
+        except Exception as e:
+            print(f"Warning: Could not save photometry diagnostic plot for frame {frame_number}: {e}")
+
+
+        # Verbose print
+        if self.verbose:
+            # print("ASTRA SNR update on frame {:2d}: intensity sum = {:8d}, source px count = {:5d}, " \
+            # "background lvl = {:8.2f}, background stddev = {:6.2f}, SNR = {:.2f}".format(
+            #     self.pick_frame_indices[self.temp_count]+self.first_pick_global_index, intensity_sum, source_px_count, 
+            #     background_lvl, background_stddev, snr))
+            # self.temp_count += 1
+            print(self.pick_frame_indices[self.temp_count]+self.first_pick_global_index, intensity_sum, source_px_count, background_lvl, background_stddev, snr)
+
+        # Return SNR - returned rather than state-set
+        return snr  
+
+
+
+
+
 
 
     def computePhotometryPixels(self, fit_img, cropped_frame, crop_vars):
@@ -2165,6 +2387,118 @@ class ASTRA:
         photometry_pixels = [tuple(idx[::-1]) for idx in nonzero_indices]
 
         return photometry_pixels
+
+    def refactorPicksToSkyFitFormat(self):
+
+        self.pick_list = {}
+
+        for i, frame_index in enumerate(self.pick_frame_indices):
+            self.pick_list[frame_index + self.first_pick_global_index] = {
+                "x_centroid" : self.global_picks[i][0],
+                "y_centroid" : self.global_picks[i][1],
+                "mode" : 1, # Default to mode 1
+                "intensity_sum" : self.abs_level_sums[i],
+                "photometry_pixels" : self.photometry_pixels[i],
+                "background_intensity" : self.background_levels[i],
+                "snr" : self.snr[i],
+                "saturated" : self.saturated_bool_list[i]
+            }
+
+    
+#  --- Interfacing Functions --- 
+
+    def process(self):
+        """
+        Run the full ASTRA pipeline on the provided frames/picks.
+
+        Pipeline:
+            1) Preprocess frames (dark/flat correction, gamma, background subtraction,
+            star masking) via `processImageData`.
+            2) Recursively crop and fit a moving Gaussian track across frames using PSO
+            via `cropAllMeteorFrames`.
+            3) Locally refine each PSO solution with L-BFGS-B via `refineAllMeteorCrops`.
+            4) Remove low-SNR or out-of-bounds fits and convert to global coords
+            via `removeLowSNRPicks`.
+            5) Optionally save a diagnostic animation via `saveAni`.
+
+        Returns:
+            ASTRA: The same instance with the following key fields populated:
+                - avepixel_background (np.ndarray): Background model, shape (H, W).
+                - subtracted_frames (np.ma.MaskedArray): BG-subtracted & star-masked frames, shape (N, H, W).
+                - cropped_frames (list[np.ndarray]): Per-pick crops for fitting.
+                - first_pass_params (np.ndarray): PSO fit params per crop, shape (K, 5).
+                - refined_fit_params (np.ndarray): Local-refined params per crop, shape (K, 5).
+                - crop_vars (np.ndarray): Crop bookkeeping (cx, cy, xmin, xmax, ymin, ymax), shape (K, 6).
+                - global_picks (np.ndarray): Edge-aligned global picks, shape (K, 2).
+                - pick_frame_indices (np.ndarray): Frame index per kept crop, shape (K,).
+                - fit_costs (np.ndarray): Objective values per refined crop, shape (K,).
+                - times (np.ndarray): Timestamps per kept crop, shape (K,).
+                - snr (list[float]): SNR per kept crop (post filtering).
+
+        Raises:
+            Exception: If any individual stage throws; errors are caught/logged per step,
+                but uncaught exceptions will propagate.
+        """
+
+
+        # 1. Gets corrected background and star_mask for later corrections 
+        try:
+            self.processImageData()
+        except Exception as e:
+            print(f'Error processing image data: {e}')
+
+        # 2. Recursively crop & fit a moving gaussian across whole event
+        try:
+            self.cropAllMeteorFrames()
+        except Exception as e:
+            print(f'Error cropping and fitting meteor frames: {e}')
+
+        # 3. Refine the moving gaussian fit by using a local optimizer
+        try:
+            self.refineAllMeteorCrops(self.first_pass_params, self.cropped_frames, 
+                                      self.omega, self.directions)
+        except Exception as e:
+            print(f'Error refining meteor crops: {e}')
+
+        # 4. Remove picks with low SNR and out-of-bounds picks, refactors into global coordinates
+        # try:
+        self.removeLowSNRPicks(self.refined_fit_params, self.fit_imgs, self.cropped_frames, 
+                                self.crop_vars, self.pick_frame_indices, self.fit_costs)
+        # except Exception as e:
+        #     print(f'Error removing low SNR picks: {e}')
+        
+        # 5. save animation
+        if self.save_animation:
+            try:
+                self.saveAni(self.data_path)
+            except Exception as e:
+                print(f'Error saving animation: {e}')
+
+        # Set progress to 100
+        self.updateProgress(100)
+
+        return True
+
+    
+    def getResults(self, skyfit_format=False):
+        
+        if skyfit_format is True:
+
+            self.refactorPicksToSkyFitFormat()
+
+            return self.pick_list
+
+        else:
+            global_pick_indices = [fr + self.first_pick_global_index for fr in self.pick_frame_indices]
+            return (self.global_picks, global_pick_indices, self.snr, self.abs_level_sums, 
+                    self.photometry_pixels, self.background_levels, self.saturated_bool_list)
+    
+    def getTotalPicks(self):
+        return len(self.pick_frame_indices)
+    
+    def getMinSnr(self):
+        return self.snr_threshold
+            
 
 
 class Dataloader:
@@ -2547,6 +2881,9 @@ if __name__ == "__main__":
     parser.add_argument("--run_kalman", default=False, action="store_true", help="Whether to run Kalman filter")
     parser.add_argument("--save_animation", default=False, action="store_true", help="Whether to save animation of frame fitting")
     parser.add_argument("--verbose", default=False, action="store_true", help="Whether to print verbose output")
+    # Add option to process full directory (--walk instead of target directories)
+    # Add option to run trajectory analysis
+
     # MAYBE SEPERATE KALMAN AND ASTRA ENTIRELY TO ALLOW KALMAN TO BE RUN ON MANUAL PICKING
     args = parser.parse_args()
 
