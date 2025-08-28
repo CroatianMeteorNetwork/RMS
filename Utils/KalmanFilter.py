@@ -82,6 +82,8 @@ class KalmanFilter():
                 
                 if use_all_files:
                     data_path = ecsv_files
+                elif len(ecsv_files) == 1:
+                    data_path = ecsv_files[0]
                 else:
                     raise ValueError("Found multiple .ecsv files in directory. Either give path to single file or set use_all_files=True.")
             else:
@@ -95,11 +97,11 @@ class KalmanFilter():
             times = []
             if len(data_path) > 1:
                 for path in data_path:
-                    t, m = self.loadECSV(None, path)
+                    t, m = self.loadECSV(path)
                     times.append(t)
                     measurements.append(m)
             else:
-                t, m = self.loadECSV(None, data_path)
+                t, m = self.loadECSV(data_path)
                 times.append(t)
                 measurements.append(m)
 
@@ -669,15 +671,43 @@ class KalmanFilter():
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description='Run Kalman Filter on trajectory data')
+    parser = argparse.ArgumentParser(
+        description='''
+Kalman Filter and Smoother for Trajectory Data.
+
+This script applies a Kalman filter with a Rauch-Tung-Striebel (RTS) smoother
+to trajectory data provided in ECSV files. It is designed to smooth noisy 
+position measurements (x, y) and estimate the kinematic state (position, velocity, 
+and optionally acceleration) of an object over time.
+
+The filter can operate in two primary modes:
+1. Constant-Velocity (CV) Model (default): Assumes the object moves at a constant velocity 
+   between measurements.
+2. Constant-Acceleration (CA) Model (`--use_accel`): Assumes the object moves with 
+   constant acceleration.
+
+Key Features:
+- Handles irregularly spaced time intervals between measurements.
+- Automatically estimates measurement noise (`R` matrix) from the data.
+- Constructs the process noise (`Q` matrix) based on user-provided parameters for 
+  position and velocity uncertainty.
+- Optionally enforces monotonic progression along the dominant axis of motion to prevent 
+  the smoothed path from moving backward.
+- Can output a new ECSV file with the smoothed trajectory data.
+- Can save detailed statistical results, including state estimates, uncertainties, 
+  and noise parameters, to a separate CSV file for analysis.
+''',
+        formatter_class=argparse.RawTextHelpFormatter
+    )
+
     
     # Mandatory arguments
-    parser.add_argument('--sigma_xy', '--s', required=True, type=float,
-                       help='Position standard deviation [px]')
-    parser.add_argument('--perc_sigma_vxy', '--v', required=True, type=float,
-                       help='Velocity standard deviation as percentage of average velocity')
-    parser.add_argument('--data_path', '--d', required=True, type=str,
+    parser.add_argument('data_path', type=str,
                        help='Path to .ecsv file or directory containing .ecsv files')
+    parser.add_argument('sigma_xy', type=float,
+                       help='Position standard deviation [px]')
+    parser.add_argument('perc_sigma_vxy', type=float,
+                       help='Velocity standard deviation as percentage of average velocity')
     
     # Optional arguments with defaults
     parser.add_argument('--epsilon', '--e', type=float, default=1e-6,

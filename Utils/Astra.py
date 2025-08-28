@@ -1,5 +1,4 @@
 import os
-import csv
 import copy
 from datetime import datetime
 import datetime as dt
@@ -29,7 +28,8 @@ except Exception as e:
 
 class ASTRA:
 
-    def __init__(self, img_obj, pick_dict, astra_config, data_path, config, dark, flat, progress_callback=None):
+    def __init__(self, img_obj, pick_dict, astra_config, data_path, config, dark, flat, 
+                 progress_callback=None, ECSV_save_path=None):
         """
         ASTRA: Astrometric Streak Tracking and Refinement Algorithm.
 
@@ -84,6 +84,7 @@ class ASTRA:
         self.dark = dark
         self.flat_struct = flat
         self.img_obj = img_obj
+        self.ecsv_save_path = ECSV_save_path
 
         # Initialize callback and set progress to 0
         self.progress_callback = progress_callback
@@ -2097,16 +2098,16 @@ class ASTRA:
 
 
         # Store a copy of the corrected frame without star_mask to avoid reference errors
-        corrected_frame = np.asarray(corr_frame.data)
+        corrected_frame = np.asarray(corr_frame.data).astype(np.float32, copy=True)
 
         # Store a copy of the uncorrected frame without star_mask to avoid reference errors
-        uncorrected_frame = np.asarray(uncorr_frame)
+        uncorrected_frame = np.asarray(uncorr_frame).astype(np.float32, copy=True)
 
-        # Store a copy of the corrected avepixel to avoid referene errors
-        corrected_avepixel = np.asarray(self.corrected_avepixel)
+        # Store a copy of the corrected avepixel to avoid reference errors
+        corrected_avepixel = np.asarray(self.corrected_avepixel).astype(np.float32, copy=True)
 
         # Store a copy of the star mask to avoid reference errors
-        star_mask = np.asarray(self.star_mask).astype(bool)
+        star_mask = np.asarray(self.star_mask).astype(bool, copy=True)
 
         # Define a crop window as twice the size of the colored pixels
         x_color_size = np.max(photom_x_indices) - np.min(photom_x_indices)
@@ -2118,46 +2119,55 @@ class ASTRA:
         ymax = int(global_centroid[1] + y_color_size)
 
         # Limit the size to be within the bounds
+
+        H, W = corr_frame.shape
+
         if xmin < 0: xmin = 0
-        if xmax > corr_frame.shape[1]: xmax = corr_frame.shape[1]
+        if xmax > W: xmax = W
         if ymin < 0: ymin = 0
-        if ymax > corr_frame.shape[0]: ymax = corr_frame.shape[0]
+        if ymax > H: ymax = H
 
         # Get cropped versions of all arrays
         cropped_corrected_frame = corrected_frame[ymin:ymax, xmin:xmax]
         cropped_uncorrected_frame = uncorrected_frame[ymin:ymax, xmin:xmax]
         cropped_corrected_avepixel = corrected_avepixel[ymin:ymax, xmin:xmax]
         cropped_star_mask = star_mask[ymin:ymax, xmin:xmax]
+        photom_x_indices = photom_x_indices - xmin
+        photom_y_indices = photom_y_indices - ymin
 
         # Create combined masks
 
         # Generate mask for photometry pixels, cropped
-        cropped_mask_photom_included = np.ones_like(corrected_frame) # Create a fully masked array
-        cropped_mask_photom_included[photom_y_indices, photom_x_indices] = 0 # Unmask photometry pixels
-        cropped_mask_photom_included = cropped_mask_photom_included[ymin:ymax, xmin:xmax].astype(bool) # Crop
+        cropped_mask_photom_included = np.ones_like(cropped_corrected_frame, dtype=bool) # Create a fully masked array
+        cropped_mask_photom_included[photom_y_indices, photom_x_indices] = False # Unmask photometry pixels
 
         # Generate mask excluding photometry pixels, cropped
-        cropped_mask_photom_excluded = np.zeros_like(corrected_frame) # Create a fully unmasked array
-        cropped_mask_photom_excluded[photom_y_indices, photom_x_indices] = 1 # Mask photometry pixels
-        cropped_mask_photom_excluded = cropped_mask_photom_excluded[ymin:ymax, xmin:xmax].astype(bool) # Crop
+        cropped_mask_photom_excluded = np.zeros_like(cropped_corrected_frame, dtype=bool) # Create a fully unmasked array
+        cropped_mask_photom_excluded[photom_y_indices, photom_x_indices] = True # Mask photometry pixels
 
         # 1) Compute intensity sum
 
         # Get array of cropped photometric area from the corrected frame
         photom_included_cropped_corrected_frame = np.ma.masked_array(cropped_corrected_frame, 
-                                                                    mask=cropped_mask_photom_included)
+                                                                    mask=cropped_mask_photom_included,
+                                                                    copy=True)
         
         # Get array of cropped photometric area from the corrected avepixel
         photom_included_cropped_corrected_avepixel = np.ma.masked_array(cropped_corrected_avepixel, 
-                                                                        mask=cropped_mask_photom_included)
+                                                                        mask=cropped_mask_photom_included, 
+                                                                        copy=True)
 
         # Subtract both to get background subtracted cropped corrected photometric area
-        photom_pixels_nobg = np.clip((photom_included_cropped_corrected_frame - photom_included_cropped_corrected_avepixel), 0, None)
+        photom_pixels_nobg = np.clip((photom_included_cropped_corrected_frame - 
+                                      photom_included_cropped_corrected_avepixel), 0, None)
 
         # Replace photometry pixels that are masked by a star with the median value of the photom. area
 
         # Check where the photometric pixels intersect with the star mask
         photom_star_masked_indices = np.where((photom_pixels_nobg.mask == 0) & (cropped_star_mask == 1))
+
+        # Add the star mask
+        photom_pixels_nobg.mask = (photom_pixels_nobg.mask | cropped_star_mask).copy()   
 
         # Apply correction only if the streak intersects a star
         if len(photom_star_masked_indices[0]) > 0:
@@ -2177,7 +2187,8 @@ class ASTRA:
 
         # Get corrected cropped frame with photometry pixels & stars masked out
         photom_excluded_sm_cropped_corrected_frame = np.ma.masked_array(cropped_corrected_frame, 
-                                                                        mask=cropped_mask_photom_excluded | cropped_star_mask)
+                                                    mask=cropped_mask_photom_excluded | cropped_star_mask,
+                                                    copy=True)
         
         # Compute the standard deviation of the background
         background_stddev = np.ma.std(photom_excluded_sm_cropped_corrected_frame)
@@ -2195,7 +2206,8 @@ class ASTRA:
 
         # Get cropped photometric area from the uncorrected frame
         photom_included_cropped_uncorrected_frame = np.ma.masked_array(cropped_uncorrected_frame, 
-                                                                      mask=cropped_mask_photom_included)
+                                                                      mask=cropped_mask_photom_included,
+                                                                      copy=True)
         
         # If at least 2 pixels are saturated in the photometric area, mark the pick as saturated
         if np.sum(photom_included_cropped_uncorrected_frame > self.saturation_threshold) >= 2:
@@ -2214,18 +2226,22 @@ class ASTRA:
 
         # DEBUG - Save diagnostic photometry images
         try:
+            # Save the current matplotlib backend and switch to Agg
+            current_backend = matplotlib.get_backend()
+            matplotlib.use('Agg')
+
             # Create directory for photometry diagnostics if it doesn't exist
             photom_dir = os.path.join(self.data_path, "ASTRA_Photometry_Diagnostics")
             os.makedirs(photom_dir, exist_ok=True)
-            
+
             # Get frame number for filename
             frame_number = self.pick_frame_indices[len(self.photometry_pixels)-1] + self.first_pick_global_index
-            
-            # Create a figure with a 3x2 grid to show all processing stages
-            fig = Figure(figsize=(15, 10), dpi=100)
+
+            # Create a figure with a 3x2 grid - use Figure directly for thread safety
+            fig = Figure(figsize=(15, 10))
             canvas = FigureCanvas(fig)
             grid = fig.add_gridspec(3, 2, hspace=0.3, wspace=0.3)
-            
+
             # Create all needed axes
             ax1 = fig.add_subplot(grid[0, 0])  # Original cropped frame
             ax2 = fig.add_subplot(grid[0, 1])  # Background subtracted
@@ -2233,52 +2249,49 @@ class ASTRA:
             ax4 = fig.add_subplot(grid[1, 1])  # Photometry mask
             ax5 = fig.add_subplot(grid[2, 0])  # Final photometry pixels
             ax6 = fig.add_subplot(grid[2, 1])  # Combined result
-            
+
             # Show cropped_corrected_frame
-            im1 = ax1.imshow(cropped_corrected_frame, cmap='gray', 
-            vmin=np.percentile(cropped_corrected_frame, 1), 
-            vmax=np.percentile(cropped_corrected_frame, 99))
-            ax1.set_title("Cropped Corrected Frame")
+            vmin1 = np.percentile(cropped_corrected_frame, 1)
+            vmax1 = np.percentile(cropped_corrected_frame, 99)
+            im1 = ax1.imshow(cropped_corrected_frame, cmap='gray', vmin=vmin1, vmax=vmax1)
+            ax1.set_title("cropped_corrected_frame")
             fig.colorbar(im1, ax=ax1, shrink=0.7)
-            
+
             # Show photometry pixels with background subtracted
-            im2 = ax2.imshow(photom_pixels_nobg.filled(0), cmap='gray',
-            vmin=0,
-            vmax=np.percentile(photom_pixels_nobg.filled(0), 99))
-            ax2.set_title("Background-Subtracted Photometry")
+            filled_nobg = photom_pixels_nobg.filled(0)
+            vmax2 = np.percentile(filled_nobg, 99)
+            im2 = ax2.imshow(filled_nobg, cmap='gray', vmin=0, vmax=vmax2)
+            ax2.set_title("photom_pixels_nobg")
             fig.colorbar(im2, ax=ax2, shrink=0.7)
-            
+
             # Show star mask
-            star_mask_viz = np.ma.masked_array(np.ones_like(cropped_star_mask), mask=~cropped_star_mask)
-            im3 = ax3.imshow(star_mask_viz, cmap='Reds', vmin=0, vmax=1)
-            ax3.set_title("Star Mask")
-            
+            star_mask_viz = np.ones_like(cropped_star_mask)
+            im3 = ax3.imshow(cropped_star_mask, cmap='Reds', vmin=0, vmax=1)
+            ax3.set_title("cropped_star_mask")
+
             # Show photometry mask (included and excluded)
-            phot_mask_viz = np.ma.masked_array(np.ones_like(cropped_mask_photom_excluded), 
-                mask=~cropped_mask_photom_excluded)
-            im4 = ax4.imshow(phot_mask_viz, cmap='Blues', vmin=0, vmax=1)
-            ax4.set_title("Photometry Mask")
-            
+            im4 = ax4.imshow(cropped_mask_photom_excluded, cmap='Blues', vmin=0, vmax=1)
+            ax4.set_title("cropped_mask_photom_excluded")
+
             # Visualization for final photometry pixels 
             phot_final = np.zeros_like(cropped_corrected_frame)
             for p in photom_pixels:
-            # Convert to local coordinates
+                # Convert to local coordinates
                 px, py = p[0] - xmin, p[1] - ymin
                 # Check if within crop bounds
                 if 0 <= px < phot_final.shape[1] and 0 <= py < phot_final.shape[0]:
                     phot_final[py, px] = 1
-            
+
             im5 = ax5.imshow(phot_final, cmap='viridis', vmin=0, vmax=1)
-            ax5.set_title("Final Photometry Pixels")
-            
+            ax5.set_title("photometry_pixels")
+
             # Combined visualization - frame with photometry overlay
             combined = np.zeros((*cropped_corrected_frame.shape, 3))
             # Grayscale background
-            normalized = cropped_corrected_frame / (np.percentile(cropped_corrected_frame, 99) + 0.01)
-            normalized = np.clip(normalized, 0, 1)
+            normalized = np.clip(cropped_corrected_frame / (vmax1 + 0.01), 0, 1)
             for i in range(3):
                 combined[:,:,i] = normalized
-            
+
             # Add red overlay for photometry pixels
             for p in photom_pixels:
                 px, py = p[0] - xmin, p[1] - ymin
@@ -2286,7 +2299,7 @@ class ASTRA:
                     combined[py, px, 0] = 1.0  # Red channel
                     combined[py, px, 1] = 0.3  # Green channel
                     combined[py, px, 2] = 0.3  # Blue channel
-            
+
             # Add blue overlay for stars
             for y in range(cropped_star_mask.shape[0]):
                 for x in range(cropped_star_mask.shape[1]):
@@ -2294,45 +2307,44 @@ class ASTRA:
                         combined[y, x, 0] = 0.3  # Red channel
                         combined[y, x, 1] = 0.3  # Green channel
                         combined[y, x, 2] = 1.0  # Blue channel
-            
+
             im6 = ax6.imshow(combined)
-            ax6.set_title("Combined Visualization")
-            
+            ax6.set_title("combined_visualization")
+
             # Add summary stats as figure title
             fig.suptitle(f"Frame {frame_number} - SNR: {snr:.2f}, Sum: {intensity_sum:.0f}, " + 
-            f"Bg: {background_lvl:.2f}, Pixels: {source_px_count}, " +
-            f"Saturated: {saturated_bool}", fontsize=12)
-            
+                f"Bg: {background_lvl:.2f}, Pixels: {source_px_count}, " +
+                f"Saturated: {saturated_bool}", fontsize=12)
+
             # Save the figure in a thread-safe way
-            lock = threading.Lock()
-            with lock:
-                fig_path = os.path.join(photom_dir, f"photometry_frame_{frame_number:04d}.png")
-                canvas.print_figure(fig_path, dpi=100, bbox_inches='tight')
-            
+            if not hasattr(self, "_plot_lock"):
+                self._plot_lock = threading.RLock()
+
+            with self._plot_lock:
+                fig_path = os.path.join(photom_dir, f"photometry_frame_{frame_number:04d}.jpg")
+                fig.savefig(fig_path, format='jpg', dpi=100, bbox_inches='tight', 
+                    pil_kwargs={"quality": 90, "optimize": True})
+
             # Explicitly close to free memory
             fig.clf()
-            
+
+            # Restore the original matplotlib backend
+            matplotlib.use(current_backend)
+
         except Exception as e:
             print(f"Warning: Could not save photometry diagnostic plot for frame {frame_number}: {e}")
 
-
         # Verbose print
         if self.verbose:
-            # print("ASTRA SNR update on frame {:2d}: intensity sum = {:8d}, source px count = {:5d}, " \
-            # "background lvl = {:8.2f}, background stddev = {:6.2f}, SNR = {:.2f}".format(
-            #     self.pick_frame_indices[self.temp_count]+self.first_pick_global_index, intensity_sum, source_px_count, 
-            #     background_lvl, background_stddev, snr))
-            # self.temp_count += 1
-            print(self.pick_frame_indices[self.temp_count]+self.first_pick_global_index, intensity_sum, source_px_count, background_lvl, background_stddev, snr)
+            print("ASTRA SNR update on frame {:2d}: intensity sum = {:8.1f}, source px count = {:5d}, " \
+            "background lvl = {:8.2f}, background stddev = {:6.2f}, SNR = {:.2f}".format(
+                self.pick_frame_indices[self.temp_count]+self.first_pick_global_index, float(intensity_sum), source_px_count, 
+                background_lvl, background_stddev, snr))
+            self.temp_count += 1
+            # print(self.pick_frame_indices[self.temp_count]+self.first_pick_global_index, intensity_sum, source_px_count, background_lvl, background_stddev, snr)
 
         # Return SNR - returned rather than state-set
         return snr  
-
-
-
-
-
-
 
     def computePhotometryPixels(self, fit_img, cropped_frame, crop_vars):
         """
@@ -2477,27 +2489,168 @@ class ASTRA:
         # Set progress to 100
         self.updateProgress(100)
 
+        # Refactor picks to SkyFit format before saving
+        self.refactorPicksToSkyFitFormat()
+
         return True
 
-    
+    def saveECSV(self, platepar):
+        """ Save the picks into the GDEF ECSV standard. """
+
+        self.platepar = platepar
+
+        # If no picks, save nothing and send no-picks to FTPDetectionInfo save
+        if not hasattr(self, 'pick_list') or not self.pick_list or all(val.get('x_centroid') is None for val in self.pick_list.values()):
+            print("No valid picks to save.")
+            return False
+
+        isodate_format_file = "%Y-%m-%dT%H_%M_%S"
+        isodate_format_entry = "%Y-%m-%dT%H:%M:%S.%f"
+
+        # Reference time
+        dt_ref = self.img_obj.beginning_datetime
+
+        # ECSV file name
+        ecsv_file_name = dt_ref.strftime(isodate_format_file) + '_ASTRA_' + self.config.stationID + ".ecsv"
+
+        # Compute alt/az pointing
+        azim, elev = Image.trueRaDec2ApparentAltAz(self.platepar.RA_d, self.platepar.dec_d, self.platepar.JD,
+            self.platepar.lat, self.platepar.lon, refraction=False)
+
+        # Compute FOV size
+        fov_horiz, fov_vert = Image.computeFOVSize(self.platepar)
+
+        if self.img_obj.input_type == 'ff':
+            ff_name = self.img_obj.current_ff_file
+        else:
+            ff_name = "FF_{:s}_".format(self.platepar.station_code) \
+                + self.img_obj.beginning_datetime.strftime("%Y%m%d_%H%M%S_") \
+                + "{:03d}".format(int(self.img_obj.beginning_datetime.microsecond//1000)) \
+                + "_0000000.fits"
+
+        # Get the number of stars in the list
+        if self.platepar.star_list is not None:
+            n_stars = len(self.platepar.star_list)
+        else:
+            n_stars = 0
+
+        # Write the meta header
+        meta_dict = {
+            'obs_latitude': self.platepar.lat,
+            'obs_longitude': self.platepar.lon,
+            'obs_elevation': self.platepar.elev,
+            'origin': 'ASTRA',
+            'camera_id': self.config.stationID,
+            'cx' : self.platepar.X_res,
+            'cy' : self.platepar.Y_res,
+            'photometric_band' : self.platepar.mag_band_string if hasattr(self.platepar, 'mag_band_string') else 'V',
+            'image_file' : ff_name,
+            'isodate_start_obs': str(dt_ref.strftime(isodate_format_entry)),
+            'astrometry_number_stars' : n_stars,
+            'mag_label': 'mag_data',
+            'no_frags': 1,
+            'obs_az': azim,
+            'obs_ev': elev,
+            'obs_rot': Image.rotationWrtHorizon(self.platepar),
+            'fov_horiz': fov_horiz,
+            'fov_vert': fov_vert,
+        }
+
+        # Write the header
+        out_str = """# %ECSV 0.9
+    # ---
+    # datatype:
+    # - {name: datetime, datatype: string}
+    # - {name: ra, unit: deg, datatype: float64}
+    # - {name: dec, unit: deg, datatype: float64}
+    # - {name: azimuth, datatype: float64}
+    # - {name: altitude, datatype: float64}
+    # - {name: x_image, unit: pix, datatype: float64}
+    # - {name: y_image, unit: pix, datatype: float64}
+    # - {name: integrated_pixel_value, datatype: int64}
+    # - {name: background_pixel_value, datatype: int64}
+    # - {name: saturated_pixels, datatype: bool}
+    # - {name: mag_data, datatype: float64}
+    # - {name: err_minus_mag, datatype: float64}
+    # - {name: err_plus_mag, datatype: float64}
+    # - {name: snr, datatype: float64}
+    # delimiter: ','
+    # meta: !!omap
+    """
+        # Add the meta information
+        for key, value in meta_dict.items():
+            value_str = f"'{value}'" if isinstance(value, str) else str(value)
+            out_str += f"# - {{{key}: {value_str}}}\n"
+
+        out_str += "# schema: astropy-2.0\n"
+        out_str += "datetime,ra,dec,azimuth,altitude,x_image,y_image,integrated_pixel_value,background_pixel_value,saturated_pixels,mag_data,err_minus_mag,err_plus_mag,snr\n"
+
+        # Add the data (sort by frame)
+        for frame, pick in sorted(self.pick_list.items(), key=lambda x: x[0]):
+
+            if pick.get('x_centroid') is None or pick.get('mode', 0) == 0:
+                continue
+
+            snr = pick.get('snr', 0.0)
+            if snr is None or snr <= 0:
+                snr = 0.0
+                mag_err_random = 0.0
+            else:
+                mag_err_random = 2.5 * np.log10(1 + 1 / snr)
+
+                mag_err_total = np.sqrt(mag_err_random**2 + self.platepar.mag_lev_stddev**2)
+
+                pp_tmp = copy.deepcopy(self.platepar)
+                
+                time_data = [self.img_obj.currentFrameTime(frame_no=frame)]
+
+                jd_data, ra_data, dec_data, mag_data = Image.xyToRaDecPP(time_data, [pick['x_centroid']],
+                [pick['y_centroid']], [pick['intensity_sum']], pp_tmp, measurement=True)
+
+                jd, ra, dec, mag = jd_data[0], ra_data[0], dec_data[0], mag_data[0]
+
+                azim, alt = Image.trueRaDec2ApparentAltAz(ra, dec, jd, pp_tmp.lat, pp_tmp.lon, refraction=False)
+
+                frame_dt = self.img_obj.currentFrameTime(frame_no=frame, dt_obj=True)
+
+                entry = [
+                frame_dt.strftime(isodate_format_entry),
+                f"{ra:10.6f}", f"{dec:+10.6f}",
+                f"{azim:10.6f}", f"{alt:+10.6f}",
+                f"{pick['x_centroid']:9.3f}", f"{pick['y_centroid']:9.3f}",
+                f"{int(pick.get('intensity_sum', 0)):10d}",
+                f"{int(pick.get('background_intensity', 0)):10d}",
+                f"{str(pick.get('saturated', False)):5s}",
+                f"{mag:+7.2f}", f"{-mag_err_total:+6.2f}", f"{mag_err_total:+6.2f}",
+                f"{snr:10.2f}"
+                ]
+                out_str += ",".join(entry) + "\n"
+
+        ecsv_file_path = os.path.join(self.ecsv_save_path, ecsv_file_name)
+
+        with open(ecsv_file_path, 'w') as f:
+            f.write(out_str)
+
+        print("ECSV file saved to:", ecsv_file_path)
+        return True
+
     def getResults(self, skyfit_format=False):
         
         if skyfit_format is True:
-
-            self.refactorPicksToSkyFitFormat()
 
             return self.pick_list
 
         else:
             global_pick_indices = [fr + self.first_pick_global_index for fr in self.pick_frame_indices]
             return (self.global_picks, global_pick_indices, self.snr, self.abs_level_sums, 
-                    self.photometry_pixels, self.background_levels, self.saturated_bool_list)
+                self.photometry_pixels, self.background_levels, self.saturated_bool_list)
     
     def getTotalPicks(self):
         return len(self.pick_frame_indices)
     
     def getMinSnr(self):
         return self.snr_threshold
+
             
 
 
@@ -2625,85 +2778,6 @@ class Dataloader:
         # return true if no errors
         return True
 
-    def loadECSV(self, ECSV_file_path, dir_path, img_obj):
-        # ASTRA Addition - Justin DT
-        """
-        Loads the ECSV file and adds the relevant info to pick_list
-        Args:
-            ECSV_file_path (str): Path to the ECSV file to load
-        Returns:
-            picks (np.ndarray): (N, 2) array of (x, y) picks
-            pick_frame_indices (np.ndarray): (N,) array of frame indices for each pick
-            mags (np.ndarray): (N,) array of magnitudes for each pick
-        """
-
-        # Instantiate arrays to be populated
-        picks = []  # N x args_dict array for addCentroid
-        pick_frame_indices = []  # (N,) array of frame indices
-        pick_frame_times = []  # (N,) array of frame times
-
-        # Opens and parses the ECSV file
-        with open(ECSV_file_path, 'r') as file:
-
-            # Read the file contents
-            contents = file.readlines()
-    
-            # Temp bool to get the column names
-            first_bool = False
-
-            # Process the contents
-            for line in contents:
-
-                # Clean the line
-                line = [part.strip() for part in line.split(',') if part]
-
-                # Skip header lines
-                if line[0].startswith('#'):
-                    continue
-
-                if first_bool == False:
-                    # Set first bool to True so header is not unpacked twice
-                    first_bool = True
-
-                    # Unpack column names
-                    column_names = line
-
-                    # Map column names to their indices
-                    pick_frame_times_idx = column_names.index('datetime') if 'datetime' in column_names else None
-                    x_ind = column_names.index('x_image') if 'x_image' in column_names else None
-                    y_ind = column_names.index('y_image') if 'y_image' in column_names else None
-                    background_ind = column_names.index('background_pixel_value') if 'background_pixel_value' in column_names else None
-                    sat_ind = column_names.index('saturated_pixels') if 'saturated_pixels' in column_names else None
-                    snr_ind = column_names.index('snr') if 'snr' in column_names else None
-
-                    continue
-
-                else:
-                    # Unpack line
-
-                    # Populate arrays
-                    cx, cy = float(line[x_ind]), float(line[y_ind])
-                    pick_frame_times.append(datetime.strptime(line[pick_frame_times_idx], '%Y-%m-%dT%H:%M:%S.%f'))
-
-                    # Load in pick parameters, use default for other values
-                    picks.append([cx, cy])
-
-        # Converts times into frame indices, accounting for floating-point errors
-        pick_frame_indices = []
-        frame_count = sum(1 for name in os.listdir(dir_path) if 'dump' in name)
-        time_idx = 0
-        for i in range(frame_count):
-            frame_time = img_obj.currentFrameTime(frame_no=i, dt_obj = True)
-            time = pick_frame_times[time_idx]
-            if frame_time == time or \
-                frame_time == time + dt.timedelta(microseconds=1) or \
-                frame_time == time - dt.timedelta(microseconds=1):
-                pick_frame_indices.append(i)
-                time_idx += 1
-            if time_idx >= len(pick_frame_times):
-                break
-        
-        return np.array(picks), np.array(pick_frame_indices), np.array(pick_frame_times)
     
     def loadEvTxt(self, txt_file_path, img_handle):
         """
@@ -2862,6 +2936,158 @@ def checkAstraConfig(astra_config):
 
     return errors
 
+def loadEvTxt(txt_file_path):
+    """
+    Loads the Ev*.txt file and adds the relevant info to pick_list
+    Args:
+        txt_file_path (str): Path to the Ev*.txt file to load
+    Returns:
+        picks (dict): (N : [8]) dict following same format as self.pick_list 
+    """
+
+    picks = [] # (N, x, y) array of picks
+    pick_frame_indices = [] # (N,) array of frame indices
+
+    # Temp bool to extract header line
+    first_bool = False
+
+    # Wrap in try except for uncaught errors
+    try:
+        # Opens and parses pick file
+        with open(txt_file_path, 'r') as file:
+            for i, line in enumerate(file):
+                if line.strip() and not line.startswith('#'):
+
+                    # Clean the line
+                    line = [part.strip() for part in line.split() if part]
+
+                    # Unpack the header
+                    if first_bool == False:
+                        first_bool = True
+
+                        # Unpack header info
+                        column_names = [part.strip() for part in temp_line.split()[1:] if part]
+
+                        # Extract indices
+                        frame_number_idx = column_names.index('fr') if 'fr' in column_names else None
+                        x_centroid_idx = column_names.index('cx') if 'cx' in column_names else None
+                        y_centroid_idx = column_names.index('cy') if 'cy' in column_names else None
+
+                        # Raise error if not found in txt file
+                        if frame_number_idx is None or x_centroid_idx is None or y_centroid_idx is None:
+                            raise ValueError("TXT file must contain 'fr', 'cx', and 'cy' columns.")
+                    
+                    else:
+                        # Unpack the pick
+                        frame_number = int(line[frame_number_idx])
+                        cx, cy = float(line[x_centroid_idx]), float(line[y_centroid_idx])
+
+                        picks.append([cx, cy])
+                        pick_frame_indices.append(frame_number)
+
+                # Store a temp line to hit previous for col names
+                temp_line = line
+        
+        # Create ASTRA-type pick_dict
+        pick_dict = {}
+        for i, fr_no in enumerate(pick_frame_indices):
+            pick_dict[fr_no] = {
+                "x_centroid" : picks[i][0],
+                "y_centroid" : picks[i][1]
+            }
+
+        return pick_dict
+
+    # Raise error message
+    except Exception as e:
+        raise ValueError(f"Error reading TXT file: {str(e)}")
+    
+def loadECSV(ECSV_file_path, dir_path, img_obj):
+    # ASTRA Addition - Justin DT
+    """
+    Loads the ECSV file and adds the relevant info to pick_list
+    Args:
+        ECSV_file_path (str): Path to the ECSV file to load
+    Returns:
+        picks (np.ndarray): (N, 2) array of (x, y) picks
+        pick_frame_indices (np.ndarray): (N,) array of frame indices for each pick
+        mags (np.ndarray): (N,) array of magnitudes for each pick
+    """
+
+    # Instantiate arrays to be populated
+    picks = []  # N x args_dict array for addCentroid
+    pick_frame_indices = []  # (N,) array of frame indices
+    pick_frame_times = []  # (N,) array of frame times
+
+    # Opens and parses the ECSV file
+    with open(ECSV_file_path, 'r') as file:
+
+        # Read the file contents
+        contents = file.readlines()
+
+        # Temp bool to get the column names
+        first_bool = False
+
+        # Process the contents
+        for line in contents:
+
+            # Clean the line
+            line = [part.strip() for part in line.split(',') if part]
+
+            # Skip header lines
+            if line[0].startswith('#'):
+                continue
+
+            if first_bool == False:
+                # Set first bool to True so header is not unpacked twice
+                first_bool = True
+
+                # Unpack column names
+                column_names = line
+
+                # Map column names to their indices
+                pick_frame_times_idx = column_names.index('datetime') if 'datetime' in column_names else None
+                x_ind = column_names.index('x_image') if 'x_image' in column_names else None
+                y_ind = column_names.index('y_image') if 'y_image' in column_names else None
+
+                continue
+
+            else:
+                # Unpack line
+
+                # Populate arrays
+                cx, cy = float(line[x_ind]), float(line[y_ind])
+                pick_frame_times.append(datetime.strptime(line[pick_frame_times_idx], '%Y-%m-%dT%H:%M:%S.%f'))
+
+                # Load in pick parameters, use default for other values
+                picks.append([cx, cy])
+
+    # Converts times into frame indices, accounting for floating-point errors
+    pick_frame_indices = []
+    frame_count = sum(1 for name in os.listdir(dir_path) if 'dump' in name)
+    time_idx = 0
+    for i in range(frame_count):
+        frame_time = img_obj.currentFrameTime(frame_no=i, dt_obj = True)
+        time = pick_frame_times[time_idx]
+        if frame_time == time or \
+            frame_time == time + dt.timedelta(microseconds=1) or \
+            frame_time == time - dt.timedelta(microseconds=1):
+            pick_frame_indices.append(i)
+            time_idx += 1
+        if time_idx >= len(pick_frame_times):
+            break
+
+    # Format into ASTRA pick_dict format
+    pick_dict = {}
+    for i, fr_no in enumerate(pick_frame_indices):
+        pick_dict[fr_no] = {
+            "x_centroid" : picks[i][0],
+            "y_centroid" : picks[i][1]
+        }
+
+    return pick_dict
+
+
 
 if __name__ == "__main__":
 
@@ -2872,19 +3098,98 @@ if __name__ == "__main__":
         # run kalman (optional)
 
     # To determine if there is more than one event, check for children directories that have a config in them
-    from argparse import ArgumentParser
+    import argparse
+    ArgumentParser = argparse.ArgumentParser
     import json
+    from RMS.Formats.FrameInterface import detectInputTypeFile
+    from RMS import ConfigReader
+    from concurrent.futures import ThreadPoolExecutor
+    
 
-    parser = ArgumentParser(description="Process some events.")
+    parser = ArgumentParser(description="""
+Command-line interface for the ASTRA (Astrometric Streak Tracking and Refinement Algorithm) pipeline.
+
+This script serves as the main entry point for processing meteor events using ASTRA. It can operate in two modes: 
+single-station or multi-station. The script parses command-line arguments to locate event data, load 
+configurations, and run the full analysis pipeline, saving the refined results in the GDEF ECSV format.
+
+Workflow:
+1.  Configuration Loading: 
+    It loads an ASTRA-specific configuration file (JSON) that controls the algorithm's parameters 
+    (e.g., PSO settings, SNR thresholds). If no config is provided, it uses a built-in default. 
+    The configuration is validated to prevent runtime errors.
+
+2.  Data Discovery:
+    -   Single-Station Mode: The script expects a single directory containing all necessary files: 
+        a RMS `config.json`, a dark/bias frame, a flat frame, and an initial picks file (`.ecsv` or `.txt`).
+    -   Multi-Station Mode (`--multi_station`): The script scans the provided parent directory for 
+        subdirectories. Each subdirectory that contains a `config.json` is treated as a separate 
+        station to be processed.
+
+3.  ASTRA Processing:
+    -   An `ASTRA` object is instantiated for each station.
+    -   The processing is launched, which involves:
+        - Image correction and background subtraction.
+        - Recursive cropping and first-pass fitting with PSO.
+        - Local refinement of fits with L-BFGS-B.
+        - Filtering of low-quality detections based on SNR and geometry.
+    -   For multi-station events, processing for each station is run in parallel using a 
+        `ThreadPoolExecutor` to improve performance.
+
+4.  Output Generation: 
+    After processing, the refined picks, photometry, and astrometry are saved to a GDEF-compliant 
+    ECSV file in the specified output directory. If `--save_animation` is enabled, diagnostic plots 
+    for each frame are also saved.
+
+Arguments:
+    file_directory (str):
+        Positional argument. The path to the root directory containing the event data.
+        For single-station mode, this is the directory with the config, dark/flat, and pick files.
+        For multi-station mode, this is the parent directory containing subdirectories for each station.
+
+    ECSV_save_path (str):
+        Positional argument. The directory where the output ECSV file(s) will be saved.
+        If not specified, it defaults to the `file_directory` for each station.
+
+    --astra_config_path (str, optional):
+        Path to a JSON file containing the ASTRA configuration. This file defines parameters for PSO,
+        cropping, filtering, and other algorithm-specific settings. If omitted, a default configuration is used.
+
+    --save_animation (bool, optional):
+        Flag to enable saving a series of diagnostic JPEG images for each processed frame.
+        These images show the original crop, the Gaussian fit, and the residuals. Defaults to False.
+
+    --verbose (bool, optional):
+        Flag to enable detailed print statements during the execution of the pipeline, which is useful
+        for debugging. Defaults to False.
+
+    --multi_station (bool, optional):
+        Flag to indicate that the `file_directory` contains data for multiple stations in subdirectories.
+        The script will process each station in parallel. Defaults to False.
+
+    --use_txt_picks (bool, optional):
+        Flag to force the script to load initial picks from a `Ev*.txt` file instead of the default `.ecsv` file.
+        Useful for processing older data formats. Defaults to False.
+
+Usage Examples:
+    # Process a single-station event
+    python Astra.py /path/to/single_event_data /path/to/output
+
+    # Process a multi-station event with verbose output and save animations
+    python Astra.py /path/to/multi_station_parent /path/to/output --multi_station --verbose --save_animation
+
+    # Process an event using a custom ASTRA configuration
+    python Astra.py /path/to/event /path/to/output --astra_config_path /path/to/my_astra_config.json
+""", formatter_class=argparse.RawTextHelpFormatter)
+    
     parser.add_argument("file_directory", type=str, help="Path to the file directory")
-    parser.add_argument("--astra_config", type=str, help="ASTRA_config dict or Path to the ASTRA config json")
-    parser.add_argument("--run_kalman", default=False, action="store_true", help="Whether to run Kalman filter")
-    parser.add_argument("--save_animation", default=False, action="store_true", help="Whether to save animation of frame fitting")
-    parser.add_argument("--verbose", default=False, action="store_true", help="Whether to print verbose output")
-    # Add option to process full directory (--walk instead of target directories)
-    # Add option to run trajectory analysis
+    parser.add_argument("ECSV_save_path", type=str, nargs='?', default=None, help="Path to save ECSV file, defaults to dir with config")
+    parser.add_argument("-c", "--astra_config_path", type=str, help="ASTRA_config dict or Path to the ASTRA config json")
+    parser.add_argument("-sa", "--save_animation", default=False, action="store_true", help="Whether to save animation of frame fitting")
+    parser.add_argument("-v", "--verbose", default=False, action="store_true", help="Whether to print verbose output")
+    parser.add_argument("-ms", "--multi_station", default=False, action="store_true", help="Whether to process multi-station data")
+    parser.add_argument("-txt", "--use_txt_picks", default=False, action="store_true", help="Whether to use picks from DetApp TXT file")
 
-    # MAYBE SEPERATE KALMAN AND ASTRA ENTIRELY TO ALLOW KALMAN TO BE RUN ON MANUAL PICKING
     args = parser.parse_args()
 
     # Check filepath
@@ -2893,28 +3198,17 @@ if __name__ == "__main__":
     else:
         file_path = args.file_directory
 
-    # Check save_animation
-    if args.save_animation is True:
-        save_animation = True
-
-    # Check verbose
-    if args.verbose is True:
-        verbose = True
+    # Check multi_station
+    if args.multi_station is True:
+        multi_station = True
 
     # Load and check astra_config
-    if args.astra_config:
+    if args.astra_config_path:
 
         # Load if a json file
-        if args.astra_config.endswith(".json"):
-            with open(args.astra_config, "r") as f:
+        if args.astra_config_path.endswith(".json"):
+            with open(args.astra_config_path, "r") as f:
                 astra_config = json.load(f)
-
-        # If dict, open as a dict
-        else:
-            try:
-                astra_config = json.loads(args.astra_config)
-            except Exception as e:
-                raise ValueError(f"Invalid ASTRA config format. Must either be path to JSON (with quotes escaped) or a valid dictionary: {e}")
 
         # If astra_config provided, check values
         try:
@@ -2935,7 +3229,94 @@ if __name__ == "__main__":
                                 'n_particles': 125, 'V_c (0-1)': 0.3, 'ftol': 1e-4, 'ftol_itter': 25, 
                                 'expl_c': 3, 'P_sigma': 3}, 
                         'astra': {'star_thresh': 3, 'min SNR': 5, 'P_crop': 1.5, 'sigma_init (px)': 2, 
-                                  'sigma_max': 1.2, 'L_max': 1.5, 'Verbose': verbose, 'photom_thresh': 0.05, 
-                                  'Save Animation': save_animation, 'pick_offset': 3}, 
+                                  'sigma_max': 1.2, 'L_max': 1.5, 'Verbose': False, 'photom_thresh': 0.05, 
+                                  'Save Animation': False, 'pick_offset': 3}, 
                         'kalman': {'Monotonicity': True, 'sigma_xy (px)': 0.5, 'sigma_vxy (%)': 100, 
                                    'save results': False}}
+        
+    # if multi-station, parse directory for subfolders including a .config object
+    if args.multi_station:
+        subfolders = [f.path for f in os.scandir(file_path) if f.is_dir()]
+        config_folders = []
+        for folder in subfolders:
+            if os.path.exists(os.path.join(folder, "config.json")):
+                config_folders.append(folder)
+        if not config_folders:
+            raise FileNotFoundError("No config folders found.")
+        print(f"Found config folders: {config_folders}")
+    else:
+        config_folders = [file_path] if os.path.isdir(file_path) else os.path.dirname(file_path)
+
+    # if no ecsv save path specified, use each config folder
+    if not args.ECSV_save_path:
+        args.ECSV_save_path = config_folders
+
+    # Set astra config with verbose and save animation
+    astra_config['astra']['Verbose'] = args.verbose
+    astra_config['astra']['Save Animation'] = args.save_animation
+
+    configs = []
+    img_objs = []
+    darks = []
+    flats = []
+    pick_dicts = []
+
+    # For each camera (single if multi_station is false) prep data
+    for config_path in config_folders:
+
+        try:
+            # Load config obj
+            config = ConfigReader.loadConfigFromDirectory(dir_path = config_path)
+
+            # Load img obj
+            img_handle = detectInputTypeFile(config_path, config)
+
+            # Load dark
+            dark_name = [file_name for file_name in os.listdir(config_path) if "dark" in file_name or "bias" in file_name][0]
+            dark = Image.loadDark(config_path, dark_name)
+
+            # Load flat
+            flat_name = [file_name for file_name in os.listdir(config_path) if "flat" in file_name][0]
+            flat = Image.loadFlat(config_path, flat_name)
+
+            # Load ECSV picks
+            if args.use_txt_picks:
+                txt_name = [file_name for file_name in os.listdir(config_path) if file_name.endswith('.txt') and file_name.startswith('ev')][0]
+                pick_dict = loadEvTxt(os.path.join(config_path, txt_name), img_handle)
+            else:
+                ecsv_name = [file_name for file_name in os.listdir(config_path) if "ecsv" in file_name][0]
+                pick_dict = loadECSV(config_path, ecsv_name)
+            if pick_dict == {}:
+                raise ValueError("No valid picks found.")
+            
+            # Once no errors raised, add all to lists
+            configs.append(config)
+            img_objs.append(img_handle)
+            flats.append(flat)
+            darks.append(dark)
+            pick_dicts.append(pick_dict)
+
+        except Exception as e:
+            raise ValueError(f"Error processing config folder {config_path}: {e}")
+        
+
+    # Using a threadpool run all astra processes (if only one, do not use threadpool)
+    def process_astra(*args):
+        
+        astra_obj = ASTRA(*args)
+
+        astra_obj.process()
+
+        astra_obj.saveECSV()
+
+    if len(configs) == 1 :
+        process_astra(img_objs[0], pick_dicts[0], astra_config, 
+                      config_folders[0], configs[0], darks[0], flats[0], None, 
+                      args.ECSV_save_path if isinstance(args.ECSV_save_path, str) else args.ECSV_save_path[0])
+    else:
+        with ThreadPoolExecutor(max_workers=len(configs)) as executor:
+            for i in range(len(configs)):
+                executor.submit(process_astra, img_objs[i], pick_dicts[i], astra_config, 
+                              config_folders[i], 
+                            configs[i], darks[i], flats[i], None, 
+                      args.ECSV_save_path if isinstance(args.ECSV_save_path, str) else args.ECSV_save_path[i])
