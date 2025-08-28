@@ -5992,8 +5992,6 @@ class PlateTool(QtWidgets.QMainWindow):
         # ######################################################################################################
 
 
-
-
         # Compute the SNR using the "CCD equation" (Howell et al., 1989)
         snr = signalToNoise(source_intens, source_px_count, bg_median, bg_std)
 
@@ -6675,8 +6673,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 # pixels
                 # (do as a float to avoid artificially pumping up the magnitude)
                 crop_img_nobg = crop_img.astype(float) - background_lvl
-                crop_img_nobg = np.clip(crop_img_nobg, 0, None)
                 intensity_sum = np.ma.sum(crop_img_nobg)
+                intensity_sum = np.abs(intensity_sum)
 
             # Subtract the background using the avepixel
             else:
@@ -6728,27 +6726,26 @@ class PlateTool(QtWidgets.QMainWindow):
                 crop_mask_img_bg = mask_img_bg[x_min:x_max, y_min:y_max]
                 crop_bg = np.ma.masked_array(crop_bg, crop_mask_img_bg | crop_star_mask)
 
-                # Subtract the avepixel crop from the data crop, clip the negative values to 0 and sum up the intensity
+                # Subtract the avepixel crop from the data crop
                 crop_img_nobg = crop_img.astype(float) - avepixel_crop
-                crop_img_nobg = np.clip(crop_img_nobg, 0, None)
                 intensity_sum = np.ma.sum(crop_img_nobg)
+                intensity_sum = np.abs(intensity_sum)
 
             # Check if the result is masked
             if np.ma.is_masked(intensity_sum):
+
                 # If the result is masked (i.e. error reading pixels), set the intensity sum to 1
                 intensity_sum = 1
-            else:
+
+            # If the intensity sum is a numpy object, set it to int
+            elif isinstance(intensity_sum, np.ndarray):
                 intensity_sum = intensity_sum.astype(int)
+
+            else:
+                intensity_sum = int(intensity_sum)
 
             # Set the intensity sum to the pick
             pick['intensity_sum'] = intensity_sum
-
-            # # Plot the background subtracted crop
-            # plt.figure()
-            # plt.imshow(crop_img_nobg, cmap='gray', origin='lower')
-            # plt.colorbar()
-            # plt.title("Background subtracted crop")
-            # plt.show()
 
             ### Measure the SNR of the pick ###
 
@@ -6767,6 +6764,25 @@ class PlateTool(QtWidgets.QMainWindow):
             # Debug print
             print("SNR update: intensity sum = {:8d}, source px count = {:5d}, background lvl = {:8.2f}, background stddev = {:6.2f}, SNR = {:.2f}".format(
                 intensity_sum, source_px_count, background_lvl, background_stddev, snr))
+
+
+            # # Plot the image on which the intensity sum was computed: crop_img, avepixel_crop, and crop_img_nobg
+            # plt.figure("Intensity sum computation")
+            # plt.clf()
+            # plt.subplot(1, 3, 1)
+            # plt.imshow(crop_img, cmap='gray', origin='lower')
+            # plt.colorbar()
+            # plt.title("Crop used for intensity sum computation\nIntensity sum = {:d}, Background = {:.2f}, SNR = {:.2f}".format(
+            #     intensity_sum, background_lvl, snr))
+            # plt.subplot(1, 3, 2)
+            # plt.imshow(avepixel_crop, cmap='gray', origin='lower')
+            # plt.colorbar()
+            # plt.title("Average pixel crop")
+            # plt.subplot(1, 3, 3)
+            # plt.imshow(crop_img_nobg, cmap='gray', origin='lower')
+            # plt.colorbar()
+            # plt.title("Background subtracted crop")
+            # plt.show()
 
             ### Determine if there is any saturation in the measured photometric area
 

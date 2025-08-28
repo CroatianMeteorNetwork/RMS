@@ -231,9 +231,6 @@ class ASTRA:
             else:
                 corrected_avepixel = Image.gammaCorrectionImage(avepixel_background, self.config.gamma, 
                                                             bp=0, wp=(2**self.config.bit_depth - 1))
-            
-            # Clip background to zero
-            self.corrected_avepixel = np.clip(corrected_avepixel, 0, None)
 
             # Set backgrounds as a class var
             self.corrected_avepixel = corrected_avepixel
@@ -580,7 +577,7 @@ class ASTRA:
         self.fit_costs = fit_costs
 
         # Clip to avoid division errors
-        self.snr = np.clip(frame_snr_values, 1, None)
+        self.snr = np.clip(frame_snr_values, 0.01, None)
         self.abs_level_sums = np.clip(self.abs_level_sums, 1, None)
 
 
@@ -1692,8 +1689,7 @@ class ASTRA:
         
         # 2. Background subtraction
         unsub_frame = corr_frame.copy()
-        sub_frame = corr_frame - self.corrected_avepixel
-        sub_frame = np.clip(sub_frame, 0, None)
+        sub_frame = corr_frame.astype(np.int32) - self.corrected_avepixel.astype(np.int32)
 
         # 3. Star masking
         final_frame = np.ma.masked_array(sub_frame, mask=self.star_mask)
@@ -2200,7 +2196,7 @@ class ASTRA:
             photom_pixels_nobg[photom_star_masked_indices] = masked_stars_streak_median
 
         # Sum the array of corrected photometric pixels with the background subtracted
-        intensity_sum = np.ma.sum(photom_pixels_nobg)
+        intensity_sum = np.abs(np.ma.sum(photom_pixels_nobg))
 
         # 2) Compute background STD
 
