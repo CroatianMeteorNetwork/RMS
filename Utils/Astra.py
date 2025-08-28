@@ -494,7 +494,8 @@ class ASTRA:
         for i in range(len(fit_imgs)):
 
             frame_idx = pick_frame_indices[i]
-            frame, uncorr_frame = self.getFrame(frame_idx, include_raw=True)
+            frame, uncorr_frame, non_sub_frame = self.getFrame(frame_idx, include_raw=True, 
+                                                                include_non_subtracted=True)
 
             # Calculate photom_pixels
             photom_pixels = self.computePhotometryPixels(fit_imgs[i], cropped_frames[i], crop_vars[i])
@@ -502,7 +503,7 @@ class ASTRA:
             # Calculate SNR, and photom values
             snr = self.computeIntensitySum(photom_pixels, 
                     self.translatePicksToGlobal((refined_params[i, 2], refined_params[i, 3]), crop_vars[i]), 
-                    frame, uncorr_frame)
+                    frame, uncorr_frame, non_sub_frame)
 
             # Determine SNR - DEPRECIATED
             # snr = self.calculateSNR(fit_imgs[i], frames[pick_frame_indices[i]], cropped_frames[i], crop_vars[i])
@@ -1581,7 +1582,7 @@ class ASTRA:
         # Return the generated particles
         return pos
 
-    def getFrame(self, fr_no, include_raw=False, crop_vars=None):
+    def getFrame(self, fr_no, include_raw=False, crop_vars=None, include_non_subtracted=False):
         """
         Loads the frame number from the img_obj and returns the subtracted, and cropped if vars are passed on
         """
@@ -1593,7 +1594,7 @@ class ASTRA:
         # Operate on list of frames
         if isinstance(fr_no, (list, np.ndarray)):
 
-            frames, raw_frames = [], []
+            frames, raw_frames, non_sub_frames = [], [], []
 
             first_frame_num = self.img_obj.current_frame
 
@@ -1607,7 +1608,11 @@ class ASTRA:
                 raw_frame = copy.deepcopy(frame) if include_raw else None
 
                 # Correct frame
-                frame = self.correctFrame(frame)
+                if include_non_subtracted:
+                    frame, non_sub_frame = self.correctFrame(frame, include_non_subtracted=True)
+                    non_sub_frames.append(non_sub_frame)
+                else:
+                    frame = self.correctFrame(frame)
 
                 # Crop if requested
                 if crop_vars is not None:
@@ -1621,13 +1626,21 @@ class ASTRA:
             # Reset to first frame
             self.img_obj.setFrame(first_frame_num)
 
-            if include_raw:
+            if include_raw is False and include_non_subtracted is False:
+                return np.array(frames)
+            elif include_raw is True and include_non_subtracted is False:
                 return np.array(frames), np.array(raw_frames)
-            else:
-                return frames
+            elif include_raw is False and include_non_subtracted is True:
+                return np.array(frames), np.array(non_sub_frames)
+            elif include_raw is True and include_non_subtracted is True:
+                return np.array(frames), np.array(raw_frames), np.array(non_sub_frames)
 
         # Operate on a single frame
         else:
+        
+            frame = None
+            raw_frame = None
+            non_sub_frame = None
 
             # Get initial frame num
             first_frame_num = self.img_obj.current_frame
@@ -1643,20 +1656,27 @@ class ASTRA:
             raw_frame = copy.deepcopy(frame) if include_raw else None
 
             # Correct frame
-            frame = self.correctFrame(frame)
+            if include_non_subtracted:
+                frame, non_sub_frame = self.correctFrame(frame, include_non_subtracted=True)
+            else:
+                frame = self.correctFrame(frame)
 
             # Crop if requested
             if crop_vars is not None:
                 cx, cy, xmin, xmax, ymin, ymax = crop_vars
                 frame = frame[ymin:ymax, xmin:xmax]
-            
-            if include_raw:
-                return np.array(frame), np.array(raw_frame)
-            else:
+
+            if include_raw is False and include_non_subtracted is False:
                 return np.array(frame)
+            elif include_raw is True and include_non_subtracted is False:
+                return np.array(frame), np.array(raw_frame)
+            elif include_raw is False and include_non_subtracted is True:
+                return np.array(frame), np.array(non_sub_frame)
+            elif include_raw is True and include_non_subtracted is True:
+                return np.array(frame), np.array(raw_frame), np.array(non_sub_frame)
 
 
-    def correctFrame(self, frame):
+    def correctFrame(self, frame, include_non_subtracted=False):
 
         # 1. correct using dark, flat, gamma
         if self.dark is not None:
@@ -1671,6 +1691,7 @@ class ASTRA:
                                                     bp=0, wp=(2**self.config.bit_depth - 1))
         
         # 2. Background subtraction
+        unsub_frame = corr_frame.copy()
         sub_frame = corr_frame - self.corrected_avepixel
         sub_frame = np.clip(sub_frame, 0, None)
 
@@ -1704,7 +1725,10 @@ class ASTRA:
         # plt.close()
 
         # Return the frame
-        return final_frame
+        if include_non_subtracted:
+            return final_frame, unsub_frame
+        else:
+            return final_frame
 
     def recursiveCroppingAlgorithm(self, frame_index, est_center_global, paramter_estimation_functions, omega, 
                                    directions, forward_pass=False):
@@ -2091,7 +2115,7 @@ class ASTRA:
     #     # return SNR - returned rather than state-set
     #     return snr
 
-    def computeIntensitySum(self, photom_pixels, global_centroid, corr_frame, uncorr_frame):
+    def computeIntensitySum(self, photom_pixels, global_centroid, corr_frame, uncorr_frame, unsub_frame):
         
         # Get photometry pixels as as an array of x_indices, and y_indices
         photom_x_indices, photom_y_indices = np.array(photom_pixels).T
@@ -2108,6 +2132,9 @@ class ASTRA:
 
         # Store a copy of the star mask to avoid reference errors
         star_mask = np.asarray(self.star_mask).astype(bool, copy=True)
+
+        # Store a copy of the unsub frame to avoid reference errors
+        unsubtracted_frame = np.asarray(unsub_frame).astype(np.float32, copy=True)
 
         # Define a crop window as twice the size of the colored pixels
         x_color_size = np.max(photom_x_indices) - np.min(photom_x_indices)
@@ -2132,6 +2159,7 @@ class ASTRA:
         cropped_uncorrected_frame = uncorrected_frame[ymin:ymax, xmin:xmax]
         cropped_corrected_avepixel = corrected_avepixel[ymin:ymax, xmin:xmax]
         cropped_star_mask = star_mask[ymin:ymax, xmin:xmax]
+        cropped_unsubtracted_frame = unsubtracted_frame[ymin:ymax, xmin:xmax]
         photom_x_indices = photom_x_indices - xmin
         photom_y_indices = photom_y_indices - ymin
 
@@ -2148,19 +2176,10 @@ class ASTRA:
         # 1) Compute intensity sum
 
         # Get array of cropped photometric area from the corrected frame
-        photom_included_cropped_corrected_frame = np.ma.masked_array(cropped_corrected_frame, 
+        photom_pixels_nobg = np.ma.masked_array(cropped_corrected_frame, 
                                                                     mask=cropped_mask_photom_included,
                                                                     copy=True)
         
-        # Get array of cropped photometric area from the corrected avepixel
-        photom_included_cropped_corrected_avepixel = np.ma.masked_array(cropped_corrected_avepixel, 
-                                                                        mask=cropped_mask_photom_included, 
-                                                                        copy=True)
-
-        # Subtract both to get background subtracted cropped corrected photometric area
-        photom_pixels_nobg = np.clip((photom_included_cropped_corrected_frame - 
-                                      photom_included_cropped_corrected_avepixel), 0, None)
-
         # Replace photometry pixels that are masked by a star with the median value of the photom. area
 
         # Check where the photometric pixels intersect with the star mask
@@ -2186,7 +2205,7 @@ class ASTRA:
         # 2) Compute background STD
 
         # Get corrected cropped frame with photometry pixels & stars masked out
-        photom_excluded_sm_cropped_corrected_frame = np.ma.masked_array(cropped_corrected_frame, 
+        photom_excluded_sm_cropped_corrected_frame = np.ma.masked_array(cropped_unsubtracted_frame, 
                                                     mask=cropped_mask_photom_excluded | cropped_star_mask,
                                                     copy=True)
         
@@ -2225,114 +2244,114 @@ class ASTRA:
         snr = signalToNoise(intensity_sum, source_px_count, background_lvl, background_stddev)
 
         # DEBUG - Save diagnostic photometry images
-        try:
-            # Save the current matplotlib backend and switch to Agg
-            current_backend = matplotlib.get_backend()
-            matplotlib.use('Agg')
+        # try:
+        #     # Save the current matplotlib backend and switch to Agg
+        #     current_backend = matplotlib.get_backend()
+        #     matplotlib.use('Agg')
 
-            # Create directory for photometry diagnostics if it doesn't exist
-            photom_dir = os.path.join(self.data_path, "ASTRA_Photometry_Diagnostics")
-            os.makedirs(photom_dir, exist_ok=True)
+        #     # Create directory for photometry diagnostics if it doesn't exist
+        #     photom_dir = os.path.join(self.data_path, "ASTRA_Photometry_Diagnostics")
+        #     os.makedirs(photom_dir, exist_ok=True)
 
-            # Get frame number for filename
-            frame_number = self.pick_frame_indices[len(self.photometry_pixels)-1] + self.first_pick_global_index
+        #     # Get frame number for filename
+        #     frame_number = self.pick_frame_indices[len(self.photometry_pixels)-1] + self.first_pick_global_index
 
-            # Create a figure with a 3x2 grid - use Figure directly for thread safety
-            fig = Figure(figsize=(15, 10))
-            canvas = FigureCanvas(fig)
-            grid = fig.add_gridspec(3, 2, hspace=0.3, wspace=0.3)
+        #     # Create a figure with a 3x2 grid - use Figure directly for thread safety
+        #     fig = Figure(figsize=(15, 10))
+        #     canvas = FigureCanvas(fig)
+        #     grid = fig.add_gridspec(3, 2, hspace=0.3, wspace=0.3)
 
-            # Create all needed axes
-            ax1 = fig.add_subplot(grid[0, 0])  # Original cropped frame
-            ax2 = fig.add_subplot(grid[0, 1])  # Background subtracted
-            ax3 = fig.add_subplot(grid[1, 0])  # Star mask
-            ax4 = fig.add_subplot(grid[1, 1])  # Photometry mask
-            ax5 = fig.add_subplot(grid[2, 0])  # Final photometry pixels
-            ax6 = fig.add_subplot(grid[2, 1])  # Combined result
+        #     # Create all needed axes
+        #     ax1 = fig.add_subplot(grid[0, 0])  # Original cropped frame
+        #     ax2 = fig.add_subplot(grid[0, 1])  # Background subtracted
+        #     ax3 = fig.add_subplot(grid[1, 0])  # Star mask
+        #     ax4 = fig.add_subplot(grid[1, 1])  # Photometry mask
+        #     ax5 = fig.add_subplot(grid[2, 0])  # Final photometry pixels
+        #     ax6 = fig.add_subplot(grid[2, 1])  # Combined result
 
-            # Show cropped_corrected_frame
-            vmin1 = np.percentile(cropped_corrected_frame, 1)
-            vmax1 = np.percentile(cropped_corrected_frame, 99)
-            im1 = ax1.imshow(cropped_corrected_frame, cmap='gray', vmin=vmin1, vmax=vmax1)
-            ax1.set_title("cropped_corrected_frame")
-            fig.colorbar(im1, ax=ax1, shrink=0.7)
+        #     # Show cropped_corrected_frame
+        #     vmin1 = np.percentile(cropped_corrected_frame, 1)
+        #     vmax1 = np.percentile(cropped_corrected_frame, 99)
+        #     im1 = ax1.imshow(cropped_corrected_frame, cmap='gray', vmin=vmin1, vmax=vmax1)
+        #     ax1.set_title("cropped_corrected_frame")
+        #     fig.colorbar(im1, ax=ax1, shrink=0.7)
 
-            # Show photometry pixels with background subtracted
-            filled_nobg = photom_pixels_nobg.filled(0)
-            vmax2 = np.percentile(filled_nobg, 99)
-            im2 = ax2.imshow(filled_nobg, cmap='gray', vmin=0, vmax=vmax2)
-            ax2.set_title("photom_pixels_nobg")
-            fig.colorbar(im2, ax=ax2, shrink=0.7)
+        #     # Show photometry pixels with background subtracted
+        #     filled_nobg = photom_pixels_nobg.filled(0)
+        #     vmax2 = np.percentile(filled_nobg, 99)
+        #     im2 = ax2.imshow(filled_nobg, cmap='gray', vmin=0, vmax=vmax2)
+        #     ax2.set_title("photom_pixels_nobg")
+        #     fig.colorbar(im2, ax=ax2, shrink=0.7)
 
-            # Show star mask
-            star_mask_viz = np.ones_like(cropped_star_mask)
-            im3 = ax3.imshow(cropped_star_mask, cmap='Reds', vmin=0, vmax=1)
-            ax3.set_title("cropped_star_mask")
+        #     # Show star mask
+        #     star_mask_viz = np.ones_like(cropped_star_mask)
+        #     im3 = ax3.imshow(cropped_star_mask, cmap='Reds', vmin=0, vmax=1)
+        #     ax3.set_title("cropped_star_mask")
 
-            # Show photometry mask (included and excluded)
-            im4 = ax4.imshow(cropped_mask_photom_excluded, cmap='Blues', vmin=0, vmax=1)
-            ax4.set_title("cropped_mask_photom_excluded")
+        #     # Show photometry mask (included and excluded)
+        #     im4 = ax4.imshow(cropped_mask_photom_excluded, cmap='Blues', vmin=0, vmax=1)
+        #     ax4.set_title("cropped_mask_photom_excluded")
 
-            # Visualization for final photometry pixels 
-            phot_final = np.zeros_like(cropped_corrected_frame)
-            for p in photom_pixels:
-                # Convert to local coordinates
-                px, py = p[0] - xmin, p[1] - ymin
-                # Check if within crop bounds
-                if 0 <= px < phot_final.shape[1] and 0 <= py < phot_final.shape[0]:
-                    phot_final[py, px] = 1
+        #     # Visualization for final photometry pixels 
+        #     phot_final = np.zeros_like(cropped_corrected_frame)
+        #     for p in photom_pixels:
+        #         # Convert to local coordinates
+        #         px, py = p[0] - xmin, p[1] - ymin
+        #         # Check if within crop bounds
+        #         if 0 <= px < phot_final.shape[1] and 0 <= py < phot_final.shape[0]:
+        #             phot_final[py, px] = 1
 
-            im5 = ax5.imshow(phot_final, cmap='viridis', vmin=0, vmax=1)
-            ax5.set_title("photometry_pixels")
+        #     im5 = ax5.imshow(phot_final, cmap='viridis', vmin=0, vmax=1)
+        #     ax5.set_title("photometry_pixels")
 
-            # Combined visualization - frame with photometry overlay
-            combined = np.zeros((*cropped_corrected_frame.shape, 3))
-            # Grayscale background
-            normalized = np.clip(cropped_corrected_frame / (vmax1 + 0.01), 0, 1)
-            for i in range(3):
-                combined[:,:,i] = normalized
+        #     # Combined visualization - frame with photometry overlay
+        #     combined = np.zeros((*cropped_corrected_frame.shape, 3))
+        #     # Grayscale background
+        #     normalized = np.clip(cropped_corrected_frame / (vmax1 + 0.01), 0, 1)
+        #     for i in range(3):
+        #         combined[:,:,i] = normalized
 
-            # Add red overlay for photometry pixels
-            for p in photom_pixels:
-                px, py = p[0] - xmin, p[1] - ymin
-                if 0 <= px < combined.shape[1] and 0 <= py < combined.shape[0]:
-                    combined[py, px, 0] = 1.0  # Red channel
-                    combined[py, px, 1] = 0.3  # Green channel
-                    combined[py, px, 2] = 0.3  # Blue channel
+        #     # Add red overlay for photometry pixels
+        #     for p in photom_pixels:
+        #         px, py = p[0] - xmin, p[1] - ymin
+        #         if 0 <= px < combined.shape[1] and 0 <= py < combined.shape[0]:
+        #             combined[py, px, 0] = 1.0  # Red channel
+        #             combined[py, px, 1] = 0.3  # Green channel
+        #             combined[py, px, 2] = 0.3  # Blue channel
 
-            # Add blue overlay for stars
-            for y in range(cropped_star_mask.shape[0]):
-                for x in range(cropped_star_mask.shape[1]):
-                    if cropped_star_mask[y, x]:
-                        combined[y, x, 0] = 0.3  # Red channel
-                        combined[y, x, 1] = 0.3  # Green channel
-                        combined[y, x, 2] = 1.0  # Blue channel
+        #     # Add blue overlay for stars
+        #     for y in range(cropped_star_mask.shape[0]):
+        #         for x in range(cropped_star_mask.shape[1]):
+        #             if cropped_star_mask[y, x]:
+        #                 combined[y, x, 0] = 0.3  # Red channel
+        #                 combined[y, x, 1] = 0.3  # Green channel
+        #                 combined[y, x, 2] = 1.0  # Blue channel
 
-            im6 = ax6.imshow(combined)
-            ax6.set_title("combined_visualization")
+        #     im6 = ax6.imshow(combined)
+        #     ax6.set_title("combined_visualization")
 
-            # Add summary stats as figure title
-            fig.suptitle(f"Frame {frame_number} - SNR: {snr:.2f}, Sum: {intensity_sum:.0f}, " + 
-                f"Bg: {background_lvl:.2f}, Pixels: {source_px_count}, " +
-                f"Saturated: {saturated_bool}", fontsize=12)
+        #     # Add summary stats as figure title
+        #     fig.suptitle(f"Frame {frame_number} - SNR: {snr:.2f}, Sum: {intensity_sum:.0f}, " + 
+        #         f"Bg: {background_lvl:.2f}, Pixels: {source_px_count}, " +
+        #         f"Saturated: {saturated_bool}", fontsize=12)
 
-            # Save the figure in a thread-safe way
-            if not hasattr(self, "_plot_lock"):
-                self._plot_lock = threading.RLock()
+        #     # Save the figure in a thread-safe way
+        #     if not hasattr(self, "_plot_lock"):
+        #         self._plot_lock = threading.RLock()
 
-            with self._plot_lock:
-                fig_path = os.path.join(photom_dir, f"photometry_frame_{frame_number:04d}.jpg")
-                fig.savefig(fig_path, format='jpg', dpi=100, bbox_inches='tight', 
-                    pil_kwargs={"quality": 90, "optimize": True})
+        #     with self._plot_lock:
+        #         fig_path = os.path.join(photom_dir, f"photometry_frame_{frame_number:04d}.jpg")
+        #         fig.savefig(fig_path, format='jpg', dpi=100, bbox_inches='tight', 
+        #             pil_kwargs={"quality": 90, "optimize": True})
 
-            # Explicitly close to free memory
-            fig.clf()
+        #     # Explicitly close to free memory
+        #     fig.clf()
 
-            # Restore the original matplotlib backend
-            matplotlib.use(current_backend)
+        #     # Restore the original matplotlib backend
+        #     matplotlib.use(current_backend)
 
-        except Exception as e:
-            print(f"Warning: Could not save photometry diagnostic plot for frame {frame_number}: {e}")
+        # except Exception as e:
+        #     print(f"Warning: Could not save photometry diagnostic plot for frame {frame_number}: {e}")
 
         # Verbose print
         if self.verbose:
@@ -2460,10 +2479,10 @@ class ASTRA:
             print(f'Error processing image data: {e}')
 
         # 2. Recursively crop & fit a moving gaussian across whole event
-        try:
-            self.cropAllMeteorFrames()
-        except Exception as e:
-            print(f'Error cropping and fitting meteor frames: {e}')
+        # try:
+        self.cropAllMeteorFrames()
+        # except Exception as e:
+#             print(f'Error cropping and fitting meteor frames: {e}')
 
         # 3. Refine the moving gaussian fit by using a local optimizer
         try:
@@ -3262,14 +3281,15 @@ Usage Examples:
     pick_dicts = []
 
     # For each camera (single if multi_station is false) prep data
-    for config_path in config_folders:
+    for i, config_path in enumerate(config_folders):
 
         try:
             # Load config obj
-            config = ConfigReader.loadConfigFromDirectory(dir_path = config_path)
-
+            config = ConfigReader.loadConfigFromDirectory('.', config_path)
+            print("LOADED CONFIG")
             # Load img obj
             img_handle = detectInputTypeFile(config_path, config)
+            print("LOADED IMAGE")
 
             # Load dark
             dark_name = [file_name for file_name in os.listdir(config_path) if "dark" in file_name or "bias" in file_name][0]
@@ -3295,6 +3315,8 @@ Usage Examples:
             flats.append(flat)
             darks.append(dark)
             pick_dicts.append(pick_dict)
+
+            print(f"Loaded data ({i} / {len(config_folders)}) from {config_path}")
 
         except Exception as e:
             raise ValueError(f"Error processing config folder {config_path}: {e}")
