@@ -3,6 +3,8 @@ import copy
 from datetime import datetime
 import datetime as dt
 import threading
+import json
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import scipy.optimize
@@ -17,8 +19,11 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from RMS.Routines.Image import signalToNoise, loadDark, loadFlat
 from RMS.Routines import Image
 from RMS.Formats.FrameInterface import InputTypeImages
-from RMS.ConfigReader import loadConfigFromDirectory
+from RMS.Formats.FrameInterface import detectInputTypeFolder
+from RMS import ConfigReader
 from Utils.SkyFit2 import Platepar
+from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz
+from RMS.Astrometry.ApplyAstrometry import computeFOVSize, xyToRaDecPP, rotationWrtHorizon
 
 try:
     from pyswarms.single.global_best import GlobalBestPSO
@@ -219,11 +224,11 @@ class ASTRA:
 
             # # Correct avepixel_background
             if self.dark is not None:
-                corrected_avepixel = Image.applyDark(avepixel_background.T, self.dark).T
+                corrected_avepixel = Image.applyDark(avepixel_background, self.dark)
 
             if self.flat_struct is not None:
-                corrected_avepixel = Image.applyFlat(corrected_avepixel.T, self.flat_struct).T
-            
+                corrected_avepixel = Image.applyFlat(corrected_avepixel, self.flat_struct)
+
             if self.dark is not None or self.flat_struct is not None:
                 corrected_avepixel = Image.gammaCorrectionImage(corrected_avepixel, self.config.gamma, 
                                                             bp=0, wp=(2**self.config.bit_depth - 1))
@@ -1676,49 +1681,70 @@ class ASTRA:
     def correctFrame(self, frame, include_non_subtracted=False):
 
         # 1. correct using dark, flat, gamma
+        raw_frame = frame.copy()
         if self.dark is not None:
-            corr_frame = Image.applyDark(frame.T, self.dark).T
+            corr_frame = Image.applyDark(frame, self.dark)
+            dark_frame = corr_frame.copy()
         if self.flat_struct is not None:
-            corr_frame = Image.applyFlat(corr_frame.T, self.flat_struct).T
+            corr_frame = Image.applyFlat(corr_frame, self.flat_struct)
+            flat_frame = copy.deepcopy(corr_frame)
         if self.dark is not None or self.flat_struct is not None:
             corr_frame = Image.gammaCorrectionImage(corr_frame, self.config.gamma,
                                                     bp=0, wp=(2**self.config.bit_depth - 1))
         else:
             corr_frame = Image.gammaCorrectionImage(frame, self.config.gamma,
                                                     bp=0, wp=(2**self.config.bit_depth - 1))
-        
+        # SOMEWHERE IN LOADING SKYFIT2 IS TRANSPOOSING THE DARK/FLAT
+        gamma_frame = corr_frame.copy()
+
         # 2. Background subtraction
         unsub_frame = corr_frame.copy()
         sub_frame = corr_frame.astype(np.int32) - self.corrected_avepixel.astype(np.int32)
 
+        subtr_frame = sub_frame.copy()
+
         # 3. Star masking
         final_frame = np.ma.masked_array(sub_frame, mask=self.star_mask)
 
-        # --DEBUG--
-        # # Plot the frame, corrected frame, sub frame, and the final frame on a 2x2 grid
-        # matplotlib.use('Agg')
-        # fig, axs = plt.subplots(2, 3, figsize=(10, 10))
-        # axs[0, 0].imshow(frame, cmap='gray', vmin=np.percentile(frame, 10), vmax=np.percentile(frame, 99))
+        # fig, axs = plt.subplots(2, 4, figsize=(14, 7))
+        # axs[0, 0].imshow(raw_frame, cmap='gray', vmin=np.percentile(raw_frame, 5), vmax=np.percentile(raw_frame, 99))
         # axs[0, 0].set_title('Original Frame')
-        # axs[0, 1].imshow(corr_frame, cmap='gray', vmin=np.percentile(corr_frame, 10), vmax=np.percentile(corr_frame, 99))
-        # axs[0, 1].set_title('Corrected Frame')
-        # axs[1, 0].imshow(sub_frame, cmap='gray', vmin=np.percentile(sub_frame, 10), vmax=np.percentile(sub_frame, 99))
-        # axs[1, 0].set_title('Background Subtracted Frame')
-        # axs[1, 1].imshow(final_frame, cmap='gray', vmin=np.percentile(final_frame, 10), vmax=np.percentile(final_frame, 99))
-        # axs[1, 1].set_title('Final Frame with Star Mask')
-        # axs[0, 2].imshow(self.corrected_avepixel, cmap='gray', vmin=np.percentile(self.corrected_avepixel, 10), vmax=np.percentile(self.corrected_avepixel, 99))
-        # axs[0, 2].set_title('Corrected Average Pixel')
-        # star_mask_display = np.ma.masked_array(np.zeros_like(self.star_mask), mask=~self.star_mask)
-        # axs[1, 2].imshow(star_mask_display, cmap='gray', vmin=0, vmax=1)
-        # axs[1, 2].set_title('Star Mask')
 
-        # print(self.star_mask, np.max(self.star_mask), np.min(self.star_mask))
+        # if 'dark_frame' in locals():
+        #     axs[0, 1].imshow(dark_frame, cmap='gray', vmin=np.percentile(dark_frame, 5), vmax=np.percentile(dark_frame, 99))
+        #     axs[0, 1].set_title('Dark Corrected')
+        # else:
+        #     axs[0, 1].text(0.5, 0.5, 'No Dark', ha='center', va='center')
+        #     axs[0, 1].set_title('Dark Corrected')
+        #     axs[0, 1].axis('off')
+
+        # if 'flat_frame' in locals():
+        #     axs[0, 2].imshow(flat_frame, cmap='gray', vmin=np.percentile(flat_frame, 5), vmax=np.percentile(flat_frame, 99))
+        #     axs[0, 2].set_title('Flat Corrected')
+        # else:
+        #     axs[0, 2].text(0.5, 0.5, 'No Flat', ha='center', va='center')
+        #     axs[0, 2].set_title('Flat Corrected')
+        #     axs[0, 2].axis('off')
+
+        # axs[0, 3].imshow(gamma_frame, cmap='gray', vmin=np.percentile(gamma_frame, 5), vmax=np.percentile(gamma_frame, 99))
+        # axs[0, 3].set_title('Gamma Corrected')
+
+        # axs[1, 0].imshow(subtr_frame, cmap='gray', vmin=np.percentile(subtr_frame, 5), vmax=np.percentile(subtr_frame, 99))
+        # axs[1, 0].set_title('BG Subtracted')
+
+        # axs[1, 1].imshow(final_frame.filled(fill_value=np.ma.median(final_frame)), cmap='gray', vmin=np.percentile(final_frame.compressed(), 5), vmax=np.percentile(final_frame.compressed(), 99))
+        # axs[1, 1].set_title('Final (Star Masked)')
+
+        # axs[1, 2].imshow(self.corrected_avepixel, cmap='gray', vmin=np.percentile(self.corrected_avepixel, 5), vmax=np.percentile(self.corrected_avepixel, 99))
+        # axs[1, 2].set_title('Corrected Avepixel')
+
+        # axs[1, 3].imshow(self.star_mask, cmap='gray')
+        # axs[1, 3].set_title('Star Mask')
 
         # plt.tight_layout()
-        # import hashlib
-        # hash_name = hashlib.md5(str(frame).encode('utf-8')).hexdigest()
-        # plt.savefig(os.path.join(self.data_path, f'frame_correction_steps_{hash_name}.png'), dpi=300)
-        # plt.close()
+
+
+        # plt.show()
 
         # Return the frame
         if include_non_subtracted:
@@ -1842,8 +1868,8 @@ class ASTRA:
 
         # Weight the different phases of the program by differeing weights
         time_weights_gaus = {
-            'cropping' : 0.8,
-            'refining' : 0.1,
+            'cropping' : 0.7,
+            'refining' : 0.2,
             'removing' : 0.1
         }
 
@@ -1861,13 +1887,13 @@ class ASTRA:
         # Else print callback to console
         if self.progress_callback is None:
             if progress is not None:
-                print(f'Progress: {progress}%')
+                print(f'Progress: {round(progress)}%')
             else:
                 current_percentage = sum(
                     self.progressed_frames[step] * time_weights_gaus[step]
                     for step in self.progressed_frames.keys()
                 ) / self.total_frames * 100
-                print(f'Progress: {current_percentage}%')
+                print(f'Progress: {round(current_percentage)}%')
 
     def selectSeedTriplet(self, picks, pick_frame_indices):
         """
@@ -2475,10 +2501,10 @@ class ASTRA:
             print(f'Error processing image data: {e}')
 
         # 2. Recursively crop & fit a moving gaussian across whole event
-        # try:
-        self.cropAllMeteorFrames()
-        # except Exception as e:
-#             print(f'Error cropping and fitting meteor frames: {e}')
+        try:
+            self.cropAllMeteorFrames()
+        except Exception as e:
+            print(f'Error cropping and fitting meteor frames: {e}')
 
         # 3. Refine the moving gaussian fit by using a local optimizer
         try:
@@ -2488,12 +2514,12 @@ class ASTRA:
             print(f'Error refining meteor crops: {e}')
 
         # 4. Remove picks with low SNR and out-of-bounds picks, refactors into global coordinates
-        # try:
-        self.removeLowSNRPicks(self.refined_fit_params, self.fit_imgs, self.cropped_frames, 
-                                self.crop_vars, self.pick_frame_indices, self.fit_costs)
-        # except Exception as e:
-        #     print(f'Error removing low SNR picks: {e}')
-        
+        try:
+            self.removeLowSNRPicks(self.refined_fit_params, self.fit_imgs, self.cropped_frames, 
+                                    self.crop_vars, self.pick_frame_indices, self.fit_costs)
+        except Exception as e:
+            print(f'Error removing low SNR picks: {e}')
+
         # 5. save animation
         if self.save_animation:
             try:
@@ -2529,11 +2555,11 @@ class ASTRA:
         ecsv_file_name = dt_ref.strftime(isodate_format_file) + '_ASTRA_' + self.config.stationID + ".ecsv"
 
         # Compute alt/az pointing
-        azim, elev = Image.trueRaDec2ApparentAltAz(self.platepar.RA_d, self.platepar.dec_d, self.platepar.JD,
+        azim, elev = trueRaDec2ApparentAltAz(self.platepar.RA_d, self.platepar.dec_d, self.platepar.JD,
             self.platepar.lat, self.platepar.lon, refraction=False)
 
         # Compute FOV size
-        fov_horiz, fov_vert = Image.computeFOVSize(self.platepar)
+        fov_horiz, fov_vert = computeFOVSize(self.platepar)
 
         if self.img_obj.input_type == 'ff':
             ff_name = self.img_obj.current_ff_file
@@ -2566,7 +2592,7 @@ class ASTRA:
             'no_frags': 1,
             'obs_az': azim,
             'obs_ev': elev,
-            'obs_rot': Image.rotationWrtHorizon(self.platepar),
+            'obs_rot': rotationWrtHorizon(self.platepar),
             'fov_horiz': fov_horiz,
             'fov_vert': fov_vert,
         }
@@ -2619,12 +2645,12 @@ class ASTRA:
                 
                 time_data = [self.img_obj.currentFrameTime(frame_no=frame)]
 
-                jd_data, ra_data, dec_data, mag_data = Image.xyToRaDecPP(time_data, [pick['x_centroid']],
+                jd_data, ra_data, dec_data, mag_data = xyToRaDecPP(time_data, [pick['x_centroid']],
                 [pick['y_centroid']], [pick['intensity_sum']], pp_tmp, measurement=True)
 
                 jd, ra, dec, mag = jd_data[0], ra_data[0], dec_data[0], mag_data[0]
 
-                azim, alt = Image.trueRaDec2ApparentAltAz(ra, dec, jd, pp_tmp.lat, pp_tmp.lon, refraction=False)
+                azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, pp_tmp.lat, pp_tmp.lon, refraction=False)
 
                 frame_dt = self.img_obj.currentFrameTime(frame_no=frame, dt_obj=True)
 
@@ -2665,207 +2691,6 @@ class ASTRA:
     
     def getMinSnr(self):
         return self.snr_threshold
-
-            
-
-
-class Dataloader:
-    """
-    Loads the following from a data path to instantiate an ASTRA process:
-    - img_obj: InputTypeImages
-    - frames: numpy array (Nxwxh)
-    - picks: numpy array (Nx2)
-    - pick_frame_indices: numpy array (N)
-    - times: numpy array (N)
-    - saturation_threshold (np.float64)
-    - save_path
-    - camera_config (config obj)
-    - dark
-    - flat
-    - platepar
-    """
-
-    def __init__(self, astra_config):
-        self.tavis_path = astra_config['01G']
-        self.elgin_path = astra_config['02G']
-        self.error_log = astra_config['error']
-        self.data_dict = {
-            "01G" : {
-                "img_obj": None,
-                "frames": None,
-                "picks": None,
-                "pick_frame_indices": None,
-                "times": None,
-                "saturation_threshold": None,
-                "camera_config": None,
-                "dark": None,
-                "flat": None,
-                "platepar" : None
-            },
-            "02G" : {
-                "img_obj": None,
-                "frames": None,
-                "picks": None,
-                "pick_frame_indices": None,
-                "times": None,
-                "saturation_threshold": None,
-                "camera_config": None,
-                "dark": None,
-                "flat": None,
-                "platepar" : None
-            }
-        }
-
-        success_bool_Tav = self.parseDirectory(self.tavis_path, '01G')
-        success_bool_Elg = self.parseDirectory(self.elgin_path, '02G')
-
-        if success_bool_Tav and success_bool_Elg:
-            self.res = True
-
-        else:
-            # If any errors, write to error log
-            with open(self.error_log, 'a') as f:
-                f.write(f"Error loading data from {self.tavis_path} or {self.elgin_path}\n")
-            self.res = False
-
-    def parseDirectory(self, path, code):
-
-        config_path = None
-        txt_path = None
-        dark_name = None
-        flat_name = None
-        platepar_path = None
-
-        # Load file paths
-        for file_name in os.listdir(path):
-
-            # Get config
-            if file_name.endswith('.config'):
-                config_path = os.path.join(path, file_name)
-            # Get dark/bias
-            elif file_name.startswith('dark') or file_name.startswith('bias'):
-                dark_name = file_name
-            # Get flat
-            elif file_name.startswith('flat'):
-                flat_name = file_name
-            # Get picks
-            elif file_name.endswith('.ecsv'):
-                picks_path = os.path.join(path, file_name)
-            elif file_name.endswith('.txt') and file_name.startswith('ev'):
-                txt_path = os.path.join(path, file_name)
-            # Get platepar
-            elif file_name.endswith('.cal'):
-                platepar_path = os.path.join(path, file_name)
-        b = True
-        # Load all
-
-        if config_path is not None:
-            config = loadConfigFromDirectory('.', config_path)
-        else:
-            raise FileNotFoundError(f"No config file found in {path}")
-
-        try:
-            config = loadConfigFromDirectory('.', config_path)
-            frames, img_obj = self.loadFrames(path, config)
-            dark = np.array(loadDark(path, dark_name, byteswap=b), dtype=np.float32)
-            flat = loadFlat(path, flat_name, byteswap=b)
-            picks, pick_frame_indices, times = self.loadECSV(picks_path, path, img_obj)
-            saturation_threshold = int(round(0.98*(2**config.bit_depth - 1)))
-            platepar = Platepar()
-            platepar.read(platepar_path)
-        except Exception as e:
-            print(f"Error loading files from {path}: {e}")
-            return False
-
-        self.data_dict[code] = {
-            "img_obj": img_obj,
-            "frames": frames,
-            "picks": picks,
-            "pick_frame_indices": pick_frame_indices,
-            "times": times,
-            "saturation_threshold": saturation_threshold,
-            "camera_config": config,
-            "dark": dark,
-            "flat": flat,
-            "platepar": platepar
-        }
-
-        # return true if no errors
-        return True
-
-    
-    def loadEvTxt(self, txt_file_path, img_handle):
-        """
-        Loads the Ev*.txt file and adds the relevant info to pick_list
-        Args:
-            txt_file_path (str): Path to the Ev*.txt file to load
-        Returns:
-            picks (dict): (N : [8]) dict following same format as self.pick_list 
-        """
-
-        picks = [] # (N, x, y) array of picks
-        pick_frame_indices = [] # (N,) array of frame indices
-        pick_frame_times = []
-
-        # Temp bool to extract header line
-        first_bool = False
-
-        # Wrap in try except for uncaught errors
-        try:
-            # Opens and parses pick file
-            with open(txt_file_path, 'r') as file:
-                for i, line in enumerate(file):
-                    if line.strip() and not line.startswith('#'):
-
-                        # Clean the line
-                        line = [part.strip() for part in line.split() if part]
-
-                        # Unpack the header
-                        if first_bool == False:
-                            first_bool = True
-
-                            # Unpack header info
-                            column_names = [part.strip() for part in temp_line.split()[1:] if part]
-
-                            # Extract indices
-                            frame_number_idx = column_names.index('fr') if 'fr' in column_names else None
-                            x_centroid_idx = column_names.index('cx') if 'cx' in column_names else None
-                            y_centroid_idx = column_names.index('cy') if 'cy' in column_names else None
-
-                            # Raise error if not found in txt file
-                            if frame_number_idx is None or x_centroid_idx is None or y_centroid_idx is None:
-                                raise ValueError("TXT file must contain 'fr', 'cx', and 'cy' columns.")
-                        
-                        else:
-                            # Unpack the pick
-                            frame_number = int(line[frame_number_idx])
-                            cx, cy = float(line[x_centroid_idx]), float(line[y_centroid_idx])
-
-                            picks.append([cx, cy])
-                            pick_frame_indices.append(frame_number)
-                            pick_frame_times.append([(img_handle.currentFrameTime(frame_no=frame_number, dt_obj=True))])
-
-                    # Store a temp line to hit previous for col names
-                    temp_line = line
-
-            return np.array(picks), np.array(pick_frame_indices), np.array(pick_frame_times)
-
-        # Raise error message
-        except Exception as e:
-            raise ValueError(f"Error reading TXT file: {str(e)}")
-
-    def loadFrames(self, path, config):
-
-        # Count frames
-        frame_count = sum(1 for name in os.listdir(path) if 'dump' in name)
-
-        img_obj = InputTypeImages(path, config)
-
-        frames = np.zeros((frame_count, *img_obj.loadFrame().shape), dtype=np.float32)
-        for i in range(frame_count):
-            frames[i] = img_obj.loadFrame(fr_no=i)
-
-        return frames, img_obj
 
 # Terminal call functions
 def checkAstraConfig(astra_config):
@@ -3114,12 +2939,7 @@ if __name__ == "__main__":
 
     # To determine if there is more than one event, check for children directories that have a config in them
     import argparse
-    ArgumentParser = argparse.ArgumentParser
-    import json
-    from RMS.Formats.FrameInterface import detectInputTypeFile
-    from RMS import ConfigReader
-    from concurrent.futures import ThreadPoolExecutor
-    
+    ArgumentParser = argparse.ArgumentParser    
 
     parser = ArgumentParser(description="""
 Command-line interface for the ASTRA (Astrometric Streak Tracking and Refinement Algorithm) pipeline.
@@ -3202,7 +3022,7 @@ Usage Examples:
     parser.add_argument("-c", "--astra_config_path", type=str, help="ASTRA_config dict or Path to the ASTRA config json")
     parser.add_argument("-sa", "--save_animation", default=False, action="store_true", help="Whether to save animation of frame fitting")
     parser.add_argument("-v", "--verbose", default=False, action="store_true", help="Whether to print verbose output")
-    parser.add_argument("-ms", "--multi_station", default=False, action="store_true", help="Whether to process multi-station data")
+    parser.add_argument("-m", "--multi_station", default=False, action="store_true", help="Whether to process multi-station data")
     parser.add_argument("-txt", "--use_txt_picks", default=False, action="store_true", help="Whether to use picks from DetApp TXT file")
 
     args = parser.parse_args()
@@ -3243,7 +3063,7 @@ Usage Examples:
                         'pso': {'w (0-1)': 0.9, 'c_1 (0-1)': 0.45, 'c_2 (0-1)': 0.25, 'max itter': 125, 
                                 'n_particles': 125, 'V_c (0-1)': 0.3, 'ftol': 1e-4, 'ftol_itter': 25, 
                                 'expl_c': 3, 'P_sigma': 3}, 
-                        'astra': {'star_thresh': 3, 'min SNR': 5, 'P_crop': 1.5, 'sigma_init (px)': 2, 
+                        'astra': {'star_thresh': 3, 'min SNR': 10, 'P_crop': 1.5, 'sigma_init (px)': 2, 
                                   'sigma_max': 1.2, 'L_max': 1.5, 'Verbose': False, 'photom_thresh': 0.05, 
                                   'Save Animation': False, 'pick_offset': 3}, 
                         'kalman': {'Monotonicity': True, 'sigma_xy (px)': 0.5, 'sigma_vxy (%)': 100, 
@@ -3252,10 +3072,7 @@ Usage Examples:
     # if multi-station, parse directory for subfolders including a .config object
     if args.multi_station:
         subfolders = [f.path for f in os.scandir(file_path) if f.is_dir()]
-        config_folders = []
-        for folder in subfolders:
-            if os.path.exists(os.path.join(folder, "config.json")):
-                config_folders.append(folder)
+        config_folders = [folder for folder in subfolders if [file for file in os.listdir(folder) if file.endswith('.config')] != []]
         if not config_folders:
             raise FileNotFoundError("No config folders found.")
         print(f"Found config folders: {config_folders}")
@@ -3275,6 +3092,7 @@ Usage Examples:
     darks = []
     flats = []
     pick_dicts = []
+    platepars = []
 
     # For each camera (single if multi_station is false) prep data
     for i, config_path in enumerate(config_folders):
@@ -3282,59 +3100,91 @@ Usage Examples:
         try:
             # Load config obj
             config = ConfigReader.loadConfigFromDirectory('.', config_path)
-            print("LOADED CONFIG")
+
             # Load img obj
-            img_handle = detectInputTypeFile(config_path, config)
-            print("LOADED IMAGE")
+            # DNOTE: requires a more robust method for detecting images
+            img_handle = detectInputTypeFolder(config_path, config)
 
             # Load dark
-            dark_name = [file_name for file_name in os.listdir(config_path) if "dark" in file_name or "bias" in file_name][0]
-            dark = Image.loadDark(config_path, dark_name)
+            dark_name = [file_name for file_name in os.listdir(config_path) if "dark" in file_name or "bias" in file_name]
+            if dark_name != []:
+                dark = Image.loadDark(config_path, dark_name[0], byteswap=img_handle.byteswap)
+                if len(dark_name) > 1:
+                    print(f"Warning: Multiple dark fields found. Using {dark_name[0]}.")
+            else:
+                dark = None
+                print(f"No dark found in {config_path}, using no dark correction.")
 
             # Load flat
-            flat_name = [file_name for file_name in os.listdir(config_path) if "flat" in file_name][0]
-            flat = Image.loadFlat(config_path, flat_name)
+            flat_name = [file_name for file_name in os.listdir(config_path) if "flat" in file_name]
+            if flat_name != []:
+                flat = Image.loadFlat(config_path, flat_name[0], byteswap=img_handle.byteswap)
+                if len(flat_name) > 1:
+                    print(f"Warning: Multiple flat fields found. Using {flat_name[0]}.")
+            else:
+                flat = None
+                print(f"No flat found in {config_path}, using no flat correction.")
 
             # Load ECSV picks
             if args.use_txt_picks:
-                txt_name = [file_name for file_name in os.listdir(config_path) if file_name.endswith('.txt') and file_name.startswith('ev')][0]
-                pick_dict = loadEvTxt(os.path.join(config_path, txt_name), img_handle)
+                txt_name = [file_name for file_name in os.listdir(config_path) if file_name.endswith('.txt') and file_name.startswith('ev')]
+                if txt_name != []:
+                    pick_dict = loadEvTxt(os.path.join(config_path, txt_name[0]), img_handle)
+                else:
+                    raise ValueError("No TXT picks found.")
             else:
-                ecsv_name = [file_name for file_name in os.listdir(config_path) if "ecsv" in file_name][0]
-                pick_dict = loadECSV(config_path, ecsv_name)
+                ecsv_name = [file_name for file_name in os.listdir(config_path) if "ecsv" in file_name]
+                if ecsv_name != []:
+                    pick_dict = loadECSV(os.path.join(config_path, ecsv_name[0]), config_path, img_handle)
+                    if len(ecsv_name) > 1:
+                        print(f"Warning: Multiple ECSV files found. Using {ecsv_name[0]}.")
+                else:
+                    raise ValueError("No ECSV picks found.")
             if pick_dict == {}:
-                raise ValueError("No valid picks found.")
-            
+                raise ValueError("No picks loaded.")
+
+            # Load platepar
+            platepar_name = [file_name for file_name in os.listdir(config_path) if "platepar" in file_name]
+            platepar = Platepar()
+            if platepar_name != []:
+                platepar.read(os.path.join(config_path, platepar_name[0]))
+                if len(platepar_name) > 1:
+                    print(f"Warning: Multiple platepar fields found. Using {platepar_name[0]}.")
+            else:
+                raise ValueError("No platepar found.")
             # Once no errors raised, add all to lists
             configs.append(config)
             img_objs.append(img_handle)
             flats.append(flat)
             darks.append(dark)
             pick_dicts.append(pick_dict)
+            platepars.append(platepar)
 
-            print(f"Loaded data ({i} / {len(config_folders)}) from {config_path}")
+            print(f"Loaded data ({i+1} / {len(config_folders)}) from {config_path}")
 
         except Exception as e:
-            raise ValueError(f"Error processing config folder {config_path}: {e}")
+            raise ValueError(f"Error processing camera folder {config_path}: {e}")
         
 
     # Using a threadpool run all astra processes (if only one, do not use threadpool)
-    def process_astra(*args):
+    def process_astra(platepar, *args):
         
         astra_obj = ASTRA(*args)
 
         astra_obj.process()
 
-        astra_obj.saveECSV()
+        astra_obj.saveECSV(platepar)
 
     if len(configs) == 1 :
-        process_astra(img_objs[0], pick_dicts[0], astra_config, 
+        print('Starting ASTRA Process on one camera')
+        process_astra(platepars[0], img_objs[0], pick_dicts[0], astra_config, 
                       config_folders[0], configs[0], darks[0], flats[0], None, 
                       args.ECSV_save_path if isinstance(args.ECSV_save_path, str) else args.ECSV_save_path[0])
     else:
+        print(f'Starting ASTRA Process on {len(configs)} cameras')
         with ThreadPoolExecutor(max_workers=len(configs)) as executor:
             for i in range(len(configs)):
-                executor.submit(process_astra, img_objs[i], pick_dicts[i], astra_config, 
+                executor.submit(process_astra, platepars[i], img_objs[i], pick_dicts[i], astra_config, 
                               config_folders[i], 
                             configs[i], darks[i], flats[i], None, 
                       args.ECSV_save_path if isinstance(args.ECSV_save_path, str) else args.ECSV_save_path[i])

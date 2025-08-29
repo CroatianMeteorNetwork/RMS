@@ -4311,15 +4311,17 @@ class PlateTool(QtWidgets.QMainWindow):
                 } for i in pick_frame_indices}
 
         # Package data for ASTRA - import later using dict comprehension
+        self.flat_struct.flat_img = self.flat_struct.flat_img.T
         data_dict = {
             "img_obj" : self.img_handle,
             "pick_dict" : pick_dict,
             "astra_config" : astra_config,
             "data_path" : self.dir_path,
             "config" : self.config,
-            "dark" : self.dark if hasattr(self, 'dark') else None,
+            "dark" : self.dark.T if hasattr(self, 'dark') else None,
             "flat" : self.flat_struct if hasattr(self, 'flat_struct') else None
         }
+        self.flat_struct.flat_img = self.flat_struct.flat_img.T
 
         return data_dict
 
