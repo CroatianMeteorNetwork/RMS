@@ -703,14 +703,11 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
     # Compute radii from image centre
     radius_arr = np.hypot(np.array(X_data) - platepar.X_res/2, np.array(Y_data) - platepar.Y_res/2)
 
-    # Calculate magnitudes if level_data were provided, else return an empty array
-    if level_data is not None:
-        magnitude_data = calculateMagnitudes(level_data, radius_arr, platepar.mag_lev, platepar.vignetting_coeff)
-    else:
-        magnitude_data = np.array([])
+    # Calculate magnitudes
+    magnitude_data = calculateMagnitudes(level_data, radius_arr, platepar.mag_lev, platepar.vignetting_coeff)
 
     # Extinction correction
-    if extinction_correction and magnitude_data.size > 0:
+    if extinction_correction:
         magnitude_data = extinctionCorrectionApparentToTrue(magnitude_data, X_data, Y_data, JD_data[0], \
             platepar)
 
