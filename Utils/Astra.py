@@ -18,8 +18,7 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
 from RMS.Routines.Image import signalToNoise, loadDark, loadFlat
 from RMS.Routines import Image
-from RMS.Formats.FrameInterface import InputTypeImages
-from RMS.Formats.FrameInterface import detectInputTypeFolder
+from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFile
 from RMS import ConfigReader
 from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz
 from RMS.Astrometry.ApplyAstrometry import computeFOVSize, xyToRaDecPP, rotationWrtHorizon
@@ -2694,7 +2693,7 @@ def loadECSV(ECSV_file_path, dir_path, img_obj):
 
     # Converts times into frame indices, accounting for floating-point errors
     pick_frame_indices = []
-    frame_count = sum(1 for name in os.listdir(dir_path) if 'dump' in name)
+    frame_count = img_obj.total_frames
     time_idx = 0
     for i in range(frame_count):
         frame_time = img_obj.currentFrameTime(frame_no=i, dt_obj = True)
@@ -2864,17 +2863,22 @@ Usage Examples:
                                   'Save Animation': False, 'pick_offset': 3}, 
                         'kalman': {'Monotonicity': True, 'sigma_xy (px)': 0.5, 'sigma_vxy (%)': 100, 
                                    'save results': False}}
-        
+    
+    dir_path = file_path
+    if not os.path.isdir(file_path):
+        dir_path = os.path.dirname(file_path)
+
     # if multi-station, parse directory for subfolders including a .config object
     if args.multi_station:
-        subfolders = [f.path for f in os.scandir(file_path) if f.is_dir()]
+
+        subfolders = [f.path for f in os.scandir(dir_path) if f.is_dir()]
         config_folders = [folder for folder in subfolders if [file for file in os.listdir(folder) \
                                                                if file.endswith('.config')] != []]
         if not config_folders:
             raise FileNotFoundError("No config folders found.")
         print(f"Found config folders: {config_folders}")
     else:
-        config_folders = [file_path] if os.path.isdir(file_path) else os.path.dirname(file_path)
+        config_folders = [file_path] if os.path.isdir(file_path) else [os.path.dirname(file_path)]
 
     # if no ecsv save path specified, use each config folder
     if not args.ECSV_save_path:
@@ -2900,75 +2904,85 @@ Usage Examples:
     # For each camera (single if multi_station is false) prep data
     for i, config_path in enumerate(config_folders):
 
-        try:
-            # Load config obj
-            config = ConfigReader.loadConfigFromDirectory('.', config_path)
+        print("Using config path:", config_path)
 
-            # Load img obj
-            # DNOTE: requires a more robust method for detecting images
+        # Load config obj
+        config = ConfigReader.loadConfigFromDirectory('.', config_path)
+
+        # Load img obj
+        if os.path.isfile(file_path):
+            img_handle = detectInputTypeFile(file_path, config)
+
+        else:
             img_handle = detectInputTypeFolder(config_path, config)
 
-            # Load dark
-            dark_name = [file_name for file_name in os.listdir(config_path) if \
-                         "dark" in file_name or "bias" in file_name]
-            if dark_name != []:
-                dark = Image.loadDark(config_path, dark_name[0], byteswap=img_handle.byteswap)
-                if len(dark_name) > 1:
-                    print(f"Warning: Multiple dark fields found. Using {dark_name[0]}.")
+        # Load dark
+        dark_name = [file_name for file_name in os.listdir(config_path) if \
+                        "dark" in file_name or "bias" in file_name]
+        if dark_name != []:
+            dark = Image.loadDark(config_path, dark_name[0], byteswap=img_handle.byteswap)
+            if len(dark_name) > 1:
+                print(f"Warning: Multiple dark fields found. Using {dark_name[0]}.")
+        else:
+            dark = None
+            print(f"No dark found in {config_path}, using no dark correction.")
+
+        # Load flat
+        flat_name = [file_name for file_name in os.listdir(config_path) if "flat" in file_name]
+        if flat_name != []:
+            flat = Image.loadFlat(config_path, flat_name[0], byteswap=img_handle.byteswap)
+            if len(flat_name) > 1:
+                print(f"Warning: Multiple flat fields found. Using {flat_name[0]}.")
+        else:
+            flat = None
+            print(f"No flat found in {config_path}, using no flat correction.")
+
+        # Load ECSV picks
+        if args.use_txt_picks:
+
+            txt_name = [file_name for file_name in os.listdir(config_path) if file_name.endswith('.txt') \
+                            and file_name.startswith('ev')]
+            
+            if txt_name != []:
+                pick_dict = loadEvTxt(os.path.join(config_path, txt_name[0]), img_handle)
             else:
-                dark = None
-                print(f"No dark found in {config_path}, using no dark correction.")
+                raise ValueError("No TXT picks found.")
+        
+        else:
+            ecsv_name = [file_name for file_name in os.listdir(config_path) if "ecsv" in file_name]
 
-            # Load flat
-            flat_name = [file_name for file_name in os.listdir(config_path) if "flat" in file_name]
-            if flat_name != []:
-                flat = Image.loadFlat(config_path, flat_name[0], byteswap=img_handle.byteswap)
-                if len(flat_name) > 1:
-                    print(f"Warning: Multiple flat fields found. Using {flat_name[0]}.")
+            if ecsv_name != []:
+                pick_dict = loadECSV(os.path.join(config_path, ecsv_name[0]), config_path, img_handle)
+
+                if len(ecsv_name) > 1:
+                    print(f"Warning: Multiple ECSV files found. Using {ecsv_name[0]}.")
             else:
-                flat = None
-                print(f"No flat found in {config_path}, using no flat correction.")
+                raise ValueError("No ECSV picks found.")
+        
+        if pick_dict == {}:
+            raise ValueError("No picks loaded.")
 
-            # Load ECSV picks
-            if args.use_txt_picks:
-                txt_name = [file_name for file_name in os.listdir(config_path) if file_name.endswith('.txt') \
-                             and file_name.startswith('ev')]
-                if txt_name != []:
-                    pick_dict = loadEvTxt(os.path.join(config_path, txt_name[0]), img_handle)
-                else:
-                    raise ValueError("No TXT picks found.")
-            else:
-                ecsv_name = [file_name for file_name in os.listdir(config_path) if "ecsv" in file_name]
-                if ecsv_name != []:
-                    pick_dict = loadECSV(os.path.join(config_path, ecsv_name[0]), config_path, img_handle)
-                    if len(ecsv_name) > 1:
-                        print(f"Warning: Multiple ECSV files found. Using {ecsv_name[0]}.")
-                else:
-                    raise ValueError("No ECSV picks found.")
-            if pick_dict == {}:
-                raise ValueError("No picks loaded.")
 
-            # Load platepar
-            platepar_name = [file_name for file_name in os.listdir(config_path) if "platepar" in file_name]
-            platepar = Platepar()
-            if platepar_name != []:
-                platepar.read(os.path.join(config_path, platepar_name[0]))
-                if len(platepar_name) > 1:
-                    print(f"Warning: Multiple platepar fields found. Using {platepar_name[0]}.")
-            else:
-                raise ValueError("No platepar found.")
-            # Once no errors raised, add all to lists
-            configs.append(config)
-            img_objs.append(img_handle)
-            flats.append(flat)
-            darks.append(dark)
-            pick_dicts.append(pick_dict)
-            platepars.append(platepar)
+        # Load platepar
+        platepar_name = [file_name for file_name in os.listdir(config_path) if "platepar" in file_name]
+        platepar = Platepar()
+        if platepar_name != []:
+            platepar.read(os.path.join(config_path, platepar_name[0]))
+            if len(platepar_name) > 1:
+                print(f"Warning: Multiple platepar fields found. Using {platepar_name[0]}.")
+        else:
+            raise ValueError("No platepar found.")
 
-            print(f"Loaded data ({i+1} / {len(config_folders)}) from {config_path}")
 
-        except Exception as e:
-            raise ValueError(f"Error processing camera folder {config_path}: {e}")
+        # Once no errors raised, add all to lists
+        configs.append(config)
+        img_objs.append(img_handle)
+        flats.append(flat)
+        darks.append(dark)
+        pick_dicts.append(pick_dict)
+        platepars.append(platepar)
+
+        print(f"Loaded data ({i+1} / {len(config_folders)}) from {config_path}")
         
 
     # Using a threadpool run all astra processes (if only one, do not use threadpool)

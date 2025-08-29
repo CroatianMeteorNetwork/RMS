@@ -4625,7 +4625,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Converts times into frame indices, accounting for floating-point errors
             pick_frame_indices = []
-            frame_count = sum(1 for name in os.listdir(self.dir_path) if 'dump' in name)
+            frame_count = self.img_handle.total_frames
             time_idx = 0
             for i in range(frame_count):
                 frame_time = self.img_handle.currentFrameTime(frame_no=i, dt_obj=True)
