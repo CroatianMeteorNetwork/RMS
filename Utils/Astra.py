@@ -21,7 +21,6 @@ from RMS.Routines import Image
 from RMS.Formats.FrameInterface import InputTypeImages
 from RMS.Formats.FrameInterface import detectInputTypeFolder
 from RMS import ConfigReader
-from Utils.SkyFit2 import Platepar
 from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz
 from RMS.Astrometry.ApplyAstrometry import computeFOVSize, xyToRaDecPP, rotationWrtHorizon
 
@@ -29,6 +28,11 @@ try:
     from pyswarms.single.global_best import GlobalBestPSO
 except Exception as e:
     print(f'ASTRA cannot be run, pyswarms not installed: {e}')
+
+# Only import platepar in terminal execution (avoids circular import error)
+if __name__ == '__main__':
+    from Utils.SkyFit2 import Platepar
+
 
 
 class ASTRA:
@@ -185,7 +189,7 @@ class ASTRA:
             'refining': 0,
             'removing': 0
         }
-        self.total_frames = self.pick_frame_indices[-1] - self.pick_frame_indices[0]
+        self.total_frames = self.pick_frame_indices[-1] - self.pick_frame_indices[0] + 1
 
     # 1) -- Functional Methods --
 
@@ -289,7 +293,8 @@ class ASTRA:
         # 1) -- Unpack variables & Calculate seed picks/frames--
         seed_picks_global, seed_indices = self.selectSeedTriplet(self.picks, self.pick_frame_indices)
 
-        omega = np.arctan2(self.picks[-1][1] - self.picks[0][1], -self.picks[-1][0] + self.picks[0][0])  % (2*np.pi)
+        omega = np.arctan2(self.picks[-1][1] - self.picks[0][1], 
+                           -self.picks[-1][0] + self.picks[0][0])  % (2*np.pi)
 
         if self.verbose:
             print(f"Starting recursive cropping with {len(seed_indices)} seed picks at indices" 
@@ -507,10 +512,8 @@ class ASTRA:
                     self.translatePicksToGlobal((refined_params[i, 2], refined_params[i, 3]), crop_vars[i]), 
                     frame, uncorr_frame, non_sub_frame)
 
-            # Determine SNR - DEPRECIATED
-            # snr = self.calculateSNR(fit_imgs[i], frames[pick_frame_indices[i]], cropped_frames[i], crop_vars[i])
-
-            # Set index for previous parameters (util. previous since optim. will reshape curr params to fit even if streak is partially OOB)
+            # Set index for previous parameters 
+            # (util. previous since optim. will reshape curr params to fit even if streak is partially OOB)
             idx = i - 1 if i > 0 else 0
 
             # Reject SNR below the threshold
@@ -520,15 +523,15 @@ class ASTRA:
                 if self.verbose:
                     print(f"Rejecting frame {i} with SNR {snr} below threshold {self.snr_threshold}.")
 
-            # Check if the streak is outside the streak
+            # Check if the streak is outside the image bounds
             elif not self.checkStreakInBounds(
                     self.translatePicksToGlobal((refined_params[i, 2], refined_params[i, 3]), crop_vars[i]),
                     refined_params[idx, 4], refined_params[idx, 1], self.omega, self.directions):
                 snr_rejection_bool[i] = True
 
                 if self.verbose:
-                    print(f"Rejecting frame {i} with out-of-bounds pick "
-                          f"{self.translatePicksToGlobal((refined_params[i, 2], refined_params[i, 3]), crop_vars[i])}.")
+                    pick_coords = self.translatePicksToGlobal((refined_params[i, 2], refined_params[i, 3]), crop_vars[i])
+                    print(f"Rejecting frame {i} with out-of-bounds pick {pick_coords}.")
 
             # If passes all checks, append SNR and level sum
             else:
@@ -1681,70 +1684,23 @@ class ASTRA:
     def correctFrame(self, frame, include_non_subtracted=False):
 
         # 1. correct using dark, flat, gamma
-        raw_frame = frame.copy()
         if self.dark is not None:
             corr_frame = Image.applyDark(frame, self.dark)
-            dark_frame = corr_frame.copy()
         if self.flat_struct is not None:
             corr_frame = Image.applyFlat(corr_frame, self.flat_struct)
-            flat_frame = copy.deepcopy(corr_frame)
         if self.dark is not None or self.flat_struct is not None:
             corr_frame = Image.gammaCorrectionImage(corr_frame, self.config.gamma,
                                                     bp=0, wp=(2**self.config.bit_depth - 1))
         else:
             corr_frame = Image.gammaCorrectionImage(frame, self.config.gamma,
                                                     bp=0, wp=(2**self.config.bit_depth - 1))
-        # SOMEWHERE IN LOADING SKYFIT2 IS TRANSPOOSING THE DARK/FLAT
-        gamma_frame = corr_frame.copy()
 
         # 2. Background subtraction
         unsub_frame = corr_frame.copy()
         sub_frame = corr_frame.astype(np.int32) - self.corrected_avepixel.astype(np.int32)
 
-        subtr_frame = sub_frame.copy()
-
         # 3. Star masking
         final_frame = np.ma.masked_array(sub_frame, mask=self.star_mask)
-
-        # fig, axs = plt.subplots(2, 4, figsize=(14, 7))
-        # axs[0, 0].imshow(raw_frame, cmap='gray', vmin=np.percentile(raw_frame, 5), vmax=np.percentile(raw_frame, 99))
-        # axs[0, 0].set_title('Original Frame')
-
-        # if 'dark_frame' in locals():
-        #     axs[0, 1].imshow(dark_frame, cmap='gray', vmin=np.percentile(dark_frame, 5), vmax=np.percentile(dark_frame, 99))
-        #     axs[0, 1].set_title('Dark Corrected')
-        # else:
-        #     axs[0, 1].text(0.5, 0.5, 'No Dark', ha='center', va='center')
-        #     axs[0, 1].set_title('Dark Corrected')
-        #     axs[0, 1].axis('off')
-
-        # if 'flat_frame' in locals():
-        #     axs[0, 2].imshow(flat_frame, cmap='gray', vmin=np.percentile(flat_frame, 5), vmax=np.percentile(flat_frame, 99))
-        #     axs[0, 2].set_title('Flat Corrected')
-        # else:
-        #     axs[0, 2].text(0.5, 0.5, 'No Flat', ha='center', va='center')
-        #     axs[0, 2].set_title('Flat Corrected')
-        #     axs[0, 2].axis('off')
-
-        # axs[0, 3].imshow(gamma_frame, cmap='gray', vmin=np.percentile(gamma_frame, 5), vmax=np.percentile(gamma_frame, 99))
-        # axs[0, 3].set_title('Gamma Corrected')
-
-        # axs[1, 0].imshow(subtr_frame, cmap='gray', vmin=np.percentile(subtr_frame, 5), vmax=np.percentile(subtr_frame, 99))
-        # axs[1, 0].set_title('BG Subtracted')
-
-        # axs[1, 1].imshow(final_frame.filled(fill_value=np.ma.median(final_frame)), cmap='gray', vmin=np.percentile(final_frame.compressed(), 5), vmax=np.percentile(final_frame.compressed(), 99))
-        # axs[1, 1].set_title('Final (Star Masked)')
-
-        # axs[1, 2].imshow(self.corrected_avepixel, cmap='gray', vmin=np.percentile(self.corrected_avepixel, 5), vmax=np.percentile(self.corrected_avepixel, 99))
-        # axs[1, 2].set_title('Corrected Avepixel')
-
-        # axs[1, 3].imshow(self.star_mask, cmap='gray')
-        # axs[1, 3].set_title('Star Mask')
-
-        # plt.tight_layout()
-
-
-        # plt.show()
 
         # Return the frame
         if include_non_subtracted:
@@ -1808,7 +1764,7 @@ class ASTRA:
                 self.pick_frame_indices.append(frame_index)
                 self.pick_frame_indices = sorted(self.pick_frame_indices)
 
-        # If backwards pass add new parameters to the start of the array to maintain symmetry with pick_frame_indices
+        # If backwards pass add new parameters to the start of the array to maintain symmetry
         else:
 
             self.cropped_frames.insert(0,cropped_frame)
@@ -1868,8 +1824,8 @@ class ASTRA:
 
         # Weight the different phases of the program by differeing weights
         time_weights_gaus = {
-            'cropping' : 0.7,
-            'refining' : 0.2,
+            'cropping' : 0.8,
+            'refining' : 0.1,
             'removing' : 0.1
         }
 
@@ -1887,13 +1843,15 @@ class ASTRA:
         # Else print callback to console
         if self.progress_callback is None:
             if progress is not None:
-                print(f'Progress: {round(progress)}%')
+                progress_bar = '*' * int(progress) + '-' * (100 - int(progress))
+                print(f'Progress: {progress_bar} : {int(progress)}%')
             else:
                 current_percentage = sum(
                     self.progressed_frames[step] * time_weights_gaus[step]
                     for step in self.progressed_frames.keys()
                 ) / self.total_frames * 100
-                print(f'Progress: {round(current_percentage)}%')
+                progress_bar = '*' * int(current_percentage) + '-' * (100 - int(current_percentage))
+                print(f'{self.config.stationID} Progress: {progress_bar} : {int(current_percentage)}%')
 
     def selectSeedTriplet(self, picks, pick_frame_indices):
         """
@@ -1966,177 +1924,6 @@ class ASTRA:
         # Return seed_picks and indices (do not need to be stored in memory)
         return seed_picks, seed_pick_frame_indices
 
-    # def computeIntensitySum(self, photom_pixels, global_centroid, corr_frame, uncorr_frame):
-    #     """
-    #     Compute background-subtracted flux, SNR, and saturation flag for a pick region.
-
-    #     Builds a local window around the photometry pixels, replaces star-masked pixels
-    #     with the median of the photometric area, subtracts background from data,
-    #     clips negatives, sums flux, estimates background stats from surrounding pixels,
-    #     computes SNR via a CCD model, and records saturation if ≥2 pixels exceed
-    #     the near-full-scale threshold.
-
-    #     Args:
-    #         photom_pixels (Sequence[tuple[int, int]]): Photometry pixel coords in global space.
-    #         global_centroid (tuple[float, float]): Global center (x, y) for windowing.
-    #         corr_frame (np.ndarray): Corrected data frame, shape (H, W).
-    #         uncorr_frame (np.ndarray): Uncorrected data frame, shape (H, W) for saturation check.
-
-    #     Returns:
-    #         float: Signal-to-noise ratio (CCD-style).
-
-    #     Side Effects:
-    #         Appends to `self.photometry_pixels`, `self.saturated_bool_list`,
-    #         `self.abs_level_sums`, `self.background_levels`.
-
-    #     Raises:
-    #         RuntimeError: If masked arithmetic yields invalid (masked) sums repeatedly.
-    #     """
-
-
-    #     x_arr, y_arr = np.array(photom_pixels).T
-    #     corr_frame = corr_frame.copy()
-    #     avepixel = self.corrected_avepixel.copy()
-
-    #     # Take a window twice the size of the colored pixels
-    #     x_color_size = np.max(x_arr) - np.min(x_arr)
-    #     y_color_size = np.max(y_arr) - np.min(y_arr)
-
-    #     x_min = int(global_centroid[0] - x_color_size)
-    #     x_max = int(global_centroid[0] + x_color_size)
-    #     y_min = int(global_centroid[1] - y_color_size)
-    #     y_max = int(global_centroid[1] + y_color_size)
-
-    #     # Limit the size to be within the bounds
-    #     if x_min < 0: x_min = 0
-    #     if x_max > corr_frame.shape[1]: x_max = corr_frame.shape[1]
-    #     if y_min < 0: y_min = 0
-    #     if y_max > corr_frame.shape[0]: y_max = corr_frame.shape[0]
-
-    #     # Take only the colored part
-    #     mask_img = np.ones_like(corr_frame)
-    #     mask_img[y_arr, x_arr] = 0
-    #     masked_img = np.ma.masked_array(corr_frame, mask_img)
-    #     crop_img = masked_img[y_min:y_max, x_min:x_max]
-    #     crop_img_uncorr = np.ma.masked_array(uncorr_frame, mask_img)
-    #     crop_img_uncorr = crop_img_uncorr[y_min:y_max, x_min:x_max]
-
-    #     # Replace photometry pixels that are masked by a star with the median value of the photom. area
-    #     cropped_star_mask = self.star_mask[y_min:y_max, x_min:x_max]
-    #     photom_star_masked_indices = np.where((crop_img.mask == 0) & (cropped_star_mask == 1))
-
-    #     # Apply correction only if the streak intersects a star
-    #     if len(photom_star_masked_indices[0]) > 0:
-
-    #         # Calulate masked median
-    #         masked_stars_streak_median = np.ma.median(crop_img)
-
-    #         # Unmask those areas
-    #         crop_img.mask[photom_star_masked_indices] = False
-
-    #         # Replace with median
-    #         crop_img[photom_star_masked_indices] = masked_stars_streak_median
-
-
-    #     # Mask out the colored in pixels
-    #     mask_img_bg = np.zeros_like(corr_frame)
-    #     mask_img_bg[y_arr, x_arr] = 1
-
-    #     # Take the image where the colored part is masked out and crop the surroundings
-    #     masked_img_bg = np.ma.masked_array(corr_frame, mask_img_bg | self.star_mask)
-    #     crop_bg = masked_img_bg[y_min:y_max, x_min:x_max]
-        
-    #     # Mask out the colored in pixels
-    #     avepixel_masked = np.ma.masked_array(avepixel, mask_img_bg)
-    #     avepixel_crop_no_color = avepixel_masked[y_min:y_max, x_min:x_max]
-    #     avepixel_crop_color = np.ma.masked_array(avepixel, mask_img)[y_min:y_max, x_min:x_max]
-
-    #     # Compute background level
-    #     background_lvl = np.ma.median(avepixel_crop_no_color)
-
-    #     # Subtract the avepixel crop from the data crop, clip negative values to 0 and sum up the intensity
-    #     crop_img_nobg = crop_img.astype(float) - avepixel_crop_color.astype(float)
-    #     crop_img_nobg = np.clip(crop_img_nobg, 0, None)
-    #     intensity_sum = np.ma.sum(crop_img_nobg)
-
-    #     # Check if the result is masked
-    #     if np.ma.is_masked(intensity_sum):
-    #         # If the result is masked (i.e. error reading pixels), set the intensity sum to 1
-    #         print("Warning: intensity sum is masked, setting to 1") 
-    #         intensity_sum = 1
-    #     else:
-    #         intensity_sum = intensity_sum.astype(int)
-
-    #     ### Measure the SNR of the pick ###
-
-    #     # Compute the standard deviation of the background
-    #     background_stddev = np.ma.std(crop_bg)
-
-    #     # Count the number of pixels in the photometric area
-    #     source_px_count = np.ma.sum(~crop_img.mask)
-
-    #     # Compute the signal to noise ratio using the CCD equation
-    #     snr = signalToNoise(intensity_sum, source_px_count, background_lvl, background_stddev)
-
-    #     ### Determine if there is any saturation in the measured photometric area
-
-    #     # If at least 2 pixels are saturated in the photometric area, mark the pick as saturated
-    #     if np.sum(crop_img_uncorr > self.saturation_threshold) >= 2:
-    #         saturated_bool = True
-    #     else:
-    #         saturated_bool = False
-
-    #     # Append values to class arrays
-    #     self.photometry_pixels.append(photom_pixels)
-    #     self.saturated_bool_list.append(saturated_bool)
-    #     self.abs_level_sums.append(intensity_sum)
-    #     self.background_levels.append(background_lvl)
-
-    #     ## DEBUG - Simplified photometry plots ###
-    #     try:
-    #         # Create directory for photometry diagnostics if it doesn't exist
-    #         photom_dir = os.path.join(self.data_path, "ASTRA_Photometry_Diagnostics")
-    #         os.makedirs(photom_dir, exist_ok=True)
-            
-    #         # Plot title with frame info
-    #         frame_number = self.pick_frame_indices[len(self.photometry_pixels)-1] + self.first_pick_global_index
-            
-    #         # Create a figure with 1x2 grid
-    #         fig, axs = plt.subplots(1, 2, figsize=(10, 5))
-            
-    #         # Plot the mask
-    #         axs[0].imshow(crop_img.mask, cmap='gray')
-    #         axs[0].set_title('crop_img.mask')
-            
-    #         # Plot the background-subtracted image
-    #         # Make a copy of the masked array to avoid read-only issues
-    #         crop_img_nobg_copy = np.array(crop_img_nobg.filled(0))
-    #         axs[1].imshow(crop_img_nobg_copy, cmap='gray',
-    #                        vmin=0, vmax=np.percentile(crop_img_nobg_copy, 99))
-    #         axs[1].set_title('crop_img_nobg')
-            
-    #         # Add frame number as figure title
-    #         fig.suptitle(f"Frame {frame_number}", fontsize=14)
-            
-    #         # Save the figure
-    #         plt.tight_layout()
-    #         fig_path = os.path.join(photom_dir, f"photometry_frame_{frame_number:04d}.jpg")
-    #         plt.savefig(fig_path, dpi=100, bbox_inches='tight', format='jpg')
-    #         plt.close(fig)
-    #     except Exception as e:
-    #         print(f"Warning: Could not save simplified photometry plot for frame {frame_number}: {e}")
-
-    #     # Verbose print
-    #     if self.verbose:
-    #         print("SNR update on frame {:2d}: intensity sum = {:8d}, source px count = {:5d}, " \
-    #         "background lvl = {:8.2f}, background stddev = {:6.2f}, SNR = {:.2f}".format(
-    #             self.pick_frame_indices[self.temp_count], intensity_sum, source_px_count, 
-    #             background_lvl, background_stddev, snr))
-    #         self.temp_count += 1
-
-    #     # return SNR - returned rather than state-set
-    #     return snr
-
     def computeIntensitySum(self, photom_pixels, global_centroid, corr_frame, uncorr_frame, unsub_frame):
         
         # Get photometry pixels as as an array of x_indices, and y_indices
@@ -2188,11 +1975,11 @@ class ASTRA:
         # Create combined masks
 
         # Generate mask for photometry pixels, cropped
-        cropped_mask_photom_included = np.ones_like(cropped_corrected_frame, dtype=bool) # Create a fully masked array
+        cropped_mask_photom_included = np.ones_like(cropped_corrected_frame, dtype=bool) 
         cropped_mask_photom_included[photom_y_indices, photom_x_indices] = False # Unmask photometry pixels
 
         # Generate mask excluding photometry pixels, cropped
-        cropped_mask_photom_excluded = np.zeros_like(cropped_corrected_frame, dtype=bool) # Create a fully unmasked array
+        cropped_mask_photom_excluded = np.zeros_like(cropped_corrected_frame, dtype=bool) 
         cropped_mask_photom_excluded[photom_y_indices, photom_x_indices] = True # Mask photometry pixels
 
         # 1) Compute intensity sum
@@ -2379,10 +2166,10 @@ class ASTRA:
         if self.verbose:
             print("ASTRA SNR update on frame {:2d}: intensity sum = {:8.1f}, source px count = {:5d}, " \
             "background lvl = {:8.2f}, background stddev = {:6.2f}, SNR = {:.2f}".format(
-                self.pick_frame_indices[self.temp_count]+self.first_pick_global_index, float(intensity_sum), source_px_count, 
+                self.pick_frame_indices[self.temp_count]+self.first_pick_global_index, 
+                float(intensity_sum), source_px_count, 
                 background_lvl, background_stddev, snr))
             self.temp_count += 1
-            # print(self.pick_frame_indices[self.temp_count]+self.first_pick_global_index, intensity_sum, source_px_count, background_lvl, background_stddev, snr)
 
         # Return SNR - returned rather than state-set
         return snr  
@@ -2523,7 +2310,7 @@ class ASTRA:
         # 5. save animation
         if self.save_animation:
             try:
-                self.saveAni(self.data_path)
+                self.saveAni(self.data_path if self.ecsv_save_path is None else self.ecsv_save_path)
             except Exception as e:
                 print(f'Error saving animation: {e}')
 
@@ -2541,7 +2328,8 @@ class ASTRA:
         self.platepar = platepar
 
         # If no picks, save nothing and send no-picks to FTPDetectionInfo save
-        if not hasattr(self, 'pick_list') or not self.pick_list or all(val.get('x_centroid') is None for val in self.pick_list.values()):
+        if not hasattr(self, 'pick_list') or \
+            not self.pick_list or all(val.get('x_centroid') is None for val in self.pick_list.values()):
             print("No valid picks to save.")
             return False
 
@@ -2584,7 +2372,8 @@ class ASTRA:
             'camera_id': self.config.stationID,
             'cx' : self.platepar.X_res,
             'cy' : self.platepar.Y_res,
-            'photometric_band' : self.platepar.mag_band_string if hasattr(self.platepar, 'mag_band_string') else 'V',
+            'photometric_band' : self.platepar.mag_band_string if \
+                hasattr(self.platepar, 'mag_band_string') else 'V',
             'image_file' : ff_name,
             'isodate_start_obs': str(dt_ref.strftime(isodate_format_entry)),
             'astrometry_number_stars' : n_stars,
@@ -2599,32 +2388,33 @@ class ASTRA:
 
         # Write the header
         out_str = """# %ECSV 0.9
-    # ---
-    # datatype:
-    # - {name: datetime, datatype: string}
-    # - {name: ra, unit: deg, datatype: float64}
-    # - {name: dec, unit: deg, datatype: float64}
-    # - {name: azimuth, datatype: float64}
-    # - {name: altitude, datatype: float64}
-    # - {name: x_image, unit: pix, datatype: float64}
-    # - {name: y_image, unit: pix, datatype: float64}
-    # - {name: integrated_pixel_value, datatype: int64}
-    # - {name: background_pixel_value, datatype: int64}
-    # - {name: saturated_pixels, datatype: bool}
-    # - {name: mag_data, datatype: float64}
-    # - {name: err_minus_mag, datatype: float64}
-    # - {name: err_plus_mag, datatype: float64}
-    # - {name: snr, datatype: float64}
-    # delimiter: ','
-    # meta: !!omap
-    """
+# ---
+# datatype:
+# - {name: datetime, datatype: string}
+# - {name: ra, unit: deg, datatype: float64}
+# - {name: dec, unit: deg, datatype: float64}
+# - {name: azimuth, datatype: float64}
+# - {name: altitude, datatype: float64}
+# - {name: x_image, unit: pix, datatype: float64}
+# - {name: y_image, unit: pix, datatype: float64}
+# - {name: integrated_pixel_value, datatype: int64}
+# - {name: background_pixel_value, datatype: int64}
+# - {name: saturated_pixels, datatype: bool}
+# - {name: mag_data, datatype: float64}
+# - {name: err_minus_mag, datatype: float64}
+# - {name: err_plus_mag, datatype: float64}
+# - {name: snr, datatype: float64}
+# delimiter: ','
+# meta: !!omap
+"""
         # Add the meta information
         for key, value in meta_dict.items():
             value_str = f"'{value}'" if isinstance(value, str) else str(value)
             out_str += f"# - {{{key}: {value_str}}}\n"
 
         out_str += "# schema: astropy-2.0\n"
-        out_str += "datetime,ra,dec,azimuth,altitude,x_image,y_image,integrated_pixel_value,background_pixel_value,saturated_pixels,mag_data,err_minus_mag,err_plus_mag,snr\n"
+        out_str += "datetime,ra,dec,azimuth,altitude,x_image,y_image,integrated_pixel_value,' \
+            'background_pixel_value,saturated_pixels,mag_data,err_minus_mag,err_plus_mag,snr\n"
 
         # Add the data (sort by frame)
         for frame, pick in sorted(self.pick_list.items(), key=lambda x: x[0]):
@@ -3018,12 +2808,18 @@ Usage Examples:
 """, formatter_class=argparse.RawTextHelpFormatter)
     
     parser.add_argument("file_directory", type=str, help="Path to the file directory")
-    parser.add_argument("ECSV_save_path", type=str, nargs='?', default=None, help="Path to save ECSV file, defaults to dir with config")
-    parser.add_argument("-c", "--astra_config_path", type=str, help="ASTRA_config dict or Path to the ASTRA config json")
-    parser.add_argument("-sa", "--save_animation", default=False, action="store_true", help="Whether to save animation of frame fitting")
-    parser.add_argument("-v", "--verbose", default=False, action="store_true", help="Whether to print verbose output")
-    parser.add_argument("-m", "--multi_station", default=False, action="store_true", help="Whether to process multi-station data")
-    parser.add_argument("-txt", "--use_txt_picks", default=False, action="store_true", help="Whether to use picks from DetApp TXT file")
+    parser.add_argument("ECSV_save_path", type=str, nargs='?', default=None, 
+                        help="Path to save ECSV file, defaults to dir with config")
+    parser.add_argument("-c", "--astra_config_path", type=str, 
+                        help="ASTRA_config dict or Path to the ASTRA config json")
+    parser.add_argument("-sa", "--save_animation", default=False, action="store_true", 
+                        help="Whether to save animation of frame fitting")
+    parser.add_argument("-v", "--verbose", default=False, action="store_true", 
+                        help="Whether to print verbose output")
+    parser.add_argument("-m", "--multi_station", default=False, action="store_true", 
+                        help="Whether to process multi-station data")
+    parser.add_argument("-txt", "--use_txt_picks", default=False, action="store_true", 
+                        help="Whether to use picks from DetApp TXT file")
 
     args = parser.parse_args()
 
@@ -3061,7 +2857,7 @@ Usage Examples:
         print("No ASTRA config provided. Using default configuration.")
         astra_config = {'file_path': file_path, 
                         'pso': {'w (0-1)': 0.9, 'c_1 (0-1)': 0.45, 'c_2 (0-1)': 0.25, 'max itter': 125, 
-                                'n_particles': 125, 'V_c (0-1)': 0.3, 'ftol': 1e-4, 'ftol_itter': 25, 
+                                'n_particles': 125, 'V_c (0-1)': 0.3, 'ftol': 1e-5, 'ftol_itter': 25, 
                                 'expl_c': 3, 'P_sigma': 3}, 
                         'astra': {'star_thresh': 3, 'min SNR': 10, 'P_crop': 1.5, 'sigma_init (px)': 2, 
                                   'sigma_max': 1.2, 'L_max': 1.5, 'Verbose': False, 'photom_thresh': 0.05, 
@@ -3072,7 +2868,8 @@ Usage Examples:
     # if multi-station, parse directory for subfolders including a .config object
     if args.multi_station:
         subfolders = [f.path for f in os.scandir(file_path) if f.is_dir()]
-        config_folders = [folder for folder in subfolders if [file for file in os.listdir(folder) if file.endswith('.config')] != []]
+        config_folders = [folder for folder in subfolders if [file for file in os.listdir(folder) \
+                                                               if file.endswith('.config')] != []]
         if not config_folders:
             raise FileNotFoundError("No config folders found.")
         print(f"Found config folders: {config_folders}")
@@ -3082,6 +2879,12 @@ Usage Examples:
     # if no ecsv save path specified, use each config folder
     if not args.ECSV_save_path:
         args.ECSV_save_path = config_folders
+    # Else make sure directory(ies) exist
+    for path in (args.ECSV_save_path if isinstance(args.ECSV_save_path, list) else [args.ECSV_save_path]):
+        try:
+            os.makedirs(path, exist_ok=True)
+        except Exception as e:
+            print(f"Error creating directory {path}: {e}")
 
     # Set astra config with verbose and save animation
     astra_config['astra']['Verbose'] = args.verbose
@@ -3106,7 +2909,8 @@ Usage Examples:
             img_handle = detectInputTypeFolder(config_path, config)
 
             # Load dark
-            dark_name = [file_name for file_name in os.listdir(config_path) if "dark" in file_name or "bias" in file_name]
+            dark_name = [file_name for file_name in os.listdir(config_path) if \
+                         "dark" in file_name or "bias" in file_name]
             if dark_name != []:
                 dark = Image.loadDark(config_path, dark_name[0], byteswap=img_handle.byteswap)
                 if len(dark_name) > 1:
@@ -3127,7 +2931,8 @@ Usage Examples:
 
             # Load ECSV picks
             if args.use_txt_picks:
-                txt_name = [file_name for file_name in os.listdir(config_path) if file_name.endswith('.txt') and file_name.startswith('ev')]
+                txt_name = [file_name for file_name in os.listdir(config_path) if file_name.endswith('.txt') \
+                             and file_name.startswith('ev')]
                 if txt_name != []:
                     pick_dict = loadEvTxt(os.path.join(config_path, txt_name[0]), img_handle)
                 else:
@@ -3185,6 +2990,10 @@ Usage Examples:
         with ThreadPoolExecutor(max_workers=len(configs)) as executor:
             for i in range(len(configs)):
                 executor.submit(process_astra, platepars[i], img_objs[i], pick_dicts[i], astra_config, 
-                              config_folders[i], 
-                            configs[i], darks[i], flats[i], None, 
+                              config_folders[i], configs[i], darks[i], flats[i], None, 
                       args.ECSV_save_path if isinstance(args.ECSV_save_path, str) else args.ECSV_save_path[i])
+    print(f'FINISHED PROCESSING {len(configs)} cameras')
+    print(f'SAVED RESULTS TO:')
+    for i, config in enumerate(configs):
+        save_path = args.ECSV_save_path[i] if isinstance(args.ECSV_save_path, list) else args.ECSV_save_path
+        print(f'{config.stationID}  {save_path}')

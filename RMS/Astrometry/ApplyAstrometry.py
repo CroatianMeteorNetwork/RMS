@@ -710,7 +710,7 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
         magnitude_data = np.array([])
 
     # Extinction correction
-    if extinction_correction:
+    if extinction_correction and magnitude_data.size > 0:
         magnitude_data = extinctionCorrectionApparentToTrue(magnitude_data, X_data, Y_data, JD_data[0], \
             platepar)
 

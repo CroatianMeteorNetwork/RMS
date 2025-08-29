@@ -10,14 +10,17 @@ import pandas as pd
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
 from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz
 
+# Only import platepar in terminal execution to avoid circular import errors with SkyFit2
+if __name__ == '__main__':
+    from Utils.SkyFit2 import Platepar
+
 
 
 class KalmanFilter():
 
-    def __init__(self, sigma_xy, perc_sigma_vxy, measurements=None, times=None, platepar=None,
-                 epsilon=1e-6, monotonicity=True, use_accel=False,
-                 data_path=None, ecsv_save_path=None,
-                 save_stats_results=False, use_all_files=False):
+    def __init__(self, sigma_xy, perc_sigma_vxy, measurements, times, platepar=None,
+                 epsilon=1e-6, monotonicity=True, use_accel=False, 
+                 save_path=None, save_stats_results=False):
 
         # Check validity of passed on args
 
@@ -46,162 +49,48 @@ class KalmanFilter():
             raise ValueError("Invalid epsilon, must be positive")
 
         # Cast bool-like args
-        self.monotonicity = str(monotonicity).lower() == 'true'
-        self.use_accel = str(use_accel).lower() == 'true'
-        self.use_all_files = str(use_all_files).lower() == 'true'
+        if not isinstance(monotonicity, bool):
+            try:
+                monotonicity = str(monotonicity).lower() == 'true'
+            except (ValueError, TypeError):
+                raise ValueError("Invalid monotonicity, must be castable to bool")
+        if not isinstance(use_accel, bool):
+            try:
+                use_accel = str(use_accel).lower() == 'true'
+            except (ValueError, TypeError):
+                raise ValueError("Invalid use_accel, must be castable to bool")
+        if not isinstance(save_stats_results, bool):
+            try:
+                save_stats_results = str(save_stats_results).lower() == 'true'
+            except (ValueError, TypeError):
+                raise ValueError("Invalid save_stats_results, must be castable to bool")
 
         # Check save_path
-        if ecsv_save_path is not None:
-            if not os.path.isdir(ecsv_save_path):
-                raise ValueError("ecsv_save_path must be a valid directory")
-            self.ecsv_save_path = ecsv_save_path
-
-        # Use measurements and times directly
-        if measurements is not None or times is not None:
-            USE_FILE = False
-        
-        # Else use data, check if valid file or directory with valid file
-        elif data_path is not None:
-            if os.path.isfile(data_path):
-                # Single file provided
-                if not data_path.endswith('.ecsv'):
-                    raise ValueError("File must have .ecsv extension")
-                else:
-                    # Add to a list
-                    data_path = [data_path]
-            elif os.path.isdir(data_path):
-                # Directory provided, find all .ecsv files
-                ecsv_files = []
-                for root, dirs, files in os.walk(data_path):
-                    for file in files:
-                        if file.endswith('.ecsv'):
-                            ecsv_files.append(os.path.join(root, file))
-                
-                if not ecsv_files:
-                    raise ValueError("No .ecsv files found in directory")
-                
-                if use_all_files:
-                    data_path = ecsv_files
-                elif len(ecsv_files) == 1:
-                    data_path = ecsv_files[0]
-                else:
-                    raise ValueError("Found multiple .ecsv files in directory. Either give path to single file or set use_all_files=True.")
-            else:
-                raise ValueError("data_path must be a valid file or directory")
-            
-            USE_FILE = True
-
-        # load measurements and times from files
-        if USE_FILE:
-            measurements = []
-            times = []
-            if len(data_path) > 1:
-                for path in data_path:
-                    t, m = self.loadECSV(path)
-                    times.append(t)
-                    measurements.append(m)
-            else:
-                t, m = self.loadECSV(data_path)
-                times.append(t)
-                measurements.append(m)
+        if save_path is not None:
+            if not os.path.isdir(save_path):
+                os.makedirs(save_path)
+                if not os.path.isdir(save_path):
+                    raise ValueError("save_path must be a valid directory")
 
         # Set class attributes
-        self.measurements = measurements if len(np.array(measurements).shape) != 2 else [measurements]
-        self.times = times if len(np.array(times).shape) != 1 else [times]
+        self.measurements = measurements
+        self.times = times
         self.sigma_xy = sigma_xy
         self.perc_sigma_vxy = perc_sigma_vxy
         self.monotonicity = monotonicity
         self.use_accel = use_accel
         self.epsilon = epsilon
         self.save_stats_results = save_stats_results
-        self.data_path = data_path  
         self.platepar = platepar
+        self.save_path = save_path
 
-
-        # Determine stats save path
-        if self.save_stats_results:
-            if data_path is not None:
-                self.stats_save_path = [os.path.dirname(path) if os.path.isfile(path) else path for path in data_path]
-            else:
-                raise ValueError("data_path must be provided if saving stats results, even if measurements and times were passed on.")
-
-    def run(self):
-
-        x_smooth = []
-        p_smooth = []
-        Q_base = []
-        R = []
-        norm_times = []
-
-        # Run kalman filters
+        # If save stats is True but no save path is provided, raise error
         if self.save_stats_results is True:
-            for m, t, s in zip(self.measurements, self.times, self.stats_save_path):
-                x, p, Q, r, norm_t = self.runKalmanStatic(t, m, self.sigma_xy, self.perc_sigma_vxy, use_accel=self.use_accel, 
-                                    monotonicity=self.monotonicity, epsilon=self.epsilon, 
-                                    save_results=True, stats_save_path=s)
-                x_smooth.append(x)
-                p_smooth.append(p)
-                Q_base.append(Q)
-                R.append(r)
-                norm_times.append(norm_t)
-        else:
-            for m, t in zip(self.measurements, self.times):
-                x, p, Q, r, norm_t = self.runKalmanStatic(t, m, self.sigma_xy, self.perc_sigma_vxy, use_accel=self.use_accel, 
-                                    monotonicity=self.monotonicity, epsilon=self.epsilon, 
-                                    save_results=False)
-                x_smooth.append(x)
-                p_smooth.append(p)
-                Q_base.append(Q)
-                R.append(r)
-                norm_times.append(norm_t)
-        
-        if np.array(self.measurements).shape[0] == 1:
-            return (x_smooth[0], p_smooth[0], Q_base[0], R[0], norm_times[0])
-        else:
-            return (x_smooth, p_smooth, Q_base, R, norm_times)
+            if self.save_path is None:
+                raise ValueError("save_path must be provided if saving stats results.")
 
-    def saveECSV(self, measurements, times, save_path, orig_path):
-        # Copy the original ecsv to the save location
-        shutil.copy(orig_path, os.path.join(save_path, os.path.basename(orig_path) + '_kalman.ecsv'))
-
-        # Recompute ra dec, alt az
-        jd, ra, dec, _ = xyToRaDecPP(times, measurements[0, :], measurements[1, :], None, self.platepar)
-        az, alt = trueRaDec2ApparentAltAz(ra, dec ,jd, self.platepar.lat, self.platepar.lon, self.platepar)
-
-        new_data = list(zip(ra, dec, az, alt, measurements[0, :], measurements[1, :]))
-        file_path = os.path.join(save_path, os.path.basename(orig_path) + '_kalman.ecsv')
-
-        # Read file, keeping comments (astropy-ecsv header) untouched
-        with open(file_path, "r") as f:
-            lines = f.readlines()
-
-        # Find where the CSV table starts (first non-# line with "datetime,ra,...")
-        for i, line in enumerate(lines):
-            if line.startswith("datetime,"):
-                header_index = i
-                break
-        header = lines[:header_index+1]   # everything before and including header
-        data_lines = lines[header_index+1:]
-
-        # Load table part into pandas
-        from io import StringIO
-        df = pd.read_csv(StringIO("".join([lines[header_index], *data_lines])))
-
-        if len(df) != len(new_data):
-            raise ValueError(f"new_data has {len(new_data)} rows, but file has {len(df)}")
-
-        # Unpack and assign replacements
-        df.loc[:, "ra"]       = [row[0] for row in new_data]
-        df.loc[:, "dec"]      = [row[1] for row in new_data]
-        df.loc[:, "azimuth"]  = [row[2] for row in new_data]
-        df.loc[:, "altitude"] = [row[3] for row in new_data]
-        df.loc[:, "x_image"]  = [row[4] for row in new_data]
-        df.loc[:, "y_image"]  = [row[5] for row in new_data]
-
-        # Write back out: preserve header, overwrite data
-        with open(file_path, "w") as f:
-            f.writelines(header)
-            df.to_csv(f, index=False)
+        # Run the kalman filter
+        self.runKalman()
 
     def computeQBase(self, measurements, times, sigma_xy, perc_sigma_vxy):
         """
@@ -512,8 +401,7 @@ class KalmanFilter():
 
         print(f"Kalman results saved to {csv_path}")
 
-    def runKalmanStatic(self, times, measurements, sigmaxy, perc_sigma_xy, 
-                        save_results=False, save_path=None, use_accel=False, monotonicity=True, epsilon=1e-6):
+    def runKalman(self):
         """
         Run the Kalman smoother as a static pipeline for given measurements.
 
@@ -548,125 +436,174 @@ class KalmanFilter():
         """
 
         # Set measurements to ndarray
-        measurements = np.array(measurements)
+        self.measurements = np.array(self.measurements)
 
         # Normalize times to start
-        norm_times = [(t - times[0]).total_seconds() for t in times]
+        self.norm_times = np.array([(t - self.times[0]).total_seconds() for t in self.times])
 
         # Compute Kalman matricies
-        Q_base = self.computeQBase(measurements, norm_times, sigmaxy, perc_sigma_xy)
-        R = self.computeR(measurements, norm_times)
+        self.Q_base = self.computeQBase(self.measurements, self.norm_times, self.sigma_xy, self.perc_sigma_vxy)
+        self.R = self.computeR(self.measurements, self.norm_times)
 
         x_smooth, p_smooth = self.kalmanFilterCA(
-            measurements, norm_times, Q_base, R, 
-            use_accel=use_accel, monotonicity=monotonicity, epsilon=epsilon
+            self.measurements, self.norm_times, self.Q_base, self.R, 
+            use_accel=self.use_accel, monotonicity=self.monotonicity, epsilon=self.epsilon
         )
 
-        if save_results and save_path is not None:
-            self.saveKalmanUncertaintiesToCSV(save_path, times, measurements, x_smooth, p_smooth, Q_base, R)
-        
-        return x_smooth, p_smooth, Q_base, R, norm_times
+        # Save results to CSV if required
+        if self.save_stats_results and self.save_path is not None:
+            self.saveKalmanUncertaintiesToCSV(self.save_path, self.times, self.measurements, x_smooth, p_smooth, self.Q_base, self.R)
+
+        # Save all results to class
+        self.x_smooth = x_smooth
+        self.p_smooth = p_smooth
     
-    def loadECSV(self, ECSV_file_path=None):
-        """
-        Loads the ECSV file and adds the relevant info to pick_list
-        Args:
-            self (PlateTool : optional): PlateTool object if used within SkyFit2
-            ECSV_file_path (str : optional): Path to the ECSV file to load
-        Returns:
-            if self: # Return as a skyfit pick_list dict
-                picks (dict): (N : [8]) dict following same format as self.pick_list 
-            else: # Return times and measurements
-                frame_times (np.ndarray) : N, array of measurement times
-                measurements (np.ndarray) : N x 2 array of x,y measurements
-        """
+    def getResults(self):
+        return self.x_smooth, self.p_smooth, self.Q_base, self.R, self.norm_times
 
-        # Instantiate arrays to be populated
-        picks = []  # N x args_dict array for addCentroid
-        pick_frame_times = []  # (N,) array of frame times
+    def getPicks(self):
+        return self.x_smooth[:, 0:2]
 
-        # wrap in try except to catch unknown errors
-        try:
-            # Opens and parses the ECSV file
-            with open(ECSV_file_path, 'r') as file:
+    def getTimes(self):
+        return self.times
 
-                # Read the file contents
-                contents = file.readlines()
-        
-                # Temp bool to get the column names
-                first_bool = False
+def parseDirForECSV(file_path, ignore_kalman):
 
-                # Process the contents
-                for line in contents:
+    ecsv_files = []
+    for root, dirs, files in os.walk(file_path):
+        for file in files:
+            if file.endswith('.ecsv'):
+                if ignore_kalman and 'kalman' in file:
+                    continue
+                else:
+                    ecsv_files.append(os.path.join(root, file))
+    return ecsv_files
 
-                    # Clean the line
-                    line = [part.strip() for part in line.split(',') if part]
+def loadECSV(ECSV_file_path):
+    """
+    Loads the ECSV file and adds the relevant info to pick_list
+    Args:
+        self (PlateTool : optional): PlateTool object if used within SkyFit2
+        ECSV_file_path (str : optional): Path to the ECSV file to load
+    Returns:
+        if self: # Return as a skyfit pick_list dict
+            picks (dict): (N : [8]) dict following same format as self.pick_list 
+        else: # Return times and measurements
+            frame_times (np.ndarray) : N, array of measurement times
+            measurements (np.ndarray) : N x 2 array of x,y measurements
+    """
 
-                    # Skip header lines
-                    if line[0].startswith('#'):
-                        continue
+    # Instantiate arrays to be populated
+    picks = []  # N x args_dict array for addCentroid
+    pick_frame_times = []  # (N,) array of frame times
 
-                    if first_bool == False:
-                        # Set first bool to True so header is not unpacked twice
-                        first_bool = True
+    # wrap in try except to catch unknown errors
+    try:
+        # Opens and parses the ECSV file
+        with open(ECSV_file_path, 'r') as file:
 
-                        # Unpack column names
-                        column_names = line
-
-                        # Map column names to their indices
-                        pick_frame_times_idx = column_names.index('datetime') if 'datetime' in column_names \
-                                                                                        else None
-                        x_ind = column_names.index('x_image') if 'x_image' in column_names \
-                                                                                        else None
-                        y_ind = column_names.index('y_image') if 'y_image' in column_names \
-                                                                                        else None
-                        background_ind = column_names.index('background_pixel_value') \
-                                                        if 'background_pixel_value' in column_names else None
-                        sat_ind = column_names.index('saturated_pixels') if 'saturated_pixels' in column_names \
-                                                                                        else None
-                        snr_ind = column_names.index('snr') if 'snr' in column_names else None
-
-                        # Ensure essential values are in the ECSV
-                        if x_ind is None or y_ind is None or pick_frame_times_idx is None:
-                            raise ValueError("ECSV file must contain 'x_image', 'y_image', "
-                                           "and 'datetime' columns.")
-
-                        continue
-
-                    else:
-                        # Unpack line
-
-                        # Populate arrays
-                        cx, cy = float(line[x_ind]), float(line[y_ind])
-                        background = float(line[background_ind]) if background_ind is not None else 0
-                        saturated = bool(line[sat_ind]) if sat_ind is not None else False
-                        snr = float(line[snr_ind]) if snr_ind is not None else 1
-                        pick_frame_times.append(datetime.datetime.strptime(line[pick_frame_times_idx], 
-                                                                           '%Y-%m-%dT%H:%M:%S.%f'))
-
-                        # Load in pick parameters, use default for other values
-                        picks.append({
-                            'x_centroid': cx,
-                            'y_centroid': cy,
-                            'mode': 1,
-                            'intensity_sum': 1,
-                            'photometry_pixels': None,
-                            'background_intensity': background,
-                            'snr': snr,
-                            'saturated': saturated,
-                        })
-
-
-
-            return np.array(pick_frame_times), np.array([[pick['x_centroid'], pick['y_centroid']] for pick in picks])
-            
-        # Raise error box
-        except Exception as e:
-            raise Exception(f"Unknown Error reading ECSV file, check correct file loaded.: {str(e)}")
-            
+            # Read the file contents
+            contents = file.readlines()
     
+            # Temp bool to get the column names
+            first_bool = False
+
+            # Process the contents
+            for line in contents:
+
+                # Clean the line
+                line = [part.strip() for part in line.split(',') if part]
+
+                # Skip header lines
+                if line[0].startswith('#'):
+                    continue
+
+                if first_bool == False:
+                    # Set first bool to True so header is not unpacked twice
+                    first_bool = True
+
+                    # Unpack column names
+                    column_names = line
+
+                    # Map column names to their indices
+                    pick_frame_times_idx = column_names.index('datetime') if 'datetime' in column_names \
+                                                                                    else None
+                    x_ind = column_names.index('x_image') if 'x_image' in column_names \
+                                                                                    else None
+                    y_ind = column_names.index('y_image') if 'y_image' in column_names \
+                                                                                    else None
+
+                    # Ensure essential values are in the ECSV
+                    if x_ind is None or y_ind is None or pick_frame_times_idx is None:
+                        raise ValueError("ECSV file must contain 'x_image', 'y_image', "
+                                        "and 'datetime' columns.")
+
+                    continue
+
+                else:
+                    # Unpack line
+
+                    # Populate arrays
+                    cx, cy = float(line[x_ind]), float(line[y_ind])
+                    pick_frame_times.append(datetime.datetime.strptime(line[pick_frame_times_idx], 
+                                                                        '%Y-%m-%dT%H:%M:%S.%f'))
+
+                    # Load in pick parameters, use default for other values
+                    picks.append([cx, cy])
+
+        return np.array(picks), np.array(pick_frame_times)
+        
+    # Raise error box
+    except Exception as e:
+        raise Exception(f"Unknown Error reading ECSV file, check correct file loaded.: {str(e)}")
+            
+def saveECSV(picks, times, platepar, save_path, orig_path):
+    # Copy the original ecsv to the save location
+    shutil.copy(orig_path, os.path.join(save_path, os.path.basename(orig_path) + '_kalman.ecsv'))
+
+    # Recompute ra dec, alt az
+
+    time_list = [[time.year, time.month, time.day, time.hour, time.minute, time.second + time.microsecond/1e6] \
+                 for time in times]
+    jd, ra, dec, _ = xyToRaDecPP(time_list, picks[:, 0], picks[:, 1], None, platepar, measurement=False)
 
 
+    az, alt = trueRaDec2ApparentAltAz(ra, dec ,jd, platepar.lat, platepar.lon, refraction=False)
+
+    new_data = list(zip(ra, dec, az, alt, picks[:, 0], picks[:, 1]))
+    file_path = os.path.join(save_path, os.path.basename(orig_path) + '_kalman.ecsv')
+
+    # Read file, keeping comments (astropy-ecsv header) untouched
+    with open(file_path, "r") as f:
+        lines = f.readlines()
+
+    # Find where the CSV table starts (first non-# line with "datetime,ra,...")
+    for i, line in enumerate(lines):
+        if line.startswith("datetime,"):
+            header_index = i
+            break
+    header = lines[:header_index+1]   # everything before and including header
+    data_lines = lines[header_index+1:]
+
+    # Load table part into pandas
+    from io import StringIO
+    df = pd.read_csv(StringIO("".join([lines[header_index], *data_lines])))
+
+    if len(df) != len(new_data):
+        raise ValueError(f"new_data has {len(new_data)} rows, but file has {len(df)}")
+
+    # Unpack and assign replacements
+    df.loc[:, "ra"]       = [row[0] for row in new_data]
+    df.loc[:, "dec"]      = [row[1] for row in new_data]
+    df.loc[:, "azimuth"]  = [row[2] for row in new_data]
+    df.loc[:, "altitude"] = [row[3] for row in new_data]
+    df.loc[:, "x_image"]  = [row[4] for row in new_data]
+    df.loc[:, "y_image"]  = [row[5] for row in new_data]
+
+    # Write back out: preserve header, overwrite data
+    with open(file_path, "w") as f:
+        f.writelines(header)
+        df.to_csv(f, index=False, header=False)
 
 if __name__ == "__main__":
     import argparse
@@ -710,19 +647,22 @@ Key Features:
                        help='Velocity standard deviation as percentage of average velocity')
     
     # Optional arguments with defaults
-    parser.add_argument('--epsilon', '--e', type=float, default=1e-6,
+    parser.add_argument('-epsilon', '-e', type=float, default=1e-6,
                        help='Numerical tolerance for monotonicity enforcement (default: 1e-6)')
-    parser.add_argument('--monotonicity', '--m', type=bool, default=True,
+    parser.add_argument('-monotonicity', '-m', action='store_true', default=True,
                        help='Enforce monotonic motion along dominant axis (default: True)')
-    parser.add_argument('--use_accel', '--a', type=bool, default=False,
+    parser.add_argument('-use_accel', '-a', action='store_true', default=False,
                        help='Use constant-acceleration model instead of constant-velocity (default: False)')
-    parser.add_argument('--save_path', '--p', type=str, default=None,
-                       help='Directory to save output ECSV files (default: None)')
-    parser.add_argument('--save_stats_results', '--r', type=bool, default=False,
+    parser.add_argument('-save_path', '-p', type=str, default=None,
+                       help='Directory to save output ECSV & Stats files (default: data_path/Kalman_Results)')
+    parser.add_argument('-save_stats_results', '-r', action='store_true', default=False,
                        help='Save statistical results to CSV (default: False)')
-    parser.add_argument('--use_all_files', '--u', type=bool, default=False,
-                       help='Process all .ecsv files in directory (default: False)')
-    
+    parser.add_argument('-walk', '-w', action='store_true', default=False,
+                       help='Walk directory and process all found ecsv (default: False)')
+    parser.add_argument('-ignore_kalman', '-ik', action='store_true', default=True,
+                       help='Ignore ecsv files with kalman filtering applied (\'kalman\' in filename)' \
+                        '(default=True)')
+
     args = parser.parse_args()
     
     # Extract values
@@ -732,13 +672,91 @@ Key Features:
     epsilon = args.epsilon
     monotonicity = args.monotonicity
     use_accel = args.use_accel
-    save_path = args.save_path
     save_stats_results = args.save_stats_results
-    use_all_files = args.use_all_files
+    walk = args.walk
+    ignore_kalman = args.ignore_kalman
+    
+    save_paths = []
+    all_picks = []
+    all_times = []
+    all_platepars = []
 
-    kalman = KalmanFilter(
-        sigma_xy=sigma_xy, perc_sigma_vxy=perc_sigma_vxy,
-        epsilon=epsilon, monotonicity=monotonicity, use_accel=use_accel,
-        data_path=data_path, ecsv_save_path=save_path,
-        save_stats_results=save_stats_results, use_all_files=use_all_files
-    )
+    # Get all ECSVs to process if walk is true
+    if walk:
+        ecsv_files = parseDirForECSV(data_path, ignore_kalman)
+    else:
+        if os.path.isfile(data_path):
+            ecsv_files = [data_path]
+        else:
+            ecsv_candidates = parseDirForECSV(data_path, ignore_kalman)
+            ecsv_files = [ecsv_candidates[0]]
+            if len(ecsv_candidates) > 1:
+                print(f"WARNING: Multiple ecsv files found in directory, using {ecsv_candidates[0]}")
+            
+            if ecsv_files == []:
+                raise ValueError(f"No .ecsv files found in directory {data_path}")
+    
+    # Set save path if not provided
+    if args.save_path is None:
+        for ecsv_file in ecsv_files:
+            save_paths.append(os.path.join(os.path.dirname(ecsv_file), "Kalman_Results"))
+    else:
+        if os.path.isdir(args.save_path):
+            save_paths = args.save_path
+        elif os.path.isfile(args.save_path):
+            save_paths = os.path.dirname(args.save_path)
+        else:
+            raise ValueError("save_path must be a valid directory or file path")
+
+    # Load platepars
+    for ecsv_file in ecsv_files:
+        parent_dir = os.path.dirname(ecsv_file)
+        platepar_path = [os.path.join(parent_dir, f) for f in os.listdir(parent_dir) if (('platepar') in f \
+                                                                                    and f.endswith('.cal'))]
+        if platepar_path == []:
+            raise ValueError(f"No .platepar file found in directory {parent_dir} for ECSV {ecsv_file}")
+        else:
+            platepar = Platepar()
+            platepar.read(platepar_path[0])
+            if len(platepar_path) > 1:
+                print(f"WARNING: Multiple .platepar files found, using the first one: {platepar_path[0]}.")
+        all_platepars.append(platepar)
+
+    # Load picks and times from all ECSV files
+    for ecsv_file in ecsv_files:
+        picks, times = loadECSV(ecsv_file)
+        all_picks.append(picks)
+        all_times.append(times)
+    
+    # Process for each
+    print('Starting kalman filtration for files: ')
+    for ecsv_file in ecsv_files:
+        print(f' - {ecsv_file}')
+
+    # Run Kalman filter on each file
+    for i, ecsv_file in enumerate(ecsv_files):
+        print(f'Processing {ecsv_file}...')
+        kalman_filter = KalmanFilter(
+            measurements=all_picks[i],
+            times=all_times[i],
+            sigma_xy=sigma_xy,
+            perc_sigma_vxy=perc_sigma_vxy,
+            epsilon=epsilon,
+            monotonicity=monotonicity,
+            use_accel=use_accel,
+            save_stats_results=save_stats_results,
+            save_path=save_paths[i] if isinstance(save_paths, list) else save_paths
+        )
+        print(f'Finished processing {ecsv_file}')
+
+        # Save ECSV
+        smoothed_picks = kalman_filter.getPicks()
+        times = kalman_filter.getTimes()
+        saveECSV(smoothed_picks, times, all_platepars[i], 
+                 save_paths[i] if isinstance(save_paths, list) else save_paths, 
+                 ecsv_file)
+
+    print("Kalman filtering complete.")
+    print("Saved filtered ECSVs for the following events, to the following folders:")
+    for i, ecsv_file in enumerate(ecsv_files):
+        print(f' - {ecsv_file} -> {save_paths[i] if isinstance(save_paths, list) else save_paths}')

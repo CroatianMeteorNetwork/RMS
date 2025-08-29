@@ -4410,13 +4410,10 @@ class PlateTool(QtWidgets.QMainWindow):
             times=times,
             monotonicity=monotonicity,
             save_stats_results=save_stats_results,
-            data_path=self.dir_path
+            save_path=self.dir_path
         )
 
-        x_smooth, _, _, _ , _ = kalman.run()
-
-        xypicks = x_smooth[:, :2]
-
+        xypicks = kalman.getPicks()
 
         # Add previous picks to list
         if np.array(
