@@ -220,31 +220,28 @@ class ASTRA:
         """
 
         # 1) -- Background Subtraction --
-        try:
-            # Load background using RMS
-            fake_ff_obj = self.img_obj.loadChunk()
-            avepixel_background = fake_ff_obj.avepixel.astype(np.float32)
+        # Load background using RMS
+        fake_ff_obj = self.img_obj.loadChunk()
+        avepixel_background = fake_ff_obj.avepixel.astype(np.float32)
+        corrected_avepixel = avepixel_background.copy()
 
-            # # Correct avepixel_background
-            if self.dark is not None:
-                corrected_avepixel = Image.applyDark(avepixel_background, self.dark)
+        # # Correct avepixel_background
+        if self.dark is not None:
+            corrected_avepixel = Image.applyDark(corrected_avepixel, self.dark)
 
-            if self.flat_struct is not None:
-                corrected_avepixel = Image.applyFlat(corrected_avepixel, self.flat_struct)
+        if self.flat_struct is not None:
+            corrected_avepixel = Image.applyFlat(corrected_avepixel, self.flat_struct)
 
-            if self.dark is not None or self.flat_struct is not None:
-                corrected_avepixel = Image.gammaCorrectionImage(corrected_avepixel, self.config.gamma, 
-                                                            bp=0, wp=(2**self.config.bit_depth - 1))
+        if self.dark is not None or self.flat_struct is not None:
+            corrected_avepixel = Image.gammaCorrectionImage(corrected_avepixel, self.config.gamma, 
+                                                        bp=0, wp=(2**self.config.bit_depth - 1))
 
-            else:
-                corrected_avepixel = Image.gammaCorrectionImage(avepixel_background, self.config.gamma, 
-                                                            bp=0, wp=(2**self.config.bit_depth - 1))
+        else:
+            corrected_avepixel = Image.gammaCorrectionImage(avepixel_background, self.config.gamma, 
+                                                        bp=0, wp=(2**self.config.bit_depth - 1))
 
-            # Set backgrounds as a class var
-            self.corrected_avepixel = corrected_avepixel
-
-        except Exception as e:
-            raise Exception(f"Error loading background or subtracting frames: {e}")
+        # Set backgrounds as a class var
+        self.corrected_avepixel = corrected_avepixel
         
         # 2) -- Star Masking --
 
@@ -1683,15 +1680,19 @@ class ASTRA:
     def correctFrame(self, frame, include_non_subtracted=False):
 
         # 1. correct using dark, flat, gamma
+        corr_frame = frame.copy()
+        
         if self.dark is not None:
-            corr_frame = Image.applyDark(frame, self.dark)
+            corr_frame = Image.applyDark(corr_frame, self.dark)
+
         if self.flat_struct is not None:
             corr_frame = Image.applyFlat(corr_frame, self.flat_struct)
+        
         if self.dark is not None or self.flat_struct is not None:
             corr_frame = Image.gammaCorrectionImage(corr_frame, self.config.gamma,
                                                     bp=0, wp=(2**self.config.bit_depth - 1))
         else:
-            corr_frame = Image.gammaCorrectionImage(frame, self.config.gamma,
+            corr_frame = Image.gammaCorrectionImage(corr_frame, self.config.gamma,
                                                     bp=0, wp=(2**self.config.bit_depth - 1))
 
         # 2. Background subtraction
@@ -2281,30 +2282,18 @@ class ASTRA:
 
 
         # 1. Gets corrected background and star_mask for later corrections 
-        try:
-            self.processImageData()
-        except Exception as e:
-            print(f'Error processing image data: {e}')
+        self.processImageData()
 
         # 2. Recursively crop & fit a moving gaussian across whole event
-        try:
-            self.cropAllMeteorFrames()
-        except Exception as e:
-            print(f'Error cropping and fitting meteor frames: {e}')
+        self.cropAllMeteorFrames()
 
         # 3. Refine the moving gaussian fit by using a local optimizer
-        try:
-            self.refineAllMeteorCrops(self.first_pass_params, self.cropped_frames, 
+        self.refineAllMeteorCrops(self.first_pass_params, self.cropped_frames, 
                                       self.omega, self.directions)
-        except Exception as e:
-            print(f'Error refining meteor crops: {e}')
 
         # 4. Remove picks with low SNR and out-of-bounds picks, refactors into global coordinates
-        try:
-            self.removeLowSNRPicks(self.refined_fit_params, self.fit_imgs, self.cropped_frames, 
+        self.removeLowSNRPicks(self.refined_fit_params, self.fit_imgs, self.cropped_frames, 
                                     self.crop_vars, self.pick_frame_indices, self.fit_costs)
-        except Exception as e:
-            print(f'Error removing low SNR picks: {e}')
 
         # 5. save animation
         if self.save_animation:

@@ -4310,18 +4310,29 @@ class PlateTool(QtWidgets.QMainWindow):
             "y_centroid" : self.pick_list[i]['y_centroid']
                 } for i in pick_frame_indices}
 
+
+        # Prepare the flat to be passed to ASTRA
+        flat = None
+        if self.flat_struct is not None:
+            flat = copy.deepcopy(self.flat_struct)
+            flat.flat_img = flat.flat_img.T
+
+        # Prepare the dark to be passed to ASTRA
+        dark = None
+        if self.dark is not None:
+            dark = copy.deepcopy(self.dark)
+            dark = dark.T
+
         # Package data for ASTRA - import later using dict comprehension
-        self.flat_struct.flat_img = self.flat_struct.flat_img.T
         data_dict = {
             "img_obj" : self.img_handle,
             "pick_dict" : pick_dict,
             "astra_config" : astra_config,
             "data_path" : self.dir_path,
             "config" : self.config,
-            "dark" : self.dark.T if hasattr(self, 'dark') else None,
-            "flat" : self.flat_struct if hasattr(self, 'flat_struct') else None
+            "dark" : dark,
+            "flat" : flat
         }
-        self.flat_struct.flat_img = self.flat_struct.flat_img.T
 
         return data_dict
 
@@ -4611,7 +4622,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         pick_frame_times.append(datetime.datetime.strptime(line[pick_frame_times_idx], 
                                                                            '%Y-%m-%dT%H:%M:%S.%f'))
 
-                        # Load in pick parameters, use default for other values
+                        # Load in pick parameters, use default for other values 
                         picks.append({
                             'x_centroid': cx,
                             'y_centroid': cy,
