@@ -61,19 +61,15 @@ from RMS.Astrometry.CyFunctions import (cyraDecToXY, cyTrueRaDec2ApparentAltAz,
                                         cyXYToRADec,
                                         eqRefractionApparentToTrue,
                                         equatorialCoordPrecession,
-                                        pointingCorrection)
-
-# Import new functions from CyFunctions_merged_full
-from RMS.Astrometry.CyFunctions_merged_full import (
-    cyXYToRADec_iter,
-    cyXYToAltAz_iter,
-    cyXYToAltAz,
-    cyAltAzToXY_iter,
-    cyAltAzToXY,
-    cyXYHttoENU_wgs84,
-    cyGeoToXY_wgs84_iter,
-    cyXYToGeo_wgs84_iter
-)
+                                        pointingCorrection,
+                                        cyXYToRADec_iter,
+                                        cyXYToAltAz_iter,
+                                        cyXYToAltAz,
+                                        cyAltAzToXY_iter,
+                                        cyAltAzToXY,
+                                        cyXYHttoENU_wgs84,
+                                        cyGeoToXY_wgs84_iter,
+                                        cyXYToGeo_wgs84_iter)
 
 # Handle Python 2/3 compatibility
 if sys.version_info.major == 3:
