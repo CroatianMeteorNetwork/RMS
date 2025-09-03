@@ -2590,7 +2590,9 @@ def cyXYHttoENU_wgs84(
     C2 = Xc*Xc + Yc*Yc + Zc*Zc
 
     # geocentric radius near station for sphere guess
-    cdef double a = 6378137.0; cdef double f = 1.0/298.257223563; cdef double b = a*(1.0 - f)
+    cdef double a = 6378137.0
+    cdef double f = 1.0/298.257223563
+    cdef double b = a*(1.0 - f)
     cdef double sF = sin(latr), cF = cos(latr)
     cdef double num = (a*a*cF)*(a*a*cF) + (b*b*sF)*(b*b*sF)
     cdef double den = (a*cF)*(a*cF) + (b*sF)*(b*sF)
@@ -2695,7 +2697,8 @@ def cyGeoToXY_wgs84_iter(
     # --- station ECEF ---
     cdef double latS = radians(lat_sta_deg)
     cdef double lonS = radians(lon_sta_deg)
-    cdef double s = sin(latS); cdef double c = cos(latS)
+    cdef double s = sin(latS)
+    cdef double c = cos(latS)
     cdef double N = a / sqrt(1.0 - e2*s*s)
     cdef double Xc = (N + h_sta_m)*c*cos(lonS)
     cdef double Yc = (N + h_sta_m)*c*sin(lonS)
