@@ -2568,15 +2568,15 @@ def cyXYHttoENU_wgs84(
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] az_deg, el_deg
     az_deg, el_deg = cyXYToAltAz(
         jd_vec, x_px, y_px,
-        lat, lon, x_res, y_res,
-        h0, jd_ref, ra_ref, dec_ref, pos_angle_ref,
-        pix_scale, x_poly_fwd, y_poly_fwd, dist_type,
+        lat_deg, lon_deg, x_res, y_res,
+        h0_deg, jd_ref, ra_ref_deg, dec_ref_deg, pos_angle_ref_deg,
+        pix_scale_px_per_deg, x_poly_fwd, y_poly_fwd, dist_type,
         refraction=refraction, equal_aspect=equal_aspect,
         force_distortion_centre=force_distortion_centre, asymmetry_corr=asymmetry_corr,
         precompute_pointing_corr=True
     )
 
-    cdef double latr = radians(lat), lonr = radians(lon)
+    cdef double latr = radians(lat_deg), lonr = radians(lon_deg)
     cdef double Xc, Yc, Zc
     geodetic_to_ecef(latr, lonr, station_ht_wgs84_m, &Xc, &Yc, &Zc)
     cdef np.ndarray[FLOAT_TYPE_t, ndim=2] R = np.empty((3,3), dtype=FLOAT_TYPE)
@@ -2585,6 +2585,7 @@ def cyXYHttoENU_wgs84(
     cdef double el_gate = radians(min_el_deg)
     cdef double az_i, el_i, c_el, s_el, dx, dy, dz, Cdotd, C2, disc, s_guess
     cdef double s_lo, s_hi, s_mid, Xi, Yi, Zi, lati, loni, hi, f_lo, f_hi, f_mid
+    cdef double dX, dY, dZ
     cdef Py_ssize_t i, it
 
     C2 = Xc*Xc + Yc*Yc + Zc*Zc
@@ -2649,7 +2650,9 @@ def cyXYHttoENU_wgs84(
             else: s_lo = s_mid; f_lo = f_mid
             if fabs(f_mid) < 1e-3: break
 
-        cdef double dX = Xi - Xc, dY = Yi - Yc, dZ = Zi - Zc
+        dX = Xi - Xc
+        dY = Yi - Yc
+        dZ = Zi - Zc
         E[i] = R[0,0]*dX + R[1,0]*dY + R[2,0]*dZ
         N[i] = R[0,1]*dX + R[1,1]*dY + R[2,1]*dZ
         U[i] = R[0,2]*dX + R[1,2]*dY + R[2,2]*dZ
@@ -2937,6 +2940,7 @@ def cyXYToGeo_wgs84_iter(
     cdef double radius, theta, sin_t, cos_t
     cdef double latP, lonP, hP, pval, theta_b, st, ct, Ncur
     cdef double dX, dY, dZ, dxe, dye, dze, Cdotd, C2, disc, s_guess, s_lo, s_hi, s_mid, f_lo, f_hi, f_mid
+    cdef double c_el, s_el
     cdef int j, it
 
     C2 = Xc*Xc + Yc*Yc + Zc*Zc
@@ -3065,7 +3069,8 @@ def cyXYToGeo_wgs84_iter(
             continue
 
         # --- ENU ray (unit), then to ECEF ---
-        cdef double c_el = cos(el), s_el = sin(el)
+        c_el = cos(el)
+        s_el = sin(el)
         dX = c_el * sin(az)  # Eu
         dY = c_el * cos(az)  # Nu
         dZ = s_el            # Uu
