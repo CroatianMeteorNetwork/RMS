@@ -2520,7 +2520,8 @@ cdef inline void ecef_to_geodetic_bowring(double X, double Y, double Z,
     cdef double theta = atan2(Z*a, p*b)
     cdef double st = sin(theta), ct = cos(theta)
     lat[0] = atan2(Z + ep2*b*st*st*st, p - e2*a*ct*ct*ct)
-    cdef double s = sin(*lat); cdef double N = a / sqrt(1.0 - e2*s*s)
+    cdef double s = sin(lat[0])
+    cdef double N = a / sqrt(1.0 - e2*s*s)
     h[0] = p/cos(lat[0]) - N
 
 @cython.cdivision(True)
