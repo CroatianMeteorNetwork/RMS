@@ -60,7 +60,8 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import (cyraDecToXY, cyTrueRaDec2ApparentAltAz,
                                         cyXYToRADec,
                                         eqRefractionApparentToTrue,
-                                        equatorialCoordPrecession)
+                                        equatorialCoordPrecession,
+                                        pointingCorrection)
 
 # Import new functions from CyFunctions_merged_full
 from RMS.Astrometry.CyFunctions_merged_full import (
@@ -470,8 +471,97 @@ def getFOVSelectionRadius(platepar):
     return fov_radius
 
 
+def rotationWrtHorizon(platepar, jd_obs=None):
+    """
+    Analytic rotation of the image x-axis w.r.t. the horizon at the FOV center.
+    No grids, no optimization.
+    Returns angle in degrees wrapped to (-180, 180].
+    """
+    if jd_obs is None:
+        jd_obs = platepar.JD
+        
+    # 1) Precession-corrected FOV center (J2000) and position-angle at epoch:
+    #    Use the same pointing correction your Cython path uses.
+    ra_c, dec_c, posA = pointingCorrection(
+        jd_obs,
+        np.radians(platepar.lat), np.radians(platepar.lon),
+        np.radians(platepar.Ho), platepar.RA_d,
+        np.radians(platepar.RA_d), np.radians(platepar.dec_d),
+        np.radians(platepar.pos_angle_ref),
+        refraction=platepar.refraction
+    )
+    # posA is the rotation of sensor axes from the **meridian** at the center.
+    # In most RMS setups, rot_M == np.degrees(posA). If you prefer, you can also call
+    # rot_M = rotationWrtStandard(platepar) to stay consistent with your existing code.
+    rot_M = np.degrees(posA)
 
-def rotationWrtHorizon(platepar):
+    # 2) Center’s apparent Alt/Az (epoch of date; match your refraction choice)
+    A, h = cyTrueRaDec2ApparentAltAz(
+        ra_c, dec_c, platepar.JD,
+        np.radians(platepar.lat), np.radians(platepar.lon),
+        platepar.refraction
+    )
+
+    # 3) Parallactic angle (az-alt form); use atan2 for proper quadrant
+    phi = np.radians(platepar.lat)
+    q = np.degrees(np.arctan2(np.sin(A), np.tan(phi)*np.cos(h) - np.sin(phi)*np.cos(A)))
+
+    # 4) Rotation from horizon
+    rot_H = rot_M - (q + 90.0)
+
+    # Wrap to (-180, 180]
+    rot_H = ((rot_H + 180.0) % 360.0) - 180.0
+    return rot_H
+
+
+def rotationWrtHorizon_iter(platepar):
+    """ Compute the optimized rotation of the FOV with respect to the horizon.
+    
+    Arguments:
+        platepar: [Platepar object] Input platepar.
+        
+    Return:
+        opt_rot_angle: [float] Optimized rotation w.r.t. horizon (degrees).
+    """
+
+    # Deep copy of platepar
+    platepar_temp = copy.deepcopy(platepar)
+    
+    # Create a 10x10 grid on the image, avoiding the edges
+    margin = 30
+    x_grid, y_grid = np.linspace(margin, platepar_temp.X_res - margin, 10), np.linspace(margin, platepar_temp.Y_res - margin, 10)
+    xx, yy = np.meshgrid(x_grid, y_grid)
+    xx, yy = xx.flatten(), yy.flatten()
+    
+    # Compute celestial coordinates for each grid point
+    _, ra_arr, dec_arr, _ = xyToRaDecPP(len(xx)*[platepar_temp.JD], xx, yy, len(xx)*[1], platepar_temp, extinction_correction=False, jd_time=True)
+    
+    # Objective function for optimization
+    def objective(rot_angle):
+        platepar_temp.rotation_from_horiz = rot_angle
+        total_error = 0
+        for ra, dec in zip(ra_arr, dec_arr):
+            az, alt = cyTrueRaDec2ApparentAltAz(np.radians(ra), np.radians(dec), platepar_temp.JD, \
+                                               np.radians(platepar_temp.lat), np.radians(platepar_temp.lon), platepar_temp.refraction)
+            x_out, y_out = azAltToXYPP(np.array([np.degrees(az)]), np.array([np.degrees(alt)]), platepar_temp)
+            error = np.sqrt((x_out - xx)**2 + (y_out - yy)**2)
+            total_error += np.sum(error)
+        
+        return total_error
+    
+    # Initial guess for rotation_from_horiz
+    initial_guess = [0]
+    
+    # Optimize
+    result = scipy.optimize.minimize(objective, initial_guess, method='Nelder-Mead')
+    
+    opt_rot_angle = result.x[0]
+    
+    return opt_rot_angle
+
+
+
+def rotationWrtHorizon_old(platepar):
     """ Given the platepar, compute the rotation of the FOV with respect to the horizon.
 
     Arguments:
