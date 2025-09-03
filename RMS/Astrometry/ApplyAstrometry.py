@@ -61,11 +61,8 @@ from RMS.Astrometry.CyFunctions import (cyraDecToXY, cyTrueRaDec2ApparentAltAz,
                                         cyXYToRADec,
                                         eqRefractionApparentToTrue,
                                         equatorialCoordPrecession,
-                                        pointingCorrection,
                                         cyXYToRADec_iter,
-                                        cyXYToAltAz_iter,
                                         cyXYToAltAz,
-                                        cyAltAzToXY_iter,
                                         cyAltAzToXY,
                                         cyXYHttoENU_wgs84,
                                         cyGeoToXY_wgs84_iter,
@@ -575,7 +572,7 @@ def rotationWrtHorizon_iter(platepar):
         for ra, dec in zip(ra_arr, dec_arr):
             az, alt = cyTrueRaDec2ApparentAltAz(np.radians(ra), np.radians(dec), platepar_temp.JD, \
                                                np.radians(platepar_temp.lat), np.radians(platepar_temp.lon), platepar_temp.refraction)
-            x_out, y_out = azAltToXYPP(np.array([np.degrees(az)]), np.array([np.degrees(alt)]), platepar_temp)
+            x_out, y_out = AltAzToXYPP(np.array([np.degrees(alt)]), np.array([np.degrees(az)]), platepar_temp)
             error = np.sqrt((x_out - xx)**2 + (y_out - yy)**2)
             total_error += np.sum(error)
         
@@ -590,7 +587,6 @@ def rotationWrtHorizon_iter(platepar):
     opt_rot_angle = result.x[0]
     
     return opt_rot_angle
-
 
 
 def rotationWrtHorizon_old(platepar):
@@ -628,7 +624,6 @@ def rotationWrtHorizon_old(platepar):
     return rot_angle
 
 
-
 def rotationWrtHorizonToPosAngle(platepar, rot_angle):
     """ Given the rotation angle w.r.t horizon, numerically compute the position angle.
 
@@ -662,8 +657,6 @@ def rotationWrtHorizonToPosAngle(platepar, rot_angle):
 
 
     return res.x[0]%360
-
-
 
 
 def rotationWrtStandard(platepar):
@@ -918,142 +911,73 @@ def xyToRaDecPP_iter(time_data, X_data, Y_data, platepar, jd_time=False, precomp
     return JD_data, RA_data, dec_data
 
 
-def xyToAltAzPP_iter(time_data, X_data, Y_data, platepar, jd_time=False, precompute_pointing_corr=False):
-    """ Converts image XY to altitude and azimuth using iterative solver for radial distortion.
-    
+def AltAzToXYPP(alt_data, az_data, platepar):
+    """ Converts Azim, Alt to image coordinates, but the platepar is given instead of individual parameters.
     Arguments:
-        time_data: [2D ndarray] Numpy array containing either: 
-            if jd_time is False - time tuples of each data point (year, month, day, hour, minute, second, 
-                millisecond).
-            if jd_time is True - Julian dates.
-        X_data: [ndarray] 1D numpy array containing the image X component.
-        Y_data: [ndarray] 1D numpy array containing the image Y component.
+        az: [ndarray] Array of azimuth (degrees).
+        alt: [ndarray] Array of altitude (degrees).
         platepar: [Platepar structure] Astrometry parameters.
-    
-    Keyword arguments:
-        jd_time: [bool] If True, time_data is expected as a list of Julian dates. False by default.
-        precompute_pointing_corr: [bool] Precompute the pointing correction. False by default.
-    
-    Return:
-        (JD_data, az_data, alt_data): [tuple of ndarrays]
-            JD_data: [ndarray] Julian date of each data point.
-            az_data: [ndarray] Azimuth of each point (degrees).
-            alt_data: [ndarray] Altitude/elevation of each point (degrees).
-    """
-    
-    # Convert time to Julian date
-    if jd_time:
-        JD_data = np.array(time_data)
-    else:
-        JD_data = np.array([date2JD(*time_data_entry) for time_data_entry in time_data], dtype=np.float64)
-    
-    # Convert x,y to alt/az using iterative solver
-    az_data, alt_data = cyXYToAltAz_iter(JD_data, np.array(X_data, dtype=np.float64), 
-        np.array(Y_data, dtype=np.float64), float(platepar.lat), float(platepar.lon), 
-        float(platepar.X_res), float(platepar.Y_res), float(platepar.Ho), float(platepar.JD), 
-        float(platepar.RA_d), float(platepar.dec_d), float(platepar.pos_angle_ref), 
-        float(platepar.F_scale), platepar.x_poly_fwd, platepar.y_poly_fwd, 
-        unicode(platepar.distortion_type), refraction=platepar.refraction, 
-        equal_aspect=platepar.equal_aspect, force_distortion_centre=platepar.force_distortion_centre, 
-        asymmetry_corr=platepar.asymmetry_corr, precompute_pointing_corr=precompute_pointing_corr)
-    
-    return JD_data, az_data, alt_data
-
-
-def altAzToXYPP_iter(az_data, alt_data, jd, platepar):
-    """ Converts altitude and azimuth to image coordinates using iterative solver for radial distortion.
-    
-    Arguments:
-        az_data: [ndarray] Array of azimuths (degrees, +E of due N).
-        alt_data: [ndarray] Array of altitudes/elevations (degrees).
-        jd: [float] Julian date.
-        platepar: [Platepar structure] Astrometry parameters.
-    
     Return:
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
     """
-    
-    # Convert alt/az to image coordinates using iterative solver
-    X_data, Y_data = cyAltAzToXY_iter(
-        np.array(az_data, dtype=np.float64), np.array(alt_data, dtype=np.float64),
-        float(jd), float(platepar.lat), float(platepar.lon),
-        float(platepar.X_res), float(platepar.Y_res), float(platepar.Ho), float(platepar.JD),
-        float(platepar.RA_d), float(platepar.dec_d), float(platepar.pos_angle_ref),
-        platepar.F_scale, platepar.x_poly_fwd, platepar.y_poly_fwd,
-        unicode(platepar.distortion_type), refraction=platepar.refraction,
-        equal_aspect=platepar.equal_aspect, force_distortion_centre=platepar.force_distortion_centre,
+
+    # Use the cythonized funtion insted of the Python function
+    X_data, Y_data = cyAltAzToXY(alt_data, az_data,
+        float(platepar.X_res), float(platepar.Y_res), float(platepar.az_centre), \
+        float(platepar.alt_centre), float(platepar.rotation_from_horiz), platepar.F_scale, platepar.x_poly_rev, \
+        platepar.y_poly_rev, unicode(platepar.distortion_type), refraction=platepar.refraction, \
+        equal_aspect=platepar.equal_aspect, force_distortion_centre=platepar.force_distortion_centre, \
         asymmetry_corr=platepar.asymmetry_corr)
-    
+
     return X_data, Y_data
 
 
-def altAzToXYPP(az_data, alt_data, jd, platepar):
-    """ Converts altitude and azimuth to image coordinates using platepar.
-    
-    Arguments:
-        az_data: [ndarray] Array of azimuths (degrees, +E of due N).
-        alt_data: [ndarray] Array of altitudes/elevations (degrees).
-        jd: [float] Julian date.
-        platepar: [Platepar structure] Astrometry parameters.
-    
-    Return:
-        (x, y): [tuple of ndarrays] Image X and Y coordinates.
-    """
-    
-    # Convert alt/az to image coordinates using reverse (x_poly_rev, y_poly_rev) parameters
-    X_data, Y_data = cyAltAzToXY(
-        np.array(az_data, dtype=np.float64), np.array(alt_data, dtype=np.float64),
-        float(jd), float(platepar.lat), float(platepar.lon),
-        float(platepar.X_res), float(platepar.Y_res), float(platepar.Ho), float(platepar.JD),
-        float(platepar.RA_d), float(platepar.dec_d), float(platepar.pos_angle_ref),
-        platepar.F_scale, platepar.x_poly_rev, platepar.y_poly_rev,
-        unicode(platepar.distortion_type), refraction=platepar.refraction,
-        equal_aspect=platepar.equal_aspect, force_distortion_centre=platepar.force_distortion_centre,
-        asymmetry_corr=platepar.asymmetry_corr)
-    
-    return X_data, Y_data
+def xyToAltAzPP(X_data, Y_data, platepar, measurement=False):
+    """ Converts image XY to Alt, Az, but it takes a platepar instead of individual parameters. 
 
-
-def xyToAltAzPP(time_data, X_data, Y_data, platepar, jd_time=False, precompute_pointing_corr=False):
-    """ Converts image XY to altitude and azimuth using platepar.
-    
     Arguments:
-        time_data: [2D ndarray] Numpy array containing either: 
-            if jd_time is False - time tuples of each data point (year, month, day, hour, minute, second, 
-                millisecond).
-            if jd_time is True - Julian dates.
         X_data: [ndarray] 1D numpy array containing the image X component.
         Y_data: [ndarray] 1D numpy array containing the image Y component.
         platepar: [Platepar structure] Astrometry parameters.
-    
+
     Keyword arguments:
-        jd_time: [bool] If True, time_data is expected as a list of Julian dates. False by default.
-        precompute_pointing_corr: [bool] Precompute the pointing correction. False by default.
-    
+        extinction_correction: [bool] Apply extinction correction. True by default. False is set to prevent 
+            infinite recursion in extinctionCorrectionApparentToTrue when set to True.
+        measurement: [bool] Indicates if the given images values are image measurements. Used for correcting
+            celestial coordinates for refraction if the refraction was not taken into account during
+            plate fitting.
+
     Return:
-        (JD_data, az_data, alt_data): [tuple of ndarrays]
-            JD_data: [ndarray] Julian date of each data point.
-            az_data: [ndarray] Azimuth of each point (degrees).
-            alt_data: [ndarray] Altitude/elevation of each point (degrees).
+        (Az_data, Alt_data): [tuple of ndarrays]
+            RA_data: [ndarray] Right ascension of each point (deg).
+            dec_data: [ndarray] Declination of each point (deg).
     """
-    
-    # Convert time to Julian date
-    if jd_time:
-        JD_data = np.array(time_data)
-    else:
-        JD_data = np.array([date2JD(*time_data_entry) for time_data_entry in time_data], dtype=np.float64)
-    
-    # Convert x,y to alt/az using the new cython function
-    az_data, alt_data = cyXYToAltAz(JD_data, np.array(X_data, dtype=np.float64), 
-        np.array(Y_data, dtype=np.float64), float(platepar.lat), float(platepar.lon), 
-        float(platepar.X_res), float(platepar.Y_res), float(platepar.Ho), float(platepar.JD), 
-        float(platepar.RA_d), float(platepar.dec_d), float(platepar.pos_angle_ref), 
-        float(platepar.F_scale), platepar.x_poly_fwd, platepar.y_poly_fwd, 
-        unicode(platepar.distortion_type), refraction=platepar.refraction, 
-        equal_aspect=platepar.equal_aspect, force_distortion_centre=platepar.force_distortion_centre, 
-        asymmetry_corr=platepar.asymmetry_corr, precompute_pointing_corr=precompute_pointing_corr)
-    
-    return JD_data, az_data, alt_data
+
+
+    # Convert x,y to Alt/Az using a fast cython function
+    Az_data, Alt_data = cyXYToAltAz(np.array(X_data, dtype=np.float64), \
+        np.array(Y_data, dtype=np.float64), float(platepar.X_res), \
+        float(platepar.Y_res), float(platepar.az_centre), float(platepar.alt_centre), \
+        float(platepar.rotation_from_horiz), float(platepar.F_scale), platepar.x_poly_fwd, platepar.y_poly_fwd, \
+        unicode(platepar.distortion_type), refraction=platepar.refraction, \
+        equal_aspect=platepar.equal_aspect, force_distortion_centre=platepar.force_distortion_centre, \
+        asymmetry_corr=platepar.asymmetry_corr)
+
+    # Correct the coordinates for refraction if it wasn't taken into account during the astrometry calibration
+    #   procedure
+    if (not platepar.refraction) and measurement and platepar.measurement_apparent_to_true_refraction:
+        for i, entry in enumerate(zip(Az_data, Alt_data)):
+            az, alt = entry
+            alt = refractionApparentToTrue(np.radians(alt))
+
+            Az_data[i] = az
+            Alt_data[i] = np.degrees(alt)
+            
+    return (Az_data, Alt_data)
+
+
+
+
 
 
 def xyHtToENUPP(X_data, Y_data, jd, ht_wgs84_m, platepar, min_el_deg=0.0):
