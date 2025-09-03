@@ -1361,7 +1361,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
 
 
 
-cdef (double, double, double) pointingCorrection(
+cpdef (double, double, double) pointingCorrection(
     double jd, double lat, double lon, 
     double h0, double jd_ref, double ra_ref, double dec_ref, double pos_angle_ref, 
     bool refraction=True
