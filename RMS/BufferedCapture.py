@@ -781,7 +781,7 @@ class BufferedCapture(Process):
         # Segment name is based on timestamp recorded during last segment save
         segment_time = UTCFromTimestamp.utcfromtimestamp(self.last_segment_savetime)
         self.last_segment_savetime = time.time()
-        segment_filename = segment_time.strftime("{}_%Y%m%d_%H%M%S_video.mkv".format(self.config.stationID))
+        segment_filename = segment_time.strftime("{}_%Y%m%d_%H%M%S_%f_video.mkv".format(self.config.stationID))
         segment_subpath = os.path.join(self.config.data_dir, self.config.video_dir, segment_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
 
         # Create full path for the segment
