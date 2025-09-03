@@ -466,48 +466,84 @@ def getFOVSelectionRadius(platepar):
 
     return fov_radius
 
-
-def rotationWrtHorizon(platepar, jd_obs=None):
+def imageCenter(platepar, center_of_distortion=False):
     """
-    Analytic rotation of the image x-axis w.r.t. the horizon at the FOV center.
-    No grids, no optimization.
-    Returns angle in degrees wrapped to (-180, 180].
+    Returns image x, y of the FOV center, or the center of distortion
+
+    Arguments:
+        platepar: [Platepar structure] Astrometry parameters.
+    
+    Keyword arguments:
+        center_of_distortion: [bool] If True, return the image x,y of the center of distortion
+
+    Return: (x, y)
     """
-    if jd_obs is None:
-        jd_obs = platepar.JD
-        
-    # 1) Precession-corrected FOV center (J2000) and position-angle at epoch:
-    #    Use the same pointing correction your Cython path uses.
-    ra_c, dec_c, posA = pointingCorrection(
-        jd_obs,
-        np.radians(platepar.lat), np.radians(platepar.lon),
-        np.radians(platepar.Ho), platepar.RA_d,
-        np.radians(platepar.RA_d), np.radians(platepar.dec_d),
-        np.radians(platepar.pos_angle_ref),
-        refraction=platepar.refraction
-    )
-    # posA is the rotation of sensor axes from the **meridian** at the center.
-    # In most RMS setups, rot_M == np.degrees(posA). If you prefer, you can also call
-    # rot_M = rotationWrtStandard(platepar) to stay consistent with your existing code.
-    rot_M = np.degrees(posA)
 
-    # 2) Center’s apparent Alt/Az (epoch of date; match your refraction choice)
-    A, h = cyTrueRaDec2ApparentAltAz(
-        ra_c, dec_c, platepar.JD,
-        np.radians(platepar.lat), np.radians(platepar.lon),
-        platepar.refraction
-    )
+    if center_of_distortion:
+        if platepar.distortion_type.startswith("radial"):
+            x0_norm = platepar.x_poly_fwd[0]
+            y0_norm = platepar.x_poly_fwd[1]
+        else:
+            x0_norm = platepar.x_poly_fwd[0]
+            y0_norm = platepar.y_poly_fwd[0]
+    
+    else:
+        x0_norm = 0
+        y0_norm = 0
+    
+    x = (1 + x0_norm) * platepar.X_res / 2
+    y = (1 + y0_norm) * platepar.Y_res / 2
 
-    # 3) Parallactic angle (az-alt form); use atan2 for proper quadrant
-    phi = np.radians(platepar.lat)
-    q = np.degrees(np.arctan2(np.sin(A), np.tan(phi)*np.cos(h) - np.sin(phi)*np.cos(A)))
+    return (x, y)
 
-    # 4) Rotation from horizon
-    rot_H = rot_M - (q + 90.0)
 
-    # Wrap to (-180, 180]
-    rot_H = ((rot_H + 180.0) % 360.0) - 180.0
-    return rot_H
+
+def rotationWrtHorizon(platepar, jd_obs=None, dx=5):
+    """
+    Angle of the image +x axis w.r.t. the horizon (east) at the FOV center, in degrees.
+    - Uses precession-corrected XY->RA/Dec path and the observation JD.
+    - Corrects the azimuth step by cos(Alt) so the angle is measured in the local tangent plane.
+    - Returns value wrapped to (-180, 180].
+
+    Args:
+        platepar: plate parameters object (as in RMS)
+        jd_obs:   observation Julian date to evaluate at; if None, uses platepar.JD
+        dx:       half-baseline in pixels for the finite-difference (default 5)
+
+    Returns:
+        rot_deg: float — rotation of sensor +x *from* the horizon (east-positive), degrees
+    """
+
+    jd = platepar.JD if jd_obs is None else jd_obs
+    x0, y0 = imageCenter(platepar, center_of_distortion=True)
+
+    def _altaz_at(x, y):
+        # precession-aware XY->RA/Dec->Alt/Az at jd
+        _, RA, DEC, _ = xyToRaDecPP(np.array([jd, jd]), np.array([x, x]), np.array([y, y]),
+                                    np.ones(2), platepar, extinction_correction=False, jd_time=True)
+        az, alt = cyTrueRaDec2ApparentAltAz(np.radians(RA[0]), np.radians(DEC[0]),
+                                            jd, np.radians(platepar.lat), np.radians(platepar.lon),
+                                            platepar.refraction)
+        return az, alt
+
+    # central differences at h and h/2
+    def _east_up(h):
+        A1,H1 = _altaz_at(x0-h, y0)
+        A2,H2 = _altaz_at(x0+h, y0)
+        dA = (A2 - A1 + np.pi) % (2*np.pi) - np.pi
+        dH = H2 - H1
+        h0 = 0.5*(H1 + H2)
+        return (np.cos(h0)*dA)/(2*h), dH/(2*h)   # east', up' per pixel
+
+    ex1, up1 = _east_up(dx)
+    ex2, up2 = _east_up(dx/2.0)
+
+    # Richardson (error ~ k*h^2): D* ≈ D(h/2) + (D(h/2)-D(h))/3
+    east = ex2 + (ex2 - ex1)/3.0
+    up   = up2 + (up2 - up1)/3.0
+
+    rot_deg = np.degrees(np.arctan2(up, east))
+    return ((rot_deg + 180) % 360) - 180
 
 
 def rotationWrtHorizon_iter(platepar):
