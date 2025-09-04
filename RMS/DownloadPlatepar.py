@@ -2,18 +2,18 @@
 
 from __future__ import print_function, division, absolute_import
 
-import logging
 import os
 from os.path import exists as file_exists
 
 import paramiko
 
 
-from RMS.UploadManager import getSSHAndSFTP
+from RMS.Logger import LoggingManager, getLogger
 from RMS.Misc import RmsDateTime
+from RMS.UploadManager import getSSHAndSFTP
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 
@@ -98,8 +98,6 @@ def downloadNewPlatepar(config):
 
 if __name__ == "__main__":
 
-    from RMS.Logger import initLogging
-
     # Set up a fake config file
     class FakeConf(object):
         def __init__(self):
@@ -125,7 +123,8 @@ if __name__ == "__main__":
     config = FakeConf()
 
     # Init the logger
-    initLogging(config)
+    log_manager = LoggingManager()
+    log_manager.initLogging(config)
 
 
     # Test platepar downloading

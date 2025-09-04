@@ -21,6 +21,7 @@ import sys
 import traceback
 import time
 import multiprocessing
+import signal
 from math import floor
 
 import cv2
@@ -38,7 +39,7 @@ class RawFrameSaver(multiprocessing.Process):
 
     running = False
     
-    def __init__(self, saved_frames_dir, array1, start_time1, array2, start_time2, tsArray1, tsArray2, config):
+    def __init__(self, saved_frames_dir, array1, start_time1, array2, start_time2, tsArray1, tsArray2, daytime_mode, config):
         """
 
         Arguments:
@@ -50,6 +51,7 @@ class RawFrameSaver(multiprocessing.Process):
             tsArray1: first numpy array in shared memory for timestamps
             tsArray2: second numpy array in shared memory for timestamps
             config: configuration class
+            daytime_mode: [bool] True if the camera is in daytime mode, False if in nightime mode
 
         """
         
@@ -62,6 +64,7 @@ class RawFrameSaver(multiprocessing.Process):
         self.start_time2 = start_time2
         self.timeStamps1 = tsArray1
         self.timeStamps2 = tsArray2
+        self.daytime_mode = daytime_mode
         self.config = config
 
         self.total_saved_frames = 0
@@ -71,7 +74,7 @@ class RawFrameSaver(multiprocessing.Process):
         self.run_exited = multiprocessing.Event()
 
 
-    def saveFramesToDisk(self, frametimes):
+    def saveFramesToDisk(self, frametimes, daytime_mode=False):
         """Saves a block of raw image frames to disk with timestamp-based filenames.
 
         This method calculates each filename using station ID, the UTC date
@@ -89,6 +92,11 @@ class RawFrameSaver(multiprocessing.Process):
             frametimes : [List] list of (frame, timestamp) pairs of corresponding frames and timestamps
         """
 
+        # Log block-level summary with day/night mode
+        frame_count = sum(1 for _, ts in frametimes if ts != 0)
+        if frame_count > 0:
+            mode_str = "day" if daytime_mode else "night"
+            log.info("Saving block of %d raw frames to disk (%s mode)", frame_count, mode_str)
 
         for (frame, timestamp) in frametimes:
 
@@ -111,16 +119,24 @@ class RawFrameSaver(multiprocessing.Process):
             # Calculate milliseconds
             millis = int((timestamp - floor(timestamp))*1000)
 
+            # Suffix for indicating if the camera is in daytime or nighttime mode
+            mode_suffix = ""
+            if daytime_mode:
+                mode_suffix = "_d"
+            else:
+                mode_suffix = "_n"
+
             # Create the filename
             if self.config.frame_file_type == 'png':
                 file_extension = '.png'
             else:
                 file_extension = '.jpg'
 
-            filename = "{0}_{1}_{2:03d}{3}".format(
+            filename = "{0}_{1}_{2:03d}{3}{4}".format(
                 str(self.config.stationID).zfill(3),
                 date_string,
                 millis,
+                mode_suffix,
                 file_extension
             )
 
@@ -137,7 +153,7 @@ class RawFrameSaver(multiprocessing.Process):
                 else:
                     cv2.imwrite(frame_path, frame, [int(cv2.IMWRITE_JPEG_QUALITY), self.config.jpgs_quality])
 
-                log.info("Frame saved: {0}".format(filename))
+                log.debug("Frame saved: {0}".format(filename))
 
             except Exception as e:
                 log.error("Could not save frame to disk: {0}".format(e))
@@ -151,6 +167,22 @@ class RawFrameSaver(multiprocessing.Process):
 
         self.exit.set()
         log.debug('Raw frame saver exit flag set')
+
+        # flush any frames whose TS array still has data
+        leftovers = []
+        for frame, ts in zip(self.array1, self.timeStamps1):
+            if ts: leftovers.append((frame.copy(), float(ts)))
+        for frame, ts in zip(self.array2, self.timeStamps2):
+            if ts: leftovers.append((frame.copy(), float(ts)))
+        if leftovers:
+            log.info("Flushing %d tail-end raw frames before shutdown", len(leftovers))
+            self.saveFramesToDisk(leftovers, self.daytime_mode)
+
+            # mark buffers consumed so run() won’t resave them
+            self.timeStamps1.fill(0)
+            self.timeStamps2.fill(0)
+            self.start_time1.value = 0
+            self.start_time2.value = 0
 
         # Free shared memory after the raw frame saver is done
         try:
@@ -176,72 +208,83 @@ class RawFrameSaver(multiprocessing.Process):
         """ Retrieve raw frames from shared array and save them.
         """
 
-        # Repeat until the raw frame saver is killed from the outside
-        while not self.exit.is_set():
+        try:
+            # Repeat until the raw frame saver is killed from the outside
+            while not self.exit.is_set():
 
-            # Block until the raw frames are available
-            while (self.start_time1.value == 0) and (self.start_time2.value == 0):
+                # Block until the raw frames are available
+                while (self.start_time1.value == 0) and (self.start_time2.value == 0):
 
-                # Exit function if process was stopped from the outside
-                if self.exit.is_set():
+                    # Exit function if process was stopped from the outside
+                    if self.exit.is_set():
 
-                    log.debug('Raw frame saver run exit')
-                    self.run_exited.set()
+                        log.debug('Raw frame saver run exit')
+                        self.run_exited.set()
 
-                    return None
+                        return None
 
-                time.sleep(0.1)
+                    time.sleep(0.1)
 
-            raw_buffer_one = True
-
-            if self.start_time1.value > 0:
-
-                # Retrieve time of first frame
-                startTime = float(self.start_time1.value)
-
-                # Copy raw (frames, timestamps)
-                # Clear out the timestamp array so it can be used by 
-                # saveFramesToDisk to halt
-                frametimes = list(zip(self.array1, self.timeStamps1))
-                self.timeStamps1.fill(0)
                 raw_buffer_one = True
 
-            elif self.start_time2.value > 0:
+                if self.start_time1.value > 0:
 
-                # Retrieve time of first frame
-                startTime = float(self.start_time2.value)
+                    # Retrieve time of first frame
+                    startTime = float(self.start_time1.value)
 
-                # Copy raw (frames, timestamps)
-                # Clear out the timestamp array so it can be used by 
-                # saveFramesToDisk to halt
-                frametimes = list(zip(self.array2, self.timeStamps2))
-                self.timeStamps2.fill(0)
-                raw_buffer_one = False
+                    # Copy raw (frames, timestamps)
+                    # Clear out the timestamp array so it can be used by 
+                    # saveFramesToDisk to halt
+                    frametimes = list(zip(self.array1, self.timeStamps1))
+                    self.timeStamps1.fill(0)
+                    raw_buffer_one = True
 
-            else:
+                elif self.start_time2.value > 0:
 
-                # Wait until data is available
-                log.debug("Raw frame saver waiting for frames...")
-                time.sleep(0.1)
-                continue
-            
-            log.debug("Saving raw frame block with start time at: {:s}".format(str(startTime)))
+                    # Retrieve time of first frame
+                    startTime = float(self.start_time2.value)
 
-            t = time.time()
+                    # Copy raw (frames, timestamps)
+                    # Clear out the timestamp array so it can be used by 
+                    # saveFramesToDisk to halt
+                    frametimes = list(zip(self.array2, self.timeStamps2))
+                    self.timeStamps2.fill(0)
+                    raw_buffer_one = False
 
-            # Run the frame block save
-            self.saveFramesToDisk(frametimes)
+                else:
 
-            # Once the frame saving is done, tell the capture thread to keep filling the buffer
-            if raw_buffer_one:
-                self.start_time1.value = 0
-            else:
-                self.start_time2.value = 0
+                    # Wait until data is available
+                    log.debug("Raw frame saver waiting for frames...")
+                    time.sleep(0.1)
+                    continue
+                
+                log.debug("Saving raw frame block with start time at: {:s}".format(str(startTime)))
 
-            log.debug("Raw frame block saving time: {:.3f} s".format(time.time() - t))
+                t = time.time()
 
-        log.debug('Raw frame saver run exit')
-        time.sleep(1.0)
-        self.run_exited.set()
+                # Run the frame block save
+                self.saveFramesToDisk(frametimes, self.daytime_mode)
+
+                # Once the frame saving is done, tell the capture thread to keep filling the buffer
+                if raw_buffer_one:
+                    self.start_time1.value = 0
+                else:
+                    self.start_time2.value = 0
+
+                log.debug("Raw frame block saving time: {:.3f} s".format(time.time() - t))
+
+            log.debug('Raw frame saver run exit')
+            time.sleep(1.0)
+            self.run_exited.set()
+
+        except KeyboardInterrupt:
+            log.info("RawFrameSaver process received interrupt signal. Shutting down gracefully...")
+            self.exit.set()
+            self.run_exited.set()
+        except Exception as e:
+            log.error("Error in RawFrameSaver process: {}".format(e))
+            log.debug(repr(traceback.format_exception(*sys.exc_info())))
+            self.exit.set()
+            self.run_exited.set()
 
 

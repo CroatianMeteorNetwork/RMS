@@ -34,7 +34,7 @@ from RMS.Astrometry.FFTalign import alignPlatepar
 from RMS.Formats import CALSTARS, FFfile, FTPdetectinfo, Platepar, StarCatalog
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, validDefaultFTPdetectinfo
 from RMS.Math import angularSeparation
-from RMS.Logger import initLogging, getLogger
+from RMS.Logger import LoggingManager, getLogger
 from RMS.Misc import RmsDateTime
 
 # Neighbourhood size around individual FFs with detections which will be takes for recalibration
@@ -185,16 +185,21 @@ def recalibrateFF(
     )
 
     log.info(
-        'Initially match stars with {:.1f} px: {:d}/{:d}'.format(min_radius, n_matched, len(star_dict_ff[jd]))
+        'Initially matched stars within {:.1f} px: {:d}/{:d}'.format(min_radius, n_matched, len(star_dict_ff[jd]))
     )
 
     # If at least half the stars are matched with the smallest radius
     # Check if the average distance with the tightest radius is close
-    if n_matched >= 0.5 * len(star_dict_ff[jd]) and avg_dist < config.dist_check_quick_threshold:
+    if (n_matched >= 0.5*len(star_dict_ff[jd])) and (avg_dist < config.dist_check_quick_threshold):
         # Use a reduced set of initial radius values
         radius_list = [1.5, min_radius]
 
         log.info('Using a quick fit...')
+
+    else:
+        log.info(
+            'Initial match failed, using radiuses: {}'.format(radius_list)
+        )
 
     ##########
 
@@ -218,6 +223,8 @@ def recalibrateFF(
         ):
             log.info('The fit is good enough!')
             break
+
+        # log.info('Trying to match stars with radius {:.1f} px...'.format(match_radius))
 
         # If there are no matched stars, give up
         n_matched, _, _, _ = CheckFit.matchStarsResiduals(
@@ -290,7 +297,7 @@ def recalibrateFF(
                 log.info('Astrometry fit failed!')
             elif (dist > config.dist_check_threshold) and (not ignore_distance_threshold):
                 log.info(
-                    'Fitted star is farther from catalog star than necessary: {:.2f} > {:.2f} px'.format(dist, config.dist_check_threshold)
+                    'Average star match does not satisfy the threshold: {:.2f} > {:.2f} px'.format(dist, config.dist_check_threshold)
                 )
 
             else:
@@ -309,7 +316,9 @@ def recalibrateFF(
             # Keep track of the minimum match radius
             min_match_radius = match_radius
 
-            log.info('Astrometry fit successful with radius {:.1f} px!'.format(match_radius))
+            log.info('{:d}/{:d} match with avg distance {:.2f} px within radius {:.2f} px!'.format(
+                n_matched, len(star_dict_ff[jd]), dist, match_radius
+            ))
 
     # Choose which radius will be chosen for the goodness of fit check
     if max_match_radius is None:
@@ -387,7 +396,9 @@ def recalibrateFF(
 
     # Otherwise, indicate that the refinement was not successful
     else:
-        log.info('Not using the refined platepar...')
+        log.info('Rejecting refined platepar, min error {:.2f} px NOT ACHIEVED!'.format(
+            config.dist_check_threshold
+        ))
         result = None
 
     return result, min_match_radius
@@ -426,6 +437,9 @@ def recalibratePlateparsForFF(
         recalibrated_platepars: [dict] A dictionary where one key is ff file name and the value is
             a calibrated corresponding platepar.
     """
+
+    orig_platepar = copy.deepcopy(prev_platepar)
+
     # Go through all FF files with detections, recalibrate and apply astrometry
     recalibrated_platepars = {}
     for ff_name in ff_file_names:
@@ -435,9 +449,9 @@ def recalibratePlateparsForFF(
         # Skip this meteor if its FF file was already recalibrated
         if ff_name in recalibrated_platepars:
             continue
-
-        log.info('Processing: {}'.format(ff_name))
+        
         log.info('------------------------------------------------------------------------------')
+        log.info('Processing: {}'.format(ff_name))
 
         # Find extracted stars on this image
         if not ff_name in calstars:
@@ -478,18 +492,18 @@ def recalibratePlateparsForFF(
                 # Run FFT alignment
                 calstars_coords = np.array(star_dict_ff[jd])[:, :2]
                 calstars_coords[:, [0, 1]] = calstars_coords[:, [1, 0]]
-                log.info(calstars_time)
                 test_platepar = alignPlatepar(
                     config, prev_platepar, calstars_time, calstars_coords, show_plot=False
                 )
 
                 # Try to recalibrate after FFT alignment
                 result, _ = recalibrateFF(
-                    config, test_platepar, jd, star_dict_ff, catalog_stars, lim_mag=lim_mag
+                    config, test_platepar, jd, star_dict_ff, catalog_stars, lim_mag=lim_mag, 
+                    ignore_distance_threshold=True
                 )
 
-                # If the FFT alignment failed, align the original platepar using the smallest radius that matched
-                #   and force save the the platepar
+                # If the FFT alignment failed, align the previous platepar using the smallest radius that 
+                # matched and force save the the platepar
                 if (result is None) and (min_match_radius is not None):
                     log.info(
                         "Using the old platepar with the minimum match radius of: {:.2f}".format(
@@ -505,6 +519,7 @@ def recalibratePlateparsForFF(
                         max_match_radius=min_match_radius,
                         force_platepar_save=True,
                         lim_mag=lim_mag,
+                        ignore_distance_threshold=True
                     )
 
                     if result is not None:
@@ -516,6 +531,24 @@ def recalibratePlateparsForFF(
 
             else:
                 working_platepar = result
+
+
+            # If the working platepar keeps failing, try using the original platepar before any FFT alignment
+            if result is None:
+                log.info('Recalibration failed, trying to use the original platepar...')
+                result, _ = recalibrateFF(
+                    config,
+                    orig_platepar,
+                    jd,
+                    star_dict_ff,
+                    catalog_stars,
+                    lim_mag=lim_mag,
+                    ignore_distance_threshold=True
+                )
+
+                # If the recalibration succeeded, use the result
+                if result is not None:
+                    working_platepar = result
 
         # Store the platepar if the fit succeeded
         if result is not None:
@@ -581,10 +614,23 @@ def recalibrateSelectedFF(dir_path, ff_file_names, calstars_data, config, lim_ma
 
     calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
 
+    if not ff_file_names:
+        log.warning("recalibrateSelectedFF: no FF files after filtering - skipping recalibration")
+        return {}
+    
+    ts = FFfile.getMiddleTimeFF(ff_file_names[0], fps=config.fps, ret_milliseconds=True, dt_obj=True)
+
+    J2000 = datetime.datetime(2000, 1, 1, 12, 0, 0)
+
+    # Compute the number of years from J2000
+    years_from_J2000 = (ts - J2000).total_seconds()/(365.25*24*3600)
+    # log.info('Loading star catalog with years from J2000: {:.2f}'.format(years_from_J2000))
+
     # load star catalog with increased catalog limiting magnitude
     star_catalog_status = StarCatalog.readStarCatalog(
         config.star_catalog_path,
         config.star_catalog_file,
+        years_from_J2000=years_from_J2000,
         lim_mag=lim_mag,
         mag_band_ratios=config.star_catalog_band_ratios,
     )
@@ -663,35 +709,6 @@ def recalibrateIndividualFFsAndApplyAstrometry(
     # Use a copy of the platepar
     platepar = copy.deepcopy(platepar)
 
-
-    ### Load catalog stars ##
-
-    # Increase catalog limiting magnitude by one to get more stars for matching
-    catalog_mag_limit = config.catalog_mag_limit + 1
-
-    # Load catalog stars (overwrite the mag band ratios if specific catalog is used)
-    star_catalog_status = StarCatalog.readStarCatalog(
-        config.star_catalog_path,
-        config.star_catalog_file,
-        lim_mag=catalog_mag_limit,
-        mag_band_ratios=config.star_catalog_band_ratios
-    )
-
-    if not star_catalog_status:
-        log.info("Could not load the star catalog!")
-        log.info(os.path.join(config.star_catalog_path, config.star_catalog_file))
-        return {}
-
-    catalog_stars, _, config.star_catalog_band_ratios = star_catalog_status
-
-    ### ###
-    
-    # Update the platepar coordinates from the config file
-    platepar.lat = config.latitude
-    platepar.lon = config.longitude
-    platepar.elev = config.elevation
-
-    
     ### Load CALSTARS data ###
 
     # Load the list of stars from the CALSTARS file
@@ -703,11 +720,51 @@ def recalibrateIndividualFFsAndApplyAstrometry(
     # Make a list of sorted FF files in CALSTARS
     calstars_ffs = sorted(calstars.keys())
 
+    if not calstars_ffs:
+        log.warning("No FF entries in CALSTARS - skipping recalibration")
+        return {}, []
+
     # Create a dictionary mapping FF file names in CALSTARS to datetime objects
     calstars_datetime_dict = OrderedDict()
     for ff_name in calstars:
         calstars_datetime_dict[ff_name] = FFfile.getMiddleTimeFF(ff_name, config.fps, dt_obj=True, 
                                                                  ff_frames=calstars_ff_frames)
+
+    ### Load catalog stars ##
+
+    # Increase catalog limiting magnitude by one to get more stars for matching
+    catalog_mag_limit = config.catalog_mag_limit + 1
+
+    ts = calstars_datetime_dict[calstars_ffs[0]]
+    J2000 = datetime.datetime(2000, 1, 1, 12, 0, 0)
+
+    # Compute the number of years from J2000
+    years_from_J2000 = (ts - J2000).total_seconds()/(365.25*24*3600)
+
+    # Load catalog stars (overwrite the mag band ratios if specific catalog is used)
+    star_catalog_status = StarCatalog.readStarCatalog(
+        config.star_catalog_path,
+        config.star_catalog_file,
+        years_from_J2000=years_from_J2000,
+        lim_mag=catalog_mag_limit,
+        mag_band_ratios=config.star_catalog_band_ratios
+    )
+
+    if not star_catalog_status:
+        log.info("Could not load the star catalog!")
+        log.info(os.path.join(config.star_catalog_path, config.star_catalog_file))
+        return {}, []
+
+    catalog_stars, _, config.star_catalog_band_ratios = star_catalog_status
+
+    ### ###
+    
+    # Update the platepar coordinates from the config file
+    platepar.lat = config.latitude
+    platepar.lon = config.longitude
+    platepar.elev = config.elevation
+
+    
 
     ### ###
 
@@ -732,7 +789,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
             log.info('ERROR! The FTPdetectinfo file does not exist: {:s}'.format(ftpdetectinfo_path))
             log.info('    The recalibration on every file was not done!')
 
-            return {}
+            return {}, []
 
         # If it exists, use it as the only file to load
         ftpdetectinfo_file_list = [os.path.basename(ftpdetectinfo_path)]
@@ -1231,7 +1288,8 @@ if __name__ == "__main__":
     config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
     # Initialize the logger
-    initLogging(config, 'recalibrate_', safedir=dir_path)
+    log_manager = LoggingManager()
+    log_manager.initLogging(config, 'recalibrate_', safedir=dir_path)
 
     # Get the logger handle
     log = getLogger("logger", level="INFO")

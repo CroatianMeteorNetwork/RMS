@@ -35,7 +35,7 @@ from RMS.ExtractStarsFrameInterface import extractStarsFrameInterface
 from RMS.Detection import detectMeteors
 from RMS.DetectionTools import loadImageCalibration
 from RMS.QueuedPool import QueuedPool
-from RMS.Logger import getLogger
+from RMS.Logger import LoggingManager, getLogger
 from RMS.Misc import RmsDateTime
 
 
@@ -234,7 +234,7 @@ def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None, dark=
     # Run meteor detection if there are enough stars on the image
     if len(star_list[1]) >= config.ff_min_stars:
 
-        log.debug('At least ' + str(config.ff_min_stars) + ' stars, detecting meteors...')
+        log.info('At least ' + str(config.ff_min_stars) + ' stars, detecting meteors...')
 
         # Run the detection
         meteor_list = detectMeteors(img_handle, config, flat_struct=flat_struct, dark=dark, mask=mask)
@@ -489,9 +489,8 @@ if __name__ == "__main__":
 
 
     ### Init the logger
-
-    from RMS.Logger import initLogging
-    initLogging(config, 'detection_', safedir=cml_args.dir_path)
+    log_manager = LoggingManager()
+    log_manager.initLogging(config, 'detection_', safedir=cml_args.dir_path)
 
     log = getLogger("logger")
 
