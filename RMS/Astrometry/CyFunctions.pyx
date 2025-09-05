@@ -2773,7 +2773,7 @@ def cyXYHttoENU_wgs84(
     if force_distortion_centre:
         x0 = 0.5/(x_res/2.0); y0 = 0.5/(y_res/2.0); index_offset += 2
     else:
-        x0 = x_poly_fwd[0]; y0 = y_poly_fwd[0]
+        x0 = x_poly_fwd[0]; y0 = x_poly_fwd[1]
     x0 *= (x_res/2.0); y0 *= (y_res/2.0)
     x0 = -x_res/2.0 + (x0 + x_res/2.0)%x_res
     y0 = -y_res/2.0 + (y0 + y_res/2.0)%y_res
@@ -3032,7 +3032,7 @@ def cyGeoToXY_wgs84_iter(
     if force_distortion_centre:
         x0 = 0.5/(x_res/2.0); y0 = 0.5/(y_res/2.0); index_offset += 2
     else:
-        x0 = x_poly_fwd[0]; y0 = y_poly_fwd[0]
+        x0 = x_poly_fwd[0]; y0 = x_poly_fwd[1]
     x0 *= (x_res/2.0); y0 *= (y_res/2.0)
     x0 = -x_res/2.0 + (x0 + x_res/2.0)%x_res
     y0 = -y_res/2.0 + (y0 + y_res/2.0)%y_res
@@ -3224,7 +3224,7 @@ def cyENUToXY_iter(
     if force_distortion_centre:
         x0 = 0.5/(x_res/2.0); y0 = 0.5/(y_res/2.0); index_offset += 2
     else:
-        x0 = x_poly_fwd[0]; y0 = y_poly_fwd[0]
+        x0 = x_poly_fwd[0]; y0 = x_poly_fwd[1]
     x0 *= (x_res/2.0); y0 *= (y_res/2.0)
     x0 = -x_res/2.0 + (x0 + x_res/2.0)%x_res
     y0 = -y_res/2.0 + (y0 + y_res/2.0)%y_res
@@ -3434,7 +3434,7 @@ def cyXYToGeo_wgs84(
     if force_distortion_centre:
         x0 = 0.5/(x_res/2.0); y0 = 0.5/(y_res/2.0); index_offset += 2
     else:
-        x0 = x_poly_fwd[0];   y0 = y_poly_fwd[0]
+        x0 = x_poly_fwd[0];   y0 = x_poly_fwd[1]
     x0 *= (x_res/2.0); y0 *= (y_res/2.0)
     x0 = -x_res/2.0 + (x0 + x_res/2.0)%x_res
     y0 = -y_res/2.0 + (y0 + y_res/2.0)%y_res
