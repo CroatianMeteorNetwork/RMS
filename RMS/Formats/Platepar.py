@@ -527,6 +527,18 @@ class Platepar(object):
 
         """
 
+        # Store the JD of the observation
+        self.JD = jd
+        
+        # Calculate the reference hour angle (as done in reading from file)
+        T = (self.JD - 2451545.0) / 36525.0
+        self.Ho = (
+            280.46061837
+            + 360.98564736629 * (self.JD - 2451545.0)
+            + 0.000387933 * T * T
+            - T * T * T / 38710000.0
+        ) % 360
+
         def _calcImageResidualsDistortion(params, platepar, jd, catalog_stars, img_stars, dimension):
             """Calculates the differences between the stars on the image and catalog stars in image
                 coordinates with the given astrometrical solution.

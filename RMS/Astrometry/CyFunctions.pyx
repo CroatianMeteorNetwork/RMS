@@ -646,7 +646,7 @@ cpdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double 
 
 
 @cython.cdivision(True)
-cdef double refractionTrueToApparent(double elev):
+cpdef double refractionTrueToApparent(double elev):
     """ Correct the true elevation of a star for refraction to apparent elevation. The temperature and air
         pressure are assumed to be unknown. 
 
@@ -1360,6 +1360,302 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     return x_array, y_array
 
 
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+def cyRaDecToXY_iter(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
+    np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data, double jd, double lat, double lon, double x_res,
+    double y_res, double h0, double jd_ref, double ra_ref, double dec_ref, double pos_angle_ref, 
+    double pix_scale, np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, 
+    np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, str dist_type, bool refraction=True, bool equal_aspect=False, 
+    bool force_distortion_centre=False, bool asymmetry_corr=True):
+    """ Convert RA, Dec to distortion corrected image coordinates using iterative solver for radial distortions.
+
+    Arguments:
+        RA_data: [ndarray] Array of right ascensions (degrees).
+        dec_data: [ndarray] Array of declinations (degrees).
+        jd: [float] Julian date.
+        lat: [float] Latitude of station in degrees.
+        lon: [float] Longitude of station in degrees.
+        x_res: [int] X resolution of the camera.
+        y_res: [int] Y resolution of the camera.
+        h0: [float] Reference hour angle (deg).
+        jd_ref: [float] Reference Julian date of plate solution.
+        ra_ref: [float] Reference right ascension of the image centre (degrees).
+        dec_ref: [float] Reference declination of the image centre (degrees).
+        pos_angle_ref: [float] Rotation from the celestial meridian (degrees).
+        pix_scale: [float] Image scale (px/deg).
+        x_poly_fwd: [ndarray float] Distortion polynomial in X direction for reverse mapping.
+        y_poly_fwd: [ndarray float] Distortion polynomial in Y direction for reverse mapping.
+        dist_type: [str] Distortion type. Can be: poly3+radial, radial3, radial4, or radial5.
+        
+    Keyword arguments:
+        refraction: [bool] Apply refraction correction. True by default.
+        equal_aspect: [bool] Force the X/Y aspect ratio to be equal. Used only for radial distortion. \
+            False by default.
+        force_distortion_centre: [bool] Force the distortion centre to the image centre. False by default.
+        asymmetry_corr: [bool] Correct the distortion for asymmetry. Only for radial distortion. True by
+            default.
+    
+    Return:
+        (x, y): [tuple of ndarrays] Image X and Y coordinates.
+    """
+
+    cdef int i, j
+    cdef double ra_centre, dec_centre, ra, dec
+    cdef double radius, sin_ang, cos_ang, theta, x, y, r, dx, dy, x_img, y_img, r_corr, r_scale
+    cdef double x0, y0, xy, a1, a2, k1, k2, k3, k4
+    cdef int index_offset
+    cdef double delta_r, lens_dist, r1, r2, x_img1, y_img1, x_img2, y_img2
+    cdef double x_img1_est, y_img1_est, x_img2_est, y_img2_est
+    cdef double x_corr1, y_corr1, sin_t, cos_t
+
+    # Init output arrays
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] x_array = np.zeros_like(ra_data)
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] y_array = np.zeros_like(ra_data)
+
+    # Correct the pointing for precession (output in radians)
+    ra_centre, dec_centre, pos_angle_ref = pointingCorrection(
+            jd, radians(lat), radians(lon), 
+            radians(h0), jd_ref, radians(ra_ref), radians(dec_ref), radians(pos_angle_ref), 
+            refraction=refraction
+            )
+
+    # If the radial distortion is used, unpack radial parameters
+    if dist_type.startswith("radial"):
+
+        # Index offset for reading distortion parameters. May change as equal aspect or asymmetry correction
+        #   is toggled on/off
+        index_offset = 0
+
+        # Force the distortion centre to the image centre
+        if force_distortion_centre:
+            x0 = 0.5/(x_res/2.0)  # 0.5 pixel offset to true center
+            y0 = 0.5/(y_res/2.0)
+            index_offset += 2
+        else:
+            # Read distortion offsets
+            x0 = x_poly_fwd[0]
+            y0 = x_poly_fwd[1]
+            
+        # Convert offsets to pixel coordinates
+        x0 *= (x_res/2.0)
+        y0 *= (y_res/2.0)
+
+        # Check if X/Y have equal aspect ratio
+        if equal_aspect:
+            xy = 0
+            index_offset += 1
+        else:
+            # Read the aspect ratio
+            xy = x_poly_fwd[2 - index_offset]
+
+        # Check if the assymmetry correction was used
+        if asymmetry_corr:
+            # Read the assymetry values
+            a1 = x_poly_fwd[3 - index_offset]
+            a2 = (x_poly_fwd[4 - index_offset]*(2*pi))%(2*pi)
+        else:
+            a1 = 0.0
+            a2 = 0.0
+            index_offset += 2
+
+        # Read distortion coefficients
+        if dist_type == "radial3-all":
+            k1 = x_poly_fwd[5 - index_offset]
+            k2 = x_poly_fwd[6 - index_offset]
+            k3 = 0.0
+            k4 = 0.0
+
+        elif dist_type == "radial4-all":
+            k1 = x_poly_fwd[5 - index_offset]
+            k2 = x_poly_fwd[6 - index_offset]
+            k3 = x_poly_fwd[7 - index_offset]
+            k4 = 0.0
+
+        elif dist_type == "radial5-all":
+            k1 = x_poly_fwd[5 - index_offset]
+            k2 = x_poly_fwd[6 - index_offset]
+            k3 = x_poly_fwd[7 - index_offset]
+            k4 = x_poly_fwd[8 - index_offset]
+
+        elif dist_type == "radial3-odd":
+            k1 = x_poly_fwd[5 - index_offset]
+            k2 = 0.0
+            k3 = 0.0
+            k4 = 0.0
+
+        elif dist_type == "radial5-odd":
+            k1 = x_poly_fwd[5 - index_offset]
+            k2 = x_poly_fwd[6 - index_offset]
+            k3 = 0.0
+            k4 = 0.0
+
+        elif dist_type == "radial7-odd":
+            k1 = x_poly_fwd[5 - index_offset]
+            k2 = x_poly_fwd[6 - index_offset]
+            k3 = x_poly_fwd[7 - index_offset]
+            k4 = 0.0
+
+        elif dist_type == "radial9-odd":
+            k1 = x_poly_fwd[5 - index_offset]
+            k2 = x_poly_fwd[6 - index_offset]
+            k3 = x_poly_fwd[7 - index_offset]
+            k4 = x_poly_fwd[8 - index_offset]
+
+    # Convert all equatorial coordinates to image coordinates
+    for i in range(ra_data.shape[0]):
+
+        # Read the next coordinate
+        ra = radians(ra_data[i])
+        dec = radians(dec_data[i])
+
+        # Apply refraction
+        if refraction:
+            ra, dec = eqRefractionTrueToApparent(ra, dec, jd, radians(lat), radians(lon))
+
+        # Compute the distance from the FOV centre to the sky coordinate
+        radius = radians(angularSeparation(degrees(ra), degrees(dec), degrees(ra_centre), degrees(dec_centre)))
+
+        # Compute theta - the direction angle between the FOV centre, sky coordinate, and the image vertical
+        if radius < 1e-8:
+            theta = 0.0
+        else:
+            sin_ang = cos(dec)*sin(ra - ra_centre)/sin(radius)
+            cos_ang = (sin(dec) - sin(dec_centre)*cos(radius))/(cos(dec_centre)*sin(radius))
+            theta = -atan2(sin_ang, cos_ang) + pos_angle_ref - pi/2.0
+
+        # Calculate the standard coordinates
+        x_corr = degrees(radius)*cos(theta)*pix_scale
+        y_corr = degrees(radius)*sin(theta)*pix_scale
+
+        # Apply polynomial distortion
+        if dist_type.startswith("poly3+radial"):
+
+            # Compute the radius from pixel coordinates
+            r = sqrt((x_corr - x0)**2 + (y_corr - y0)**2)
+
+            # Calculate the distortion in X direction (using pixel coordinates)
+            dx = (x0
+                + x_poly_fwd[1]*x_corr
+                + x_poly_fwd[2]*y_corr
+                + x_poly_fwd[3]*x_corr**2
+                + x_poly_fwd[4]*x_corr*y_corr
+                + x_poly_fwd[5]*y_corr**2
+                + x_poly_fwd[6]*x_corr**3
+                + x_poly_fwd[7]*x_corr**2*y_corr
+                + x_poly_fwd[8]*x_corr*y_corr**2
+                + x_poly_fwd[9]*y_corr**3
+                + x_poly_fwd[10]*x_corr*r
+                + x_poly_fwd[11]*y_corr*r)
+                
+            # Calculate the distortion in Y direction (using pixel coordinates)
+            dy = (y0
+                + y_poly_fwd[1]*x_corr
+                + y_poly_fwd[2]*y_corr
+                + y_poly_fwd[3]*x_corr**2
+                + y_poly_fwd[4]*x_corr*y_corr
+                + y_poly_fwd[5]*y_corr**2
+                + y_poly_fwd[6]*x_corr**3
+                + y_poly_fwd[7]*x_corr**2*y_corr
+                + y_poly_fwd[8]*x_corr*y_corr**2
+                + y_poly_fwd[9]*y_corr**3
+                + y_poly_fwd[10]*y_corr*r
+                + y_poly_fwd[11]*x_corr*r)
+
+            # If the 3rd order radial term is used, apply it
+            if dist_type.endswith("+radial3") or dist_type.endswith("+radial5"):
+                dx += x_poly_fwd[12]*x_corr*r**3
+                dy += y_poly_fwd[12]*y_corr*r**3
+
+            # If the 5th order radial term is used, apply it
+            if dist_type.endswith("+radial5"):
+                dx += x_poly_fwd[13]*x_corr*r**5
+                dy += y_poly_fwd[13]*y_corr*r**5
+
+            x_img = x_corr - dx
+            y_img = y_corr - dy
+
+        # Apply radial distortion using iterative solver
+        elif dist_type.startswith("radial"):
+            
+            # Initialize the reverse radial iteration loop
+            delta_r = 1.0
+            j = 0
+
+            # Set initial guess (undistorted coordinates in pixels)
+            x_img = x_corr
+            y_img = y_corr
+
+            # Iterate to find the distorted position
+            while delta_r > 0.01 and j < 100:  # 0.01 pixel tolerance
+                j += 1
+
+                # Compute the radius (with aspect ratio and asymmetry, in pixels then normalized)
+                r = sqrt((x_img - x0)**2 + ((1.0 + xy)*(y_img - y0))**2)
+                r = r + a1*(1.0 + xy)*(y_img - y0)*cos(a2) - a1*(x_img - x0)*sin(a2)
+                r = r/(x_res/2.0)  # Normalize to horizontal size
+
+                r_corr = r
+                
+                # Apply the appropriate radial distortion model
+                if dist_type == "radial3-all":
+                    r_corr = r + k1*r**2 + k2*r**3
+
+                elif dist_type == "radial4-all":
+                    r_corr = r + k1*r**2 + k2*r**3 + k3*r**4
+
+                elif dist_type == "radial5-all":
+                    r_corr = r + k1*r**2 + k2*r**3 + k3*r**4 + k4*r**5
+
+                elif dist_type == "radial3-odd":
+                    r_corr = r + k1*r**3
+
+                elif dist_type == "radial5-odd":
+                    r_corr = r + k1*r**3 + k2*r**5
+
+                elif dist_type == "radial7-odd":
+                    r_corr = r + k1*r**3 + k2*r**5 + k3*r**7
+
+                elif dist_type == "radial9-odd":
+                    r_corr = r + k1*r**3 + k2*r**5 + k3*r**7 + k4*r**9
+                
+                # Compute the scaling factor
+                if r == 0:
+                    r_scale = 0
+                else:
+                    r_scale = (r_corr/r - 1)
+                
+                # Stop iterating if distortion is negligible
+                if fabs(r_scale) < 1e-8:
+                    break
+                
+                # Compute distortion offsets (matching cyXYToRADec)
+                dx = (x_img - x0)*r_scale - x0
+                dy = (y_img - y0)*r_scale*(1.0 + xy) - y0*(1.0 + xy) + y_img*xy
+                
+                # Compute new estimate by inverting: x_corr = x_img + dx
+                x_img_est = x_corr - dx
+                y_img_est = y_corr - dy
+
+                # Compute distance between current and last guess
+                delta_r = sqrt((x_img - x_img_est)**2 + (y_img - y_img_est)**2)
+
+                # Update guess
+                x_img = x_img_est
+                y_img = y_img_est
+
+        else:
+            # No distortion
+            x_img = x_corr
+            y_img = y_corr
+
+        # Shift to image coordinate system (0,0 at top-left)
+        x_array[i] = x_img + x_res/2.0
+        y_array[i] = y_img + y_res/2.0
+
+    return x_array, y_array
+
 
 cpdef (double, double, double) pointingCorrection(
     double jd, double lat, double lon, 
@@ -1415,200 +1711,6 @@ cpdef (double, double, double) pointingCorrection(
 
     return ra_ref_now_corr_j2000, dec_ref_corr_j2000, pos_angle_ref_now_corr
 
-
-@cython.boundscheck(False)
-@cython.wraparound(False)
-def cyXYToRADec_iter(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data,
-    np.ndarray[FLOAT_TYPE_t, ndim=1] x_data,
-    np.ndarray[FLOAT_TYPE_t, ndim=1] y_data,
-    double lat, double lon, double x_res, double y_res,
-    double h0, double jd_ref, double ra_ref, double dec_ref, double pos_angle_ref,
-    double pix_scale, np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd,
-    np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, str dist_type,
-    bool refraction=True, bool equal_aspect=False, bool force_distortion_centre=False,
-    bool asymmetry_corr=True, bool precompute_pointing_corr=False):
-    """
-    XY -> RA/Dec (deg). Precession-aware pointing. Iterative reverse-radial undistort for 'radial*' models.
-    Polynomial '+radial' branch mirrors your current implementation.
-    """
-    cdef int i, index_offset, j
-    cdef double jd, x_img, y_img, x0, y0, xy, a1, a2, k1, k2, k3, k4
-    cdef double dx, dy, r, r_corr, r_scale, radius, theta, x_corr, y_corr
-    cdef double ra_ref_now_corr, dec_ref_corr, pos_angle_ref_now_corr
-    cdef double sin_t, cos_t, ra, dec
-    # iterative reverse-radial work vars
-    cdef double cx, cy, vx, vy_as, r_pix, r_norm, r_adj, rd, s, r_norm_new, delta_r
-    cdef double tol_norm = 0.1/(x_res/2.0)   # same scale you used: 0.1 px in normalized radius
-
-    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] ra_out = np.zeros_like(jd_data)
-    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] dec_out = np.zeros_like(jd_data)
-
-    # Precompute pointing if JD constant
-    if precompute_pointing_corr:
-        ra_ref_now_corr, dec_ref_corr, pos_angle_ref_now_corr = pointingCorrection(
-            np.mean(jd_data), radians(lat), radians(lon),
-            radians(h0), jd_ref, radians(ra_ref), radians(dec_ref), radians(pos_angle_ref),
-            refraction=refraction
-        )
-
-    # Unpack RADIAL params once (poly3+radial handled per-sample below)
-    cdef double x0_rad=0.0, y0_rad=0.0, xy_rad=0.0, a1_rad=0.0, a2_rad=0.0
-    cdef double k1_rad=0.0, k2_rad=0.0, k3_rad=0.0, k4_rad=0.0
-    if dist_type.startswith("radial"):
-        index_offset = 0
-        if force_distortion_centre:
-            x0_rad = 0.5/(x_res/2.0)
-            y0_rad = 0.5/(y_res/2.0)
-            index_offset += 2
-        else:
-            x0_rad = x_poly_fwd[0]
-            y0_rad = y_poly_fwd[0]
-        # normalize & wrap
-        x0_rad *= (x_res/2.0); y0_rad *= (y_res/2.0)
-        x0_rad = -x_res/2.0 + (x0_rad + x_res/2.0)%x_res
-        y0_rad = -y_res/2.0 + (y0_rad + y_res/2.0)%y_res
-
-        if equal_aspect:
-            xy_rad = 0.0; index_offset += 1
-        else:
-            xy_rad = x_poly_fwd[2 - index_offset]
-
-        if asymmetry_corr:
-            a1_rad = x_poly_fwd[3 - index_offset]
-            a2_rad = (x_poly_fwd[4 - index_offset]*(2*pi))%(2*pi)
-        else:
-            a1_rad = 0.0; a2_rad = 0.0; index_offset += 2
-
-        k1_rad = x_poly_fwd[5 - index_offset]
-        k2_rad = x_poly_fwd[6 - index_offset]
-        k3_rad = x_poly_fwd[7 - index_offset] if x_poly_fwd.shape[0] > (7 - index_offset) else 0.0
-        k4_rad = x_poly_fwd[8 - index_offset] if x_poly_fwd.shape[0] > (8 - index_offset) else 0.0
-
-    for i in range(jd_data.shape[0]):
-
-        jd = jd_data[i]
-        x_img = x_data[i] - x_res/2.0
-        y_img = y_data[i] - y_res/2.0
-
-        if not precompute_pointing_corr:
-            ra_ref_now_corr, dec_ref_corr, pos_angle_ref_now_corr = pointingCorrection(
-                jd, radians(lat), radians(lon),
-                radians(h0), jd_ref, radians(ra_ref), radians(dec_ref), radians(pos_angle_ref),
-                refraction=refraction
-            )
-
-        if dist_type.startswith("poly3+radial"):
-            # ---- your polynomial reverse mapping (kept intact) ----
-            r = sqrt((x_img - x_poly_fwd[0])**2 + (y_img - y_poly_fwd[0])**2)
-
-            dx = (x_poly_fwd[0]
-                + x_poly_fwd[1]*x_img + x_poly_fwd[2]*y_img
-                + x_poly_fwd[3]*x_img**2 + x_poly_fwd[4]*x_img*y_img + x_poly_fwd[5]*y_img**2
-                + x_poly_fwd[6]*x_img**3 + x_poly_fwd[7]*x_img**2*y_img + x_poly_fwd[8]*x_img*y_img**2 + x_poly_fwd[9]*y_img**3
-                + x_poly_fwd[10]*x_img*r + x_poly_fwd[11]*y_img*r)
-
-            dy = (y_poly_fwd[0]
-                + y_poly_fwd[1]*x_img + y_poly_fwd[2]*y_img
-                + y_poly_fwd[3]*x_img**2 + y_poly_fwd[4]*x_img*y_img + y_poly_fwd[5]*y_img**2
-                + y_poly_fwd[6]*x_img**3 + y_poly_fwd[7]*x_img**2*y_img + y_poly_fwd[8]*x_img*y_img**2 + y_poly_fwd[9]*y_img**3
-                + y_poly_fwd[10]*y_img*r + y_poly_fwd[11]*x_img*r)
-
-            if dist_type.endswith("+radial3") or dist_type.endswith("+radial5"):
-                dx += x_poly_fwd[12]*x_img*r**3
-                dy += y_poly_fwd[12]*y_img*r**3
-            if dist_type.endswith("+radial5"):
-                dx += x_poly_fwd[13]*x_img*r**5
-                dy += y_poly_fwd[13]*y_img*r**5
-
-            x_corr = x_img + dx
-            y_corr = y_img + dy
-
-        else:
-            # ---- RADIAL reverse with **iterative** undistort ----
-            x0 = x0_rad; y0 = y0_rad; xy = xy_rad
-            a1 = a1_rad; a2 = a2_rad
-            k1 = k1_rad; k2 = k2_rad; k3 = k3_rad; k4 = k4_rad
-
-            # initialize at observed coords (like your loop)
-            x_corr = x_img
-            y_corr = y_img
-
-            delta_r = 1e9
-            j = 0
-            while (delta_r > tol_norm) and (j < 100):
-                j += 1
-
-                cx = x_corr - x0
-                cy = y_corr - y0
-
-                # apply aspect to Y in model space
-                vx     = cx
-                vy_as  = (1.0 + xy)*cy
-
-                r_pix  = sqrt(vx*vx + vy_as*vy_as)
-                if r_pix < 1e-15:
-                    break
-
-                r_norm = r_pix/(x_res/2.0)
-
-                # asymmetry tweak (same sign convention)
-                r_adj = (r_norm
-                         + a1*vy_as/(x_res/2.0)*cos(a2)
-                         - a1*vx   /(x_res/2.0)*sin(a2))
-
-                # forward radial model (compute distorted radius from undistorted guess)
-                if   dist_type == "radial3-all":
-                    rd = r_adj + k1*r_adj**2 + k2*r_adj**3
-                elif dist_type == "radial4-all":
-                    rd = r_adj + k1*r_adj**2 + k2*r_adj**3 + k3*r_adj**4
-                elif dist_type == "radial5-all":
-                    rd = r_adj + k1*r_adj**2 + k2*r_adj**3 + k3*r_adj**4 + k4*r_adj**5
-                elif dist_type == "radial3-odd":
-                    rd = r_adj + k1*r_adj**3
-                elif dist_type == "radial5-odd":
-                    rd = r_adj + k1*r_adj**3 + k2*r_adj**5
-                elif dist_type == "radial7-odd":
-                    rd = r_adj + k1*r_adj**3 + k2*r_adj**5 + k3*r_adj**7
-                elif dist_type == "radial9-odd":
-                    rd = r_adj + k1*r_adj**3 + k2*r_adj**5 + k3*r_adj**7 + k4*r_adj**9
-                else:
-                    rd = r_adj
-
-                # scale distorted->undistorted in model space
-                s = r_adj / rd if rd > 1e-15 else 1.0
-                vx *= s
-                vy_as *= s
-
-                # undo aspect, update pixel coords
-                x_corr = x0 + vx
-                y_corr = y0 + (vy_as/(1.0 + xy))
-
-                # check convergence in normalized radius
-                r_norm_new = sqrt(vx*vx + vy_as*vy_as)/(x_res/2.0)
-                delta_r = fabs(r_norm_new - r_norm)
-
-        # gnomonic degrees
-        x_corr = x_corr/pix_scale
-        y_corr = y_corr/pix_scale
-
-        # sphere geometry to RA/Dec using precession-corrected centre/orientation
-        radius = radians(sqrt(x_corr**2 + y_corr**2))
-        theta  = (pi/2 - pos_angle_ref_now_corr + atan2(y_corr, x_corr))%(2*pi)
-
-        sin_t = sin(dec_ref_corr)*cos(radius) + cos(dec_ref_corr)*sin(radius)*cos(theta)
-        dec   = atan2(sin_t, sqrt(1 - sin_t**2))
-        sin_t = sin(theta)*sin(radius)/cos(dec)
-        cos_t = (cos(radius) - sin(dec)*sin(dec_ref_corr))/(cos(dec)*cos(dec_ref_corr))
-        ra    = (ra_ref_now_corr - atan2(sin_t, cos_t) + 2*pi)%(2*pi)
-
-        # Apparent->true correction in J2000 if requested
-        if refraction:
-            ra, dec = eqRefractionApparentToTrue(ra, dec, jd, radians(lat), radians(lon))
-
-        ra_out[i]  = degrees(ra)
-        dec_out[i] = degrees(dec)
-
-    return ra_out, dec_out
 
 
 @cython.boundscheck(False)
@@ -1947,7 +2049,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 @cython.cdivision(True)
 def cyAltAzToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] alt_data, np.ndarray[FLOAT_TYPE_t, ndim=1] az_data, \
     double x_res, double y_res, double az_ref, double alt_ref, double rotation_from_horiz, double pix_scale, \
-    np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev, \
+    np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, \
     str dist_type, bool refraction=True, bool equal_aspect=False, bool force_distortion_centre=False, \
     bool asymmetry_corr=True):
     """
@@ -1962,8 +2064,8 @@ def cyAltAzToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] alt_data, np.ndarray[FLOAT_TYPE
         alt_ref: [float] Reference altitude of the image centre (degrees).
         rotation_from_horiz: [float] Rotation from the horizontal (degrees).
         pix_scale: [float] Image scale (px/deg).
-        x_poly_rev: [ndarray float] Distortion polynomial in X direction for reverse mapping.
-        y_poly_rev: [ndarray float] Distortion polynomail in Y direction for reverse mapping.
+        x_poly_fwd: [ndarray float] Distortion polynomial in X direction for forward mapping.
+        y_poly_fwd: [ndarray float] Distortion polynomail in Y direction for forward mapping.
         dist_type: [str] Distortion type. Can be: poly3+radial, radial3, radial4, or radial5.
         
     Keyword arguments:
@@ -2005,56 +2107,81 @@ def cyAltAzToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] alt_data, np.ndarray[FLOAT_TYPE
 
         # Force the distortion centre to the image centre
         if force_distortion_centre:
-            x0 = 0.0
-            y0 = 0.0
+            x0 = 0.5/(x_res/2.0)  # 0.5 pixel offset to true center (matching cyRaDecToXY_iter)
+            y0 = 0.5/(y_res/2.0)
             index_offset += 2
         else:
             # Read distortion offsets
-            x0 = x_poly_rev[0]
-            y0 = x_poly_rev[1]
+            x0 = x_poly_fwd[0]
+            y0 = x_poly_fwd[1]
+            
+        # Convert offsets to pixel coordinates
+        x0 *= (x_res/2.0)
+        y0 *= (y_res/2.0)
 
         # Aspect ratio
         if equal_aspect:
             xy = 0.0
             index_offset += 1
         else:
-            xy = x_poly_rev[2 - index_offset]
+            xy = x_poly_fwd[2 - index_offset]
 
         # Asymmetry correction
         if asymmetry_corr:
 
             # Asymmetry amplitude
-            a1 = x_poly_rev[3 - index_offset]
+            a1 = x_poly_fwd[3 - index_offset]
 
             # Asymmetry angle - normalize so full circle fits within 0-1
-            a2 = (x_poly_rev[4 - index_offset]*(2*pi))%(2*pi)
+            a2 = (x_poly_fwd[4 - index_offset]*(2*pi))%(2*pi)
 
         else:
             a1 = 0.0
             a2 = 0.0
             index_offset += 2
 
-        # Distortion coeffs
-        k1 = x_poly_rev[5 - index_offset]
-        k2 = x_poly_rev[6 - index_offset]
+        # Read distortion coefficients
+        if dist_type == "radial3-all":
+            k1 = x_poly_fwd[5 - index_offset]
+            k2 = x_poly_fwd[6 - index_offset]
+            k3 = 0.0
+            k4 = 0.0
 
-        if x_poly_rev.shape[0] > (7 - index_offset):
-            k3 = x_poly_rev[7 - index_offset]
+        elif dist_type == "radial4-all":
+            k1 = x_poly_fwd[5 - index_offset]
+            k2 = x_poly_fwd[6 - index_offset]
+            k3 = x_poly_fwd[7 - index_offset]
+            k4 = 0.0
 
-        if x_poly_rev.shape[0] > (8 - index_offset):
-            k4 = x_poly_rev[8 - index_offset]
+        elif dist_type == "radial5-all":
+            k1 = x_poly_fwd[5 - index_offset]
+            k2 = x_poly_fwd[6 - index_offset]
+            k3 = x_poly_fwd[7 - index_offset]
+            k4 = x_poly_fwd[8 - index_offset]
 
-        # if x_poly_rev.shape[0] > (9 - index_offset):
-        #     k5 = x_poly_rev[9 - index_offset]
+        elif dist_type == "radial3-odd":
+            k1 = x_poly_fwd[5 - index_offset]
+            k2 = 0.0
+            k3 = 0.0
+            k4 = 0.0
 
-    # If the polynomial distortion was used, unpack the offsets
-    else:
-        x0 = x_poly_rev[0]
-        y0 = y_poly_rev[0]
-    
-    # Normalize offsets
-    x0 *= (x_res/2.0)
-    y0 *= (y_res/2.0)
+        elif dist_type == "radial5-odd":
+            k1 = x_poly_fwd[5 - index_offset]
+            k2 = x_poly_fwd[6 - index_offset]
+            k3 = 0.0
+            k4 = 0.0
+
+        elif dist_type == "radial7-odd":
+            k1 = x_poly_fwd[5 - index_offset]
+            k2 = x_poly_fwd[6 - index_offset]
+            k3 = x_poly_fwd[7 - index_offset]
+            k4 = 0.0
+
+        elif dist_type == "radial9-odd":
+            k1 = x_poly_fwd[5 - index_offset]
+            k2 = x_poly_fwd[6 - index_offset]
+            k3 = x_poly_fwd[7 - index_offset]
+            k4 = x_poly_fwd[8 - index_offset]
 
     # Convert all horizontal coordinates to image coordinates
     for i in range(az_data.shape[0]):
@@ -2077,206 +2204,142 @@ def cyAltAzToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] alt_data, np.ndarray[FLOAT_TYPE
         # theta = -atan2(sin_ang, cos_ang) + radians(rotation_from_horiz) - pi/2.0
 
         # Avoid division by zerp
-        if radius < 1e-5:
+        if radius < 1e-8:
             theta = 0.0
         else:
-            sin_ang = cos(alt) * sin(az_ref - az) / sin(radius)
-            cos_ang = (sin(alt) - sin(alt_ref) * cos(radius)) / (cos(alt_ref) * sin(radius))
+            sin_ang = cos(alt)*sin(az_ref - az)/sin(radius)
+            cos_ang = (sin(alt) - sin(alt_ref)*cos(radius))/(cos(alt_ref)*sin(radius))
             theta = -atan2(sin_ang, cos_ang) + radians(rotation_from_horiz) - pi/2
 
         # Calculate the standard coordinates
-        x_corr = degrees(radius) * cos(theta) * pix_scale
-        y_corr = degrees(radius) * sin(theta) * pix_scale
+        x_corr = degrees(radius)*cos(theta)*pix_scale
+        y_corr = degrees(radius)*sin(theta)*pix_scale
 
-        # Normalize coordinates to horizontal dimension
-        x_corr1 = x_corr / (x_res/2.0)
-        y_corr1 = y_corr / (x_res/2.0)
-
-        ### ###
-
-        # Set initial distorsion values
-        dx = 0.0
-        dy = 0.0
-
-        # Apply 3rd order polynomial + one radial term distortion
+        # Apply polynomial distortion
         if dist_type.startswith("poly3+radial"):
 
-            x = x_corr1
-            y = y_corr1
+            # Compute the radius from pixel coordinates
+            r = sqrt((x_corr - x0)**2 + (y_corr - y0)**2)
 
-            # Compute the radius
-            r = sqrt((x)**2 + (y)**2)
-
-            # Calculate the distortion in X direction
-            dx = (x_poly_rev[1]*x
-                + x_poly_rev[2]*y
-                + x_poly_rev[3]*x**2
-                + x_poly_rev[4]*x*y
-                + x_poly_rev[5]*y**2
-                + x_poly_rev[6]*x**3
-                + x_poly_rev[7]*x**2*y
-                + x_poly_rev[8]*x*y**2
-                + x_poly_rev[9]*y**3
-                + x_poly_rev[10]*x*r
-                + x_poly_rev[11]*y*r)
+            # Calculate the distortion in X direction (using pixel coordinates)
+            dx = (x0
+                + x_poly_fwd[1]*x_corr
+                + x_poly_fwd[2]*y_corr
+                + x_poly_fwd[3]*x_corr**2
+                + x_poly_fwd[4]*x_corr*y_corr
+                + x_poly_fwd[5]*y_corr**2
+                + x_poly_fwd[6]*x_corr**3
+                + x_poly_fwd[7]*x_corr**2*y_corr
+                + x_poly_fwd[8]*x_corr*y_corr**2
+                + x_poly_fwd[9]*y_corr**3
+                + x_poly_fwd[10]*x_corr*r
+                + x_poly_fwd[11]*y_corr*r)
                 
-
-            # Calculate the distortion in Y direction
-            dy = (y_poly_rev[1]*x
-                + y_poly_rev[2]*y
-                + y_poly_rev[3]*x**2
-                + y_poly_rev[4]*x*y
-                + y_poly_rev[5]*y**2
-                + y_poly_rev[6]*x**3
-                + y_poly_rev[7]*x**2*y
-                + y_poly_rev[8]*x*y**2
-                + y_poly_rev[9]*y**3
-                + y_poly_rev[10]*y*r
-                + y_poly_rev[11]*x*r)
+            # Calculate the distortion in Y direction (using pixel coordinates)
+            dy = (y0
+                + y_poly_fwd[1]*x_corr
+                + y_poly_fwd[2]*y_corr
+                + y_poly_fwd[3]*x_corr**2
+                + y_poly_fwd[4]*x_corr*y_corr
+                + y_poly_fwd[5]*y_corr**2
+                + y_poly_fwd[6]*x_corr**3
+                + y_poly_fwd[7]*x_corr**2*y_corr
+                + y_poly_fwd[8]*x_corr*y_corr**2
+                + y_poly_fwd[9]*y_corr**3
+                + y_poly_fwd[10]*y_corr*r
+                + y_poly_fwd[11]*x_corr*r)
 
             # If the 3rd order radial term is used, apply it
             if dist_type.endswith("+radial3") or dist_type.endswith("+radial5"):
-                dx += x_poly_rev[12]*x*r**3
-                dy += y_poly_rev[12]*y*r**3
-
+                dx += x_poly_fwd[12]*x_corr*r**3
+                dy += y_poly_fwd[12]*y_corr*r**3
 
             # If the 5th order radial term is used, apply it
             if dist_type.endswith("+radial5"):
-                dx += x_poly_rev[13]*x*r**5
-                dy += y_poly_rev[13]*y*r**5
+                dx += x_poly_fwd[13]*x_corr*r**5
+                dy += y_poly_fwd[13]*y_corr*r**5
 
-            x_img = x_corr1 - dx
-            y_img = y_corr1 - dy
+            x_img = x_corr - dx
+            y_img = y_corr - dy
 
 
-        # Apply a radial distortion
-        else:
-
+        # Apply radial distortion using iterative solver
+        elif dist_type.startswith("radial"):
+            
             # Initialize the reverse radial iteration loop
             delta_r = 1.0
             j = 0
-            lens_dist = 1.0
 
-            # Set initial guess
-            x_img2 = x_corr1
-            y_img2 = y_corr1
+            # Set initial guess (undistorted coordinates in pixels)
+            x_img = x_corr
+            y_img = y_corr
 
-            while delta_r > 0.1 / (x_res/2.0) and j < 100:
+            # Iterate to find the distorted position
+            while delta_r > 0.01 and j < 100:  # 0.01 pixel tolerance
                 j += 1
 
-                # Compute the radius
-                r2 = sqrt(x_img2**2 + y_img2**2)
+                # Compute the radius (with aspect ratio and asymmetry, in pixels then normalized)
+                r = sqrt((x_img - x0)**2 + ((1.0 + xy)*(y_img - y0))**2)
+                r = r + a1*(1.0 + xy)*(y_img - y0)*cos(a2) - a1*(x_img - x0)*sin(a2)
+                r = r/(x_res/2.0)  # Normalize to horizontal size
 
-                # Apply the 3rd order radial distortion, all powers
-                if dist_type == "radial3-all":
-
-                    # Compute the new radius
-                    lens_dist = 1 + k1*r2 + k2*r2**2
-
-                # Apply the 4th order radial distortion, all powers
-                elif dist_type == "radial4-all":
-
-                    # Compute the new radius
-                    lens_dist = 1 + k1*r2 + k2*r2**2 + k3*r2**3
-
-                # Apply the 5th order radial distortion, all powers
-                elif dist_type == "radial5-all":
-
-                    # Compute the new radius
-                    lens_dist = 1 + k1*r2 + k2*r2**2 + k3*r2**3 + k4*r2**4
-
-                # Apply the 3rd order radial distortion, only odd powers
-                elif dist_type == "radial3-odd":
-
-                    # Compute the new radius
-                    lens_dist = 1 + k1*r2**2
-
-                # Apply the 5th order radial distortion, only odd powers
-                elif dist_type == "radial5-odd":
-
-                    # Compute the new radius
-                    lens_dist = 1 + k1*r2**2 + k2*r2**4
-
-                # Apply the 7th order radial distortion, only odd powers
-                elif dist_type == "radial7-odd":
-
-                    # Compute the new radius
-                    lens_dist = 1 + k1*r2**2 + k2*r2**4 + k3*r2**6
-
-                # Apply the 9th order radial distortion, only odd powers
-                elif dist_type == "radial9-odd":
-
-                    # Compute lens distortion
-                    lens_dist = 1 + k1*r2**2 + k2*r2**4 + k3*r2**6 + k4*r2**8
+                r_corr = r
                 
-                # Stop itterating if point is at center of distortion or outside the lens FOV.
-                if lens_dist == 1 or fabs(lens_dist) > 1.7 or (fabs(x_img2) < 1e-5 and fabs(y_img2) < 1e-5):
+                # Apply the appropriate radial distortion model
+                if dist_type == "radial3-all":
+                    r_corr = r + k1*r**2 + k2*r**3
+
+                elif dist_type == "radial4-all":
+                    r_corr = r + k1*r**2 + k2*r**3 + k3*r**4
+
+                elif dist_type == "radial5-all":
+                    r_corr = r + k1*r**2 + k2*r**3 + k3*r**4 + k4*r**5
+
+                elif dist_type == "radial3-odd":
+                    r_corr = r + k1*r**3
+
+                elif dist_type == "radial5-odd":
+                    r_corr = r + k1*r**3 + k2*r**5
+
+                elif dist_type == "radial7-odd":
+                    r_corr = r + k1*r**3 + k2*r**5 + k3*r**7
+
+                elif dist_type == "radial9-odd":
+                    r_corr = r + k1*r**3 + k2*r**5 + k3*r**7 + k4*r**9
+                
+                # Compute the scaling factor
+                if r == 0:
+                    r_scale = 0
+                else:
+                    r_scale = (r_corr/r - 1)
+                
+                # Stop iterating if distortion is negligible
+                if fabs(r_scale) < 1e-8:
                     break
                 
-                # Apply the reverse radial distortion
-                x_img2_est = x_corr1 / lens_dist
-                y_img2_est = y_corr1 / lens_dist                
+                # Compute distortion offsets (matching cyXYToRADec)
+                dx = (x_img - x0)*r_scale - x0
+                dy = (y_img - y0)*r_scale*(1.0 + xy) - y0*(1.0 + xy) + y_img*xy
+                
+                # Compute new estimate by inverting: x_corr = x_img + dx
+                x_img_est = x_corr - dx
+                y_img_est = y_corr - dy
 
                 # Compute distance between current and last guess
-                delta_r = sqrt((x_img2 - x_img2_est)**2 + (y_img2 - y_img2_est)**2)
+                delta_r = sqrt((x_img - x_img_est)**2 + (y_img - y_img_est)**2)
 
                 # Update guess
-                x_img2 = x_img2_est
-                y_img2 = y_img2_est
-            
-            # Initialize the reverse assymetry itiration loop
-            delta_r = 1.0
-            j = 0
+                x_img = x_img_est
+                y_img = y_img_est
 
-            # Set initial guess
-            x_img1 = x_img2
-            y_img1 = y_img2
+        else:
+            # No distortion
+            x_img = x_corr
+            y_img = y_corr
 
-            while delta_r > 0.1 / (x_res/2.0) and j < 100:
-                j += 1
-
-                # Compute the radius
-                r2 = sqrt(x_img2**2 + y_img2**2)
-
-                # Compute the reverse assymetry
-                r1 = r2 - a1*y_img1*cos(a2) + a1*x_img1*sin(a2)
-
-                # Apply the reverse assymetry
-                # x_img1_est = x_img2 * r1/r2
-                # y_img1_est = y_img2 * r1/r2
-
-                # Avoid division by zero
-                if fabs(r2) < 1e-5:
-                    x_img1_est = x_img2
-                    y_img1_est = y_img2
-
-                else:
-                    x_img1_est = x_img2 * r1/r2
-                    y_img1_est = y_img2 * r1/r2
-
-                # Compute distance between current and last guess
-                delta_r = sqrt((x_img1 - x_img1_est)**2 + (y_img1 - y_img1_est)**2)
-                # print(f"\r{j}: Assymetry guess error: {delta_r}")
-                
-                # Update guess
-                x_img1 = x_img1_est
-                y_img1 = y_img1_est
-                
-            # Apply the reverse aspect ratio correction 
-            x_img = x_img1
-            y_img = y_img1 / (1.0 + xy)
-
-        # De-normalize for horizontal pixel size
-        x_img = x_img * (x_res/2.0)
-        y_img = y_img * (x_res/2.0)
-
-        # Set origin to top left corner
-        x_img = x_img + x0 + x_res/2.0
-        y_img = y_img + y0 + y_res/2.0
-
-        # Add image coordinates to array
-        x_array[i] = x_img 
-        y_array[i] = y_img
+        # Shift to image coordinate system (0,0 at top-left)
+        x_array[i] = x_img + x_res/2.0
+        y_array[i] = y_img + y_res/2.0
 
     return x_array, y_array
 
@@ -2286,7 +2349,7 @@ def cyAltAzToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] alt_data, np.ndarray[FLOAT_TYPE
 @cython.cdivision(True)
 def cyXYToAltAz(np.ndarray[FLOAT_TYPE_t, ndim=1] x_data, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] y_data, double x_res, double y_res, \
-    double az_centre, double alt_centre, double rotation_from_horiz, double pix_scale, \
+    double alt_centre, double az_centre, double rotation_from_horiz, double pix_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, \
     str dist_type, bool refraction=True, bool equal_aspect=False, bool force_distortion_centre=False,\
     bool asymmetry_corr=True):
@@ -2313,10 +2376,10 @@ def cyXYToAltAz(np.ndarray[FLOAT_TYPE_t, ndim=1] x_data, \
             default.
     
     Return:
-        (az_data, alt_data): [tuple of ndarrays]
+        (alt_data, az_data): [tuple of ndarrays]
             
-            ra_data: [ndarray] Right ascension of each point (deg).
-            dec_data: [ndarray] Declination of each point (deg).
+            alt_data: [ndarray] Altitude of each point (deg).
+            az_data: [ndarray] Azimuth of each point (deg).
     """
 
     cdef int i, index_offset
@@ -2344,13 +2407,22 @@ def cyXYToAltAz(np.ndarray[FLOAT_TYPE_t, ndim=1] x_data, \
 
         # Force the distortion centre to the image centre
         if force_distortion_centre:
-            x0 = 0.0
-            y0 = 0.0
+            x0 = 0.5/(x_res/2.0)
+            y0 = 0.5/(y_res/2.0)
             index_offset += 2
         else:
             # Read distortion offsets
             x0 = x_poly_fwd[0]
             y0 = x_poly_fwd[1]
+
+
+        # Normalize offsets
+        x0 *= (x_res/2.0)
+        y0 *= (y_res/2.0)
+
+        # Wrap offsets to always be within the image
+        x0 = -x_res/2.0 + (x0 + x_res/2.0)%x_res
+        y0 = -y_res/2.0 + (y0 + y_res/2.0)%y_res
 
         # Aspect ratio
         if equal_aspect:
@@ -2395,10 +2467,6 @@ def cyXYToAltAz(np.ndarray[FLOAT_TYPE_t, ndim=1] x_data, \
         x0 = x_poly_fwd[0]
         y0 = y_poly_fwd[0]
 
-    # Normalize offsets
-    x0 *= (x_res/2.0)
-    y0 *= (y_res/2.0)
-
     # Go through all given data points and convert them from X, Y to Az, Alt
     for i in range(x_data.shape[0]):
 
@@ -2409,19 +2477,15 @@ def cyXYToAltAz(np.ndarray[FLOAT_TYPE_t, ndim=1] x_data, \
 
         ### APPLY DISTORTION CORRECTION ###
 
-        # Normalize image coordinates to the image centre and compute the radius from image centre
-        x_img = x_img - x0 - x_res/2.0
-        y_img = y_img - y0 - y_res/2.0
-
-        # Normalize radius to horizontal size
-        x_img = x_img / (x_res/2.0)
-        y_img = y_img / (x_res/2.0)
+        # Normalize image coordinates to the image centre
+        x_img = x_img - x_res/2.0
+        y_img = y_img - y_res/2.0
 
         # Apply 3rd order polynomial + one radial term distortion
         if dist_type.startswith("poly3+radial"):
 
             # Compute the radius
-            r = sqrt((x_img)**2 + (y_img)**2)
+            r = sqrt((x_img - x0)**2 + (y_img - y0)**2)
 
             # Compute offset in X direction
             dx = (x_poly_fwd[1]*x_img
@@ -2466,86 +2530,72 @@ def cyXYToAltAz(np.ndarray[FLOAT_TYPE_t, ndim=1] x_data, \
         # Apply a radial distortion
         elif dist_type.startswith("radial"):
 
-            # Apply fwd aspect ratio correction 
-            x_img1 = x_img
-            y_img1 = y_img * (1.0 + xy)
+            # Compute the radius from distortion center
+            r = sqrt((x_img - x0)**2 + ((1.0 + xy)*(y_img - y0))**2)
+            
+            # Apply the asymmetry correction
+            r = r + a1*(1.0 + xy)*(y_img - y0)*cos(a2) - a1*(x_img - x0)*sin(a2)
+            
+            # Normalize radius to horizontal size
+            r = r/(x_res/2.0)
 
-            # Compute the radius
-            r1 = sqrt(x_img1**2 + y_img1**2)
-
-            # Compute the fwd asymmetry correction
-            r2 = r1 + a1*y_img1*cos(a2) - a1*x_img1*sin(a2)
-
-            # Aplly the forward assymetry correction
-            # x_img2 = x_img1 * r2/r1
-            # y_img2 = y_img1 * r2/r1
-
-            if fabs(r1) < 1e-5:
-                x_img2 = x_img1
-                y_img2 = y_img1
-
-            else:
-                x_img2 = x_img1 * r2/r1
-                y_img2 = y_img1 * r2/r1
-
-            # Compute the new radius
-            # r2_verify = sqrt(x_img2**2 + y_img2**2)
-            # print(f"should be zero: {r2-r2_verify}")
+            r_corr = r
 
             # Apply the 3rd order radial distortion, all powers
-            lens_dist = 1.0
-
             if dist_type == "radial3-all":
-
                 # Compute the new radius
-                lens_dist = 1 + k1*r2 + k2*r2**2
+                r_corr = r + k1*r**2 + k2*r**3
 
             # Apply the 4th order radial distortion, all powers
             elif dist_type == "radial4-all":
-
-                # Compute the new radius
-                lens_dist = 1 + k1*r2 + k2*r2**2 + k3*r2**3
+                # Compute the new radius  
+                r_corr = r + k1*r**2 + k2*r**3 + k3*r**4
 
             # Apply the 5th order radial distortion, all powers
             elif dist_type == "radial5-all":
-
                 # Compute the new radius
-                lens_dist = 1 + k1*r2 + k2*r2**2 + k3*r2**3 + k4*r2**4
+                r_corr = r + k1*r**2 + k2*r**3 + k3*r**4 + k4*r**5
 
             # Apply the 3rd order radial distortion, only odd powers
             elif dist_type == "radial3-odd":
-
                 # Compute the new radius
-                lens_dist = 1 + k1*r2**2
+                r_corr = r + k1*r**3
 
             # Apply the 5th order radial distortion, only odd powers
             elif dist_type == "radial5-odd":
-
                 # Compute the new radius
-                lens_dist = 1 + k1*r2**2 + k2*r2**4
+                r_corr = r + k1*r**3 + k2*r**5
 
             # Apply the 7th order radial distortion, only odd powers
             elif dist_type == "radial7-odd":
-
                 # Compute the new radius
-                lens_dist = 1 + k1*r2**2 + k2*r2**4 + k3*r2**6
+                r_corr = r + k1*r**3 + k2*r**5 + k3*r**7
 
             # Apply the 9th order radial distortion, only odd powers
             elif dist_type == "radial9-odd":
-
                 # Compute the new radius
-                lens_dist = 1 + k1*r2**2 + k2*r2**4 + k3*r2**6 + k4*r2**8
+                r_corr = r + k1*r**3 + k2*r**5 + k3*r**7 + k4*r**9
 
-            # Correct image coordinates for distortion
-            x_corr1 = x_img2 * lens_dist
-            y_corr1 = y_img2 * lens_dist
+            # Compute the scaling term
+            if r == 0:
+                r_scale = 0
+            else:
+                r_scale = (r_corr/r - 1)
+
+            # Compute offsets
+            dx = (x_img - x0)*r_scale - x0
+            dy = (y_img - y0)*r_scale*(1.0 + xy) - y0*(1.0 + xy) + y_img*xy
+
+        # Correct image coordinates for distortion
+        x_corr = x_img + dx
+        y_corr = y_img + dy
+
 
         # Gnomonize coordinates
-        x_corr = x_corr1 * (x_res/2.0) / pix_scale
-        y_corr = y_corr1 * (x_res/2.0) / pix_scale
-        
+        x_corr = x_corr/pix_scale
+        y_corr = y_corr/pix_scale
 
-        ### ###
+        ### ###        
 
 
         ### Convert gnomonic X, Y to Az, Alt ###
@@ -2587,7 +2637,7 @@ def cyXYToAltAz(np.ndarray[FLOAT_TYPE_t, ndim=1] x_data, \
         alt_data[i] = alt
 
 
-    return az_data, alt_data
+    return alt_data, az_data
 
 # === XY -> ENU at WGS-84 height (low-elevation safe) ===
 @cython.cdivision(True)
@@ -2659,17 +2709,30 @@ def cyXYHttoENU_wgs84(
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] az = np.empty(n, dtype=FLOAT_TYPE)
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] el = np.empty(n, dtype=FLOAT_TYPE)
 
-    # quick XY->AltAz with precomputed pointing
-    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] jd_vec = np.full(n, jd, dtype=FLOAT_TYPE)
+    # Compute Alt/Az center from RA/Dec center (without precession, as stored values are epoch of date)
+    cdef double az_centre_rad, alt_centre_rad
+    az_centre_rad, alt_centre_rad = cyraDec2AltAz(
+        radians(ra_ref_deg), radians(dec_ref_deg), 
+        jd_ref, radians(lat_deg), radians(lon_deg)
+    )
+    # Apply refraction if needed
+    if refraction:
+        alt_centre_rad = refractionTrueToApparent(alt_centre_rad)
+    cdef double az_centre_deg = degrees(az_centre_rad)
+    cdef double alt_centre_deg = degrees(alt_centre_rad)
+    
+    # Compute rotation angle w.r.t. horizon 
+    # For now, use a simplified calculation - this should ideally use rotationWrtHorizon
+    cdef double rot_deg = degrees(atan2(radians(h0_deg), radians(pos_angle_ref_deg)))
+    
+    # Convert XY to Alt/Az
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] az_deg, el_deg
-    az_deg, el_deg = cyXYToAltAz(
-        jd_vec, x_px, y_px,
-        lat_deg, lon_deg, x_res, y_res,
-        h0_deg, jd_ref, ra_ref_deg, dec_ref_deg, pos_angle_ref_deg,
-        pix_scale_px_per_deg, x_poly_fwd, y_poly_fwd, dist_type,
+    el_deg, az_deg = cyXYToAltAz(
+        x_px, y_px, x_res, y_res,
+        alt_centre_deg, az_centre_deg, rot_deg, pix_scale_px_per_deg,
+        x_poly_fwd, y_poly_fwd, dist_type,
         refraction=refraction, equal_aspect=equal_aspect,
-        force_distortion_centre=force_distortion_centre, asymmetry_corr=asymmetry_corr,
-        precompute_pointing_corr=True
+        force_distortion_centre=force_distortion_centre, asymmetry_corr=asymmetry_corr
     )
 
     cdef double latr = radians(lat_deg), lonr = radians(lon_deg)
@@ -2770,8 +2833,8 @@ def cyGeoToXY_wgs84_iter(
     double ra_ref_deg, double dec_ref_deg, double pos_angle_ref_deg,
     double pix_scale_px_per_deg,
     # distortion params (same layout as cyraDecToXY forward branch)
-    np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev,
-    np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev,
+    np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd,
+    np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd,
     str dist_type,
     # options
     bint refraction=True, bint equal_aspect=False,
@@ -2825,7 +2888,7 @@ def cyGeoToXY_wgs84_iter(
     if force_distortion_centre:
         x0 = 0.5/(x_res/2.0); y0 = 0.5/(y_res/2.0); index_offset += 2
     else:
-        x0 = x_poly_rev[0]; y0 = y_poly_rev[0]
+        x0 = x_poly_fwd[0]; y0 = y_poly_fwd[0]
     # normalize & wrap
     x0 *= (x_res/2.0); y0 *= (y_res/2.0)
     x0 = -x_res/2.0 + (x0 + x_res/2.0)%x_res
@@ -2834,18 +2897,18 @@ def cyGeoToXY_wgs84_iter(
     if equal_aspect:
         xy = 0.0; index_offset += 1
     else:
-        xy = x_poly_rev[2 - index_offset]
+        xy = x_poly_fwd[2 - index_offset]
 
     if asymmetry_corr:
-        a1 = x_poly_rev[3 - index_offset]
-        a2 = (x_poly_rev[4 - index_offset]*(2*pi))%(2*pi)
+        a1 = x_poly_fwd[3 - index_offset]
+        a2 = (x_poly_fwd[4 - index_offset]*(2*pi))%(2*pi)
     else:
         a1 = 0.0; a2 = 0.0; index_offset += 2
 
-    k1 = x_poly_rev[5 - index_offset]
-    k2 = x_poly_rev[6 - index_offset]
-    k3 = x_poly_rev[7 - index_offset] if x_poly_rev.shape[0] > (7 - index_offset) else 0.0
-    k4 = x_poly_rev[8 - index_offset] if x_poly_rev.shape[0] > (8 - index_offset) else 0.0
+    k1 = x_poly_fwd[5 - index_offset]
+    k2 = x_poly_fwd[6 - index_offset]
+    k3 = x_poly_fwd[7 - index_offset] if x_poly_fwd.shape[0] > (7 - index_offset) else 0.0
+    k4 = x_poly_fwd[8 - index_offset] if x_poly_fwd.shape[0] > (8 - index_offset) else 0.0
 
     # --- main loop ---
     cdef Py_ssize_t i
