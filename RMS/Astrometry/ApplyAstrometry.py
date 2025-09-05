@@ -846,9 +846,6 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
     return JD_data, RA_data, dec_data, magnitude_data
 
 
-
-
-
 def raDecToXYPP(RA_data, dec_data, jd, platepar):
     """ Converts RA, Dec to image coordinates, but the platepar is given instead of individual parameters.
     Arguments:
@@ -988,16 +985,13 @@ def xyToAltAzPP(X_data, Y_data, platepar, measurement=False):
 
 
 
-
-
-
 def xyHtToENUPP(X_data, Y_data, ht_wgs84_m, platepar, min_el_deg=0.0):
     """ Converts image XY to East-North-Up coordinates at a given WGS-84 height.
     
     Arguments:
         X_data: [ndarray] 1D numpy array containing the image X component.
         Y_data: [ndarray] 1D numpy array containing the image Y component.
-        ht_wgs84_m: [float] Target WGS-84 ellipsoid height in meters.
+        ht_wgs84_m: [float or ndarray] Target WGS-84 ellipsoid height(s) in meters.
         platepar: [Platepar structure] Astrometry parameters.
     
     Keyword arguments:
@@ -1031,7 +1025,7 @@ def xyHtToENUPP(X_data, Y_data, ht_wgs84_m, platepar, min_el_deg=0.0):
         platepar.x_poly_fwd, platepar.y_poly_fwd, 
         unicode(platepar.distortion_type), 
         float(platepar.lat), float(platepar.lon), float(platepar.height_wgs84), 
-        float(ht_wgs84_m),
+        np.array(ht_wgs84_m, dtype=np.float64).ravel() if not np.isscalar(ht_wgs84_m) else np.full(len(X_data), float(ht_wgs84_m), dtype=np.float64),
         refraction=platepar.refraction, 
         equal_aspect=platepar.equal_aspect, 
         force_distortion_centre=platepar.force_distortion_centre, 
@@ -1176,24 +1170,29 @@ def xyToGeoPP(X_data, Y_data, h_data, platepar, min_el_deg=0.0):
     
     rot = rotationWrtHorizon(platepar)
     
+    # Convert input data to arrays
+    X_array = np.array(X_data, dtype=np.float64).ravel()
+    Y_array = np.array(Y_data, dtype=np.float64).ravel()
+    
     # Handle scalar or array h_data
     if np.isscalar(h_data):
-        ht_wgs84_m = float(h_data)
+        ht_array = np.full(len(X_array), float(h_data), dtype=np.float64)
     else:
-        # Use first value if array provided
-        ht_wgs84_m = float(h_data[0]) if len(h_data) > 0 else 100000.0
+        ht_array = np.array(h_data, dtype=np.float64).ravel()
+        # Check length match
+        if len(ht_array) != len(X_array):
+            raise ValueError(f"Height array length ({len(ht_array)}) must match X/Y array length ({len(X_array)})")
     
     # Convert x,y to Geo using the Cython function
     lat_data, lon_data = cyXYToGeo_wgs84(
-        np.array(X_data, dtype=np.float64),
-        np.array(Y_data, dtype=np.float64),
+        X_array, Y_array,
         float(platepar.X_res), float(platepar.Y_res),
         float(alt_centre), float(az_centre),
         float(rot), float(platepar.F_scale),
         platepar.x_poly_fwd, platepar.y_poly_fwd,
         unicode(platepar.distortion_type),
         float(platepar.lat), float(platepar.lon), float(platepar.height_wgs84),
-        ht_wgs84_m,
+        ht_array,
         refraction=platepar.refraction,
         equal_aspect=platepar.equal_aspect,
         force_distortion_centre=platepar.force_distortion_centre,

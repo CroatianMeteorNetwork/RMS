@@ -2688,7 +2688,7 @@ def cyXYHttoENU_wgs84(
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd,
     str dist_type,
     # station geodetic & target height (WGS-84)
-    double lat_sta_deg, double lon_sta_deg, double h_sta_m, double ht_wgs84_m,
+    double lat_sta_deg, double lon_sta_deg, double h_sta_m, np.ndarray[FLOAT_TYPE_t, ndim=1] ht_wgs84_m,
     # options
     bint refraction=True, bint equal_aspect=False,
     bint force_distortion_centre=False, bint asymmetry_corr=True,
@@ -2803,7 +2803,7 @@ def cyXYHttoENU_wgs84(
     num = (a*a*cS)*(a*a*cS) + (b*b*sS)*(b*b*sS)
     den = (a*cS)*(a*cS) + (b*sS)*(b*sS)
     Rgeo = sqrt(num/den)
-    r_guess = Rgeo + ht_wgs84_m + 1000.0
+    # Note: r_guess will be set per point in the loop
 
     for i in range(n):
         # 1) center-subtract
@@ -2882,15 +2882,16 @@ def cyXYHttoENU_wgs84(
         dze = RE2*east + RN2*north + RU2*up
 
         # bracket with sphere guess
+        r_guess = Rgeo + ht_wgs84_m[i] + 1000.0
         C2 = Xc*Xc + Yc*Yc + Zc*Zc
         Cdotd = Xc*dxe + Yc*dye + Zc*dze
-        disc  = Cdotd*Cdotd - (C2 - (Rgeo + ht_wgs84_m + 1000.0)**2)
+        disc  = Cdotd*Cdotd - (C2 - r_guess*r_guess)
         if disc <= 0.0:
             E[i]=N[i]=U[i]=np.nan
             continue
         s_hi = -Cdotd + sqrt(disc)
         s_lo = 0.0
-        f_lo = h_sta_m - ht_wgs84_m
+        f_lo = h_sta_m - ht_wgs84_m[i]
 
         Xi = Xc + s_hi*dxe; Yi = Yc + s_hi*dye; Zi = Zc + s_hi*dze
         pval = sqrt(Xi*Xi + Yi*Yi)
@@ -2898,7 +2899,7 @@ def cyXYHttoENU_wgs84(
         latP = atan2(Zi + ep2*b*st*st*st, pval - e2*a*ct*ct*ct)
         Ncur = a / sqrt(1.0 - e2*sin(latP)*sin(latP))
         hP   = pval/cos(latP) - Ncur
-        f_hi = hP - ht_wgs84_m
+        f_hi = hP - ht_wgs84_m[i]
 
         it = 0
         while f_lo*f_hi > 0.0 and it < 6:
@@ -2909,7 +2910,7 @@ def cyXYHttoENU_wgs84(
             latP = atan2(Zi + ep2*b*st*st*st, pval - e2*a*ct*ct*ct)
             Ncur = a / sqrt(1.0 - e2*sin(latP)*sin(latP))
             hP   = pval/cos(latP) - Ncur
-            f_hi = hP - ht_wgs84_m
+            f_hi = hP - ht_wgs84_m[i]
             it += 1
 
         if f_lo*f_hi > 0.0:
@@ -2924,7 +2925,7 @@ def cyXYHttoENU_wgs84(
             latP = atan2(Zi + ep2*b*st*st*st, pval - e2*a*ct*ct*ct)
             Ncur = a / sqrt(1.0 - e2*sin(latP)*sin(latP))
             hP   = pval/cos(latP) - Ncur
-            f_mid = hP - ht_wgs84_m
+            f_mid = hP - ht_wgs84_m[i]
             if f_lo*f_mid <= 0.0:
                 s_hi = s_mid; f_hi = f_mid
             else:
@@ -3355,7 +3356,7 @@ def cyXYToGeo_wgs84(
     np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd,
     str dist_type,
     # station geodetic & target ellipsoidal height
-    double lat_sta_deg, double lon_sta_deg, double h_sta_m, double ht_wgs84_m,
+    double lat_sta_deg, double lon_sta_deg, double h_sta_m, np.ndarray[FLOAT_TYPE_t, ndim=1] ht_wgs84_m,
     # options
     bint refraction=True, bint equal_aspect=False,
     bint force_distortion_centre=False, bint asymmetry_corr=True,
@@ -3466,7 +3467,7 @@ def cyXYToGeo_wgs84(
     num = (a*a*cS)*(a*a*cS) + (b*b*sS)*(b*b*sS)
     den = (a*cS)*(a*cS) + (b*sS)*(b*sS)
     Rgeo = sqrt(num/den)
-    r_guess = Rgeo + ht_wgs84_m + 1000.0
+    # Note: r_guess will be set per point in the loop
 
     # --- main loop ---
     for i in range(n):
@@ -3544,6 +3545,7 @@ def cyXYToGeo_wgs84(
         dze = RE2*east + RN2*north + RU2*up
 
         # 5) Intersect WGS-84 h = ht_wgs84_m   (sphere guess + bisection)
+        r_guess = Rgeo + ht_wgs84_m[i] + 1000.0
         C2 = Xc*Xc + Yc*Yc + Zc*Zc
         Cdotd = Xc*dxe + Yc*dye + Zc*dze
         disc  = Cdotd*Cdotd - (C2 - r_guess*r_guess)
@@ -3552,7 +3554,7 @@ def cyXYToGeo_wgs84(
             continue
         s_hi = -Cdotd + sqrt(disc)
         s_lo = 0.0
-        f_lo = h_sta_m - ht_wgs84_m
+        f_lo = h_sta_m - ht_wgs84_m[i]
 
         Xi = Xc + s_hi*dxe; Yi = Yc + s_hi*dye; Zi = Zc + s_hi*dze
         pval = sqrt(Xi*Xi + Yi*Yi)
@@ -3560,7 +3562,7 @@ def cyXYToGeo_wgs84(
         latP = atan2(Zi + ep2*b*st*st*st, pval - e2*a*ct*ct*ct)
         Ncur = a / sqrt(1.0 - e2*sin(latP)*sin(latP))
         hP   = pval/cos(latP) - Ncur
-        f_hi = hP - ht_wgs84_m
+        f_hi = hP - ht_wgs84_m[i]
 
         it = 0
         while f_lo*f_hi > 0.0 and it < 6:
@@ -3571,7 +3573,7 @@ def cyXYToGeo_wgs84(
             latP = atan2(Zi + ep2*b*st*st*st, pval - e2*a*ct*ct*ct)
             Ncur = a / sqrt(1.0 - e2*sin(latP)*sin(latP))
             hP   = pval/cos(latP) - Ncur
-            f_hi = hP - ht_wgs84_m
+            f_hi = hP - ht_wgs84_m[i]
             it += 1
 
         if f_lo*f_hi > 0.0:
@@ -3586,7 +3588,7 @@ def cyXYToGeo_wgs84(
             latP = atan2(Zi + ep2*b*st*st*st, pval - e2*a*ct*ct*ct)
             Ncur = a / sqrt(1.0 - e2*sin(latP)*sin(latP))
             hP   = pval/cos(latP) - Ncur
-            f_mid = hP - ht_wgs84_m
+            f_mid = hP - ht_wgs84_m[i]
             if f_lo*f_mid <= 0.0:
                 s_hi = s_mid; f_hi = f_mid
             else:
