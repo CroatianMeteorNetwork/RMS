@@ -1010,8 +1010,8 @@ def xyHtToENUPP(X_data, Y_data, jd, ht_wgs84_m, platepar, min_el_deg=0.0):
             az, el: [ndarrays] Azimuth and elevation of the ray (radians).
     """
     
-    # Convert station height to WGS-84 if needed (assuming platepar.elev is MSL height)
-    station_ht_wgs84_m = platepar.elev  # This might need adjustment based on geoid
+    # Use WGS-84 height if available, otherwise fall back to MSL elevation
+    station_ht_wgs84_m = getattr(platepar, 'height_wgs84', platepar.elev)
     
     E, N, U, Eu, Nu, Uu, az, el = cyXYHttoENU_wgs84(
         np.array(X_data, dtype=np.float64), np.array(Y_data, dtype=np.float64), 
@@ -1040,8 +1040,8 @@ def geoToXYPP_iter(lat_data, lon_data, h_data, jd, platepar):
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
     """
     
-    # Convert station height to WGS-84 if needed (assuming platepar.elev is MSL height)
-    station_ht_wgs84_m = platepar.elev  # This might need adjustment based on geoid
+    # Use WGS-84 height if available, otherwise fall back to MSL elevation
+    station_ht_wgs84_m = getattr(platepar, 'height_wgs84', platepar.elev)
     
     X_data, Y_data = cyGeoToXY_wgs84_iter(
         np.array(lat_data, dtype=np.float64), np.array(lon_data, dtype=np.float64), 
@@ -1074,8 +1074,8 @@ def xyToGeoPP_iter(X_data, Y_data, h_data, jd, platepar):
             h: [ndarray] WGS-84 ellipsoid heights (meters).
     """
     
-    # Convert station height to WGS-84 if needed (assuming platepar.elev is MSL height)
-    station_ht_wgs84_m = platepar.elev  # This might need adjustment based on geoid
+    # Use WGS-84 height if available, otherwise fall back to MSL elevation
+    station_ht_wgs84_m = getattr(platepar, 'height_wgs84', platepar.elev)
     
     lat_data, lon_data, h_out_data = cyXYToGeo_wgs84_iter(
         np.array(X_data, dtype=np.float64), np.array(Y_data, dtype=np.float64),

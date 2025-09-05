@@ -33,6 +33,8 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
+from RMS.GeoidHeightEGM96 import mslToWGS84Height
+
 # Import Cython functions
 import pyximport
 import RMS.Astrometry.ApplyAstrometry
@@ -963,6 +965,20 @@ class Platepar(object):
         if not 'version' in self.__dict__:
             self.version = 1
 
+        # If the WGS84 height is not present, compute it from MSL elevation
+        if not 'height_wgs84' in self.__dict__:
+            try:
+                egm96_file_path = None  # This will use the default path
+                self.height_wgs84 = mslToWGS84Height(
+                    np.radians(self.lat),
+                    np.radians(self.lon),
+                    self.elev,
+                    egm96_file_path=egm96_file_path
+                )
+            except Exception as e:
+                self.height_wgs84 = self.elev
+                print("Warning: Calculating platepar WGS84 height failed {}. Using Geoid height instead.".format(str(e)))
+
         # If the refraction was not used for the fit, assume it is disabled
         if not 'refraction' in self.__dict__:
             self.refraction = False
@@ -1120,6 +1136,19 @@ class Platepar(object):
 
                 # Convert time to JD
                 self.JD = date2JD(Y, M, D, h, m, s)
+
+                # Calculate WGS84 height from MSL elevation
+                try:
+                    egm96_file_path = None  # This will use the default path
+                    self.height_wgs84 = mslToWGS84Height(
+                        np.radians(self.lat),
+                        np.radians(self.lon),
+                        self.elev,
+                        egm96_file_path=egm96_file_path
+                    )
+                except Exception as e:
+                    self.height_wgs84 = self.elev
+                    print("Warning: Calculating platepar WGS84 height failed {}. Using Geoid height instead.".format(str(e)))
 
                 # Calculate the reference hour angle
                 T = (self.JD - 2451545.0) / 36525.0
