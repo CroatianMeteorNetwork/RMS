@@ -1092,6 +1092,70 @@ def enuToXYPP(E_data, N_data, U_data, platepar, min_el_deg=0.0):
     return x, y
 
 
+def enHtToXYPP(E_data, N_data, Ht_data, platepar, min_el_deg=0.0):
+    """ Converts East-North coordinates at specified heights to image XY coordinates using iterative solver.
+    
+    This function takes E, N coordinates and target WGS-84 ellipsoidal heights, 
+    solves for the Up (U) component that places the point at the specified height,
+    then converts to image coordinates.
+    
+    Arguments:
+        E_data: [ndarray] Array of East coordinates in meters (from station).
+        N_data: [ndarray] Array of North coordinates in meters (from station).
+        Ht_data: [ndarray] Array of target WGS-84 ellipsoidal heights in meters.
+        platepar: [Platepar structure] Astrometry parameters.
+    
+    Keyword arguments:
+        min_el_deg: [float] Minimum elevation in degrees. Points below this will return NaN. Default: 0.0.
+    
+    Return:
+        (x, y): [tuple of ndarrays] Image X and Y coordinates.
+    """
+    
+    # Import the Cython function
+    from RMS.Astrometry.CyFunctions import cyENHtToXY_iter
+    
+    # Compute reference Alt/Az to apparent coordinates, epoch of date
+    az_centre, alt_centre = cyraDec2AltAz(
+        np.radians(platepar.RA_d),
+        np.radians(platepar.dec_d),
+        platepar.JD,
+        np.radians(platepar.lat),
+        np.radians(platepar.lon)
+    )
+    alt_centre = refractionTrueToApparent(alt_centre)
+    az_centre, alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
+    
+    rot = rotationWrtHorizon(platepar)
+    
+    # Ensure inputs are numpy arrays
+    E_array = np.array(E_data, dtype=np.float64).ravel()
+    N_array = np.array(N_data, dtype=np.float64).ravel()
+    Ht_array = np.array(Ht_data, dtype=np.float64).ravel()
+    
+    # Check that arrays have the same length
+    if len(E_array) != len(N_array) or len(E_array) != len(Ht_array):
+        raise ValueError(f"E, N, and Ht arrays must have the same length. Got E:{len(E_array)}, N:{len(N_array)}, Ht:{len(Ht_array)}")
+    
+    # Call the Cython function
+    x, y = cyENHtToXY_iter(
+        E_array, N_array, Ht_array,
+        float(platepar.X_res), float(platepar.Y_res),
+        float(alt_centre), float(az_centre),
+        float(rot), float(platepar.F_scale),
+        platepar.x_poly_fwd, platepar.y_poly_fwd,
+        platepar.distortion_type,
+        float(platepar.lat), float(platepar.lon), float(platepar.height_wgs84),
+        refraction=platepar.refraction,
+        equal_aspect=platepar.equal_aspect,
+        force_distortion_centre=platepar.force_distortion_centre,
+        asymmetry_corr=platepar.asymmetry_corr,
+        min_el_deg=min_el_deg
+    )
+    
+    return x, y
+
+
 def geoToXYPP(lat_data, lon_data, h_data, platepar, min_el_deg=0.0):
     """ Converts WGS-84 geodetic coordinates to image coordinates.
     

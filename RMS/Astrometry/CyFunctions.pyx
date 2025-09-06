@@ -3342,6 +3342,272 @@ def cyENUToXY_iter(
     return x_array, y_array
 
 
+@cython.boundscheck(False)
+@cython.wraparound(False)
+def cyENHtToXY_iter(
+    np.ndarray[FLOAT_TYPE_t, ndim=1] E_m,    # ENU east  (m)
+    np.ndarray[FLOAT_TYPE_t, ndim=1] N_m,    # ENU north (m)
+    np.ndarray[FLOAT_TYPE_t, ndim=1] Ht_m,   # target WGS-84 ellipsoidal height PER POINT (m)
+    double x_res, double y_res,
+    double alt_ref, double az_ref, double rotation_from_horiz, double pix_scale,
+    np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd,
+    str dist_type,
+    double lat_sta_deg, double lon_sta_deg, double h_sta_m,
+    bint refraction=True, bint equal_aspect=False,
+    bint force_distortion_centre=False, bint asymmetry_corr=True,
+    double min_el_deg=0.0
+):
+    """
+    (E, N, h_ellip[i]) -> XY.
+    Solves U per point so that geodetic height equals Ht_m[i], then Alt/Az -> gnomonic -> forward distortion.
+    Matches cyAltAzToXY normalization/flow. Iteration only in radial forward branch.
+    """
+
+    # -------- HOISTED DECLARATIONS --------
+    cdef Py_ssize_t n, i
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] x_array, y_array
+
+    # WGS-84 constants
+    cdef double a, f, e2, b, ep2
+
+    # station ECEF + columns of (ECEF <- ENU)
+    cdef double latS, lonS, sS, cS, Nsta, Xc, Yc, Zc
+    cdef double RE0, RE1, RE2, RN0, RN1, RN2, RU0, RU1, RU2
+
+    # center/rotation (Alt/Az)
+    cdef double A0, h0, rotH, el_gate
+
+    # forward distortion params
+    cdef int index_offset
+    cdef double x0, y0, xy, a1, a2, k1, k2, k3, k4
+
+    # per-point temps
+    cdef double E, Nn, U
+    cdef double dxe_base, dye_base, dze_base
+    cdef double U_lo, U_hi, U_mid, f_lo, f_hi, f_mid
+    cdef double Xi, Yi, Zi, pval, theta_b, st, ct, latP, Ncur, hP
+
+    cdef double A, h, radius, theta, sin_ang, cos_ang
+    cdef double x_corr, y_corr, r, dx, dy, x_img, y_img
+
+    cdef int it, j
+    cdef double delta_r, r_corr, r_scale, x_est, y_est
+    # --------------------------------------
+
+    n = E_m.shape[0]
+    x_array = np.zeros(n, dtype=FLOAT_TYPE)
+    y_array = np.zeros(n, dtype=FLOAT_TYPE)
+
+    # WGS-84
+    a  = 6378137.0
+    f  = 1.0/298.257223563
+    e2 = f*(2.0 - f)
+    b  = a*(1.0 - f)
+    ep2 = (a*a - b*b)/(b*b)
+
+    # station ECEF
+    latS = radians(lat_sta_deg); lonS = radians(lon_sta_deg)
+    sS = sin(latS); cS = cos(latS)
+    Nsta = a / sqrt(1.0 - e2*sS*sS)
+    Xc = (Nsta + h_sta_m)*cS*cos(lonS)
+    Yc = (Nsta + h_sta_m)*cS*sin(lonS)
+    Zc = (Nsta*(1.0 - e2) + h_sta_m)*sS
+
+    # ECEF <- ENU (columns are E,N,U in ECEF)
+    RE0 = -sin(lonS); RE1 =  cos(lonS); RE2 = 0.0
+    RN0 = -sS*cos(lonS); RN1 = -sS*sin(lonS); RN2 = cS
+    RU0 =  cS*cos(lonS); RU1 =  cS*sin(lonS); RU2 = sS
+
+    # center/rotation like cyAltAzToXY
+    A0 = radians(az_ref)
+    h0 = radians(alt_ref)
+    if refraction:
+        h0 = refractionTrueToApparent(h0)
+    rotH = radians(rotation_from_horiz)
+    el_gate = radians(min_el_deg)
+
+    # forward distortion params (offsets from x_poly_fwd)
+    index_offset = 0
+    if force_distortion_centre:
+        x0 = 0.5/(x_res/2.0); y0 = 0.5/(y_res/2.0); index_offset += 2
+    else:
+        x0 = x_poly_fwd[0]; y0 = x_poly_fwd[1]
+    x0 *= (x_res/2.0); y0 *= (y_res/2.0)
+    x0 = -x_res/2.0 + (x0 + x_res/2.0)%x_res
+    y0 = -y_res/2.0 + (y0 + y_res/2.0)%y_res
+
+    if equal_aspect:
+        xy = 0.0; index_offset += 1
+    else:
+        xy = x_poly_fwd[2 - index_offset]
+
+    if asymmetry_corr:
+        a1 = x_poly_fwd[3 - index_offset]
+        a2 = (x_poly_fwd[4 - index_offset]*(2*pi))%(2*pi)
+    else:
+        a1 = 0.0; a2 = 0.0; index_offset += 2
+
+    k1 = k2 = k3 = k4 = 0.0
+    if   dist_type == "radial3-all": k1 = x_poly_fwd[5 - index_offset]; k2 = x_poly_fwd[6 - index_offset]
+    elif dist_type == "radial4-all": k1 = x_poly_fwd[5 - index_offset]; k2 = x_poly_fwd[6 - index_offset]; k3 = x_poly_fwd[7 - index_offset]
+    elif dist_type == "radial5-all": k1 = x_poly_fwd[5 - index_offset]; k2 = x_poly_fwd[6 - index_offset]; k3 = x_poly_fwd[7 - index_offset]; k4 = x_poly_fwd[8 - index_offset]
+    elif dist_type == "radial3-odd": k1 = x_poly_fwd[5 - index_offset]
+    elif dist_type == "radial5-odd": k1 = x_poly_fwd[5 - index_offset]; k2 = x_poly_fwd[6 - index_offset]
+    elif dist_type == "radial7-odd": k1 = x_poly_fwd[5 - index_offset]; k2 = x_poly_fwd[6 - index_offset]; k3 = x_poly_fwd[7 - index_offset]
+    elif dist_type == "radial9-odd": k1 = x_poly_fwd[5 - index_offset]; k2 = x_poly_fwd[6 - index_offset]; k3 = x_poly_fwd[7 - index_offset]; k4 = x_poly_fwd[8 - index_offset]
+
+    for i in range(n):
+        E = E_m[i]; Nn = N_m[i]
+
+        # 1) Build base ECEF direction for this (E,N), then 1-D solve U to hit Ht_m[i]
+        dxe_base = RE0*E + RN0*Nn
+        dye_base = RE1*E + RN1*Nn
+        dze_base = RE2*E + RN2*Nn
+
+        # bracket U (m). Start with a broad span.
+        U_lo = -50000.0
+        U_hi =  400000.0
+
+        # f(U_lo)
+        Xi = Xc + dxe_base + RU0*U_lo; Yi = Yc + dye_base + RU1*U_lo; Zi = Zc + dze_base + RU2*U_lo
+        pval = sqrt(Xi*Xi + Yi*Yi)
+        theta_b = atan2(Zi*a, pval*b); st = sin(theta_b); ct = cos(theta_b)
+        latP = atan2(Zi + ep2*b*st*st*st, pval - e2*a*ct*ct*ct)
+        Ncur = a / sqrt(1.0 - e2*sin(latP)*sin(latP))
+        hP   = pval/cos(latP) - Ncur
+        f_lo = hP - Ht_m[i]
+
+        # f(U_hi)
+        Xi = Xc + dxe_base + RU0*U_hi; Yi = Yc + dye_base + RU1*U_hi; Zi = Zc + dze_base + RU2*U_hi
+        pval = sqrt(Xi*Xi + Yi*Yi)
+        theta_b = atan2(Zi*a, pval*b); st = sin(theta_b); ct = cos(theta_b)
+        latP = atan2(Zi + ep2*b*st*st*st, pval - e2*a*ct*ct*ct)
+        Ncur = a / sqrt(1.0 - e2*sin(latP)*sin(latP))
+        hP   = pval/cos(latP) - Ncur
+        f_hi = hP - Ht_m[i]
+
+        it = 0
+        while f_lo*f_hi > 0.0 and it < 8:
+            if fabs(f_lo) < fabs(f_hi):
+                U_lo -= 0.5*(U_hi - U_lo)
+            else:
+                U_hi += 0.5*(U_hi - U_lo)
+            Xi = Xc + dxe_base + RU0*U_hi; Yi = Yc + dye_base + RU1*U_hi; Zi = Zc + dze_base + RU2*U_hi
+            pval = sqrt(Xi*Xi + Yi*Yi)
+            theta_b = atan2(Zi*a, pval*b); st = sin(theta_b); ct = cos(theta_b)
+            latP = atan2(Zi + ep2*b*st*st*st, pval - e2*a*ct*ct*ct)
+            Ncur = a / sqrt(1.0 - e2*sin(latP)*sin(latP))
+            hP   = pval/cos(latP) - Ncur
+            f_hi = hP - Ht_m[i]
+            it += 1
+
+        for it in range(20):
+            U_mid = 0.5*(U_lo + U_hi)
+            Xi = Xc + dxe_base + RU0*U_mid; Yi = Yc + dye_base + RU1*U_mid; Zi = Zc + dze_base + RU2*U_mid
+            pval = sqrt(Xi*Xi + Yi*Yi)
+            theta_b = atan2(Zi*a, pval*b); st = sin(theta_b); ct = cos(theta_b)
+            latP = atan2(Zi + ep2*b*st*st*st, pval - e2*a*ct*ct*ct)
+            Ncur = a / sqrt(1.0 - e2*sin(latP)*sin(latP))
+            hP   = pval/cos(latP) - Ncur
+            f_mid = hP - Ht_m[i]
+            if f_lo*f_mid <= 0.0:
+                U_hi = U_mid; f_hi = f_mid
+            else:
+                U_lo = U_mid; f_lo = f_mid
+            if fabs(f_mid) < 1e-3:   # ~1 mm height
+                break
+
+        U = 0.5*(U_lo + U_hi)
+
+        # 2) ENU -> Alt/Az (apparent if refraction=True)
+        A = atan2(E, Nn)
+        if A < 0.0: A += 2*pi
+        h = atan2(U, sqrt(E*E + Nn*Nn))
+        if refraction:
+            h = refractionTrueToApparent(h)
+        if h < el_gate:
+            x_array[i] = np.nan; y_array[i] = np.nan
+            continue
+
+        # 3) gnomonic (match cyAltAzToXY)
+        radius = radians(angularSeparation(degrees(A), degrees(h), degrees(A0), degrees(h0)))
+        if radius < 1e-8:
+            theta = 0.0
+        else:
+            # keep same sign convention you use elsewhere
+            sin_ang =  cos(h) * sin(A0 - A) / sin(radius)
+            cos_ang = (sin(h) - sin(h0) * cos(radius)) / (cos(h0) * sin(radius))
+            theta   = -atan2(sin_ang, cos_ang) + rotH - pi/2.0
+
+        x_corr = degrees(radius)*cos(theta)*pix_scale
+        y_corr = degrees(radius)*sin(theta)*pix_scale
+
+        # 4) forward distortion (same as cyAltAzToXY)
+        if dist_type.startswith("poly3+radial"):
+            r  = sqrt((x_corr - x0)**2 + (y_corr - y0)**2)
+
+            dx = (x0
+                + x_poly_fwd[1]*x_corr + x_poly_fwd[2]*y_corr
+                + x_poly_fwd[3]*x_corr**2 + x_poly_fwd[4]*x_corr*y_corr + x_poly_fwd[5]*y_corr**2
+                + x_poly_fwd[6]*x_corr**3 + x_poly_fwd[7]*x_corr**2*y_corr + x_poly_fwd[8]*x_corr*y_corr**2 + x_poly_fwd[9]*y_corr**3
+                + x_poly_fwd[10]*x_corr*r + x_poly_fwd[11]*y_corr*r)
+
+            dy = (y0
+                + y_poly_fwd[1]*x_corr + y_poly_fwd[2]*y_corr
+                + y_poly_fwd[3]*x_corr**2 + y_poly_fwd[4]*x_corr*y_corr + y_poly_fwd[5]*y_corr**2
+                + y_poly_fwd[6]*x_corr**3 + y_poly_fwd[7]*x_corr**2*y_corr + y_poly_fwd[8]*x_corr*y_corr**2 + y_poly_fwd[9]*y_corr**3
+                + y_poly_fwd[10]*y_corr*r + y_poly_fwd[11]*x_corr*r)
+
+            if dist_type.endswith("+radial3") or dist_type.endswith("+radial5"):
+                dx += x_poly_fwd[12]*x_corr*r**3
+                dy += y_poly_fwd[12]*y_corr*r**3
+            if dist_type.endswith("+radial5"):
+                dx += x_poly_fwd[13]*x_corr*r**5
+                dy += y_poly_fwd[13]*y_corr*r**5
+
+            x_img = x_corr - dx
+            y_img = y_corr - dy
+
+        elif dist_type.startswith("radial"):
+            delta_r = 1.0
+            j = 0
+            x_img = x_corr; y_img = y_corr
+            while (delta_r > 0.01) and (j < 100):
+                j += 1
+                r = sqrt((x_img - x0)**2 + ((1.0 + xy)*(y_img - y0))**2)
+                r = r + a1*(1.0 + xy)*(y_img - y0)*cos(a2) - a1*(x_img - x0)*sin(a2)
+                r = r/(x_res/2.0)
+
+                r_corr = r
+                if   dist_type == "radial3-all": r_corr = r + k1*r**2 + k2*r**3
+                elif dist_type == "radial4-all": r_corr = r + k1*r**2 + k2*r**3 + k3*r**4
+                elif dist_type == "radial5-all": r_corr = r + k1*r**2 + k2*r**3 + k3*r**4 + k4*r**5
+                elif dist_type == "radial3-odd": r_corr = r + k1*r**3
+                elif dist_type == "radial5-odd": r_corr = r + k1*r**3 + k2*r**5
+                elif dist_type == "radial7-odd": r_corr = r + k1*r**3 + k2*r**5 + k3*r**7
+                elif dist_type == "radial9-odd": r_corr = r + k1*r**3 + k2*r**5 + k3*r**7 + k4*r**9
+
+                if r == 0.0:
+                    r_scale = 0.0
+                else:
+                    r_scale = (r_corr/r - 1.0)
+
+                dx = (x_img - x0)*r_scale - x0
+                dy = (y_img - y0)*r_scale*(1.0 + xy) - y0*(1.0 + xy) + y_img*xy
+
+                x_est = x_corr - dx
+                y_est = y_corr - dy
+                delta_r = sqrt((x_img - x_est)**2 + (y_img - y_est)**2)
+                x_img = x_est; y_img = y_est
+        else:
+            x_img = x_corr; y_img = y_corr
+
+        x_array[i] = x_img + x_res/2.0
+        y_array[i] = y_img + y_res/2.0
+
+    return x_array, y_array
+
+
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
