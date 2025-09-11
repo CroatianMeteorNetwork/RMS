@@ -16,21 +16,18 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
+from RMS import ConfigReader
+from RMS.Astrometry.ApplyAstrometry import computeFOVSize, xyToRaDecPP, rotationWrtHorizon
+from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz
+from RMS.Formats.Platepar import Platepar
+from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFile
 from RMS.Routines.Image import signalToNoise, loadDark, loadFlat
 from RMS.Routines import Image
-from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFile
-from RMS import ConfigReader
-from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz
-from RMS.Astrometry.ApplyAstrometry import computeFOVSize, xyToRaDecPP, rotationWrtHorizon
 
 try:
     from pyswarms.single.global_best import GlobalBestPSO
 except Exception as e:
     print(f'ASTRA cannot be run, pyswarms not installed: {e}')
-
-# Only import platepar in terminal execution (avoids circular import error)
-if __name__ == '__main__':
-    from Utils.SkyFit2 import Platepar
 
 
 
