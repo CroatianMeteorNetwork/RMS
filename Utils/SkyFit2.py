@@ -4983,7 +4983,8 @@ class PlateTool(QtWidgets.QMainWindow):
         img_crop_orig = self.img.data[x_min:x_max, y_min:y_max]
 
         # Perform gamma correction
-        img_crop = Image.gammaCorrectionImage(img_crop_orig, self.config.gamma)
+        img_crop = Image.gammaCorrectionImage(img_crop_orig, self.config.gamma, out_type=np.float32)
+
 
         ######################################################################################################
 
@@ -5820,7 +5821,11 @@ class PlateTool(QtWidgets.QMainWindow):
             crop_img = masked_img[x_min:x_max, y_min:y_max]
 
             # Perform gamma correction on the colored part
-            crop_img = Image.gammaCorrectionImage(crop_img, self.config.gamma, bp=0, wp=(2**self.config.bit_depth - 1))
+            crop_img = Image.gammaCorrectionImage(
+                crop_img, self.config.gamma, 
+                bp=0, wp=(2**self.config.bit_depth - 1), 
+                out_type=np.float32
+                )
 
             # Mask out the colored in pixels
             mask_img_bg = np.zeros_like(self.img.data)
@@ -5831,7 +5836,11 @@ class PlateTool(QtWidgets.QMainWindow):
             crop_bg = masked_img_bg[x_min:x_max, y_min:y_max]
 
             # Perform gamma correction on the background
-            crop_bg = Image.gammaCorrectionImage(crop_bg, self.config.gamma, bp=0, wp=(2**self.config.bit_depth - 1))
+            crop_bg = Image.gammaCorrectionImage(
+                crop_bg, self.config.gamma, 
+                bp=0, wp=(2**self.config.bit_depth - 1),
+                out_type=np.float32
+                )
 
             # Compute the median background
             background_lvl = np.ma.median(crop_bg)
@@ -5885,7 +5894,11 @@ class PlateTool(QtWidgets.QMainWindow):
                 avepixel_crop = avepixel_masked[x_min:x_max, y_min:y_max]
 
                 # Perform gamma correction on the avepixel crop
-                avepixel_crop = Image.gammaCorrectionImage(avepixel_crop, self.config.gamma, bp=0, wp=(2**self.config.bit_depth - 1))
+                avepixel_crop = Image.gammaCorrectionImage(
+                    avepixel_crop, self.config.gamma, 
+                    bp=0, wp=(2**self.config.bit_depth - 1),
+                    out_type=np.float32
+                    )
 
                 background_lvl = np.ma.median(avepixel_crop)
 
