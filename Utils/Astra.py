@@ -234,11 +234,13 @@ class ASTRA:
 
         if self.dark is not None or self.flat_struct is not None:
             corrected_avepixel = Image.gammaCorrectionImage(corrected_avepixel, self.config.gamma, 
-                                                        bp=0, wp=(2**self.config.bit_depth - 1))
+                                                        bp=0, wp=(2**self.config.bit_depth - 1),
+                                                        out_type=np.float32)
 
         else:
             corrected_avepixel = Image.gammaCorrectionImage(avepixel_background, self.config.gamma, 
-                                                        bp=0, wp=(2**self.config.bit_depth - 1))
+                                                        bp=0, wp=(2**self.config.bit_depth - 1),
+                                                        out_type=np.float32)
 
         # Set backgrounds as a class var
         self.corrected_avepixel = corrected_avepixel
@@ -1690,10 +1692,12 @@ class ASTRA:
         
         if self.dark is not None or self.flat_struct is not None:
             corr_frame = Image.gammaCorrectionImage(corr_frame, self.config.gamma,
-                                                    bp=0, wp=(2**self.config.bit_depth - 1))
+                                                    bp=0, wp=(2**self.config.bit_depth - 1),
+                                                    out_type=np.float32)
         else:
             corr_frame = Image.gammaCorrectionImage(corr_frame, self.config.gamma,
-                                                    bp=0, wp=(2**self.config.bit_depth - 1))
+                                                    bp=0, wp=(2**self.config.bit_depth - 1),
+                                                    out_type=np.float32)
 
         # 2. Background subtraction
         unsub_frame = corr_frame.copy()
