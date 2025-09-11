@@ -3836,6 +3836,9 @@ class PlateTool(QtWidgets.QMainWindow):
         if not hasattr(self, "astra_config_params"):
             self.astra_config_params = None
 
+        if not hasattr(self, "saturation_threshold"):
+            self.saturation_threshold = int(round(0.98*(2**self.config.bit_depth - 1)))
+
         # If the paired stars are a list (old version), reset it to a new version where it's an object
         if isinstance(self.paired_stars, list):
 
@@ -7867,7 +7870,16 @@ class PlateTool(QtWidgets.QMainWindow):
                 mag_str = 'GAIA G band'
 
             else:
-                mag_str = "{:.2f}B + {:.2f}V + {:.2f}R + {:.2f}I".format(*self.config.star_catalog_band_ratios)
+
+                # If there are only 4 band ratios, assume BVRI
+                if len(self.config.star_catalog_band_ratios) == 4:
+                    mag_str = "{:.2f}B + {:.2f}V + {:.2f}R + {:.2f}I".format(*self.config.star_catalog_band_ratios)
+
+                # If there are 7, assume BVRI + G + Bp + Rp. Only take non-zero coefficients
+                elif len(self.config.star_catalog_band_ratios) == 7:
+                    band_names = ['B', 'V', 'R', 'I', 'G', 'Bp', 'Rp']
+                    mag_str = " + ".join(["{:.2f}{}".format(ratio, band) for ratio, band in 
+                                          zip(self.config.star_catalog_band_ratios, band_names) if ratio > 0])
 
             ax_p.set_ylabel("Apparent magnitude ({:s})".format(mag_str))
 
