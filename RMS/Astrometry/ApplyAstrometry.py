@@ -706,7 +706,6 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
     # Calculate magnitudes
     magnitude_data = calculateMagnitudes(level_data, radius_arr, platepar.mag_lev, platepar.vignetting_coeff)
 
-
     # Extinction correction
     if extinction_correction:
         magnitude_data = extinctionCorrectionApparentToTrue(magnitude_data, X_data, Y_data, JD_data[0], \

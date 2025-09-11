@@ -1355,7 +1355,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             
             # Apply the gamma correction to the average pixel image if needed
             if config.gamma != 1.0:
-                avepixel_img = Image.gammaCorrectionImage(avepixel_img, config.gamma)
+                avepixel_img = Image.gammaCorrectionImage(avepixel_img, config.gamma, out_type=np.float32)
 
             # Calculate centroids
             centroids = []
@@ -1476,7 +1476,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
                         # Apply gamma correction
                         if config.gamma != 1.0:
-                            fr_img = Image.gammaCorrectionImage(fr_img, config.gamma)
+                            fr_img = Image.gammaCorrectionImage(fr_img, config.gamma, out_type=np.float32)
 
                         # Subtract average
                         max_avg_corrected = Image.applyDark(fr_img, avepixel_img)
