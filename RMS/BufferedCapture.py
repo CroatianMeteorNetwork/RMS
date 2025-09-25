@@ -797,9 +797,41 @@ class BufferedCapture(Process):
           full_path [str]: Full path to save this new video segment to
         """
 
-        # Segment name is based on timestamp recorded during last segment save
-        segment_time = UTCFromTimestamp.utcfromtimestamp(self.last_segment_savetime)
-        self.last_segment_savetime = time.time()
+        # Determine the timestamp of the first frame belonging to this segment. We derive it from
+        # the pipeline clock so that the generated filename reflects the actual capture time
+        # instead of the moment when splitmuxsink finalizes the file.
+
+        segment_timestamp = None
+
+        if self.start_timestamp:
+            try:
+                clock = splitmuxsink.get_clock()
+                clock_time = clock.get_time() if clock else Gst.CLOCK_TIME_NONE
+
+                # Base time is maintained on the pipeline element if it still exists, otherwise
+                # fall back to the sink's base time.
+                base_time = Gst.CLOCK_TIME_NONE
+                if self.pipeline is not None:
+                    base_time = self.pipeline.get_base_time()
+                if base_time == Gst.CLOCK_TIME_NONE:
+                    base_time = splitmuxsink.get_base_time()
+
+                if (clock_time != Gst.CLOCK_TIME_NONE) and (base_time != Gst.CLOCK_TIME_NONE):
+                    running_time_ns = clock_time - base_time
+                    if running_time_ns >= 0:
+                        segment_timestamp = self.start_timestamp + (running_time_ns / Gst.SECOND)
+
+            except Exception as e:
+                log.debug("moveSegment: Failed to derive timestamp from pipeline clock: {}".format(e))
+
+        if segment_timestamp is None:
+            # Fall back to the best known timestamp (usually previous segment) or current time
+            segment_timestamp = self.last_segment_savetime or time.time()
+
+        # Remember this value for the next invocation/fallbacks
+        self.last_segment_savetime = segment_timestamp
+
+        segment_time = UTCFromTimestamp.utcfromtimestamp(segment_timestamp)
         segment_filename = segment_time.strftime("{}_%Y%m%d_%H%M%S_%f_video.mkv".format(self.config.stationID))
         segment_subpath = os.path.join(self.config.data_dir, self.config.video_dir, segment_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
 
@@ -1066,6 +1098,8 @@ class BufferedCapture(Process):
                 # Calculate start timestamp
                 if start_time is not None:
                     self.start_timestamp = start_time - (self.config.camera_buffer/self.config.fps + self.config.camera_latency)
+                    if self.config.raw_video_save:
+                        self.last_segment_savetime = self.start_timestamp
 
                 # Log start time
                 start_time_str = (UTCFromTimestamp.utcfromtimestamp(self.start_timestamp)
