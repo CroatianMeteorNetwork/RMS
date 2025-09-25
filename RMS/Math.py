@@ -88,8 +88,8 @@ def angularSeparationVect(vect1, vect2):
     # yield wildly wrong angles (and even NaNs if the product exceeds 1).  Ensure
     # both vectors are normalized before evaluating the inverse cosine and clip
     # the dot product into the valid range to avoid numerical issues.
-    vect1_norm = vect1 / np.linalg.norm(vect1)
-    vect2_norm = vect2 / np.linalg.norm(vect2)
+    vect1_norm = vect1/np.linalg.norm(vect1)
+    vect2_norm = vect2/np.linalg.norm(vect2)
 
     # Numerical precision can push the dot product slightly outside the range,
     # so clamp it to the closed interval [-1, 1].
