@@ -52,8 +52,10 @@ except ImportError:
 def choosePlatform(win_conf, rpi_conf, linux_pc_conf):
     """ Choose the setting depending on if this is running on the RPi or a Linux PC. """
 
-    # Check if running on Windows
-    if 'win' in sys.platform:
+    # Check if running on Windows.
+    # ``startswith`` ensures the platform string actually begins with ``"win"``
+    # instead of matching other identifiers that merely contain that substring.
+    if sys.platform.startswith('win'):
         return win_conf
 
     else:
