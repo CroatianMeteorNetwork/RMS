@@ -53,7 +53,10 @@ def choosePlatform(win_conf, rpi_conf, linux_pc_conf):
     """ Choose the setting depending on if this is running on the RPi or a Linux PC. """
 
     # Check if running on Windows
-    if 'win' in sys.platform:
+    # ``sys.platform`` contains ``darwin`` on macOS, which previously triggered the
+    # Windows branch because it contains the substring ``"win"``.  Use ``startswith``
+    # to avoid mis-detecting macOS as Windows.
+    if sys.platform.startswith('win'):
         return win_conf
 
     else:
