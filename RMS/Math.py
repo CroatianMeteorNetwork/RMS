@@ -83,7 +83,19 @@ def angularSeparationDeg(ra1, dec1, ra2, dec2):
 def angularSeparationVect(vect1, vect2):
     """ Calculates angle between vectors in radians. """
 
-    return np.abs(np.arccos(np.dot(vect1, vect2)))
+    # The dot product gives |a||b|cos(theta). If the vectors are not normalized the
+    # magnitude term will incorrectly scale the value passed to arccos which can
+    # yield wildly wrong angles (and even NaNs if the product exceeds 1).  Ensure
+    # both vectors are normalized before evaluating the inverse cosine and clip
+    # the dot product into the valid range to avoid numerical issues.
+    vect1_norm = vect1 / np.linalg.norm(vect1)
+    vect2_norm = vect2 / np.linalg.norm(vect2)
+
+    # Numerical precision can push the dot product slightly outside the range,
+    # so clamp it to the closed interval [-1, 1].
+    dot_prod = np.clip(np.dot(vect1_norm, vect2_norm), -1.0, 1.0)
+
+    return np.abs(np.arccos(dot_prod))
 
 
 
