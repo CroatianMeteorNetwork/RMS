@@ -2751,9 +2751,18 @@ class PlateTool(QtWidgets.QMainWindow):
 
             cat_stars_xy, self.catalog_stars_filtered = [], []
             for star_xy, star_radec in zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked):
-                
-                # Check if the star is inside the mask
-                if self.mask.img[int(star_xy[1]), int(star_xy[0])] != 0:
+
+                # Make sure that the dimensions of the mask match the image dimensions
+                if (self.mask.img.shape[0] == self.img.data.shape[0]) or \
+                   (self.mask.img.shape[1] == self.img.data.shape[1]):
+
+                    # Check if the star is inside the mask
+                    if self.mask.img[int(star_xy[1]), int(star_xy[0])] != 0:
+                        cat_stars_xy.append(star_xy)
+                        self.catalog_stars_filtered.append(star_radec)
+
+                # If the mask dimensions don't match the image dimensions, ignore the mask
+                else:
                     cat_stars_xy.append(star_xy)
                     self.catalog_stars_filtered.append(star_radec)
 

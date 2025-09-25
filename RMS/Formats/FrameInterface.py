@@ -2000,7 +2000,10 @@ class InputTypeImages(object):
 
                 # Load the frame time
                 timestamp_stripped = head["DATE-OBS"].strip("=").strip("'").strip()
-                self.dt_frame_time = datetime.datetime.strptime(timestamp_stripped, "%Y-%m-%dT%H:%M:%S.%f")
+                try:
+                    self.dt_frame_time = datetime.datetime.strptime(timestamp_stripped, "%Y-%m-%dT%H:%M:%S.%f")
+                except ValueError:
+                    self.dt_frame_time = datetime.datetime.strptime(timestamp_stripped, "%Y-%m-%dT%H:%M:%S")
 
                 # If CABERNET is used, set a fixed FPS
                 if "COMMENT" in head:
