@@ -33,6 +33,9 @@ def runExternalScript(captured_night_dir, archived_night_dir, config):
     if not config.external_script_run:
         return None
 
+    if (config.external_script_path is None) or (config.external_function_name is None):
+        log.error('To run an external script, both the path to the script and the name of the function to run must be defined in the config file!')
+        return None
 
     # Check if the script path exists
     if not os.path.isfile(config.external_script_path):
