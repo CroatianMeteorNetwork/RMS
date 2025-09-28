@@ -183,6 +183,11 @@ class BufferedCapture(Process):
         self._bus_should_exit = False
         self._bus_thread = None
 
+        # Store the most recent smoothing correction between raw and smoothed
+        # presentation timestamps. This value is reused when naming splitmux
+        # segments to keep filenames aligned with the first buffered frame.
+        self.last_pts_correction_ns = 0
+
 
     def startCapture(self, cameraID=0):
         """ Start capture using specified camera.
@@ -460,6 +465,7 @@ class BufferedCapture(Process):
             if self.reset_count == 50:
                 log.info("Too many resets. Disabling smoothing function!")
                 self.reset_count += 1
+            self.last_pts_correction_ns = 0
             return new_pts
 
         # Calculate linear regression params
@@ -492,6 +498,7 @@ class BufferedCapture(Process):
                 self.b_error_debt = 0
                 self.last_m_err = float('inf')
                 self.last_m_err_n = 0
+                self.last_pts_correction_ns = 0
                 log.info('smooth_pts detected dropped frame. Resetting regression parameters.')
 
                 return new_pts
@@ -516,6 +523,7 @@ class BufferedCapture(Process):
             ret, frame = self.device.read()
             if ret:
                 timestamp = None # assigned later
+                self.last_pts_correction_ns = 0
         
         # Read capture device frame
         else:
@@ -554,6 +562,7 @@ class BufferedCapture(Process):
 
                     # Smooth raw pts and calculate actual timestamp
                     smoothed_pts = self.smoothPTS(gst_timestamp_ns)
+                    self.last_pts_correction_ns = smoothed_pts - gst_timestamp_ns
                     timestamp = self.start_timestamp + (smoothed_pts/1e9)
 
                 finally:
@@ -565,6 +574,7 @@ class BufferedCapture(Process):
                 ret, frame = self.device.read()
                 if ret:
                     timestamp = time.time()
+                    self.last_pts_correction_ns = 0
 
         return ret, frame, timestamp
 
@@ -797,9 +807,45 @@ class BufferedCapture(Process):
           full_path [str]: Full path to save this new video segment to
         """
 
-        # Segment name is based on timestamp recorded during last segment save
-        segment_time = UTCFromTimestamp.utcfromtimestamp(self.last_segment_savetime)
-        self.last_segment_savetime = time.time()
+        # Determine the timestamp of the first frame belonging to this segment. We derive it from
+        # the pipeline clock so that the generated filename reflects the actual capture time
+        # instead of the moment when splitmuxsink finalizes the file.
+
+        segment_timestamp = None
+
+        if self.start_timestamp:
+            try:
+                clock = splitmuxsink.get_clock()
+                clock_time = clock.get_time() if clock else Gst.CLOCK_TIME_NONE
+
+                # Base time is maintained on the pipeline element if it still exists, otherwise
+                # fall back to the sink's base time.
+                base_time = Gst.CLOCK_TIME_NONE
+                if self.pipeline is not None:
+                    base_time = self.pipeline.get_base_time()
+                if base_time == Gst.CLOCK_TIME_NONE:
+                    base_time = splitmuxsink.get_base_time()
+
+                if (clock_time != Gst.CLOCK_TIME_NONE) and (base_time != Gst.CLOCK_TIME_NONE):
+                    running_time_ns = clock_time - base_time
+                    if running_time_ns >= 0:
+                        correction = getattr(self, "last_pts_correction_ns", 0) or 0
+                        corrected_running_time_ns = running_time_ns + correction
+                        if corrected_running_time_ns < 0:
+                            corrected_running_time_ns = running_time_ns
+                        segment_timestamp = self.start_timestamp + (corrected_running_time_ns / Gst.SECOND)
+
+            except Exception as e:
+                log.debug("moveSegment: Failed to derive timestamp from pipeline clock: {}".format(e))
+
+        if segment_timestamp is None:
+            # Fall back to the best known timestamp (usually previous segment) or current time
+            segment_timestamp = self.last_segment_savetime or time.time()
+
+        # Remember this value for the next invocation/fallbacks
+        self.last_segment_savetime = segment_timestamp
+
+        segment_time = UTCFromTimestamp.utcfromtimestamp(segment_timestamp)
         segment_filename = segment_time.strftime("{}_%Y%m%d_%H%M%S_%f_video.mkv".format(self.config.stationID))
         segment_subpath = os.path.join(self.config.data_dir, self.config.video_dir, segment_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
 
@@ -1066,6 +1112,8 @@ class BufferedCapture(Process):
                 # Calculate start timestamp
                 if start_time is not None:
                     self.start_timestamp = start_time - (self.config.camera_buffer/self.config.fps + self.config.camera_latency)
+                    if self.config.raw_video_save:
+                        self.last_segment_savetime = self.start_timestamp
 
                 # Log start time
                 start_time_str = (UTCFromTimestamp.utcfromtimestamp(self.start_timestamp)
@@ -1233,9 +1281,10 @@ class BufferedCapture(Process):
                 self.m_jump_error = 0
                 self.last_m_err = float('inf')
                 self.last_m_err_n = 0
+                self.last_pts_correction_ns = 0
 
 
-                try: 
+                try:
 
                     # Initialize GStreamer (only if not already initialized)
                     if not Gst.is_initialized():
@@ -1633,6 +1682,7 @@ class BufferedCapture(Process):
             self.last_m_err_n = 0
             self.current_raw_frame_shape = None
             self.current_mode = None
+            self.last_pts_correction_ns = 0
 
             # Initialize raw frame handling if enabled
             if self.config.save_frames:
