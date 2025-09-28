@@ -183,6 +183,9 @@ class BufferedCapture(Process):
         self._bus_should_exit = False
         self._bus_thread = None
 
+        # Initialize PTS correction tracking
+        self.last_pts_correction_ns = 0
+
 
     def startCapture(self, cameraID=0):
         """ Start capture using specified camera.
@@ -554,6 +557,9 @@ class BufferedCapture(Process):
 
                     # Smooth raw pts and calculate actual timestamp
                     smoothed_pts = self.smoothPTS(gst_timestamp_ns)
+
+                    # Store the difference between smoothed and raw timestamps for later correction
+                    self.last_pts_correction_ns = smoothed_pts - gst_timestamp_ns
                     timestamp = self.start_timestamp + (smoothed_pts/1e9)
 
                 finally:
@@ -797,11 +803,65 @@ class BufferedCapture(Process):
           full_path [str]: Full path to save this new video segment to
         """
 
-        # Segment name is based on timestamp recorded during last segment save
-        segment_time = UTCFromTimestamp.utcfromtimestamp(self.last_segment_savetime)
-        self.last_segment_savetime = time.time()
+        # Segment naming prefers pipeline timing information if available
+        segment_epoch = None
+        running_time_ns = None
+
+        if GST_IMPORTED:
+            # Attempt to read running time directly from the pipeline clock when available
+            try:
+                clock = splitmuxsink.get_clock() if hasattr(splitmuxsink, "get_clock") else None
+                base_time = None
+
+                if hasattr(splitmuxsink, "get_base_time"):
+                    base_time = splitmuxsink.get_base_time()
+
+                if (base_time in (None, Gst.CLOCK_TIME_NONE)) and self.pipeline is not None:
+                    base_time = self.pipeline.get_base_time()
+
+                if clock is not None and base_time not in (None, Gst.CLOCK_TIME_NONE):
+                    clock_time = clock.get_time()
+                    if clock_time != Gst.CLOCK_TIME_NONE:
+                        running_time_ns = clock_time - base_time
+                        if running_time_ns < 0:
+                            log.debug("Negative running time detected; ignoring pipeline clock measurement.")
+                            running_time_ns = None
+            except Exception as e:
+                log.debug("Failed to query pipeline clock for segment timing: %s", e)
+                running_time_ns = None
+
+        if running_time_ns is not None and self.start_timestamp:
+            # Apply the most recent smoothing correction to the running clock time
+            correction_ns = getattr(self, "last_pts_correction_ns", 0) or 0
+            corrected_running_time_ns = running_time_ns + correction_ns
+            if corrected_running_time_ns < 0:
+                # Fall back to the uncorrected time if smoothing produced an invalid negative value
+                log.debug("Ignoring negative corrected running time (%d ns); using uncorrected value.",
+                          corrected_running_time_ns)
+                corrected_running_time_ns = running_time_ns
+
+            segment_epoch = self.start_timestamp + (corrected_running_time_ns / 1e9)
+            # Emit timing diagnostics to help verify filename to first-frame alignment
+            log.debug(
+                "Segment #%d timing: running=%.6f s, correction=%.6f s, corrected=%.6f s",
+                fragment_id,
+                running_time_ns / 1e9,
+                correction_ns / 1e9,
+                corrected_running_time_ns / 1e9,
+            )
+
+        if segment_epoch is None:
+            # Fallback to wall-clock time when the pipeline clock cannot be trusted
+            segment_epoch = time.time()
+
+        self.last_segment_savetime = segment_epoch
+        segment_time = UTCFromTimestamp.utcfromtimestamp(segment_epoch)
         segment_filename = segment_time.strftime("{}_%Y%m%d_%H%M%S_%f_video.mkv".format(self.config.stationID))
-        segment_subpath = os.path.join(self.config.data_dir, self.config.video_dir, segment_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
+        segment_subpath = os.path.join(
+            self.config.data_dir,
+            self.config.video_dir,
+            segment_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H")
+        )
 
         # Create full path for the segment
         mkdirP(segment_subpath)
@@ -1233,9 +1293,10 @@ class BufferedCapture(Process):
                 self.m_jump_error = 0
                 self.last_m_err = float('inf')
                 self.last_m_err_n = 0
+                self.last_pts_correction_ns = 0
 
 
-                try: 
+                try:
 
                     # Initialize GStreamer (only if not already initialized)
                     if not Gst.is_initialized():
@@ -1631,6 +1692,7 @@ class BufferedCapture(Process):
             self.m_jump_error = 0
             self.last_m_err = float('inf')
             self.last_m_err_n = 0
+            self.last_pts_correction_ns = 0
             self.current_raw_frame_shape = None
             self.current_mode = None
 
