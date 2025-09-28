@@ -2942,6 +2942,106 @@ def cyXYHttoENU_wgs84(
     return E, N, U
 
 
+@cython.boundscheck(False)
+@cython.wraparound(False)
+def cyGeoToENU(
+    np.ndarray[FLOAT_TYPE_t, ndim=1] lat_geo_deg,   # target geodetic lat (deg)
+    np.ndarray[FLOAT_TYPE_t, ndim=1] lon_geo_deg,   # target geodetic lon (deg)
+    np.ndarray[FLOAT_TYPE_t, ndim=1] h_geo_m,       # target WGS-84 height (m)
+    double lat_sta_deg,                             # station geodetic lat (deg)
+    double lon_sta_deg,                             # station geodetic lon (deg)
+    double h_sta_m                                  # station WGS-84 height (m)
+):
+    """
+    Convert geodetic coordinates (lat, lon, h) to ENU coordinates (East, North, Up) in meters.
+
+    Direct conversion from geodetic to ENU without going through image coordinates.
+    Steps:
+      1) Convert target geodetic (lat, lon, h) -> ECEF
+      2) Convert station geodetic (lat, lon, h) -> ECEF
+      3) Transform ECEF difference to ENU using rotation matrix
+
+    Parameters:
+        lat_geo_deg: Array of target geodetic latitudes in degrees
+        lon_geo_deg: Array of target geodetic longitudes in degrees
+        h_geo_m: Array of target WGS-84 heights in meters
+        lat_sta_deg: Station geodetic latitude in degrees
+        lon_sta_deg: Station geodetic longitude in degrees
+        h_sta_m: Station WGS-84 height in meters
+
+    Returns:
+        (E, N, U): Arrays of East, North, Up coordinates in meters
+    """
+
+    # ---------- HOISTED DECLARATIONS ----------
+    cdef Py_ssize_t n, i
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] E, N, U
+
+    # WGS-84 constants
+    cdef double a, f, e2
+
+    # Station ECEF + rotation columns (ECEF <- ENU, columns are E,N,U in ECEF)
+    cdef double latS, lonS, sS, cS, Nsta, Xc, Yc, Zc
+    cdef double RE0, RE1, RE2, RN0, RN1, RN2, RU0, RU1, RU2
+
+    # Per-sample variables
+    cdef double latT, lonT, hT, sT, cT, NT, Xt, Yt, Zt
+    cdef double dX, dY, dZ
+    # ------------------------------------------
+
+    n = lat_geo_deg.shape[0]
+    E = np.zeros(n, dtype=FLOAT_TYPE)
+    N = np.zeros(n, dtype=FLOAT_TYPE)
+    U = np.zeros(n, dtype=FLOAT_TYPE)
+
+    # WGS-84 constants
+    a  = 6378137.0
+    f  = 1.0/298.257223563
+    e2 = f*(2.0 - f)
+
+    # Station ECEF
+    latS = radians(lat_sta_deg)
+    lonS = radians(lon_sta_deg)
+    sS = sin(latS)
+    cS = cos(latS)
+    Nsta = a / sqrt(1.0 - e2*sS*sS)
+    Xc = (Nsta + h_sta_m)*cS*cos(lonS)
+    Yc = (Nsta + h_sta_m)*cS*sin(lonS)
+    Zc = (Nsta*(1.0 - e2) + h_sta_m)*sS
+
+    # ECEF <- ENU rotation columns (so ENU = R^T * (ECEF-C))
+    RE0 = -sin(lonS)
+    RE1 =  cos(lonS)
+    RE2 = 0.0
+    RN0 = -sS*cos(lonS)
+    RN1 = -sS*sin(lonS)
+    RN2 = cS
+    RU0 =  cS*cos(lonS)
+    RU1 =  cS*sin(lonS)
+    RU2 = sS
+
+    # Main loop
+    for i in range(n):
+        # GEO -> ECEF for target point
+        latT = radians(lat_geo_deg[i])
+        lonT = radians(lon_geo_deg[i])
+        hT = h_geo_m[i]
+        sT = sin(latT)
+        cT = cos(latT)
+        NT = a / sqrt(1.0 - e2*sT*sT)
+        Xt = (NT + hT)*cT*cos(lonT)
+        Yt = (NT + hT)*cT*sin(lonT)
+        Zt = (NT*(1.0 - e2) + hT)*sT
+
+        # ECEF -> ENU (using columns; ENU = R^T*(ECEF - C))
+        dX = Xt - Xc
+        dY = Yt - Yc
+        dZ = Zt - Zc
+        E[i] = RE0*dX + RE1*dY + RE2*dZ
+        N[i] = RN0*dX + RN1*dY + RN2*dZ
+        U[i] = RU0*dX + RU1*dY + RU2*dZ
+
+    return E, N, U
 
 
 @cython.boundscheck(False)

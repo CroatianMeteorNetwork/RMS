@@ -66,6 +66,7 @@ from RMS.Astrometry.CyFunctions import (cyraDecToXY, cyTrueRaDec2ApparentAltAz,
                                         cyXYToAltAz,
                                         cyAltAzToXY,
                                         cyXYHttoENU_wgs84,
+                                        cyGeoToENU,
                                         cyENUToXY_iter,
                                         cyGeoToXY_wgs84_iter,
                                         cyXYToGeo_wgs84,
@@ -1044,6 +1045,41 @@ def xyHtToENUPP(X_data, Y_data, ht_wgs84_m, platepar, min_el_deg=0.0):
     el = np.arcsin(Uu)
     
     return E, N, U, Eu, Nu, Uu, az, el
+
+
+def geoToENUPP(lat_geo_deg, lon_geo_deg, h_geo_m, platepar):
+    """ Convert geodetic coordinates to East-North-Up (ENU) coordinates.
+
+    This is a direct conversion from geodetic (lat, lon, height) to ENU coordinates
+    relative to the station position. Unlike geoToXYPP, this does not go through
+    the camera projection and works for any point, not just those in the field of view.
+
+    Arguments:
+        lat_geo_deg: [float or ndarray] Target geodetic latitude(s) in degrees.
+        lon_geo_deg: [float or ndarray] Target geodetic longitude(s) in degrees.
+        h_geo_m: [float or ndarray] Target WGS-84 ellipsoid height(s) in meters.
+        platepar: [Platepar structure] Platepar object containing station coordinates.
+
+    Return:
+        (E, N, U): [tuple of ndarrays] East, North, Up coordinates in meters relative to station.
+    """
+
+    # Convert scalars to arrays if needed
+    lat_arr = np.atleast_1d(np.array(lat_geo_deg, dtype=np.float64))
+    lon_arr = np.atleast_1d(np.array(lon_geo_deg, dtype=np.float64))
+    h_arr = np.atleast_1d(np.array(h_geo_m, dtype=np.float64))
+
+    # Call the Cython function
+    E, N, U = cyGeoToENU(
+        lat_arr, lon_arr, h_arr,
+        float(platepar.lat), float(platepar.lon), float(platepar.height_wgs84)
+    )
+
+    # Return scalars if input was scalar
+    if np.isscalar(lat_geo_deg) and np.isscalar(lon_geo_deg) and np.isscalar(h_geo_m):
+        return E[0], N[0], U[0]
+
+    return E, N, U
 
 
 def enuToXYPP(E_data, N_data, U_data, platepar, min_el_deg=0.0):
