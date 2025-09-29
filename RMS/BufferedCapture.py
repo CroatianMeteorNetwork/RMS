@@ -179,6 +179,10 @@ class BufferedCapture(Process):
         self.last_sync_tick = -1
         self.sync_tick_reference = 0  # reference epoch for sync ticks
 
+        # Timestamp correction between smoothed PTS and pipeline running time
+        self.last_pts_correction_ns = 0
+        self.last_running_time_ns = None
+
         # handle for the Gst bus-poller thread
         self._bus_should_exit = False
         self._bus_thread = None
@@ -554,7 +558,29 @@ class BufferedCapture(Process):
 
                     # Smooth raw pts and calculate actual timestamp
                     smoothed_pts = self.smoothPTS(gst_timestamp_ns)
-                    timestamp = self.start_timestamp + (smoothed_pts/1e9)
+                    running_time_ns = None
+
+                    if self.pipeline is not None:
+                        try:
+                            clock = self.pipeline.get_clock()
+                            base_time = self.pipeline.get_base_time()
+
+                            if clock is not None and base_time != Gst.CLOCK_TIME_NONE:
+                                clock_time = clock.get_time()
+                                if clock_time != Gst.CLOCK_TIME_NONE and clock_time >= base_time:
+                                    running_time_ns = clock_time - base_time
+                        except Exception as clock_exc:
+                            log.debug("Failed to query pipeline clock/base time: %s", clock_exc)
+
+                    if running_time_ns is not None:
+                        self.last_running_time_ns = running_time_ns
+                        self.last_pts_correction_ns = smoothed_pts - running_time_ns
+                        corrected_running_time_ns = running_time_ns + self.last_pts_correction_ns
+                        timestamp = self.start_timestamp + (corrected_running_time_ns/1e9)
+                    else:
+                        self.last_running_time_ns = None
+                        self.last_pts_correction_ns = 0
+                        timestamp = self.start_timestamp + (smoothed_pts/1e9)
 
                 finally:
                     # Always unmap buffer to prevent memory leaks
@@ -784,7 +810,7 @@ class BufferedCapture(Process):
             return None
 
 
-    def moveSegment(self, splitmuxsink, fragment_id):
+    def moveSegment(self, splitmuxsink, fragment_id, first_sample=None):
         """
         Custom callback for splitmuxsink's format-location signal to name and move each segment as its
         created. Generates a timestamp-based folder structure: Year/Day-Of-Year/Hour/ per video segment.
@@ -792,14 +818,51 @@ class BufferedCapture(Process):
         Arguments:
           splitmuxsink [GstElement]: The splitmuxsink object itself, included in arguments as GStreamer expects it.
           fragment_id [int]: Fragment / segment number of the new clip
+          first_sample [GstSample]: First sample in the fragment when connected to the
+              ``format-location-full`` signal. Optional.
 
         Returns:
           full_path [str]: Full path to save this new video segment to
         """
 
-        # Segment name is based on timestamp recorded during last segment save
-        segment_time = UTCFromTimestamp.utcfromtimestamp(self.last_segment_savetime)
-        self.last_segment_savetime = time.time()
+        segment_timestamp = None
+        corrected_running_time_ns = None
+
+        if first_sample is not None:
+            try:
+                buffer = first_sample.get_buffer()
+                segment = first_sample.get_segment()
+                running_time_ns = None
+
+                if buffer is not None:
+                    buffer_pts = buffer.pts
+                    if buffer_pts != Gst.CLOCK_TIME_NONE:
+                        running_time_ns = buffer_pts
+
+                        if segment is not None:
+                            converted = segment.to_running_time(Gst.Format.TIME, buffer_pts)
+                            if converted != Gst.CLOCK_TIME_NONE:
+                                running_time_ns = converted
+
+                if running_time_ns is not None:
+                    corrected_running_time_ns = running_time_ns + self.last_pts_correction_ns
+                    segment_timestamp = self.start_timestamp + (corrected_running_time_ns / 1e9)
+
+            except Exception as sample_exc:
+                log.debug("Failed to derive running time from splitmux sample: %s", sample_exc)
+
+        if segment_timestamp is None and corrected_running_time_ns is None and self.last_running_time_ns is not None:
+            corrected_running_time_ns = self.last_running_time_ns + self.last_pts_correction_ns
+            segment_timestamp = self.start_timestamp + (corrected_running_time_ns / 1e9)
+
+        if segment_timestamp is not None:
+            segment_time = UTCFromTimestamp.utcfromtimestamp(segment_timestamp)
+            self.last_segment_savetime = segment_timestamp
+        else:
+            # Fallback to previous behaviour using wall-clock time
+            segment_time = UTCFromTimestamp.utcfromtimestamp(self.last_segment_savetime)
+            self.last_segment_savetime = time.time()
+
         segment_filename = segment_time.strftime("{}_%Y%m%d_%H%M%S_%f_video.mkv".format(self.config.stationID))
         segment_subpath = os.path.join(self.config.data_dir, self.config.video_dir, segment_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
 
@@ -1010,7 +1073,7 @@ class BufferedCapture(Process):
             # The video will be split into segments of segment_duration_sec seconds
             # The splitmuxsink will save the segments to video_file_dir
             # The splitmuxsink will use the matroskamux muxer
-            # The splitmuxsink will use the format-location signal to name and move each segment
+            # The splitmuxsink will use the format-location-full signal to name and move each segment
             # queue2 smooths out the writes, but doesn't wait until the buffers fill up for writing
             storage_branch = (
                 "t. ! queue2 max-size-buffers=150 max-size-bytes=2097152 max-size-time=5000000000 ! "
@@ -1049,12 +1112,12 @@ class BufferedCapture(Process):
                 self._bus_thread = threading.Thread(target=self._busPoller, daemon=True)
                 self._bus_thread.start()
                 
-                # If raw video saving is enabled, Connect the "format-location" signal to the 
+                # If raw video saving is enabled, connect the "format-location-full" signal to the
                 # moveSegment function
                 if video_file_dir is not None:
                     
                     splitmuxsink = self.pipeline.get_by_name("splitmuxsink0")
-                    splitmuxsink.connect("format-location", self.moveSegment)
+                    splitmuxsink.connect("format-location-full", self.moveSegment)
 
                 # Transition through states
                 log.info("Starting pipeline state transitions...")
@@ -1233,9 +1296,11 @@ class BufferedCapture(Process):
                 self.m_jump_error = 0
                 self.last_m_err = float('inf')
                 self.last_m_err_n = 0
+                self.last_pts_correction_ns = 0
+                self.last_running_time_ns = None
 
 
-                try: 
+                try:
 
                     # Initialize GStreamer (only if not already initialized)
                     if not Gst.is_initialized():
@@ -1360,8 +1425,12 @@ class BufferedCapture(Process):
             log.debug("releaseResources: Already in progress, skipping duplicate call")
             return
         self._releasing_resources = True
-        
+
         log.debug("releaseResources: Starting")
+
+        # Reset timestamp correction whenever resources are released
+        self.last_pts_correction_ns = 0
+        self.last_running_time_ns = None
 
         def _timedCall(fn, timeout_s=2):
             """Run *fn()* in a daemon thread and wait *timeout_s*.
@@ -1613,6 +1682,8 @@ class BufferedCapture(Process):
             self.start_timestamp = 0
             self.frame_shape = None
             self.convert_to_gray = False
+            self.last_pts_correction_ns = 0
+            self.last_running_time_ns = None
 
             # Initialize smoothing variables
             self.startup_flag = True
