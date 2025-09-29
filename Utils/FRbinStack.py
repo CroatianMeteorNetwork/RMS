@@ -259,7 +259,25 @@ if __name__ == '__main__':
     if args.mosaic:
         stackFRbins(args.fr_file, output_path=args.output, columns=args.columns)
     else:
-        if len(args.fr_file) != 1:
-            raise ValueError('Provide exactly one FR*.bin file unless --mosaic is specified.')
+        if len(args.fr_file) == 1:
+            stackFRbin(args.fr_file[0], output_path=args.output)
+        else:
+            if args.output:
+                output_dir = os.path.abspath(args.output)
 
-        stackFRbin(args.fr_file[0], output_path=args.output)
+                if os.path.exists(output_dir) and not os.path.isdir(output_dir):
+                    raise ValueError('When stacking multiple FR files without a mosaic the output '
+                        'path must point to a directory.')
+
+                if not os.path.isdir(output_dir):
+                    os.makedirs(output_dir)
+            else:
+                output_dir = None
+
+            for fr_path in args.fr_file:
+                if output_dir is None:
+                    stackFRbin(fr_path)
+                else:
+                    base_name = os.path.splitext(os.path.basename(fr_path))[0]
+                    target_path = os.path.join(output_dir, base_name + '_stack.png')
+                    stackFRbin(fr_path, output_path=target_path)
