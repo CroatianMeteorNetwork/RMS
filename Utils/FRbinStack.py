@@ -3,6 +3,7 @@
 from __future__ import print_function, division, absolute_import, unicode_literals
 
 import argparse
+import fnmatch
 import math
 import os
 
@@ -329,7 +330,8 @@ if __name__ == '__main__':
 
     # Source FR*.bin files can either be stacked individually or combined into a mosaic.
     arg_parser.add_argument('fr_file', nargs='+', metavar='FR_FILE', type=str,
-        help='Path to one or more FR*.bin files to stack.')
+        help='Path to one or more FR*.bin files. When --walk is used each entry must be a '
+            'directory that will be searched recursively.')
 
     # Allow overriding the default file path when producing a single stacked image.
     arg_parser.add_argument('-o', '--output', nargs='?', metavar='OUTPUT', type=str,
@@ -345,15 +347,49 @@ if __name__ == '__main__':
     arg_parser.add_argument('--columns', nargs='?', type=int, metavar='COLS',
         help='Optional number of columns to use when building a mosaic image.')
 
+    arg_parser.add_argument('--walk', action='store_true',
+        help='Treat each FR_FILE as a directory and include all nested FR*.bin files.')
+
     args = arg_parser.parse_args()
+
+    # When walking directories collect every FR*.bin path for later processing.
+    if args.walk:
+        fr_inputs = []
+        walk_roots = []
+
+        for entry in args.fr_file:
+            root_dir = os.path.abspath(entry)
+
+            if not os.path.isdir(root_dir):
+                raise ValueError('When --walk is specified each FR_FILE must refer to a directory.')
+
+            walk_roots.append(root_dir)
+
+            for current_root, _, files in os.walk(root_dir):
+                for name in files:
+                    if fnmatch.fnmatch(name, 'FR*.bin'):
+                        fr_inputs.append(os.path.join(current_root, name))
+
+        fr_inputs.sort()
+
+        if not fr_inputs:
+            raise ValueError('No FR*.bin files were found when walking the supplied directories.')
+    else:
+        fr_inputs = args.fr_file
+
+    # Derive a sensible default directory for mosaics produced from walked directories.
+    mosaic_dir = args.mosaic_dir
+    if args.walk and args.mosaic and args.output is None and mosaic_dir is None:
+        if walk_roots:
+            mosaic_dir = walk_roots[0]
 
     # When requested, build a combined mosaic instead of individual stack images.
     if args.mosaic:
-        stackFRbins(args.fr_file, output_path=args.output, columns=args.columns,
-            output_dir=args.mosaic_dir)
+        stackFRbins(fr_inputs, output_path=args.output, columns=args.columns,
+            output_dir=mosaic_dir)
     else:
-        if len(args.fr_file) == 1:
-            stackFRbin(args.fr_file[0], output_path=args.output)
+        if len(fr_inputs) == 1:
+            stackFRbin(fr_inputs[0], output_path=args.output)
         else:
             # Prepare a target directory when saving several individual stack outputs.
             if args.output:
@@ -368,7 +404,7 @@ if __name__ == '__main__':
             else:
                 output_dir = None
 
-            for fr_path in args.fr_file:
+            for fr_path in fr_inputs:
                 if output_dir is None:
                     stackFRbin(fr_path)
                 else:
