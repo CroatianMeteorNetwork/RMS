@@ -6,6 +6,8 @@ import argparse
 import math
 import os
 
+import numpy as np
+
 from RMS.Formats.FRbin import read as readFR
 from RMS.Routines.Image import saveImage
 
@@ -55,17 +57,15 @@ def computeFrameExtents(fr):
     return int(min_x), int(min_y), width, height
 
 
-def stackFRbin(fr_path, output_path=None):
-    """Stack every detection line from an FR*.bin file into a PNG image.
+def loadStackedImage(fr_path):
+    """Return the stacked image for a single FR*.bin file.
 
     Arguments:
         fr_path: [str] Full or relative path to an FR*.bin file.
 
-    Keyword arguments:
-        output_path: [str] Optional destination for the PNG file. The extension is enforced.
-
-    Return:
-        [str] Absolute path of the written PNG image.
+    Returns:
+        [tuple] (stacked_image, output_directory, file_name) where stacked_image is the numpy
+        array generated from all detection lines.
 
     """
 
@@ -97,7 +97,24 @@ def stackFRbin(fr_path, output_path=None):
     fr.ncols = width
     fr.nrows = height
 
-    stacked_image = fr.maxpixel
+    return fr.maxpixel, dir_path, file_name
+
+
+def stackFRbin(fr_path, output_path=None):
+    """Stack every detection line from an FR*.bin file into a PNG image.
+
+    Arguments:
+        fr_path: [str] Full or relative path to an FR*.bin file.
+
+    Keyword arguments:
+        output_path: [str] Optional destination for the PNG file. The extension is enforced.
+
+    Return:
+        [str] Absolute path of the written PNG image.
+
+    """
+
+    stacked_image, dir_path, file_name = loadStackedImage(fr_path)
 
     # Resolve the output path and ensure the directory exists.
     if output_path is None:
@@ -118,6 +135,106 @@ def stackFRbin(fr_path, output_path=None):
     return output_path
 
 
+def stackFRbins(fr_paths, output_path=None, columns=None):
+    """Create a mosaic composed of stacks from multiple FR*.bin files.
+
+    Arguments:
+        fr_paths: [Iterable[str]] Collection of FR*.bin file paths to include in the mosaic.
+
+    Keyword arguments:
+        output_path: [str] Optional destination for the PNG file. The extension is enforced.
+        columns: [int] Optional number of mosaic columns. If omitted the layout is square-ish.
+
+    Returns:
+        [str] Absolute path of the written PNG mosaic image.
+
+    """
+
+    fr_paths = list(fr_paths)
+
+    if not fr_paths:
+        raise ValueError('At least one FR*.bin file must be provided for the mosaic.')
+
+    stacks = []
+    base_dirs = []
+    file_names = []
+
+    for path in fr_paths:
+        stacked_image, dir_path, file_name = loadStackedImage(path)
+        stacks.append(stacked_image)
+        base_dirs.append(dir_path)
+        file_names.append(file_name)
+
+    # Determine the mosaic grid dimensions. Default to a square layout when possible.
+    image_count = len(stacks)
+    if columns is None or columns <= 0:
+        columns = int(math.ceil(math.sqrt(image_count)))
+
+    rows = int(math.ceil(float(image_count) / float(columns)))
+
+    # Track the maximum width per column and height per row to build a tight canvas.
+    column_widths = [0] * columns
+    row_heights = [0] * rows
+
+    for index, image in enumerate(stacks):
+        row_idx = index // columns
+        col_idx = index % columns
+
+        height, width = image.shape[:2]
+        column_widths[col_idx] = max(column_widths[col_idx], width)
+        row_heights[row_idx] = max(row_heights[row_idx], height)
+
+    mosaic_height = sum(row_heights)
+    mosaic_width = sum(column_widths)
+
+    if mosaic_height == 0 or mosaic_width == 0:
+        raise ValueError('Could not determine valid mosaic dimensions from the provided files.')
+
+    # Build the mosaic canvas using the dtype/channel count of the first stack.
+    template = stacks[0]
+    if template.ndim == 2:
+        mosaic = np.zeros((mosaic_height, mosaic_width), dtype=template.dtype)
+    else:
+        mosaic = np.zeros((mosaic_height, mosaic_width, template.shape[2]), dtype=template.dtype)
+
+    y_offset = 0
+    for row_idx in range(rows):
+        x_offset = 0
+        for col_idx in range(columns):
+            image_index = row_idx * columns + col_idx
+            if image_index >= image_count:
+                break
+
+            image = stacks[image_index]
+            height, width = image.shape[:2]
+
+            if template.ndim == 2:
+                mosaic[y_offset:y_offset + height, x_offset:x_offset + width] = image
+            else:
+                mosaic[y_offset:y_offset + height, x_offset:x_offset + width, :] = image
+            x_offset += column_widths[col_idx]
+
+        y_offset += row_heights[row_idx]
+
+    # Choose a sensible output location when one is not supplied.
+    if output_path is None:
+        base_name = os.path.splitext(file_names[0])[0]
+        output_path = os.path.join(base_dirs[0], base_name + '_mosaic.png')
+    else:
+        output_path = os.path.abspath(output_path)
+        output_dir = os.path.dirname(output_path)
+        if output_dir and not os.path.isdir(output_dir):
+            os.makedirs(output_dir)
+
+        if not output_path.lower().endswith('.png'):
+            output_path += '.png'
+
+    saveImage(output_path, mosaic)
+    print('Saved FR mosaic to: {}'.format(output_path))
+
+    return output_path
+
+
 if __name__ == '__main__':
 
     # COMMAND LINE ARGUMENTS
@@ -125,12 +242,24 @@ if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser(
         description='Create a stacked max-value image from an FR*.bin file.')
 
-    arg_parser.add_argument('fr_file', nargs=1, metavar='FR_FILE', type=str,
-        help='Path to the FR*.bin file to stack.')
+    arg_parser.add_argument('fr_file', nargs='+', metavar='FR_FILE', type=str,
+        help='Path to one or more FR*.bin files to stack.')
 
     arg_parser.add_argument('-o', '--output', nargs='?', metavar='OUTPUT', type=str,
         help='Optional path for the stacked PNG image.')
 
+    arg_parser.add_argument('--mosaic', action='store_true',
+        help='Combine all provided FR files into a single mosaic image.')
+
+    arg_parser.add_argument('--columns', nargs='?', type=int, metavar='COLS',
+        help='Optional number of columns to use when building a mosaic image.')
+
     args = arg_parser.parse_args()
 
-    stackFRbin(args.fr_file[0], output_path=args.output)
+    if args.mosaic:
+        stackFRbins(args.fr_file, output_path=args.output, columns=args.columns)
+    else:
+        if len(args.fr_file) != 1:
+            raise ValueError('Provide exactly one FR*.bin file unless --mosaic is specified.')
+
+        stackFRbin(args.fr_file[0], output_path=args.output)
