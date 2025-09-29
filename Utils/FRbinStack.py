@@ -6,6 +6,7 @@ import argparse
 import math
 import os
 
+import cv2
 import numpy as np
 
 from RMS.Formats.FRbin import read as readFR
@@ -100,6 +101,59 @@ def loadStackedImage(fr_path):
     return fr.maxpixel, dir_path, file_name
 
 
+def extractCameraCode(file_name):
+    """Extract the camera code from an FR file name if present."""
+
+    base_name = os.path.splitext(os.path.basename(file_name))[0]
+    parts = base_name.split('_')
+
+    if len(parts) >= 2:
+        return parts[1]
+
+    return None
+
+
+def annotateCameraCode(image, camera_code):
+    """Render the camera code in the upper-left corner of a stacked inset."""
+
+    if not camera_code:
+        return
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+
+    height, width = image.shape[:2]
+    scale = max(0.3, min(0.8, width / 320.0))
+    thickness = max(1, int(round(scale * 2)))
+    margin = max(3, int(round(min(height, width) * 0.02)))
+
+    text_size, baseline = cv2.getTextSize(camera_code, font, scale, thickness)
+    y_pos = margin + text_size[1]
+
+    if y_pos + baseline > height:
+        y_pos = max(text_size[1], height - baseline - 1)
+
+    x_pos = margin
+
+    if np.issubdtype(image.dtype, np.integer):
+        white_value = np.iinfo(image.dtype).max
+        black_value = np.iinfo(image.dtype).min
+    else:
+        white_value = 1.0
+        black_value = 0.0
+
+    if image.ndim == 2 or image.shape[2] == 1:
+        white_colour = white_value
+        black_colour = black_value
+    else:
+        white_colour = tuple([white_value] * image.shape[2])
+        black_colour = tuple([black_value] * image.shape[2])
+
+    cv2.putText(image, camera_code, (x_pos, y_pos), font, scale,
+        black_colour, thickness + 2, cv2.LINE_AA)
+    cv2.putText(image, camera_code, (x_pos, y_pos), font, scale,
+        white_colour, thickness, cv2.LINE_AA)
+
+
 def stackFRbin(fr_path, output_path=None):
     """Stack every detection line from an FR*.bin file into a PNG image.
 
@@ -159,11 +213,14 @@ def stackFRbins(fr_paths, output_path=None, columns=None):
     base_dirs = []
     file_names = []
 
+    camera_codes = []
+
     for path in fr_paths:
         stacked_image, dir_path, file_name = loadStackedImage(path)
         stacks.append(stacked_image)
         base_dirs.append(dir_path)
         file_names.append(file_name)
+        camera_codes.append(extractCameraCode(file_name))
 
     # Determine the mosaic grid dimensions. Default to a square layout when possible.
     image_count = len(stacks)
@@ -210,8 +267,12 @@ def stackFRbins(fr_paths, output_path=None, columns=None):
 
             if template.ndim == 2:
                 mosaic[y_offset:y_offset + height, x_offset:x_offset + width] = image
+                region = mosaic[y_offset:y_offset + height, x_offset:x_offset + width]
             else:
                 mosaic[y_offset:y_offset + height, x_offset:x_offset + width, :] = image
+                region = mosaic[y_offset:y_offset + height, x_offset:x_offset + width, :]
+
+            annotateCameraCode(region, camera_codes[image_index])
             x_offset += column_widths[col_idx]
 
         y_offset += row_heights[row_idx]
