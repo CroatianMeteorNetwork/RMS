@@ -98,12 +98,14 @@ def loadStackedImage(fr_path):
     fr.ncols = width
     fr.nrows = height
 
+    # Return the prepared stack alongside its source directory and file name.
     return fr.maxpixel, dir_path, file_name
 
 
 def extractCameraCode(file_name):
     """Extract the camera code from an FR file name if present."""
 
+    # Split the stem using underscores as separators to isolate the camera token.
     base_name = os.path.splitext(os.path.basename(file_name))[0]
     parts = base_name.split('_')
 
@@ -119,9 +121,12 @@ def annotateCameraCode(image, camera_code):
     if not camera_code:
         return
 
+    # Configure the font style so the annotation matches other RMS utilities.
     font = cv2.FONT_HERSHEY_SIMPLEX
 
     height, width = image.shape[:2]
+
+    # Adapt the text layout to the image dimensions so the annotation remains legible.
     scale = max(0.3, min(0.8, width / 320.0))
     thickness = max(1, int(round(scale * 2)))
     margin = max(3, int(round(min(height, width) * 0.02)))
@@ -134,6 +139,7 @@ def annotateCameraCode(image, camera_code):
 
     x_pos = margin
 
+    # Select colour values that contrast well regardless of the image depth or channels.
     if np.issubdtype(image.dtype, np.integer):
         white_value = np.iinfo(image.dtype).max
         black_value = np.iinfo(image.dtype).min
@@ -148,6 +154,7 @@ def annotateCameraCode(image, camera_code):
         white_colour = tuple([white_value] * image.shape[2])
         black_colour = tuple([black_value] * image.shape[2])
 
+    # Draw a black outline first and then the white text to improve visibility.
     cv2.putText(image, camera_code, (x_pos, y_pos), font, scale,
         black_colour, thickness + 2, cv2.LINE_AA)
     cv2.putText(image, camera_code, (x_pos, y_pos), font, scale,
@@ -175,6 +182,7 @@ def stackFRbin(fr_path, output_path=None):
         base_name = os.path.splitext(file_name)[0]
         output_path = os.path.join(dir_path, base_name + '_stack.png')
     else:
+        # Normalise explicit output paths and ensure the destination exists.
         output_path = os.path.abspath(output_path)
         output_dir = os.path.dirname(output_path)
         if output_dir and not os.path.isdir(output_dir):
@@ -183,13 +191,14 @@ def stackFRbin(fr_path, output_path=None):
         if not output_path.lower().endswith('.png'):
             output_path += '.png'
 
+    # Persist the stacked image using the standard RMS save helper.
     saveImage(output_path, stacked_image)
     print('Saved FR stack to: {}'.format(output_path))
 
     return output_path
 
 
-def stackFRbins(fr_paths, output_path=None, columns=None):
+def stackFRbins(fr_paths, output_path=None, columns=None, output_dir=None):
     """Create a mosaic composed of stacks from multiple FR*.bin files.
 
     Arguments:
@@ -198,21 +207,26 @@ def stackFRbins(fr_paths, output_path=None, columns=None):
     Keyword arguments:
         output_path: [str] Optional destination for the PNG file. The extension is enforced.
         columns: [int] Optional number of mosaic columns. If omitted the layout is square-ish.
+        output_dir: [str] Optional directory used when deriving the mosaic output name.
 
     Returns:
         [str] Absolute path of the written PNG mosaic image.
 
     """
 
+    # Convert any incoming iterable to a list so it can be traversed repeatedly below.
     fr_paths = list(fr_paths)
 
+    # Ensure there is at least one FR file to include in the mosaic composition.
     if not fr_paths:
         raise ValueError('At least one FR*.bin file must be provided for the mosaic.')
 
+    # Collect the stacked images together with their directory and file name metadata.
     stacks = []
     base_dirs = []
     file_names = []
 
+    # Store the camera code for each FR stack so the mosaic tiles can be annotated later.
     camera_codes = []
 
     for path in fr_paths:
@@ -254,6 +268,7 @@ def stackFRbins(fr_paths, output_path=None, columns=None):
     else:
         mosaic = np.zeros((mosaic_height, mosaic_width, template.shape[2]), dtype=template.dtype)
 
+    # Lay out each stacked image while keeping track of the current offsets.
     y_offset = 0
     for row_idx in range(rows):
         x_offset = 0
@@ -272,6 +287,7 @@ def stackFRbins(fr_paths, output_path=None, columns=None):
                 mosaic[y_offset:y_offset + height, x_offset:x_offset + width, :] = image
                 region = mosaic[y_offset:y_offset + height, x_offset:x_offset + width, :]
 
+            # Tag each inset with the originating camera code for quick identification.
             annotateCameraCode(region, camera_codes[image_index])
             x_offset += column_widths[col_idx]
 
@@ -280,7 +296,14 @@ def stackFRbins(fr_paths, output_path=None, columns=None):
     # Choose a sensible output location when one is not supplied.
     if output_path is None:
         base_name = os.path.splitext(file_names[0])[0]
-        output_path = os.path.join(base_dirs[0], base_name + '_mosaic.png')
+        output_dir_path = output_dir if output_dir else base_dirs[0]
+        if output_dir_path:
+            output_dir_path = os.path.abspath(output_dir_path)
+            if not os.path.isdir(output_dir_path):
+                os.makedirs(output_dir_path)
+        else:
+            output_dir_path = ''
+        output_path = os.path.join(output_dir_path, base_name + '_mosaic.png')
     else:
         output_path = os.path.abspath(output_path)
         output_dir = os.path.dirname(output_path)
@@ -290,6 +313,7 @@ def stackFRbins(fr_paths, output_path=None, columns=None):
         if not output_path.lower().endswith('.png'):
             output_path += '.png'
 
+    # Persist the combined mosaic to disk so it can be inspected later.
     saveImage(output_path, mosaic)
     print('Saved FR mosaic to: {}'.format(output_path))
 
@@ -303,26 +327,35 @@ if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser(
         description='Create a stacked max-value image from an FR*.bin file.')
 
+    # Source FR*.bin files can either be stacked individually or combined into a mosaic.
     arg_parser.add_argument('fr_file', nargs='+', metavar='FR_FILE', type=str,
         help='Path to one or more FR*.bin files to stack.')
 
+    # Allow overriding the default file path when producing a single stacked image.
     arg_parser.add_argument('-o', '--output', nargs='?', metavar='OUTPUT', type=str,
         help='Optional path for the stacked PNG image.')
 
     arg_parser.add_argument('--mosaic', action='store_true',
         help='Combine all provided FR files into a single mosaic image.')
 
+    # Accept a directory for the mosaic output so users do not need to specify the full path.
+    arg_parser.add_argument('--mosaic-dir', nargs='?', metavar='DIR', type=str,
+        help='Optional directory where the mosaic PNG will be stored when --mosaic is used.')
+
     arg_parser.add_argument('--columns', nargs='?', type=int, metavar='COLS',
         help='Optional number of columns to use when building a mosaic image.')
 
     args = arg_parser.parse_args()
 
+    # When requested, build a combined mosaic instead of individual stack images.
     if args.mosaic:
-        stackFRbins(args.fr_file, output_path=args.output, columns=args.columns)
+        stackFRbins(args.fr_file, output_path=args.output, columns=args.columns,
+            output_dir=args.mosaic_dir)
     else:
         if len(args.fr_file) == 1:
             stackFRbin(args.fr_file[0], output_path=args.output)
         else:
+            # Prepare a target directory when saving several individual stack outputs.
             if args.output:
                 output_dir = os.path.abspath(args.output)
 
