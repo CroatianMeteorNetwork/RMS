@@ -7566,14 +7566,38 @@ class PlateTool(QtWidgets.QMainWindow):
         pick = self.getCurrentPick()
 
         if pick:
+            photom_pixels_raw = pick.get('photometry_pixels')
+
             # If there are no photometry pixels, set the intensity to 0
-            if not pick['photometry_pixels']:
-                # print("No photometry selected, setting intensity sum to 1")
+            if photom_pixels_raw is None:
                 pick['intensity_sum'] = 1
                 return None
 
-            photom_pixels = np.asarray(pick['photometry_pixels'], dtype=np.int64)
+            if isinstance(photom_pixels_raw, np.ndarray):
+                has_pixels = photom_pixels_raw.size > 0
+            else:
+                try:
+                    has_pixels = len(photom_pixels_raw) > 0
+                except TypeError:
+                    has_pixels = bool(photom_pixels_raw)
+
+            if not has_pixels:
+                pick['intensity_sum'] = 1
+                return None
+
+            photom_pixels = np.asarray(photom_pixels_raw, dtype=np.int64)
             if photom_pixels.size == 0:
+                pick['intensity_sum'] = 1
+                return None
+
+            if photom_pixels.ndim != 2 or photom_pixels.shape[1] != 2:
+                try:
+                    photom_pixels = np.reshape(photom_pixels, (-1, 2))
+                except ValueError:
+                    pick['intensity_sum'] = 1
+                    return None
+
+            if photom_pixels.shape[0] == 0:
                 pick['intensity_sum'] = 1
                 return None
 
@@ -7619,7 +7643,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 if x_arr.size == 0:
                     pick['intensity_sum'] = 1
                     return None
-                pick['photometry_pixels'] = list(map(tuple, np.stack([x_arr_global, y_arr_global], axis=-1)))
+
+            pick['photometry_pixels'] = list(map(tuple, np.stack([x_arr_global, y_arr_global], axis=-1)))
 
             # Take only the colored part
             mask_img = np.ones_like(self.img.data)
@@ -8056,9 +8081,38 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Updates image to have the colouring in the current frame """
         pick = self.getCurrentPick()
 
-        if pick and pick['photometry_pixels']:
+        if pick:
+            photom_pixels = pick.get('photometry_pixels')
+            if photom_pixels is None:
+                self.photometry_mask_image = None
+                self.region.setImage(np.array([[0]]))
+                self.img_display.update()
+                return None
+
+            photom_pixels = np.asarray(photom_pixels)
+            if photom_pixels.size == 0:
+                self.photometry_mask_image = None
+                self.region.setImage(np.array([[0]]))
+                self.img_display.update()
+                return None
+
+            if photom_pixels.ndim != 2 or photom_pixels.shape[1] != 2:
+                try:
+                    photom_pixels = np.reshape(photom_pixels, (-1, 2))
+                except ValueError:
+                    self.photometry_mask_image = None
+                    self.region.setImage(np.array([[0]]))
+                    self.img_display.update()
+                    return None
+
+            if photom_pixels.shape[0] == 0:
+                self.photometry_mask_image = None
+                self.region.setImage(np.array([[0]]))
+                self.img_display.update()
+                return None
+
             # Create a coloring mask
-            x_mask, y_mask = np.array(pick['photometry_pixels']).T
+            x_mask, y_mask = photom_pixels.T
 
             mask_img = np.zeros(self.img.data.shape)
             mask_img[x_mask, y_mask] = 255
