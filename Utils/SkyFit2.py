@@ -894,6 +894,10 @@ if ASTRA_IMPORTED:
 
             self.kalman_worker = KalmanWorker(self.skyfit_instance, self.config)
             self.kalman_worker.progress.connect(self.updateProgress)
+            self.kalman_worker.results_ready.connect(
+                self.skyfit_instance.applyKalmanResults,
+                QtCore.Qt.QueuedConnection
+            )
 
             # Restore interactivity
             self.kalman_worker.finished.connect(lambda: (not getattr(self, "_is_closing", False)) and self.file_picker_button.setEnabled(True))
@@ -921,6 +925,7 @@ if ASTRA_IMPORTED:
     class KalmanWorker(QThread):
         progress = pyqtSignal(int)
         finished = pyqtSignal()
+        results_ready = pyqtSignal(object)
 
         def __init__(self, skyfit_instance, config):
             super().__init__()
@@ -941,9 +946,11 @@ if ASTRA_IMPORTED:
                 if self._stop or self.isInterruptionRequested():
                     self.finished.emit()
                     return
-                self.skyfit_instance.runKalmanFromConfig(
+                result = self.skyfit_instance.runKalmanFromConfig(
                     self.config, progress_callback=self._progress_guard
                 )
+                if result is not None:
+                    self.results_ready.emit(result)
             except Exception as e:
                 print(f'Error running Kalman: {e}')
                 pass
@@ -5346,26 +5353,25 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def runKalmanFromConfig(self, astra_config, progress_callback=None):
         """Runs the Kalman filter with the given ASTRA configuration."""
-        
+
         print("Running Kalman with:", astra_config)
 
         if progress_callback is not None:
             progress_callback(0)
 
-        # Sort pick list according to keys
-        self.pick_list = dict(sorted(self.pick_list.items()))
-
-        # Take only keys of non-empty picks (not just photometry)
-        pick_frame_indices = np.array(
-            [key for key in self.pick_list.keys()
-             if self.pick_list[key]['x_centroid'] is not None 
-             and self.pick_list[key]['y_centroid'] is not None],
-            dtype=int
-        )
+        # Take only keys of non-empty picks (not just photometry), maintaining order
+        ordered_keys = [key for key, _ in sorted(self.pick_list.items())]
+        pick_frame_indices = [
+            key for key in ordered_keys
+            if self.pick_list[key]['x_centroid'] is not None
+            and self.pick_list[key]['y_centroid'] is not None
+        ]
 
         # Prepare measurements and times for Kalman filter
-        measurements = [(self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid']) 
-                            for key in pick_frame_indices]
+        measurements = [
+            (self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid'])
+            for key in pick_frame_indices
+        ]
         times = [self.img_handle.currentFrameTime(key, dt_obj=True) for key in pick_frame_indices]
 
         # Extract kalman settings from astra_config
@@ -5387,14 +5393,33 @@ class PlateTool(QtWidgets.QMainWindow):
 
         xypicks = kalman.getPicks()
 
+        if progress_callback is not None:
+            progress_callback(100)
+
+        return {
+            'frame_indices': pick_frame_indices,
+            'xypicks': xypicks.tolist(),
+            'save_results': save_stats_results,
+        }
+
+    def applyKalmanResults(self, kalman_result):
+        """Integrates Kalman smoothing results into the SkyFit2 instance."""
+
+        if not kalman_result:
+            return
+
+        frame_indices = kalman_result.get('frame_indices', [])
+        xypicks = kalman_result.get('xypicks', [])
+        save_results = kalman_result.get('save_results', 'false')
+
         # Add previous picks to list
         if np.array(
             sorted(
-            k for k in self.pick_list.keys()
-            if (
-                self.pick_list[k].get('x_centroid') is not None
-                or self.pick_list[k].get('y_centroid') is not None
-            )
+                k for k in self.pick_list.keys()
+                if (
+                    self.pick_list[k].get('x_centroid') is not None
+                    or self.pick_list[k].get('y_centroid') is not None
+                )
             ),
             dtype=int
         ).size > 0:
@@ -5404,13 +5429,15 @@ class PlateTool(QtWidgets.QMainWindow):
         # Print message to show Kalman has been applied
         print(f'Kalman filter applied to {len(xypicks)} picks!')
 
-        # Adjust all picks positions   
-        for i in range(len(pick_frame_indices)):
-            self.pick_list[pick_frame_indices[i]]["x_centroid"] = xypicks[i][0]
-            self.pick_list[pick_frame_indices[i]]["y_centroid"] = xypicks[i][1]
+        # Adjust all picks positions
+        for frame_number, pick in zip(frame_indices, xypicks):
+            frame_number = int(frame_number)
+            if frame_number in self.pick_list:
+                self.pick_list[frame_number]["x_centroid"] = pick[0]
+                self.pick_list[frame_number]["y_centroid"] = pick[1]
 
-            # Print adjustment message
-            print(f'Adjusted centroid at ({xypicks[i][0]}, {xypicks[i][1]}) on frame {pick_frame_indices[i]}')
+                # Print adjustment message
+                print(f'Adjusted centroid at ({pick[0]}, {pick[1]}) on frame {frame_number}')
 
         # Update picks on GUI and greatCircle
         self.updateGreatCircle()
@@ -5423,13 +5450,10 @@ class PlateTool(QtWidgets.QMainWindow):
             self.checkPickRevertCanRun()
 
         # Print message showing kalman finished
-        if astra_config['kalman']['save results'].lower() == 'true':
-            print(f'Saved to CSV & Loaded {len(pick_frame_indices)} Picks from Kalman Smoothing.')
+        if str(save_results).lower() == 'true':
+            print(f'Saved to CSV & Loaded {len(frame_indices)} Picks from Kalman Smoothing.')
         else:
-            print(f'Loaded {len(pick_frame_indices)} Picks from Kalman Smoothing!')
-        
-        if progress_callback is not None:
-            progress_callback(100)
+            print(f'Loaded {len(frame_indices)} Picks from Kalman Smoothing!')
 
     def loadEvTxt(self, txt_file_path):
         """
