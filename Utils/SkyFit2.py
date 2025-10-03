@@ -7572,20 +7572,25 @@ class PlateTool(QtWidgets.QMainWindow):
                 pick['intensity_sum'] = 1
                 return None
 
-            x_arr, y_arr = np.array(pick['photometry_pixels']).T
+            photom_pixels = np.asarray(pick['photometry_pixels'], dtype=np.int64)
+            if photom_pixels.size == 0:
+                pick['intensity_sum'] = 1
+                return None
+
+            x_arr_global, y_arr_global = photom_pixels.T
 
             # Compute the centre of the colored pixels
-            x_centre = np.mean(x_arr)
-            y_centre = np.mean(y_arr)
+            x_centre = np.mean(x_arr_global)
+            y_centre = np.mean(y_arr_global)
 
             # Take a window twice the size of the colored pixels
-            x_color_size = np.max(x_arr) - np.min(x_arr)
-            y_color_size = np.max(y_arr) - np.min(y_arr)
+            x_color_size = np.max(x_arr_global) - np.min(x_arr_global)
+            y_color_size = np.max(y_arr_global) - np.min(y_arr_global)
 
-            x_min = int(x_centre - x_color_size)
-            x_max = int(x_centre + x_color_size)
-            y_min = int(y_centre - y_color_size)
-            y_max = int(y_centre + y_color_size)
+            x_min = int(np.floor(x_centre - x_color_size))
+            x_max = int(np.ceil(x_centre + x_color_size)) + 1
+            y_min = int(np.floor(y_centre - y_color_size))
+            y_max = int(np.ceil(y_centre + y_color_size)) + 1
 
             # Limit the size to be within the bounds
             if x_min < 0: x_min = 0
@@ -7593,9 +7598,32 @@ class PlateTool(QtWidgets.QMainWindow):
             if y_min < 0: y_min = 0
             if y_max > self.img.data.shape[1]: y_max = self.img.data.shape[1]
 
+            if x_max <= x_min:
+                x_max = min(self.img.data.shape[0], x_min + 1)
+            if y_max <= y_min:
+                y_max = min(self.img.data.shape[1], y_min + 1)
+
+            x_arr = (x_arr_global - x_min).astype(np.int64, copy=False)
+            y_arr = (y_arr_global - y_min).astype(np.int64, copy=False)
+
+            valid_mask = (
+                (x_arr >= 0) & (x_arr < (x_max - x_min)) &
+                (y_arr >= 0) & (y_arr < (y_max - y_min))
+            )
+
+            if not np.all(valid_mask):
+                x_arr = x_arr[valid_mask]
+                y_arr = y_arr[valid_mask]
+                x_arr_global = x_arr_global[valid_mask]
+                y_arr_global = y_arr_global[valid_mask]
+                if x_arr.size == 0:
+                    pick['intensity_sum'] = 1
+                    return None
+                pick['photometry_pixels'] = list(map(tuple, np.stack([x_arr_global, y_arr_global], axis=-1)))
+
             # Take only the colored part
             mask_img = np.ones_like(self.img.data)
-            mask_img[x_arr, y_arr] = 0
+            mask_img[x_arr_global, y_arr_global] = 0
             masked_img = np.ma.masked_array(self.img.data, mask_img)
             crop_img = masked_img[x_min:x_max, y_min:y_max]
 
@@ -7608,7 +7636,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Mask out the colored in pixels
             mask_img_bg = np.zeros_like(self.img.data)
-            mask_img_bg[x_arr, y_arr] = 1
+            mask_img_bg[x_arr_global, y_arr_global] = 1
 
             # Take the image where the colored part is masked out and crop the surroundings
             masked_img_bg = np.ma.masked_array(self.img.data, mask_img_bg)
