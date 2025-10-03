@@ -8081,45 +8081,53 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Updates image to have the colouring in the current frame """
         pick = self.getCurrentPick()
 
-        if pick:
-            photom_pixels = pick.get('photometry_pixels')
-            if photom_pixels is None:
-                self.photometry_mask_image = None
-                self.region.setImage(np.array([[0]]))
-                self.img_display.update()
-                return None
-
-            photom_pixels = np.asarray(photom_pixels)
-            if photom_pixels.size == 0:
-                self.photometry_mask_image = None
-                self.region.setImage(np.array([[0]]))
-                self.img_display.update()
-                return None
-
-            if photom_pixels.ndim != 2 or photom_pixels.shape[1] != 2:
-                try:
-                    photom_pixels = np.reshape(photom_pixels, (-1, 2))
-                except ValueError:
-                    self.photometry_mask_image = None
-                    self.region.setImage(np.array([[0]]))
-                    self.img_display.update()
-                    return None
-
-            if photom_pixels.shape[0] == 0:
-                self.photometry_mask_image = None
-                self.region.setImage(np.array([[0]]))
-                self.img_display.update()
-                return None
-
-            # Create a coloring mask
-            x_mask, y_mask = photom_pixels.T
-
-            mask_img = np.zeros(self.img.data.shape)
-            mask_img[x_mask, y_mask] = 255
-
-            self.region.setImage(mask_img)
-        else:
+        if not pick:
             self.region.setImage(np.array([[0]]))
+            return
+
+        photom_pixels = pick.get('photometry_pixels')
+        if photom_pixels is None:
+            self.region.setImage(np.array([[0]]))
+            return
+
+        photom_pixels = np.asarray(photom_pixels)
+        if photom_pixels.size == 0:
+            self.region.setImage(np.array([[0]]))
+            return
+
+        if photom_pixels.ndim != 2 or photom_pixels.shape[1] != 2:
+            try:
+                photom_pixels = np.reshape(photom_pixels, (-1, 2))
+            except ValueError:
+                self.region.setImage(np.array([[0]]))
+                return
+
+        if photom_pixels.shape[0] == 0:
+            self.region.setImage(np.array([[0]]))
+            return
+
+        photom_pixels = photom_pixels.astype(int, copy=False)
+
+        # Clip any out-of-bounds pixels to the image extent to avoid indexing errors when drawing
+        height, width = self.img.data.shape[:2]
+        valid_mask = (
+            (photom_pixels[:, 0] >= 0) & (photom_pixels[:, 0] < height) &
+            (photom_pixels[:, 1] >= 0) & (photom_pixels[:, 1] < width)
+        )
+
+        if not np.any(valid_mask):
+            self.region.setImage(np.array([[0]]))
+            return
+
+        photom_pixels = photom_pixels[valid_mask]
+
+        # Create a coloring mask
+        x_mask, y_mask = photom_pixels.T
+
+        mask_img = np.zeros(self.img.data.shape)
+        mask_img[x_mask, y_mask] = 255
+
+        self.region.setImage(mask_img)
 
 
     def saveFTPdetectinfo(self, ECSV_saved=True):
