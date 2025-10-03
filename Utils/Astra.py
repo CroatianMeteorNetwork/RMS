@@ -1928,7 +1928,11 @@ class ASTRA:
     def computeIntensitySum(self, photom_pixels, global_centroid, corr_frame, uncorr_frame, unsub_frame):
         
         # Get photometry pixels as as an array of x_indices, and y_indices
-        photom_x_indices, photom_y_indices = np.array(photom_pixels).T
+        photom_pixels = np.asarray(photom_pixels, dtype=np.int64)
+        if photom_pixels.size == 0:
+            raise ValueError("photom_pixels must contain at least one coordinate")
+
+        photom_x_indices, photom_y_indices = photom_pixels.T
 
 
         # Store a copy of the corrected frame without star_mask to avoid reference errors
@@ -1950,10 +1954,10 @@ class ASTRA:
         x_color_size = np.max(photom_x_indices) - np.min(photom_x_indices)
         y_color_size = np.max(photom_y_indices) - np.min(photom_y_indices)
 
-        xmin = int(global_centroid[0] - x_color_size)
-        xmax = int(global_centroid[0] + x_color_size)
-        ymin = int(global_centroid[1] - y_color_size)
-        ymax = int(global_centroid[1] + y_color_size)
+        xmin = int(np.floor(global_centroid[0] - x_color_size))
+        xmax = int(np.ceil(global_centroid[0] + x_color_size)) + 1
+        ymin = int(np.floor(global_centroid[1] - y_color_size))
+        ymax = int(np.ceil(global_centroid[1] + y_color_size)) + 1
 
         # Limit the size to be within the bounds
 
@@ -1964,14 +1968,30 @@ class ASTRA:
         if ymin < 0: ymin = 0
         if ymax > H: ymax = H
 
+        if xmax <= xmin:
+            xmax = min(W, xmin + 1)
+        if ymax <= ymin:
+            ymax = min(H, ymin + 1)
+
         # Get cropped versions of all arrays
         cropped_corrected_frame = corrected_frame[ymin:ymax, xmin:xmax]
         cropped_uncorrected_frame = uncorrected_frame[ymin:ymax, xmin:xmax]
         cropped_corrected_avepixel = corrected_avepixel[ymin:ymax, xmin:xmax]
         cropped_star_mask = star_mask[ymin:ymax, xmin:xmax]
         cropped_unsubtracted_frame = unsubtracted_frame[ymin:ymax, xmin:xmax]
-        photom_x_indices = photom_x_indices - xmin
-        photom_y_indices = photom_y_indices - ymin
+        photom_x_indices = (photom_x_indices - xmin).astype(np.int64, copy=False)
+        photom_y_indices = (photom_y_indices - ymin).astype(np.int64, copy=False)
+
+        valid_mask = (
+            (photom_x_indices >= 0) & (photom_x_indices < cropped_corrected_frame.shape[1]) &
+            (photom_y_indices >= 0) & (photom_y_indices < cropped_corrected_frame.shape[0])
+        )
+
+        if not np.all(valid_mask):
+            photom_x_indices = photom_x_indices[valid_mask]
+            photom_y_indices = photom_y_indices[valid_mask]
+            if photom_x_indices.size == 0:
+                raise ValueError("No valid photometry pixels remain within the crop window")
 
         # Create combined masks
 

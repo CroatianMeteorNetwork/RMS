@@ -7566,26 +7566,55 @@ class PlateTool(QtWidgets.QMainWindow):
         pick = self.getCurrentPick()
 
         if pick:
+            photom_pixels_raw = pick.get('photometry_pixels')
+
             # If there are no photometry pixels, set the intensity to 0
-            if not pick['photometry_pixels']:
-                # print("No photometry selected, setting intensity sum to 1")
+            if photom_pixels_raw is None:
                 pick['intensity_sum'] = 1
                 return None
 
-            x_arr, y_arr = np.array(pick['photometry_pixels']).T
+            if isinstance(photom_pixels_raw, np.ndarray):
+                has_pixels = photom_pixels_raw.size > 0
+            else:
+                try:
+                    has_pixels = len(photom_pixels_raw) > 0
+                except TypeError:
+                    has_pixels = bool(photom_pixels_raw)
+
+            if not has_pixels:
+                pick['intensity_sum'] = 1
+                return None
+
+            photom_pixels = np.asarray(photom_pixels_raw, dtype=np.int64)
+            if photom_pixels.size == 0:
+                pick['intensity_sum'] = 1
+                return None
+
+            if photom_pixels.ndim != 2 or photom_pixels.shape[1] != 2:
+                try:
+                    photom_pixels = np.reshape(photom_pixels, (-1, 2))
+                except ValueError:
+                    pick['intensity_sum'] = 1
+                    return None
+
+            if photom_pixels.shape[0] == 0:
+                pick['intensity_sum'] = 1
+                return None
+
+            x_arr_global, y_arr_global = photom_pixels.T
 
             # Compute the centre of the colored pixels
-            x_centre = np.mean(x_arr)
-            y_centre = np.mean(y_arr)
+            x_centre = np.mean(x_arr_global)
+            y_centre = np.mean(y_arr_global)
 
             # Take a window twice the size of the colored pixels
-            x_color_size = np.max(x_arr) - np.min(x_arr)
-            y_color_size = np.max(y_arr) - np.min(y_arr)
+            x_color_size = np.max(x_arr_global) - np.min(x_arr_global)
+            y_color_size = np.max(y_arr_global) - np.min(y_arr_global)
 
-            x_min = int(x_centre - x_color_size)
-            x_max = int(x_centre + x_color_size)
-            y_min = int(y_centre - y_color_size)
-            y_max = int(y_centre + y_color_size)
+            x_min = int(np.floor(x_centre - x_color_size))
+            x_max = int(np.ceil(x_centre + x_color_size)) + 1
+            y_min = int(np.floor(y_centre - y_color_size))
+            y_max = int(np.ceil(y_centre + y_color_size)) + 1
 
             # Limit the size to be within the bounds
             if x_min < 0: x_min = 0
@@ -7593,9 +7622,33 @@ class PlateTool(QtWidgets.QMainWindow):
             if y_min < 0: y_min = 0
             if y_max > self.img.data.shape[1]: y_max = self.img.data.shape[1]
 
+            if x_max <= x_min:
+                x_max = min(self.img.data.shape[0], x_min + 1)
+            if y_max <= y_min:
+                y_max = min(self.img.data.shape[1], y_min + 1)
+
+            x_arr = (x_arr_global - x_min).astype(np.int64, copy=False)
+            y_arr = (y_arr_global - y_min).astype(np.int64, copy=False)
+
+            valid_mask = (
+                (x_arr >= 0) & (x_arr < (x_max - x_min)) &
+                (y_arr >= 0) & (y_arr < (y_max - y_min))
+            )
+
+            if not np.all(valid_mask):
+                x_arr = x_arr[valid_mask]
+                y_arr = y_arr[valid_mask]
+                x_arr_global = x_arr_global[valid_mask]
+                y_arr_global = y_arr_global[valid_mask]
+                if x_arr.size == 0:
+                    pick['intensity_sum'] = 1
+                    return None
+
+            pick['photometry_pixels'] = list(map(tuple, np.stack([x_arr_global, y_arr_global], axis=-1)))
+
             # Take only the colored part
             mask_img = np.ones_like(self.img.data)
-            mask_img[x_arr, y_arr] = 0
+            mask_img[x_arr_global, y_arr_global] = 0
             masked_img = np.ma.masked_array(self.img.data, mask_img)
             crop_img = masked_img[x_min:x_max, y_min:y_max]
 
@@ -7608,7 +7661,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Mask out the colored in pixels
             mask_img_bg = np.zeros_like(self.img.data)
-            mask_img_bg[x_arr, y_arr] = 1
+            mask_img_bg[x_arr_global, y_arr_global] = 1
 
             # Take the image where the colored part is masked out and crop the surroundings
             masked_img_bg = np.ma.masked_array(self.img.data, mask_img_bg)
@@ -8028,16 +8081,53 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Updates image to have the colouring in the current frame """
         pick = self.getCurrentPick()
 
-        if pick and pick['photometry_pixels']:
-            # Create a coloring mask
-            x_mask, y_mask = np.array(pick['photometry_pixels']).T
-
-            mask_img = np.zeros(self.img.data.shape)
-            mask_img[x_mask, y_mask] = 255
-
-            self.region.setImage(mask_img)
-        else:
+        if not pick:
             self.region.setImage(np.array([[0]]))
+            return
+
+        photom_pixels = pick.get('photometry_pixels')
+        if photom_pixels is None:
+            self.region.setImage(np.array([[0]]))
+            return
+
+        photom_pixels = np.asarray(photom_pixels)
+        if photom_pixels.size == 0:
+            self.region.setImage(np.array([[0]]))
+            return
+
+        if photom_pixels.ndim != 2 or photom_pixels.shape[1] != 2:
+            try:
+                photom_pixels = np.reshape(photom_pixels, (-1, 2))
+            except ValueError:
+                self.region.setImage(np.array([[0]]))
+                return
+
+        if photom_pixels.shape[0] == 0:
+            self.region.setImage(np.array([[0]]))
+            return
+
+        photom_pixels = photom_pixels.astype(int, copy=False)
+
+        # Clip any out-of-bounds pixels to the image extent to avoid indexing errors when drawing
+        height, width = self.img.data.shape[:2]
+        valid_mask = (
+            (photom_pixels[:, 0] >= 0) & (photom_pixels[:, 0] < height) &
+            (photom_pixels[:, 1] >= 0) & (photom_pixels[:, 1] < width)
+        )
+
+        if not np.any(valid_mask):
+            self.region.setImage(np.array([[0]]))
+            return
+
+        photom_pixels = photom_pixels[valid_mask]
+
+        # Create a coloring mask
+        x_mask, y_mask = photom_pixels.T
+
+        mask_img = np.zeros(self.img.data.shape)
+        mask_img[x_mask, y_mask] = 255
+
+        self.region.setImage(mask_img)
 
 
     def saveFTPdetectinfo(self, ECSV_saved=True):
