@@ -45,5 +45,7 @@
   446|oDPC2024|December phi-Cassiopeiids    |245.5|250.0|253.0| 21.0|-0.19| 54.0 | 1.07|16.1| 0.00|2024  |250.0  |   5|0.2  |0.2  |2.5 | 90.1|   3.0|{'yearly': {'min_tap': 100, 'min_meteors': 100, 'min_bin_duration':   2, 'max_bin_duration': 48}}
  9997|oM2025L1|M2025L1                      | 68.4| 69.5| 73  |197.0| 1.68| 51.5 |-0.44|12.1|-0.03|2025  | 69.5  | 100|0.2  |0.2  |2.5 | 83.5|   6.6|{'yearly': {'min_tap': 400, 'min_meteors':  20, 'min_bin_duration':   4, 'max_bin_duration': 48}}
  9996|oM2025L2|M2025L2                      | 68.8| 71.5| 73  |203.1|-0.07|  7.6 | 0.46|11.7|-0.05|2025  | 71.5  | 100|0.2  |0.2  |2.5 | 83.1|   3.0|{'yearly': {'min_tap': 400, 'min_meteors':  20, 'min_bin_duration':   4, 'max_bin_duration': 48}}
+ 1044|oEPU2025|epsilon-Ursae Minorids       |179.4|181.0|183.0|277.7|-6.68| 82.8 | 0.11|33.8| 0.22|2025  |181.0  | 100|0.2  |0.2  |2.5 | 83.1|   3.0|{'yearly': {'min_tap': 400, 'min_meteors':  20, 'min_bin_duration':   4, 'max_bin_duration': 48}}
+
 # An outburst in a certain year can be defined as e.g.:
 #   9|oDRA2011|Draconids 2011 Outburst      |192.2|195  |197.1|262.9| 0.34| 55.7|-0.05|20.7| 0.00|2011  |195.438|200 |7.225|0    |2.5 | -1  |   3.0|
