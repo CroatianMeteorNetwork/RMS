@@ -13,9 +13,9 @@ except ImportError:
 import os
 import sys
 import copy
+import datetime
 import shutil
 import argparse
-import logging
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -28,7 +28,7 @@ from RMS.Formats.FFfile import getMiddleTimeFF
 from RMS.Formats import Platepar
 from RMS.Formats import StarCatalog
 from RMS.Math import rotatePoint
-from RMS.Logger import initLogging
+from RMS.Logger import initLogging, getLogger
 
 # Import Cython functions
 import pyximport
@@ -36,7 +36,7 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog
 
 
-log = logging.getLogger('logger')
+log = getLogger('logger')
 
 
 def addPoint(img, xc, yc, radius):
@@ -225,6 +225,13 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
     # Create a copy of the config not to mess with the original config parameters
     config = copy.deepcopy(config)
 
+    year, month, day, hour, minute, second, millisecond = calstars_time
+    ts = datetime.datetime(year, month, day, hour, minute, second, int(round(millisecond * 1000)))
+    J2000 = datetime.datetime(2000, 1, 1, 12, 0, 0)
+
+    # Compute the number of years from J2000
+    years_from_J2000 = (ts - J2000).total_seconds()/(365.25*24*3600)
+    log.info('Loading star catalog with years from J2000: {:.2f}'.format(years_from_J2000))
 
     # Try to optimize the catalog limiting magnitude until the number of image and catalog stars are matched
     maxiter = 10
@@ -233,8 +240,12 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
     for inum in range(maxiter):
 
         # Load the catalog stars
-        catalog_stars, _, _ = StarCatalog.readStarCatalog(config.star_catalog_path, config.star_catalog_file, \
-            lim_mag=config.catalog_mag_limit, mag_band_ratios=config.star_catalog_band_ratios)
+        catalog_stars, _, _ = StarCatalog.readStarCatalog(
+            config.star_catalog_path,
+            config.star_catalog_file,
+            years_from_J2000=years_from_J2000,
+            lim_mag=config.catalog_mag_limit,
+            mag_band_ratios=config.star_catalog_band_ratios)
 
         # Get the RA/Dec of the image centre
         _, ra_centre, dec_centre, _ = ApplyAstrometry.xyToRaDecPP([calstars_time], [platepar.X_res/2], \
@@ -376,8 +387,7 @@ if __name__ == "__main__":
     initLogging(config, 'fftalign_')
 
     # Get the logger handle
-    log = logging.getLogger("logger")
-    log.setLevel(logging.INFO)
+    log = getLogger("logger", level="INFO")
 
     # Get a list of files in the night folder
     file_list = os.listdir(dir_path)
@@ -406,7 +416,14 @@ if __name__ == "__main__":
         sys.exit()
 
     # Load the calstars file
-    calstars_list = CALSTARS.readCALSTARS(dir_path, calstars_file)
+    calstars_data = CALSTARS.readCALSTARS(dir_path, calstars_file)
+    calstars_list, ff_frames = calstars_data
+
+    # Bail out gracefully if the CALSTARS list is empty
+    if not calstars_list:
+        log.warning("FFTalign: CALSTARS list is empty - nothing to align")
+        sys.exit()
+        
     calstars_dict = {ff_file: star_data for ff_file, star_data in calstars_list}
 
     log.info('CALSTARS file: ' + calstars_file + ' loaded!')
@@ -419,7 +436,7 @@ if __name__ == "__main__":
     calstars_coords[:, [0, 1]] = calstars_coords[:, [1, 0]]
 
     # Get the time of the FF file
-    calstars_time = getMiddleTimeFF(max_len_ff, config.fps, ret_milliseconds=True)
+    calstars_time = getMiddleTimeFF(max_len_ff, config.fps, ret_milliseconds=True, ff_frames=ff_frames)
 
 
 

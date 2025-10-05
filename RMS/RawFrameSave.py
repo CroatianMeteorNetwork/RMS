@@ -20,17 +20,16 @@ import os
 import sys
 import traceback
 import time
-import logging
 import multiprocessing
 from math import floor
-import json
 
 import cv2
 
+from RMS.Logger import getLogger
 from RMS.Misc import mkdirP
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 class RawFrameSaver(multiprocessing.Process):
@@ -39,18 +38,19 @@ class RawFrameSaver(multiprocessing.Process):
 
     running = False
     
-    def __init__(self, saved_frames_dir, array1, startTime1, array2, startTime2, tsArray1, tsArray2, config):
+    def __init__(self, saved_frames_dir, array1, start_time1, array2, start_time2, tsArray1, tsArray2, daytime_mode, config):
         """
 
         Arguments:
             saved_frames_dir: directory to save raw frames to
             array1: first numpy array in shared memory of raw video frames
-            startTime1: float in shared memory that holds time of first raw frame in array1
+            start_time1: float in shared memory that holds time of first raw frame in array1
             array2: second numpy array in shared memory
-            startTime1: float in shared memory that holds time of first raw frame in array2
+            start_time1: float in shared memory that holds time of first raw frame in array2
             tsArray1: first numpy array in shared memory for timestamps
             tsArray2: second numpy array in shared memory for timestamps
             config: configuration class
+            daytime_mode: [bool] True if the camera is in daytime mode, False if in nightime mode
 
         """
         
@@ -58,11 +58,12 @@ class RawFrameSaver(multiprocessing.Process):
         
         self.saved_frames_dir = saved_frames_dir
         self.array1 = array1
-        self.startTime1 = startTime1
+        self.start_time1 = start_time1
         self.array2 = array2
-        self.startTime2 = startTime2
+        self.start_time2 = start_time2
         self.timeStamps1 = tsArray1
         self.timeStamps2 = tsArray2
+        self.daytime_mode = daytime_mode
         self.config = config
 
         self.total_saved_frames = 0
@@ -72,56 +73,7 @@ class RawFrameSaver(multiprocessing.Process):
         self.run_exited = multiprocessing.Event()
 
 
-    def initRawFrameCount(self):        
-        """Initiates frame counter for the JSON file with (frame, timestamp) pairs, so that the frame count is
-        consistent after a reboot
-        """
-
-        # Find sidecar json file for current day in year's directory
-        json_subpath = time.strftime("%Y/{}_%Y%m%d-%j".format(self.config.stationID)) + "_frametimes.json"
-        json_file_path = os.path.join(self.saved_frames_dir, json_subpath)
-
-
-        # Get latest frame count in case file exists
-        if os.path.exists(json_file_path):
-            with open(json_file_path, 'r') as json_file:
-                json_data = json.load(json_file)
-            self.total_saved_frames = max(map(int, json_data.keys())) + 1
-            log.info("Continuing raw frame saving for today from frame #{}".format(self.total_saved_frames))
-
-
-    def saveJsonTimestamps(self, block_timestamp, block_json_data) :
-        """Produces/Updates a JSON file with (frame, timestamp) pairs
-
-        Arguments
-        ---------
-            block_timestamp : [float] time of first frame in block
-            block_json_data: [Dict] (frame, timestamp) mappings
-
-        """
-
-        # Sidecar json file to write to (frame, timestamp) pairs to year's directory
-        json_subpath = time.strftime("%Y/{}_%Y%m%d-%j".format(self.config.stationID), time.gmtime(block_timestamp)) + "_frametimes.json"
-        json_file_path = os.path.join(self.saved_frames_dir, json_subpath)
-
-        # Create JSON on path if not present, else update file
-        if not os.path.exists(json_file_path):
-            present_json_data = block_json_data
-            log.info("Initialized new json at {}.".format(json_file_path)) 
-
-        else:
-            with open(json_file_path, 'r') as json_file:
-                present_json_data = json.load(json_file)
-            present_json_data.update(block_json_data)
-
-        with open(json_file_path, 'w') as json_file:
-            json.dump(present_json_data, json_file, indent=4)
-
-        log.info("Updated {} with {} new frame timestamps".format(json_file_path, len(block_json_data))) 
-
-
-
-    def saveFramesToDisk(self, frametimes, block_start_time):
+    def saveFramesToDisk(self, frametimes, daytime_mode=False):
         """Saves a block of raw image frames to disk with timestamp-based filenames.
 
         This method calculates each filename using station ID, the UTC date
@@ -137,10 +89,8 @@ class RawFrameSaver(multiprocessing.Process):
         Arguments
         ---------
             frametimes : [List] list of (frame, timestamp) pairs of corresponding frames and timestamps
-            block_start_time: [float] time of first frame in frame_array
         """
 
-        block_json_data = {}
 
         for (frame, timestamp) in frametimes:
 
@@ -151,12 +101,7 @@ class RawFrameSaver(multiprocessing.Process):
             # In case the timestamp day changes mid-block
             if self.day_of_year != time.strftime("%j", time.gmtime(timestamp)):
                 
-                # Save block data from previous day
-                self.saveJsonTimestamps(block_start_time, block_json_data)
-
                 # Adjust values for the day change
-                block_json_data = {}
-                block_start_time = timestamp
                 self.total_saved_frames = 0
                 self.day_of_year = time.strftime("%j", time.gmtime(timestamp))
 
@@ -168,16 +113,24 @@ class RawFrameSaver(multiprocessing.Process):
             # Calculate milliseconds
             millis = int((timestamp - floor(timestamp))*1000)
 
+            # Suffix for indicating if the camera is in daytime or nighttime mode
+            mode_suffix = ""
+            if daytime_mode:
+                mode_suffix = "_d"
+            else:
+                mode_suffix = "_n"
+
             # Create the filename
             if self.config.frame_file_type == 'png':
                 file_extension = '.png'
             else:
                 file_extension = '.jpg'
 
-            filename = "{0}_{1}_{2:03d}{3}".format(
+            filename = "{0}_{1}_{2:03d}{3}{4}".format(
                 str(self.config.stationID).zfill(3),
                 date_string,
                 millis,
+                mode_suffix,
                 file_extension
             )
 
@@ -199,14 +152,7 @@ class RawFrameSaver(multiprocessing.Process):
             except Exception as e:
                 log.error("Could not save frame to disk: {0}".format(e))
 
-
-            # Write timestamps to temporary dictionary, to be then saved to json
-            block_json_data[self.total_saved_frames] = "{0}_{1:03d}".format(date_string, millis)
             self.total_saved_frames += 1
-
-
-        self.saveJsonTimestamps(block_start_time, block_json_data)
-
 
 
     def stop(self):
@@ -240,13 +186,11 @@ class RawFrameSaver(multiprocessing.Process):
         """ Retrieve raw frames from shared array and save them.
         """
 
-        self.initRawFrameCount()
-
         # Repeat until the raw frame saver is killed from the outside
         while not self.exit.is_set():
 
             # Block until the raw frames are available
-            while (self.startTime1.value == 0) and (self.startTime2.value == 0):
+            while (self.start_time1.value == 0) and (self.start_time2.value == 0):
 
                 # Exit function if process was stopped from the outside
                 if self.exit.is_set():
@@ -260,10 +204,10 @@ class RawFrameSaver(multiprocessing.Process):
 
             raw_buffer_one = True
 
-            if self.startTime1.value > 0:
+            if self.start_time1.value > 0:
 
                 # Retrieve time of first frame
-                startTime = float(self.startTime1.value)
+                startTime = float(self.start_time1.value)
 
                 # Copy raw (frames, timestamps)
                 # Clear out the timestamp array so it can be used by 
@@ -272,10 +216,10 @@ class RawFrameSaver(multiprocessing.Process):
                 self.timeStamps1.fill(0)
                 raw_buffer_one = True
 
-            elif self.startTime2.value > 0:
+            elif self.start_time2.value > 0:
 
                 # Retrieve time of first frame
-                startTime = float(self.startTime2.value)
+                startTime = float(self.start_time2.value)
 
                 # Copy raw (frames, timestamps)
                 # Clear out the timestamp array so it can be used by 
@@ -296,13 +240,13 @@ class RawFrameSaver(multiprocessing.Process):
             t = time.time()
 
             # Run the frame block save
-            self.saveFramesToDisk(frametimes, startTime)
+            self.saveFramesToDisk(frametimes, self.daytime_mode)
 
             # Once the frame saving is done, tell the capture thread to keep filling the buffer
             if raw_buffer_one:
-                self.startTime1.value = 0
+                self.start_time1.value = 0
             else:
-                self.startTime2.value = 0
+                self.start_time2.value = 0
 
             log.debug("Raw frame block saving time: {:.3f} s".format(time.time() - t))
 

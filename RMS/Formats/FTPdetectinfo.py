@@ -21,7 +21,7 @@ import os
 import sys
 import git
 import numpy as np
-from RMS.Misc import RmsDateTime
+from RMS.Misc import RmsDateTime, UTCFromTimestamp
 
 # Map FileNotFoundError to IOError in Python 2 as it does not exist
 if sys.version_info[0] < 3:
@@ -74,7 +74,7 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
             repo = git.Repo(search_parent_directories=True)
             commit_unix_time = repo.head.object.committed_date
             sha = repo.head.object.hexsha
-            commit_time = datetime.datetime.fromtimestamp(commit_unix_time).strftime('%Y%m%d_%H%M%S')
+            commit_time = UTCFromTimestamp.utcfromtimestamp(commit_unix_time).strftime('%Y%m%d_%H%M%S')
 
         except:
             commit_time = ""
@@ -94,7 +94,7 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
         ftpdetect_file.write("CAL file processed\n")
         ftpdetect_file.write("Cam# Meteor# #Segments fps hnr mle bin Pix/fm Rho Phi\n")
         
-        ftpdetect_file.write("Per segment:  Frame# Col Row RA Dec Azim Elev Inten Mag\n")
+        ftpdetect_file.write("Per segment:  Frame# Col Row RA Dec Azim Elev Inten Mag Bcknd SNR NSatPx\n")
 
         # Write info for all meteors
         for meteor in meteor_list:
@@ -104,81 +104,148 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
 
             ftpdetect_file.write("-------------------------------------------------------\n")
             ftpdetect_file.write(ff_name + "\n")
-            
-            if calibration is not None:
-                ftpdetect_file.write(calibration + "\n")
-            else:
-                ftpdetect_file.write("Uncalibrated" + "\n")
-
+            ftpdetect_file.write(calibration + "\n" if calibration is not None else "Uncalibrated\n")
 
             # Calculate meteor's angular velocity
             if len(centroids) > 1:
                 first_centroid = centroids[0]
-                last_centroid  = centroids[-1]
+                last_centroid = centroids[-1]
                 frame1, x1, y1 = first_centroid[:3]
                 frame2, x2, y2 = last_centroid[:3]
 
                 # If the frames are the same, assume the angular velocity is zero
                 if frame1 == frame2:
                     ang_vel = 0.0
-
                 else:
-                    ang_vel = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)/float(frame2 - frame1)
-
+                    ang_vel = np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2) / float(frame2 - frame1)
             else:
                 ang_vel = 0.0
 
             # Write detection header
-            ftpdetect_file.write("{:>4s}".format(str(cam_code)) + " " + str(int(meteor_No)).zfill(4) + " " + \
-                str(int(len(centroids))).zfill(4) + " " + "{:07.2f}".format(round(float(fps), 2)) + \
-                " 000.0 000.0  00.0 " + str(round(ang_vel, 1)).zfill(5) + " " + \
-                "{:06.1f} {:06.1f}".format(round(rho, 1), round(theta, 1)) + "\n")
+            detection_header = "{:>4s} {:0>4d} {:0>4d} {:07.2f} 000.0 000.0  00.0 {:>5.1f} {:06.1f} {:06.1f}\n".format(
+                str(cam_code),
+                int(meteor_No),
+                int(len(centroids)),
+                round(float(fps), 2),
+                round(ang_vel, 1),
+                round(rho, 1),
+                round(theta, 1),
+            )
+            ftpdetect_file.write(detection_header)
+
+
+
+            # Define the format string for detection lines
+            detection_line_str = (
+                "{:09.4f} "     # Frame
+                "{:07.2f} "     # X
+                "{:07.2f} "     # Y
+                "{:010.6f} "    # RA
+                "{:+010.6f} "   # Dec
+                "{:010.6f} "    # Azim
+                "{:+010.6f} "   # Elev
+                "{:09d} "       # Level
+                "{:+06.2f} "    # Mag
+                "{:06d} "       # Background
+                "{:05.2f} "     # SNR
+                "{:06d}\n"      # Saturated count
+            )
 
             # Write individual detection points
             for line in centroids:
 
-                if celestial_coords_given:
+                # Initialize variables with default values
+                frame = x = y = level = background = snr = saturated_count = None
+                ra = dec = azim = elev = mag = None
 
-                    frame, x, y, ra, dec, azim, elev, level, mag = line
+                # Unpack line depending on the data available
+                if len(line) == 12:
 
-                    # If the coordinates or the magnitude are NaN, skip this centroid
-                    if np.isnan(x) or np.isnan(y) or np.isnan(mag):
-                        continue
-
-                    # Check that level and magnitude are numbers
-                    if level is None:
-                        level = 1
-                    if mag is None:
-                        mag = 10.0
-
-                    detection_line_str = "{:09.4f} {:07.2f} {:07.2f} {:10.6f} {:+10.6f} {:10.6f} {:+10.6f} {:06d} {:+6.2f}"
-
-                    ftpdetect_file.write(detection_line_str.format(round(frame, 4), round(x, 2), \
-                        round(y, 2), round(ra, 6), round(dec, 6), round(azim, 6), round(elev, 6), \
-                        int(level), round(mag, 2)) + "\n")
+                    # All data available
+                    (
+                        frame,
+                        x,
+                        y,
+                        ra,
+                        dec,
+                        azim,
+                        elev,
+                        level,
+                        mag,
+                        background,
+                        snr,
+                        saturated_count,
+                    ) = line
 
                 else:
-                    if len(line) == 9:
-                        frame, x, y, ra, dec, azim, elev, level, mag = line
+                    # Only basic data available
+                    frame, x, y, level, background, snr, saturated_count = line
 
-                        if mag is None:
-                            mag = 10.0
+                # If the coordinates are NaN, skip this centroid
+                if np.isnan(x) or np.isnan(y):
+                    continue
 
-                    else:
-                        frame, x, y, level = line
-
-                    # If the coordinates are NaN, skip this centroid
-                    if np.isnan(x) or np.isnan(y):
-                        continue
+                # If the magnitude is given and NaN, skip this centroid
+                if mag is not None and np.isnan(mag):
+                    continue
 
 
-                    # Check that level is a number
-                    if level is None:
-                        level = 1
+                ### Set default values if necessary and limit the values to the allowed range ###
+                level = int(level) \
+                    if (level is not None) and (not np.isnan(level)) \
+                    else 1
+                
+                background = int(background) \
+                    if (background is not None) and (not np.isnan(background)) \
+                    else 0
+                
+                snr = min(float(snr), 99.99) \
+                    if (snr is not None) and (not np.isnan(snr)) \
+                    else 0.0
 
-                    ftpdetect_file.write("{:09.4f} {:07.2f} {:07.2f}".format(round(frame, 4), round(x, 2), \
-                        round(y, 2)) + " 000.000000  00.000000 000.000000  00.000000 " + "{:06d}".format(int(level)) \
-                        + " 0.00\n")
+                saturated_count = min(int(saturated_count), 999999) \
+                    if (saturated_count is not None) and (not np.isnan(saturated_count)) \
+                    else 0
+                
+                ### 
+
+                # Round the values to the required precision
+                frame = round(frame, 4)
+                x = round(x, 2)
+                y = round(y, 2)
+                snr = round(snr, 2)
+
+                if celestial_coords_given and len(line) == 12:
+                    mag = float(mag) if mag is not None else 999.0
+                    ra = round(ra, 6) if ra is not None else 0.0
+                    dec = round(dec, 6) if dec is not None else 0.0
+                    azim = round(azim, 6) if azim is not None else 0.0
+                    elev = round(elev, 6) if elev is not None else 0.0
+
+                else:
+                    
+                    # Set default values for celestial coordinates and magnitude
+                    mag = 0.00  # As per original code in non-celestial case
+                    ra = azim = 0.0  # For formatting with leading zeros
+                    dec = elev = 0.0  # For formatting with sign
+
+                # Prepare the detection line
+                detection_line = detection_line_str.format(
+                    frame,
+                    x,
+                    y,
+                    ra,
+                    dec,
+                    azim,
+                    elev,
+                    level,
+                    mag,
+                    background,
+                    snr,
+                    saturated_count,
+                )
+
+                ftpdetect_file.write(detection_line)
 
 
 def findFTPdetectinfoFile(path):
@@ -245,6 +312,7 @@ def readFTPdetectinfo(ff_directory, file_name, ret_input_format=False):
         meteor_list = []
         meteor_meas = []
         cam_code = meteor_No = n_segments = fps = hnr = mle = binn = px_fm = rho = phi = None
+        background = snr = saturated_count = None
         calib_status = 0
 
         # Skip the header
@@ -298,6 +366,9 @@ def readFTPdetectinfo(ff_directory, file_name, ret_input_format=False):
                     continue
 
                 mag = np.nan
+                background = np.nan
+                snr = np.nan
+                saturated_count = np.nan
 
                 # Read magnitude if it is in the file
                 if len(line.split()) > 8:
@@ -306,10 +377,23 @@ def readFTPdetectinfo(ff_directory, file_name, ret_input_format=False):
 
                     mag = float(line_sp[8])
 
+                # Read additional parameters if they are in the file
+                if len(line.split()) > 9:
+
+                    background = float(line_sp[9])
+                    snr = float(line_sp[10])
+                    saturated_count = float(line_sp[11])
+
                 # Read meteor frame-by-frame measurements
                 frame_n, x, y, ra, dec, azim, elev, inten = list(map(float, line.split()[:8]))
 
-                meteor_meas.append([calib_status, frame_n, x, y, ra, dec, azim, elev, inten, mag])
+                meteor_meas.append([
+                    calib_status, 
+                    frame_n, 
+                    x, y, 
+                    ra, dec, azim, elev, 
+                    inten, mag, background, snr, saturated_count
+                    ])
 
 
             entry_counter += 1

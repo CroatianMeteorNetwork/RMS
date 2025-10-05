@@ -4,16 +4,16 @@ from __future__ import print_function, division, absolute_import
 import platform
 import os
 import sys
+import traceback
 import shutil
 import errno
-import logging
 import subprocess
 import random
 import re
 import string
 import inspect
 import datetime
-
+import tarfile
 
 # tkinter import that works on both Python 2 and 3
 if sys.version_info[0] < 3:
@@ -32,12 +32,14 @@ from matplotlib import scale as mscale
 from matplotlib import transforms as mtransforms
 from matplotlib.ticker import FixedLocator
 
+from RMS.Logger import getLogger
+
 # Map FileNotFoundError to IOError in Python 2 as it does not exist
 if sys.version_info[0] < 3:
     FileNotFoundError = IOError
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 def mkdirP(path):
@@ -630,6 +632,37 @@ class RmsDateTime:
             return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
 
+class UTCFromTimestamp:
+    """Cross-version helper to convert Unix timestamps to naive UTC datetime objects.
+
+    - Python 2.7-3.11: uses datetime.utcfromtimestamp()
+    - Python 3.12+: uses datetime.fromtimestamp(..., tz=timezone.utc).replace(tzinfo=None)
+    """
+
+    @staticmethod
+    def utcfromtimestamp(timestamp):
+        if sys.version_info >= (3, 12):
+            # Use aware datetime then strip tzinfo to make it naive
+            return datetime.datetime.fromtimestamp(
+                timestamp, tz=UTCFromTimestamp._get_utc_timezone()
+            ).replace(tzinfo=None)
+        else:
+            return datetime.datetime.utcfromtimestamp(timestamp)
+
+    @staticmethod
+    def _get_utc_timezone():
+        """Safely provide UTC tzinfo across Python versions."""
+        try:
+            # Python 3.2+
+            from datetime import timezone
+            return timezone.utc
+        except ImportError:
+            # Python 2: no timezone support
+            raise NotImplementedError(
+                "timezone-aware fromtimestamp() is not supported in Python < 3.2. "
+                "Use Python >= 3.12 or fallback to utcfromtimestamp()."
+            )
+
 def niceFormat(string, delim=":", extra_space=5):
 
     """
@@ -770,6 +803,137 @@ def obfuscatePassword(url):
                 return re.sub(pattern, r'\1****\3', url)
         return url
     except Exception as e:
-        logging.error("Error in obfuscate_password: %s", str(e))
+        log.error("Error in obfuscate_password: %s", str(e))
         return "[URL_REDACTED_DUE_TO_ERROR]"
+
+
+def _portableCommonpath(paths):
+    """Return the longest common sub-path shared by all given paths.
+
+    Arguments:
+        paths: [list[str]] Sequence (list, tuple, etc.) of file-system
+            paths to compare.
+
+    Return:
+        common_path: [str] The directory prefix common to every element in
+            *paths*, or an empty string if none exists.
+    """
+    try:
+        return os.path.commonpath(paths)          # Py 3.5+
     
+    except AttributeError:
+        if not paths:
+            return ''
+        
+        split_paths = [os.path.normpath(p).split(os.sep) for p in paths]
+        prefix_parts = os.path.commonprefix(split_paths)
+
+        if not prefix_parts:
+            return os.path.dirname(paths[0])      # diff drives (Windows)
+        
+        prefix = os.sep.join(prefix_parts)
+
+        if not os.path.isdir(prefix):
+            prefix = os.path.dirname(prefix)
+
+        return prefix or os.path.dirname(paths[0])
+
+
+def tarWithProgress(source_dir, tar_path, compression='bz2', remove_source=False, file_list=None):
+    """Create a tar archive with progress feedback, verify it, and (optionally) delete the sources.
+
+    Arguments:
+        source_dir: [str | None] Directory whose entire contents will be
+            archived. Ignored when *file_list* is supplied.
+        tar_path: [str] Full path (including extension) where the archive
+            will be written.
+
+    Keyword arguments:
+        compression: [str] Compression algorithm: 'bz2' or 'gz'.
+            'bz2' by default.
+        remove_source: [bool] If *True* and *file_list* is *None*, delete
+            *source_dir* after the archive verifies correctly. False by
+            default.
+        file_list: [list[str] | None] Explicit list of file paths to
+            archive. When given, the directory walk is skipped and each
+            file is stored relative to their deepest common parent
+            directory. None by default.
+
+    Return:
+        success: [bool] True if the archive was created **and** verified
+            successfully, False otherwise.
+    """
+    try:
+        # 1. Build list of files ------------------------------------------------
+        if file_list is not None:
+            files_to_archive = list(file_list)
+            if not files_to_archive:
+                log.error("No files given in file_list - nothing to archive")
+                return False
+            base_dir = _portableCommonpath(files_to_archive)
+        else:
+            files_to_archive = [os.path.join(r, f)
+                                for r, _, fs in os.walk(source_dir)
+                                for f in fs]
+            base_dir = source_dir
+
+        total_files = len(files_to_archive)
+        if not total_files:
+            log.info("Nothing to archive")
+            return False
+
+        log.info("Found {:d} files to archive".format(total_files))
+                
+        # 2. Create tarball -----------------------------------------------------
+        mode = 'w:bz2' if compression == 'bz2' else 'w:gz'
+        with tarfile.open(tar_path, mode) as tar:
+            processed = 0
+            last_pct = 0
+            for fpath in files_to_archive:
+                rel = os.path.relpath(fpath, base_dir)
+                
+                # Check if the file is outside the base directory
+                if rel.startswith(os.pardir):
+                    raise ValueError("{} is outside {}".format(fpath, base_dir))
+                
+                arcname = os.path.join(os.path.basename(base_dir), rel)
+                tar.add(fpath, arcname=arcname)
+
+                processed += 1
+                pct = int(processed * 100.0/total_files)
+                if pct >= last_pct + 5:
+                    last_pct = (pct//5)*5
+                    print("Archiving progress: {}% ({}/{})".format(
+                          last_pct, processed, total_files))
+        
+        # 3. Verify -------------------------------------------------------------
+        log.info("Verifying archive integrity...")
+        read_mode = 'r:bz2' if compression == 'bz2' else 'r:gz'
+
+        if not (os.path.exists(tar_path) and os.path.getsize(tar_path) > 0):
+            log.error("Archive verification failed: file is empty or missing")
+            return False
+
+        with tarfile.open(tar_path, read_mode) as tst:
+            archive_files = len(tst.getnames())
+            if archive_files < total_files:
+                log.error("Archive verification failed: wanted >={} files, found {}".format(
+                          total_files, archive_files))
+                return False
+            log.info("Archive verified successfully: contains {} files".format(
+                     archive_files))
+            print("Archive verified successfully: contains {} files".format(
+                  archive_files))
+
+        # 4. Optional cleanup ---------------------------------------------------
+        if remove_source and file_list is None and source_dir:
+            log.info("Removing source directory {} ...".format(source_dir))
+            shutil.rmtree(source_dir)
+            log.info("Source directory removed")
+
+        return True
+
+    except Exception as e:
+        log.error("Error creating archive: {}".format(e))
+        log.error("".join(traceback.format_exception(*sys.exc_info())))
+        return False

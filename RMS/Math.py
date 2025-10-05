@@ -328,6 +328,50 @@ def histogramEdgesDataNumber(x, points_per_bin):
 
 #########
 
+
+def twoDGaussian(params, amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
+    """ Defines a 2D Gaussian distribution. 
+    
+    Arguments:
+        params: [tuple of floats] 
+            - (x, y) independent variables, 
+            - saturation: [int] Value at which saturation occurs
+        amplitude: [float] amplitude of the PSF
+        xo: [float] PSF center, X component
+        yo: [float] PSF center, Y component
+        sigma_x: [float] standard deviation X component
+        sigma_y: [float] standard deviation Y component
+        theta: [float] PSF rotation in radians
+        offset: [float] PSF offset from the 0 (i.e. the "elevation" of the PSF)
+
+    Return:
+        g: [ndarray] values of the given Gaussian at (x, y) coordinates
+
+    """
+
+    x, y, saturation = params
+
+    if isinstance(saturation, np.ndarray):
+        saturation = saturation[0, 0]
+    
+    xo = float(xo)
+    yo = float(yo)
+    amplitude = abs(amplitude)
+    sigma_x = abs(sigma_x)
+    sigma_y = abs(sigma_y)
+
+    a = (np.cos(theta)**2)/(2*sigma_x**2) + (np.sin(theta)**2)/(2*sigma_y**2)
+    b = -(np.sin(2*theta))/(4*sigma_x**2) + (np.sin(2*theta))/(4*sigma_y**2)
+    c = (np.sin(theta)**2)/(2*sigma_x**2) + (np.cos(theta)**2)/(2*sigma_y**2)
+    g = offset + amplitude*np.exp(-(a*((x - xo)**2) + 2*b*(x - xo)*(y - yo) + c*((y - yo)**2)))
+
+    # Limit values to saturation level
+    g[g > saturation] = saturation
+
+    return g.ravel()
+
+
+
 def rollingAverage2d(x, y, x_window):
     """
     Rolling average where the window is on the x axis rather than index
@@ -356,6 +400,34 @@ def rollingAverage2d(x, y, x_window):
 
     return output_x, output_y
 
+
+
+def weightedMedian(coordinates, weights):
+    """ Compute the weighted median of the given coordinates.
+
+    Arguments:
+        coordinates: [list] List of numeric values.
+        weights: [list] List of corresponding weights.
+
+    Returns:
+        [float] Weighted median of the coordinates.
+    """
+
+    # Combine coordinates and weights, and sort by coordinate value.
+    sorted_pairs = sorted(zip(coordinates, weights), key=lambda x: x[0])
+    total_weight = sum(weights)
+    cumulative_weight = 0
+
+    for coord, w in sorted_pairs:
+
+        cumulative_weight += w
+
+        if cumulative_weight >= total_weight/2:
+
+            return coord
+        
+    # Fallback: return the last coordinate if the cumulative threshold is not reached
+    return sorted_pairs[-1][0]
 
 
 def dimHypot(t1, t2):

@@ -4,13 +4,27 @@ from __future__ import print_function, division, absolute_import
 
 from time import time
 import os
-import logging
 
 import numpy as np
 import matplotlib.pyplot as plt
 
 
+# Try importing numba
+try:
+    from numba import njit
+    NUMBA_AVAILABLE = True
+
+    # If it's available, set the numba debug level to WARNING
+    import logging
+    logging.getLogger("numba").setLevel(logging.WARNING)
+
+except ImportError:
+    NUMBA_AVAILABLE = False
+
+
+
 from RMS.Formats.FFfile import selectFFFrames
+from RMS.Logger import getLogger
 from RMS.Routines import Image
 from RMS.Routines import MaskImage
 from RMS.Math import vectNorm
@@ -22,7 +36,7 @@ import RMS.Routines.MorphCy as morph
 
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("logger")
 
 
 def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
@@ -55,7 +69,6 @@ def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
 
     # Load the mask if given
     if mask_path:
-        
         mask = MaskImage.loadMask(mask_path)
 
         log.info('Loaded mask: {:s}'.format(mask_path))
@@ -68,9 +81,6 @@ def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
     else:
         log.info('No mask file has been found.')
         
-
-
-
 
     # Try loading the dark frame
     dark = None
@@ -273,10 +283,63 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
                 indicesx.append(x + hw)
 
     # Convert indices to integer
-    indicesx = list(map(int, indicesx))
-    indicesy = list(map(int, indicesy))
+    indicesx = np.array(indicesx, dtype=np.uint16)
+    indicesy = np.array(indicesy, dtype=np.uint16)
 
     return (indicesy, indicesx)
+
+
+def dilateCoordinates(coords, img_h, img_w, width=1):
+    """
+    Dilate the given coordinates by adding neighboring coordinates.
+
+    Arguments:
+        coords: [np.ndarray] An (N, 3) array where each row is [x, y, frame_no].
+        img_h: [int] Height of the image (px).
+        img_w: [int] Width of the image (px).
+
+    Keyword arguments:
+        width: [int] The dilation width (number of steps). Default is 1.
+
+    Returns:
+        np.ndarray: A (M, 3) array of dilated coordinates.
+
+    """
+
+        # If the width is 0, return the original coordinates
+    if width == 0:
+        return coords
+
+    # Ensure width is at least 1
+    width = max(1, int(width))
+    
+    # Generate shifts for dilation
+    shift_range = np.arange(-width, width + 1)
+    dx, dy = np.meshgrid(shift_range, shift_range)
+    shifts = np.column_stack((dx.ravel(), dy.ravel()))
+    
+    # Generate all shifted coordinates
+    coords_xy = coords[:, :2][:, np.newaxis, :]  # Shape: (N, 1, 2)
+    shifted_coords = coords_xy + shifts[np.newaxis, :, :]  # Shape: (N, S, 2)
+    shifted_coords = shifted_coords.reshape(-1, 2)  # Shape: (N*S, 2)
+    
+    # Repeat frame_no for each shifted coordinate
+    frame_no = coords[:, 2]
+    frame_no_repeated = np.repeat(frame_no, shifts.shape[0])
+    
+    # Combine x, y, and frame_no
+    dilated_coords = np.column_stack((shifted_coords, frame_no_repeated))
+    
+    # Remove duplicate coordinates
+    dilated_coords_unique = np.unique(dilated_coords, axis=0)
+    
+    # Ensure the coordinates are within image boundaries
+    x_within_bounds = (dilated_coords_unique[:, 0] >= 0) & (dilated_coords_unique[:, 0] < img_w)
+    y_within_bounds = (dilated_coords_unique[:, 1] >= 0) & (dilated_coords_unique[:, 1] < img_h)
+    within_bounds = x_within_bounds & y_within_bounds
+    dilated_coords_within_bounds = dilated_coords_unique[within_bounds]
+    
+    return dilated_coords_within_bounds
 
 
 
@@ -301,6 +364,60 @@ def checkCentroidBounds(model_pos, img_w, img_h):
         return False
 
     return True
+
+
+
+### Define the function for finding the nonzero positions in a numpy array ###
+### Choose the fastest implementation depending on whether numba is available ###
+
+def findNonzeroPositionsNumpy(arr):
+    """ Find the nonzero positions in a numpy array using numpy functions.
+    
+    Arguments:
+        arr: [ndarray] Numpy array.
+
+    Return:
+        y, x: [tuple of lists] Indices of nonzero elements.
+        
+    """
+
+
+    y, x = np.where(arr != 0)
+
+    return y, x
+
+
+if NUMBA_AVAILABLE:
+    
+    @njit
+    def findNonzeroPositionsNumba(arr):
+        """ Find the nonzero positions in a numpy array using numba functions.
+        
+        Arguments:
+            arr: [ndarray] Numpy array.
+
+        Return:
+            y, x: [tuple of lists] Indices of nonzero elements.
+            
+        """
+
+        y = []
+        x = []
+
+        for i in range(arr.shape[0]):
+            for j in range(arr.shape[1]):
+                if arr[i, j] != 0:
+                    y.append(i)
+                    x.append(j)
+
+        return np.array(y), np.array(x)
+    
+    findNonzeroPositions = findNonzeroPositionsNumba
+
+else:
+    findNonzeroPositions = findNonzeroPositionsNumpy
+
+### ###
 
 
 
@@ -334,12 +451,22 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
     """
 
 
-    # Get indices of stripe pixels around the line of the meteor (this is quite fast)
     img_h, img_w = img_handle.ff.maxpixel.shape
+
+    t_stripe = time()
+
+    # Get indices of stripe pixels around the line of the meteor (this is quite fast)
     stripe_indices = getStripeIndices(rho, theta, stripe_width_factor*config.stripe_width, img_h, img_w)
+    
+    if debug: 
+        strip_indices_time = time() - t_stripe
+        print('  - Stripe indices time: {:.4f} s'.format(strip_indices_time))
+
 
     # If centroiding should be done, prepare everything for cutting out parts of the image for photometry
     if centroiding:
+
+        t_centroid_prep = time()
 
         # Compute the unit vector which describes the motion of the meteor in the image domain
         point1 = np.array(point1)
@@ -356,6 +483,10 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
 
         # Compute the vector describing the length and direction of the meteor per frame
         motion_vect = ang_vel*motion_vect_unit
+
+        if debug:
+            centroid_prep_time = time() - t_centroid_prep
+            print('  - Centroiding prep time: {:.4f} s'.format(centroid_prep_time))
 
 
     # If the FF files is given, extract the points from FF after threshold
@@ -381,11 +512,12 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
         # Show 3D could
         # show3DCloud(ff, stripe)
 
-        # Get stripe positions (x, y, frame)
-        stripe_positions = stripe.nonzero()
-        xs = stripe_positions[1]
-        ys = stripe_positions[0]
-        zs = img_handle.ff.maxframe[stripe_positions]
+        # Use findNonzeroPositions to get y and x indices of non-zero elements in stripe
+        ys, xs = findNonzeroPositions(stripe)
+
+        # Retrieve the frame (z) values corresponding to the non-zero positions
+        # Assuming img_handle.ff.maxframe is a numpy array with the same shape as stripe
+        zs = img_handle.ff.maxframe[ys, xs]
 
         return xs, ys, zs
 
@@ -397,6 +529,14 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
         ys_array = []
         zs_array = []
 
+        # Track the time it takes to do specific operations
+        frame_conditioning_times = []
+        thresholding_times = []
+        morph_times = []
+        extract_stripe_times = []
+        centroiding_times = []
+        nonzero_times = []
+
         # Go through all frames in the frame range
         for fr in range(frame_min, frame_max + 1):
 
@@ -404,6 +544,8 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
             # Break the loop if outside frame size
             if fr == (img_handle.total_frames - 1):
                 break
+            
+            t_frame_conditioning = time()
 
             # Set the frame number
             img_handle.setFrame(fr)
@@ -424,21 +566,39 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
             if mask is not None:
                 fr_img = MaskImage.applyMask(fr_img, mask)
             
+            frame_conditioning_times.append(time() - t_frame_conditioning)
+
+
+            
+            t_threshold = time()
 
             # Threshold the frame (THIS IS CURRENTLY SLOW)
             img_thres = Image.thresholdImg(fr_img, img_handle.ff.avepixel, img_handle.ff.stdpixel, \
                 config.k1_det, config.j1_det, mask=mask, mask_ave_bright=False)
+            
+            thresholding_times.append(time() - t_threshold)
+
+
+            t_morph = time()
 
             # Remove lonely pixels
             img_thres = morph.clean(img_thres)
+
+            morph_times.append(time() - t_morph)
+
+
+            t_extract_stripe = time()
 
             # Extract the stripe from the thresholded image
             stripe = np.zeros(img_thres.shape, img_thres.dtype)
             stripe[stripe_indices] = img_thres[stripe_indices]
 
+            extract_stripe_times.append(time() - t_extract_stripe)
 
             # Include more pixels for centroiding and photometry and mask out per frame pixels
             if centroiding:
+
+                t_centroid = time()
                 
                 # Dilate the pixels in the stripe twice, to include more pixels for photometry
                 stripe = morph.dilate(stripe)
@@ -462,6 +622,7 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
                     (not checkCentroidBounds(model_pos, img_w, img_h)) or \
                     (not checkCentroidBounds(model_pos_next, img_w, img_h)):
 
+                    centroiding_times.append(time() - t_centroid)
                     continue
 
                 # Get parameters of the perpendicular line to the meteor line
@@ -479,6 +640,8 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
                 stripe_new = np.zeros_like(stripe)
                 stripe_new[stripe_indices_motion] = stripe[stripe_indices_motion]
                 stripe = stripe_new
+
+                centroiding_times.append(time() - t_centroid)
 
 
                 # if debug:
@@ -518,12 +681,13 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
 
             #     pass
 
+            t_nonzero = time()
 
-            # Get stripe positions (x, y, frame)
-            stripe_positions = stripe.nonzero()
-            xs = stripe_positions[1]
-            ys = stripe_positions[0]
+            # Get stripe positions (x, y)
+            ys, xs = findNonzeroPositions(stripe)
             zs = np.zeros_like(xs) + fr
+
+            nonzero_times.append(time() - t_nonzero)
 
             # Add the points to the list
             xs_array.append(xs)
@@ -537,6 +701,8 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
             #     print(xs, ys, zs)
 
 
+        t_concatenate = time()
+
         if len(xs_array) > 0:
             
             # Flatten the arrays
@@ -548,6 +714,54 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
             xs_array = np.array(xs_array)
             ys_array = np.array(ys_array)
             zs_array = np.array(zs_array)
+
+        concatenate_time = time() - t_concatenate
+
+
+        if debug:
+            
+            total_tracked_time = 0
+            total_tracked_time += strip_indices_time
+
+            if centroiding:
+                total_tracked_time += centroid_prep_time
+
+            print('  - Frame conditioning time:')
+            print('    - Mean:  {:.4f} +/- {:.4f} s'.format(np.mean(frame_conditioning_times), np.std(frame_conditioning_times)))
+            print('    - Total: {:.4f} s'.format(np.sum(frame_conditioning_times)))
+            total_tracked_time += np.sum(frame_conditioning_times)
+
+            print('  - Thresholding time:')
+            print('    - Mean:  {:.4f} +/- {:.4f} s'.format(np.mean(thresholding_times), np.std(thresholding_times)))
+            print('    - Total: {:.4f} s'.format(np.sum(thresholding_times)))
+            total_tracked_time += np.sum(thresholding_times)
+
+            print('  - Morphology time:')
+            print('    - Mean:  {:.4f} +/- {:.4f} s'.format(np.mean(morph_times), np.std(morph_times)))
+            print('    - Total: {:.4f} s'.format(np.sum(morph_times)))
+            total_tracked_time += np.sum(morph_times)
+
+            print('  - Extract stripe time:')
+            print('    - Mean:  {:.4f} +/- {:.4f} s'.format(np.mean(extract_stripe_times), np.std(extract_stripe_times)))
+            print('    - Total: {:.4f} s'.format(np.sum(extract_stripe_times)))
+            total_tracked_time += np.sum(extract_stripe_times)
+            
+            if centroiding:
+                print('  - Centroiding time:')
+                print('    - Mean:  {:.4f} +/- {:.4f} s'.format(np.mean(centroiding_times), np.std(centroiding_times)))
+                print('    - Total: {:.4f} s'.format(np.sum(centroiding_times)))
+                total_tracked_time += np.sum(centroiding_times)
+
+            print('  - Nonzero time:')
+            print('    - Mean:  {:.4f} +/- {:.4f} s'.format(np.mean(nonzero_times), np.std(nonzero_times)))
+            print('    - Total: {:.4f} s'.format(np.sum(nonzero_times)))
+            total_tracked_time += np.sum(nonzero_times)
+
+            print('  - Concatenate time: {:.6f} s'.format(concatenate_time))
+            total_tracked_time += concatenate_time
+
+            print('  - TOTAL: {:.4f} s'.format(total_tracked_time))
+
 
 
         return xs_array, ys_array, zs_array

@@ -31,7 +31,7 @@ import os
 import subprocess
 
 
-from RMS.Misc import niceFormat, isRaspberryPi, sanitise, getRMSStyleFileName, getRmsRootDir
+from RMS.Misc import niceFormat, isRaspberryPi, sanitise, getRMSStyleFileName, getRmsRootDir, UTCFromTimestamp
 import re
 import sqlite3
 from RMS.ConfigReader import parse
@@ -171,7 +171,7 @@ def startObservationSummaryReport(config, duration, force_delete=False):
         repo = git.Repo(repo_path)
         if repo:
             addObsParam(conn, "commit_date",
-                        datetime.datetime.fromtimestamp(repo.head.object.committed_date).strftime('%Y%m%d_%H%M%S'))
+                        UTCFromTimestamp.utcfromtimestamp(repo.head.object.committed_date).strftime('%Y%m%d_%H%M%S'))
             addObsParam(conn, "commit_hash", repo.head.object.hexsha)
         else:
             print("RMS Git repository not found. Skipping Git-related information.")
@@ -408,29 +408,36 @@ def addObsParam(conn, key, value):
 
 
 
-def gatherCameraInformation(config):
+def gatherCameraInformation(config, attempts=6, delay=10, sock_timeout=3):
 
     """ Gather information about the sensor in use
+        Retry the DVRIP handshake until it works or we exhaust attempts.
 
                 arguments:
                     config: config object
+                    attempts: optional, default 6, number of attempts to connect
+                    delay: optional, default 10, delay between attempts
+                    sock_timeout: optional, default 3, socket timeout in seconds
 
                 returns:
                     sensor type string
 
                 """
 
-    try:
-        cam = dvr.DVRIPCam(re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0])
-        if cam.login():
-            sensor_type = cam.get_upgrade_info()['Hardware']
-            cam.close()
-        else:
-            sensor_type = "Unable to login"
-    except:
-        sensor_type = "Error"
+    ip = re.search(r'(?:\d{1,3}\.){3}\d{1,3}', config.deviceID).group()
+    for _ in range(attempts):
+        try:
+            cam = dvr.DVRIPCam(ip, timeout=sock_timeout)
+            if cam.login():
+                sensor = cam.get_upgrade_info()['Hardware']
+                cam.close()
+                return sensor
+        except (socket.timeout, OSError, ConnectionError):
+            # Camera may still rebooting - ignore and retry
+            pass
+        time.sleep(delay)
 
-    return sensor_type
+    return "Unavailable"
 
 def estimateLens(fov_h):
 

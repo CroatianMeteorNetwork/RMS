@@ -14,7 +14,6 @@
 
 from __future__ import print_function
 
-import logging
 import threading
 from socket import socket, AF_INET, SOCK_STREAM, SOCK_DGRAM
 import json
@@ -22,6 +21,9 @@ import time
 import sys 
 import hashlib
 import struct
+
+from RMS.Logger import getLogger
+
 
 if sys.version_info.major > 2:
     print('use Utils.CameraControl with Python3')
@@ -37,7 +39,7 @@ class DVRIPCam(object):
     }
 
     def __init__(self, ip, **kwargs):
-        self.logger = logging.getLogger(__name__)
+        self.logger = getLogger(__name__)
         self.ip = ip
         self.user = kwargs.get("user", "admin")
         hash_pass = kwargs.get("hash_pass")
@@ -109,55 +111,84 @@ class DVRIPCam(object):
             return {}
 
         self.packet_count += 1
-        self.logger.debug("<= %s", data)
+
+        # Skip printing keep-alive packets
+        if "KeepAlive" not in data:
+
+            # Log the packet being received
+            self.logger.debug("<= %s", data)
+
         reply = json.loads(data[:-2])
+
         return reply
 
     def send(self, msg, data={}, wait_response=True):
         if self.socket is None:
             return {"Ret": 101}
+        
         # self.busy.wait()
         self.busy.acquire()
-        if hasattr(data, "__iter__"):
-            if sys.version_info[0] > 2:
-                data = bytes(json.dumps(data, ensure_ascii=False), "utf-8")
-            else:
-                data = json.dumps(data, ensure_ascii=False)
-        pkt = (
-            struct.pack(
-                "BB2xII2xHI",
-                255,
-                0,
-                self.session,
-                self.packet_count,
-                msg,
-                len(data) + 2,
+
+        try:
+
+            # serialize data
+            if hasattr(data, "__iter__"):
+                if sys.version_info[0] > 2:
+                    data = bytes(json.dumps(data, ensure_ascii=False), "utf-8")
+                else:
+                    data = json.dumps(data, ensure_ascii=False)
+
+            # build packet
+            pkt = (
+                struct.pack(
+                    "BB2xII2xHI",
+                    255,
+                    0,
+                    self.session,
+                    self.packet_count,
+                    msg,
+                    len(data) + 2,
+                )
+                + data
+                + b"\x0a\x00"
             )
-            + data
-            + b"\x0a\x00"
-        )
-        self.logger.debug("=> %s", pkt)
-        self.socket_send(pkt)
-        if wait_response:
-            reply = {"Ret": 101}
-            (
-                head,
-                version,
-                self.session,
-                sequence_number,
-                msgid,
-                len_data,
-            ) = struct.unpack("BB2xII2xHI", self.socket_recv(20))
+
+            # Skip printing keep-alive packets (message 1006)
+            if msg != 1006:
+
+                # Log the packet being sent
+                self.logger.debug("=> %s", data)
+
+
+            # send packet
+            self.socket_send(pkt)
+
+            # If the caller does not want a response, return immediately
+            if not wait_response:
+                return {"Ret": 101}
+
+
+            # Otherwise read exactly 20 bytes for the header            
+            hdr = self.receive_with_timeout(20)
+            if not hdr:
+                # no header -> either reconnect or treat as a keep-alive "no-op"
+                return {"Ret": 101}
+            
+            head, version, self.session, seq, msgid, len_data = struct.unpack("BB2xII2xHI", hdr)
+
+            # now read and parse the JSON body
             reply = self.receive_json(len_data)
-            self.busy.release()
             return reply
+            
+        finally:
+            self.busy.release()
 
     def sofia_hash(self, password=""):
         if sys.version_info[0] > 2:
             md5 = hashlib.md5(bytes(password, "utf-8")).digest()
         else:
             md5 = hashlib.md5(password.decode('utf-8')).digest()
-            md5=struct.unpack('>BBBBBBBBBBBBBBBB', md5)
+            md5 = struct.unpack('>BBBBBBBBBBBBBBBB', md5)
 
         chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
         return "".join([chars[sum(x) % 62] for x in zip(md5[::2], md5[1::2])])
@@ -185,6 +216,7 @@ class DVRIPCam(object):
         self.send(
             1006,
             {"Name": "KeepAlive", "SessionID": "0x%08X" % self.session},
+            wait_response=False
         )
         self.alive = threading.Timer(self.alive_time, self.keep_alive)
         self.alive.start()

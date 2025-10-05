@@ -1,0 +1,4 @@
+gobject-introspection
+libgirepository1.0-dev
+gstreamer1.0-libav
+gstreamer1.0-plugins-bad

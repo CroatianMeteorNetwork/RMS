@@ -62,16 +62,19 @@ if not isPackageInstalled('tensorflow'):
         # If tflite-runtime fails, install TensorFlow
         attemptInstall('tensorflow')
 
-# Read requirements file
+# Read requirements file, filtering out comments and empty lines
+requirements = []
 with open('requirements.txt') as f:
-    requirements = f.read().splitlines()
-# drop unsupported git refs for install_requires https://github.com/pypa/setuptools/issues/1052
-for requirement in requirements:
-    if requirement.startswith("git+"):
-        requirements.remove(requirement)
+    for line in f:
+        # Remove whitespace from the beginning and end of the line
+        stripped_line = line.strip()
+
+        # Ignore comments and empty lines
+        if stripped_line and not stripped_line.startswith('#'):
+            requirements.append(stripped_line)
+
 
 ### Add rawpy is running on Windows or Linux (not the Pi) ###
-
 # Check if running on Windows
 if 'win' in sys.platform and "darwin" not in sys.platform:
     requirements.append("rawpy")
@@ -80,11 +83,13 @@ if 'win' in sys.platform and "darwin" not in sys.platform:
 else:
 
     # Check if running on the Pi
-    if 'arm' in os.uname()[4]:
+    if any(arch in os.uname()[4].lower() for arch in ['arm', 'aarch']):
         print("Not installing rawpy because it is not available on the Pi...")
 
     else:
         requirements.append("rawpy")
+
+### ###
 
 # Cython modules which will be compiled on setup
 cython_modules = [
@@ -120,6 +125,13 @@ platepar_templates = [
         if os.path.isfile(os.path.join(dir_path, 'share', 'platepar_templates', file_name))
         ]
 
+
+# Print the requirements to be installed
+print("Requirements to be installed:")
+for req in requirements:
+    print(" - {}".format(req))
+
+
 setup (name = "RMS",
         version = "0.1",
         description = "Raspberry Pi Meteor Station",
@@ -131,6 +143,5 @@ setup (name = "RMS",
         data_files=[('Catalogs', catalog_files), ('share', share_files), ('share/platepar_templates', platepar_templates)],
         ext_modules = [kht_module] + cythonize(cython_modules),
         packages=find_packages_func(),
-        include_package_data=True,
-        include_dirs=[numpy.get_include()]
+        include_package_data=True
         )
