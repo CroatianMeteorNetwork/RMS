@@ -168,7 +168,6 @@ class BufferedCapture(Process):
 
         # Initialize shared counter for dropped frames
         self.dropped_frames = Value('i', 0)
-        self.dropped_frames_session_start = 0  # Frames dropped at start of current night session
         self.last_daytime_mode = None  # Track day/night transitions
         self.dropped_frames_timestamps = deque()  # Track when frames were dropped for 10-min window
 
@@ -2107,29 +2106,33 @@ class BufferedCapture(Process):
                     
                     # For GStreamer, show elapsed time since frame capture to assess sink fill level
                     else:
-                        # Check for day→night transition to reset session counter
+                        # Check for any day/night mode transition to reset counters
                         current_daytime = self.daytime_mode.value if self.daytime_mode is not None else False
-                        if self.last_daytime_mode is not None and self.last_daytime_mode and not current_daytime:
-                            # Day→Night transition detected, reset session counter
-                            self.dropped_frames_session_start = self.dropped_frames.value
-                            self.dropped_frames_timestamps.clear()  # Clear 10-min window too
-                            log.info("Day→Night transition detected, resetting session counter")
+                        if self.last_daytime_mode is not None and self.last_daytime_mode != current_daytime:
+                            # Transition detected (either day→night or night→day)
+                            transition_type = "Day→Night" if not current_daytime else "Night→Day"
+                            log.info(f"{transition_type} transition detected, resetting counters")
+
+                            # Reset dropped frames counter for new session
+                            self.dropped_frames.value = 0
+                            self.dropped_frames_timestamps.clear()
+
+                            # Reset PTS smoothing reset counter for new session
+                            self.reset_count = -1
+
                         self.last_daytime_mode = current_daytime
-                        
+
                         # Calculate buffer fill percentage based on max frame age
                         # The appsink has max-buffers=100, so at fps rate, max capacity is ~100/fps seconds
                         max_buffer_time = 100.0 / self.config.fps  # Theoretical max buffer time in seconds
                         buffer_fill_percent = min(100, (max_frame_age_seconds / max_buffer_time) * 100)
-                        
-                        # Calculate dropped frames for current session (since day→night or process start)
-                        session_dropped = max(0, self.dropped_frames.value - self.dropped_frames_session_start)
-                        
+
                         # Calculate dropped frames in last 10 minutes
                         current_time = time.time()
                         ten_min_ago = current_time - 600  # 10 minutes in seconds
                         recent_dropped = len([t for t in self.dropped_frames_timestamps if t > ten_min_ago])
-                        
-                        log.info(f"Buffer fill: {buffer_fill_percent:.1f}%. Dropped frames: {recent_dropped} (last 10 min), {session_dropped} this session")
+
+                        log.info(f"Buffer fill: {buffer_fill_percent:.1f}%. Dropped frames: {recent_dropped} (last 10 min), {self.dropped_frames.value} this session")
 
                 last_frame_timestamp = frame_timestamp
                 
