@@ -3,7 +3,7 @@ import shutil
 from PIL import ImageDraw, Image
 import numpy as np
 import logging
-from RMS.getThumbs import get_thumbnails, apply_vignetting
+from RMS.ExtractThumbnails import get_thumbnails, apply_vignetting
 import tarfile
 from datetime import datetime
 import statistics
@@ -530,7 +530,7 @@ if __name__ == "__main__":
         "-v",
         type=float,
         default=0.0009,
-        help="Confidence threshold for detection (default: %(default)s)",
+        help="Vignetting coefficient (default: %(default)s)",
     )
     parser.add_argument(
         "--thumbnails-only",
@@ -570,3 +570,4 @@ if __name__ == "__main__":
             max_fits_threshold=args.max_fits_threshold,
         )
     # example: python -m RMS.thumbs_detection -m /mnt/1tb/Documents/Astronomija/GMN/dev/SpriteNet/results/train/spritenet-maxpixel-v7-pretrained-yolov5/weights/best-fp16.tflite -c 0.455 -s 0 /mnt/1tb/Documents/Astronomija/GMN/dev/hr002k/HR002K_20250411_181455_674301
+    # python -m RMS.SrpiteDetector -m share/spritenet-maxpixel-v8-pretrained-best-fp16.tflite -c 0.432 -s 1 -v 0.001 -f 3 /home/pi/RMS_data/CapturedFiles/...
