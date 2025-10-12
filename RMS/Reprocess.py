@@ -624,7 +624,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
     SpriteDetector(
         folder_path=night_data_dir,
-        model_path="share/spritenet-maxpixel-v8-pretrained-best-fp16.tflite",
+        model_path="share/spritenet-maxpixel-v8-pretrained-yolov5_best-fp16.tflite",
         conf_thres=0.432,  # max F-1 at this confidence
         config=config,
         disable_mask=False,
