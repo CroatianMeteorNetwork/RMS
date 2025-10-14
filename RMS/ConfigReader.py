@@ -52,8 +52,10 @@ except ImportError:
 def choosePlatform(win_conf, rpi_conf, linux_pc_conf):
     """ Choose the setting depending on if this is running on the RPi or a Linux PC. """
 
-    # Check if running on Windows
-    if 'win' in sys.platform:
+    # Check if running on Windows.
+    # ``startswith`` ensures the platform string actually begins with ``"win"``
+    # instead of matching other identifiers that merely contain that substring.
+    if sys.platform.startswith('win'):
         return win_conf
 
     else:
@@ -602,10 +604,10 @@ class Config:
         self.min_patch_intensity_multiplier = 0.0
 
         # Filtering by machine learning
-        self.ml_filter = 0.85
+        self.ml_filter = 0.5
 
         # Path to the ML model
-        self.ml_model_path = os.path.join(self.rms_root_dir, "share", "meteorml32.tflite")
+        self.ml_model_path = os.path.join(self.rms_root_dir, "share", "hyper_model.tflite")
 
         # Detection border (in pixels) - detections too close to the border of the mask will be rejected
         self.detection_border = 5
@@ -1650,7 +1652,9 @@ def parseMeteorDetection(config, parser):
         config.min_patch_intensity_multiplier = parser.getfloat(section, "min_patch_intensity_multiplier")
 
     if parser.has_option(section, "ml_filter"):
-        config.ml_filter = parser.getfloat(section, "ml_filter")
+        # since most of the old configs have threshold 0.85, and the current model is calibrated to 0.5,
+        # we need to rescale the value here
+        config.ml_filter = parser.getfloat(section, "ml_filter") * 0.5/0.85
 
         # Disable the min_patch_intensity filter if the ML filter is used and the ML library is available
         if TFLITE_AVAILABLE and (config.ml_filter > 0):
