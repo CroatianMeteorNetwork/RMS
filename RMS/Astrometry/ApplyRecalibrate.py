@@ -302,7 +302,7 @@ def recalibrateFF(
 
             else:
                 log.info(
-                    'Number of matched stars after the fit is smaller than necessary: {:d} < {:d}'.format(n_matched < config.min_matched_stars)
+                    'Number of matched stars after the fit is smaller than necessary: {:d} < {:d}'.format(n_matched, config.min_matched_stars)
                 )
 
             # Indicate that the recalibration failed
