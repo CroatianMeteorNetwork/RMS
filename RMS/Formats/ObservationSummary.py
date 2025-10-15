@@ -573,7 +573,18 @@ def getEphemTimesFromCaptureDirectory(config, capture_directory):
     capture_directory_full_path = os.path.join(config.data_dir, config.captured_dir, capture_directory)
     if DEBUG_PRINT:
         print("Capture directory full path: {}".format(capture_directory_full_path))
-    night_config = parse(os.path.join(capture_directory_full_path,".config"))
+    config_file_name = getattr(config, "config_file_name", None)
+    if config_file_name:
+        nightly_config_filename = os.path.basename(config_file_name)
+        night_config_path = os.path.join(capture_directory_full_path, nightly_config_filename)
+    else:
+        night_config_path = os.path.join(capture_directory_full_path, ".config")
+
+    if not os.path.isfile(night_config_path):
+        # Fall back to the full config path if the nightly file is missing.
+        night_config_path = config_file_name or os.path.join(capture_directory_full_path, ".config")
+
+    night_config = parse(night_config_path)
     if DEBUG_PRINT:
         print("Making a time from {}".format(capture_directory))
     capture_directory_start_time = filenameToDatetimeStr(os.path.basename(capture_directory))
