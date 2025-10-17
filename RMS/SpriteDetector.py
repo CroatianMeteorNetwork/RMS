@@ -320,10 +320,12 @@ class SpriteDetector(object):
         if self.calstars:
             ff_stars = []
             # print(self.calstars[0][0],stack_files)
+            print("Checking number of stars for", stack_files)
             for ff in self.calstars:
                 # print(ff[0],len(ff[1]),stack_files)
                 if ff[0] in stack_files:
                     ff_stars.append(len(ff[1]))
+            print("Number of stars per FF:", ff_stars)
             if ff_stars:
                 print("Median stars", statistics.median(ff_stars))
             if not ff_stars or statistics.median(ff_stars) < self.min_stars:
@@ -570,4 +572,4 @@ if __name__ == "__main__":
             max_fits_threshold=args.max_fits_threshold,
         )
     # example: python -m RMS.thumbs_detection -m /mnt/1tb/Documents/Astronomija/GMN/dev/SpriteNet/results/train/spritenet-maxpixel-v7-pretrained-yolov5/weights/best-fp16.tflite -c 0.455 -s 0 /mnt/1tb/Documents/Astronomija/GMN/dev/hr002k/HR002K_20250411_181455_674301
-    # python -m RMS.SrpiteDetector -m share/spritenet-maxpixel-v8-pretrained-best-fp16.tflite -c 0.432 -s 1 -v 0.001 -f 3 /home/pi/RMS_data/CapturedFiles/...
+    # python -m RMS.SpriteDetector -m share/spritenet-maxpixel-v8-pretrained-best-fp16.tflite -c 0.432 -s 1 -v 0.001 -f 3 /home/pi/RMS_data/CapturedFiles/...
