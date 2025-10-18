@@ -321,6 +321,7 @@ class SpriteDetector(object):
             ff_stars = []
             # print(self.calstars[0][0],stack_files)
             print("Checking number of stars for", stack_files)
+            print("Example FF name from CALSTARS:", self.calstars[0][0])
             for ff in self.calstars:
                 # print(ff[0],len(ff[1]),stack_files)
                 if ff[0] in stack_files:
