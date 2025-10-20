@@ -1,3 +1,4 @@
+#!/bin/bash
 # This software is part of the Linux port of RMS
 # Copyright (C) 2023  Ed Harman
 # 
@@ -15,7 +16,6 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
-#!/bin/bash
 #
 # Version 1.1   - fixed bug introduced during testing
 # Version 1.0	- initial release
