@@ -146,8 +146,10 @@ class SpriteDetector(object):
                 print("No mask file found")
         self.calstars = readCALSTARS(
             self.folder_path, "CALSTARS_" + os.path.basename(self.folder_path) + ".txt"
-        )[0]
-        if not self.calstars:
+        )
+        if self.calstars:
+            self.calstars = self.calstars[0]
+        else:
             print("No CALSTARS file found")
         thumbnail_file = os.path.join(
             self.folder_path,
@@ -319,26 +321,30 @@ class SpriteDetector(object):
         print("Determined timestamp:", imgname)
         if self.calstars:
             ff_stars = []
+            ff_to_process=[]
             # print(self.calstars[0][0],stack_files)
             print("Checking number of stars for", stack_files)
             print("Example FF name from CALSTARS:", self.calstars[0][0])
             for ff in self.calstars:
                 # print(ff[0],len(ff[1]),stack_files)
-                if ff[0] in stack_files:
-                    ff_stars.append(len(ff[1]))
+                for file in stack_files:
+                    if file in ff[0]:
+                        ff_stars.append(len(ff[1]))
+                        ff_to_process.append(ff[0])
+                        break
             print("Number of stars per FF:", ff_stars)
             if ff_stars:
                 print("Median stars", statistics.median(ff_stars))
             if not ff_stars or statistics.median(ff_stars) < self.min_stars:
                 print("Not enough stars in the images")
                 return
-        print("Keeping detection")
+        #print("Keeping detection")
         if self.thumbnails_only:
             print("Storing thumbnail detection")
             self.store_detections(image, folder_path, output, save, imgname)
         else:
             print("Analyzing fits files")
-            ff_found = self.analyze_fits(stack_files, save, folder_path)
+            ff_found = self.analyze_fits(ff_to_process, save, folder_path)
             if not ff_found:
                 print("Saving thumbnail since fits arent available.")
                 self.store_detections(image, folder_path, output, save, imgname)
@@ -369,29 +375,30 @@ class SpriteDetector(object):
                 print(f"No detections in {ff_name}.")
 
         print("Number of FFs with detections:", len(detections))
-        # if this or above, scrap detections
+        if len(detections)== 0:
+            print("Ignoring detection.")
+            return ff_found
         if len(detections) <= self.max_fits_threshold:
-            if len(detections) > 0:
-                print("Saving FFs with detections")
-                # we can save them
-                for i in range(len(detections)):
-                    output, image = detections[i]
-                    ff_name = ff_names_with_detections[i]
-                    os.makedirs(os.path.join(self.save_dir, "FFs"), exist_ok=True)
-                    shutil.copy(
-                        os.path.join(self.folder_path, ff_name),
-                        os.path.join(self.save_dir, "FFs", ff_name),
-                    )
-                    self.store_detections(
-                        image,
-                        folder_path,
-                        output,
-                        save,
-                        ff_name,
-                        # os.path.splitext(ff_name)[0] + "_sprite",
-                    )
+            print("Saving FFs with detections")
+            # we can save them
+            for i in range(len(detections)):
+                output, image = detections[i]
+                ff_name = ff_names_with_detections[i]
+                os.makedirs(os.path.join(self.save_dir, "FFs"), exist_ok=True)
+                shutil.copy(
+                    os.path.join(self.folder_path, ff_name),
+                    os.path.join(self.save_dir, "FFs", ff_name),
+                )
+                self.store_detections(
+                    image,
+                    folder_path,
+                    output,
+                    save,
+                    ff_name,
+                    # os.path.splitext(ff_name)[0] + "_sprite",
+                )
         else:
-            print(f"Too many detections ({len(detections)}). Ditching the detections.")
+            print(f"Too many detections. Ditching the detections.")
             # we can skip saving them, too many detections
         return ff_found
 
@@ -404,8 +411,9 @@ class SpriteDetector(object):
             writer = csv.writer(
                 csvfile, delimiter=",", quotechar="|", quoting=csv.QUOTE_MINIMAL
             )
+            writer.writerow("image name", "detection type","upper left x","upper left y","bottom right x","bottom right y","confidence")
             for i in output:
-                writer.writerow([imgname, i[0], i[1], i[2], i[3], i[4]])
+                writer.writerow([imgname,"sprite", i[0]*self.config.width, i[1]*self.config.height, i[2]*self.config.width, i[3]*self.config.height, i[4]])
 
         f = open(os.path.join(folder_path, "detections.txt"), "a")
         f.write(f"{imgname}\n")
@@ -460,7 +468,7 @@ class SpriteDetector(object):
                     for j in range(
                         start_index, min(start_index + FF_FILES_IN_THUMB, len(files))
                     ):
-                        stack_files.append("FF_" + files[j].name[5:39] + ".fits")
+                        stack_files.append("FF_" + files[j].name[5:31])
                     return (
                         files[start_index].name[5:27] + "_thumbnail" + str(thumb_index),
                         stack_files,
@@ -495,6 +503,10 @@ class SpriteDetector(object):
             MARKED_DIR = os.path.join(self.save_dir, "marked")
             os.makedirs(MARKED_DIR, exist_ok=True)
             edit_image.save(f'{os.path.join(MARKED_DIR,imgname+"_marked")}.png')
+            #its useful to ahve unmarked ones since they can be used in model training
+            UNMARKED_DIR = os.path.join(self.save_dir, "unmarked")
+            os.makedirs(UNMARKED_DIR, exist_ok=True)
+            image.save(f'{os.path.join(UNMARKED_DIR,imgname+"_unmarked")}.png')
 
 
 if __name__ == "__main__":
