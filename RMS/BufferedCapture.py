@@ -2040,7 +2040,7 @@ class BufferedCapture(Process):
                         if self.last_daytime_mode is not None and self.last_daytime_mode != current_daytime:
                             # Transition detected (either day→night or night→day)
                             transition_type = "Day→Night" if not current_daytime else "Night→Day"
-                            log.info(f"{transition_type} transition detected, resetting counters")
+                            log.info(f"{transition_type} transition detected, resetting counters and media backend")
 
                             # Reset dropped frames counter for new session
                             self.dropped_frames.value = 0
@@ -2048,6 +2048,15 @@ class BufferedCapture(Process):
 
                             # Reset PTS smoothing reset counter for new session
                             self.reset_count = -1
+
+                            # Reset media backend override to allow GStreamer retry
+                            self.media_backend_override = False
+
+                            # Force device re-initialization by releasing and reconnecting
+                            log.info("Releasing resources to re-initialize video device with GStreamer")
+                            self.releaseResources()
+                            wait_for_reconnect = True
+                            break
 
                         self.last_daytime_mode = current_daytime
 
