@@ -22,8 +22,6 @@
 
 
 
-#!/usr/bin/bash
-
 echo -e "\n\n\nThis script automates the download and installation of RMS and configures support for multiple cameras on a generic Ubuntu-Desktop"
 echo -e "\n If you wish to proceed type y or Y at the prompt or n/N to exit"
 read -p  "Y/N: " Ans
