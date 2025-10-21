@@ -409,9 +409,9 @@ class SpriteDetector(object):
             os.path.join(self.save_dir, "detections.csv"), "a", newline=""
         ) as csvfile:
             writer = csv.writer(
-                csvfile, delimiter=",", quotechar="|", quoting=csv.QUOTE_MINIMAL
+                csvfile, delimiter=";", quotechar="|", quoting=csv.QUOTE_MINIMAL
             )
-            writer.writerow("image name", "detection type","upper left x","upper left y","bottom right x","bottom right y","confidence")
+            writer.writerow(["image name", "detection type","upper left x","upper left y","bottom right x","bottom right y","confidence"])
             for i in output:
                 writer.writerow([imgname,"sprite", i[0]*self.config.width, i[1]*self.config.height, i[2]*self.config.width, i[3]*self.config.height, i[4]])
 
