@@ -202,24 +202,14 @@ class SpriteDetector(object):
         # remove known camera obstructions
         if self.mask is not None:
             if np.array(thumbnail).shape != self.mask.img.shape:
-                # print(
-                #    "Mask and image size do not match",
-                #    np.array(thumbnail).shape,
-                #    self.mask.img.shape,
-                # )
-                # mask_img = np.ascontiguousarray(self.mask.img)
-                # mask = Image.fromarray(mask_img).resize((thumbnail.width, thumbnail.height))
+                #print("Rescaling mask")
 
-                mask = np.resize(self.mask.img, (thumbnail.height, thumbnail.width, 3))
-                # mask = mask.resize((thumbnail.width, thumbnail.height))
+                mask_img = Image.fromarray(self.mask.img)
+                mask_resized = mask_img.resize((thumbnail.width, thumbnail.height))  
+                mask_resized = np.array(mask_resized.convert("RGB"))
 
-                # if len(np.array(thumbnail).shape) == 3:
-                # mask = mask.convert("RGB")
-
-                # print("Trying resize...",np.array(thumbnail).shape,
-                #    mask.shape,)
                 image = Image.fromarray(
-                    MaskImage.maskImage(np.array(thumbnail), mask, True)
+                    MaskImage.maskImage(np.array(thumbnail), mask_resized, True)
                 )
             else:
 
@@ -411,16 +401,16 @@ class SpriteDetector(object):
             writer = csv.writer(
                 csvfile, delimiter=";", quotechar="|", quoting=csv.QUOTE_MINIMAL
             )
-            writer.writerow(["image name", "detection type","upper left x","upper left y","bottom right x","bottom right y","confidence"])
+            writer.writerow(["image name", "detection type","upper left x","upper left y","bottom right x","bottom right y","confidence","station name","station latitude","station longitude","station elevation"])
             for i in output:
-                writer.writerow([imgname,"sprite", i[0]*self.config.width, i[1]*self.config.height, i[2]*self.config.width, i[3]*self.config.height, i[4]])
+                writer.writerow([imgname,"sprite", i[0]*self.config.width, i[1]*self.config.height, i[2]*self.config.width, i[3]*self.config.height, i[4],config.stationID,config.latitude,config.longitude,config.elevation])
 
-        f = open(os.path.join(folder_path, "detections.txt"), "a")
-        f.write(f"{imgname}\n")
-        for i in output:
-            f.write(f"{i[0]},{i[1]},{i[2]},{i[3]},{i[4]}\n")
-        f.write("\n")
-        f.close()
+        #f = open(os.path.join(folder_path, "detections.txt"), "a")
+        #f.write(f"{imgname}\n")
+        #for i in output:
+        #    f.write(f"{i[0]},{i[1]},{i[2]},{i[3]},{i[4]}\n")
+        #f.write("\n")
+        #f.close()
 
     def get_timestamp(self, folder_path, imgname):
         """
