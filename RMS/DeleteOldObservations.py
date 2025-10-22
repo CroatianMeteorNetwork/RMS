@@ -11,15 +11,13 @@ import time
 import glob
 import argparse
 import subprocess
-import re
-from http.cookiejar import UTC_ZONES
 
 import ephem
 
 from RMS.CaptureDuration import captureDuration
 from RMS.ConfigReader import loadConfigFromDirectory
-from RMS.Logger import initLogging, getLogger
-from RMS.Misc import RmsDateTime
+from RMS.Logger import LoggingManager, getLogger
+from RMS.Misc import RmsDateTime, UTCFromTimestamp
 
 # Get the logger from the main module
 log = getLogger("logger")
@@ -262,7 +260,7 @@ def objectsToDeleteByTime(top_level_dir, directories_list, quota_gb=0):
         if accumulated_size > quota_gb:
             accumulated_deletion_size += file_date_path_size[2] / (1024 ** 3)
             if not logged_deletion_start_time:
-                log.info("Deleting files before {}".format(datetime.datetime.fromtimestamp(file_date_path_size[0]).strftime('%Y%m%d_%H%M%S')))
+                log.info("Deleting files before {}".format(UTCFromTimestamp.utcfromtimestamp(file_date_path_size[0]).strftime('%Y%m%d_%H%M%S')))
                 logged_deletion_start_time = True
             objects_to_delete.append(file_date_path_size[1])
         pass
@@ -354,7 +352,8 @@ def rmList(delete_list, dummy_run=True, log_deletions=True):
         full_path = os.path.expanduser(full_path)
         try:
             if dummy_run:
-                log.info("Config setting inhibited deletion of {}".format(os.path.basename(full_path)))
+                if log_deletions:
+                    log.info("Config setting inhibited deletion of {}".format(os.path.basename(full_path)))
             else:
                 if os.path.exists(full_path):
                     if os.path.isdir(full_path):
@@ -732,25 +731,27 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     log.info('clearing down old data')
     deleteOldDirs(data_dir, config)
 
-    # calculate the captured directory allowance and print to log
-    if (config.rms_data_quota is None or
-        config.arch_dir_quota is None or
-        config.bz2_files_quota is None or
-        config.continuous_capture_quota is None or
-        config.log_files_quota is None):
-        log.info("Deleting files by space quota is not enabled, some quota is None.")
-    else:
-        capt_dir_quota = config.rms_data_quota
-        capt_dir_quota -= config.arch_dir_quota
-        capt_dir_quota -= config.bz2_files_quota
-        capt_dir_quota -= config.continuous_capture_quota
-        capt_dir_quota -= config.log_files_quota
 
-        if capt_dir_quota <= 0:
-            log.warning("No quota allocation remains for captured directories, please increase rms_data_quota")
-            capt_dir_quota = 0
+    if config.quota_management_enabled:
+        # calculate the captured directory allowance and print to log
+        if (config.rms_data_quota is None or
+            config.arch_dir_quota is None or
+            config.bz2_files_quota is None or
+            config.continuous_capture_quota is None or
+            config.log_files_quota is None):
+            log.info("Deleting files by space quota is not enabled, some quota is None.")
+        else:
+            capt_dir_quota = config.rms_data_quota
+            capt_dir_quota -= config.arch_dir_quota
+            capt_dir_quota -= config.bz2_files_quota
+            capt_dir_quota -= config.continuous_capture_quota
+            capt_dir_quota -= config.log_files_quota
 
-        deleteByQuota(archived_dir, capt_dir_quota, captured_dir, config)
+            if capt_dir_quota <= 0:
+                log.warning("No quota allocation remains for captured directories, please increase rms_data_quota")
+                capt_dir_quota = 0
+
+            deleteByQuota(archived_dir, capt_dir_quota, captured_dir, config)
 
     # Calculate the approximate needed disk space for the next night
 
@@ -1156,7 +1157,8 @@ if __name__ == '__main__':
     config = loadConfigFromDirectory(cfg_file, cfg_path)
 
     # Initialize the logger
-    initLogging(config)
+    log_manager = LoggingManager()
+    log_manager.initLogging(config)
     log = getLogger("logger")
 
     if not os.path.isdir(config.data_dir):

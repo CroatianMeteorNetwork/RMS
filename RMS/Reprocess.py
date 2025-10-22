@@ -24,7 +24,7 @@ from RMS.Formats.FFfile import validFFName
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo, writeFTPdetectinfo
 from RMS.Formats.Platepar import Platepar
 from RMS.Formats import CALSTARS
-from RMS.Logger import getLogger
+from RMS.Logger import LoggingManager, getLogger
 from RMS.MLFilter import filterFTPdetectinfoML
 from RMS.UploadManager import UploadManager
 from RMS.Routines.Image import saveImage
@@ -39,7 +39,7 @@ from Utils.PlotFieldsums import plotFieldsums
 from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
 from Utils.ShowerAssociation import showerAssociation
 from Utils.PlotTimeIntervals import plotFFTimeIntervals
-from RMS.Formats.ObservationSummary import addObsParam, getObsDBConn, nightSummaryData
+from RMS.Formats.ObservationSummary import addObsParam, getObsDBConn
 from RMS.Formats.ObservationSummary import serialize, startObservationSummaryReport, finalizeObservationSummary
 from Utils.AuditConfig import compareConfigs
 from RMS.Misc import RmsDateTime, tarWithProgress
@@ -647,6 +647,10 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     try:
         observation_summary_path_file_name, observation_summary_json_path_file_name = (
                 finalizeObservationSummary(config, night_data_dir))
+        
+        extra_files.append(observation_summary_path_file_name)
+        extra_files.append(observation_summary_json_path_file_name)
+        
         log.info("\n\nObservation Summary\n===================\n\n" + serialize(config) + "\n\n")
 
     except Exception as e:
@@ -654,8 +658,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
 
-    extra_files.append(observation_summary_path_file_name)
-    extra_files.append(observation_summary_json_path_file_name)
+
     night_archive_dir = os.path.join(os.path.abspath(config.data_dir), config.archived_dir,
         night_data_dir_name)
 
@@ -751,7 +754,7 @@ def processFramesFiles(config):
 
     except Exception as exc:
         log.error("Timelapse generation failed: %s", exc, exc_info=True)
-        return None                                          # bail early
+        return None
 
     # -- 3. archive ----------------------------------------------------------
     log.info("Archiving frame timelapses in %s", frame_dir)
@@ -793,9 +796,8 @@ if __name__ == "__main__":
 
     
     ### Init the logger
-
-    from RMS.Logger import initLogging
-    initLogging(config, 'reprocess_')
+    log_manager = LoggingManager()
+    log_manager.initLogging(config, 'reprocess_')
 
     log = getLogger("logger")
 
@@ -811,9 +813,6 @@ if __name__ == "__main__":
 
             log.info("Using all available cores for detection.")
 
-
-    duration, _,_,_,_,_,_, = nightSummaryData(config, cml_args.dir_path[0])
-    log.info(startObservationSummaryReport(config, duration, force_delete=False))
     # Process the night
     _, archive_name, detector = processNight(cml_args.dir_path[0], config)
 

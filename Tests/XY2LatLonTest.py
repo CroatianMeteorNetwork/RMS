@@ -139,7 +139,7 @@ if __name__ == "__main__":
     pp.loadFromDict(json.loads(pp_json))
 
     # Reference height
-    ht = 10_000 # m
+    ht = 10000 # m
 
     # Get the edges of the FOV
     x_vert, y_vert, ra_vert, dec_vert = fovEdgePolygon(pp, J2000_JD.days)
@@ -181,14 +181,14 @@ if __name__ == "__main__":
         # Map back to X and Y
         x_o, y_o, _ = geoHt2XYInsideFOV(pp, lat, lon, ht)
 
-        print(f"Test point {i}:")
-        print(f"  IN  X: {x_i:.2f}, Y: {y_i:.2f}")
-        print(f"  Latitude: {lat[0]:.5f}, Longitude: {lon[0]:.5f}")
+        print("Test point {}:".format(i))
+        print("  IN  X: {:.2f}, Y: {:.2f}".format(x_i, y_i))
+        print("  Latitude: {:.5f}, Longitude: {:.5f}".format(lat[0], lon[0]))
 
         if len(x_o) == 0:
             print("  OUT X: N/A, Y: N/A")
         else:
-            print(f"  OUT X: {x_o[0]:.2f}, Y: {y_o[0]:.2f}")
+            print("  OUT X: {:.2f}, Y: {:.2f}".format(x_o[0], y_o[0]))
 
 
     
@@ -209,7 +209,7 @@ if __name__ == "__main__":
     inside_count = 0
     for i in range(len(lat_points)):
         if inside_mask[i]:
-            print(f"Lat: {lat_points[i]:.5f}, Lon: {lon_points[i]:.5f} -> X: {x_coords[inside_count]:.2f}, Y: {y_coords[inside_count]:.2f}")
+            print("Lat: {:.5f}, Lon: {:.5f} -> X: {:.2f}, Y: {:.2f}".format(lat_points[i], lon_points[i], x_coords[inside_count], y_coords[inside_count]))
             inside_count += 1
 
     # Plot the grid of lat/lon points on the map and on the image

@@ -28,7 +28,7 @@ from RMS.Formats.FFfile import getMiddleTimeFF
 from RMS.Formats import Platepar
 from RMS.Formats import StarCatalog
 from RMS.Math import rotatePoint
-from RMS.Logger import initLogging, getLogger
+from RMS.Logger import LoggingManager, getLogger
 
 # Import Cython functions
 import pyximport
@@ -231,7 +231,7 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
 
     # Compute the number of years from J2000
     years_from_J2000 = (ts - J2000).total_seconds()/(365.25*24*3600)
-    log.info('Loading star catalog with years from J2000: {:.2f}'.format(years_from_J2000))
+    # log.info('Loading star catalog with years from J2000: {:.2f}'.format(years_from_J2000))
 
     # Try to optimize the catalog limiting magnitude until the number of image and catalog stars are matched
     maxiter = 10
@@ -295,7 +295,7 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
         else:
             config.catalog_mag_limit -= mag_step
 
-    log.info('Final catalog limiting magnitude: {:.3f}'.format(config.catalog_mag_limit))
+    # log.info('Final catalog limiting magnitude: {:.3f}'.format(config.catalog_mag_limit))
 
 
     # Find the transform between the image coordinates and predicted platepar coordinates
@@ -384,7 +384,8 @@ if __name__ == "__main__":
     config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
     # Initialize the logger
-    initLogging(config, 'fftalign_')
+    log_manager = LoggingManager()
+    log_manager.initLogging(config, 'fftalign_')
 
     # Get the logger handle
     log = getLogger("logger", level="INFO")

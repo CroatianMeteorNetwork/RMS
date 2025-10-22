@@ -17,7 +17,7 @@ currip=$(python -m Utils.CameraControl GetIP)
 
 echo "Camera Address is $currip"
 
-# Set camera settings using the camera settings json file specified in teh config file
+# Set camera settings using the camera settings json file specified in the config file
 python -m Utils.CameraControl SwitchMode init
 python -m Utils.CameraControl reboot
 

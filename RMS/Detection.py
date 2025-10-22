@@ -43,7 +43,7 @@ from RMS.Formats import FFfile
 from RMS.Formats import FTPdetectinfo
 from RMS.Formats.FrameInterface import detectInputType
 from RMS.Formats.AST import loadAST
-from RMS.Logger import getLogger
+from RMS.Logger import LoggingManager, getLogger
 from RMS.Misc import mkdirP
 from RMS.Routines.Grouping3D import find3DLines, getAllPoints
 from RMS.Routines.CompareLines import compareLines
@@ -1020,9 +1020,9 @@ def thresholdAndCorrectGammaFF(img_handle, config, mask):
 
 
     # Gamma correct image files
-    maxpixel_gamma_corr = Image.gammaCorrectionImage(img_handle.ff.maxpixel, config.gamma)
-    avepixel_gamma_corr = Image.gammaCorrectionImage(img_handle.ff.avepixel, config.gamma)
-    stdpixel_gamma_corr = Image.gammaCorrectionImage(img_handle.ff.stdpixel, config.gamma)
+    maxpixel_gamma_corr = Image.gammaCorrectionImage(img_handle.ff.maxpixel, config.gamma, out_type=np.float32)
+    avepixel_gamma_corr = Image.gammaCorrectionImage(img_handle.ff.avepixel, config.gamma, out_type=np.float32)
+    stdpixel_gamma_corr = Image.gammaCorrectionImage(img_handle.ff.stdpixel, config.gamma, out_type=np.float32)
 
     # Make sure there are no zeros in standard deviation
     stdpixel_gamma_corr[stdpixel_gamma_corr == 0] = 1
@@ -1355,7 +1355,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             
             # Apply the gamma correction to the average pixel image if needed
             if config.gamma != 1.0:
-                avepixel_img = Image.gammaCorrectionImage(avepixel_img, config.gamma)
+                avepixel_img = Image.gammaCorrectionImage(avepixel_img, config.gamma, out_type=np.float32)
 
             # Calculate centroids
             centroids = []
@@ -1476,7 +1476,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
                         # Apply gamma correction
                         if config.gamma != 1.0:
-                            fr_img = Image.gammaCorrectionImage(fr_img, config.gamma)
+                            fr_img = Image.gammaCorrectionImage(fr_img, config.gamma, out_type=np.float32)
 
                         # Subtract average
                         max_avg_corrected = Image.applyDark(fr_img, avepixel_img)
@@ -1739,8 +1739,8 @@ if __name__ == "__main__":
 
     ### Init the logger
 
-    from RMS.Logger import initLogging
-    initLogging(config, 'detection_', safedir=os.path.dirname(cml_args.dir_path[0]))
+    log_manager = LoggingManager()
+    log_manager.initLogging(config, 'detection_', safedir=os.path.dirname(cml_args.dir_path[0]))
 
     log = getLogger("logger")
 

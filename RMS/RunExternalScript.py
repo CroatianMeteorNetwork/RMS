@@ -33,6 +33,9 @@ def runExternalScript(captured_night_dir, archived_night_dir, config):
     if not config.external_script_run:
         return None
 
+    if (config.external_script_path is None) or (config.external_function_name is None):
+        log.error('To run an external script, both the path to the script and the name of the function to run must be defined in the config file!')
+        return None
 
     # Check if the script path exists
     if not os.path.isfile(config.external_script_path):
@@ -78,12 +81,15 @@ if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser(description=""" Run external script.
         """)
 
-    arg_parser.add_argument('captured_path', nargs=1, metavar='CAPTURED_PATH', type=str, \
+    arg_parser.add_argument('captured_path', nargs=1, metavar='CAPTURED_PATH', type=str, 
         help='Path to Captured night directory.')
 
-    arg_parser.add_argument('archived_path', nargs=1, metavar='ARCHIVED_PATH', type=str, \
+    arg_parser.add_argument('archived_path', nargs=1, metavar='ARCHIVED_PATH', type=str, 
         help='Path to Archived night directory.')
 
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, 
+        help="Path to a config file which will be used instead of the default one.")
+    
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -92,7 +98,11 @@ if __name__ == "__main__":
     log = getLogger("logger", stdout=True)
 
     # Load config file
-    config = cr.parse(".config")
+    if cml_args.config is None:
+        config = cr.parse(".config")
+    else:
+        pth, cfg = os.path.split(cml_args.config[0])
+        config = cr.loadConfigFromDirectory(cfg, pth)
 
     # Run the external script
     runExternalScript(cml_args.captured_path[0], cml_args.archived_path[0], config)

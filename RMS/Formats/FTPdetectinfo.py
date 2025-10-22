@@ -21,7 +21,7 @@ import os
 import sys
 import git
 import numpy as np
-from RMS.Misc import RmsDateTime
+from RMS.Misc import RmsDateTime, UTCFromTimestamp
 
 # Map FileNotFoundError to IOError in Python 2 as it does not exist
 if sys.version_info[0] < 3:
@@ -74,7 +74,7 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
             repo = git.Repo(search_parent_directories=True)
             commit_unix_time = repo.head.object.committed_date
             sha = repo.head.object.hexsha
-            commit_time = datetime.datetime.fromtimestamp(commit_unix_time).strftime('%Y%m%d_%H%M%S')
+            commit_time = UTCFromTimestamp.utcfromtimestamp(commit_unix_time).strftime('%Y%m%d_%H%M%S')
 
         except:
             commit_time = ""

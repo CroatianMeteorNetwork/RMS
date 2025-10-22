@@ -65,8 +65,9 @@ import argparse
 import json
 import pprint
 import re
+
 import RMS.ConfigReader as cr
-from RMS.Logger import getLogger
+from RMS.Logger import LoggingManager, getLogger
 from time import sleep
 import datetime
 
@@ -81,13 +82,14 @@ else:
 # Get the logger from the main module
 log = getLogger("logger")
 
+
 def rebootCamera(cam):
     """Reboot the Camera
 
     Args:
         cam : The camera
     """
-    log.info('rebooting, please wait....')
+    log.info('Camera rebooting, please wait....')
     cam.reboot()
     retry = 0
     while retry < 5:
@@ -96,9 +98,9 @@ def rebootCamera(cam):
             break
         retry += 1
     if retry < 5: 
-        log.info('reboot successful')
+        log.info('Camera reboot successful')
     else:
-        log.info('camera nonresponsive, please wait 30s and reconnect')
+        log.info('Camera nonresponsive, please wait 30s and reconnect')
 
 
 def strIPtoHex(ip_str):
@@ -458,10 +460,7 @@ def setCameraParam(cam, opts):
         subfld = opts[2].lower()
         val = int(opts[3])
         if subfld == 'enable':
-            if val == 1:
-                val = 'true'
-            else:
-                val = 'false'
+            val = True if val == 1 else False
 
         elif subfld == 'level':
             val = int(val)
@@ -853,12 +852,8 @@ def cameraControlV2(config, cmd, opts=''):
     # extract IP from config file
     camera_ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0]
 
-    if not hasattr(config, 'camera_settings_path') or not os.path.isfile(config.camera_settings_path):
-        camera_settings_path = './camera_settings.json'
-    else:
-        camera_settings_path = config.camera_settings_path
-
-    cameraControl(camera_ip, cmd, opts, camera_settings_path=camera_settings_path)
+    # camera_settings_path is sanity checked in ConfigReader so no checks needed here
+    cameraControl(camera_ip, cmd, opts, camera_settings_path=config.camera_settings_path)
 
 
 if __name__ == '__main__':
@@ -916,12 +911,16 @@ if __name__ == '__main__':
     else:
         opts = ''
 
+    # Load the config file
+    config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
+
+    # Initialise a logger, when running in standalone mode, to avoid DVRip's excessive debug messages
+    log_manager = LoggingManager()
+    log_manager.initLogging(config, log_file_prefix='camControl_')
+    log = getLogger("logger")
     if cmd not in cmd_list:
         log.info('Error: command "%s" not supported', cmd)
         exit(1)
-
-    # Load the config file
-    config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
 
     cameraControlV2(config, cmd, opts)
 

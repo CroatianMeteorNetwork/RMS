@@ -38,7 +38,7 @@ import numpy as np
 from Utils.LiveViewer import LiveViewer
 
 import RMS.ConfigReader as cr
-from RMS.Logger import initLogging, getLogger
+from RMS.Logger import LoggingManager, getLogger
 from RMS.BufferedCapture import BufferedCapture
 from RMS.CaptureDuration import captureDuration
 from RMS.CaptureModeSwitcher import captureModeSwitcher
@@ -46,7 +46,7 @@ from RMS.Compression import Compressor
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
 from RMS.Formats.FFfile import validFFName
-from RMS.Misc import mkdirP, RmsDateTime
+from RMS.Misc import mkdirP, RmsDateTime, UTCFromTimestamp
 from RMS.QueuedPool import QueuedPool
 from RMS.Reprocess import getPlatepar, processNight, processFramesFiles
 from RMS.RunExternalScript import runExternalScript
@@ -269,6 +269,22 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         + "_|____    /__.-'|_|--|_|          ______|__\n")
     print("################################################################")
 
+    # Add a note about deceased members
+    print()
+    print("In memory of Global Meteor Network members:")
+    print("- Dr. Daniel A. Klinglesmith III (d. 2019)")
+    print("- Martin Richmond-Hardy (d. 2023)")
+    print("- Rajko Susanj (d. 2023)")
+    print("- Zoran Dragic (d. 2025)")
+    print("- Romke Schievink (d. 2025)")
+    print("- Seppe Canonaco (d. 2025)")
+    print()
+    print("Memento mori")
+    print("Each of us, a fleeting flame")
+    print("Yet our paths remain.")
+    print()
+    print("################################################################")
+
     # Make a directory for the night - if currently in night capture mode
     in_night_capture = (daytime_mode is None) or (not daytime_mode.value)
     if (not config.continuous_capture) or in_night_capture:
@@ -352,7 +368,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
     # Initialize buffered capture
     bc = BufferedCapture(sharedArray, startTime, sharedArray2, start_time2, config, video_file=video_file,
-                         night_data_dir=night_data_dir, saved_frames_dir=saved_frames_dir, daytime_mode=daytime_mode, camera_mode_switch_trigger=camera_mode_switch_trigger)
+                         night_data_dir=night_data_dir, saved_frames_dir=saved_frames_dir, 
+                         daytime_mode=daytime_mode, camera_mode_switch_trigger=camera_mode_switch_trigger)
     bc.startCapture()
 
     # To track and make new directories every iteration
@@ -667,7 +684,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 log.info("File added.")
 
                 # optional delay (minutes in .config, converted to seconds)
-                upload_manager.delayNextUpload(delay=60 * config.upload_delay)
+                upload_manager.delayNextUpload(delay=60*config.upload_delay)
 
             # Delete detector backup files
             if detector is not None:
@@ -677,12 +694,12 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             # frames -> timelapse(s) -> archive(s) -> upload
             if config.timelapse_generate_from_frames:
                 try:
-                    log.info("Running processFramesFiles() ...")
+                    log.info("Processing frame files...")
                     archive_paths = processFramesFiles(config)          # may return None
-                    log.info("processFramesFiles() done.")
+                    log.info("Processing frame files done.")
 
                 except Exception:
-                    log.exception("processFramesFiles() threw an exception")
+                    log.exception("An error occurred when processing frame files!")
                     archive_paths = None
 
                 # -- enqueue & upload -----------------------------------------
@@ -900,7 +917,8 @@ if __name__ == "__main__":
 
 
     # Initialize the logger
-    initLogging(config)
+    log_manager = LoggingManager()
+    log_manager.initLogging(config)
 
     # Get the logger handle
     log = getLogger("logger")
@@ -915,7 +933,7 @@ if __name__ == "__main__":
         repo = git.Repo(search_parent_directories=True)
         commit_unix_time = repo.head.object.committed_date
         sha = repo.head.object.hexsha
-        commit_time = datetime.datetime.fromtimestamp(commit_unix_time).strftime('%Y%m%d_%H%M%S')
+        commit_time = UTCFromTimestamp.utcfromtimestamp(commit_unix_time).strftime('%Y%m%d_%H%M%S')
 
     except:
         commit_time = ""
@@ -995,7 +1013,6 @@ if __name__ == "__main__":
             if upload_manager.is_alive():
                 log.info('Closing upload manager...')
                 upload_manager.stop()
-                del upload_manager
 
 
         sys.exit()
