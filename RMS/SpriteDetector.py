@@ -403,7 +403,7 @@ class SpriteDetector(object):
             )
             writer.writerow(["image name", "detection type","upper left x","upper left y","bottom right x","bottom right y","confidence","station name","station latitude","station longitude","station elevation"])
             for i in output:
-                writer.writerow([imgname,"sprite", i[0]*self.config.width, i[1]*self.config.height, i[2]*self.config.width, i[3]*self.config.height, i[4],config.stationID,config.latitude,config.longitude,config.elevation])
+                writer.writerow([imgname,"sprite", i[0]*self.config.width, i[1]*self.config.height, i[2]*self.config.width, i[3]*self.config.height, i[4],self.config.stationID,self.config.latitude,self.config.longitude,self.config.elevation])
 
         #f = open(os.path.join(folder_path, "detections.txt"), "a")
         #f.write(f"{imgname}\n")
