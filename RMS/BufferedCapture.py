@@ -2042,6 +2042,9 @@ class BufferedCapture(Process):
                             transition_type = "Day→Night" if not current_daytime else "Night→Day"
                             log.info(f"{transition_type} transition detected, resetting counters and media backend")
 
+                            # Update last_daytime_mode BEFORE breaking to prevent detecting same transition again
+                            self.last_daytime_mode = current_daytime
+
                             # Reset dropped frames counter for new session
                             self.dropped_frames.value = 0
                             self.dropped_frames_timestamps.clear()
