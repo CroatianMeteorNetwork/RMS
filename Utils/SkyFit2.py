@@ -2120,6 +2120,11 @@ class PlateTool(QtWidgets.QMainWindow):
         self.region.setZValue(10)
         self.img_frame.addItem(self.region)
 
+        self.region_zoom = pg.ImageItem(lut=lut)
+        self.region_zoom.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)
+        self.region_zoom.setZValue(10)
+        self.zoom_window.addItem(self.region_zoom)
+
         self.tab = RightOptionsTab(self)
         self.tab.hist.setImageItem(self.img)
         self.tab.hist.setImages(self.img_zoom)
@@ -2228,6 +2233,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.pick_marker2.hide()
             self.great_circle_line.hide()
             self.region.hide()
+            if hasattr(self, "region_zoom"):
+                self.region_zoom.hide()
             self.img_frame.setMouseEnabled(True, True)
             self.star_pick_mode = False
             self.cursor.hide()
@@ -2299,6 +2306,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.pick_marker2.show()
             self.great_circle_line.show()
             self.region.show()
+            if hasattr(self, "region_zoom"):
+                self.region_zoom.show()
 
             # Update the great circle
             self.updateGreatCircle()
@@ -5889,8 +5898,12 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Toggle whether to show the photometry region for manualreduction """
         if self.region.isVisible():
             self.region.hide()
+            if hasattr(self, "region_zoom"):
+                self.region_zoom.hide()
         else:
             self.region.show()
+            if hasattr(self, "region_zoom"):
+                self.region_zoom.show()
 
     def toggleDistortion(self):
         """ Toggle whether to show the distortion lines"""
@@ -8103,31 +8116,38 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def drawPhotometryColoring(self):
         """ Updates image to have the colouring in the current frame """
+
+        def set_region_image(image):
+            self.region.setImage(image)
+            if hasattr(self, "region_zoom"):
+                self.region_zoom.setImage(image)
+
+        blank_mask = np.array([[0]], dtype=np.uint8)
         pick = self.getCurrentPick()
 
         if not pick:
-            self.region.setImage(np.array([[0]]))
+            set_region_image(blank_mask)
             return
 
         photom_pixels = pick.get('photometry_pixels')
         if photom_pixels is None:
-            self.region.setImage(np.array([[0]]))
+            set_region_image(blank_mask)
             return
 
         photom_pixels = np.asarray(photom_pixels)
         if photom_pixels.size == 0:
-            self.region.setImage(np.array([[0]]))
+            set_region_image(blank_mask)
             return
 
         if photom_pixels.ndim != 2 or photom_pixels.shape[1] != 2:
             try:
                 photom_pixels = np.reshape(photom_pixels, (-1, 2))
             except ValueError:
-                self.region.setImage(np.array([[0]]))
+                set_region_image(blank_mask)
                 return
 
         if photom_pixels.shape[0] == 0:
-            self.region.setImage(np.array([[0]]))
+            set_region_image(blank_mask)
             return
 
         photom_pixels = photom_pixels.astype(int, copy=False)
@@ -8140,18 +8160,17 @@ class PlateTool(QtWidgets.QMainWindow):
         )
 
         if not np.any(valid_mask):
-            self.region.setImage(np.array([[0]]))
+            set_region_image(blank_mask)
             return
 
         photom_pixels = photom_pixels[valid_mask]
 
         # Create a coloring mask
+        mask_img = np.zeros(self.img.data.shape, dtype=np.uint8)
         x_mask, y_mask = photom_pixels.T
-
-        mask_img = np.zeros(self.img.data.shape)
         mask_img[x_mask, y_mask] = 255
 
-        self.region.setImage(mask_img)
+        set_region_image(mask_img)
 
 
     def saveFTPdetectinfo(self, ECSV_saved=True):
