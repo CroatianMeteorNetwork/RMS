@@ -10,6 +10,7 @@ import statistics
 from RMS.Routines import MaskImage
 from RMS.Formats.CALSTARS import readCALSTARS
 from RMS.Formats.FFfits import read as readFFfile
+import cv2
 
 try:
     from tflite_runtime.interpreter import Interpreter
@@ -116,6 +117,7 @@ class SpriteDetector(object):
         vignetting_parameter,
         thumbnails_only,
         max_fits_threshold,
+        scrape_timelapse,
     ):
 
         self.min_stars = min_stars
@@ -129,6 +131,7 @@ class SpriteDetector(object):
         self.max_det = 4
         self.conf_thres = conf_thres
         self.max_fits_threshold = max_fits_threshold
+        self.scrape_timelapse = scrape_timelapse
 
         self.save_dir = os.path.join(
             config.data_dir, "SpriteFiles", os.path.basename(folder_path)
@@ -174,23 +177,45 @@ class SpriteDetector(object):
         return interpreter, input_details, output_details
 
     def swipe_thumbnails(self, thumbnail_file, vignetting_parameter):
-        if os.path.exists(thumbnail_file):
-            for thumbnail, thumbnail_name, subfolder_path in get_thumbnails(
-                vignetting_parameter, thumbnail_file
-            ):
-                prediction, image = self.get_prediction(thumbnail)
+        if not self.scrape_timelapse:
+            if os.path.exists(thumbnail_file):
+                for thumbnail, thumbnail_name, subfolder_path in get_thumbnails(
+                    vignetting_parameter, thumbnail_file
+                ):
+                    prediction, image = self.get_prediction(thumbnail)
 
-                # process(prediction, image, subfolder_path, thumbnail_name, save=True)
+                    # process(prediction, image, subfolder_path, thumbnail_name, save=True)
+                    output = self.process_predictions(
+                        prediction,
+                        thumbnail_name,
+                    )
+                    # sprites candidates were found
+                    if output.shape[0] > 0:
+                        self.filter_detections(
+                            image,
+                            thumbnail_name,
+                            output,
+                            True,
+                        )
+            else:
+                print("Thumbnail file not found:", thumbnail_file)
+
+        else:
+            print("Trying to scrape timelapse")
+            for frame, frame_name in self.extract_timelapse_frames(self.folder_path):
+                # print("Processing frame:", frame_name)
+                pil_image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                prediction, image = self.get_prediction(pil_image)
+
                 output = self.process_predictions(
                     prediction,
-                    thumbnail_name,
+                    frame_name,
                 )
                 # sprites candidates were found
                 if output.shape[0] > 0:
                     self.filter_detections(
                         image,
-                        thumbnail_name,
-                        subfolder_path,
+                        frame_name,
                         output,
                         True,
                     )
@@ -202,10 +227,10 @@ class SpriteDetector(object):
         # remove known camera obstructions
         if self.mask is not None:
             if np.array(thumbnail).shape != self.mask.img.shape:
-                #print("Rescaling mask")
+                # print("Rescaling mask")
 
                 mask_img = Image.fromarray(self.mask.img)
-                mask_resized = mask_img.resize((thumbnail.width, thumbnail.height))  
+                mask_resized = mask_img.resize((thumbnail.width, thumbnail.height))
                 mask_resized = np.array(mask_resized.convert("RGB"))
 
                 image = Image.fromarray(
@@ -299,11 +324,10 @@ class SpriteDetector(object):
         self,
         image,
         imgname,
-        folder_path,
         output,
         save,
     ):
-        imgname, stack_files = self.get_timestamp(folder_path, imgname)
+        imgname, stack_files = self.get_timestamp(imgname)
         if stack_files is None:  # cant determine image timestamp so were skipping it
             # probably empty part of the last thumb row
             print("Can't determine image timestamp")
@@ -311,7 +335,7 @@ class SpriteDetector(object):
         print("Determined timestamp:", imgname)
         if self.calstars:
             ff_stars = []
-            ff_to_process=[]
+            ff_to_process = []
             # print(self.calstars[0][0],stack_files)
             print("Checking number of stars for", stack_files)
             print("Example FF name from CALSTARS:", self.calstars[0][0])
@@ -328,18 +352,18 @@ class SpriteDetector(object):
             if not ff_stars or statistics.median(ff_stars) < self.min_stars:
                 print("Not enough stars in the images")
                 return
-        #print("Keeping detection")
+        # print("Keeping detection")
         if self.thumbnails_only:
             print("Storing thumbnail detection")
-            self.store_detections(image, folder_path, output, save, imgname)
+            self.store_detections(image, output, save, imgname)
         else:
             print("Analyzing fits files")
-            ff_found = self.analyze_fits(ff_to_process, save, folder_path)
+            ff_found = self.analyze_fits(ff_to_process, save)
             if not ff_found:
                 print("Saving thumbnail since fits arent available.")
-                self.store_detections(image, folder_path, output, save, imgname)
+                self.store_detections(image, output, save, imgname)
 
-    def analyze_fits(self, stack_files, save, folder_path):
+    def analyze_fits(self, stack_files, save):
         detections = []  # here we store detections for each fits file
         ff_found = False
         ff_names_with_detections = []
@@ -365,7 +389,7 @@ class SpriteDetector(object):
                 print(f"No detections in {ff_name}.")
 
         print("Number of FFs with detections:", len(detections))
-        if len(detections)== 0:
+        if len(detections) == 0:
             print("Ignoring detection.")
             return ff_found
         if len(detections) <= self.max_fits_threshold:
@@ -381,7 +405,6 @@ class SpriteDetector(object):
                 )
                 self.store_detections(
                     image,
-                    folder_path,
                     output,
                     save,
                     ff_name,
@@ -392,7 +415,7 @@ class SpriteDetector(object):
             # we can skip saving them, too many detections
         return ff_found
 
-    def store_detections(self, image, folder_path, output, save, imgname):
+    def store_detections(self, image, output, save, imgname):
         self.mark_sprites(output, image, imgname, save)
 
         with open(
@@ -401,49 +424,64 @@ class SpriteDetector(object):
             writer = csv.writer(
                 csvfile, delimiter=";", quotechar="|", quoting=csv.QUOTE_MINIMAL
             )
-            writer.writerow(["image name", "detection type","upper left x","upper left y","bottom right x","bottom right y","confidence","station name","station latitude","station longitude","station elevation"])
+            writer.writerow(
+                [
+                    "image name",
+                    "detection type",
+                    "upper left x",
+                    "upper left y",
+                    "bottom right x",
+                    "bottom right y",
+                    "confidence",
+                    "station name",
+                    "station latitude",
+                    "station longitude",
+                    "station elevation",
+                ]
+            )
             for i in output:
-                writer.writerow([imgname,"sprite", i[0]*self.config.width, i[1]*self.config.height, i[2]*self.config.width, i[3]*self.config.height, i[4],self.config.stationID,self.config.latitude,self.config.longitude,self.config.elevation])
+                writer.writerow(
+                    [
+                        imgname,
+                        "sprite",
+                        i[0] * self.config.width,
+                        i[1] * self.config.height,
+                        i[2] * self.config.width,
+                        i[3] * self.config.height,
+                        i[4],
+                        self.config.stationID,
+                        self.config.latitude,
+                        self.config.longitude,
+                        self.config.elevation,
+                    ]
+                )
 
-        #f = open(os.path.join(folder_path, "detections.txt"), "a")
-        #f.write(f"{imgname}\n")
-        #for i in output:
-        #    f.write(f"{i[0]},{i[1]},{i[2]},{i[3]},{i[4]}\n")
-        #f.write("\n")
-        #f.close()
-
-    def get_timestamp(self, folder_path, imgname):
+    def get_timestamp(self, imgname):
         """
         Find the timestamp in a specific file from a FS_*.tar.bz2 archive
 
         Args:
-            folder_path (str): Path to the folder with thumbnails
             imgname (str): Name of the image without extension
         """
 
-        # Get parent folder (directory containing the folder_path)
-        parent_folder = os.path.dirname(folder_path)
-
-        # Extract info from imgname (assuming imgname format contains station code
-        code_and_date = imgname[:15]
         thumb_index = int(imgname.split("_")[-1])
+        from_timelapse = True if imgname.split("_")[-2] == "frame" else False
+        if from_timelapse:
+            print("Timestamp extraction in timelapse mode")
 
         # Find all .tar.bz2 files in parent folder that match pattern
-        archive_file = ""
-        for filename in sorted(os.listdir(parent_folder)):
-            if filename.endswith(".tar.bz2") and filename.startswith(
-                f"FS_{code_and_date}"
-            ):
-                archive_file = filename
-                break
+        archive_file = f"FS_{os.path.basename(self.folder_path)}_fieldsums.tar.bz2"
 
-        if archive_file == "":
-            print(f"No matching archives found for {code_and_date} in {parent_folder}")
-            return imgname
+        archive_path = os.path.join(self.folder_path, archive_file)
+
+        if os.path.exists(archive_path) == False:
+            print(f"Archive {archive_file} not found")
+            return imgname, None
 
         # Extract the timestamp from the appropriate file in the archive
-        archive_path = os.path.join(parent_folder, archive_file)
-        FF_FILES_IN_THUMB = 5  # config.thumb_stack
+        FF_FILES_IN_THUMB = (
+            self.config.thumb_stack if not from_timelapse else 1
+        )  # default 5
         try:
             with tarfile.open(archive_path, "r:bz2") as tar:
                 # Look through archive files, first element is "." so it is ommitted
@@ -493,10 +531,25 @@ class SpriteDetector(object):
             MARKED_DIR = os.path.join(self.save_dir, "marked")
             os.makedirs(MARKED_DIR, exist_ok=True)
             edit_image.save(f'{os.path.join(MARKED_DIR,imgname+"_marked")}.png')
-            #its useful to ahve unmarked ones since they can be used in model training
+            # its useful to ahve unmarked ones since they can be used in model training
             UNMARKED_DIR = os.path.join(self.save_dir, "unmarked")
             os.makedirs(UNMARKED_DIR, exist_ok=True)
             image.save(f'{os.path.join(UNMARKED_DIR,imgname+"_unmarked")}.png')
+
+    def extract_timelapse_frames(self, folder_path):
+        timelapse_filename = os.path.basename(folder_path) + "_timelapse.mp4"
+        timelapse_path = os.path.join(folder_path, timelapse_filename)
+        if os.path.exists(timelapse_path) == False:
+            print(f"Timelapse file {timelapse_path} not found.")
+            return
+        vidcap = cv2.VideoCapture(timelapse_path)
+        success, image = vidcap.read()
+        count = 1
+        while success:
+            yield image, f"{timelapse_filename}_frame_{count}"
+            success, image = vidcap.read()
+            # print('Read a new frame: ', count)
+            count += 1
 
 
 if __name__ == "__main__":
@@ -550,6 +603,12 @@ if __name__ == "__main__":
         default=5,
         help="Maximum allowed number of .fits files (from a single thumbnail) with detections (default: %(default)s). If more than this number of .fits files is detected, the detections are considered false positives.",
     )
+    parser.add_argument(
+        "--use-timelapse",
+        "-l",
+        action="store_true",
+        help="Process timelapse MP4 file instead of thumbnails",
+    )
 
     args = parser.parse_args()
 
@@ -573,6 +632,7 @@ if __name__ == "__main__":
             vignetting_parameter=args.vignetting,
             thumbnails_only=args.thumbnails_only,
             max_fits_threshold=args.max_fits_threshold,
+            scrape_timelapse=args.use_timelapse,
         )
     # example: python -m RMS.thumbs_detection -m /mnt/1tb/Documents/Astronomija/GMN/dev/SpriteNet/results/train/spritenet-maxpixel-v7-pretrained-yolov5/weights/best-fp16.tflite -c 0.455 -s 0 /mnt/1tb/Documents/Astronomija/GMN/dev/hr002k/HR002K_20250411_181455_674301
     # python -m RMS.SpriteDetector -m share/spritenet-maxpixel-v8-pretrained-best-fp16.tflite -c 0.432 -s 1 -v 0.001 -f 3 /home/pi/RMS_data/CapturedFiles/...
