@@ -93,7 +93,11 @@ def get_thumbnails(vignetting_parameter, image_path, save=False):
 
             # thumbnail = thumbnail.resize((320, 320))
             # thumbnail.paste(thumb_timestamp, box_where)
-            thumbnail = apply_vignetting(thumbnail, vignetting_parameter).convert("RGB")
+            #i disabled vignetting correction since images in the dataset also didnt have it
+            #it can be enabled later, but vignetting parameter has to be scaled down 
+            # since the value in station config is for the thumbnail of the original FF size
+            #thumbnail = apply_vignetting(thumbnail, vignetting_parameter).convert("RGB")
+            thumbnail = thumbnail.convert("RGB")
             #thumbnail = thumbnail.resize((320, 320)) should be handled afterwards
             # Save the thumbnail to a separate file
             count += 1

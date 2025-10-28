@@ -633,7 +633,9 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             platepar.vignetting_coeff if platepar is not None else 0.001
         ),
         thumbnails_only=False,
-        max_fits_threshold=3,
+        max_fits_threshold=2, 
+        #if more than 2 FFs of the same thumbnail have detection, 
+        # they are likely false positives
     )
 
     return night_archive_dir, archive_name, detector
