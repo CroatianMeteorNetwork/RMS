@@ -184,7 +184,7 @@ class GstCaptureTest(multiprocessing.Process):
 
 
 class GstVideoFile():
-    def __init__(self, file_path, decoder='decodebin', video_format='GRAY8'):
+    def __init__(self, file_path, decoder='decodebin', video_format='GRAY8', segment_writer=None, segment_duration_sec=30):
         """ Initialize the video file stream using GStreamer. 
         
         Arguments:
@@ -199,6 +199,8 @@ class GstVideoFile():
         self.file_path = file_path
         self.decoder = decoder
         self.video_format = video_format
+        self.segment_writer = segment_writer
+        self.segment_duration_sec = segment_duration_sec
 
         self.height = None
         self.width = None
@@ -218,14 +220,100 @@ class GstVideoFile():
         # Unless nvdec is specified, use decodebin
         if self.decoder == 'nvh264dec':
 
-            pipeline_str = (
-                "filesrc location={} ! matroskademux ! h264parse ! {} ! "
-                "videoconvert ! video/x-raw,format={} ! "
-                "queue leaky=downstream max-size-buffers=100 ! "
-                "appsink emit-signals=True max-buffers=100 drop=False sync=0 name=appsink"
-                "".format(self.file_path, self.decoder, self.video_format)
-            )
+            if self.segment_writer is None:
+                pipeline_str = (
+                    "filesrc location={} ! matroskademux ! h264parse ! {} ! "
+                    "videoconvert ! video/x-raw,format={} ! "
+                    "queue leaky=downstream max-size-buffers=100 ! "
+                    "appsink emit-signals=True max-buffers=100 drop=False sync=0 name=appsink"
+                    "".format(self.file_path, self.decoder, self.video_format)
+                )
+            else:
+                pipeline_str = (
+                    "filesrc location={} ! matroskademux name=d "
+                    "d.video_0 ! h264parse ! tee name=t "
+                    "t. ! queue ! avdec_h264 ! videoconvert ! video/x-raw,format={} ! appsink emit-signals=True max-buffers=100 drop=False sync=0 name=appsink "
+                    "t. ! queue ! splitmuxsink  name=splitmuxsink0 async-finalize=true max-size-time={} muxer-factory=matroskamux"
+                    "".format(self.file_path, self.video_format, int(self.segment_duration_sec*1e9))
+                )
 
+                """
+                pipeline = Gst.Pipeline.new("mypipeline")
+
+                # Utility to ensure we have all the needed plugins
+                def makeOrDie(factory, name):
+                    elem = Gst.ElementFactory.make(factory, name)
+                    if not elem:
+                        raise RuntimeError(f"Could not create element: {factory}")
+                    return elem
+
+                # --- Source + Demux ---
+                filesrc = makeOrDie("filesrc", "filesrc")
+                filesrc.set_property("location", self.file_path)
+
+                demux = makeOrDie("matroskademux", "demux")
+
+                # --- Shared ---
+                h264parse = makeOrDie("h264parse", "h264parse")
+                tee = makeOrDie("tee", "tee")
+
+                # --- Branch 1: decode to appsink ---
+                queue1 = makeOrDie("queue", "queue1")
+                decoder = makeOrDie("avdec_h264", "decoder")
+                conv = makeOrDie("videoconvert", "conv")
+                capsfilter = makeOrDie("capsfilter", "capsfilter")
+                capsfilter.set_property("caps", Gst.Caps.from_string(f"video/x-raw,format={self.video_format}"))
+                appsink = makeOrDie("appsink", "appsink")
+                appsink.set_property("emit-signals", True)
+                appsink.set_property("max-buffers", 100)
+                appsink.set_property("drop", False)
+                appsink.set_property("sync", False)
+
+                # --- Branch 2: splitmuxsink ---
+                queue2 = makeOrDie("queue", "queue2")
+                splitmux = makeOrDie("splitmuxsink", "splitmux")
+                splitmux.set_property("location", video_location)
+                splitmux.set_property("max-size-time", int(self.segment_duration_sec*1e9))
+                splitmux.set_property("muxer-factory", "matroskamux")
+
+                # --- Add to pipeline ---
+                for elem in [filesrc, demux, h264parse, tee,
+                            queue1, decoder, conv, capsfilter, appsink,
+                            queue2, splitmux]:
+                    if not elem:
+                        raise RuntimeError("Missing GStreamer plugin!")
+                    pipeline.add(elem)
+
+                # --- Link static parts ---
+                filesrc.link(demux)
+                h264parse.link(tee)
+
+                # branch 1
+                queue1.link(decoder)
+                decoder.link(conv)
+                conv.link(capsfilter)
+                capsfilter.link(appsink)
+
+                # branch 2
+                queue2.link(splitmux)
+
+                # tee links
+                tee.link(queue1)
+                tee.link(queue2)
+
+                # --- Dynamic pad handler for demux ---
+                def on_pad_added(demux, pad, h264parse):
+                    sinkpad = h264parse.get_static_pad("sink")
+                    if not sinkpad.is_linked():
+                        pad.link(sinkpad)
+
+                demux.connect("pad-added", on_pad_added, h264parse)
+
+                # --- Run ---
+                pipeline.set_state(Gst.State.PLAYING)             
+                self.pipeline = pipeline
+                return self.pipeline.get_by_name("appsink")
+                """
         else:
 
             pipeline_str = (
@@ -236,11 +324,16 @@ class GstVideoFile():
             "".format(self.file_path, self.video_format)
             )
 
-        self.pipeline = Gst.parse_launch(pipeline_str)
-
         print("Gstreamer video pipeline:")
         print(pipeline_str)
+        sys.stdout.flush()
+ 
+        self.pipeline = Gst.parse_launch(pipeline_str)
+        if self.segment_writer is not None:
+            splitmuxsink = self.pipeline.get_by_name("splitmuxsink0")
+            splitmuxsink.connect("format-location", self.segment_writer.moveSegment)
 
+         # Start playing
         self.pipeline.set_state(Gst.State.PLAYING)
 
         return self.pipeline.get_by_name("appsink")
@@ -252,8 +345,8 @@ class GstVideoFile():
         
         self.device = self.createGSTDevice()
 
-        # Attempt to get a sample and determine the frame shape
-        sample = self.device.emit("pull-sample")
+        # Attempt to get a sample and determine the frame shape (use timed try-pull to avoid blocking)
+        sample = self.device.emit("try-pull-sample", 500 * Gst.MSECOND)
         if not sample:
             raise ValueError("Could not obtain sample.")
 
@@ -301,7 +394,8 @@ class GstVideoFile():
     def read(self):
         """ Read a frame from the video file. """
 
-        sample = self.device.emit("pull-sample")
+        # Use timed try-pull to prevent indefinite blocking at end-of-stream or pipeline stalls
+        sample = self.device.emit("try-pull-sample", 500 * Gst.MSECOND)
 
         if not sample:
             return False, None
@@ -377,8 +471,27 @@ class GstVideoFile():
 
     def release(self):
         """ Release the video file. """
+        try:
+            # Try a graceful EOS first to nudge internal threads to exit
+            bus = self.pipeline.get_bus()
+            try:
+                self.pipeline.send_event(Gst.Event.new_eos())
+                # Wait briefly for EOS or ERROR
+                if bus is not None:
+                    bus.timed_pop_filtered(2 * Gst.SECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR)
+            except Exception:
+                pass
 
-        self.pipeline.set_state(Gst.State.NULL)
+            # Force to NULL and wait a short time for the state change
+            self.pipeline.set_state(Gst.State.NULL)
+            try:
+                self.pipeline.get_state(2 * Gst.SECOND)
+            except Exception:
+                pass
+
+        finally:
+            # Drop our reference so the pipeline can be garbage-collected
+            self.pipeline = None
 
     
     def get_state(self, gst_param):

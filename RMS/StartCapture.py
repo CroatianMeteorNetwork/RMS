@@ -156,7 +156,7 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
 
 
 
-def runCapture(config, duration=None, video_file=None, nodetect=False, detect_end=False, \
+def runCapture(config, duration=None, video_file=None, video_file_source_dir=None, nodetect=False, detect_end=False, \
     upload_manager=None, eventmonitor=None, resume_capture=False, daytime_mode=None, camera_mode_switch_trigger=None):
     """ Run capture and compression for the given time.given
     
@@ -166,6 +166,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     Keyword arguments:
         duration: [float] Time in seconds to capture. None by default.
         video_file: [str] Path to the video file, if it was given as the video source. None by default.
+        video_file_source_dir: [str] Path to a directory containing video files, if it was given as the video source. None by default.
         nodetect: [bool] If True, detection will not be performed. False by default.
         detect_end: [bool] If True, detection will be performed at the end of the night, when capture
             finishes. False by default.
@@ -367,7 +368,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
     # Initialize buffered capture
-    bc = BufferedCapture(sharedArray, startTime, sharedArray2, start_time2, config, video_file=video_file,
+    bc = BufferedCapture(sharedArray, startTime, sharedArray2, start_time2, config, video_file=video_file,video_file_source_dir=video_file_source_dir,
                          night_data_dir=night_data_dir, saved_frames_dir=saved_frames_dir, 
                          daytime_mode=daytime_mode, camera_mode_switch_trigger=camera_mode_switch_trigger)
     bc.startCapture()
@@ -621,10 +622,11 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                     log.info('Waiting for the detection to finish...')
 
                     # Wait for the detector to finish and close it
-                    try:
-                        detector.closePool()
-                    except Exception:
-                        log.exception('Detector closePool() raised; continuing with shutdown')
+                    if detector is not None:
+                        try:
+                            detector.closePool()
+                        except Exception:
+                            log.exception('Detector closePool() raised; continuing with shutdown')
 
                     log.info('Detection finished!')
 
@@ -666,7 +668,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 log.info('Collecting results...')
 
                 # Get the detection results from the queue
-                detection_results = detector.getResults()
+                if detector is not None:
+                    detection_results = detector.getResults()
 
             else:
 
@@ -891,6 +894,9 @@ if __name__ == "__main__":
     arg_group.add_argument('-i', '--input', metavar='FILE_PATH', help="""Use video from the given file, 
         not from a video device. The name of the file needs to be in the following format: STATIONID_YYYYMMDD_HHMMSS_US.mp4, where the time is the UTC time of the first frame. Example: CZ0002_20210317_193338_404889.mp4.""")
 
+    arg_group.add_argument('-j', '--input_dir', metavar='FILE_DIR', help="""Use video from the given directory, 
+        not from a video device. The directory is recusively scanned for valid file names as above.""")
+
     arg_parser.add_argument('-n', '--nodetect', action="store_true", help="""Do not perform star extraction 
         nor meteor detection. """)
 
@@ -911,10 +917,10 @@ if __name__ == "__main__":
 
     ######
     video_file = cml_args.input
+    video_file_source_dir = cml_args.input_dir
 
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath('.'))
-
 
     # Initialize the logger
     log_manager = LoggingManager()
@@ -925,6 +931,9 @@ if __name__ == "__main__":
 
 
     log.info("Program start")
+    log.info("Using config file: {:s}".format(config.config_file_name))
+    if config.realtime_video_detection_config:
+        log.info("Using realtime video detection config file: {:s}".format(config.realtime_video_detection_config.config_file_name))
     log.info("Station code: {:s}".format(str(config.stationID)))
 
     # Get the program version
@@ -1019,17 +1028,17 @@ if __name__ == "__main__":
 
 
 
-    # If a file with video input was give, use it as a video source. These files fill not the uploaded to the
+    # If a file or directory with video input was given, use it as a video source. These files will not be uploaded to the
     # server, because the video was recorded beforehand!
-    if cml_args.input:
+    if cml_args.input or cml_args.input_dir:
 
-        log.info('Video source: ' + cml_args.input)
+        log.info('Video source: ' + ", ".join(filter(None, [cml_args.input, cml_args.input_dir])))
 
         # Disable continuous capture for video file capture
         config.continuous_capture = False
         
         # Capture the video frames from the video file
-        runCapture(config, duration=None, video_file=video_file, nodetect=cml_args.nodetect,
+        runCapture(config, duration=None, video_file=video_file, video_file_source_dir=video_file_source_dir, nodetect=cml_args.nodetect,
             resume_capture=cml_args.resume)
         cml_args.resume = False
 

@@ -5,6 +5,7 @@ appropriate recalibrated pointing.
 """
 
 import os
+from datetime import timedelta
 import threading
 import time
 import queue
@@ -15,9 +16,10 @@ import json
 
 from RMS.Astrometry.ApplyAstrometry import applyPlateparToCentroids
 from RMS.Astrometry.ApplyRecalibrate import recalibratePlateparsForFF
-from RMS.Astrometry.Conversions import date2JD
-from RMS.Formats.FFfile import filenameToDatetime, getMiddleTimeFF
+from RMS.Formats.FFfile import filenameToDatetime
+from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
 from RMS.Formats.StarCatalog import readStarCatalog
+from RMS.Misc import RmsDateTime
 
 # Get the logger from the main module
 log = logging.getLogger("logger")
@@ -31,28 +33,32 @@ class LiveRecalibration(threading.Thread):
     appropriate recalibrated pointing.
     """
     
-    def __init__(self, config, platepar, meas_triggered_recalib=True, meas_trigger_dt=30):
+    def __init__(self, config, platepar, output_dir, meas_triggered_recalib=True, meas_trigger_dt=30, verbose=False):
         """
         Initialize the LiveRecalibration class.
 
         Arguments:
             config: [Config] Configuration object containing the necessary parameters.
             platepar: [Platepar] Initial platepar to be used for recalibration.
+            output_dir: [str] Directory where recalibrated platepars and logs will be saved.
 
         Keyword Arguments:
             meas_triggered_recalib: [bool] If True, only recalibrate platepars that are close to measurements
                 in the measurement queue. If False, all platepars are recalibrated. Default is True.
             meas_trigger_dt: [int] Minimum time difference in seconds to trigger recalibration for 
                 measurements. Default is 30 seconds.
+            verbose: [bool] If True, enable verbose logging. Default is False.
         """
         
         threading.Thread.__init__(self)
 
         self.config = config
         self.orig_platepar = platepar
+        self.output_dir = output_dir
 
         self.meas_triggered_recalib = meas_triggered_recalib
         self.meas_trigger_dt = meas_trigger_dt
+        self.verbose = verbose
 
         # Thread lifecycle control event
         self._stop_event = threading.Event()
@@ -63,9 +69,6 @@ class LiveRecalibration(threading.Thread):
 
         # Queue of measurements to be processed (max size of 10,000)
         self.measurement_input_queue = queue.Queue(maxsize=10_000)
-
-        # Queue of measurements output (max size of 10,000)
-        self.measurement_output_queue = queue.Queue(maxsize=10_000)
 
 
         # Dictionary of recalibrated platepars (keys are FF names)
@@ -103,8 +106,10 @@ class LiveRecalibration(threading.Thread):
         from the queue, recalibrating the platepars in real-time.
         """
 
+        log.info("Recalibration thread running.")
+        run_cycle = 0
         while not self._stop_event.is_set():
-
+            run_cycle += 1
 
             # Only do the recalibrations of the platepars close to the measurements
             # i.e. recalibrations will be triggered by measurements in the queue
@@ -113,20 +118,29 @@ class LiveRecalibration(threading.Thread):
                 # Go through the measurements queue and check if there are any calibration stars close in
                 # time to the measurements
                 try:
+                    if run_cycle % 1000 == 0:
+                        log.info(f"Run() measurement input queue {hex(id(self.measurement_input_queue))} length: {self.measurement_input_queue.qsize()}")
                     # Pull all new measurements and associate them with timestamps and unique hash keys
                     measurements = {}
                     while not self.measurement_input_queue.empty():
-                        ff_name, meas = self.measurement_input_queue.get_nowait()
+                        ff_name, meas, info = self.measurement_input_queue.get_nowait()
                         meas_time = filenameToDatetime(ff_name)
                         key = self._hash_measurement(ff_name, meas)
-                        measurements[key] = (ff_name, meas, meas_time)
+                        measurements[key] = (ff_name, meas, meas_time, info)
 
                     # If there are no measurements, continue to wait
                     if not measurements:
+                        if run_cycle % 1000 == 0:
+                            log.debug("No measurements in queue, waiting...")
                         time.sleep(0.1)
                         continue
 
+                    if self.verbose:
+                        log.info(f"Processing {len(measurements)} measurements for recalibration.")
+
                     # Drain the CALSTARS queue to get all available calibration data
+                    if run_cycle % 1000 == 0:
+                        log.info(f"Run() calstars input queue length: {self.measurement_input_queue.qsize()}")
                     calstars_entries = []
                     while not self.calstars_queue.empty():
                         try:
@@ -141,7 +155,7 @@ class LiveRecalibration(threading.Thread):
 
                     # Match each measurement with the closest calibration star record within the trigger time 
                     # window
-                    for key, (m_ff_name, m_meas, m_dt) in measurements.items():
+                    for key, (m_ff_name, m_meas, m_dt, info) in measurements.items():
                         closest_entry = None
                         closest_diff = float('inf')
 
@@ -204,10 +218,13 @@ class LiveRecalibration(threading.Thread):
                                     # Safely update the shared platepar dictionary
                                     with self.recalibrated_platepars_lock:
                                         self.recalibrated_platepars.update(recalibrated_platepars)
+                                    
+                                    # Place the platepar on the output queue
+                                    self.writePlatePar(ff_name, recalibrated_platepars[ff_name])
 
-
-                                    print(f"Recalibrated platepar for {ff_name}")
-                                    print("Success:", recalibrated_platepars[ff_name].auto_recalibrated)
+                                    if self.verbose:
+                                        log.info(f"Recalibrated platepar for {ff_name}")
+                                        log.info(f"Success: {recalibrated_platepars[ff_name].auto_recalibrated}")
 
 
                                 except Exception as e:
@@ -219,7 +236,7 @@ class LiveRecalibration(threading.Thread):
                             
                             # If mapping was successful, put the result in the output queue
                             if mapped is not None:
-                                self.measurement_output_queue.put((key, m_ff_name, mapped))
+                                self.writeMeasurement(m_ff_name, mapped, info)
 
 
                     # Requeue CALSTARS entries that were not used in this pass
@@ -263,9 +280,12 @@ class LiveRecalibration(threading.Thread):
                     # Safely update the shared platepar dictionary
                     with self.recalibrated_platepars_lock:
                         self.recalibrated_platepars.update(recalibrated_platepars)
-
-                    print(f"Recalibrated platepar for {ff_name}")
-                    print("Success:", recalibrated_platepars[ff_name].auto_recalibrated)
+                    
+                    # Place the platepar on the output queue
+                    self.writePlatePar(ff_name, recalibrated_platepars[ff_name])
+                    if self.verbose:
+                        log.info(f"Recalibrated platepar for {ff_name}")
+                        log.info(f"Success: {recalibrated_platepars[ff_name].auto_recalibrated}")
 
                 except queue.Empty:
                     # No data to process; continue waiting
@@ -275,6 +295,45 @@ class LiveRecalibration(threading.Thread):
                 except Exception as e:
                     # Log any unexpected exceptions
                     log.exception(f"Recalibration failed for {ff_name if 'ff_name' in locals() else '[unknown]'}: {e}")
+
+        log.info("Recalibration thread finished.")
+
+
+    def writePlatePar(self, ff_name, platepar):
+        """
+        Write a recalibrated platepar to a JSON file in the output directory.
+        
+        Arguments:
+            ff_name: [str] Name of the FF file.
+            platepar: [Platepar] Recalibrated platepar object to be written.
+        """
+        
+        platepar_name = f'platepar_{os.path.splitext(ff_name)[0]}_liverecalib.json'
+        log.info(f'Writing recalibrated platepar file: {platepar_name}')
+        # Some play to avoid data that isn't serializable (taken from ApplyRecalibrate)
+        json_str = f'{{"{ff_name}": {platepar.jsonStr()}\n}}'
+        with open(os.path.join(self.output_dir, platepar_name), 'w') as f:
+            f.write(json_str)
+
+
+    def writeMeasurement(self, ff_name, meteor_meas, info):
+        """
+        Write a recalibrated measurement to the output queue.
+
+        Arguments:
+            ff_name: [str] Name of the FF file.
+            meteor_meas: [list] List of recalibrated meteor measurements.
+            info: [dict] Additional information about the measurements (e.g., meteor number, rho, phi).
+        """
+
+        det_cam_code,  det_fps, meteor_No, rho, phi = info
+        date_time = filenameToDatetime(ff_name) + timedelta(seconds=meteor_meas[0][0] / det_fps)
+        ftpdetectinfo_name = f"FTPdetectinfo_{det_cam_code}_{date_time.strftime('%Y%m%d_%H%M%S_%f')}.txt"
+        calib_str = 'Live recalibrated with RMS on: ' + str(RmsDateTime.utcnow()) + ' UTC'
+        log.info(f'Writing recalibrated FTPdetectinfo file: {ftpdetectinfo_name}')
+        writeFTPdetectinfo([(ff_name, meteor_No, rho, phi, meteor_meas)], 
+            self.output_dir, ftpdetectinfo_name, self.output_dir, det_cam_code, det_fps, calib_str, True)
+       
 
 
     def startRecalibration(self):
@@ -313,6 +372,7 @@ class LiveRecalibration(threading.Thread):
         if not self._stop_event.is_set():
             try:
                 self.calstars_queue.put((ff_name, star_data, calstars_ff_frames), timeout=1)
+                log.info(f"addCalstars() calstars input queue {hex(id(self.calstars_queue))} length: {self.calstars_queue.qsize()}")
                 
                 return True  # Successfully added to the queue
             
@@ -329,7 +389,7 @@ class LiveRecalibration(threading.Thread):
             return False
         
 
-    def addMeasurements(self, ff_name, meteor_meas):
+    def addMeasurements(self, ff_name, meteor_meas, info):
         """
         Add meteor measurements for recalibration to the queue. If the queue is full,
         it will wait until space becomes available.
@@ -337,12 +397,14 @@ class LiveRecalibration(threading.Thread):
         Arguments:
             ff_name: [str] Name of the FF file.
             meteor_meas: [list] List of meteor measurements to be added for recalibration.
+            info: [dict] Additional information about the measurements (e.g., meteor number, rho, phi).
         """
 
         if not self._stop_event.is_set():
             try:
-                self.measurement_input_queue.put((ff_name, meteor_meas), timeout=1)
-
+                self.measurement_input_queue.put((ff_name, meteor_meas, info), timeout=1)
+                log.info(f"addMeasurements() measurement input queue {hex(id(self.measurement_input_queue))} length: {self.measurement_input_queue.qsize()}")
+ 
                 return True  # Successfully added to the queue
             
 
@@ -422,12 +484,11 @@ class LiveRecalibration(threading.Thread):
 
         # Apply the platepar to the meteor measurements
         meteor_picks = applyPlateparToCentroids(
-            ff_name, config.fps, meteor_meas, working_platepar, add_calstatus=True
+            ff_name, self.config.fps, meteor_meas, working_platepar, add_calstatus=True
             )
         
         return meteor_picks
-
-
+ 
 
 if __name__ == "__main__":
 
@@ -560,8 +621,10 @@ if __name__ == "__main__":
     while len(received_results) < len(expected_keys):
         try:
             # Get processed result from output queue
-            key, ff_name, mapped_coords = recalibrator.measurement_output_queue.get(timeout=5)
-            received_results[key] = (ff_name, mapped_coords)
+            data = recalibrator.readCalibratedMeasure(timeout=5)
+            if data[0] == 'M':
+                key, ff_name, mapped_coords, info = data[1:5]
+                received_results[key] = (ff_name, mapped_coords)
         except queue.Empty:
             print("Still waiting for some mapped measurements...")
             time.sleep(0.5)
@@ -572,7 +635,7 @@ if __name__ == "__main__":
     print("\n=== Mapped Meteor Measurements ===")
     for key, (ff_name, _) in expected_keys.items():
         _, result = received_results[key]
-        print(f"{ff_name}: {result}")
+        print(f"{ff_name}: {info}\n{result}")
 
     
     recalibrator.stopRecalibration()

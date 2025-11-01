@@ -514,7 +514,7 @@ def _listener_configurer(config, log_file_prefix, safedir, console_level=logging
 
     # Set common formatter for both handlers
     formatter = logging.Formatter(
-        fmt='%(asctime)s-%(levelname)s-%(module)s-line:%(lineno)d - %(message)s',
+        fmt='%(asctime)s-%(thread)d-%(levelname)s-%(module)s-line:%(lineno)d - %(message)s',
         datefmt='%Y/%m/%d %H:%M:%S'
     )
     handler.setFormatter(formatter)

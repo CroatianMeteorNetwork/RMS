@@ -16,6 +16,7 @@
 
 from __future__ import print_function, division, absolute_import
 
+from ast import If
 import os
 import sys
 import ctypes
@@ -47,6 +48,7 @@ from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp
 from RMS.Formats import FTfile, FTStruct
 from RMS.Logger import LoggingManager, getLogger, gstDebugLogger
 from RMS.CaptureModeSwitcher import switchCameraMode
+from RMS.RealtimeVideoDetection import RealtimeVideoDetector
 import Utils.CameraControl as cc
 
 # Get the logger from the main module
@@ -102,7 +104,7 @@ class BufferedCapture(Process):
     
     running = False
     
-    def __init__(self, array1, start_time1, array2, start_time2, config, video_file=None, night_data_dir=None,
+    def __init__(self, array1, start_time1, array2, start_time2, config, video_file=None, video_file_source_dir=None, night_data_dir=None,
                  saved_frames_dir=None, daytime_mode=None, camera_mode_switch_trigger=None):
         """ Populate arrays with (startTime, frames) after startCapture is called.
         
@@ -114,6 +116,7 @@ class BufferedCapture(Process):
 
         Keyword arguments:
             video_file: [str] Path to the video file, if it was given as the video source. None by default.
+            video_file_source_dir: [str] A path of a directory to be recursivelyscanned for video files to be used as video sources. None by default.
             night_data_dir: [str] Path to the directory where night data is stored. None by default.
             saved_frames_dir: [str] Path to the directory where saved frames are stored. None by default.
             daytime_mode: [multiprocessing.Value] Shared boolean variable to communicate camera mode switch
@@ -126,8 +129,7 @@ class BufferedCapture(Process):
         
         # Store configuration and paths (immutable data is safe to pass to child process)
         self.config = config
-        self.video_file = video_file
-        self.night_data_dir = night_data_dir
+        self.night_data_dir= night_data_dir
         self.saved_frames_dir = saved_frames_dir
 
         # make sure the flags are always real shared Values
@@ -187,6 +189,58 @@ class BufferedCapture(Process):
         self._bus_should_exit = False
         self._bus_thread = None
 
+        # The real-time-video detector if so enabled
+        self.realtime_video_detector = None
+
+        # We keep a one element queue of video files saved so that when we pass them to the
+        # realtime video detector, thay are know to be complete.  
+        # TBD Could we trigger saving on a tmux event
+        self.last_video_file = None   
+
+        # Build a list of video files from the provided list of of video files 
+        if not video_file_source_dir and not video_file:
+            self.video_files = None
+        else:
+            self.video_files = []
+            
+            def isValid(filename):
+                # Check if the file exists and is a valid video file
+                if not os.path.isfile(filename):
+                    return False
+                if not filename.endswith(('.mkv')):  # TBD what extensions to support?
+                    return False
+                time_stamp = "_".join(os.path.basename(filename).split("_")[1:4])
+                time_stamp = time_stamp.split(".")[0]
+                try:
+                    datetime.datetime.strptime(time_stamp, "%Y%m%d_%H%M%S_%f")
+                    return True
+                except ValueError:
+                    return False
+                
+            if video_file is not None:
+                if not isValid(video_file):
+                    raise FileNotFoundError("Video file {} does not exist or is not a valid video file.".format(video_file))
+                self.video_files.append(video_file)
+
+            # Recursively scan the video_file_source_dir for video files
+            if video_file_source_dir is not None:
+                found = False
+                for root, dirs, files in os.walk(video_file_source_dir):
+                    for filename in files:
+                        full_name = os.path.join(root, filename)
+                        if isValid(full_name):
+                            self.video_files.append(full_name)
+                            found = True
+                if not found:
+                    raise FileNotFoundError("No valid video files found in directory {}.".format(video_file_source_dir))
+            # Sort the files by timestamp parsed from the filename
+            self.video_files.sort(key=lambda f: datetime.datetime.strptime("_".join(os.path.basename(f).split("_")[1:4]), "%Y%m%d_%H%M%S_%f"))
+            log.info("Using {} video files from directory {}".format(len(self.video_files), video_file_source_dir))
+
+        # The is no current file yet                        
+        self.video_file = None
+        self.video_file_index = 0
+        
 
     def startCapture(self, cameraID=0):
         """ Start capture using specified camera.
@@ -516,7 +570,7 @@ class BufferedCapture(Process):
         ret, frame, timestamp = False, None, None
 
         # Read Video file frame
-        if self.video_file is not None:
+        if self.video_files is not None:
             ret, frame = self.device.read()
             if ret:
                 timestamp = None # assigned later
@@ -871,6 +925,12 @@ class BufferedCapture(Process):
         segment_full_path = os.path.join(segment_subpath, segment_filename)
         log.info("Created new video segment #{} at: {}".format(fragment_id, segment_full_path))
 
+        # If performing real-time video detection, inform the detector of the new segment.  We always stay one
+        # segment behind as this signal arrives at the start of a new segment, not the end
+        if self.realtime_video_detector is not None:
+            self.passVideoToRealtimeDetector()
+            self.last_video_file = segment_full_path
+
         # Return full path to splitmux's callback
         return segment_full_path
 
@@ -1172,17 +1232,31 @@ class BufferedCapture(Process):
         self.video_device_type = "cv2"
 
         # Use a file as the video source
-        if self.video_file is not None:
+        if self.video_files is not None:
+
+            # Increment through the list of video files
+            if self.video_file_index >= len(self.video_files):
+                self.video_file = None
+                return False
+            self.video_file = self.video_files[self.video_file_index]
+            self.video_file_index += 1
 
             # If the video file is a GStreamer file, use the GstVideoFile class
             if GST_IMPORTED and (self.config.media_backend == 'gst'):
 
                 self.device = GstVideoFile(self.video_file, decoder=self.config.gst_decoder,
-                                           video_format=self.config.gst_colorspace)
+                                           video_format=self.config.gst_colorspace,
+                                           segment_writer=self if self.config.raw_video_save else None,
+                                           segment_duration_sec=self.config.raw_video_duration)
+                self.video_device_type = "gst"
+
 
             # Fall back to OpenCV if GStreamer is not available
             else:
                 self.device = cv2.VideoCapture(self.video_file)
+            
+            # Return success status
+            return True
 
         # Use a device as the video source
         else:
@@ -1446,7 +1520,7 @@ class BufferedCapture(Process):
         log.debug("releaseResources: releaseRawArrays() completed")
 
         # gracefully drain & stop the pipeline
-        if self.pipeline:
+        if hasattr(self, 'pipeline') and self.pipeline:
             log.debug("releaseResources: Pipeline exists, starting shutdown")
             
             # Disconnect any signal handlers first
@@ -1730,6 +1804,9 @@ class BufferedCapture(Process):
             if self.config.raw_video_save:
                 self.last_segment_savetime = time.time()
 
+            # Initialize the realtime video detector if enabled
+            self.createRealtimeVideoDetector()         
+
             log.debug("Process-specific initialization complete")
 
             # Main capture loop
@@ -1755,6 +1832,34 @@ class BufferedCapture(Process):
         finally:
             self.releaseResources()
 
+            # Clean up the realtime video detector if it exists
+            self.releaseRealtimeVideoDetector()
+
+
+    def createRealtimeVideoDetector(self):
+        # Initialize the realtime video detector if enabled
+        self.realtime_video_detector = RealtimeVideoDetector.createDetector(self.night_data_dir, self.config)
+        if self.realtime_video_detector is not None:
+            self.realtime_video_detector.start()
+
+
+    def releaseRealtimeVideoDetector(self):
+        # Clean up the realtime video detector if it exists
+        if self.realtime_video_detector is not None:
+            # Process the last video captured
+            self.passVideoToRealtimeDetector()
+            # Stop the detector once it has finished processing
+            self.realtime_video_detector.stop()
+            del self.realtime_video_detector
+            self.realtime_video_detector = None
+
+
+    def passVideoToRealtimeDetector(self):
+        # Pass the last video file to the realtime video detector if it exists
+        if self.realtime_video_detector is not None:
+            if self.last_video_file is not None:
+                self.realtime_video_detector.addVideoFile(self.last_video_file)
+                self.last_video_file = None
 
 
     def captureFrames(self):
@@ -1767,7 +1872,7 @@ class BufferedCapture(Process):
         run_start_ts = None
 
         # For video devices only (not files), throw away the first 10 frames
-        if (self.video_file is None) and (self.video_device_type == "cv2"):
+        if (self.video_files is None) and (self.video_device_type == "cv2"):
 
             first_skipped_frames = 10
             for i in range(first_skipped_frames):
@@ -1777,12 +1882,12 @@ class BufferedCapture(Process):
 
             total_frames = first_skipped_frames
 
-        # If a video file was used, set the time of the first frame to the time read from the file name
-        if self.video_file is not None:
-            time_stamp = "_".join(os.path.basename(self.video_file).split("_")[1:4])
+        # If using video files, set the time of the first frame from the first file name
+        if self.video_files is not None:
+            time_stamp = "_".join(os.path.basename(self.video_files[0]).split("_")[1:4])
             time_stamp = time_stamp.split(".")[0]
             video_first_time = datetime.datetime.strptime(time_stamp, "%Y%m%d_%H%M%S_%f")
-            log.info("Using a video file: " + self.video_file)
+            log.info("Using a video file: " + self.video_files[0])
             log.info("Setting the time of the first frame to: " + str(video_first_time))
 
             # Convert the first time to a UNIX timestamp
@@ -1806,7 +1911,7 @@ class BufferedCapture(Process):
         while not self.exit.is_set():
 
             # Wait until the compression is done (only when a video file is used)
-            if self.video_file is not None:
+            if self.video_files is not None:
                 
                 wait_for_compression = False
 
@@ -1836,6 +1941,18 @@ class BufferedCapture(Process):
 
                 while not self.exit.is_set() and not self.initVideoDevice():
 
+                    # If inputting video files, respond to the success of setting gstreamer to the new file
+                    if self.video_files is not None:
+                        if self.video_file is None:
+                            # Flush realtime detection if at play
+                            if self.realtime_video_detector is not None:
+                                self.passVideoToRealtimeDetector()
+                            self.exit.set()
+                            time.sleep(0.1)
+                            break
+
+
+
                     log.info('Waiting for the video device to be reconnected...')
 
                     time.sleep(5)
@@ -1857,11 +1974,23 @@ class BufferedCapture(Process):
                     if ret:
                         log.info('Video device reconnected successfully!')
                         self.convert_to_gray = self.isGrayscale(frame)
+                        # If reading from files, rebase timestamps to the newly opened file
+                        if self.video_files is not None and self.video_file is not None:
+                            try:
+                                ts_str = "_".join(os.path.basename(self.video_file).split("_")[1:4]).split(".")[0]
+                                vf_time = datetime.datetime.strptime(ts_str, "%Y%m%d_%H%M%S_%f")
+                                video_first_timestamp = (vf_time - datetime.datetime(1970, 1, 1)).total_seconds()
+                                log.info("Rebased timestamp origin to {}".format(vf_time))
+                            except Exception:
+                                log.exception("Failed to parse timestamp from filename: {}".format(self.video_file))
                         wait_for_reconnect = False
                         break
 
 
                 wait_for_reconnect = False
+
+                if self.exit.is_set():
+                    break
 
 
             t_frame = 0
@@ -1897,9 +2026,17 @@ class BufferedCapture(Process):
                 ret, frame, frame_timestamp = self.read()
                 t_frame = time.time() - t1_frame
 
-                # If the video device was disconnected, wait for reconnection
-                if (self.video_file is None) and (not ret):
-                    log.info('Frame grabbing failed, video device is probably disconnected!')
+                # If the video device was disconnected, wait for reconnection.
+                # For video file being input, this corresponds to requiring the next file
+                if not ret:
+                    if self.video_files is None:
+                        log.info('Frame grabbing failed, video device is probably disconnected!')
+                    else:
+                        log.info("End of video file!")
+                        log.debug("Video end status:")
+                        log.debug("Frame:" + str(frame))
+                        log.debug("Device open:" + str(self.deviceIsOpened()))
+
                     self.releaseResources()
                     # Note: releaseResources() includes proper RTSP cleanup with fallback force close
                     wait_for_reconnect = True
@@ -1907,7 +2044,7 @@ class BufferedCapture(Process):
 
                 # Set flag to save a raw frame
                 save_this_frame = (self.config.save_frames and
-                                   self.video_file is None and
+                                   self.video_files is None and
                                    self.shouldSaveFrame(frame_timestamp)
                                    )
 
@@ -1921,7 +2058,7 @@ class BufferedCapture(Process):
 
 
                 # If a video file is used, compute the time using the time from the file timestamp
-                if self.video_file is not None:
+                if self.video_files is not None:
                 
                     frame_timestamp = video_first_timestamp + total_frames/self.config.fps
 
@@ -2025,9 +2162,12 @@ class BufferedCapture(Process):
                         self.raw_frame_count = 0
                         raw_buffer_one = not raw_buffer_one
 
-
+            
                 # If the end of the video file was reached, stop the capture
+                # TBD No longer needed
                 if self.video_file is not None: 
+                    pass
+                    """
                     if (frame is None) or (not self.deviceIsOpened()):
 
                         log.info("End of video file!")
@@ -2038,6 +2178,7 @@ class BufferedCapture(Process):
                         self.exit.set()
                         time.sleep(0.1)
                         break
+                    """
 
 
                 # Check if frame is dropped if it has been more than 1.5 frames than the last frame
@@ -2280,6 +2421,8 @@ if __name__ == "__main__":
     arg_parser.add_argument('--video_file', metavar='VIDEO_FILE', type=str, \
         help="Path to a video file to be used as a video source instead of a camera.")
     
+    arg_parser.add_argument('--video_file_source_dir', metavar='VIDEO_FILE_SOURCE_DIR', type=str, \
+        help="Path to a directory of video files to be recursively scanned for video files to be used as video sources instead of a camera.")
 
      # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -2308,18 +2451,22 @@ if __name__ == "__main__":
     startTime = multiprocessing.Value('d', 0.0)
 
 
-    # If a video is given, use it as the video source
-    if cml_args.video_file:
-
-        print("Using video file: {}".format(cml_args.video_file))
+    # If a video or videos is given, use them as the video source
+    if cml_args.video_file or cml_args.video_file_source_dir:
+        if cml_args.video_file_source_dir:
+            print("Using video files from directory: {}".format(cml_args.video_file_source_dir))
+        if cml_args.video_file:
+            print("Using video file: {}".format(cml_args.video_file))
 
         bc = BufferedCapture(sharedArray, startTime, sharedArray, startTime, config, 
-                             video_file=cml_args.video_file)
+                             video_file=cml_args.video_file, video_file_source_dir=cml_args.video_file_source_dir)
         
+        # Initialize the realtime video detector if enabled
+        bc.createRealtimeVideoDetector()
         bc.initVideoDevice()
         
 
-        # Read at least 256 frames from the video file
+        # Read at least 256 frames from the first video file
         for i in range(256):
             ret, frame = bc.device.read()
 
@@ -2330,7 +2477,8 @@ if __name__ == "__main__":
                 
         # Close the device
         bc.releaseResources()
-
+        # Clean up the realtime video detector if it exists
+        bc.releaseRealtimeVideoDetector()
         
     
     # Capture from a camera

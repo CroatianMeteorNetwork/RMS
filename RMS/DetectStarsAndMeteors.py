@@ -113,7 +113,7 @@ def detectStarsAndMeteorsFrameInterface(
     return star_list, meteor_list
 
 
-def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_frames=128, output_suffix=''):
+def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_frames=128, output_suffix='', output_dir=None):
     """ Save detection results to CALSTARS and FTPdetectinfo files.
     
     Arguments:
@@ -125,11 +125,16 @@ def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_
     Keyword arguments:
         chunk_frames: [int] Number of frames to stacked image on which the stars will be extracted.
         output_suffix: [str] Suffix to add to the output files.
+        output_dir: [str] Directory where to save the output files if different the img_handle source directory
 
     Return:
-        None
+        [output_dir, calstars_name, ftpdetectinfo_name]: The output directory and file names
     
     """
+
+    # Construct the name of the directory to save to
+    if output_dir is None:
+        output_dir = img_handle.dir_path
 
      # Construct the name of the CALSTARS file by using the camera code and the time of the first frame
     timestamp = img_handle.beginning_datetime.strftime("%Y%m%d_%H%M%S_%f")
@@ -143,7 +148,7 @@ def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_
     calstars_name = 'CALSTARS_' + prefix + suffix + '.txt'
 
     # Write detected stars to the CALSTARS file
-    CALSTARS.writeCALSTARS(star_list, img_handle.dir_path, calstars_name, 
+    CALSTARS.writeCALSTARS(star_list, output_dir, calstars_name, 
                         config.stationID, config.height, config.width, chunk_frames=chunk_frames)
     
     log.info("Stars extracted and written to {:s}".format(calstars_name))
@@ -178,8 +183,13 @@ def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_
         results_list.append([ff_file_name, meteor_No, rho, theta, centroids])
 
     # Write FTPdetectinfo file
-    FTPdetectinfo.writeFTPdetectinfo(results_list, img_handle.dir_path, ftpdetectinfo_name, 
+    FTPdetectinfo.writeFTPdetectinfo(results_list, output_dir, ftpdetectinfo_name, 
                                      img_handle.dir_path, config.stationID, config.fps)
+    log.info("FTPdetectinfo data written to {:s}".format(ftpdetectinfo_name)) 
+    
+    # Return the output directory and the names of the output files
+    return output_dir, calstars_name, ftpdetectinfo_name
+    
 
 
 def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None, dark=None, mask=None):
@@ -451,6 +461,55 @@ def detectStarsAndMeteorsDirectory(dir_path, config, output_suffix=''):
 
 
 
+def detectStarsAndMeteorsInVideoFile(video_path, config, chunk_frames=None, output_suffix='', output_dir=None):
+    """ Given a video file, perform both star and meteor detection.
+
+    Arguments:
+        video_path: [str] path to a video file.
+        config: [Config Struct]
+
+
+    Keyword arguments:
+        chunk_frames: [int] Number of frames to read in a chunk. None by default, in which case the defaults
+            will be used specified for each input type.
+        output_suffix: [str] Suffix to add to the output files.
+        output_dir: [str] Directory where to save the output files if different the video file source directory.
+
+    Return:
+      [output_dir, calstars_name, ftpdetectinfo_name]: The output directory and file names
+    """        
+
+    # Load the video file
+    img_handle = detectInputTypeFile(video_path, config, detection=True, preload_video=True, chunk_frames=chunk_frames)
+
+    # Load the calibration files
+    mask, dark, flat_struct = loadImageCalibration(img_handle.dir_path, config, 
+        dtype=img_handle.ff.dtype, byteswap=img_handle.byteswap)
+
+    # Run detection on the video
+    star_list, meteor_list = detectStarsAndMeteorsFrameInterface(img_handle, config, 
+        flat_struct=flat_struct, dark=dark, mask=mask, chunk_frames=img_handle.chunk_frames)
+    
+    # Save the results
+    file_dir, calstars_name, ftpdetectinfo_name = saveResultsFrameInterface(star_list, meteor_list, img_handle, config, 
+        chunk_frames=img_handle.chunk_frames, output_suffix=output_suffix, output_dir=output_dir)
+    
+    # Release the video handle
+    if img_handle.input_type == 'video':
+
+        print("Releasing video handle... ", end="")
+        img_handle.cap.release()
+        print("Done!")
+            
+    # Delete the image handle to free up memory
+    del img_handle
+
+    # Collect garbage
+    gc.collect()
+
+    # Return the output directory and the names of the output files
+    return file_dir, calstars_name, ftpdetectinfo_name
+
 
 
 if __name__ == "__main__":
@@ -511,34 +570,7 @@ if __name__ == "__main__":
         # Run the detection on each video file
         for video_path in video_paths:
 
-            # Load the video file
-            img_handle = detectInputTypeFile(video_path, config, detection=True, preload_video=True, 
-                                             chunk_frames=cml_args.chunk_frames)
-
-            # Load the calibration files
-            mask, dark, flat_struct = loadImageCalibration(img_handle.dir_path, config, 
-                dtype=img_handle.ff.dtype, byteswap=img_handle.byteswap)
-
-            # Run detection on the video
-            star_list, meteor_list = detectStarsAndMeteorsFrameInterface(img_handle, config, 
-                flat_struct=flat_struct, dark=dark, mask=mask, chunk_frames=img_handle.chunk_frames)
-            
-            # Save the results
-            saveResultsFrameInterface(star_list, meteor_list, img_handle, config, 
-                chunk_frames=img_handle.chunk_frames, output_suffix=cml_args.suffix)
-            
-            # Release the video handle
-            if img_handle.input_type == 'video':
-
-                print("Releasing video handle... ", end="")
-                img_handle.cap.release()
-                print("Done!")
-            
-            # Delete the image handle to free up memory
-            del img_handle
-
-            # Collect garbage
-            gc.collect()
+            detectStarsAndMeteorsInVideoFile(video_path, config, chunk_frames=cml_args.chunk_frames, output_suffix=cml_args.suffix)
 
     else:
 
