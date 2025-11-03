@@ -10,11 +10,30 @@ import json
 import datetime
 import collections
 import glob
+import sys
 
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-import pyqtgraph as pg
+try:
+    import pyqtgraph as pg
+except Exception as exc:
+    message = [
+        "SkyFit requires PyQtGraph/PyQt5 for its GUI components, but the import failed.",
+        "The most common causes are missing GUI dependencies or Windows being unable to allocate enough",
+        "virtual memory (e.g. the paging file is too small).",
+        f"Original import error: {exc}",
+        "Fix the underlying issue and re-run SkyFit."
+    ]
+
+    # Provide an actionable tip if Windows reports an undersized paging file.
+    if isinstance(exc, ImportError) and "paging file" in str(exc).lower():
+        message.append(
+            "Windows reported that the paging file is too small. Increase the paging file size or free RAM and try again."
+        )
+
+    print("\n".join(message))
+    sys.exit(1)
 import random
 import copy
 
