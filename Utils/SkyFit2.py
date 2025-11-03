@@ -11,7 +11,6 @@ import datetime
 import collections
 import glob
 
-import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
