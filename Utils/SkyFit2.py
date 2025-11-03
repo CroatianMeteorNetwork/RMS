@@ -1422,7 +1422,7 @@ class PairedStars(object):
 class PlateTool(QtWidgets.QMainWindow):
     def __init__(self, input_path, config, beginning_time=None, fps=None, gamma=None, use_fr_files=False,
         geo_points_input=None, startUI=True, mask=None, nobg=False, peribg=False, flipud=False,
-        flatbiassub=False):
+        flatbiassub=False, exposure_ratio=1.0):
         """ SkyFit interactive window.
 
         Arguments:
@@ -1445,6 +1445,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 coloured mask instead of the avepixel. False by default.
             flipud: [bool] Flip the image upside down. False by default.
             flatbiassub: [bool] Subtract flat and bias frames. False by default.
+            exposure_ratio: [float] Exposure ratio between stars and meteors. Used for magnitude scaling of 
+                meteors observed on long exposure images with shutters. The correct exp. ratio is already 
+                automatically applied for DFN images. 1.0 by default.
         """
 
         super(PlateTool, self).__init__()
@@ -1478,6 +1481,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Store the flat and bias subtraction flag
         self.flatbiassub = flatbiassub
+
+        # Store the exposure ratio
+        self.exposure_ratio = exposure_ratio
 
         # Extract the directory path if a file was given
         if os.path.isfile(self.dir_path):
@@ -3852,6 +3858,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update the possibly missing flag for subtracting the bias from the flat
         if not hasattr(self, "flatbiassub"):
             self.flatbiassub = False
+
+        # Update the possibly missing exposure ratio variable
+        if not hasattr(self, "exposure_ratio"):
+            self.exposure_ratio = 1.0
 
 
         # Add the possibily missing variables for ASTRA
@@ -7879,6 +7889,15 @@ class PlateTool(QtWidgets.QMainWindow):
                 pick['intensity_sum'] = 1
 
 
+    def computeExposureRatioCorrection(self):
+        """ Compute the exposure ratio magnitude correction. """
+
+        if self.exposure_ratio <= 0:
+            return 0.0
+
+        return -2.5*np.log10(self.exposure_ratio)
+
+
     def showLightcurve(self):
         """ Show the meteor lightcurve. """
 
@@ -7955,6 +7974,9 @@ class PlateTool(QtWidgets.QMainWindow):
             mag_err_random = 2.5*np.log10(1 + 1/snr)
             mag_err_total = np.sqrt(mag_err_random**2 + self.platepar.mag_lev_stddev**2)
 
+            # Apply exposure ratio correction
+            mag_data += self.computeExposureRatioCorrection()
+
             # Plot the magnitudes
             ax_p.errorbar(frames, mag_data, yerr=mag_err_total, capsize=5, color='k')
 
@@ -7986,6 +8008,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Compute the instrumental magnitude
             inst_mag = -2.5*np.log10(intensities)
+
+            # Apply exposure ratio correction
+            inst_mag += self.computeExposureRatioCorrection()
 
             # Compute the SNR error
             mag_err_random = 2.5*np.log10(1 + 1/snr)
@@ -8280,7 +8305,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 pp_tmp.switchToGroundPicks()
 
             applyAstrometryFTPdetectinfo(self.dir_path, ftpdetectinfo_name, '', \
-                                         UT_corr=pp_tmp.UT_corr, platepar=pp_tmp)
+                                         UT_corr=pp_tmp.UT_corr, platepar=pp_tmp, 
+                                         exp_mag_corr=self.computeExposureRatioCorrection())
 
             print('Platepar applied to manual picks!')
 
@@ -8428,6 +8454,9 @@ class PlateTool(QtWidgets.QMainWindow):
             ra = ra_data[0]
             dec = dec_data[0]
             mag = mag_data[0]
+
+            # Apply exposure ratio correction
+            mag += self.computeExposureRatioCorrection()
 
             # Compute alt/az (topocentric, i.e. without refraction)
             azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, pp_tmp.lat, pp_tmp.lon, refraction=False)
@@ -8778,6 +8807,12 @@ if __name__ == '__main__':
     arg_parser.add_argument('--flatbiassub', action="store_true", \
         help="Subtract the bias from the flat. False by default.")
 
+    arg_parser.add_argument('--expratio', metavar='EXPOSURE_RATIO', type=float, default=1.0,
+                            help="Exposure ratio between stars and meteor segments. Used for static images " 
+                            "where the stars are continuously exposed but the meteors/fireballs are chopped "
+                            "up by a shutter. For example, a 30 s exposure with meteor segments at 20 FPS "
+                            "results in a exposure ratio of 600.")
+
 
 
     # Parse the command line arguments
@@ -8878,7 +8913,7 @@ if __name__ == '__main__':
         plate_tool = PlateTool(input_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
             gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints,
             mask=mask, nobg=cml_args.nobg, peribg=cml_args.peribg, flipud=cml_args.flipud, 
-            flatbiassub=cml_args.flatbiassub)
+            flatbiassub=cml_args.flatbiassub, exposure_ratio=cml_args.expratio)
 
 
     # Run the GUI app
