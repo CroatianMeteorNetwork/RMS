@@ -11,6 +11,7 @@ import datetime
 import collections
 import glob
 
+import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -7606,7 +7607,8 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Compute the background subtracted sum of intensity of colored pixels. The background is estimated
             as the median of near pixels that are not colored.
             args:
-                star_mask_coeff (float): Multiples of STD above mean to consider a pixel as a star (masked).
+                star_mask_coeff (float): Mask out parts of the image with stars by masking out a region 
+                    where star_mask_coeff x stddev > average.
         """
 
         # Find the pick done on the current frame
@@ -7694,8 +7696,8 @@ class PlateTool(QtWidgets.QMainWindow):
             pick['photometry_pixels'] = list(map(tuple, np.stack([x_arr_global, y_arr_global], axis=-1)))
 
             # Take only the colored part
-            mask_img = np.ones_like(self.img.data)
-            mask_img[x_arr_global, y_arr_global] = 0
+            mask_img = np.ones(self.img.data.shape, dtype=bool)
+            mask_img[x_arr_global, y_arr_global] = False
             masked_img = np.ma.masked_array(self.img.data, mask_img)
             crop_img = masked_img[x_min:x_max, y_min:y_max]
 
@@ -7707,8 +7709,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 )
 
             # Mask out the colored in pixels
-            mask_img_bg = np.zeros_like(self.img.data)
-            mask_img_bg[x_arr_global, y_arr_global] = 1
+            mask_img_bg = np.zeros(self.img.data.shape, dtype=bool)
+            mask_img_bg[x_arr_global, y_arr_global] = True
 
             # Take the image where the colored part is masked out and crop the surroundings
             masked_img_bg = np.ma.masked_array(self.img.data, mask_img_bg)
@@ -7767,11 +7769,27 @@ class PlateTool(QtWidgets.QMainWindow):
                 if self.flat_struct is not None:
                     avepixel = applyFlat(avepixel, self.flat_struct)
 
-                # Create an additional mask, masking stars above 3 sigma brightness
-                star_mask = np.zeros_like(avepixel.copy(), dtype=int)
-                star_mask[avepixel > (np.median(avepixel) + star_mask_coeff*np.std(avepixel))] = 1
-                crop_star_mask = star_mask[x_min:x_max, y_min:y_max]
+                
+                ### Create star mask to remove bright stars from affecting the centroid and photometry ###
+                
+                # Don't allow the star mask if the FR file is being used as the bright fireball track can
+                # affect the avepixel significantly
+                # Also don't allow on static images and they have the bright fireball track
+                if ((self.img_handle.input_type == "ff") and self.img_handle.use_fr_files) \
+                    or (self.img_handle.input_type == "dfn") or (self.img_handle.input_type == "images"):
 
+                    star_mask = np.zeros_like(avepixel.copy(), dtype=bool)
+                    crop_star_mask = np.zeros((x_max - x_min, y_max - y_min), dtype=bool)
+                
+                else:
+
+                    # Create the star mask and mask out bright stars from the avepixel
+                    star_mask = np.zeros_like(avepixel.copy(), dtype=int)
+                    star_mask[avepixel > (np.median(avepixel) + star_mask_coeff*np.std(avepixel))] = 1
+                    crop_star_mask = star_mask[x_min:x_max, y_min:y_max]
+
+                ### ###
+                
                 # Add the star mask & mask_img to the avepixel mask
                 avepixel_masked = np.ma.masked_array(avepixel, mask_img | star_mask)
                 avepixel_crop = avepixel_masked[x_min:x_max, y_min:y_max]
