@@ -1,3 +1,4 @@
+#!/bin/bash
 # This software is part of the Linux port of RMS
 # Copyright (C) 2023  Ed Harman
 # 
@@ -13,7 +14,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-#!/bin/bash
 #
 # This is script will take an Ubuntu LTS or Debian-11/12 release and install all the components
 # required to run an RMS meteor station
