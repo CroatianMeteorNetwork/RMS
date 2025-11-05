@@ -505,7 +505,7 @@ def detectStarsAndMeteorsInVideoFile(video_path, config, chunk_frames=None, outp
     del img_handle
 
     # Collect garbage
-    gc.collect()
+    # gc.collect()
 
     # Return the output directory and the names of the output files
     return file_dir, calstars_name, ftpdetectinfo_name
@@ -537,6 +537,9 @@ if __name__ == "__main__":
     
     arg_parser.add_argument('--suffix', type=str, default='', \
         help="Suffix to add to the output files.")
+
+    arg_parser.add_argument('--out_dir', type=str, \
+        help="Directory where to save the output files.")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -570,7 +573,7 @@ if __name__ == "__main__":
         # Run the detection on each video file
         for video_path in video_paths:
 
-            detectStarsAndMeteorsInVideoFile(video_path, config, chunk_frames=cml_args.chunk_frames, output_suffix=cml_args.suffix)
+            detectStarsAndMeteorsInVideoFile(video_path, config, chunk_frames=cml_args.chunk_frames, output_suffix=cml_args.suffix, output_dir=cml_args.out_dir)
 
     else:
 
@@ -583,7 +586,7 @@ if __name__ == "__main__":
 
             # Run detection on the folder
             _, _, _, detector = detectStarsAndMeteorsDirectory(cml_args.dir_path, config, 
-                                                               output_suffix=cml_args.suffix)
+                                                               output_suffix=cml_args.suffix, output_dir=cml_args.out_dir)
 
             # Delete backup files
             detector.deleteBackupFiles()
