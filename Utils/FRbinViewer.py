@@ -78,6 +78,10 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
 
         # Make the image square
         img_size = max(y_size, x_size)
+                
+        # ffmpeg requires dimensions to be divisible by two on some platforms see issue 742
+        if img_size % 2:
+            img_size +=1
 
         background = np.zeros((img_size, img_size), np.uint8)
         add_timestamp = False
