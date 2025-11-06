@@ -260,6 +260,7 @@ class FrameDisplay:
             self._plt.close(self._mpl_fig)
             self._mpl_ready = False
 
+
 def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=None, hide=False,
         avg_background=False, split=False, add_timestamp=False, add_frame_number=False, append_ff_to_video=False,
          add_shower_name=False, associations={}):
@@ -304,6 +305,10 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
         # Make the image square
         img_size = max(y_size, x_size)
 
+        # ffmpeg requires dimensions to be divisible by two on some platforms see issue 742
+        if img_size % 2: 
+            img_size +=1
+            
         background = np.zeros((img_size, img_size), np.uint8)
         add_timestamp = False
         add_shower_name = False
@@ -359,7 +364,7 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
         for current_line in range(fr.lines):
             for z in range(fr.frameNum[current_line]):
                 t = fr.t[current_line][z]
-                if not t in clips:
+                if t not in clips:
                     clips[t] = []
                 clips[t].append((current_line, z))
                 start = min(start, t)
@@ -557,8 +562,7 @@ def saveFramesForMeteorImage(meteorImage, frPath, addTimestamp, lastFrameNumber,
     # append frames for 1.5 second
     for frameNumber in range(frameCount):
         frameFileName = frPath.replace('.bin', '') \
-                        + "_line_{:02d}_frame_{:03d}.{:s}".format(videoNumber, lastFrameNumber + frameNumber + 1,
-                                                                  format)
+            + "_line_{:02d}_frame_{:03d}.{:s}".format(videoNumber, lastFrameNumber + frameNumber + 1, format)
         cv2.imwrite(os.path.join(folder, frameFileName), meteorImage)
         frameFiles.append(frameFileName)
 
@@ -627,9 +631,9 @@ def addTextToImage(image, title, x, y):
 
 
 
-# Resize image to fit window to screen (for images larger than 1280x720)
-# By default resize to HD (with=1280 same as for regular camera resolution)
 def resizeImageIfNeed(image, width=1280):
+    # Resize image to fit window to screen (for images larger than 1280x720)
+    # By default resize to HD (with=1280 same as for regular camera resolution)
 
     (h, w) = image.shape[:2]
     #  Resize only if image larger than required
@@ -644,6 +648,7 @@ def resizeImageIfNeed(image, width=1280):
 def getTimestampTitle(stationName, startDate, frameNumber, fps):
     timestamp = startDate + datetime.timedelta(seconds=(frameNumber/fps))
     return stationName + ' ' + (timestamp.strftime('%Y-%m-%d %H:%M:%S.%f')[:-5]) + ' UTC'
+
 
 def getStationNameAndTimestampfromFile(ff_path):
     fileName = os.path.basename(ff_path)
