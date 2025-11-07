@@ -634,6 +634,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         ),
         thumbnails_only=False,
         max_fits_threshold=2, 
+        scrape_timelapse=False
         #if more than 2 FFs of the same thumbnail have detection, 
         # they are likely false positives
     )
