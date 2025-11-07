@@ -866,6 +866,15 @@ def showImage(name, img, convert_to_uint8=False):
     img_height, img_width = img_to_show.shape[:2]
 
     fig, ax = plt.subplots()
+    background_color = (0.1, 0.1, 0.1)
+    try:
+        fig.patch.set_facecolor(background_color)
+    except Exception:
+        pass
+    try:
+        ax.set_facecolor(background_color)
+    except Exception:
+        pass
 
     manager = getattr(fig.canvas, "manager", None)
     if manager and hasattr(manager, "set_window_title"):
@@ -912,6 +921,8 @@ def showImage(name, img, convert_to_uint8=False):
             win = getattr(fig_manager, "canvas", None)
         return win
 
+    qt_context = {"window": None, "QtCore": None, "QtWidgets": None}
+
     def _configure_window(win):
         # Match the previous OpenCV helper behaviour: keep the window pixel-perfect, place it in the
         # upper-left corner, and avoid stealing focus from the rest of the desktop session.
@@ -921,11 +932,21 @@ def showImage(name, img, convert_to_uint8=False):
             QtCore = qt_compat.QtCore  # type: ignore[attr-defined]
             QtWidgets = qt_compat.QtWidgets  # type: ignore[attr-defined]
             if QtCore is not None and QtWidgets is not None and isinstance(win, QtWidgets.QWidget):  # type: ignore[arg-type]
+                qt_context["window"] = win
+                qt_context["QtCore"] = QtCore
+                qt_context["QtWidgets"] = QtWidgets
                 try:
                     win.setAttribute(QtCore.Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
                 except AttributeError:
                     win.setAttribute(QtCore.Qt.WA_ShowWithoutActivating, True)  # type: ignore[attr-defined]
-                win.show()
+                try:
+                    win.setFocusPolicy(QtCore.Qt.FocusPolicy.ClickFocus)
+                except AttributeError:
+                    win.setFocusPolicy(QtCore.Qt.ClickFocus)
+                try:
+                    win.clearFocus()
+                except Exception:
+                    pass
                 focus_configured = True
         except Exception:
             pass
@@ -976,6 +997,7 @@ def showImage(name, img, convert_to_uint8=False):
         _configure_window(post_window)
 
     closed = [False]
+    pending_exception = [None]
 
     def _on_close(*_):
         closed[0] = True
@@ -984,14 +1006,46 @@ def showImage(name, img, convert_to_uint8=False):
         if event.key in (" ", "space", "enter", "return"):
             closed[0] = True
             plt.close(fig)
+        elif event.key in ("ctrl+c", "ctrl+control+c"):
+            closed[0] = True
+            pending_exception[0] = KeyboardInterrupt()
+            plt.close(fig)
+
+    def _request_focus(_event):
+        win = qt_context.get("window")
+        QtCore = qt_context.get("QtCore")
+        if win is None:
+            try:
+                canvas_getter = getattr(fig.canvas, "get_tk_widget", None)
+                if callable(canvas_getter):
+                    canvas_getter().focus_set()
+            except Exception:
+                pass
+            return
+
+        try:
+            if QtCore is not None:
+                try:
+                    win.setAttribute(QtCore.Qt.WidgetAttribute.WA_ShowWithoutActivating, False)
+                except AttributeError:
+                    win.setAttribute(QtCore.Qt.WA_ShowWithoutActivating, False)  # type: ignore[attr-defined]
+            win.raise_()
+            win.activateWindow()
+            win.setFocus()
+        except Exception:
+            pass
 
     fig.canvas.mpl_connect("key_press_event", _on_key)
     fig.canvas.mpl_connect("close_event", _on_close)
+    fig.canvas.mpl_connect("button_press_event", _request_focus)
 
     while not closed[0]:
         plt.pause(0.05)
 
     plt.close(fig)
+
+    if pending_exception[0] is not None:
+        raise pending_exception[0]
 
 
 
