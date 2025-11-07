@@ -921,7 +921,7 @@ def showImage(name, img, convert_to_uint8=False):
             win = getattr(fig_manager, "canvas", None)
         return win
 
-    qt_context = {"window": None, "QtCore": None, "QtWidgets": None}
+    qt_context = {"window": None, "QtCore": None, "QtWidgets": None, "focus_guard": None}
 
     def _configure_window(win):
         # Match the previous OpenCV helper behaviour: keep the window pixel-perfect, place it in the
@@ -947,6 +947,26 @@ def showImage(name, img, convert_to_uint8=False):
                     win.clearFocus()
                 except Exception:
                     pass
+                if qt_context["focus_guard"] is None:
+                    class _QtFocusGuard(QtCore.QObject):
+                        def eventFilter(self, obj, event):
+                            try:
+                                focus_out = QtCore.QEvent.Type.FocusOut
+                            except AttributeError:
+                                focus_out = QtCore.QEvent.FocusOut  # type: ignore[attr-defined]
+                            if event.type() == focus_out:
+                                try:
+                                    obj.setAttribute(QtCore.Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+                                except AttributeError:
+                                    obj.setAttribute(QtCore.Qt.WA_ShowWithoutActivating, True)  # type: ignore[attr-defined]
+                            return False
+
+                    guard = _QtFocusGuard(win)
+                    try:
+                        win.installEventFilter(guard)
+                        qt_context["focus_guard"] = guard
+                    except Exception:
+                        qt_context["focus_guard"] = None
                 focus_configured = True
         except Exception:
             pass
@@ -1006,7 +1026,7 @@ def showImage(name, img, convert_to_uint8=False):
         if event.key in (" ", "space", "enter", "return"):
             closed[0] = True
             plt.close(fig)
-        elif event.key in ("ctrl+c", "ctrl+control+c"):
+        elif event.key in ("ctrl+c", "control+c"):
             closed[0] = True
             pending_exception[0] = KeyboardInterrupt()
             plt.close(fig)
@@ -1014,6 +1034,7 @@ def showImage(name, img, convert_to_uint8=False):
     def _request_focus(_event):
         win = qt_context.get("window")
         QtCore = qt_context.get("QtCore")
+        QtWidgets = qt_context.get("QtWidgets")
         if win is None:
             try:
                 canvas_getter = getattr(fig.canvas, "get_tk_widget", None)
@@ -1029,9 +1050,23 @@ def showImage(name, img, convert_to_uint8=False):
                     win.setAttribute(QtCore.Qt.WidgetAttribute.WA_ShowWithoutActivating, False)
                 except AttributeError:
                     win.setAttribute(QtCore.Qt.WA_ShowWithoutActivating, False)  # type: ignore[attr-defined]
-            win.raise_()
-            win.activateWindow()
-            win.setFocus()
+            if QtWidgets is not None:
+                try:
+                    QtWidgets.QApplication.setActiveWindow(win)
+                except Exception:
+                    try:
+                        win.activateWindow()
+                    except Exception:
+                        pass
+            else:
+                try:
+                    win.activateWindow()
+                except Exception:
+                    pass
+            try:
+                win.setFocus()
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -1043,6 +1078,14 @@ def showImage(name, img, convert_to_uint8=False):
         plt.pause(0.05)
 
     plt.close(fig)
+
+    win = qt_context.get("window")
+    guard = qt_context.get("focus_guard")
+    if win is not None and guard is not None:
+        try:
+            win.removeEventFilter(guard)
+        except Exception:
+            pass
 
     if pending_exception[0] is not None:
         raise pending_exception[0]
