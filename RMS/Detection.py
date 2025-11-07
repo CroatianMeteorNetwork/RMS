@@ -433,7 +433,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         img_thres = thresholdFF(img_handle.ff, k1, j1, mask=mask)
 
         # # Show thresholded image
-        # show("thresholded ALL", img_thres)
+        # showImage("thresholded ALL", img_thres, convert_to_uint8=True)
 
         # Check if there are too many threshold passers, if so report that no lines were found
         if not checkWhiteRatio(img_thres, img_handle.ff, max_white_ratio):
@@ -500,7 +500,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             # Adjust levels
             maxpixel_autolevel = Image.adjustLevels(maxpix_img, min_lvl, 1.0, max_lvl)
 
-            show2(str(frame_min) + "-" + str(frame_max) + " threshold", np.concatenate((maxpixel_autolevel, \
+            showImage(str(frame_min) + "-" + str(frame_max) + " threshold", np.concatenate((maxpixel_autolevel, \
                 img.astype(maxpix_img.dtype)*(2**(maxpix_img.itemsize*8) - 1)), axis=1))
 
             ###
@@ -509,7 +509,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         # # Show maxpixel of the thresholded part
         # mask = np.zeros(shape=img.shape)
         # mask[np.where(img)] = 1
-        # show('thresh max', ff.maxpixel*mask)
+        # showImage('thresh max', ff.maxpixel*mask, convert_to_uint8=True)
 
         ### Apply morphological operations to prepare the image for KHT
 
@@ -524,7 +524,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
 
         if debug:
             # Show morphed image
-            show(str(frame_min) + "-" + str(frame_max) + " morph", img)
+            showImage(str(frame_min) + "-" + str(frame_max) + " morph", img, convert_to_uint8=True)
 
 
         # Get image shape
@@ -855,23 +855,62 @@ def checkAngularVelocity(centroids, config):
 
 
 
-def show(name, img):
-    """ COnvert the given image to uint8 and show it. """
+def showImage(name, img, convert_to_uint8=False):
+    """ Show the given image using matplotlib.
 
-    cv2.imshow(name, img.astype(np.uint8)*255)
-    cv2.moveWindow(name, 0, 0)
-    cv2.waitKey(0)
-    cv2.destroyWindow(name)
+    Arguments:
+        name: [str] Window title.
+        img: [numpy.ndarray] Image to display.
 
+    Keyword arguments:
+        convert_to_uint8: [bool] If True, convert the image to uint8 and scale to the full range before showing.
+    """
 
+    if convert_to_uint8:
+        img_to_show = img.astype(np.uint8)*255
+    else:
+        img_to_show = img
 
-def show2(name, img):
-    """ Show the given image. """
+    fig, ax = plt.subplots()
 
-    cv2.imshow(name, img)
-    cv2.moveWindow(name, 0, 0)
-    cv2.waitKey(0)
-    cv2.destroyWindow(name)
+    # Try to set the window title for easier identification when multiple images are opened.
+    # The attribute is backend dependent, so guard against missing support on some systems.
+    if hasattr(fig.canvas.manager, "set_window_title"):
+        fig.canvas.manager.set_window_title(name)
+
+    # Hide the axes, as they are not needed when previewing frames.
+    ax.axis("off")
+
+    # Convert grayscale frames appropriately for matplotlib.
+    if img_to_show.ndim == 2:
+        ax.imshow(img_to_show, cmap="gray")
+    elif img_to_show.ndim == 3 and img_to_show.shape[2] == 3:
+        # Matplotlib expects RGB ordering, whereas the detector provides BGR frames. Perform the conversion if needed.
+        ax.imshow(cv2.cvtColor(img_to_show, cv2.COLOR_BGR2RGB))
+    else:
+        ax.imshow(img_to_show)
+
+    # ``plt.show`` blocks until the window is closed, but we want to allow users to quickly advance through images by pressing space or enter.
+    # Use a non-blocking show and drive the GUI event loop manually.
+    plt.show(block=False)
+
+    closed = [False]
+
+    def _on_close(*_):
+        closed[0] = True
+
+    def _on_key(event):
+        if event.key in (" ", "space", "enter"):
+            closed[0] = True
+            plt.close(fig)
+
+    fig.canvas.mpl_connect("key_press_event", _on_key)
+    fig.canvas.mpl_connect("close_event", _on_close)
+
+    while not closed[0]:
+        plt.pause(0.05)
+
+    plt.close(fig)
 
 
 
@@ -927,7 +966,7 @@ def plotLines(ff, line_list):
         
         cv2.line(img, (x1, y1), (x2, y2), (max_lvl, 0, max_lvl), 1)
         
-    show2("KHT", img)
+    showImage("KHT", img)
 
 
 
