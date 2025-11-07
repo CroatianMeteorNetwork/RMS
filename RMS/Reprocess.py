@@ -26,6 +26,7 @@ from RMS.Formats.Platepar import Platepar
 from RMS.Formats import CALSTARS
 from RMS.Logger import LoggingManager, getLogger
 from RMS.MLFilter import filterFTPdetectinfoML
+from RMS.SpriteDetector import SpriteDetector
 from RMS.UploadManager import UploadManager
 from RMS.Routines.Image import saveImage
 from RMS.Routines.MaskImage import loadMask
@@ -47,7 +48,6 @@ from RMS.Misc import RmsDateTime, tarWithProgress
 
 # Get the logger from the main module
 log = getLogger("logger")
-
 
 
 def getPlatepar(config, night_data_dir):
@@ -150,8 +150,6 @@ def getPlatepar(config, night_data_dir):
     return platepar, platepar_path, platepar_fmt
 
 
-
-
 def processNight(night_data_dir, config, detection_results=None, nodetect=False):
     """ Given the directory with FF files, run detection and archiving.  
     
@@ -180,7 +178,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     platepar = None
     kml_files = []
     recalibrated_platepars = None
-    
+
     # If the detection should be run
     if (not nodetect):
 
@@ -201,9 +199,6 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             # If the files were previously detected, there is no detector
             detector = None
 
-
-
-
         obs_db_conn = getObsDBConn(config)
         # Filter out detections using machine learning
         if config.ml_filter > 0:
@@ -220,13 +215,11 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         # Get the platepar file
         platepar, platepar_path, platepar_fmt = getPlatepar(config, night_data_dir)
 
-
         # Run calibration check and auto astrometry refinement
         if (platepar is not None) and (calstars_name is not None):
 
             # Read in the CALSTARS file
             calstars_data = CALSTARS.readCALSTARS(night_data_dir, calstars_name)
-
 
             # Run astrometry check and refinement
             platepar, fit_status = autoCheckFit(config, platepar, calstars_data)
@@ -250,8 +243,6 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             if config.use_flat:
                 platepar.vignetting_coeff = 0.0
 
-
-
             log.info("Recalibrating astrometry on FF files with detections...")
 
             # Recalibrate astrometry on every FF file and apply the calibration to detections
@@ -261,15 +252,10 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                 os.path.join(night_data_dir, ftpdetectinfo_name), calstars_data, config, platepar
                 )
 
-
-
-
             log.info("Converting RMS format to UFOOrbit format...")
 
             # Convert the FTPdetectinfo into UFOOrbit input file
             FTPdetectinfo2UFOOrbitInput(night_data_dir, ftpdetectinfo_name, platepar_path)
-
-
 
             # Generate a calibration report
             log.info("Generating a calibration report...")
@@ -280,8 +266,6 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                 log.debug('Generating calibration report failed with the message:\n' + repr(e))
                 log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
-
-
             # Perform single station shower association
             log.info("Performing single station shower association...")
             try:
@@ -291,8 +275,6 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             except Exception as e:
                 log.debug('Shower association failed with the message:\n' + repr(e))
                 log.debug(repr(traceback.format_exception(*sys.exc_info())))
-
-
 
             # Generate the FOV KML file
             log.info("Generating a FOV KML file...")
@@ -324,7 +306,6 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                     area_ht=100000)
                 kml_files.append(kml_file100)
 
-
                 # Generate the KML (only the FOV is shown, without the station) - 70 km
                 kml_file70 = fovKML(night_data_dir, platepar, mask=mask, plot_station=False, \
                     area_ht=70000)
@@ -335,13 +316,9 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                     area_ht=25000)
                 kml_files.append(kml_file25)
 
-
-
             except Exception as e:
                 log.debug("Generating a FOV KML file failed with the message:\n" + repr(e))
                 log.debug(repr(traceback.format_exception(*sys.exc_info())))
-
-
 
             # Prepare the flux files
             log.info("Preparing flux files...")
@@ -353,13 +330,9 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                 log.debug("Preparing flux files failed with the message:\n" + repr(e))
                 log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
-
     else:
         ff_detected = []
         detector = None
-
-
-
 
     log.info('Plotting field sums...')
 
@@ -371,22 +344,19 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         log.debug('Plotting field sums failed with message:\n' + repr(e))
         log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
-
-
     # Archive all fieldsums to one archive
     archiveFieldsums(night_data_dir)
 
-    # List for any extra files which will be copied to the night archive directory. Full paths have to be 
+    # List for any extra files which will be copied to the night archive directory. Full paths have to be
     #   given
     extra_files = []
-
 
     # Add relevant FT files the upload archive.
     if config.save_frame_times:
 
         log.info('Archiving new frame time (FT) files...')
 
-        # Archive unprocessed FT files, one day at a time 
+        # Archive unprocessed FT files, one day at a time
         try:
             ft_file_dir = os.path.join(config.data_dir, config.times_dir)
 
@@ -400,7 +370,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                 for day in os.listdir(year_dir):
                     # Each 'day' is 20240923-267, 20240924-268, ...
                     day_dir = os.path.join(year_dir, day)
-                    
+
                     # Skip if not directory (eg. bz2 archive) or if inside today's directory
                     if (not os.path.isdir(day_dir)) or (day == RmsDateTime.utcnow().strftime("%Y%m%d-%j")):
                         continue
@@ -408,7 +378,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                     try:
                         # Archive directory for this day of ft files
                         tar_path = os.path.join(year_dir, '{}_{}_FT.tar.bz2'.format(config.stationID, day))
-                        
+
                         # Use the tarWithProgress function with removal of source
                         print("Creating archive for {} FT files...".format(day))
                         archive_success = tarWithProgress(
@@ -417,20 +387,19 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                             compression='bz2',
                             remove_source=True
                         )
-                        
+
                         if archive_success:
                             print("Successfully created tar archive at: {}".format(tar_path))
                             # Add to extra files for upload
                             extra_files.append(tar_path)
                         else:
                             print("Archive creation failed, keeping original directory: {}".format(day_dir))
-                            
+
                     except Exception as e:
                         print("Error in archiving process: {}".format(e))
         except Exception as e:
             log.debug('Archiving FT files failed with message:\n' + repr(e))
             log.debug(repr(traceback.format_exception(*sys.exc_info())))
-
 
     log.info('Making a flat...')
 
@@ -442,7 +411,6 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         log.debug('Making a flat failed with message:\n' + repr(e))
         log.debug(repr(traceback.format_exception(*sys.exc_info())))
         flat_img = None
-        
 
     # If making flat was successful, save it
     if flat_img is not None:
@@ -458,11 +426,9 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     else:
         log.info('Making flat image FAILED!')
 
-
-
     # Generate a timelapse
     if config.timelapse_generate_captured:
-        
+
         log.info('Generating a timelapse...')
         try:
 
@@ -490,7 +456,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         if jitter_quality is not None and dropped_frame_rate is not None:
             log.info('Timestamp Intervals Analysis: Jitter Quality: {:.1f}%, Dropped Frame Rate: {:.1f}%'
                      .format(jitter_quality, dropped_frame_rate))
-            
+
         else:
             log.info('Timestamp Intervals Analysis: Failed')
 
@@ -530,7 +496,6 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         log.debug('Generating config audit failed with message:\n' + repr(e))
         log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
-
     ### Add extra files to archive
 
     # Add the config file to the archive too
@@ -543,12 +508,10 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             mask_path = os.path.abspath(mask_path_default)
             extra_files.append(mask_path)
 
-
     # Add the platepar to the archive if it exists
     if (not nodetect):
         if os.path.exists(platepar_path):
             extra_files.append(platepar_path)
-
 
     # Add the json file with recalibrated platepars to the archive
     if (not nodetect):
@@ -560,17 +523,15 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     if len(kml_files):
         extra_files += kml_files
 
-
     # Add all flux related files
     if (not nodetect):
         for file_name in sorted(os.listdir(night_data_dir)):
             if ("flux" in file_name) and (file_name.endswith(".json") or file_name.endswith(".ecsv")):
                 extra_files.append(os.path.join(night_data_dir, file_name))
 
-
     # If FFs are not uploaded, choose two to upload
     if config.upload_mode > 1:
-    
+
         # If all FF files are not uploaded, add two FF files which were successfully recalibrated
         recalibrated_ffs = []
         if recalibrated_platepars is not None:
@@ -589,7 +550,6 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         elif len(recalibrated_ffs) > 0:
             extra_files += recalibrated_ffs
 
-
         # If no were recalibrated
         else:
 
@@ -602,11 +562,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                 extra_files += random.sample(ff_list, 2)
             else:
                 extra_files += ff_list
-        
 
     ### ###
-
-
 
     # If the detection should be run
     if (not nodetect):
@@ -637,7 +594,6 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                     ff_name = ff_name.replace(config.stationID, cams_code_formatted)
                     met[0] = ff_name
 
-
                 # Write the CAMS compatible FTPdetectinfo file
                 writeFTPdetectinfo(meteor_list, night_data_dir, \
                     ftpdetectinfo_name.replace(config.stationID, cams_code_formatted),\
@@ -647,29 +603,41 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     try:
         observation_summary_path_file_name, observation_summary_json_path_file_name = (
                 finalizeObservationSummary(config, night_data_dir))
-        
+
         extra_files.append(observation_summary_path_file_name)
         extra_files.append(observation_summary_json_path_file_name)
-        
+
         log.info("\n\nObservation Summary\n===================\n\n" + serialize(config) + "\n\n")
 
     except Exception as e:
         log.debug('Generating Observation Summary failed with message:\n' + repr(e))
         log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
-
-
     night_archive_dir = os.path.join(os.path.abspath(config.data_dir), config.archived_dir,
         night_data_dir_name)
 
-
-
     log.info('Archiving detections to ' + night_archive_dir)
-    
+
     # Archive the detections
     archive_name = archiveDetections(night_data_dir, night_archive_dir, ff_detected, config, \
         extra_files=extra_files)
 
+    SpriteDetector(
+        folder_path=night_data_dir,
+        model_path="share/spritenet-maxpixel-v8-pretrained-yolov5_best-fp16.tflite",
+        conf_thres=0.432,  # max F-1 at this confidence
+        config=config,
+        disable_mask=False,
+        min_stars=1,
+        vignetting_parameter=(
+            platepar.vignetting_coeff if platepar is not None else 0.001
+        ),
+        thumbnails_only=False,
+        max_fits_threshold=2, 
+        scrape_timelapse=False
+        #if more than 2 FFs of the same thumbnail have detection, 
+        # they are likely false positives
+    )
 
     return night_archive_dir, archive_name, detector
 
