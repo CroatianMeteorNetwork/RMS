@@ -871,7 +871,24 @@ def showImage(name, img, convert_to_uint8=False):
     if manager and hasattr(manager, "set_window_title"):
         manager.set_window_title(name)
 
+    if hasattr(fig.canvas, "toolbar_visible"):
+        try:
+            fig.canvas.toolbar_visible = False  # type: ignore[attr-defined]
+        except Exception:
+            pass
+    else:
+        toolbar = getattr(manager, "toolbar", None)
+        if toolbar is not None:
+            try:
+                toolbar.setVisible(False)
+            except AttributeError:
+                try:
+                    toolbar.hide()
+                except Exception:
+                    pass
+
     fig.set_size_inches(img_width/fig.dpi, img_height/fig.dpi, forward=True)
+    fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
     ax.set_position([0, 0, 1, 1])
     ax.set_xlim(-0.5, img_width - 0.5)
     ax.set_ylim(img_height - 0.5, -0.5)
@@ -908,21 +925,6 @@ def showImage(name, img, convert_to_uint8=False):
                     win.setAttribute(QtCore.Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
                 except AttributeError:
                     win.setAttribute(QtCore.Qt.WA_ShowWithoutActivating, True)  # type: ignore[attr-defined]
-                try:
-                    win.setWindowFlag(QtCore.Qt.WindowType.WindowDoesNotAcceptFocus, True)
-                except AttributeError:
-                    win.setWindowFlag(QtCore.Qt.WindowDoesNotAcceptFocus, True)  # type: ignore[attr-defined]
-                handle = win.windowHandle()
-                if handle is not None:
-                    try:
-                        handle.setFlag(QtCore.Qt.WindowType.WindowDoesNotAcceptFocus, True)
-                    except AttributeError:
-                        handle.setFlag(QtCore.Qt.WindowDoesNotAcceptFocus, True)  # type: ignore[attr-defined]
-                try:
-                    win.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-                except AttributeError:
-                    win.setFocusPolicy(QtCore.Qt.NoFocus)  # type: ignore[attr-defined]
-                win.clearFocus()
                 win.show()
                 focus_configured = True
         except Exception:
@@ -979,7 +981,7 @@ def showImage(name, img, convert_to_uint8=False):
         closed[0] = True
 
     def _on_key(event):
-        if event.key in (" ", "space", "enter"):
+        if event.key in (" ", "space", "enter", "return"):
             closed[0] = True
             plt.close(fig)
 
