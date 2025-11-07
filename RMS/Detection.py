@@ -856,43 +856,122 @@ def checkAngularVelocity(centroids, config):
 
 
 def showImage(name, img, convert_to_uint8=False):
-    """ Show the given image using matplotlib.
-
-    Arguments:
-        name: [str] Window title.
-        img: [numpy.ndarray] Image to display.
-
-    Keyword arguments:
-        convert_to_uint8: [bool] If True, convert the image to uint8 and scale to the full range before showing.
-    """
+    """ Show the given image using matplotlib. """
 
     if convert_to_uint8:
         img_to_show = img.astype(np.uint8)*255
     else:
         img_to_show = img
 
+    img_height, img_width = img_to_show.shape[:2]
+
     fig, ax = plt.subplots()
 
-    # Try to set the window title for easier identification when multiple images are opened.
-    # The attribute is backend dependent, so guard against missing support on some systems.
-    if hasattr(fig.canvas.manager, "set_window_title"):
-        fig.canvas.manager.set_window_title(name)
+    manager = getattr(fig.canvas, "manager", None)
+    if manager and hasattr(manager, "set_window_title"):
+        manager.set_window_title(name)
 
-    # Hide the axes, as they are not needed when previewing frames.
+    fig.set_size_inches(img_width/fig.dpi, img_height/fig.dpi, forward=True)
+    ax.set_position([0, 0, 1, 1])
+    ax.set_xlim(-0.5, img_width - 0.5)
+    ax.set_ylim(img_height - 0.5, -0.5)
+    ax.set_aspect("equal")
     ax.axis("off")
 
-    # Convert grayscale frames appropriately for matplotlib.
     if img_to_show.ndim == 2:
-        ax.imshow(img_to_show, cmap="gray")
+        ax.imshow(img_to_show, cmap="gray", interpolation="nearest")
     elif img_to_show.ndim == 3 and img_to_show.shape[2] == 3:
-        # Matplotlib expects RGB ordering, whereas the detector provides BGR frames. Perform the conversion if needed.
-        ax.imshow(cv2.cvtColor(img_to_show, cv2.COLOR_BGR2RGB))
+        ax.imshow(cv2.cvtColor(img_to_show, cv2.COLOR_BGR2RGB), interpolation="nearest")
     else:
-        ax.imshow(img_to_show)
+        ax.imshow(img_to_show, interpolation="nearest")
 
-    # ``plt.show`` blocks until the window is closed, but we want to allow users to quickly advance through images by pressing space or enter.
-    # Use a non-blocking show and drive the GUI event loop manually.
+    fig.canvas.draw()
+
+    def _get_window(fig_manager):
+        if fig_manager is None:
+            return None
+        win = getattr(fig_manager, "window", None)
+        if win is None:
+            win = getattr(fig_manager, "canvas", None)
+        return win
+
+    def _configure_window(win):
+        # Match the previous OpenCV helper behaviour: keep the window pixel-perfect, place it in the
+        # upper-left corner, and avoid stealing focus from the rest of the desktop session.
+        focus_configured = False
+        try:
+            from matplotlib.backends import qt_compat
+            QtCore = qt_compat.QtCore  # type: ignore[attr-defined]
+            QtWidgets = qt_compat.QtWidgets  # type: ignore[attr-defined]
+            if QtCore is not None and QtWidgets is not None and isinstance(win, QtWidgets.QWidget):  # type: ignore[arg-type]
+                try:
+                    win.setAttribute(QtCore.Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+                except AttributeError:
+                    win.setAttribute(QtCore.Qt.WA_ShowWithoutActivating, True)  # type: ignore[attr-defined]
+                try:
+                    win.setWindowFlag(QtCore.Qt.WindowType.WindowDoesNotAcceptFocus, True)
+                except AttributeError:
+                    win.setWindowFlag(QtCore.Qt.WindowDoesNotAcceptFocus, True)  # type: ignore[attr-defined]
+                handle = win.windowHandle()
+                if handle is not None:
+                    try:
+                        handle.setFlag(QtCore.Qt.WindowType.WindowDoesNotAcceptFocus, True)
+                    except AttributeError:
+                        handle.setFlag(QtCore.Qt.WindowDoesNotAcceptFocus, True)  # type: ignore[attr-defined]
+                try:
+                    win.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+                except AttributeError:
+                    win.setFocusPolicy(QtCore.Qt.NoFocus)  # type: ignore[attr-defined]
+                win.clearFocus()
+                win.show()
+                focus_configured = True
+        except Exception:
+            pass
+
+        if not focus_configured:
+            try:
+                if hasattr(win, "attributes"):
+                    win.attributes("-topmost", False)
+                    win.attributes("-disabled", False)
+                if hasattr(win, "wm_attributes"):
+                    win.wm_attributes("-topmost", False)
+                    win.wm_attributes("-disabled", False)
+                if hasattr(win, "focus_clear"):
+                    win.focus_clear()
+            except Exception:
+                pass
+
+        try:
+            if hasattr(win, "resize"):
+                win.resize(img_width, img_height)
+            elif hasattr(win, "wm_geometry"):
+                win.wm_geometry(f"{img_width}x{img_height}+0+0")
+            elif hasattr(win, "SetSize"):
+                win.SetSize(img_width, img_height)
+            elif hasattr(win, "setGeometry"):
+                win.setGeometry(0, 0, img_width, img_height)
+        except Exception:
+            pass
+
+        try:
+            if hasattr(win, "move"):
+                win.move(0, 0)
+            elif hasattr(win, "wm_geometry"):
+                win.wm_geometry(f"{img_width}x{img_height}+0+0")
+            elif hasattr(win, "SetPosition"):
+                win.SetPosition((0, 0))
+        except Exception:
+            pass
+
+    pre_window = _get_window(manager)
+    if pre_window is not None:
+        _configure_window(pre_window)
+
     plt.show(block=False)
+
+    post_window = _get_window(manager)
+    if post_window is not None:
+        _configure_window(post_window)
 
     closed = [False]
 
