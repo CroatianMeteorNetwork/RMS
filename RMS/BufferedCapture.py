@@ -679,10 +679,25 @@ class BufferedCapture(Process):
                     # Try to connect
                     result = sock.connect_ex((host, port))
                     sock.close()
-                    
+
                     if result == 0:
-                        log.info("RTSP service ready after {} attempts".format(attempt + 1))
-                        return True, RtspProbeResult.SUCCESS
+                        # First probe succeeded, wait 10s and verify with second probe
+                        log.info("First probe successful, waiting 10s for verification probe...")
+                        time.sleep(10)
+
+                        # Second verification probe
+                        sock2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        sock2.settimeout(timeout)
+                        result2 = sock2.connect_ex((host, port))
+                        sock2.close()
+
+                        if result2 == 0:
+                            log.info("RTSP service ready after {} attempts (verified with 2 probes)".format(attempt + 1))
+                            return True, RtspProbeResult.SUCCESS
+                        else:
+                            log.info("Second probe failed, continuing retry loop...")
+                            last_error = RtspProbeResult.CONNECTION_REFUSED
+                            # Don't sleep at end of loop - continue to next attempt immediately
                     
                     # Analyze specific connection errors
                     if result in (errno.ENETUNREACH, errno.ENETDOWN):
@@ -1014,7 +1029,7 @@ class BufferedCapture(Process):
 
 
     def createGstreamDevice(self, video_format, gst_decoder='decodebin', 
-                            video_file_dir=None, segment_duration_sec=30, max_retries=5, retry_interval=1):
+                            video_file_dir=None, segment_duration_sec=30, max_retries=5, retry_interval=5):
         """
         Creates a GStreamer pipeline for capturing video from an RTSP source and 
         initializes playback with specific configurations.
@@ -1315,8 +1330,7 @@ class BufferedCapture(Process):
                     log.info("Creating GStreamer pipeline...")
                     self.device = self.createGstreamDevice(
                         self.config.gst_colorspace, gst_decoder=self.config.gst_decoder,
-                        video_file_dir=raw_video_dir, segment_duration_sec=self.config.raw_video_duration,
-                        max_retries=5, retry_interval=1
+                        video_file_dir=raw_video_dir, segment_duration_sec=self.config.raw_video_duration
                         )
 
                     if not self.device:
