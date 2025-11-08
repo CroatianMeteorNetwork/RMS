@@ -921,68 +921,28 @@ def showImage(name, img, convert_to_uint8=False):
             win = getattr(fig_manager, "canvas", None)
         return win
 
-    qt_context = {"window": None, "QtCore": None, "QtWidgets": None, "focus_guard": None}
-
     def _configure_window(win):
         # Match the previous OpenCV helper behaviour: keep the window pixel-perfect, place it in the
-        # upper-left corner, and avoid stealing focus from the rest of the desktop session.
-        focus_configured = False
+        # upper-left corner, and ensure it does not grab focus from the rest of the desktop session.
         try:
             from matplotlib.backends import qt_compat
             QtCore = qt_compat.QtCore  # type: ignore[attr-defined]
             QtWidgets = qt_compat.QtWidgets  # type: ignore[attr-defined]
             if QtCore is not None and QtWidgets is not None and isinstance(win, QtWidgets.QWidget):  # type: ignore[arg-type]
-                qt_context["window"] = win
-                qt_context["QtCore"] = QtCore
-                qt_context["QtWidgets"] = QtWidgets
                 try:
                     win.setAttribute(QtCore.Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
                 except AttributeError:
                     win.setAttribute(QtCore.Qt.WA_ShowWithoutActivating, True)  # type: ignore[attr-defined]
                 try:
-                    win.setFocusPolicy(QtCore.Qt.FocusPolicy.ClickFocus)
+                    win.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
                 except AttributeError:
-                    win.setFocusPolicy(QtCore.Qt.ClickFocus)
+                    win.setFocusPolicy(QtCore.Qt.NoFocus)
                 try:
                     win.clearFocus()
                 except Exception:
                     pass
-                if qt_context["focus_guard"] is None:
-                    class _QtFocusGuard(QtCore.QObject):
-                        def eventFilter(self, obj, event):
-                            try:
-                                focus_out = QtCore.QEvent.Type.FocusOut
-                            except AttributeError:
-                                focus_out = QtCore.QEvent.FocusOut  # type: ignore[attr-defined]
-                            if event.type() == focus_out:
-                                try:
-                                    obj.setAttribute(QtCore.Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
-                                except AttributeError:
-                                    obj.setAttribute(QtCore.Qt.WA_ShowWithoutActivating, True)  # type: ignore[attr-defined]
-                            return False
-
-                    guard = _QtFocusGuard(win)
-                    try:
-                        win.installEventFilter(guard)
-                        qt_context["focus_guard"] = guard
-                    except Exception:
-                        qt_context["focus_guard"] = None
-                focus_configured = True
         except Exception:
             pass
-
-        if not focus_configured:
-            try:
-                if hasattr(win, "attributes"):
-                    win.attributes("-topmost", False)
-                    win.attributes("-disabled", False)
-                if hasattr(win, "wm_attributes"):
-                    win.wm_attributes("-topmost", False)
-                    win.wm_attributes("-disabled", False)
-                if hasattr(win, "focus_clear"):
-                    win.focus_clear()
-            except Exception:
-                pass
 
         try:
             if hasattr(win, "resize"):
@@ -1031,61 +991,51 @@ def showImage(name, img, convert_to_uint8=False):
             pending_exception[0] = KeyboardInterrupt()
             plt.close(fig)
 
-    def _request_focus(_event):
-        win = qt_context.get("window")
-        QtCore = qt_context.get("QtCore")
-        QtWidgets = qt_context.get("QtWidgets")
-        if win is None:
-            try:
-                canvas_getter = getattr(fig.canvas, "get_tk_widget", None)
-                if callable(canvas_getter):
-                    canvas_getter().focus_set()
-            except Exception:
-                pass
-            return
+    def _on_click(event):
+        if event.button in (1, 2, 3):
+            closed[0] = True
+            plt.close(fig)
 
+    def _poll_stdin_key():
+        key = None
         try:
-            if QtCore is not None:
-                try:
-                    win.setAttribute(QtCore.Qt.WidgetAttribute.WA_ShowWithoutActivating, False)
-                except AttributeError:
-                    win.setAttribute(QtCore.Qt.WA_ShowWithoutActivating, False)  # type: ignore[attr-defined]
-            if QtWidgets is not None:
-                try:
-                    QtWidgets.QApplication.setActiveWindow(win)
-                except Exception:
-                    try:
-                        win.activateWindow()
-                    except Exception:
-                        pass
+            if os.name == "nt":
+                import msvcrt
+                if msvcrt.kbhit():
+                    key = msvcrt.getwch()
             else:
-                try:
-                    win.activateWindow()
-                except Exception:
-                    pass
-            try:
-                win.setFocus()
-            except Exception:
-                pass
+                import select
+                if sys.stdin is not None and sys.stdin.isatty():
+                    readable, _, _ = select.select([sys.stdin], [], [], 0)
+                    if readable:
+                        key = sys.stdin.read(1)
         except Exception:
-            pass
+            return None
+
+        if key is None:
+            return None
+        if key == "\r":
+            return "\n"
+        return key
 
     fig.canvas.mpl_connect("key_press_event", _on_key)
     fig.canvas.mpl_connect("close_event", _on_close)
-    fig.canvas.mpl_connect("button_press_event", _request_focus)
+    fig.canvas.mpl_connect("button_press_event", _on_click)
 
     while not closed[0]:
         plt.pause(0.05)
+        key = _poll_stdin_key()
+        if key is None:
+            continue
+        if key in (" ", "space", "\n"):
+            closed[0] = True
+            plt.close(fig)
+        elif key == "\x03":
+            closed[0] = True
+            pending_exception[0] = KeyboardInterrupt()
+            plt.close(fig)
 
     plt.close(fig)
-
-    win = qt_context.get("window")
-    guard = qt_context.get("focus_guard")
-    if win is not None and guard is not None:
-        try:
-            win.removeEventFilter(guard)
-        except Exception:
-            pass
 
     if pending_exception[0] is not None:
         raise pending_exception[0]
