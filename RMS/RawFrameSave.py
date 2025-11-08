@@ -30,7 +30,7 @@ from RMS.Logger import getLogger
 from RMS.Misc import mkdirP
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 class RawFrameSaver(multiprocessing.Process):

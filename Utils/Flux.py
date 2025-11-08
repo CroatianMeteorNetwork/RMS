@@ -29,7 +29,7 @@ from RMS.Logger import LoggingManager, getLogger
 
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 from RMS.Astrometry.ApplyAstrometry import (

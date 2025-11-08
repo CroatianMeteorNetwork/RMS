@@ -17,7 +17,7 @@ from RMS.Logger import getLogger
 
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_bright=False, flat_path=None,

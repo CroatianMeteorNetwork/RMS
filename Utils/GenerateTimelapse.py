@@ -26,7 +26,7 @@ from RMS.Formats.FFfile import validFFName, filenameToDatetime
 from RMS.Misc import mkdirP, RmsDateTime, tarWithProgress
 from RMS.Logger import getLogger
 
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 # --------------------------------------------------------------------

@@ -15,7 +15,7 @@ from Utils.StackFFs import stackFFs
 
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 def selectFiles(config, dir_path, ff_detected):

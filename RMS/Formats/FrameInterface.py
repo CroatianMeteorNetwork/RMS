@@ -34,7 +34,7 @@ from RMS.Routines.GstreamerCapture import GstVideoFile
 from RMS.Logger import getLogger
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 # Define a single, safe messagebox function

@@ -245,7 +245,7 @@ def gstDebugLogger(category, level, file, function, line, obj, message, user_dat
         the message directly through the logging system.
     """
     # Get the main logger instance
-    logger = logging.getLogger("Logger") 
+    logger = logging.getLogger("rmslogger") 
     
     # Extract message information safely
     cat_name = category.get_name() if category else "Unknown"
@@ -605,14 +605,14 @@ def getLogger(name=None, level="DEBUG", stdout=False):
     """ Get a logger instance.
     
     Arguments:
-        name: [str] Logger name. If None, returns "logger"
+        name: [str] Logger name. If None, returns "rmslogger"
         level: [str] Logging level to set ("DEBUG","INFO","WARNING","ERROR","CRITICAL")
         stdout: [bool] If True, adds a StreamHandler to stdout
         
     Return:
         [Logger] Logger instance
     """
-    logger = logging.getLogger(name if name else "logger")
+    logger = logging.getLogger(name if name else "rmsogger")
 
     level_map = {
         "DEBUG": logging.DEBUG,

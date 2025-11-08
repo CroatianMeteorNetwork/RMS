@@ -30,7 +30,7 @@ from RMS.Formats import FRbin
 
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 class Extractor(Process):

@@ -47,7 +47,7 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 

@@ -921,7 +921,7 @@ if __name__ == "__main__":
     log_manager.initLogging(config)
 
     # Get the logger handle
-    log = getLogger("logger")
+    log = getLogger("rmslogger")
 
 
     log.info("Program start")

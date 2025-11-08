@@ -40,7 +40,7 @@ if sys.version_info[0] < 3:
     FileNotFoundError = IOError
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 def mkdirP(path):
