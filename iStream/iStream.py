@@ -22,7 +22,7 @@ def rmsExternal(captured_night_dir, archived_night_dir, config):
     # Initialize the logger
     log_manager = LoggingManager()
     log_manager.initLogging(config, 'iStream_')
-    log = getLogger("rmslogger")
+    log = getLogger("logger")
     log.info('iStream external script started')
 
     # Create lock file to avoid RMS rebooting the system
