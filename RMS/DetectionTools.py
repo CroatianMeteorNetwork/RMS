@@ -211,82 +211,34 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
 
     """
 
-    # minimum angle offset from 90 degrees
+    # Minimum angle offset to avoid division by zero (keeping original logic)
     angle_eps = 0.2
-
-    # Check for vertical/horizontal lines and set theta to a small angle
-    if (theta%90 < angle_eps):
+    if (theta % 90 < angle_eps):
         theta = theta + angle_eps
+    theta = theta % 360
 
-    # Normalize theta to 0-360 range
-    theta = theta%360
+    # Convert theta to radians
+    th_rad = np.radians(theta)
+    cos_th = np.cos(th_rad)
+    sin_th = np.sin(th_rad)
 
-    hh = img_h/2.0
-    hw = img_w/2.0
+    # 1. Create a grid of (y, x) coordinates
+    # Corresponds to the -hh to hh and -hw to hw ranges in the original coordinate system
+    y_grid, x_grid = np.indices((img_h, img_w))
+    y_centered = y_grid - (img_h / 2.0)
+    x_centered = x_grid - (img_w / 2.0)
 
-    indicesy = []
-    indicesx = []
-     
-    if theta < 45 or (theta > 90 and theta < 135):
+    # 2. Calculate perpendicular distance of every pixel from the line
+    # Line equation in HT: x*cos(theta) + y*sin(theta) = rho
+    dist = np.abs(x_centered * cos_th + y_centered * sin_th - rho)
 
-        theta = np.radians(theta)
-        half_limit = (stripe_width/2)/np.cos(theta)
+    # 3. Select pixels within the stripe width
+    mask = dist <= (stripe_width / 2.0)
+    
+    # 4. Get indices of the mask
+    indicesy, indicesx = np.nonzero(mask)
 
-        a = -np.tan(theta)
-        b = rho/np.cos(theta)
-         
-        for y in range(int(-hh), int(hh)):
-
-            x0 = a*y + b
-             
-            x1 = int(x0 - half_limit + hw)
-            x2 = int(x0 + half_limit + hw)
-             
-            if x1 > x2:
-                x1, x2 = x2, x1
-             
-            if x2 < 0 or x1 >= img_w:
-                continue
-            
-            for x in range(x1, x2):
-                if x < 0 or x >= img_w:
-                    continue
-                 
-                indicesy.append(y + hh)
-                indicesx.append(x)
-                 
-    else:
-
-        theta = np.radians(theta)
-        half_limit = (stripe_width/2)/np.sin(theta)
-
-        a = -1/np.tan(theta)
-        b = rho/np.sin(theta)
-         
-        for x in range(int(-hw), int(hw)):
-            y0 = a*x + b
-             
-            y1 = int(y0 - half_limit + hh)
-            y2 = int(y0 + half_limit + hh)
-             
-            if y1 > y2:
-                y1, y2 = y2, y1
-             
-            if y2 < 0 or y1 >= img_h:
-                continue
-                
-            for y in range(y1, y2):
-                if y < 0 or y >= img_h:
-                    continue
-                 
-                indicesy.append(y)
-                indicesx.append(x + hw)
-
-    # Convert indices to integer
-    indicesx = np.array(indicesx, dtype=np.uint16)
-    indicesy = np.array(indicesy, dtype=np.uint16)
-
-    return (indicesy, indicesx)
+    return indicesy.astype(np.uint16), indicesx.astype(np.uint16)
 
 
 def dilateCoordinates(coords, img_h, img_w, width=1):
