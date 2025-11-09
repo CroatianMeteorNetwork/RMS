@@ -103,7 +103,7 @@ def getPolarLine(x1, y1, x2, y2, img_h, img_w):
 
     # Calculate polar line coordinates
     theta = -np.arctan2(dx, dy)
-    rho = (dy * x0 - dx * y0 + x2*y1 - y2*x1) / np.sqrt(dy**2 + dx**2)
+    rho = (dy*x0 - dx*y0 + x2*y1 - y2*x1) / np.sqrt(dy**2 + dx**2)
     
     # Correct for quadrant
     if rho > 0:
@@ -433,7 +433,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         img_thres = thresholdFF(img_handle.ff, k1, j1, mask=mask)
 
         # # Show thresholded image
-        # show("thresholded ALL", img_thres)
+        # showImage("thresholded ALL", img_thres, convert_to_uint8=True)
 
         # Check if there are too many threshold passers, if so report that no lines were found
         if not checkWhiteRatio(img_thres, img_handle.ff, max_white_ratio):
@@ -500,7 +500,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             # Adjust levels
             maxpixel_autolevel = Image.adjustLevels(maxpix_img, min_lvl, 1.0, max_lvl)
 
-            show2(str(frame_min) + "-" + str(frame_max) + " threshold", np.concatenate((maxpixel_autolevel, \
+            showImage(str(frame_min) + "-" + str(frame_max) + " threshold", np.concatenate((maxpixel_autolevel, \
                 img.astype(maxpix_img.dtype)*(2**(maxpix_img.itemsize*8) - 1)), axis=1))
 
             ###
@@ -509,7 +509,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         # # Show maxpixel of the thresholded part
         # mask = np.zeros(shape=img.shape)
         # mask[np.where(img)] = 1
-        # show('thresh max', ff.maxpixel*mask)
+        # showImage('thresh max', ff.maxpixel*mask, convert_to_uint8=True)
 
         ### Apply morphological operations to prepare the image for KHT
 
@@ -524,7 +524,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
 
         if debug:
             # Show morphed image
-            show(str(frame_min) + "-" + str(frame_max) + " morph", img)
+            showImage(str(frame_min) + "-" + str(frame_max) + " morph", img, convert_to_uint8=True)
 
 
         # Get image shape
@@ -855,25 +855,79 @@ def checkAngularVelocity(centroids, config):
 
 
 
-def show(name, img):
-    """ COnvert the given image to uint8 and show it. """
+import matplotlib.pyplot as plt
+import numpy as np
+import cv2
+import sys
 
-    cv2.imshow(name, img.astype(np.uint8)*255)
-    cv2.moveWindow(name, 0, 0)
-    cv2.waitKey(0)
-    cv2.destroyWindow(name)
+def showImage(name, img, convert_to_uint8=False):
+    """ 
+    Show the given image using matplotlib, mimicking cv2.imshow behavior.
+    Closes on 'Space' or 'Enter'. Exits program on 'Ctrl+C'.
+    """
 
+    if convert_to_uint8:
+        img_to_show = img.astype(np.uint8)*255
+    else:
+        img_to_show = img
 
+    img_height, img_width = img_to_show.shape[:2]
 
-def show2(name, img):
-    """ Show the given image. """
+    # Setup figure without toolbar
+    plt.rcParams['toolbar'] = 'None' 
+    fig, ax = plt.subplots()
 
-    cv2.imshow(name, img)
-    cv2.moveWindow(name, 0, 0)
-    cv2.waitKey(0)
-    cv2.destroyWindow(name)
+    # Set Dark Background
+    dark_gray = '#2A2A2A'  # slightly lighter than pure black for contrast
+    fig.patch.set_facecolor(dark_gray)
+    ax.set_facecolor(dark_gray)
+    
+    # Set window title
+    manager = fig.canvas.manager
+    if manager is not None:
+        manager.set_window_title(name)
 
+    # Configure Axes
+    ax.axis('off')
+    fig.subplots_adjust(left=0, right=1, bottom=0, top=1) # No margins
 
+    # Set appropriate aspect and display
+    if img_to_show.ndim == 2:
+        ax.imshow(img_to_show, cmap='gray', interpolation='nearest')
+    elif img_to_show.ndim == 3 and img_to_show.shape[2] == 3:
+        # Assume BGR if 3 channel, convert to RGB for matplotlib
+        ax.imshow(cv2.cvtColor(img_to_show, cv2.COLOR_BGR2RGB), interpolation='nearest')
+    else:
+        ax.imshow(img_to_show, interpolation='nearest')
+
+    # Handle DPI scaling for accurate window size if possible
+    dpi = fig.dpi
+    fig.set_size_inches(img_width / dpi, img_height / dpi, forward=True)
+
+    # Mutable state to track exit condition across the inner function scope
+    state = {'exit_program': False}
+
+    def _on_key(event):
+        # Check specifically for desired keys. 
+        # Matplotlib standardizes these names across backends.
+        if event.key in [' ', 'enter']:
+            plt.close(fig)
+        elif event.key == 'ctrl+c':
+            state['exit_program'] = True
+            plt.close(fig)
+        # Any other key is ignored by this handler
+
+    # Connect the handler
+    fig.canvas.mpl_connect('key_press_event', _on_key)
+
+    # Display and block until closed. 
+    # This allows standard OS window management (changing focus) to work correctly.
+    plt.show(block=True)
+
+    # Check if we need to kill the whole program
+    if state['exit_program']:
+        raise KeyboardInterrupt
+    
 
 def showAutoLevels(img):
 
@@ -927,7 +981,7 @@ def plotLines(ff, line_list):
         
         cv2.line(img, (x1, y1), (x2, y2), (max_lvl, 0, max_lvl), 1)
         
-    show2("KHT", img)
+    showImage("KHT", img)
 
 
 
