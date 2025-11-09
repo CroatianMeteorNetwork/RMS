@@ -22,6 +22,7 @@ import datetime
 import sys, os
 import ctypes
 import traceback
+import logging
 
 import numpy as np
 import numpy.ctypeslib as npct
@@ -58,10 +59,6 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 import RMS.Routines.MorphCy as morph
 from RMS.Routines.BinImageCy import binImage
 
-# If True, all detection details will be logged
-VERBOSE_DEBUG = False
-
-
 # Get the logger from the main module
 log = getLogger("logger")
 
@@ -70,11 +67,8 @@ log = getLogger("logger")
 def logDebug(*log_str):
     """ Log detection debug messages. """
 
-    if VERBOSE_DEBUG:
-
-        log_str = map(str, log_str)
-
-        log.debug(" ".join(log_str))
+    log_str = map(str, log_str)
+    log.debug(" ".join(log_str))
 
 
 
@@ -1240,7 +1234,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             # Extract (x, y, frame) of thresholded frames, i.e. pixel and frame locations of threshold passers
             t1 = time()
             xs, ys, zs = getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, \
-                mask, flat_struct, dark, debug=VERBOSE_DEBUG)
+                mask, flat_struct, dark, debug=True)
             
             logDebug('Time for thresholding and stripe extraction: {:.3f}'.format(time() - t1))
 
@@ -1792,9 +1786,14 @@ if __name__ == "__main__":
 
 
     ### Init the logger
+    if cml_args.debug:
+        console_level = logging.DEBUG
+    else:
+        console_level = logging.INFO
 
     log_manager = LoggingManager()
-    log_manager.initLogging(config, 'detection_', safedir=os.path.dirname(cml_args.dir_path[0]))
+    log_manager.initLogging(config, 'detection_', safedir=os.path.dirname(cml_args.dir_path[0]), 
+                            console_level=console_level)
 
     log = getLogger("logger")
 
@@ -1873,11 +1872,7 @@ if __name__ == "__main__":
 
     else:
         out_dir = main_dir
-
-
-    # If debug is on, enable debug logging
-    if cml_args.debug:
-        VERBOSE_DEBUG = True
+        
 
 
     # Load mask, dark, flat
