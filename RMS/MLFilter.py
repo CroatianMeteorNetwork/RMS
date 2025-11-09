@@ -146,8 +146,8 @@ def classifyPNGs(file_dir, model_path):
         # rescale values to (0;1)
         image = rescale_me1(image)
 
-        # normalize min and max values
-        image = normalize_me1(image)
+        # normalize min and max values not currently needed
+        #image = normalize_me1(image)
 
         #image = standardize_me1(image)
         
@@ -307,26 +307,28 @@ def crop_detections(detection_info, fits_dir):
 
         #add some space around the meteor detection so that its not touching the edges
         #leftover terms need to be set to 0 outside if statements otherwise they wont be set if there's nothing left over which will cause an error with the blackfill.blackfill() line
-        left_side = left_side - 20
+        PADDING = 10
+
+        left_side = left_side - PADDING
         leftover_left = 0
         if left_side < 0:
             #this will be used later to determine how to fill in the rest of the image to make it square but also have the meteor centered in the image
             leftover_left = 0 - left_side
             left_side = 0
 
-        right_side = right_side + 20
+        right_side = right_side + PADDING
         leftover_right = 0
         if right_side > col_size:
             leftover_right = right_side - col_size
             right_side = col_size
 
-        top_side = top_side - 20
+        top_side = top_side - PADDING
         leftover_top = 0
         if top_side < 0:
             leftover_top = 0 - top_side
             top_side = 0
 
-        bottom_side = bottom_side + 20
+        bottom_side = bottom_side + PADDING
         leftover_bottom = 0
         if bottom_side > row_size:
             leftover_bottom = bottom_side - row_size
@@ -407,7 +409,7 @@ def makePNGCrops(FTP_path, FF_dir_path):
 
 
 
-def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=False, clear_prev_run=False):
+def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.5, keep_pngs=False, clear_prev_run=False):
     """ Using machine learning, reject false positives and only keep real meteors. An updated FTPdetectinfo
         file will be saved.  
 
@@ -604,7 +606,7 @@ if __name__ == "__main__":
         help='Path to the FTPDetectInfo file.')
 
     arg_parser.add_argument('--threshold', '-t', metavar='THRESHOLD', type=float,
-        help='threshold for meteor/non-meteor classification', default=0.85)
+        help='threshold for meteor/non-meteor classification', default=0.5)
 
     arg_parser.add_argument('--keep_pngs', '-p', action="store_true",
         help='Keep the temporary PNG crops on which the ML filter is run pngs. They will be deleted by default.')

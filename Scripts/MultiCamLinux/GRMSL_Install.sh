@@ -1,3 +1,4 @@
+#!/bin/bash
 # This software is part of the Linux port of RMS
 # Copyright (C) 2023  Ed Harman
 # 
@@ -15,14 +16,11 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
-#!/bin/bash
 #
 # Version 1.1   - fixed bug introduced during testing
 # Version 1.0	- initial release
 
 
-
-#!/usr/bin/bash
 
 echo -e "\n\n\nThis script automates the download and installation of RMS and configures support for multiple cameras on a generic Ubuntu-Desktop"
 echo -e "\n If you wish to proceed type y or Y at the prompt or n/N to exit"

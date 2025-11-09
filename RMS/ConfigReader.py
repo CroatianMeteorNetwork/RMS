@@ -55,8 +55,10 @@ except ImportError:
 def choosePlatform(win_conf, rpi_conf, linux_pc_conf):
     """ Choose the setting depending on if this is running on the RPi or a Linux PC. """
 
-    # Check if running on Windows
-    if 'win' in sys.platform:
+    # Check if running on Windows.
+    # ``startswith`` ensures the platform string actually begins with ``"win"``
+    # instead of matching other identifiers that merely contain that substring.
+    if sys.platform.startswith('win'):
         return win_conf
 
     else:
@@ -605,10 +607,10 @@ class Config:
         self.min_patch_intensity_multiplier = 0.0
 
         # Filtering by machine learning
-        self.ml_filter = 0.85
+        self.ml_filter = 0.5
 
         # Path to the ML model
-        self.ml_model_path = os.path.join(self.rms_root_dir, "share", "meteorml32.tflite")
+        self.ml_model_path = os.path.join(self.rms_root_dir, "share", "hyper_model.tflite")
 
         # Detection border (in pixels) - detections too close to the border of the mask will be rejected
         self.detection_border = 5
@@ -1008,15 +1010,10 @@ def parseCapture(config, parser):
     if parser.has_option(section, "logdays_to_keep"):
         config.logdays_to_keep = int(parser.get(section, "logdays_to_keep"))
 
+    log_level_mapping = { 0: 'CRITICAL',1: 'ERROR',2: 'WARNING',3: 'INFO',4: 'DEBUG'}
+    
     if parser.has_option(section, "console_log_level"):
         config.console_log_level = parser.getint(section, "console_log_level")
-        log_level_mapping = {
-            0: 'CRITICAL',
-            1: 'ERROR',
-            2: 'WARNING',
-            3: 'INFO',
-            4: 'DEBUG'
-        }
         config.console_log_level = log_level_mapping[min(max(config.console_log_level, 0), 4)]
 
     if parser.has_option(section, "log_file_log_level"):
@@ -1174,8 +1171,15 @@ def parseCapture(config, parser):
     if parser.has_option(section, "gst_decoder"):
         config.gst_decoder = parser.get(section, "gst_decoder")
 
-    if parser.has_option(section, "camera_settings_path"):
+    if parser.has_option(section, "camera_settings_path") and os.path.isfile(parser.get(section, "camera_settings_path")):
         config.camera_settings_path = parser.get(section, "camera_settings_path")
+    else:
+        station_specific_file = os.path.expanduser(os.path.join(config.config_file_path,'camera_settings.json'))
+        if os.path.isfile(station_specific_file):
+            config.camera_settings_path = station_specific_file
+        else:    
+            config.camera_settings_path = './camera_settings.json'
+    print(f'Camera settings file: {config.camera_settings_path}')
 
     if parser.has_option(section, "initialize_camera"):
         config.initialize_camera = parser.getboolean(section, "initialize_camera")
@@ -1667,7 +1671,9 @@ def parseMeteorDetection(config, parser):
         config.min_patch_intensity_multiplier = parser.getfloat(section, "min_patch_intensity_multiplier")
 
     if parser.has_option(section, "ml_filter"):
-        config.ml_filter = parser.getfloat(section, "ml_filter")
+        # since most of the old configs have threshold 0.85, and the current model is calibrated to 0.5,
+        # we need to rescale the value here
+        config.ml_filter = parser.getfloat(section, "ml_filter") * 0.5/0.85
 
         # Disable the min_patch_intensity filter if the ML filter is used and the ML library is available
         if TFLITE_AVAILABLE and (config.ml_filter > 0):

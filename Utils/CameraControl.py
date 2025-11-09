@@ -98,9 +98,9 @@ def rebootCamera(cam):
             break
         retry += 1
     if retry < 5: 
-        log.info('reboot successful')
+        log.info('Camera reboot successful')
     else:
-        log.info('camera nonresponsive, please wait 30s and reconnect')
+        log.info('Camera nonresponsive, please wait 30s and reconnect')
 
 
 def strIPtoHex(ip_str):
@@ -862,40 +862,8 @@ def cameraControlV2(config, cmd, opts=''):
     # extract IP from config file
     camera_ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0]
 
-    if not hasattr(config, 'camera_settings_path') or not os.path.isfile(config.camera_settings_path):
-        camera_settings_path = './camera_settings.json'
-    else:
-        camera_settings_path = config.camera_settings_path
-
-    cameraControl(camera_ip, cmd, opts, camera_settings_path=camera_settings_path)
-
-def computeMachineTimeOffset():
-    """
-    Compute machine time offset.
-
-    Returns:
-        Time offset of machine relative to UTC in hours.
-    """
-
-    utc_time_naive = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
-    local_time_naive = datetime.datetime.now()
-
-    return round((local_time_naive - utc_time_naive).total_seconds() / 3600,2)
-
-def computeStationNoonInUTC(config):
-    """
-
-    Arguments:
-        config: [config] RMS Config instance
-
-    Returns:
-        [float] Hour of solar noon computed using longitude
-    """
-
-    degrees_of_longitude = 360
-    hours_in_a_day = 24
-
-    return 12 - hours_in_a_day * (config.longitude / degrees_of_longitude)
+    # camera_settings_path is sanity checked in ConfigReader so no checks needed here
+    cameraControl(camera_ip, cmd, opts, camera_settings_path=config.camera_settings_path)
 
 
 if __name__ == '__main__':
