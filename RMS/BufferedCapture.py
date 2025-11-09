@@ -29,7 +29,6 @@ import os.path
 from multiprocessing import Process, Event, Value, Array
 import threading
 from collections import deque
-from collections import deque
 import os
 import signal
 
@@ -169,8 +168,6 @@ class BufferedCapture(Process):
 
         # Initialize shared counter for dropped frames
         self.dropped_frames = Value('i', 0)
-        self.last_daytime_mode = None  # Track day/night transitions
-        self.dropped_frames_timestamps = deque()  # Track when frames were dropped for 10-min window
         self.last_daytime_mode = None  # Track day/night transitions
         self.dropped_frames_timestamps = deque()  # Track when frames were dropped for 10-min window
 
@@ -685,23 +682,6 @@ class BufferedCapture(Process):
 
 
                     if result == 0:
-                        # First probe succeeded, wait 10s and verify with second probe
-                        log.info("First probe successful, waiting 10s for verification probe...")
-                        time.sleep(10)
-
-                        # Second verification probe
-                        sock2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        sock2.settimeout(timeout)
-                        result2 = sock2.connect_ex((host, port))
-                        sock2.close()
-
-                        if result2 == 0:
-                            log.info("RTSP service ready after {} attempts (verified with 2 probes)".format(attempt + 1))
-                            return True, RtspProbeResult.SUCCESS
-                        else:
-                            log.info("Second probe failed, continuing retry loop...")
-                            last_error = RtspProbeResult.CONNECTION_REFUSED
-                            # Don't sleep at end of loop - continue to next attempt immediately
                         # First probe succeeded, wait 10s and verify with second probe
                         log.info("First probe successful, waiting 10s for verification probe...")
                         time.sleep(10)
