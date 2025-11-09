@@ -103,7 +103,7 @@ def getPolarLine(x1, y1, x2, y2, img_h, img_w):
 
     # Calculate polar line coordinates
     theta = -np.arctan2(dx, dy)
-    rho = (dy * x0 - dx * y0 + x2*y1 - y2*x1) / np.sqrt(dy**2 + dx**2)
+    rho = (dy*x0 - dx*y0 + x2*y1 - y2*x1) / np.sqrt(dy**2 + dx**2)
     
     # Correct for quadrant
     if rho > 0:
@@ -855,8 +855,16 @@ def checkAngularVelocity(centroids, config):
 
 
 
+import matplotlib.pyplot as plt
+import numpy as np
+import cv2
+import sys
+
 def showImage(name, img, convert_to_uint8=False):
-    """ Show the given image using matplotlib. """
+    """ 
+    Show the given image using matplotlib, mimicking cv2.imshow behavior.
+    Closes on 'Space' or 'Enter'. Exits program on 'Ctrl+C'.
+    """
 
     if convert_to_uint8:
         img_to_show = img.astype(np.uint8)*255
@@ -865,182 +873,61 @@ def showImage(name, img, convert_to_uint8=False):
 
     img_height, img_width = img_to_show.shape[:2]
 
+    # Setup figure without toolbar
+    plt.rcParams['toolbar'] = 'None' 
     fig, ax = plt.subplots()
-    background_color = (0.1, 0.1, 0.1)
-    try:
-        fig.patch.set_facecolor(background_color)
-    except Exception:
-        pass
-    try:
-        ax.set_facecolor(background_color)
-    except Exception:
-        pass
 
-    manager = getattr(fig.canvas, "manager", None)
-    if manager and hasattr(manager, "set_window_title"):
+    # Set Dark Background
+    dark_gray = '#2A2A2A'  # slightly lighter than pure black for contrast
+    fig.patch.set_facecolor(dark_gray)
+    ax.set_facecolor(dark_gray)
+    
+    # Set window title
+    manager = fig.canvas.manager
+    if manager is not None:
         manager.set_window_title(name)
 
-    if hasattr(fig.canvas, "toolbar_visible"):
-        try:
-            fig.canvas.toolbar_visible = False  # type: ignore[attr-defined]
-        except Exception:
-            pass
-    else:
-        toolbar = getattr(manager, "toolbar", None)
-        if toolbar is not None:
-            try:
-                toolbar.setVisible(False)
-            except AttributeError:
-                try:
-                    toolbar.hide()
-                except Exception:
-                    pass
+    # Configure Axes
+    ax.axis('off')
+    fig.subplots_adjust(left=0, right=1, bottom=0, top=1) # No margins
 
-    fig.set_size_inches(img_width/fig.dpi, img_height/fig.dpi, forward=True)
-    fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
-    ax.set_position([0, 0, 1, 1])
-    ax.set_xlim(-0.5, img_width - 0.5)
-    ax.set_ylim(img_height - 0.5, -0.5)
-    ax.set_aspect("equal")
-    ax.axis("off")
-
+    # Set appropriate aspect and display
     if img_to_show.ndim == 2:
-        ax.imshow(img_to_show, cmap="gray", interpolation="nearest")
+        ax.imshow(img_to_show, cmap='gray', interpolation='nearest')
     elif img_to_show.ndim == 3 and img_to_show.shape[2] == 3:
-        ax.imshow(cv2.cvtColor(img_to_show, cv2.COLOR_BGR2RGB), interpolation="nearest")
+        # Assume BGR if 3 channel, convert to RGB for matplotlib
+        ax.imshow(cv2.cvtColor(img_to_show, cv2.COLOR_BGR2RGB), interpolation='nearest')
     else:
-        ax.imshow(img_to_show, interpolation="nearest")
+        ax.imshow(img_to_show, interpolation='nearest')
 
-    fig.canvas.draw()
+    # Handle DPI scaling for accurate window size if possible
+    dpi = fig.dpi
+    fig.set_size_inches(img_width / dpi, img_height / dpi, forward=True)
 
-    def _get_window(fig_manager):
-        if fig_manager is None:
-            return None
-        win = getattr(fig_manager, "window", None)
-        if win is None:
-            win = getattr(fig_manager, "canvas", None)
-        return win
-
-    def _configure_window(win):
-        # Match the previous OpenCV helper behaviour: keep the window pixel-perfect, place it in the
-        # upper-left corner, and ensure it does not grab focus from the rest of the desktop session.
-        try:
-            from matplotlib.backends import qt_compat
-            QtCore = qt_compat.QtCore  # type: ignore[attr-defined]
-            QtWidgets = qt_compat.QtWidgets  # type: ignore[attr-defined]
-            if QtCore is not None and QtWidgets is not None and isinstance(win, QtWidgets.QWidget):  # type: ignore[arg-type]
-                try:
-                    win.setAttribute(QtCore.Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
-                except AttributeError:
-                    win.setAttribute(QtCore.Qt.WA_ShowWithoutActivating, True)  # type: ignore[attr-defined]
-                try:
-                    win.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-                except AttributeError:
-                    win.setFocusPolicy(QtCore.Qt.NoFocus)
-                try:
-                    win.clearFocus()
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-        try:
-            if hasattr(win, "resize"):
-                win.resize(img_width, img_height)
-            elif hasattr(win, "wm_geometry"):
-                win.wm_geometry(f"{img_width}x{img_height}+0+0")
-            elif hasattr(win, "SetSize"):
-                win.SetSize(img_width, img_height)
-            elif hasattr(win, "setGeometry"):
-                win.setGeometry(0, 0, img_width, img_height)
-        except Exception:
-            pass
-
-        try:
-            if hasattr(win, "move"):
-                win.move(0, 0)
-            elif hasattr(win, "wm_geometry"):
-                win.wm_geometry(f"{img_width}x{img_height}+0+0")
-            elif hasattr(win, "SetPosition"):
-                win.SetPosition((0, 0))
-        except Exception:
-            pass
-
-    pre_window = _get_window(manager)
-    if pre_window is not None:
-        _configure_window(pre_window)
-
-    plt.show(block=False)
-
-    post_window = _get_window(manager)
-    if post_window is not None:
-        _configure_window(post_window)
-
-    closed = [False]
-    pending_exception = [None]
-
-    def _on_close(*_):
-        closed[0] = True
+    # Mutable state to track exit condition across the inner function scope
+    state = {'exit_program': False}
 
     def _on_key(event):
-        if event.key in (" ", "space", "enter", "return"):
-            closed[0] = True
+        # Check specifically for desired keys. 
+        # Matplotlib standardizes these names across backends.
+        if event.key in [' ', 'enter']:
             plt.close(fig)
-        elif event.key in ("ctrl+c", "control+c"):
-            closed[0] = True
-            pending_exception[0] = KeyboardInterrupt()
+        elif event.key == 'ctrl+c':
+            state['exit_program'] = True
             plt.close(fig)
+        # Any other key is ignored by this handler
 
-    def _on_click(event):
-        if event.button in (1, 2, 3):
-            closed[0] = True
-            plt.close(fig)
+    # Connect the handler
+    fig.canvas.mpl_connect('key_press_event', _on_key)
 
-    def _poll_stdin_key():
-        key = None
-        try:
-            if os.name == "nt":
-                import msvcrt
-                if msvcrt.kbhit():
-                    key = msvcrt.getwch()
-            else:
-                import select
-                if sys.stdin is not None and sys.stdin.isatty():
-                    readable, _, _ = select.select([sys.stdin], [], [], 0)
-                    if readable:
-                        key = sys.stdin.read(1)
-        except Exception:
-            return None
+    # Display and block until closed. 
+    # This allows standard OS window management (changing focus) to work correctly.
+    plt.show(block=True)
 
-        if key is None:
-            return None
-        if key == "\r":
-            return "\n"
-        return key
-
-    fig.canvas.mpl_connect("key_press_event", _on_key)
-    fig.canvas.mpl_connect("close_event", _on_close)
-    fig.canvas.mpl_connect("button_press_event", _on_click)
-
-    while not closed[0]:
-        plt.pause(0.05)
-        key = _poll_stdin_key()
-        if key is None:
-            continue
-        if key in (" ", "space", "\n"):
-            closed[0] = True
-            plt.close(fig)
-        elif key == "\x03":
-            closed[0] = True
-            pending_exception[0] = KeyboardInterrupt()
-            plt.close(fig)
-
-    plt.close(fig)
-
-    if pending_exception[0] is not None:
-        raise pending_exception[0]
-
-
+    # Check if we need to kill the whole program
+    if state['exit_program']:
+        raise KeyboardInterrupt
+    
 
 def showAutoLevels(img):
 
