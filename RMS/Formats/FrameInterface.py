@@ -1666,9 +1666,9 @@ class InputTypeImages(object):
                 self.config.longitude = self.fripon_header["SITELONG"]
                 self.config.elevation = self.fripon_header["SITEELEV"] # MSL
 
-                # Set the catalog to BSC5
+                # Set the catalog to the GMN catalog
                 self.config.star_catalog_path = os.path.join(self.config.rms_root_dir, "Catalogs")
-                self.config.star_catalog_file = "BSC5"
+                self.config.star_catalog_file = "GMN_StarCatalog"
 
                 # Set approximate FOV
                 self.config.fov_h = 180

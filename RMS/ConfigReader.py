@@ -880,7 +880,7 @@ def parseDFNStation(config, parser):
     config.catalog_mag_limit = 4.5
 
     config.star_catalog_path = 'Catalogs'
-    config.star_catalog_file = 'BSC5'
+    config.star_catalog_file = 'GMN_StarCatalog'
     config.platepar_name = 'platepar_cmn2010.cal'
     config.deinterlace_order = -2
 
