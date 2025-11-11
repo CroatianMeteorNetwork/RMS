@@ -1621,6 +1621,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
     sigVignettingChanged = QtCore.pyqtSignal()
 
     sigFitPressed = QtCore.pyqtSignal()
+    sigClearPicks = QtCore.pyqtSignal()  # Multi-image calibration: Clear all picked stars
     sigNextStarPressed = QtCore.pyqtSignal()
     sigAstrometryPressed = QtCore.pyqtSignal()
     sigPhotometryPressed = QtCore.pyqtSignal()
@@ -1649,6 +1650,11 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.fit_astrometry_button = QtWidgets.QPushButton("Fit")
         self.fit_astrometry_button.clicked.connect(self.sigFitPressed.emit)
         box.addWidget(self.fit_astrometry_button)
+
+        # Multi-image calibration: Clear All Picks button
+        self.clear_picks_button = QtWidgets.QPushButton("Clear All Picks")
+        self.clear_picks_button.clicked.connect(self.sigClearPicks.emit)
+        box.addWidget(self.clear_picks_button)
 
         self.next_star_button = QtWidgets.QPushButton("Next Star")
         self.next_star_button.clicked.connect(self.sigNextStarPressed.emit)

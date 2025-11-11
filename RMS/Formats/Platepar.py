@@ -94,12 +94,15 @@ def parseInf(file_name):
     return station_data_obj
 
 
-def getCatalogStarsImagePositions(catalog_stars, jd, platepar):
+def getCatalogStarsImagePositions(catalog_stars, jd, platepar, use_iterative=True):
     """Get image positions of catalog stars using the current platepar values.
     Arguments:
         catalog_stars: [2D list] A list of (ra, dec, mag) pairs of catalog stars.
         jd: [float] Julian date for transformation.
         platepar: [Platepar]
+    Keyword arguments:
+        use_iterative: [bool] Use iterative solver (raDecToXYPP_iter) for better accuracy with
+            radial distortion models. True by default (recommended).
     Return:
         (x_array, y_array mag_catalog): [tuple of ndarrays] X, Y positions and magnitudes of stars on the
             image.
@@ -108,7 +111,16 @@ def getCatalogStarsImagePositions(catalog_stars, jd, platepar):
     ra_catalog, dec_catalog, mag_catalog = catalog_stars.T
 
     # Convert star RA, Dec to image coordinates
-    x_array, y_array = RMS.Astrometry.ApplyAstrometry.raDecToXYPP(ra_catalog, dec_catalog, jd, platepar)
+    # Use iterative solver by default for better accuracy
+    if use_iterative:
+        x_array, y_array = RMS.Astrometry.ApplyAstrometry.raDecToXYPP_iter(
+            ra_catalog, dec_catalog, jd, platepar
+        )
+    else:
+        # Fallback to standard conversion if needed
+        x_array, y_array = RMS.Astrometry.ApplyAstrometry.raDecToXYPP(
+            ra_catalog, dec_catalog, jd, platepar
+        )
 
     return x_array, y_array, mag_catalog
 
@@ -910,6 +922,364 @@ class Platepar(object):
         self.auto_recalibrated = False
 
         ### ###
+
+
+    def fitAstrometryMultiImage(
+        self,
+        image_groups,
+        first_platepar_fit=False,
+        fit_only_pointing=False,
+        fixed_scale=False,
+    ):
+        """Fit astrometric parameters using star picks from multiple images.
+
+        This method allows combining star picks from different images throughout a night
+        to achieve better spatial coverage (especially in corners) since the camera is
+        fixed relative to Earth and only the sky rotates.
+
+        Arguments:
+            image_groups: [list] List of tuples (image_id, jd, img_stars, catalog_stars) where:
+                - image_id: [str] Image identifier
+                - jd: [float] Julian date of the image
+                - img_stars: [ndarray] Array of (x, y, intensity) for stars in this image
+                - catalog_stars: [ndarray] Array of (ra, dec, mag) for catalog stars
+
+        Keyword arguments:
+            first_platepar_fit: [bool] Fit a platepar from scratch. False by default.
+            fit_only_pointing: [bool] Only fit the pointing parameters, not distortion.
+            fixed_scale: [bool] Keep the scale fixed. False by default.
+        """
+
+        if len(image_groups) == 0:
+            print("ERROR: No image groups provided!")
+            return
+
+        # Use the first image's JD as the reference
+        _, ref_jd, _, _ = image_groups[0]
+        self.JD = ref_jd
+
+        # Calculate the reference hour angle
+        T = (self.JD - 2451545.0) / 36525.0
+        self.Ho = (
+            280.46061837
+            + 360.98564736629 * (self.JD - 2451545.0)
+            + 0.000387933 * T * T
+            - T * T * T / 38710000.0
+        ) % 360
+
+        print()
+        print("=" * 60)
+        print("MULTI-IMAGE ASTROMETRY FIT")
+        print("=" * 60)
+        print("Number of images: {:d}".format(len(image_groups)))
+        total_stars = sum(len(img_stars) for _, _, img_stars, _ in image_groups)
+        print("Total star picks: {:d}".format(total_stars))
+        print()
+
+        # Define residual functions that work across multiple images
+        def _calcImageResidualsDistortionMulti(params, platepar, image_groups, dimension):
+            """Calculate residuals across all images for distortion parameters."""
+
+            pp_copy = copy.deepcopy(platepar)
+
+            if (dimension == 'x') or (dimension == 'radial'):
+                pp_copy.x_poly_rev = params
+                pp_copy.y_poly_rev = np.zeros(platepar.poly_length) if dimension != 'radial' else pp_copy.y_poly_rev
+            else:
+                pp_copy.x_poly_rev = np.zeros(platepar.poly_length)
+                pp_copy.y_poly_rev = params
+
+            total_dist_sum = 0
+
+            for image_id, jd, img_stars, catalog_stars in image_groups:
+                img_x, img_y, _ = img_stars.T
+
+                # Get image coordinates of catalog stars using this image's JD
+                catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(
+                    catalog_stars, jd, pp_copy
+                )
+
+                # Calculate residuals
+                if dimension == 'x':
+                    total_dist_sum += np.sum((catalog_x - img_x) ** 2)
+                elif dimension == 'y':
+                    total_dist_sum += np.sum((catalog_y - img_y) ** 2)
+                else:  # radial
+                    total_dist_sum += np.sum((catalog_x - img_x) ** 2 + (catalog_y - img_y) ** 2)
+
+            return total_dist_sum
+
+
+        def _calcSkyResidualsDistortionMulti(params, platepar, image_groups, dimension):
+            """Calculate sky residuals across all images for forward distortion parameters."""
+
+            pp_copy = copy.deepcopy(platepar)
+
+            if (dimension == 'x') or (dimension == 'radial'):
+                pp_copy.x_poly_fwd = params
+            else:
+                pp_copy.y_poly_fwd = params
+
+            total_separation_sum = 0
+
+            for image_id, jd, img_stars, catalog_stars in image_groups:
+                img_x, img_y, _ = img_stars.T
+
+                # Get sky coordinates of image stars using this image's JD
+                ra_array, dec_array = getPairedStarsSkyPositions(img_x, img_y, jd, pp_copy)
+
+                ra_catalog, dec_catalog, _ = catalog_stars.T
+
+                # Compute angular separation
+                total_separation_sum += np.sum(
+                    angularSeparation(
+                        np.radians(ra_array),
+                        np.radians(dec_array),
+                        np.radians(ra_catalog),
+                        np.radians(dec_catalog),
+                    ) ** 2
+                )
+
+            return total_separation_sum
+
+
+        def _calcImageResidualsAstroAndDistortionRadialMulti(params, platepar, image_groups):
+            """Calculate image residuals for pointing + distortion across all images."""
+
+            pp_copy = copy.deepcopy(platepar)
+
+            # Unpack pointing parameters
+            ra_ref, dec_ref, pos_angle_ref, F_scale = params[:4]
+
+            # Unnormalize pointing parameters
+            pp_copy.RA_d = (360 * ra_ref) % 360
+            pp_copy.dec_d = -90 + (90 * dec_ref + 90) % 180.000001
+            pp_copy.pos_angle_ref = (360 * pos_angle_ref) % 360
+            pp_copy.F_scale = abs(F_scale)
+
+            # Assign distortion parameters
+            pp_copy.x_poly_rev = params[4:]
+
+            total_dist_sum = 0
+
+            for image_id, jd, img_stars, catalog_stars in image_groups:
+                img_x, img_y, _ = img_stars.T
+
+                # Get image coordinates of catalog stars using this image's JD
+                catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(
+                    catalog_stars, jd, pp_copy
+                )
+
+                # Calculate residuals
+                total_dist_sum += np.sum((catalog_x - img_x) ** 2 + (catalog_y - img_y) ** 2)
+
+            return total_dist_sum
+
+
+        def _calcSkyResidualsAstroAndDistortionRadialMulti(params, platepar, image_groups):
+            """Calculate sky residuals for pointing + distortion across all images."""
+
+            pp_copy = copy.deepcopy(platepar)
+
+            # Unpack pointing parameters
+            ra_ref, dec_ref, pos_angle_ref, F_scale = params[:4]
+
+            # Unnormalize pointing parameters
+            pp_copy.RA_d = (360 * ra_ref) % 360
+            pp_copy.dec_d = -90 + (90 * dec_ref + 90) % 180.000001
+            pp_copy.pos_angle_ref = (360 * pos_angle_ref) % 360
+            pp_copy.F_scale = abs(F_scale)
+
+            # Assign distortion parameters
+            pp_copy.x_poly_fwd = params[4:]
+
+            total_separation_sum = 0
+
+            for image_id, jd, img_stars, catalog_stars in image_groups:
+                img_x, img_y, _ = img_stars.T
+
+                # Get sky coordinates of image stars using this image's JD
+                ra_array, dec_array = getPairedStarsSkyPositions(img_x, img_y, jd, pp_copy)
+
+                ra_catalog, dec_catalog, _ = catalog_stars.T
+
+                # Compute angular separation
+                total_separation_sum += np.sum(
+                    angularSeparation(
+                        np.radians(ra_array),
+                        np.radians(dec_array),
+                        np.radians(ra_catalog),
+                        np.radians(dec_catalog),
+                    ) ** 2
+                )
+
+            return total_separation_sum
+
+
+        ### ASTROMETRIC PARAMETERS FIT ###
+
+        # Fit the pointing parameters using the first image
+        # (pointing should be consistent across all images for a fixed camera)
+        if (
+            self.distortion_type.startswith("poly")
+            or (not self.distortion_type.startswith("poly") and first_platepar_fit)
+            or fit_only_pointing
+        ):
+            # Use first image for initial pointing fit
+            _, jd_first, img_stars_first, catalog_stars_first = image_groups[0]
+            print("Fitting initial pointing using first image...")
+            self.fitPointing(jd_first, img_stars_first, catalog_stars_first, fixed_scale=fixed_scale)
+            print("Initial pointing fit complete.")
+            print()
+
+        ### ###
+
+        ### DISTORTION FIT ###
+
+        # Fit distortion parameters if there are enough stars across all images
+        min_fit_stars = self.poly_length + 1
+
+        if (total_stars >= min_fit_stars) and (not fit_only_pointing):
+
+            # Fit polynomial distortion
+            if self.distortion_type.startswith("poly"):
+
+                print("Fitting polynomial distortion across all images...")
+
+                ### REVERSE MAPPING FIT ###
+
+                # Fit X distortion
+                print("  Fitting X poly (reverse)...")
+                res = scipy.optimize.minimize(
+                    _calcImageResidualsDistortionMulti,
+                    self.x_poly_rev,
+                    args=(self, image_groups, 'x'),
+                    method='Nelder-Mead',
+                    options={'maxiter': 10000, 'adaptive': True},
+                )
+                self.x_poly_rev = res.x
+
+                # Fit Y distortion
+                print("  Fitting Y poly (reverse)...")
+                res = scipy.optimize.minimize(
+                    _calcImageResidualsDistortionMulti,
+                    self.y_poly_rev,
+                    args=(self, image_groups, 'y'),
+                    method='Nelder-Mead',
+                    options={'maxiter': 10000, 'adaptive': True},
+                )
+                self.y_poly_rev = res.x
+
+                ### ###
+
+                # If first fit, set forward = reverse
+                if first_platepar_fit:
+                    self.x_poly_fwd = np.array(self.x_poly_rev)
+                    self.y_poly_fwd = np.array(self.y_poly_rev)
+
+                ### FORWARD MAPPING FIT ###
+
+                # Fit X distortion forward
+                print("  Fitting X poly (forward)...")
+                res = scipy.optimize.minimize(
+                    _calcSkyResidualsDistortionMulti,
+                    self.x_poly_fwd,
+                    args=(self, image_groups, 'x'),
+                    method='Nelder-Mead',
+                    options={'maxiter': 10000, 'adaptive': True},
+                )
+                self.x_poly_fwd = res.x
+
+                # Fit Y distortion forward
+                print("  Fitting Y poly (forward)...")
+                res = scipy.optimize.minimize(
+                    _calcSkyResidualsDistortionMulti,
+                    self.y_poly_fwd,
+                    args=(self, image_groups, 'y'),
+                    method='Nelder-Mead',
+                    options={'maxiter': 10000, 'adaptive': True},
+                )
+                self.y_poly_fwd = res.x
+
+                ### ###
+
+            # Fit radial distortion (+ pointing)
+            else:
+
+                ### FORWARD MAPPING FIT ###
+
+                print("Fitting radial distortion + pointing across all images...")
+
+                # Initial parameters for pointing and distortion
+                p0 = [self.RA_d / 360, self.dec_d / 90, self.pos_angle_ref / 360, abs(self.F_scale)]
+                p0 += self.x_poly_fwd.tolist()
+
+                # Fit radial distortion
+                print("  Fitting forward mapping...")
+                res = scipy.optimize.minimize(
+                    _calcSkyResidualsAstroAndDistortionRadialMulti,
+                    p0,
+                    args=(self, image_groups),
+                    method='Nelder-Mead',
+                    options={'maxiter': 10000, 'adaptive': True},
+                )
+
+                # Update pointing parameters
+                ra_ref, dec_ref, pos_angle_ref, F_scale = res.x[:4]
+                self.RA_d = (360 * ra_ref) % 360
+                self.dec_d = -90 + (90 * dec_ref + 90) % 180.000001
+                self.pos_angle_ref = (360 * pos_angle_ref) % 360
+                self.F_scale = abs(F_scale)
+                self.updateRefAltAz()
+
+                # Extract distortion parameters
+                self.x_poly_fwd = res.x[4:]
+
+                ### ###
+
+                # If first fit, set reverse = forward
+                if first_platepar_fit:
+                    self.x_poly_rev = np.array(self.x_poly_fwd)
+
+                ### REVERSE MAPPING FIT ###
+
+                print("  Fitting reverse mapping...")
+                res = scipy.optimize.minimize(
+                    _calcImageResidualsDistortionMulti,
+                    self.x_poly_rev,
+                    args=(self, image_groups, 'radial'),
+                    method='Nelder-Mead',
+                    options={'maxiter': 10000, 'adaptive': True},
+                )
+                self.x_poly_rev = res.x
+
+                ### ###
+
+        else:
+            if total_stars < min_fit_stars:
+                print('Too few stars to fit distortion across all images!')
+                print('  Required: {:d}, Available: {:d}'.format(min_fit_stars, total_stars))
+
+        # Store all star picks in the star_list
+        fit_star_list = []
+        for image_id, jd, img_stars, catalog_stars in image_groups:
+            for img_coords, cat_coords in zip(img_stars, catalog_stars):
+                # Store jd, image x, y, intensity, catalog ra, dec, mag
+                fit_star_list.append([jd] + img_coords.tolist() + cat_coords.tolist())
+
+        self.star_list = fit_star_list
+
+        # Set flags
+        self.auto_check_fit_refined = False
+        self.auto_recalibrated = False
+
+        print()
+        print("Multi-image fit complete!")
+        print("=" * 60)
+        print()
+
+        ### ###
+
 
     def parseLine(self, f):
         """Read next line, split the line and convert parameters to float.

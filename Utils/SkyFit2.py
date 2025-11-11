@@ -19,7 +19,7 @@ import scipy.optimize
 import pyqtgraph as pg
 import random
 
-from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
+from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP_iter, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
     extinctionCorrectionTrueToApparent, applyAstrometryFTPdetectinfo, getFOVSelectionRadius
@@ -443,6 +443,196 @@ class PairedStars(object):
 
 
 
+class MultiImagePairedStars(PairedStars):
+    def __init__(self):
+        """ Container for picked stars across multiple images.
+
+        Each pair includes:
+        - Image coordinates (x, y)
+        - Star properties (fwhm, intensity, snr, saturated)
+        - Catalog object (CatalogStar or GeoPoint)
+        - Image identifier (image_id)
+        - Julian date (jd) of the image
+        """
+        super(MultiImagePairedStars, self).__init__()
+
+        # Track unique images
+        self.image_list = []  # List of unique image identifiers
+        self.jd_list = []     # List of JDs corresponding to each image
+
+
+    def addPair(self, x, y, fwhm, intens_acc, obj, image_id, jd, snr=0, saturated=False):
+        """ Add a pair between image coordinates and a catalog object, with image tracking.
+
+        Arguments:
+            x: [float] Image X coordinate.
+            y: [float] Image Y coordinate.
+            fwhm: [float] Full width at half maximum (px).
+            intens_acc: [float] Sum of pixel intensities.
+            obj: [object] Instance of CatalogStar or GeoPoint.
+            image_id: [str] Identifier for the source image.
+            jd: [float] Julian date of the image.
+            snr: [float] Signal-to-noise ratio. Default 0.
+            saturated: [bool] Whether the star is saturated. Default False.
+        """
+
+        # Store: [x, y, fwhm, intens_acc, obj, snr, saturated, image_id, jd]
+        self.paired_stars.append([x, y, fwhm, intens_acc, obj, snr, saturated, image_id, jd])
+
+        # Track unique images
+        if image_id not in self.image_list:
+            self.image_list.append(image_id)
+            self.jd_list.append(jd)
+
+
+    def getImageGroups(self):
+        """ Group paired stars by image.
+
+        Returns:
+            list: List of tuples (image_id, jd, img_stars, catalog_stars) where:
+                - image_id: str identifier
+                - jd: float Julian date
+                - img_stars: ndarray of (x, y, intensity) for this image
+                - catalog_stars: ndarray of (ra, dec, mag) for this image
+        """
+
+        groups = []
+
+        for image_id, jd in zip(self.image_list, self.jd_list):
+            # Filter stars from this image
+            image_pairs = [entry for entry in self.paired_stars if entry[7] == image_id]
+
+            if len(image_pairs) == 0:
+                continue
+
+            # Extract image coordinates: (x, y, intensity)
+            img_stars = np.array([(x, y, intens_acc)
+                                  for x, y, fwhm, intens_acc, obj, snr, saturated, img_id, jd_val
+                                  in image_pairs])
+
+            # Extract catalog coordinates: (ra, dec, mag)
+            catalog_stars = np.array([obj.coords()
+                                      for x, y, fwhm, intens_acc, obj, snr, saturated, img_id, jd_val
+                                      in image_pairs])
+
+            groups.append((image_id, jd, img_stars, catalog_stars))
+
+        return groups
+
+
+    def getStarsByImage(self, image_id):
+        """ Get all paired stars from a specific image.
+
+        Arguments:
+            image_id: [str] Image identifier.
+
+        Returns:
+            list: List of star pairs from this image.
+        """
+
+        return [entry for entry in self.paired_stars if entry[7] == image_id]
+
+
+    def removeStarsFromImage(self, image_id):
+        """ Remove all stars from a specific image.
+
+        Arguments:
+            image_id: [str] Image identifier.
+        """
+
+        self.paired_stars = [entry for entry in self.paired_stars if entry[7] != image_id]
+
+        # Update image list
+        if image_id in self.image_list:
+            idx = self.image_list.index(image_id)
+            self.image_list.pop(idx)
+            self.jd_list.pop(idx)
+
+
+    def getImageCount(self):
+        """ Return the number of unique images. """
+
+        return len(self.image_list)
+
+
+    # Override methods for backward compatibility
+    def imageCoords(self, draw=False, image_id=None):
+        """ Return a list of image coordinates of the pairs.
+
+        Keyword arguments:
+            draw: [bool] Add an offset of 0.5 px for drawing using pyqtgraph.
+            image_id: [str] If provided, only return coords from this image. Otherwise all.
+        """
+
+        offset = 0
+        if draw:
+            offset = 0.5
+
+        if image_id is not None:
+            # Filter by image
+            img_coords = [(x + offset, y + offset, intens_acc)
+                          for x, y, _, intens_acc, _, _, _, img_id, _ in self.paired_stars
+                          if img_id == image_id]
+        else:
+            # All images
+            img_coords = [(x + offset, y + offset, intens_acc)
+                          for x, y, _, intens_acc, _, _, _, _, _ in self.paired_stars]
+
+        return img_coords
+
+
+    def skyCoords(self, image_id=None):
+        """ Return a list of sky coordinates.
+
+        Keyword arguments:
+            image_id: [str] If provided, only return coords from this image. Otherwise all.
+        """
+
+        if image_id is not None:
+            return [obj.coords() for _, _, _, _, obj, _, _, img_id, _ in self.paired_stars
+                    if img_id == image_id]
+        else:
+            return [obj.coords() for _, _, _, _, obj, _, _, _, _ in self.paired_stars]
+
+
+    def allCoords(self, image_id=None):
+        """ Return all coordinates, image and sky.
+
+        Keyword arguments:
+            image_id: [str] If provided, only return coords from this image. Otherwise all.
+
+        Returns:
+            list: [(x, y, fwhm, intens_acc, snr, saturated), (ra, dec, mag), image_id, jd] for each entry.
+        """
+
+        if image_id is not None:
+            return [
+                [(x, y, fwhm, intens_acc, snr, saturated), obj.coords(), img_id, jd_val]
+                for x, y, fwhm, intens_acc, obj, snr, saturated, img_id, jd_val in self.paired_stars
+                if img_id == image_id
+            ]
+        else:
+            return [
+                [(x, y, fwhm, intens_acc, snr, saturated), obj.coords(), img_id, jd_val]
+                for x, y, fwhm, intens_acc, obj, snr, saturated, img_id, jd_val in self.paired_stars
+            ]
+
+
+    def snr(self, image_id=None):
+        """ Return a list of SNR values.
+
+        Keyword arguments:
+            image_id: [str] If provided, only return SNR from this image. Otherwise all.
+        """
+
+        if image_id is not None:
+            return [snr for _, _, _, _, _, snr, _, img_id, _ in self.paired_stars
+                    if img_id == image_id]
+        else:
+            return [snr for _, _, _, _, _, snr, _, _, _ in self.paired_stars]
+
+
+
 class PlateTool(QtWidgets.QMainWindow):
     def __init__(self, input_path, config, beginning_time=None, fps=None, gamma=None, use_fr_files=False,
         geo_points_input=None, startUI=True, mask=None, nobg=False, peribg=False, flipud=False,
@@ -548,7 +738,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # List of paired image and catalog stars
         self.pick_list = {}
-        self.paired_stars = PairedStars()
+        self.paired_stars = MultiImagePairedStars()  # Multi-image calibration support
         self.residuals = None
 
         # Autopan coordinates
@@ -760,6 +950,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.manualreduction_button.pressed.connect(lambda: self.changeMode('manualreduction'))
         self.status_bar.addPermanentWidget(self.skyfit_button)
         self.status_bar.addPermanentWidget(self.manualreduction_button)
+
+        # Multi-image calibration status label
+        self.multi_image_status_label = QtWidgets.QLabel('Picks: 0 stars')
+        self.status_bar.addPermanentWidget(self.multi_image_status_label)
 
         self.nextstar_button = QtWidgets.QPushButton('SkyFit')
         self.nextstar_button.pressed.connect(lambda: self.nextstar())
@@ -1131,6 +1325,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Connect astrometry & photometry buttons to functions
         self.tab.param_manager.sigFitPressed.connect(lambda: self.fitPickedStars())
+        self.tab.param_manager.sigClearPicks.connect(self.clearAllPicks)  # Multi-image: Clear all picks
         self.tab.param_manager.sigNextStarPressed.connect(lambda: self.jumpNextStar())
         self.tab.param_manager.sigPhotometryPressed.connect(lambda: self.photometry(show_plot=True))
         self.tab.param_manager.sigAstrometryPressed.connect(self.showAstrometryFitPlots)
@@ -1473,6 +1668,28 @@ class PlateTool(QtWidgets.QMainWindow):
     def updateBottomLabel(self):
         """ Update bottom label with current mouse position """
         self.status_bar.showMessage(self.mouseOverStatus(self.mouse_x, self.mouse_y))
+
+
+    def updateMultiImageStatus(self):
+        """ Update the multi-image calibration status label in the status bar. """
+
+        if isinstance(self.paired_stars, MultiImagePairedStars):
+            num_stars = len(self.paired_stars)
+            num_images = self.paired_stars.getImageCount()
+
+            if num_images == 0:
+                self.multi_image_status_label.setText('Picks: 0 stars')
+            elif num_images == 1:
+                self.multi_image_status_label.setText('Picks: {:d} stars'.format(num_stars))
+            else:
+                self.multi_image_status_label.setText(
+                    'Picks: {:d} stars across {:d} images'.format(num_stars, num_images)
+                )
+        else:
+            # Fallback for PairedStars (shouldn't happen with current setup)
+            num_stars = len(self.paired_stars)
+            self.multi_image_status_label.setText('Picks: {:d} stars'.format(num_stars))
+
 
     def updateLeftLabels(self):
         """ Update the two labels on the left with their information """
@@ -2001,7 +2218,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Compute X, Y back without the distortion
             jd = date2JD(*self.img_handle.currentTime())
-            x_nodist, y_nodist = raDecToXYPP(ra_data, dec_data, jd, platepar_nodist)
+            x_nodist, y_nodist = raDecToXYPP_iter(ra_data, dec_data, jd, platepar_nodist)
 
             x = [None]*2*len(x_arr)
             x[::2] = x_arr
@@ -2039,7 +2256,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
         for paired_star in self.paired_stars.allCoords():
 
-            img_star, catalog_star = paired_star
+            # Handle both MultiImagePairedStars (4 values) and PairedStars (2 values)
+            if len(paired_star) == 4:
+                img_star, catalog_star, image_id, jd = paired_star
+            else:
+                img_star, catalog_star = paired_star
+                # For single-image mode, use current image's JD
+                jd = date2JD(*self.img_handle.currentTime())
 
             star_x, star_y, fwhm, px_intens, snr, saturated = img_star
             star_ra, star_dec, star_mag = catalog_star
@@ -2049,29 +2272,27 @@ class PlateTool(QtWidgets.QMainWindow):
             if np.isnan(lsp) or np.isinf(lsp):
                 continue
 
+            # Compute the azimuth and elevation of the star using the correct JD
+            _, alt = trueRaDec2ApparentAltAz(star_ra, star_dec, jd,
+                                                self.platepar.lat, self.platepar.lon,
+                                                self.platepar.refraction)
+
+            # Apply extinction correction per-star using correct JD
+            star_mag_corrected = extinctionCorrectionTrueToApparent([star_mag], [star_ra], [star_dec],
+                                                                      jd, self.platepar)[0]
+
             star_coords.append([star_x, star_y])
             radius_list.append(np.hypot(star_x - self.platepar.X_res/2, star_y - self.platepar.Y_res/2))
             px_intens_list.append(px_intens)
             catalog_ra.append(star_ra)
             catalog_dec.append(star_dec)
-            catalog_mags.append(star_mag)
+            catalog_mags.append(star_mag_corrected)
             snr_list.append(snr)
             saturation_list.append(saturated)
-
-            # Compute the azimuth and elevation of the star
-            _, alt = trueRaDec2ApparentAltAz(star_ra, star_dec, date2JD(*self.img_handle.currentTime()),
-                                                self.platepar.lat, self.platepar.lon, 
-                                                self.platepar.refraction)
-            
             elevation_list.append(alt)
 
 
         self.residual_text.clear()
-
-        # Compute apparent magnitude corrected for extinction
-        catalog_mags = extinctionCorrectionTrueToApparent(catalog_mags, catalog_ra, catalog_dec,
-                                                            date2JD(*self.img_handle.currentTime()),
-                                                            self.platepar)
 
 
         # Determine if the vignetting should be kept fixed. Only if:
@@ -2401,13 +2622,15 @@ class PlateTool(QtWidgets.QMainWindow):
         
         if self.mode == 'skyfit':
 
-            # Don't allow image change while in star picking mode
-            if self.star_pick_mode:
-                qmessagebox(title='Star picking mode', \
-                            message='You cannot cycle through images while in star picking mode!',
-                            message_type="warning")
-
-                return None
+            # Multi-image calibration: Allow navigation in star picking mode
+            # (The old restriction prevented browsing images while picking stars,
+            #  but for multi-image calibration we need to pick stars across multiple images)
+            # if self.star_pick_mode:
+            #     qmessagebox(title='Star picking mode', \
+            #                 message='You cannot cycle through images while in star picking mode!',
+            #                 message_type="warning")
+            #
+            #     return None
 
             # don't change images if there's no image to change to
             if (self.img.img_handle.input_type == 'dfn') and (self.img.img_handle.total_images == 1):
@@ -2431,11 +2654,12 @@ class PlateTool(QtWidgets.QMainWindow):
             self.cat_star_markers2.setData(pos=[])
             self.pick_marker.setData(pos=[])
 
-            # Reset paired stars
-            self.pick_list = {}
-            self.paired_stars = PairedStars()
-            self.unsuitable_stars = PairedStars()
-            self.residuals = None
+            # Multi-image calibration: Keep paired stars when navigating
+            # (Stars are no longer cleared when browsing images)
+            # self.pick_list = {}
+            # self.paired_stars = PairedStars()
+            # self.unsuitable_stars = PairedStars()
+            # self.residuals = None
             self.drawPhotometryColoring()
 
             self.updateStars()
@@ -2812,33 +3036,58 @@ class PlateTool(QtWidgets.QMainWindow):
         # If the paired stars are a list (old version), reset it to a new version where it's an object
         if isinstance(self.paired_stars, list):
 
-            paired_stars_new = PairedStars()
+            paired_stars_new = MultiImagePairedStars()  # Use multi-image version
 
             for entry in self.paired_stars:
-                
+
                 img_coords, sky_coords = entry
                 x, y, fwhm, intens_acc, snr = img_coords
                 sky_obj = CatalogStar(*sky_coords)
 
-                paired_stars_new.addPair(x, y, fwhm, intens_acc, sky_obj, snr=snr)
+                # Add with dummy image_id and jd for old data
+                paired_stars_new.addPair(x, y, fwhm, intens_acc, sky_obj,
+                                        image_id="legacy", jd=self.img_handle.currentTime(),
+                                        snr=snr)
 
             self.paired_stars = paired_stars_new
 
-        # Add missing paired_stars parameters
+        # Convert PairedStars to MultiImagePairedStars if needed
+        elif isinstance(self.paired_stars, PairedStars) and not isinstance(self.paired_stars, MultiImagePairedStars):
+
+            # Convert old PairedStars to new MultiImagePairedStars format
+            paired_stars_new = MultiImagePairedStars()
+
+            for paired_star in self.paired_stars.paired_stars:
+                # Old format: [x, y, fwhm, intens_acc, obj, snr, saturated]
+                if len(paired_star) >= 7:
+                    x, y, fwhm, intens_acc, obj, snr, saturated = paired_star[:7]
+                    paired_stars_new.addPair(x, y, fwhm, intens_acc, obj,
+                                           image_id="legacy", jd=self.img_handle.currentTime(),
+                                           snr=snr, saturated=saturated)
+
+            self.paired_stars = paired_stars_new
+
+        # Add missing paired_stars parameters (for backward compatibility)
         else:
             for paired_star in self.paired_stars.paired_stars:
 
-                # Add SNR if it's missing
+                # Add SNR if it's missing (very old format with 4 fields)
                 if len(paired_star) == 4:
                     paired_star.append(1.0)
 
-                # Add the saturation flag is it's missing
+                # Add the saturation flag if it's missing (old format with 5 fields)
                 if len(paired_star) == 5:
                     paired_star.append(False)
 
-                # If the FWHM is missing, add it to the 3rd index
+                # If the FWHM is missing, add it to the 3rd index (old format with 6 fields)
                 if len(paired_star) == 6:
                     paired_star.insert(2, 0.0)
+
+                # Convert 7-field PairedStars to 9-field MultiImagePairedStars
+                if len(paired_star) == 7:
+                    # Add image_id and jd for old data
+                    paired_star.append("legacy")
+                    paired_star.append(date2JD(*self.img_handle.currentTime()))
 
 
         if self.platepar is not None:
@@ -3841,13 +4090,19 @@ class PlateTool(QtWidgets.QMainWindow):
 
                         # Add the image/catalog pair to the list
                         if not unsuitable:
+                            # Get current image identifier and Julian Date for multi-image tracking
+                            image_id = self.img_handle.name()
+                            jd = date2JD(*self.img_handle.currentTime())
+
                             self.paired_stars.addPair(self.x_centroid, self.y_centroid, self.star_fwhm,
-                                    self.star_intensity, pair_obj, 
+                                    self.star_intensity, pair_obj,
+                                    image_id=image_id, jd=jd,
                                     snr=self.star_snr, saturated=self.star_saturated)
 
                         # Switch back to centroiding mode
                         self.cursor.setMode(0)
                         self.updatePairedStars()
+                        self.updateMultiImageStatus()  # Update multi-image pick count
 
                         if self.autopan_mode:
 
@@ -4122,9 +4377,13 @@ class PlateTool(QtWidgets.QMainWindow):
         if self.draw_calstars:
             self.calstar_markers.show()
             self.calstar_markers2.show()
+            self.calstar_markers_outer.show()
+            self.calstar_markers_outer2.show()
         else:
             self.calstar_markers.hide()
             self.calstar_markers2.hide()
+            self.calstar_markers_outer.hide()
+            self.calstar_markers_outer2.hide()
 
     def toggleShowPicks(self):
         """ Toggle whether to show the picks for manualreduction """
@@ -5307,7 +5566,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 ra_array, dec_array = np.array(ra_array), np.array(dec_array)
 
                 # Compute image coordinates
-                x_array, y_array = raDecToXYPP(ra_array, dec_array, \
+                x_array, y_array = raDecToXYPP_iter(ra_array, dec_array, \
                     datetime2JD(self.img_handle.currentFrameTime(dt_obj=True)), self.platepar)
 
                 # Remove points outside the image
@@ -5399,6 +5658,16 @@ class PlateTool(QtWidgets.QMainWindow):
             without the distortion, then just the distortion parameters, then all together.
 
         """
+
+        # Auto-detect multi-image mode: if we have picks from multiple images, use multi-image fit
+        if isinstance(self.paired_stars, MultiImagePairedStars) and \
+           self.paired_stars.getImageCount() > 1:
+            print()
+            print("=" * 80)
+            print("MULTI-IMAGE MODE DETECTED: Using multi-image calibration")
+            print("Images with picks: {:d}".format(self.paired_stars.getImageCount()))
+            print("=" * 80)
+            return self.fitPickedStarsMultiImage(self.paired_stars)
 
         # Check if there are enough stars for the fit
         min_stars = self.getMinFitStars()
@@ -5568,6 +5837,242 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.updatePlatepar()
 
 
+    def clearAllPicks(self):
+        """ Clear all star picks across all images (multi-image calibration support). """
+
+        print()
+        print("=" * 80)
+        print("CLEARING ALL PICKED STARS")
+        print("=" * 80)
+
+        # Reset to fresh MultiImagePairedStars
+        self.pick_list = {}
+        self.paired_stars = MultiImagePairedStars()
+        self.unsuitable_stars = PairedStars()
+        self.residuals = None
+
+        # Update UI
+        self.updateMultiImageStatus()
+        self.updateStars()
+        self.drawPhotometryColoring()
+
+        print("All star picks cleared.")
+        print("=" * 80)
+        print()
+
+
+    def fitPickedStarsMultiImage(self, multi_image_paired_stars, use_iterative=True):
+        """ Fit stars that are manually picked across multiple images.
+
+        This method performs astrometric calibration using star picks from multiple FF files
+        taken throughout the night. Since the camera is fixed relative to Earth, the platepar
+        distortion parameters remain constant while only the sky rotates. This allows combining
+        picks from different times to achieve better spatial coverage, especially in corners.
+
+        Arguments:
+            multi_image_paired_stars: [MultiImagePairedStars] Container with picks from multiple images.
+
+        Keyword arguments:
+            use_iterative: [bool] Use iterative coordinate solver (raDecToXYPP_iter) for better
+                accuracy with radial distortion models. True by default.
+
+        Returns:
+            platepar: [Platepar] The fitted platepar object.
+        """
+
+        # Check if this is a MultiImagePairedStars object
+        if not isinstance(multi_image_paired_stars, MultiImagePairedStars):
+            print("ERROR: Must provide a MultiImagePairedStars object!")
+            return self.platepar
+
+        # Get the image groups
+        image_groups = multi_image_paired_stars.getImageGroups()
+
+        if len(image_groups) == 0:
+            qmessagebox(
+                title='No images',
+                message="No images with paired stars found!",
+                message_type="warning"
+            )
+            return self.platepar
+
+        # Check minimum stars
+        min_stars = self.getMinFitStars()
+        total_stars = sum(len(img_stars) for _, _, img_stars, _ in image_groups)
+
+        if total_stars < min_stars:
+            qmessagebox(
+                title='Number of stars',
+                message="At least {:d} paired stars are needed across all images! Currently have {:d}.".format(
+                    min_stars, total_stars
+                ),
+                message_type="warning"
+            )
+            return self.platepar
+
+        print()
+        print("=" * 80)
+        print("MULTI-IMAGE ASTROMETRIC CALIBRATION")
+        print("=" * 80)
+        print("Images: {:d}".format(len(image_groups)))
+        print("Total star picks: {:d}".format(total_stars))
+        for i, (img_id, jd, img_stars, _) in enumerate(image_groups):
+            print("  Image {:d}: {} - {:d} stars (JD: {:.6f})".format(
+                i + 1, img_id, len(img_stars), jd
+            ))
+        print()
+
+        # Fit the platepar using multi-image method
+        self.platepar.fitAstrometryMultiImage(
+            image_groups,
+            first_platepar_fit=self.first_platepar_fit,
+            fit_only_pointing=self.fit_only_pointing,
+            fixed_scale=self.fixed_scale
+        )
+        self.first_platepar_fit = False
+
+        # Show platepar parameters
+        print()
+        print(self.platepar)
+
+        ### Calculate the fit residuals for every fitted star across all images ###
+
+        print()
+        print("=" * 80)
+        print("RESIDUALS ANALYSIS")
+        print("=" * 80)
+        print()
+
+        all_residuals = []
+
+        for img_idx, (img_id, jd, img_stars, catalog_stars) in enumerate(image_groups):
+
+            print("Image {:d}: {}".format(img_idx + 1, img_id))
+            print("-" * 80)
+
+            # Get image coordinates of catalog stars for this image's JD
+            catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(
+                catalog_stars, jd, self.platepar, use_iterative=use_iterative
+            )
+
+            residuals = []
+
+            print(' No,       Img X,       Img Y, RA cat (deg), Dec cat (deg),    Cat X,   Cat Y, Err px, Err amin')
+
+            # Calculate residuals for each star
+            for star_no, ((img_x, img_y, intens), (ra, dec, mag), cat_x, cat_y) in enumerate(
+                zip(img_stars, catalog_stars, catalog_x, catalog_y)
+            ):
+
+                delta_x = cat_x - img_x
+                delta_y = cat_y - img_y
+
+                # Compute pixel distance
+                distance = np.sqrt(delta_x**2 + delta_y**2)
+
+                # Compute angle
+                angle = np.arctan2(delta_y, delta_x)
+
+                # Compute RA/Dec of the image point
+                img_time = jd2Date(jd)
+                _, ra_img, dec_img, _ = xyToRaDecPP([img_time], [img_x], [img_y], [1], self.platepar,
+                                                    extinction_correction=False)
+                ra_img = ra_img[0]
+                dec_img = dec_img[0]
+
+                # Compute angular distance
+                angular_distance = np.degrees(angularSeparation(
+                    np.radians(ra), np.radians(dec),
+                    np.radians(ra_img), np.radians(dec_img)
+                ))
+
+                residuals.append([img_x, img_y, angle, distance, angular_distance])
+
+                print('{:3d}, {:11.6f}, {:11.6f}, {:>12.6f}, {:>+13.6f}, {:8.2f}, {:7.2f}, {:7.2f}, {:8.2f}'.format(
+                    star_no + 1, img_x, img_y, ra, dec, cat_x, cat_y, distance, 60 * angular_distance
+                ))
+
+            # Compute RMSD for this image
+            if len(residuals) > 0:
+                rmsd_angular = 60 * RMSD([entry[4] for entry in residuals])
+                rmsd_img = RMSD([entry[3] for entry in residuals])
+
+                # Format angular error
+                if rmsd_angular > 60:
+                    rmsd_angular /= 60
+                    angular_error_label = 'deg'
+                elif rmsd_angular > 0.5:
+                    angular_error_label = 'arcmin'
+                else:
+                    rmsd_angular *= 60
+                    angular_error_label = 'arcsec'
+
+                print('RMSD: {:.2f} px, {:.2f} {:s}'.format(rmsd_img, rmsd_angular, angular_error_label))
+                print()
+
+                all_residuals.extend(residuals)
+
+        # Compute overall RMSD across all images
+        if len(all_residuals) > 0:
+            rmsd_angular_all = 60 * RMSD([entry[4] for entry in all_residuals])
+            rmsd_img_all = RMSD([entry[3] for entry in all_residuals])
+
+            # Format angular error
+            if rmsd_angular_all > 60:
+                rmsd_angular_all /= 60
+                angular_error_label_all = 'deg'
+            elif rmsd_angular_all > 0.5:
+                angular_error_label_all = 'arcmin'
+            else:
+                rmsd_angular_all *= 60
+                angular_error_label_all = 'arcsec'
+
+            print("=" * 80)
+            print("OVERALL RMSD (all {:d} stars across {:d} images):".format(
+                len(all_residuals), len(image_groups)
+            ))
+            print("  {:.2f} px, {:.2f} {:s}".format(
+                rmsd_img_all, rmsd_angular_all, angular_error_label_all
+            ))
+            print("=" * 80)
+            print()
+
+        # Save the residuals from the first image for visualization
+        # (could be extended to visualize all images)
+        if len(image_groups) > 0:
+            _, jd_first, img_stars_first, catalog_stars_first = image_groups[0]
+            catalog_x_first, catalog_y_first, _ = getCatalogStarsImagePositions(
+                catalog_stars_first, jd_first, self.platepar, use_iterative=use_iterative
+            )
+
+            residuals_first = []
+            for (img_x, img_y, intens), cat_x, cat_y in zip(img_stars_first, catalog_x_first, catalog_y_first):
+                delta_x = cat_x - img_x
+                delta_y = cat_y - img_y
+                angle = np.arctan2(delta_y, delta_x)
+                distance = np.sqrt(delta_x**2 + delta_y**2)
+
+                # Compute angular distance
+                img_time_first = jd2Date(jd_first)
+                _, ra_img, dec_img, _ = xyToRaDecPP([img_time_first], [img_x], [img_y], [1],
+                                                    self.platepar, extinction_correction=False)
+                ra, dec, _ = catalog_stars_first[0]  # Just for structure
+                angular_distance = 0  # Simplified for visualization
+
+                residuals_first.append([img_x, img_y, angle, distance, angular_distance])
+
+            self.residuals = residuals_first
+
+        # Update UI
+        self.updateDistortion()
+        self.updateLeftLabels()
+        self.updateStars()
+        self.updateFitResiduals()
+        self.tab.param_manager.updatePlatepar()
+
+        return self.platepar
+
+
     def jumpNextStar(self, miss_this_one=False):
 
         new_x, new_y, self.max_pixels_between_matched_stars  = self.furthestStar(miss_this_one=miss_this_one)
@@ -5585,6 +6090,14 @@ class PlateTool(QtWidgets.QMainWindow):
     def showAstrometryFitPlots(self):
         """ Show window with astrometry fit details. """
 
+        # Check if multi-image mode
+        if isinstance(self.paired_stars, MultiImagePairedStars) and \
+           self.paired_stars.getImageCount() > 1:
+            # Multi-image: need to compute residuals per image with correct JD
+            self.showAstrometryFitPlotsMultiImage()
+            return
+
+        # Single image mode (original behavior)
         # Extract paired catalog stars and image coordinates separately
         img_stars = np.array(self.paired_stars.imageCoords())
         catalog_stars = np.array(self.paired_stars.skyCoords())
@@ -5769,6 +6282,179 @@ class PlateTool(QtWidgets.QMainWindow):
         max_ylim = np.ceil(np.max([x_max_ylim, y_max_ylim, radius_max_ylim]))
         if max_ylim < 1:
             max_ylim = 1.0
+        ax_x.set_ylim([-max_ylim, max_ylim])
+        ax_y.set_ylim([-max_ylim, max_ylim])
+        ax_radius.set_ylim([-max_ylim, max_ylim])
+
+        fig_a.tight_layout()
+        fig_a.show()
+
+
+    def showAstrometryFitPlotsMultiImage(self):
+        """ Show window with astrometry fit details for multi-image calibration.
+
+        This version properly handles stars from multiple images by using the correct JD
+        for each star when computing catalog positions.
+        """
+
+        # Get image groups
+        image_groups = self.paired_stars.getImageGroups()
+
+        # Collect residuals from all images
+        all_x_list = []
+        all_y_list = []
+        all_radius_list = []
+        all_skyradius_list = []
+        all_azim_list = []
+        all_elev_list = []
+        all_azim_residuals = []
+        all_elev_residuals = []
+        all_x_residuals = []
+        all_y_residuals = []
+        all_radius_residuals = []
+        all_skyradius_residuals = []
+
+        # Get RA/Dec of the FOV centre (using current platepar)
+        ra_centre, dec_centre = self.computeCentreRADec()
+
+        # Process each image separately with its correct JD
+        for image_id, jd, img_stars, catalog_stars in image_groups:
+
+            # Get image coordinates of catalog stars using THIS image's JD
+            catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(
+                catalog_stars, jd, self.platepar, use_iterative=True
+            )
+
+            # Get image time
+            img_time = jd2Date(jd)
+
+            # Calculate residuals for each star in this image
+            for (img_x, img_y, intens), (cat_ra, cat_dec, cat_mag), cat_x, cat_y in \
+                zip(img_stars, catalog_stars, catalog_x, catalog_y):
+
+                # Image radius from center
+                img_radius = np.hypot(img_x - self.platepar.X_res/2, img_y - self.platepar.Y_res/2)
+
+                # Sky angular separation from center
+                cat_ang_separation = np.degrees(angularSeparation(
+                    np.radians(cat_ra), np.radians(cat_dec),
+                    np.radians(ra_centre), np.radians(dec_centre)
+                ))
+
+                # Compute RA/Dec from image coordinates
+                _, img_ra, img_dec, _ = xyToRaDecPP([img_time], [img_x], [img_y], [1],
+                                                    self.platepar, extinction_correction=False)
+                img_ra = img_ra[0]
+                img_dec = img_dec[0]
+
+                # Store positions
+                all_x_list.append(img_x)
+                all_y_list.append(img_y)
+                all_radius_list.append(img_radius)
+                all_skyradius_list.append(cat_ang_separation)
+
+                # Compute image residuals
+                all_x_residuals.append(cat_x - img_x)
+                all_y_residuals.append(cat_y - img_y)
+                all_radius_residuals.append(
+                    np.hypot(cat_x - self.platepar.X_res/2, cat_y - self.platepar.Y_res/2) - img_radius
+                )
+
+                # Compute sky residuals
+                img_ang_separation = np.degrees(angularSeparation(
+                    np.radians(img_ra), np.radians(img_dec),
+                    np.radians(ra_centre), np.radians(dec_centre)
+                ))
+                all_skyradius_residuals.append(cat_ang_separation - img_ang_separation)
+
+                # Compute azim/elev from catalog
+                azim_cat, elev_cat = trueRaDec2ApparentAltAz(
+                    cat_ra, cat_dec, jd, self.platepar.lat, self.platepar.lon
+                )
+                all_azim_list.append(azim_cat)
+                all_elev_list.append(elev_cat)
+
+                # Compute azim/elev from image coordinates
+                azim_img, elev_img = trueRaDec2ApparentAltAz(
+                    img_ra, img_dec, jd, self.platepar.lat, self.platepar.lon
+                )
+
+                # Compute azim/elev residuals
+                all_azim_residuals.append(
+                    ((azim_cat - azim_img + 180) % 360 - 180) * np.cos(np.radians(elev_cat))
+                )
+                all_elev_residuals.append(elev_cat - elev_img)
+
+        # Now plot everything using the collected data
+        fig_a, (
+            (ax_azim, ax_elev, ax_skyradius),
+            (ax_x, ax_y, ax_radius)
+        ) = plt.subplots(ncols=3, nrows=2, facecolor=None, figsize=(12, 6))
+
+        # Set figure title
+        try:
+            fig_a.canvas.set_window_title("Multi-Image Astrometry Fit ({:d} images, {:d} stars)".format(
+                len(image_groups), len(all_x_list)
+            ))
+        except AttributeError:
+            try:
+                fig_a.canvas.manager.window.setWindowTitle(
+                    "Multi-Image Astrometry Fit ({:d} images, {:d} stars)".format(
+                        len(image_groups), len(all_x_list)
+                    )
+                )
+            except:
+                print("Failed to set the window title!")
+
+        # Plot azimuth vs azimuth error
+        ax_azim.scatter(all_azim_list, 60*np.array(all_azim_residuals), s=2, c='k', zorder=3)
+        ax_azim.grid()
+        ax_azim.set_xlabel("Azimuth (deg, +E of due N)")
+        ax_azim.set_ylabel("Azimuth error (arcmin)")
+
+        # Plot elevation vs elevation error
+        ax_elev.scatter(all_elev_list, 60*np.array(all_elev_residuals), s=2, c='k', zorder=3)
+        ax_elev.grid()
+        ax_elev.set_xlabel("Elevation (deg)")
+        ax_elev.set_ylabel("Elevation error (arcmin)")
+
+        # Plot sky radius vs sky radius error
+        ax_skyradius.scatter(all_skyradius_list, 60*np.array(all_skyradius_residuals), s=2, c='k', zorder=3)
+        ax_skyradius.grid()
+        ax_skyradius.set_xlabel("Angular separation from FOV centre (deg)")
+        ax_skyradius.set_ylabel("Angular separation error (arcmin)")
+
+        # Plot X vs X error
+        ax_x.scatter(all_x_list, all_x_residuals, s=2, c='k', zorder=3)
+        ax_x.grid()
+        ax_x.set_xlabel("X (px)")
+        ax_x.set_ylabel("X error (px)")
+        ax_x.set_xlim([0, self.platepar.X_res])
+
+        # Plot Y vs Y error
+        ax_y.scatter(all_y_list, all_y_residuals, s=2, c='k', zorder=3)
+        ax_y.grid()
+        ax_y.set_xlabel("Y (px)")
+        ax_y.set_ylabel("Y error (px)")
+        ax_y.set_xlim([0, self.platepar.Y_res])
+
+        # Plot radius vs radius error
+        ax_radius.scatter(all_radius_list, all_radius_residuals, s=2, c='k', zorder=3)
+        ax_radius.grid()
+        ax_radius.set_xlabel("Radius from centre (px)")
+        ax_radius.set_ylabel("Radius error (px)")
+
+        # Set Y limits to make all residual plots comparable
+        max_ylim = 0
+        for y_vals in [all_x_residuals, all_y_residuals, all_radius_residuals]:
+            if len(y_vals) > 0:
+                max_ylim = max(max_ylim, np.max(np.abs(y_vals)))
+
+        if max_ylim < 0.5:
+            max_ylim = 0.5
+        elif max_ylim < 1.0:
+            max_ylim = 1.0
+
         ax_x.set_ylim([-max_ylim, max_ylim])
         ax_y.set_ylim([-max_ylim, max_ylim])
         ax_radius.set_ylim([-max_ylim, max_ylim])
@@ -6655,7 +7341,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Convert all visible star to image coordinates
 
-            visible_x, visible_y = raDecToXYPP(np.array(visible_ra_list), np.array(visible_dec_list),
+            visible_x, visible_y = raDecToXYPP_iter(np.array(visible_ra_list), np.array(visible_dec_list),
                                                datetime2JD(self.img_handle.currentFrameTime(dt_obj=True)),
                                                self.platepar)
 
