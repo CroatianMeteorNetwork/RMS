@@ -424,13 +424,13 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
     if img_handle.input_type == 'ff':
 
         # Threshold the FF
-        img_thres = thresholdFF(img_handle.ff, k1, j1, mask=mask)
+        ff_thresh = thresholdFF(img_handle.ff, k1, j1, mask=mask)
 
         # # Show thresholded image
-        # showImage("thresholded ALL", img_thres, convert_to_uint8=True)
+        # showImage("thresholded ALL", ff_thresh, convert_to_uint8=True)
 
         # Check if there are too many threshold passers, if so report that no lines were found
-        if not checkWhiteRatio(img_thres, img_handle.ff, max_white_ratio):
+        if not checkWhiteRatio(ff_thresh, img_handle.ff, max_white_ratio):
             return line_results
 
 
@@ -445,7 +445,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         if img_handle.input_type == 'ff':
             
             # Select the time range of the thresholded image
-            img = FFfile.selectFFFrames(img_thres, img_handle.ff, frame_min, frame_max)
+            img_thresh = FFfile.selectFFFrames(ff_thresh, img_handle.ff, frame_min, frame_max)
 
 
         # If not, load a range of frames and threshold it
@@ -470,10 +470,10 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             img_handle = preprocessFF(img_handle, mask, flat_struct, dark)
 
             # Threshold the frame chunk
-            img = thresholdFF(img_handle.ff, k1, j1, mask=mask)
+            img_thresh = thresholdFF(img_handle.ff, k1, j1, mask=mask)
 
             # Check if there are too many threshold passers, if so report that no lines were found
-            if not checkWhiteRatio(img, img_handle.ff, max_white_ratio):
+            if not checkWhiteRatio(img_thresh, img_handle.ff, max_white_ratio):
                 continue
 
 
@@ -494,8 +494,12 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             # Adjust levels
             maxpixel_autolevel = Image.adjustLevels(maxpix_img, min_lvl, 1.0, max_lvl)
 
-            showImage(str(frame_min) + "-" + str(frame_max) + " threshold", np.concatenate((maxpixel_autolevel, \
-                img.astype(maxpix_img.dtype)*(2**(maxpix_img.itemsize*8) - 1)), axis=1))
+            # showImage(str(frame_min) + "-" + str(frame_max) + " threshold", np.concatenate(
+            #         (
+            #             maxpixel_autolevel,
+            #             img_thresh.astype(maxpix_img.dtype)*(2**(maxpix_img.itemsize*8) - 1)
+            #         ), axis=1)
+            #     )
 
             ###
 
@@ -513,19 +517,19 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             # 3 - close (Close surrounded pixels)
             # 4 - thin (Thin all lines to 1px width)
             # 1 - Remove lonely pixels
-        img = morph.morphApply(img, [1, 2, 3, 4, 1])
+        img_morph = morph.morphApply(img_thresh, [1, 2, 3, 4, 1])
 
 
-        if debug:
-            # Show morphed image
-            showImage(str(frame_min) + "-" + str(frame_max) + " morph", img, convert_to_uint8=True)
+        # if debug:
+        #     # Show morphed image
+        #     showImage(str(frame_min) + "-" + str(frame_max) + " morph", img_morph, convert_to_uint8=True)
 
 
         # Get image shape
-        w, h = img.shape[1], img.shape[0]
+        w, h = img_morph.shape[1], img_morph.shape[0]
 
         # Convert the image to feed it into the KHT
-        img_flatten = (img.flatten().astype(np.byte)*255).astype(np.byte)
+        img_flatten = (img_morph.flatten().astype(np.byte)*255).astype(np.byte)
         
         # Predefine the line output
         lines = np.empty((max_lines, 2), np.double)
@@ -550,6 +554,27 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         #     if frame_lines:
         #         plotLines(img_handle.ff, frame_lines)
 
+
+
+    # Join similar lines
+    line_results = mergeLines(line_results, config.line_min_dist, img_handle.ff.ncols, img_handle.ff.nrows)
+
+
+    if debug:
+        # Create a summary image showing: 
+        # a) Raw stack,
+        # b) Thresholded stack, 
+        # c) Morphological operations result, 
+        # d) KHT lines
+        img_summary = np.zeros((img_handle.ff.nrows, img_handle.ff.ncols*4), dtype=np.uint8)
+
+        # Fill in the summary image
+        img_summary[:, 0:img_handle.ff.ncols] = maxpixel_autolevel
+        img_summary[:, img_handle.ff.ncols:img_handle.ff.ncols*2] = img_thresh.astype(maxpix_img.dtype)*(2**(maxpix_img.itemsize*8) - 1)
+        img_summary[:, img_handle.ff.ncols*2:img_handle.ff.ncols*3] = img_morph
+        img_summary[:, img_handle.ff.ncols*3:img_handle.ff.ncols*4] = plotLines(img_handle.ff, line_results, show_image=False)
+
+        showImage(str(frame_min) + "-" + str(frame_max), img_summary)
 
     return line_results
 
@@ -940,7 +965,7 @@ def showAutoLevels(img):
 
 
 
-def plotLines(ff, line_list):
+def plotLines(ff, line_list, show_image=True):
     """ Plot lines on the image.
     """
 
@@ -974,8 +999,12 @@ def plotLines(ff, line_list):
         y2 = int(y0 - 1000*(a) + hh)
         
         cv2.line(img, (x1, y1), (x2, y2), (max_lvl, 0, max_lvl), 1)
-        
-    showImage("KHT", img)
+    
+    if show_image:
+        showImage("KHT", img)
+
+    return img
+
 
 
 
@@ -1175,15 +1204,12 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
     # Only if there are some lines in the image
     if len(line_list):
 
-        # Join similar lines
-        line_list = mergeLines(line_list, config.line_min_dist, img_handle.ff.ncols, img_handle.ff.nrows)
-
         logDebug('Time for finding lines:', time() - t1)
 
         logDebug('Number of KHT lines: ', len(line_list))
 
-        # Plot lines
-        plotLines(img_handle.ff, line_list)
+        # # Plot lines
+        # plotLines(img_handle.ff, line_list)
 
 
         filtered_lines = []
