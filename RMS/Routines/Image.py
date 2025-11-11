@@ -34,7 +34,7 @@ except ImportError:
     pass
 
 
-from RMS.Decorators import memoizeSingle
+from RMS.Decorators import memoizeSingle, memoizeManualKeyCache
 
 # Cython init
 import pyximport
@@ -349,6 +349,12 @@ def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False, mask=None, mask_ave_
 
     # The thresholded image is always 8 bit
     return img_thresh.astype(np.uint8)
+
+
+# This decorator caches the thresholded images based on their input parameters
+# In addition to the normal parameters, the first argument should be the key which is used a cache key
+# To reset the cache, call thresholdImgMemoCache.clearCache()
+thresholdImgMemoCache = memoizeManualKeyCache(thresholdImg)
 
 
 @memoizeSingle

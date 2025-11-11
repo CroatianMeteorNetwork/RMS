@@ -1712,6 +1712,9 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             # plt.show()
 
 
+    # Once detection is done on this data, clear the cache for the thresholding function
+    Image.thresholdImgMemoCache.clearCache()
+
     
     return meteor_detections
 

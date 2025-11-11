@@ -524,9 +524,9 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
             
             t_threshold = time()
 
-            # Threshold the frame (THIS IS CURRENTLY SLOW)
-            img_thres = Image.thresholdImg(fr_img, img_handle.ff.avepixel, img_handle.ff.stdpixel, \
-                config.k1_det, config.j1_det, mask=mask, mask_ave_bright=False)
+            # Threshold the frame (memoized function, the frame index "fr" is used as cache key)
+            img_thres = Image.thresholdImgMemoCache(fr, fr_img, img_handle.ff.avepixel,
+                img_handle.ff.stdpixel, config.k1_det, config.j1_det, mask=mask, mask_ave_bright=False)
             
             thresholding_times.append(time() - t_threshold)
 
