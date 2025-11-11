@@ -394,10 +394,12 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         max_lines: [int] maximum number of lines to find by KHT
         max_white_ratio: [float] max ratio between write and all pixels after thresholding
         kht_lib_path: [string] path to the compiled KHT library
+
+    Keyword arguments:
         mask: [MaskStruct] Mask structure.
         flat_struct: [FlatStruct]  Flat frame structure.
         dark: [ndarray] Dark frame.
-
+        debug: [bool] If True, print debug information and show debug images.
     
     Return:
         [list] a list of all found lines
@@ -555,26 +557,24 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         #         plotLines(img_handle.ff, frame_lines)
 
 
+        if debug:
+            # Create a summary image showing: 
+            # a) Raw stack,
+            # b) Thresholded stack, 
+            # c) Morphological operations result, 
+            # d) KHT lines
+            img_summary = np.zeros((img_handle.ff.nrows*2, img_handle.ff.ncols*2), dtype=np.uint8)
 
-    # Join similar lines
-    line_results = mergeLines(line_results, config.line_min_dist, img_handle.ff.ncols, img_handle.ff.nrows)
+            # Merge the lines on the frame for plotting purposes
+            frame_lines = mergeLines(frame_lines, config.line_min_dist, img_handle.ff.ncols, img_handle.ff.nrows)
 
+            # Fill in the summary image (2x2 grid)
+            img_summary[:, 0:img_handle.ff.ncols] = maxpixel_autolevel
+            img_summary[:, img_handle.ff.ncols:img_handle.ff.ncols*2] = img_thresh.astype(maxpix_img.dtype)*(2**(maxpix_img.itemsize*8) - 1)
+            img_summary[img_handle.ff.nrows:img_handle.ff.nrows*2, 0:img_handle.ff.ncols] = img_morph
+            img_summary[img_handle.ff.nrows:img_handle.ff.nrows*2, img_handle.ff.ncols:img_handle.ff.ncols*2] = plotLines(img_handle.ff, frame_lines, show_image=False)
 
-    if debug:
-        # Create a summary image showing: 
-        # a) Raw stack,
-        # b) Thresholded stack, 
-        # c) Morphological operations result, 
-        # d) KHT lines
-        img_summary = np.zeros((img_handle.ff.nrows, img_handle.ff.ncols*4), dtype=np.uint8)
-
-        # Fill in the summary image
-        img_summary[:, 0:img_handle.ff.ncols] = maxpixel_autolevel
-        img_summary[:, img_handle.ff.ncols:img_handle.ff.ncols*2] = img_thresh.astype(maxpix_img.dtype)*(2**(maxpix_img.itemsize*8) - 1)
-        img_summary[:, img_handle.ff.ncols*2:img_handle.ff.ncols*3] = img_morph
-        img_summary[:, img_handle.ff.ncols*3:img_handle.ff.ncols*4] = plotLines(img_handle.ff, line_results, show_image=False)
-
-        showImage(str(frame_min) + "-" + str(frame_max), img_summary)
+            showImage(str(frame_min) + "-" + str(frame_max), img_summary)
 
     return line_results
 
@@ -1203,6 +1203,9 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
     # Only if there are some lines in the image
     if len(line_list):
+
+        # Join similar lines
+        line_list = mergeLines(line_list, config.line_min_dist, img_handle.ff.ncols, img_handle.ff.nrows)
 
         logDebug('Time for finding lines:', time() - t1)
 
