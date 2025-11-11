@@ -546,9 +546,9 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
                 frame_lines.append([rho, theta, frame_min, frame_max])
 
 
-        if debug:
-            if frame_lines:
-                plotLines(img_handle.ff, frame_lines)
+        # if debug:
+        #     if frame_lines:
+        #         plotLines(img_handle.ff, frame_lines)
 
 
     return line_results
@@ -1182,8 +1182,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
         logDebug('Number of KHT lines: ', len(line_list))
 
-        # # Plot lines
-        # plotLines(img_handle.ff, line_list)
+        # Plot lines
+        plotLines(img_handle.ff, line_list)
 
 
         filtered_lines = []
