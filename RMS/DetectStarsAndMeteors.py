@@ -455,9 +455,6 @@ def detectStarsAndMeteorsDirectory(dir_path, config, output_suffix=''):
 
 if __name__ == "__main__":
 
-    time_start = RmsDateTime.utcnow()
-
-
     ### COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
@@ -495,6 +492,8 @@ if __name__ == "__main__":
     log = getLogger("logger")
 
     ######
+
+    time_start = RmsDateTime.utcnow()
 
     if cml_args.multivid:
 
@@ -540,6 +539,16 @@ if __name__ == "__main__":
             # Collect garbage
             gc.collect()
 
+
+        # Print the total run time
+        elapsed_time = RmsDateTime.utcnow() - time_start
+        if len(video_paths) > 0:
+            avg_time = elapsed_time.total_seconds()/len(video_paths)
+        else:
+            avg_time = 0.0
+        log.info('Total time taken: {} for {:d} files, average {:.2f} s/file.'.format(
+            str(elapsed_time), len(video_paths), avg_time))
+
     else:
 
         # Detect the file type
@@ -574,3 +583,5 @@ if __name__ == "__main__":
             # Save the results
             saveResultsFrameInterface(star_list, meteor_list, img_handle, config, 
                 chunk_frames=img_handle.chunk_frames, output_suffix=cml_args.suffix)
+            
+            log.info('Total time taken: {}'.format(RmsDateTime.utcnow() - time_start))
