@@ -572,7 +572,8 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             img_summary[:img_handle.ff.nrows, 0:img_handle.ff.ncols] = maxpixel_autolevel
             img_summary[:img_handle.ff.nrows, img_handle.ff.ncols:img_handle.ff.ncols*2] = \
                 img_thresh.astype(maxpix_img.dtype)*(2**(maxpix_img.itemsize*8) - 1)
-            img_summary[img_handle.ff.nrows:img_handle.ff.nrows*2, 0:img_handle.ff.ncols] = img_morph
+            img_summary[img_handle.ff.nrows:img_handle.ff.nrows*2, 0:img_handle.ff.ncols] = \
+                img_morph.astype(np.uint8)*255
             img_summary[img_handle.ff.nrows:img_handle.ff.nrows*2, img_handle.ff.ncols:img_handle.ff.ncols*2] = \
                 plotLines(img_handle.ff, frame_lines, show_image=False)
 
