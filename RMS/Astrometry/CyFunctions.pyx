@@ -3708,6 +3708,242 @@ def cyENHtToXY_iter(
     return x_array, y_array
 
 
+@cython.boundscheck(False)
+@cython.wraparound(False)
+def cyENHt0ToENHt1(
+    np.ndarray[FLOAT_TYPE_t, ndim=1] E0_m,    # Input ENU east at height Ht0 (m)
+    np.ndarray[FLOAT_TYPE_t, ndim=1] N0_m,    # Input ENU north at height Ht0 (m)
+    np.ndarray[FLOAT_TYPE_t, ndim=1] Ht0_m,   # Input target WGS-84 ellipsoidal height (m)
+    np.ndarray[FLOAT_TYPE_t, ndim=1] Ht1_m,   # Output target WGS-84 ellipsoidal height (m)
+    double lat_sta_deg, double lon_sta_deg, double h_sta_m
+):
+    """
+    Convert ENHt coordinates at one height to ENHt at a different height,
+    maintaining the same line of sight from the station.
+
+    Given (E0, N0, Ht0), find (E1, N1, U1) such that (E1, N1, Ht1) lies on the
+    same ray from the station as (E0, N0, Ht0), where U1 is the Up component.
+
+    Returns: (E1_array, N1_array, U1_array) at height Ht1
+    """
+
+    cdef Py_ssize_t n, i
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] E1_array, N1_array, U1_array
+
+    # WGS-84 constants
+    cdef double a, f, e2, b, ep2
+
+    # Station ECEF and rotation matrix columns
+    cdef double latS, lonS, sS, cS, Nsta, Xc, Yc, Zc
+    cdef double RE0, RE1, RE2, RN0, RN1, RN2, RU0, RU1, RU2
+
+    # Per-point variables
+    cdef double E0, N0, U0, E1, N1, U1
+    cdef double dxe_base, dye_base, dze_base
+    cdef double U_lo, U_hi, U_mid, f_lo, f_hi, f_mid
+    cdef double Xi, Yi, Zi, pval, theta_b, st, ct, latP, Ncur, hP
+    cdef double A, h, distance0, scale_factor
+    cdef double dir_e, dir_n, dir_u
+    cdef double t_lo, t_hi, t_mid
+    cdef int it
+
+    n = E0_m.shape[0]
+    E1_array = np.zeros(n, dtype=FLOAT_TYPE)
+    N1_array = np.zeros(n, dtype=FLOAT_TYPE)
+    U1_array = np.zeros(n, dtype=FLOAT_TYPE)
+
+    # WGS-84 ellipsoid
+    a  = 6378137.0
+    f  = 1.0/298.257223563
+    e2 = f*(2.0 - f)
+    b  = a*(1.0 - f)
+    ep2 = (a*a - b*b)/(b*b)
+
+    # Station ECEF coordinates
+    latS = radians(lat_sta_deg)
+    lonS = radians(lon_sta_deg)
+    sS = sin(latS)
+    cS = cos(latS)
+    Nsta = a / sqrt(1.0 - e2*sS*sS)
+    Xc = (Nsta + h_sta_m)*cS*cos(lonS)
+    Yc = (Nsta + h_sta_m)*cS*sin(lonS)
+    Zc = (Nsta*(1.0 - e2) + h_sta_m)*sS
+
+    # ECEF <- ENU rotation matrix columns
+    RE0 = -sin(lonS)
+    RE1 =  cos(lonS)
+    RE2 = 0.0
+    RN0 = -sS*cos(lonS)
+    RN1 = -sS*sin(lonS)
+    RN2 = cS
+    RU0 =  cS*cos(lonS)
+    RU1 =  cS*sin(lonS)
+    RU2 = sS
+
+    for i in range(n):
+        E0 = E0_m[i]
+        N0 = N0_m[i]
+
+        # Step 1: Find U0 that gives the input height Ht0
+        # Build base ECEF direction for this (E0, N0)
+        dxe_base = RE0*E0 + RN0*N0
+        dye_base = RE1*E0 + RN1*N0
+        dze_base = RE2*E0 + RN2*N0
+
+        # Bisection to solve for U0
+        U_lo = -50000.0
+        U_hi =  400000.0
+
+        # Evaluate at U_lo
+        Xi = Xc + dxe_base + RU0*U_lo
+        Yi = Yc + dye_base + RU1*U_lo
+        Zi = Zc + dze_base + RU2*U_lo
+        pval = sqrt(Xi*Xi + Yi*Yi)
+        theta_b = atan2(Zi*a, pval*b)
+        st = sin(theta_b)
+        ct = cos(theta_b)
+        latP = atan2(Zi + ep2*b*st*st*st, pval - e2*a*ct*ct*ct)
+        Ncur = a / sqrt(1.0 - e2*sin(latP)*sin(latP))
+        hP = pval/cos(latP) - Ncur
+        f_lo = hP - Ht0_m[i]
+
+        # Evaluate at U_hi
+        Xi = Xc + dxe_base + RU0*U_hi
+        Yi = Yc + dye_base + RU1*U_hi
+        Zi = Zc + dze_base + RU2*U_hi
+        pval = sqrt(Xi*Xi + Yi*Yi)
+        theta_b = atan2(Zi*a, pval*b)
+        st = sin(theta_b)
+        ct = cos(theta_b)
+        latP = atan2(Zi + ep2*b*st*st*st, pval - e2*a*ct*ct*ct)
+        Ncur = a / sqrt(1.0 - e2*sin(latP)*sin(latP))
+        hP = pval/cos(latP) - Ncur
+        f_hi = hP - Ht0_m[i]
+
+        # Ensure bracketing
+        it = 0
+        while f_lo*f_hi > 0.0 and it < 8:
+            if fabs(f_lo) < fabs(f_hi):
+                U_lo -= 0.5*(U_hi - U_lo)
+            else:
+                U_hi += 0.5*(U_hi - U_lo)
+
+            Xi = Xc + dxe_base + RU0*U_hi
+            Yi = Yc + dye_base + RU1*U_hi
+            Zi = Zc + dze_base + RU2*U_hi
+            pval = sqrt(Xi*Xi + Yi*Yi)
+            theta_b = atan2(Zi*a, pval*b)
+            st = sin(theta_b)
+            ct = cos(theta_b)
+            latP = atan2(Zi + ep2*b*st*st*st, pval - e2*a*ct*ct*ct)
+            Ncur = a / sqrt(1.0 - e2*sin(latP)*sin(latP))
+            hP = pval/cos(latP) - Ncur
+            f_hi = hP - Ht0_m[i]
+            it += 1
+
+        # Bisection iterations
+        for it in range(20):
+            U_mid = 0.5*(U_lo + U_hi)
+            Xi = Xc + dxe_base + RU0*U_mid
+            Yi = Yc + dye_base + RU1*U_mid
+            Zi = Zc + dze_base + RU2*U_mid
+            pval = sqrt(Xi*Xi + Yi*Yi)
+            theta_b = atan2(Zi*a, pval*b)
+            st = sin(theta_b)
+            ct = cos(theta_b)
+            latP = atan2(Zi + ep2*b*st*st*st, pval - e2*a*ct*ct*ct)
+            Ncur = a / sqrt(1.0 - e2*sin(latP)*sin(latP))
+            hP = pval/cos(latP) - Ncur
+            f_mid = hP - Ht0_m[i]
+
+            if f_lo*f_mid <= 0.0:
+                U_hi = U_mid
+                f_hi = f_mid
+            else:
+                U_lo = U_mid
+                f_lo = f_mid
+
+            if fabs(f_mid) < 1e-3:  # ~1 mm height tolerance
+                break
+
+        U0 = 0.5*(U_lo + U_hi)
+
+        # Step 2: Convert to Alt/Az (this gives us the viewing direction)
+        A = atan2(E0, N0)
+        h = atan2(U0, sqrt(E0*E0 + N0*N0))
+
+        # Step 3: Find U1 that gives height Ht1 along the same Alt/Az direction
+        # For the same Alt/Az, the ratio E:N:U stays constant
+        # So we need to find the scale factor that gives us the new height
+
+        # The horizontal distance at height Ht0
+        distance0 = sqrt(E0*E0 + N0*N0)
+
+        # Now solve for U1 such that (E1, N1, U1) at height Ht1
+        # maintains the same Alt/Az angles
+        # Since tan(h) = U/distance_horizontal, and h is fixed:
+        # U1/distance1 = U0/distance0
+
+        # But we need to solve for the new position that has height Ht1
+        # This requires another bisection, but now along the ray direction
+
+        # Use the direction ratios
+        if distance0 > 1e-10:
+            # Direction cosines in ENU
+            dir_e = E0 / sqrt(E0*E0 + N0*N0 + U0*U0)
+            dir_n = N0 / sqrt(E0*E0 + N0*N0 + U0*U0)
+            dir_u = U0 / sqrt(E0*E0 + N0*N0 + U0*U0)
+
+            # Search along the ray for the point at height Ht1
+            # Parameter t: distance along ray from station
+            t_lo = 10.0      # Start search at 10m from station
+            t_hi = 1000000.0 # Up to 1000km
+
+            # Binary search for the right distance along the ray
+            for it in range(30):
+                t_mid = 0.5*(t_lo + t_hi)
+
+                # ENU coordinates at distance t_mid along the ray
+                E1 = t_mid * dir_e
+                N1 = t_mid * dir_n
+                U1 = t_mid * dir_u
+
+                # Convert to ECEF and find geodetic height
+                Xi = Xc + RE0*E1 + RN0*N1 + RU0*U1
+                Yi = Yc + RE1*E1 + RN1*N1 + RU1*U1
+                Zi = Zc + RE2*E1 + RN2*N1 + RU2*U1
+
+                pval = sqrt(Xi*Xi + Yi*Yi)
+                theta_b = atan2(Zi*a, pval*b)
+                st = sin(theta_b)
+                ct = cos(theta_b)
+                latP = atan2(Zi + ep2*b*st*st*st, pval - e2*a*ct*ct*ct)
+                Ncur = a / sqrt(1.0 - e2*sin(latP)*sin(latP))
+                hP = pval/cos(latP) - Ncur
+
+                if hP < Ht1_m[i]:
+                    t_lo = t_mid
+                else:
+                    t_hi = t_mid
+
+                if fabs(hP - Ht1_m[i]) < 1e-3:  # 1mm tolerance
+                    break
+
+            # Final position at height Ht1
+            E1_array[i] = t_mid * dir_e
+            N1_array[i] = t_mid * dir_n
+            U1_array[i] = t_mid * dir_u
+        else:
+            # Point is directly above/below station
+            E1_array[i] = 0.0
+            N1_array[i] = 0.0
+            # Need to calculate U1 for vertical case
+            # For a point directly above, we just scale U by the height difference
+            # This requires solving for the new U that gives Ht1
+            U1_array[i] = Ht1_m[i] - h_sta_m  # Approximate for vertical case
+
+    return E1_array, N1_array, U1_array
+
 
 @cython.boundscheck(False)
 @cython.wraparound(False)

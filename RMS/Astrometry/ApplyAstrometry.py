@@ -70,7 +70,8 @@ from RMS.Astrometry.CyFunctions import (cyraDecToXY, cyTrueRaDec2ApparentAltAz,
                                         cyENUToXY_iter,
                                         cyGeoToXY_wgs84_iter,
                                         cyXYToGeo_wgs84,
-                                        cyRaDecToXY_iter)
+                                        cyRaDecToXY_iter,
+                                        cyENHt0ToENHt1)
 
 # Handle Python 2/3 compatibility
 if sys.version_info.major == 3:
@@ -1192,6 +1193,41 @@ def enHtToXYPP(E_data, N_data, Ht_data, platepar, min_el_deg=0.0):
     return x, y
 
 
+def ENHt0ToENHt1(E0_data, N0_data, Ht0_data, Ht1_data, platepar):
+    """ Convert ENHt coordinates at one height to ENHt at a different height,
+        maintaining the same line of sight from the station.
+
+    Arguments:
+        E0_data: [ndarray or float] ENU east coordinate(s) at height Ht0 (meters).
+        N0_data: [ndarray or float] ENU north coordinate(s) at height Ht0 (meters).
+        Ht0_data: [ndarray or float] WGS-84 ellipsoidal height(s) of input points (meters).
+        Ht1_data: [ndarray or float] WGS-84 ellipsoidal height(s) of output points (meters).
+        platepar: [Platepar object] Platepar object with station coordinates.
+
+    Returns:
+        tuple: (E1, N1, U1) ENU coordinates at height Ht1 that lie on the same line of sight,
+               where U1 is the Up component in the ENU system.
+    """
+
+    # Ensure inputs are numpy arrays
+    E0_array = np.array(E0_data, dtype=np.float64).ravel()
+    N0_array = np.array(N0_data, dtype=np.float64).ravel()
+    Ht0_array = np.array(Ht0_data, dtype=np.float64).ravel()
+    Ht1_array = np.array(Ht1_data, dtype=np.float64).ravel()
+
+    # Check that arrays have the same length
+    if len(E0_array) != len(N0_array) or len(E0_array) != len(Ht0_array) or len(E0_array) != len(Ht1_array):
+        raise ValueError(f"E0, N0, Ht0, and Ht1 arrays must have the same length. Got E0:{len(E0_array)}, N0:{len(N0_array)}, Ht0:{len(Ht0_array)}, Ht1:{len(Ht1_array)}")
+
+    # Call the Cython function
+    E1, N1, U1 = cyENHt0ToENHt1(
+        E0_array, N0_array, Ht0_array, Ht1_array,
+        float(platepar.lat), float(platepar.lon), float(platepar.height_wgs84)
+    )
+
+    return E1, N1, U1
+
+
 def geoToXYPP(lat_data, lon_data, h_data, platepar, min_el_deg=0.0):
     """ Converts WGS-84 geodetic coordinates to image coordinates.
     
@@ -1222,7 +1258,7 @@ def geoToXYPP(lat_data, lon_data, h_data, platepar, min_el_deg=0.0):
     rot = rotationWrtHorizon(platepar)
         
     X_data, Y_data = cyGeoToXY_wgs84_iter(
-        np.array(lat_data, dtype=np.float64), np.array(lon_data, dtype=np.float64), 
+        np.array(lat_data, dtype=np.float64), np.array(lon_data, dtype=np.float64),
         np.array(h_data, dtype=np.float64),
         float(platepar.X_res), float(platepar.Y_res),
         float(alt_centre), float(az_centre),
@@ -1231,9 +1267,10 @@ def geoToXYPP(lat_data, lon_data, h_data, platepar, min_el_deg=0.0):
         unicode(platepar.distortion_type),
         float(platepar.lat), float(platepar.lon), float(platepar.height_wgs84),
         refraction=platepar.refraction,
-        equal_aspect=platepar.equal_aspect, 
+        equal_aspect=platepar.equal_aspect,
         force_distortion_centre=platepar.force_distortion_centre,
-        asymmetry_corr=platepar.asymmetry_corr
+        asymmetry_corr=platepar.asymmetry_corr,
+        min_el_deg=min_el_deg
     )
     
     return X_data, Y_data
