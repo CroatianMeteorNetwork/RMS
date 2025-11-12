@@ -33,7 +33,7 @@ class LiveRecalibration(threading.Thread):
     appropriate recalibrated pointing.
     """
     
-    def __init__(self, config, platepar, output_dir, meas_triggered_recalib=True, meas_trigger_dt=30, verbose=False):
+    def __init__(self, config, platepar, output_dir, meas_triggered_recalib=True, meas_trigger_dt=30):
         """
         Initialize the LiveRecalibration class.
 
@@ -47,7 +47,6 @@ class LiveRecalibration(threading.Thread):
                 in the measurement queue. If False, all platepars are recalibrated. Default is True.
             meas_trigger_dt: [int] Minimum time difference in seconds to trigger recalibration for 
                 measurements. Default is 30 seconds.
-            verbose: [bool] If True, enable verbose logging. Default is False.
         """
         
         threading.Thread.__init__(self)
@@ -58,7 +57,6 @@ class LiveRecalibration(threading.Thread):
 
         self.meas_triggered_recalib = meas_triggered_recalib
         self.meas_trigger_dt = meas_trigger_dt
-        self.verbose = verbose
 
         # Thread lifecycle control event
         self._stop_event = threading.Event()
@@ -107,9 +105,7 @@ class LiveRecalibration(threading.Thread):
         """
 
         log.info("Recalibration thread running.")
-        run_cycle = 0
         while not self._stop_event.is_set():
-            run_cycle += 1
 
             # Only do the recalibrations of the platepars close to the measurements
             # i.e. recalibrations will be triggered by measurements in the queue
@@ -118,8 +114,6 @@ class LiveRecalibration(threading.Thread):
                 # Go through the measurements queue and check if there are any calibration stars close in
                 # time to the measurements
                 try:
-                    if run_cycle % 1000 == 0:
-                        log.info(f"Run() measurement input queue {hex(id(self.measurement_input_queue))} length: {self.measurement_input_queue.qsize()}")
                     # Pull all new measurements and associate them with timestamps and unique hash keys
                     measurements = {}
                     while not self.measurement_input_queue.empty():
@@ -130,17 +124,10 @@ class LiveRecalibration(threading.Thread):
 
                     # If there are no measurements, continue to wait
                     if not measurements:
-                        if run_cycle % 1000 == 0:
-                            log.debug("No measurements in queue, waiting...")
                         time.sleep(0.1)
                         continue
 
-                    if self.verbose:
-                        log.info(f"Processing {len(measurements)} measurements for recalibration.")
-
                     # Drain the CALSTARS queue to get all available calibration data
-                    if run_cycle % 1000 == 0:
-                        log.info(f"Run() calstars input queue length: {self.measurement_input_queue.qsize()}")
                     calstars_entries = []
                     while not self.calstars_queue.empty():
                         try:
@@ -150,12 +137,16 @@ class LiveRecalibration(threading.Thread):
                         except queue.Empty:
                             break
 
+                    # Log each non-null calibration attempt
+                    log.info(f"Processing {len(measurements)} measurements for recalibration against {len(calstars_entries)} CALSTARS entries.")
+
                     # Sort the calibration stars by their datetime (newest first)
                     calstars_entries.sort(key=lambda x: x[1], reverse=True)
 
                     # Match each measurement with the closest calibration star record within the trigger time 
                     # window
                     for key, (m_ff_name, m_meas, m_dt, info) in measurements.items():
+                        log.info(f"Processing measurement {m_ff_name} #{info[2]} at {m_dt} UTC.")
                         closest_entry = None
                         closest_diff = float('inf')
 
@@ -219,12 +210,8 @@ class LiveRecalibration(threading.Thread):
                                     with self.recalibrated_platepars_lock:
                                         self.recalibrated_platepars.update(recalibrated_platepars)
                                     
-                                    # Place the platepar on the output queue
+                                    # Output the platepar
                                     self.writePlatePar(ff_name, recalibrated_platepars[ff_name])
-
-                                    if self.verbose:
-                                        log.info(f"Recalibrated platepar for {ff_name}")
-                                        log.info(f"Success: {recalibrated_platepars[ff_name].auto_recalibrated}")
 
 
                                 except Exception as e:
@@ -234,7 +221,7 @@ class LiveRecalibration(threading.Thread):
                             mapped = self.mapCoordinates(m_ff_name, m_meas, 
                                                          pp_time_diff_limit=self.meas_trigger_dt)
                             
-                            # If mapping was successful, put the result in the output queue
+                            # If mapping was successful, output the recalibrated measurement
                             if mapped is not None:
                                 self.writeMeasurement(m_ff_name, mapped, info)
 
@@ -281,11 +268,9 @@ class LiveRecalibration(threading.Thread):
                     with self.recalibrated_platepars_lock:
                         self.recalibrated_platepars.update(recalibrated_platepars)
                     
-                    # Place the platepar on the output queue
+                    # Output the platepar
                     self.writePlatePar(ff_name, recalibrated_platepars[ff_name])
-                    if self.verbose:
-                        log.info(f"Recalibrated platepar for {ff_name}")
-                        log.info(f"Success: {recalibrated_platepars[ff_name].auto_recalibrated}")
+
 
                 except queue.Empty:
                     # No data to process; continue waiting
@@ -309,7 +294,7 @@ class LiveRecalibration(threading.Thread):
         """
         
         platepar_name = f'platepar_{os.path.splitext(ff_name)[0]}_liverecalib.json'
-        log.info(f'Writing recalibrated platepar file: {platepar_name}')
+        log.info(f'Writing recalibrated platepar file: {platepar_name}  Auto recalibrated: {platepar.auto_recalibrated}')
         # Some play to avoid data that isn't serializable (taken from ApplyRecalibrate)
         json_str = f'{{"{ff_name}": {platepar.jsonStr()}\n}}'
         with open(os.path.join(self.output_dir, platepar_name), 'w') as f:

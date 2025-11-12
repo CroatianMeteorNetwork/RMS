@@ -32,7 +32,7 @@ from RMS.Formats.FFfile import validFFName, constructFFName
 from RMS.Formats.FrameInterface import detectInputType, detectInputTypeFile, checkIfVideoFile
 from RMS.ExtractStars import extractStarsFF
 from RMS.ExtractStarsFrameInterface import extractStarsFrameInterface
-from RMS.Detection import detectMeteors
+from RMS.Detection import detectMeteors, VERBOSE_DEBUG
 from RMS.DetectionTools import loadImageCalibration
 from RMS.QueuedPool import QueuedPool
 from RMS.Logger import LoggingManager, getLogger
@@ -42,6 +42,11 @@ from RMS.Misc import RmsDateTime
 # Get the logger from the main module
 log = getLogger("logger")
 
+
+def setVerboseLogging(verbose):
+    """Perform verbose logging, primarily by setting VERBOSE_DEBUG to True in meteor detection module."""
+    global VERBOSE_DEBUG
+    VERBOSE_DEBUG = verbose
 
 
 def detectStarsAndMeteorsFrameInterface(
@@ -113,7 +118,7 @@ def detectStarsAndMeteorsFrameInterface(
     return star_list, meteor_list
 
 
-def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_frames=128, output_suffix='', output_dir=None):
+def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_frames=128, output_suffix='', output_dir=None, write_empty=True):
     """ Save detection results to CALSTARS and FTPdetectinfo files.
     
     Arguments:
@@ -126,6 +131,7 @@ def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_
         chunk_frames: [int] Number of frames to stacked image on which the stars will be extracted.
         output_suffix: [str] Suffix to add to the output files.
         output_dir: [str] Directory where to save the output files if different the img_handle source directory
+        write_empty: [bool] If True, write the output files even if there are no stars or meteors detected.
 
     Return:
         [output_dir, calstars_name, ftpdetectinfo_name]: The output directory and file names
@@ -144,48 +150,59 @@ def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_
     if len(output_suffix):
         suffix = '_' + output_suffix
 
-    # Generate the name for the CALSTARS file
-    calstars_name = 'CALSTARS_' + prefix + suffix + '.txt'
+    # Bypass empty outputs if requested
+    if not write_empty and len(star_list) == 0:
+        log.info("No stars extracted, skipping writing CALSTARS.")
+        calstars_name = None
+    else:
 
-    # Write detected stars to the CALSTARS file
-    CALSTARS.writeCALSTARS(star_list, output_dir, calstars_name, 
-                        config.stationID, config.height, config.width, chunk_frames=chunk_frames)
-    
-    log.info("Stars extracted and written to {:s}".format(calstars_name))
+        # Generate the name for the CALSTARS file
+        calstars_name = 'CALSTARS_' + prefix + suffix + '.txt'
 
-    # Generate FTPdetectinfo file name
-    ftpdetectinfo_name = 'FTPdetectinfo_' + prefix + suffix + '.txt'
+        # Write detected stars to the CALSTARS file
+        CALSTARS.writeCALSTARS(star_list, output_dir, calstars_name, 
+                            config.stationID, config.height, config.width, chunk_frames=chunk_frames)
+        
+        log.info("Stars extracted and written to {:s}".format(calstars_name))
 
-    results_list = []
-    meteor_No = 1
-    for meteor in meteor_list:
+    # Bypass empty outputs if requested
+    if not write_empty and len(meteor_list) == 0:
+        log.info("No meteors detected, skipping writing FTPdetectinfo.")
+        ftpdetectinfo_name = None
+    else:
+        # Generate FTPdetectinfo file name
+        ftpdetectinfo_name = 'FTPdetectinfo_' + prefix + suffix + '.txt'
 
-        rho, theta, centroids = meteor
+        results_list = []
+        meteor_No = 1
+        for meteor in meteor_list:
 
-        # Get the time of the first frame in the detection
-        first_pick_time = img_handle.currentFrameTime(frame_no=int(centroids[0][0]), dt_obj=True)
+            rho, theta, centroids = meteor
 
-        # Construct FF file name if it's not available
-        if img_handle.input_type == 'ff':
-            ff_file_name = img_handle.name()
+            # Get the time of the first frame in the detection
+            first_pick_time = img_handle.currentFrameTime(frame_no=int(centroids[0][0]), dt_obj=True)
 
-        # For non-FF inputs, construct the FF name from the station ID and the first pick time
-        # To keep an accurate time, reset the frames so that the first pick is at frame 0
-        else:
-            ff_file_name = constructFFName(config.stationID, first_pick_time)
+            # Construct FF file name if it's not available
+            if img_handle.input_type == 'ff':
+                ff_file_name = img_handle.name()
 
-            # Reset the frame numbers so that the first pick is at frame 0 
-            # frame[i] - int(frame[0]) to preserve the rolling shutter correction encoded as the 
-            #   fractional part of the frame number
-            centroids[:,0] -= int(centroids[0,0])
+            # For non-FF inputs, construct the FF name from the station ID and the first pick time
+            # To keep an accurate time, reset the frames so that the first pick is at frame 0
+            else:
+                ff_file_name = constructFFName(config.stationID, first_pick_time)
 
-        # Append to the results list
-        results_list.append([ff_file_name, meteor_No, rho, theta, centroids])
+                # Reset the frame numbers so that the first pick is at frame 0 
+                # frame[i] - int(frame[0]) to preserve the rolling shutter correction encoded as the 
+                #   fractional part of the frame number
+                centroids[:,0] -= int(centroids[0,0])
 
-    # Write FTPdetectinfo file
-    FTPdetectinfo.writeFTPdetectinfo(results_list, output_dir, ftpdetectinfo_name, 
-                                     img_handle.dir_path, config.stationID, config.fps)
-    log.info("FTPdetectinfo data written to {:s}".format(ftpdetectinfo_name)) 
+            # Append to the results list
+            results_list.append([ff_file_name, meteor_No, rho, theta, centroids])
+
+        # Write FTPdetectinfo file
+        FTPdetectinfo.writeFTPdetectinfo(results_list, output_dir, ftpdetectinfo_name, 
+                                        img_handle.dir_path, config.stationID, config.fps)
+        log.info("FTPdetectinfo data written to {:s}".format(ftpdetectinfo_name)) 
     
     # Return the output directory and the names of the output files
     return output_dir, calstars_name, ftpdetectinfo_name
@@ -461,7 +478,7 @@ def detectStarsAndMeteorsDirectory(dir_path, config, output_suffix=''):
 
 
 
-def detectStarsAndMeteorsInVideoFile(video_path, config, chunk_frames=None, output_suffix='', output_dir=None):
+def detectStarsAndMeteorsInVideoFile(video_path, config, chunk_frames=None, output_suffix='', output_dir=None, write_empty=True):
     """ Given a video file, perform both star and meteor detection.
 
     Arguments:
@@ -474,6 +491,7 @@ def detectStarsAndMeteorsInVideoFile(video_path, config, chunk_frames=None, outp
             will be used specified for each input type.
         output_suffix: [str] Suffix to add to the output files.
         output_dir: [str] Directory where to save the output files if different the video file source directory.
+        write_empty: [bool] If True, write the output files even if there are no stars or meteors detected.
 
     Return:
       [output_dir, calstars_name, ftpdetectinfo_name]: The output directory and file names
@@ -492,7 +510,7 @@ def detectStarsAndMeteorsInVideoFile(video_path, config, chunk_frames=None, outp
     
     # Save the results
     file_dir, calstars_name, ftpdetectinfo_name = saveResultsFrameInterface(star_list, meteor_list, img_handle, config, 
-        chunk_frames=img_handle.chunk_frames, output_suffix=output_suffix, output_dir=output_dir)
+        chunk_frames=img_handle.chunk_frames, output_suffix=output_suffix, output_dir=output_dir, write_empty=write_empty)
     
     # Release the video handle
     if img_handle.input_type == 'video':
@@ -535,12 +553,19 @@ if __name__ == "__main__":
         help="Number of frames to use to stack an image on which the stars will be extracted. Only "
         "applicable for non-FF files.")
     
+    arg_parser.add_argument('--prefix', type=str, default='detection_', \
+        help="Prefix to add to log files")   
+    
     arg_parser.add_argument('--suffix', type=str, default='', \
         help="Suffix to add to the output files.")
 
     arg_parser.add_argument('--out_dir', type=str, \
         help="Directory where to save the output files.")
 
+    arg_parser.add_argument('--debug', action='store_true', help="Enable verbose logging.")
+
+    arg_parser.add_argument('--write_empty', action='store_true', help="Enable writing empty output files (only applies to --multivid, True otherwise).")
+    
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -552,9 +577,12 @@ if __name__ == "__main__":
 
     ### Init the logger
     log_manager = LoggingManager()
-    log_manager.initLogging(config, 'detection_', safedir=cml_args.dir_path)
+    log_manager.initLogging(config, cml_args.prefix, safedir=cml_args.dir_path)
 
     log = getLogger("logger")
+
+    # Enable verbose logging if requested
+    setVerboseLogging(cml_args.debug)
 
     ######
 
@@ -572,8 +600,7 @@ if __name__ == "__main__":
 
         # Run the detection on each video file
         for video_path in video_paths:
-
-            detectStarsAndMeteorsInVideoFile(video_path, config, chunk_frames=cml_args.chunk_frames, output_suffix=cml_args.suffix, output_dir=cml_args.out_dir)
+            detectStarsAndMeteorsInVideoFile(video_path, config, chunk_frames=cml_args.chunk_frames, output_suffix=cml_args.suffix, output_dir=cml_args.out_dir, write_empty=cml_args.write_empty)
 
     else:
 
