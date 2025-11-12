@@ -18,7 +18,7 @@ import numpy as np
 import pyximport
 import RMS.ConfigReader as cr
 import scipy.optimize
-from RMS.Astrometry.ApplyAstrometry import (getFOVSelectionRadius, raDecToXYPP,
+from RMS.Astrometry.ApplyAstrometry import (getFOVSelectionRadius, raDecToXYPP_iter,
                                             rotationWrtHorizon, xyToRaDecPP)
 from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
 from RMS.Astrometry.FFTalign import alignPlatepar
@@ -112,7 +112,7 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
             continue
 
         # Convert all catalog stars to image coordinates
-        cat_x_array, cat_y_array = raDecToXYPP(ra_catalog, dec_catalog, jd, platepar)
+        cat_x_array, cat_y_array = raDecToXYPP_iter(ra_catalog, dec_catalog, jd, platepar)
 
         # Take only those stars which are within the FOV
         x_indices = np.argwhere((cat_x_array >= 0) & (cat_x_array < platepar.X_res))

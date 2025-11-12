@@ -873,25 +873,25 @@ def raDecToXYPP(RA_data, dec_data, jd, platepar):
 
 def raDecToXYPP_iter(RA_data, dec_data, jd, platepar):
     """ Converts RA, Dec to image coordinates using iterative solver for radial distortion models.
-    
+
     Arguments:
         RA_data: [ndarray] Array of right ascensions (degrees).
         dec_data: [ndarray] Array of declinations (degrees).
         jd: [float] Julian date.
         platepar: [Platepar structure] Astrometry parameters.
-    
+
     Return:
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
     """
-    
+
     # Use the new iterative cythonized function for radial distortion models
     X_data, Y_data = cyRaDecToXY_iter(RA_data, dec_data, float(jd), float(platepar.lat), float(platepar.lon),
-        float(platepar.X_res), float(platepar.Y_res), float(platepar.Ho), float(platepar.JD),  
-        float(platepar.RA_d), float(platepar.dec_d), float(platepar.pos_angle_ref), platepar.F_scale, 
-        platepar.x_poly_fwd, platepar.y_poly_fwd, unicode(platepar.distortion_type), 
-        refraction=platepar.refraction, equal_aspect=platepar.equal_aspect, 
+        float(platepar.X_res), float(platepar.Y_res), float(platepar.Ho), float(platepar.JD),
+        float(platepar.RA_d), float(platepar.dec_d), float(platepar.pos_angle_ref), platepar.F_scale,
+        platepar.x_poly_fwd, platepar.y_poly_fwd, unicode(platepar.distortion_type),
+        refraction=platepar.refraction, equal_aspect=platepar.equal_aspect,
         force_distortion_centre=platepar.force_distortion_centre, asymmetry_corr=platepar.asymmetry_corr)
-    
+
     return X_data, Y_data
 
 

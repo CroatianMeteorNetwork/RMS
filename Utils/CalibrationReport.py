@@ -10,7 +10,7 @@ import datetime
 import numpy as np
 import matplotlib.pyplot as plt
 
-from RMS.Astrometry.ApplyAstrometry import computeFOVSize, xyToRaDecPP, raDecToXYPP, \
+from RMS.Astrometry.ApplyAstrometry import computeFOVSize, xyToRaDecPP, raDecToXYPP_iter, \
     photometryFitRobust, correctVignetting, photomLine, rotationWrtHorizon, \
     extinctionCorrectionTrueToApparent, getFOVSelectionRadius
 from RMS.Astrometry.CheckFit import matchStarsResiduals
@@ -316,7 +316,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         ### Plot match residuals ###
 
         # Compute predicted positions of matched image stars from the catalog
-        x_predicted, y_predicted = raDecToXYPP(matched_catalog_stars[:, 0], \
+        x_predicted, y_predicted = raDecToXYPP_iter(matched_catalog_stars[:, 0], \
             matched_catalog_stars[:, 1], max_jd, platepar)
 
         img_y = image_stars[:, 0]
@@ -382,7 +382,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
     ra_catalog, dec_catalog, mag_catalog = extracted_catalog.T
 
     # Compute image positions of all catalog stars that should be on the image
-    x_catalog, y_catalog = raDecToXYPP(ra_catalog, dec_catalog, max_jd, platepar)
+    x_catalog, y_catalog = raDecToXYPP_iter(ra_catalog, dec_catalog, max_jd, platepar)
 
     # Filter all catalog stars outside the image
     temp_arr = np.c_[x_catalog, y_catalog, mag_catalog]

@@ -65,7 +65,7 @@ import json
 from RMS.Formats.CALSTARS import readCALSTARS
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector, raDec2AltAz
 from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt, jd2Date
-from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
+from RMS.Astrometry.ApplyAstrometry import raDecToXYPP_iter
 from RMS.Logger import getLogger
 from RMS.Math import angularSeparationVect, angularSeparationDeg
 from RMS.Formats.FFfile import convertFRNameToFF, getMiddleTimeFF
@@ -3235,7 +3235,7 @@ def calstarRaDecToDict(data_dir_path, config, pp, pp_recal_json, r_target, d_tar
                     path_to_ff = None
 
 
-            x_from_radec_arr, y_from_radec_arr = raDecToXYPP(np.array([r]), np.array([d]), np.array([j]), pp)
+            x_from_radec_arr, y_from_radec_arr = raDecToXYPP_iter(np.array([r]), np.array([d]), np.array([j]), pp)
             x_from_radec, y_from_radec = x_from_radec_arr[0], y_from_radec_arr[0]
             if centre_on_calstar_coords:
                 x_centre, y_centre = round(x), round(y)
@@ -3493,7 +3493,7 @@ def plateparFitsContainsRaDec(r, d, source_pp, file_name, mask_dir, check_mask=T
     if angle_from_centre > max(source_pp.fov_h, source_pp.fov_v) / 2:
         return False, 0, 0
 
-    source_x, source_y = raDecToXYPP(r_array, d_array, source_JD, source_pp)
+    source_x, source_y = raDecToXYPP_iter(r_array, d_array, source_JD, source_pp)
     source_x, source_y = round(source_x[0]), round(source_y[0])
 
     if 0 < source_x < source_pp.X_res and 0 < source_y < source_pp.Y_res:

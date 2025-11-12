@@ -267,7 +267,7 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
 
         # Take those catalog stars which should be inside the FOV
         ra_catalog, dec_catalog, _ = catalog_stars[filtered_indices].T
-        catalog_xy = ApplyAstrometry.raDecToXYPP(ra_catalog, dec_catalog, jd, platepar)
+        catalog_xy = ApplyAstrometry.raDecToXYPP_iter(ra_catalog, dec_catalog, jd, platepar)
 
         catalog_x, catalog_y = catalog_xy
         catalog_xy = np.c_[catalog_x, catalog_y]

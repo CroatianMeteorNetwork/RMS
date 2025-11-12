@@ -4,7 +4,7 @@ from __future__ import print_function, division, absolute_import
 
 import numpy as np
 
-from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, computeFOVSize, getFOVSelectionRadius
+from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP_iter, computeFOVSize, getFOVSelectionRadius
 from RMS.Astrometry.Conversions import jd2Date, apparentAltAz2TrueRADec, trueRaDec2ApparentAltAz
 from RMS.Math import angularSeparation
 
@@ -111,7 +111,7 @@ def addEquatorialGrid(plt_handle, platepar, jd):
         for ra_grid_plot, dec_grid_plot in zip(ra_grid_plot_list, dec_grid_plot_list):
 
             # Compute image coordinates for every grid celestial parallel
-            x_grid, y_grid = raDecToXYPP(ra_grid_plot, dec_grid_plot, jd, platepar)
+            x_grid, y_grid = raDecToXYPP_iter(ra_grid_plot, dec_grid_plot, jd, platepar)
 
             # Plot the grid
             plt_handle.plot(x_grid, y_grid, color='w', alpha=0.2, zorder=2, linewidth=0.5, linestyle='dotted')
@@ -140,7 +140,7 @@ def addEquatorialGrid(plt_handle, platepar, jd):
         dec_grid_plot = dec_grid_plot[filter_arr]
 
         # Compute image coordinates for every grid celestial parallel
-        x_grid, y_grid = raDecToXYPP(ra_grid_plot, dec_grid_plot, jd, platepar)
+        x_grid, y_grid = raDecToXYPP_iter(ra_grid_plot, dec_grid_plot, jd, platepar)
 
         # # Filter out everything outside the FOV
         # filter_arr = (x_grid >= 0) & (x_grid <= platepar.X_res) & (y_grid >= 0) & (y_grid <= platepar.Y_res)
@@ -225,7 +225,7 @@ def updateRaDecGrid(grid, platepar):
 
 
         # Compute image coordinates for every grid celestial parallel
-        x_grid, y_grid = raDecToXYPP(ra_grid_plot, dec_grid_plot, platepar.JD, platepar)
+        x_grid, y_grid = raDecToXYPP_iter(ra_grid_plot, dec_grid_plot, platepar.JD, platepar)
 
         # Filter out all points outside the image
         filter_arr = (x_grid >= 0) & (x_grid <= platepar.X_res) & (y_grid >= 0) & (y_grid <= platepar.Y_res)
@@ -256,7 +256,7 @@ def updateRaDecGrid(grid, platepar):
         dec_grid_plot = dec_grid_plot[filter_arr]
 
         # Compute image coordinates for every grid celestial parallel
-        x_grid, y_grid = raDecToXYPP(ra_grid_plot, dec_grid_plot, platepar.JD, platepar)
+        x_grid, y_grid = raDecToXYPP_iter(ra_grid_plot, dec_grid_plot, platepar.JD, platepar)
 
         # Filter out points outside the image
         filter_arr = (x_grid >= 0) & (x_grid <= platepar.X_res) & (y_grid >= 0) & (y_grid <= platepar.Y_res)
@@ -283,7 +283,7 @@ def updateRaDecGrid(grid, platepar):
 
 
     # Compute image coordinates of the horizon
-    x_horiz, y_horiz = raDecToXYPP(ra_horiz_plot, dec_horiz_plot, platepar.JD, platepar)
+    x_horiz, y_horiz = raDecToXYPP_iter(ra_horiz_plot, dec_horiz_plot, platepar.JD, platepar)
 
     # Filter out all horizon points outside the image
     filter_arr = (x_horiz >= 0) & (x_horiz <= platepar.X_res) & (y_horiz >= 0) & (y_horiz <= platepar.Y_res)
@@ -375,7 +375,7 @@ def updateAzAltGrid(grid, platepar):
         # Compute image coordinates
         ra_grid_plot, dec_grid_plot = apparentAltAz2TrueRADec(az_grid_plot, alt_grid_plot, platepar.JD, \
             platepar.lat, platepar.lon, platepar.refraction)
-        x_grid, y_grid = raDecToXYPP(ra_grid_plot, dec_grid_plot, platepar.JD, platepar)
+        x_grid, y_grid = raDecToXYPP_iter(ra_grid_plot, dec_grid_plot, platepar.JD, platepar)
 
         # Filter out all points outside the image
         filter_arr = (x_grid >= 0) & (x_grid <= platepar.X_res) & (y_grid >= 0) & (y_grid <= platepar.Y_res)
@@ -406,7 +406,7 @@ def updateAzAltGrid(grid, platepar):
         # Compute image coordinates
         ra_grid_plot, dec_grid_plot = apparentAltAz2TrueRADec(az_grid_plot, alt_grid_plot, platepar.JD, \
             platepar.lat, platepar.lon, platepar.refraction)
-        x_grid, y_grid = raDecToXYPP(ra_grid_plot, dec_grid_plot, platepar.JD, platepar)
+        x_grid, y_grid = raDecToXYPP_iter(ra_grid_plot, dec_grid_plot, platepar.JD, platepar)
 
         
         # Filter out all points outside the image

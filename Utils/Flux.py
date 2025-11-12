@@ -34,7 +34,7 @@ log = getLogger("logger")
 
 from RMS.Astrometry.ApplyAstrometry import (
     getFOVSelectionRadius,
-    raDecToXYPP,
+    raDecToXYPP_iter,
     xyToRaDecPP,
 )
 from RMS.Astrometry.ApplyRecalibrate import applyRecalibrate, loadRecalibratedPlatepar, recalibrateSelectedFF
@@ -1116,7 +1116,7 @@ def detectMoon(file_list, platepar, config):
         else:
 
             # Compute X, Y coordinates of the Moon in the image
-            x, y = raDecToXYPP(
+            x, y = raDecToXYPP_iter(
                 np.array([np.degrees(m.ra)]),
                 np.array([np.degrees(m.dec)]),
                 datetime2JD(o.date.datetime()),
@@ -1516,7 +1516,7 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
             )
 
             # Compute catalog stars in X, Y coordinates and filter out in X, Y
-            x, y = raDecToXYPP(ra_catalog[inside], dec_catalog[inside], jd, platepar)
+            x, y = raDecToXYPP_iter(ra_catalog[inside], dec_catalog[inside], jd, platepar)
             mag = mag[inside]
 
             # Skip if there are no stars inside

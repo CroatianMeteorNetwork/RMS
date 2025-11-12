@@ -11,7 +11,7 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import RMS.ConfigReader as cr
-from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP
+from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP_iter
 from RMS.Astrometry.Conversions import date2JD, jd2Date
 from RMS.Formats.FFfile import validFFName, getMiddleTimeFF
 from RMS.Formats.FFfile import read as readFF
@@ -398,7 +398,7 @@ def stackFrame(ff_name, recalibrated_platepars, mask, border, pp_ref, img_size, 
         len(x_coords) * [getMiddleTimeFF(ff_basename, conf.fps, ret_milliseconds=True)], x_coords, y_coords,
         len(x_coords) * [1], pp_temp, extinction_correction=False, precompute_pointing_corr=True)
     # Map sky coordinates to stack image coordinates
-    stack_x, stack_y = raDecToXYPP(ra_coords, dec_coords, jd_middle, pp_stack)
+    stack_x, stack_y = raDecToXYPP_iter(ra_coords, dec_coords, jd_middle, pp_stack)
 
     # Round pixel coordinates
     stack_x = np.round(stack_x, decimals=0).astype(int)

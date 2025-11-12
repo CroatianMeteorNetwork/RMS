@@ -2120,6 +2120,9 @@ class SettingsWidget(QtWidgets.QWidget):
     sigMeasGroundPointsToggled = QtCore.pyqtSignal()
     sigInvertToggled = QtCore.pyqtSignal()
     sigAutoPanToggled = QtCore.pyqtSignal()
+    sigLivePhotometryToggled = QtCore.pyqtSignal()
+    sigCoverageGridToggled = QtCore.pyqtSignal()
+    sigCoverageGridSizeChanged = QtCore.pyqtSignal(int)
     sigGridToggled = QtCore.pyqtSignal()
     sigSelStarsToggled = QtCore.pyqtSignal()
     sigPicksToggled = QtCore.pyqtSignal()
@@ -2206,6 +2209,33 @@ class SettingsWidget(QtWidgets.QWidget):
         self.autopan_chk.setChecked(False)
         vbox.addWidget(self.autopan_chk)
 
+        self.live_photometry_chk = QtWidgets.QCheckBox('Live Photometry Updates')
+        self.live_photometry_chk.released.connect(self.sigLivePhotometryToggled.emit)
+        self.live_photometry_chk.setChecked(True)  # Default ON
+        vbox.addWidget(self.live_photometry_chk)
+
+        # Coverage grid controls
+        self.coverage_grid_chk = QtWidgets.QCheckBox('Show Coverage Grid')
+        self.coverage_grid_chk.released.connect(self.sigCoverageGridToggled.emit)
+        self.coverage_grid_chk.setChecked(False)  # Default OFF
+        vbox.addWidget(self.coverage_grid_chk)
+
+        coverage_grid_hbox = QtWidgets.QHBoxLayout()
+        coverage_grid_label = QtWidgets.QLabel('Grid size:')
+        coverage_grid_hbox.addWidget(coverage_grid_label)
+
+        self.coverage_grid_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.coverage_grid_slider.setMinimum(2)
+        self.coverage_grid_slider.setMaximum(20)
+        self.coverage_grid_slider.setValue(5)  # Default 5x5 grid
+        self.coverage_grid_slider.setToolTip("Adjust coverage grid density")
+        self.coverage_grid_slider.valueChanged.connect(self.sigCoverageGridSizeChanged.emit)
+        coverage_grid_hbox.addWidget(self.coverage_grid_slider)
+
+        self.coverage_grid_value_label = QtWidgets.QLabel('5x5')
+        self.coverage_grid_value_label.setMinimumWidth(35)
+        coverage_grid_hbox.addWidget(self.coverage_grid_value_label)
+        vbox.addLayout(coverage_grid_hbox)
 
         self.meas_ground_points = QtWidgets.QCheckBox('Measure ground points')
         self.meas_ground_points.released.connect(self.sigMeasGroundPointsToggled.emit)
