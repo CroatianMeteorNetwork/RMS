@@ -10,7 +10,7 @@ from RMS.Logger import getLogger
 from RMS.Misc import RmsDateTime
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 # Sun altitude (in degrees) that defines the switch point.
 # Negative numbers mean the Sun is below the horizon.

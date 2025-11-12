@@ -13,7 +13,7 @@ import RMS.ConfigReader as cr
 from RMS.Logger import getLogger
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 def runExternalScript(captured_night_dir, archived_night_dir, config):
@@ -95,7 +95,7 @@ if __name__ == "__main__":
 
     ######
     # Start log to stdout
-    log = getLogger("logger", stdout=True)
+    log = getLogger("rmslogger", stdout=True)
 
     # Load config file
     if cml_args.config is None:

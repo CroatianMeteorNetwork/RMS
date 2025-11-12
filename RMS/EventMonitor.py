@@ -84,7 +84,7 @@ import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz
 
-log = getLogger("logger")
+log = getLogger("rmslogger")
 EM_RAISE = False
 
 """

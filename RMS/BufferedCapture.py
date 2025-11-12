@@ -50,7 +50,7 @@ from RMS.CaptureModeSwitcher import switchCameraMode
 import Utils.CameraControl as cc
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 if sys.version_info[0] < 3:
     # py2
@@ -2323,7 +2323,7 @@ if __name__ == "__main__":
     log_manager.initLogging(config)
 
     # Get the logger handle
-    log = getLogger("logger")
+    log = getLogger("rmslogger")
 
     # Print the kind of media backend
     print("Station code: {}".format(config.stationID))

@@ -32,7 +32,7 @@ from RMS.UploadManager import getSSHAndSFTP, existsRemoteDirectory, createRemote
 
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 

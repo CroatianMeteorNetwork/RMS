@@ -36,7 +36,7 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog
 
 
-log = getLogger('logger')
+log = getLogger('rmslogger')
 
 
 def addPoint(img, xc, yc, radius):
@@ -388,7 +388,7 @@ if __name__ == "__main__":
     log_manager.initLogging(config, 'fftalign_')
 
     # Get the logger handle
-    log = getLogger("logger", level="INFO")
+    log = getLogger("rmslogger", level="INFO")
 
     # Get a list of files in the night folder
     file_list = os.listdir(dir_path)

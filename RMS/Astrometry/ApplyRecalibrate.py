@@ -42,7 +42,8 @@ from RMS.Misc import RmsDateTime
 RECALIBRATE_NEIGHBOURHOOD_SIZE = 3
 
 # Get the logger from the main module
-log = getLogger("logger", level="INFO")
+log = getLogger("rmslogger", level="INFO")
+
 
 def loadRecalibratedPlatepar(dir_path, config, file_list=None, type='meteor'):
     """
@@ -1292,7 +1293,7 @@ if __name__ == "__main__":
     log_manager.initLogging(config, 'recalibrate_', safedir=dir_path)
 
     # Get the logger handle
-    log = getLogger("logger", level="INFO")
+    log = getLogger("rmslogger", level="INFO")
 
     # Run the recalibration and recomputation
     applyRecalibrate(ftpdetectinfo_path, config, load_all=cml_args.all, generate_ufoorbit=(not cml_args.skipuforbit))

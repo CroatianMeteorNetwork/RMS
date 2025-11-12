@@ -41,7 +41,7 @@ from RMS.CompressionCy import compressFrames
 
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 class Compressor(multiprocessing.Process):

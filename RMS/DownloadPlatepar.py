@@ -13,7 +13,7 @@ from RMS.Misc import RmsDateTime
 from RMS.UploadManager import getSSHAndSFTP
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 

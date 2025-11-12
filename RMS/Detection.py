@@ -63,7 +63,7 @@ VERBOSE_DEBUG = False
 
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 
@@ -1742,7 +1742,7 @@ if __name__ == "__main__":
     log_manager = LoggingManager()
     log_manager.initLogging(config, 'detection_', safedir=os.path.dirname(cml_args.dir_path[0]))
 
-    log = getLogger("logger")
+    log = getLogger("rmslogger")
 
     ######
 

@@ -33,7 +33,7 @@ if sys.version_info[0] < 3:
     FileNotFoundError = IOError
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = logging.getLogger("rmslogger")
 
 
 def existsRemoteDirectory(sftp,path):
