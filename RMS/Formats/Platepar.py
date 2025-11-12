@@ -576,7 +576,9 @@ class Platepar(object):
             img_x, img_y, _ = img_stars.T
 
             # Get image coordinates of catalog stars
-            catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(catalog_stars, jd, pp_copy)
+            # Use non-iterative (raDecToXYPP) to actually test the rev polynomials
+            catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(catalog_stars, jd, pp_copy,
+                                                                               use_iterative=False)
 
             # Calculate the sum of squared distances between image stars and catalog stars, per every
             #   dimension
@@ -2005,7 +2007,7 @@ if __name__ == "__main__":
         )
 
         # Map back to X, Y
-        x_data, y_data = RMS.Astrometry.ApplyAstrometry.raDecToXYPP(ra_data, dec_data, jd_data[0], pp)
+        x_data, y_data = RMS.Astrometry.ApplyAstrometry.raDecToXYPP_iter(ra_data, dec_data, jd_data[0], pp)
 
         # Map forward to sky again
         _, ra_data_rev, dec_data_rev, _ = RMS.Astrometry.ApplyAstrometry.xyToRaDecPP(
