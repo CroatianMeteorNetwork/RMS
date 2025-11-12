@@ -669,6 +669,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.mode_list = ['skyfit', 'manualreduction']
         self.max_pixels_between_matched_stars = np.inf
         self.autopan_mode = False
+        self.live_photometry_mode = True  # Default: ON for visual feedback
+        self.coverage_grid_enabled = False  # Default: OFF
+        self.coverage_grid_size = 5  # Default: 5x5 grid
+        self.coverage_grid_cells = []  # Store QGraphicsRectItem objects
         self.input_path = input_path
         if os.path.isfile(self.input_path):
             self.dir_path = os.path.dirname(self.input_path)
@@ -854,6 +858,12 @@ class PlateTool(QtWidgets.QMainWindow):
             self.setupUI()
 
 
+    def closeEvent(self, event):
+        """ Handle window close event to properly exit application. """
+        event.accept()
+        QtWidgets.QApplication.quit()
+
+
     def setFPS(self):
         """ Update the FPS if it's forced. """
 
@@ -954,6 +964,21 @@ class PlateTool(QtWidgets.QMainWindow):
         # Multi-image calibration status label
         self.multi_image_status_label = QtWidgets.QLabel('Picks: 0 stars')
         self.status_bar.addPermanentWidget(self.multi_image_status_label)
+
+        # Image navigation slider (like a video timeline)
+        self.image_navigation_label = QtWidgets.QLabel('Image: 1 / 1')
+        self.image_navigation_label.setMinimumWidth(80)
+        self.status_bar.addPermanentWidget(self.image_navigation_label)
+
+        self.image_navigation_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.image_navigation_slider.setMinimum(1)
+        self.image_navigation_slider.setMaximum(1)
+        self.image_navigation_slider.setValue(1)
+        self.image_navigation_slider.setMinimumWidth(200)
+        self.image_navigation_slider.setMaximumWidth(400)
+        self.image_navigation_slider.setToolTip("Drag or click to navigate through images")
+        self.image_navigation_slider.valueChanged.connect(self.jumpToImage)
+        self.status_bar.addPermanentWidget(self.image_navigation_slider)
 
         self.nextstar_button = QtWidgets.QPushButton('SkyFit')
         self.nextstar_button.pressed.connect(lambda: self.nextstar())
@@ -1170,7 +1195,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.star_pick_info_text_str += "CTRL + Z - Fit stars\n"
         self.star_pick_info_text_str += "CTRL + SHIFT + Z - Fit with initial distortion params set to 0\n"
         self.star_pick_info_text_str += "L - Astrometry fit plot\n"
-        self.star_pick_info_text_str += "P - Photometry fit plot"
+        self.star_pick_info_text_str += "P - Photometry fit plot\n"
+        self.star_pick_info_text_str += "CTRL + P - Toggle live photometry updates"
         self.star_pick_info = TextItem(self.star_pick_info_text_str, anchor=(0.0, 0.75), color=(0, 0, 0), fill=(255, 255, 255, 100))
         self.star_pick_info.setFont(QtGui.QFont('monospace', 8))
         self.star_pick_info.setAlign(QtCore.Qt.AlignLeft)
@@ -1347,6 +1373,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigGridToggled.connect(self.onGridChanged)
         self.tab.settings.sigInvertToggled.connect(self.toggleInvertColours)
         self.tab.settings.sigAutoPanToggled.connect(self.toggleAutoPan)
+        self.tab.settings.sigLivePhotometryToggled.connect(self.toggleLivePhotometry)
+        self.tab.settings.sigCoverageGridToggled.connect(self.toggleCoverageGrid)
+        self.tab.settings.sigCoverageGridSizeChanged.connect(self.updateCoverageGridSize)
         self.tab.settings.sigSingleClickPhotometryToggled.connect(self.toggleSingleClickPhotometry)
 
         layout.addWidget(self.tab, 0, 2)
@@ -1369,6 +1398,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.show()
 
         self.updateLeftLabels()
+        self.updateImageNavigationDisplay()  # Initialize image navigation spinbox
         self.updateStars()
         self.updateDistortion()
         self.tab.param_manager.updatePlatepar()
@@ -1517,6 +1547,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.photometry()
 
         self.updateLeftLabels()
+        self.updateImageNavigationDisplay()  # Update image navigation for new station
         self.tab.debruijn.updateTable()
 
     def onRefractionChanged(self):
@@ -2011,9 +2042,13 @@ class PlateTool(QtWidgets.QMainWindow):
         self.centroid_star_markers.setData(pos=[])
         self.centroid_star_markers2.setData(pos=[])
 
-        # Draw photometry
-        if len(self.paired_stars) >= 2:
+        # Draw photometry (only if live updates enabled)
+        # When disabled, photometry is still calculated when fitting or when user presses 'P'
+        if self.live_photometry_mode and len(self.paired_stars) >= 2:
             self.photometry()
+
+        # Update coverage grid overlay
+        self.updateCoverageGrid()
 
         self.tab.param_manager.updatePairedStars(min_fit_stars=self.getMinFitStars())
 
@@ -2720,6 +2755,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         self.updateLeftLabels()
+        self.updateImageNavigationDisplay()
 
 
     def showFRBox(self):
@@ -2750,6 +2786,55 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
                 self.fr_box.hide()
 
+    def jumpToImage(self, image_num):
+        """ Jump directly to a specific image number (1-indexed).
+
+        Arguments:
+            image_num: [int] Target image number (1-indexed, 1 to total_images)
+        """
+        # Only works in skyfit mode with multiple images
+        if self.mode != 'skyfit':
+            return
+
+        # Check if we have a valid image handle with ff_list
+        if not hasattr(self.img_handle, 'ff_list'):
+            return
+
+        # Convert 1-indexed UI to 0-indexed internal
+        target_index = image_num - 1
+        current_index = self.img_handle.current_ff_index
+
+        # Calculate delta and navigate
+        delta = target_index - current_index
+        if delta != 0:
+            # Block signals to prevent recursive calls
+            self.image_navigation_slider.blockSignals(True)
+            self.nextImg(n=delta)
+            self.image_navigation_slider.blockSignals(False)
+
+    def updateImageNavigationDisplay(self):
+        """ Update the image navigation slider and label to show current position. """
+        # Only update if we have a multi-image handle with ff_list
+        if not hasattr(self.img_handle, 'ff_list'):
+            self.image_navigation_slider.hide()
+            self.image_navigation_label.hide()
+            return
+
+        # Show slider for multi-image inputs
+        self.image_navigation_slider.show()
+        self.image_navigation_label.show()
+
+        # Update bounds and current value
+        total_images = len(self.img_handle.ff_list)
+        current_index = self.img_handle.current_ff_index
+
+        self.image_navigation_slider.blockSignals(True)
+        self.image_navigation_slider.setMaximum(total_images)
+        self.image_navigation_slider.setValue(current_index + 1)  # 1-indexed display
+        self.image_navigation_slider.blockSignals(False)
+
+        # Update label text
+        self.image_navigation_label.setText(f'Image: {current_index + 1} / {total_images}')
 
     def saveState(self):
         """
@@ -3340,7 +3425,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
                         self.updatePairedStars()
                         self.updateFitResiduals()
-                        self.photometry()
+                        # Photometry already handled in updatePairedStars() if live updates enabled
 
             # Add centroid in manual reduction
             else:
@@ -4016,7 +4101,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
             # Toggle showing detected stars
-            elif event.key() == QtCore.Qt.Key_C:
+            elif event.key() == QtCore.Qt.Key_C and modifiers != QtCore.Qt.ControlModifier:
                 self.toggleShowCalStars()
                 self.tab.settings.updateShowCalStars()
                 # updates image automatically
@@ -4125,6 +4210,11 @@ class PlateTool(QtWidgets.QMainWindow):
                     # If the ESC is pressed when the star has been centroided, reset the centroid
                     self.resetStarPick()
                     self.updatePairedStars()
+
+            # Toggle live photometry updates
+            elif event.key() == QtCore.Qt.Key_P and modifiers == QtCore.Qt.ControlModifier:
+                self.toggleLivePhotometry()
+                self.tab.settings.live_photometry_chk.setChecked(self.live_photometry_mode)
 
             # Show the photometry plot
             elif event.key() == QtCore.Qt.Key_P and not modifiers == QtCore.Qt.ControlModifier:
@@ -4438,9 +4528,94 @@ class PlateTool(QtWidgets.QMainWindow):
         self.img.autopan()
         self.autopan_mode = not self.autopan_mode
 
+    def toggleLivePhotometry(self):
+        """ Toggle live photometry updates during star picking. """
+
+        self.live_photometry_mode = not self.live_photometry_mode
+
+        # If turning it back on, run photometry once to update displays
+        if self.live_photometry_mode and len(self.paired_stars) >= 2:
+            self.photometry()
 
     def toggleSingleClickPhotometry(self):
         self.single_click_photometry = not self.single_click_photometry
+
+    def toggleCoverageGrid(self):
+        """ Toggle coverage grid display. """
+        self.coverage_grid_enabled = not self.coverage_grid_enabled
+        self.updateCoverageGrid()
+
+    def updateCoverageGridSize(self, grid_size):
+        """ Update coverage grid size and refresh display.
+
+        Arguments:
+            grid_size: [int] Number of divisions in X and Y (e.g., 5 for 5x5 grid)
+        """
+        self.coverage_grid_size = grid_size
+
+        # Update the label in the settings panel
+        self.tab.settings.coverage_grid_value_label.setText(f'{grid_size}x{grid_size}')
+
+        # Refresh the grid if it's enabled
+        if self.coverage_grid_enabled:
+            self.updateCoverageGrid()
+
+    def updateCoverageGrid(self):
+        """ Update the coverage grid overlay to show which cells have picked stars. """
+
+        # Clear existing grid cells
+        for cell in self.coverage_grid_cells:
+            self.img_frame.removeItem(cell)
+        self.coverage_grid_cells.clear()
+
+        # Only draw if enabled and we're in skyfit mode
+        if not self.coverage_grid_enabled or self.mode != 'skyfit':
+            return
+
+        # Check if image is loaded
+        if not hasattr(self, 'img') or self.img is None or self.img.data is None:
+            return
+
+        # Get image dimensions
+        # Note: In this coordinate system, x corresponds to shape[0] and y to shape[1]
+        # Based on coordinate ranges, shape[0] is the x range (width) and shape[1] is y range (height)
+        img_x_max, img_y_max = self.img.data.shape[:2]
+
+        # Calculate cell dimensions
+        cell_x = img_x_max / self.coverage_grid_size
+        cell_y = img_y_max / self.coverage_grid_size
+
+        # Get all picked star positions
+        star_positions = []
+        for x, y, _ in self.paired_stars.imageCoords(draw=False):
+            star_positions.append((x, y))
+
+        # Create grid and check which cells have stars
+        for x_idx in range(self.coverage_grid_size):
+            for y_idx in range(self.coverage_grid_size):
+                # Calculate cell boundaries
+                x_min = x_idx * cell_x
+                x_max = (x_idx + 1) * cell_x
+                y_min = y_idx * cell_y
+                y_max = (y_idx + 1) * cell_y
+
+                # Check if any star falls in this cell
+                has_star = False
+                for star_x, star_y in star_positions:
+                    if x_min <= star_x < x_max and y_min <= star_y < y_max:
+                        has_star = True
+                        break
+
+                # Draw cell if it has a star
+                if has_star:
+                    # Create semi-transparent green rectangle
+                    # QGraphicsRectItem(x, y, width, height) where x,y are top-left corner
+                    rect = QtWidgets.QGraphicsRectItem(x_min, y_min, cell_x, cell_y)
+                    rect.setPen(pg.mkPen((0, 255, 0, 80), width=1))
+                    rect.setBrush(pg.mkBrush((0, 255, 0, 40)))
+                    rect.setZValue(1)  # Below markers but above image
+                    self.img_frame.addItem(rect)
+                    self.coverage_grid_cells.append(rect)
 
 
     def updateMeasurementRefractionCorrection(self):
@@ -5658,6 +5833,11 @@ class PlateTool(QtWidgets.QMainWindow):
             without the distortion, then just the distortion parameters, then all together.
 
         """
+
+        # Always compute photometry before fitting (needed for residual display)
+        # This runs regardless of live_photometry_mode flag
+        if len(self.paired_stars) >= 2:
+            self.photometry()
 
         # Auto-detect multi-image mode: if we have picks from multiple images, use multi-image fit
         if isinstance(self.paired_stars, MultiImagePairedStars) and \
