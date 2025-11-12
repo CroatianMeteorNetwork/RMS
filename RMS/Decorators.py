@@ -102,3 +102,48 @@ class memoizeSingle(object):
     def key(self, args, kwargs):
         a = self.normalize_args(args, kwargs)
         return tuple(sorted(a.items()))
+    
+
+
+class memoizeManualKeyCache:
+    """ A decorator that caches the result of a function call using a manually provided 'key' argument.
+    """
+    def __init__(self, func):
+        self.original_function = func
+        self.cache = {}
+
+        # This preserves the original function's name, docstring, etc.
+        functools.update_wrapper(self, func)
+
+    def __call__(self, key, *args, **kwargs):
+        """ The wrapper logic that's executed on function call.
+        Note: The decorated function's new signature is (key, *args, **kwargs).
+        """
+
+        # Check if the result is already in the cache
+        if key in self.cache:
+
+            # print(f"Cache HIT for key: '{key}'") # Uncomment for debugging
+
+            return self.cache[key]
+
+        # If not, run the original function
+        # print(f"Cache MISS for key: '{key}'") # Uncomment for debugging
+        result = self.original_function(*args, **kwargs)
+        
+        # Store the result in the cache
+        self.cache[key] = result
+        return result
+
+    def clearCache(self):
+        """
+        Clears the entire cache.
+        """
+
+        print("--- Cache Cleared ---")
+        self.cache.clear()
+
+    def getCache(self):
+        """ Helper to inspect the cache. """
+
+        return self.cache

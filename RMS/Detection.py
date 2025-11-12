@@ -22,6 +22,7 @@ import datetime
 import sys, os
 import ctypes
 import traceback
+import logging
 
 import numpy as np
 import numpy.ctypeslib as npct
@@ -58,10 +59,6 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 import RMS.Routines.MorphCy as morph
 from RMS.Routines.BinImageCy import binImage
 
-# If True, all detection details will be logged
-VERBOSE_DEBUG = False
-
-
 # Get the logger from the main module
 log = getLogger("logger")
 
@@ -70,11 +67,8 @@ log = getLogger("logger")
 def logDebug(*log_str):
     """ Log detection debug messages. """
 
-    if VERBOSE_DEBUG:
-
-        log_str = map(str, log_str)
-
-        log.debug(" ".join(log_str))
+    log_str = map(str, log_str)
+    log.debug(" ".join(log_str))
 
 
 
@@ -103,7 +97,7 @@ def getPolarLine(x1, y1, x2, y2, img_h, img_w):
 
     # Calculate polar line coordinates
     theta = -np.arctan2(dx, dy)
-    rho = (dy * x0 - dx * y0 + x2*y1 - y2*x1) / np.sqrt(dy**2 + dx**2)
+    rho = (dy*x0 - dx*y0 + x2*y1 - y2*x1) / np.sqrt(dy**2 + dx**2)
     
     # Correct for quadrant
     if rho > 0:
@@ -400,10 +394,12 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         max_lines: [int] maximum number of lines to find by KHT
         max_white_ratio: [float] max ratio between write and all pixels after thresholding
         kht_lib_path: [string] path to the compiled KHT library
+
+    Keyword arguments:
         mask: [MaskStruct] Mask structure.
         flat_struct: [FlatStruct]  Flat frame structure.
         dark: [ndarray] Dark frame.
-
+        debug: [bool] If True, print debug information and show debug images.
     
     Return:
         [list] a list of all found lines
@@ -430,13 +426,13 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
     if img_handle.input_type == 'ff':
 
         # Threshold the FF
-        img_thres = thresholdFF(img_handle.ff, k1, j1, mask=mask)
+        ff_thresh = thresholdFF(img_handle.ff, k1, j1, mask=mask)
 
         # # Show thresholded image
-        # show("thresholded ALL", img_thres)
+        # showImage("thresholded ALL", ff_thresh, convert_to_uint8=True)
 
         # Check if there are too many threshold passers, if so report that no lines were found
-        if not checkWhiteRatio(img_thres, img_handle.ff, max_white_ratio):
+        if not checkWhiteRatio(ff_thresh, img_handle.ff, max_white_ratio):
             return line_results
 
 
@@ -451,7 +447,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         if img_handle.input_type == 'ff':
             
             # Select the time range of the thresholded image
-            img = FFfile.selectFFFrames(img_thres, img_handle.ff, frame_min, frame_max)
+            img_thresh = FFfile.selectFFFrames(ff_thresh, img_handle.ff, frame_min, frame_max)
 
 
         # If not, load a range of frames and threshold it
@@ -476,10 +472,10 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             img_handle = preprocessFF(img_handle, mask, flat_struct, dark)
 
             # Threshold the frame chunk
-            img = thresholdFF(img_handle.ff, k1, j1, mask=mask)
+            img_thresh = thresholdFF(img_handle.ff, k1, j1, mask=mask)
 
             # Check if there are too many threshold passers, if so report that no lines were found
-            if not checkWhiteRatio(img, img_handle.ff, max_white_ratio):
+            if not checkWhiteRatio(img_thresh, img_handle.ff, max_white_ratio):
                 continue
 
 
@@ -500,8 +496,12 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             # Adjust levels
             maxpixel_autolevel = Image.adjustLevels(maxpix_img, min_lvl, 1.0, max_lvl)
 
-            show2(str(frame_min) + "-" + str(frame_max) + " threshold", np.concatenate((maxpixel_autolevel, \
-                img.astype(maxpix_img.dtype)*(2**(maxpix_img.itemsize*8) - 1)), axis=1))
+            # showImage(str(frame_min) + "-" + str(frame_max) + " threshold", np.concatenate(
+            #         (
+            #             maxpixel_autolevel,
+            #             img_thresh.astype(maxpix_img.dtype)*(2**(maxpix_img.itemsize*8) - 1)
+            #         ), axis=1)
+            #     )
 
             ###
 
@@ -509,7 +509,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         # # Show maxpixel of the thresholded part
         # mask = np.zeros(shape=img.shape)
         # mask[np.where(img)] = 1
-        # show('thresh max', ff.maxpixel*mask)
+        # showImage('thresh max', ff.maxpixel*mask, convert_to_uint8=True)
 
         ### Apply morphological operations to prepare the image for KHT
 
@@ -519,19 +519,19 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             # 3 - close (Close surrounded pixels)
             # 4 - thin (Thin all lines to 1px width)
             # 1 - Remove lonely pixels
-        img = morph.morphApply(img, [1, 2, 3, 4, 1])
+        img_morph = morph.morphApply(img_thresh, [1, 2, 3, 4, 1])
 
 
-        if debug:
-            # Show morphed image
-            show(str(frame_min) + "-" + str(frame_max) + " morph", img)
+        # if debug:
+        #     # Show morphed image
+        #     showImage(str(frame_min) + "-" + str(frame_max) + " morph", img_morph, convert_to_uint8=True)
 
 
         # Get image shape
-        w, h = img.shape[1], img.shape[0]
+        w, h = img_morph.shape[1], img_morph.shape[0]
 
         # Convert the image to feed it into the KHT
-        img_flatten = (img.flatten().astype(np.byte)*255).astype(np.byte)
+        img_flatten = (img_morph.flatten().astype(np.byte)*255).astype(np.byte)
         
         # Predefine the line output
         lines = np.empty((max_lines, 2), np.double)
@@ -552,10 +552,32 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
                 frame_lines.append([rho, theta, frame_min, frame_max])
 
 
-        if debug:
-            if frame_lines:
-                plotLines(img_handle.ff, frame_lines)
+        # if debug:
+        #     if frame_lines:
+        #         plotLines(img_handle.ff, frame_lines)
 
+
+        if debug:
+            # Create a summary image showing: 
+            # a) Raw stack,
+            # b) Thresholded stack, 
+            # c) Morphological operations result, 
+            # d) KHT lines
+            img_summary = np.zeros((img_handle.ff.nrows*2, img_handle.ff.ncols*2), dtype=np.uint8)
+
+            # Merge the lines on the frame for plotting purposes
+            frame_lines = mergeLines(frame_lines, config.line_min_dist, img_handle.ff.ncols, img_handle.ff.nrows)
+
+            # Fill in the summary image (2x2 grid)
+            img_summary[:img_handle.ff.nrows, 0:img_handle.ff.ncols] = maxpixel_autolevel
+            img_summary[:img_handle.ff.nrows, img_handle.ff.ncols:img_handle.ff.ncols*2] = \
+                img_thresh.astype(maxpix_img.dtype)*(2**(maxpix_img.itemsize*8) - 1)
+            img_summary[img_handle.ff.nrows:img_handle.ff.nrows*2, 0:img_handle.ff.ncols] = \
+                img_morph.astype(np.uint8)*255
+            img_summary[img_handle.ff.nrows:img_handle.ff.nrows*2, img_handle.ff.ncols:img_handle.ff.ncols*2] = \
+                plotLines(img_handle.ff, frame_lines, show_image=False)
+
+            showImage(str(frame_min) + "-" + str(frame_max), img_summary)
 
     return line_results
 
@@ -855,25 +877,79 @@ def checkAngularVelocity(centroids, config):
 
 
 
-def show(name, img):
-    """ COnvert the given image to uint8 and show it. """
+import matplotlib.pyplot as plt
+import numpy as np
+import cv2
+import sys
 
-    cv2.imshow(name, img.astype(np.uint8)*255)
-    cv2.moveWindow(name, 0, 0)
-    cv2.waitKey(0)
-    cv2.destroyWindow(name)
+def showImage(name, img, convert_to_uint8=False):
+    """ 
+    Show the given image using matplotlib, mimicking cv2.imshow behavior.
+    Closes on 'Space' or 'Enter'. Exits program on 'Ctrl+C'.
+    """
 
+    if convert_to_uint8:
+        img_to_show = img.astype(np.uint8)*255
+    else:
+        img_to_show = img
 
+    img_height, img_width = img_to_show.shape[:2]
 
-def show2(name, img):
-    """ Show the given image. """
+    # Setup figure without toolbar
+    plt.rcParams['toolbar'] = 'None' 
+    fig, ax = plt.subplots()
 
-    cv2.imshow(name, img)
-    cv2.moveWindow(name, 0, 0)
-    cv2.waitKey(0)
-    cv2.destroyWindow(name)
+    # Set Dark Background
+    dark_gray = '#2A2A2A'  # slightly lighter than pure black for contrast
+    fig.patch.set_facecolor(dark_gray)
+    ax.set_facecolor(dark_gray)
+    
+    # Set window title
+    manager = fig.canvas.manager
+    if manager is not None:
+        manager.set_window_title(name)
 
+    # Configure Axes
+    ax.axis('off')
+    fig.subplots_adjust(left=0, right=1, bottom=0, top=1) # No margins
 
+    # Set appropriate aspect and display
+    if img_to_show.ndim == 2:
+        ax.imshow(img_to_show, cmap='gray', interpolation='nearest')
+    elif img_to_show.ndim == 3 and img_to_show.shape[2] == 3:
+        # Assume BGR if 3 channel, convert to RGB for matplotlib
+        ax.imshow(cv2.cvtColor(img_to_show, cv2.COLOR_BGR2RGB), interpolation='nearest')
+    else:
+        ax.imshow(img_to_show, interpolation='nearest')
+
+    # Handle DPI scaling for accurate window size if possible
+    dpi = fig.dpi
+    fig.set_size_inches(img_width / dpi, img_height / dpi, forward=True)
+
+    # Mutable state to track exit condition across the inner function scope
+    state = {'exit_program': False}
+
+    def _on_key(event):
+        # Check specifically for desired keys. 
+        # Matplotlib standardizes these names across backends.
+        if event.key in [' ', 'enter']:
+            plt.close(fig)
+        elif event.key == 'ctrl+c':
+            state['exit_program'] = True
+            plt.close(fig)
+        # Any other key is ignored by this handler
+
+    # Connect the handler
+    fig.canvas.mpl_connect('key_press_event', _on_key)
+
+    # Display and block until closed. 
+    # This allows standard OS window management (changing focus) to work correctly.
+    plt.show(block=True)
+
+    # Check if we need to kill the whole program
+    if state['exit_program']:
+        raise KeyboardInterrupt
+    
 
 def showAutoLevels(img):
 
@@ -892,7 +968,7 @@ def showAutoLevels(img):
 
 
 
-def plotLines(ff, line_list):
+def plotLines(ff, line_list, show_image=True):
     """ Plot lines on the image.
     """
 
@@ -926,8 +1002,12 @@ def plotLines(ff, line_list):
         y2 = int(y0 - 1000*(a) + hh)
         
         cv2.line(img, (x1, y1), (x2, y2), (max_lvl, 0, max_lvl), 1)
-        
-    show2("KHT", img)
+    
+    if show_image:
+        showImage("KHT", img)
+
+    return img
+
 
 
 
@@ -1186,7 +1266,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             # Extract (x, y, frame) of thresholded frames, i.e. pixel and frame locations of threshold passers
             t1 = time()
             xs, ys, zs = getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, \
-                mask, flat_struct, dark, debug=VERBOSE_DEBUG)
+                mask, flat_struct, dark, debug=True)
             
             logDebug('Time for thresholding and stripe extraction: {:.3f}'.format(time() - t1))
 
@@ -1632,6 +1712,9 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             # plt.show()
 
 
+    # Once detection is done on this data, clear the cache for the thresholding function
+    Image.thresholdImgMemoCache.clearCache()
+
     
     return meteor_detections
 
@@ -1738,9 +1821,14 @@ if __name__ == "__main__":
 
 
     ### Init the logger
+    if cml_args.debug:
+        console_level = logging.DEBUG
+    else:
+        console_level = logging.INFO
 
     log_manager = LoggingManager()
-    log_manager.initLogging(config, 'detection_', safedir=os.path.dirname(cml_args.dir_path[0]))
+    log_manager.initLogging(config, 'detection_', safedir=os.path.dirname(cml_args.dir_path[0]), 
+                            console_level=console_level)
 
     log = getLogger("logger")
 
@@ -1819,11 +1907,7 @@ if __name__ == "__main__":
 
     else:
         out_dir = main_dir
-
-
-    # If debug is on, enable debug logging
-    if cml_args.debug:
-        VERBOSE_DEBUG = True
+        
 
 
     # Load mask, dark, flat

@@ -34,7 +34,7 @@ except ImportError:
     pass
 
 
-from RMS.Decorators import memoizeSingle
+from RMS.Decorators import memoizeSingle, memoizeManualKeyCache
 
 # Cython init
 import pyximport
@@ -256,9 +256,9 @@ def applyThresholdNumpy(img_avg_sub, stdpixel, k1, j1):
 
 # Try importing Numba and define the Numba-optimized function if possible
 try:
-    from numba import njit
+    from numba import njit, prange
 
-    @njit
+    @njit(parallel=True, fastmath=True) # Enable multicore and faster math
     def applyThresholdNumba(img_avg_sub, stdpixel, k1, j1):
         """Apply thresholding to the image using Numba for JIT compilation.
         
@@ -270,14 +270,17 @@ try:
         """
 
         height, width = img_avg_sub.shape
-        img_thresh = np.zeros((height, width), dtype=np.bool_)
+        img_thresh = np.empty((height, width), dtype=np.uint8)
 
-        for i in range(height):
+        for i in prange(height): # Parallelize outer loop
             for j in range(width):
 
-                threshold = int(k1*stdpixel[i, j] + j1)
+                threshold = k1*stdpixel[i, j] + j1
 
-                img_thresh[i, j] = img_avg_sub[i, j] > threshold
+                if img_avg_sub[i, j] > threshold:
+                    img_thresh[i, j] = 1
+                else:
+                    img_thresh[i, j] = 0
 
         return img_thresh
 
@@ -346,6 +349,12 @@ def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False, mask=None, mask_ave_
 
     # The thresholded image is always 8 bit
     return img_thresh.astype(np.uint8)
+
+
+# This decorator caches the thresholded images based on their input parameters
+# In addition to the normal parameters, the first argument should be the key which is used a cache key
+# To reset the cache, call thresholdImgMemoCache.clearCache()
+thresholdImgMemoCache = memoizeManualKeyCache(thresholdImg)
 
 
 @memoizeSingle
