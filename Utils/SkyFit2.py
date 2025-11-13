@@ -15,11 +15,13 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+import matplotlib.cm as cm
 import scipy.optimize
 import pyqtgraph as pg
 import random
+import cv2
 
-from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP_iter, \
+from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, raDecToXYPP_iter, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
     extinctionCorrectionTrueToApparent, applyAstrometryFTPdetectinfo, getFOVSelectionRadius
@@ -29,7 +31,7 @@ from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2Apparent
 from RMS.Astrometry.AstrometryNet import astrometryNetSolve
 from RMS.Astrometry.FFTalign import alignPlatepar
 import RMS.ConfigReader as cr
-from RMS.ExtractStars import extractStarsAndSave
+from RMS.ExtractStars import extractStarsAndSave, extractStarsFF
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
 from RMS.Formats.FFfile import convertFRNameToFF, constructFFName
@@ -673,6 +675,24 @@ class PlateTool(QtWidgets.QMainWindow):
         self.coverage_grid_enabled = False  # Default: OFF
         self.coverage_grid_size = 5  # Default: 5x5 grid
         self.coverage_grid_cells = []  # Store QGraphicsRectItem objects
+        self.error_overlay_enabled = False  # Default: OFF for round-trip error overlay
+        self.error_overlay_item = None  # Store QGraphicsPixmapItem for error overlay
+        self.error_overlay_pixmap = None  # Cached pixmap for error overlay
+        self.error_overlay_stride = 20  # Compute error every N pixels for performance
+        self.error_overlay_threshold = 0.1  # Errors below this (px) are fully transparent
+        self.error_overlay_needs_update = True  # Flag to track if overlay needs recomputation
+        self.show_all_calstars_residuals = False  # Toggle for showing residuals of all detected stars
+        self.all_calstars_residuals = None  # Store residuals for all detected stars
+        self.all_calstars_residuals_threshold = 5.0  # Only show stars with matches within this threshold (px)
+
+        # Star detection override parameters
+        self.star_detection_override_enabled = False  # Use override parameters instead of CALSTARS
+        self.star_detection_override_data = {}  # Store re-detected stars per FF file
+        # Override parameters (initialized from config)
+        self.override_intensity_threshold = None
+        self.override_neighborhood_size = None
+        self.override_max_stars = None
+
         self.input_path = input_path
         if os.path.isfile(self.input_path):
             self.dir_path = os.path.dirname(self.input_path)
@@ -828,6 +848,8 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             print('Star catalog loaded: ', self.config.star_catalog_file)
 
+        # Initialize star detection override parameters from config
+        self.initStarDetectionOverrides()
 
         self.calstars = {}
         self.loadCalstars()
@@ -1252,6 +1274,12 @@ class PlateTool(QtWidgets.QMainWindow):
         self.img_frame.addItem(self.residual_lines_astro)
         self.residual_lines_astro.setZValue(2)
 
+        # All CALSTARS residuals (cyan, for all detected stars)
+        self.all_calstars_residual_lines = pg.PlotCurveItem(connect='pairs', pen=pg.mkPen((0, 255, 255),
+                                                                             style=QtCore.Qt.DotLine, width=1))
+        self.img_frame.addItem(self.all_calstars_residual_lines)
+        self.all_calstars_residual_lines.setZValue(1.5)
+
 
         # Text
         self.stdev_text_filter = 0
@@ -1376,6 +1404,11 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigLivePhotometryToggled.connect(self.toggleLivePhotometry)
         self.tab.settings.sigCoverageGridToggled.connect(self.toggleCoverageGrid)
         self.tab.settings.sigCoverageGridSizeChanged.connect(self.updateCoverageGridSize)
+        self.tab.settings.sigErrorOverlayToggled.connect(self.toggleErrorOverlay)
+        self.tab.settings.sigErrorOverlayThresholdChanged.connect(self.updateErrorOverlayThreshold)
+        self.tab.settings.sigShowAllCalstarsResidualsToggled.connect(self.toggleShowAllCalstarsResiduals)
+        self.tab.settings.sigAllCalstarsThresholdChanged.connect(self.updateAllCalstarsThreshold)
+        self.tab.settings.sigAutoPairStars.connect(self.autoPairStars)
         self.tab.settings.sigSingleClickPhotometryToggled.connect(self.toggleSingleClickPhotometry)
 
         layout.addWidget(self.tab, 0, 2)
@@ -1391,9 +1424,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.setMinimumSize(1200, 800)
 
-        # Open in full screen
-        self.showMaximized()
-
+        # Size window to 80% of screen dimensions to avoid resize-to-fullscreen issue
+        # while still working on any screen size
+        screen = QtWidgets.QApplication.primaryScreen().availableGeometry()
+        self.resize(int(screen.width() * 0.8), int(screen.height() * 0.8))
 
         self.show()
 
@@ -1528,6 +1562,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.detectInputType()
         self.catalog_stars = self.loadCatalogStars(self.config.catalog_mag_limit)
         self.cat_lim_mag = self.config.catalog_mag_limit
+        self.initStarDetectionOverrides()
         self.loadCalstars()
         self.loadPlatepar(update=True)
         print()
@@ -2050,6 +2085,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update coverage grid overlay
         self.updateCoverageGrid()
 
+        # Update error overlay
+        self.updateErrorOverlay()
+
         self.tab.param_manager.updatePairedStars(min_fit_stars=self.getMinFitStars())
 
 
@@ -2059,11 +2097,16 @@ class PlateTool(QtWidgets.QMainWindow):
         # Handle using FR files
         ff_name_c = convertFRNameToFF(self.img_handle.name())
 
-        # Check if the given FF files is in the calstars list
-        if ff_name_c in self.calstars:
-
-            # Get the stars detected on this FF file
+        # Use override data if enabled and available, otherwise use original CALSTARS
+        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
+            star_data = np.array(self.star_detection_override_data[ff_name_c])
+        elif ff_name_c in self.calstars:
             star_data = np.array(self.calstars[ff_name_c])
+        else:
+            star_data = None
+
+        # Check if we have star data to display
+        if star_data is not None and len(star_data) > 0:
 
             # Get star coordinates
             y = star_data[:, 0]
@@ -2220,6 +2263,276 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             self.residual_lines_img.clear()
             self.residual_lines_astro.clear()
+
+
+    def computeAllCalstarsResiduals(self):
+        """ Compute residuals for all detected CALSTARS by matching to nearest catalog star.
+
+        Returns a list of residuals, or None if computation cannot be performed.
+        Each residual entry is: [img_x, img_y, angle, distance, angular_distance, catalog_ra, catalog_dec]
+        """
+
+        # Check if we have a valid platepar fit
+        if self.platepar is None:
+            return None
+
+        # Get the FF name for the current image
+        ff_name_c = convertFRNameToFF(self.img_handle.name())
+
+        # Check if we have CALSTARS for this image
+        if ff_name_c not in self.calstars:
+            return None
+
+        # Get all detected stars for this image
+        star_data = np.array(self.calstars[ff_name_c])
+        if len(star_data) == 0:
+            return None
+
+        # Extract star coordinates (y, x, ...)
+        calstars_y = star_data[:, 0]
+        calstars_x = star_data[:, 1]
+
+        # Get image time
+        jd = date2JD(*self.img_handle.currentTime())
+        img_time = self.img_handle.currentTime()
+
+        # Convert all detected stars to RA/Dec
+        _, ra_detected, dec_detected, _ = xyToRaDecPP(
+            [img_time] * len(calstars_x),
+            calstars_x,
+            calstars_y,
+            np.ones_like(calstars_x),
+            self.platepar,
+            extinction_correction=False
+        )
+
+        # Get catalog stars in FOV
+        if not self.catalog_stars.any():
+            return None
+
+        # Filter catalog stars to those visible in the FOV
+        catalog_stars_filtered = []
+        for cat_star in self.catalog_stars:
+            ra, dec, mag = cat_star
+            # Check if star is in FOV by converting to XY
+            try:
+                x_cat, y_cat = raDecToXYPP(np.array([ra]), np.array([dec]), jd, self.platepar)
+                # Check if in image bounds
+                if (0 <= x_cat[0] <= self.platepar.X_res and
+                    0 <= y_cat[0] <= self.platepar.Y_res):
+                    catalog_stars_filtered.append(cat_star)
+            except:
+                continue
+
+        if len(catalog_stars_filtered) == 0:
+            return None
+
+        catalog_stars_filtered = np.array(catalog_stars_filtered)
+
+        # Compute residuals for each detected star
+        residuals = []
+
+        for i, (det_x, det_y, det_ra, det_dec) in enumerate(
+            zip(calstars_x, calstars_y, ra_detected, dec_detected)):
+
+            # Find nearest catalog star by angular distance
+            min_dist = float('inf')
+            nearest_cat_star = None
+
+            for cat_star in catalog_stars_filtered:
+                cat_ra, cat_dec, cat_mag = cat_star
+
+                # Compute angular distance
+                ang_dist = angularSeparation(
+                    np.radians(cat_ra), np.radians(cat_dec),
+                    np.radians(det_ra), np.radians(det_dec)
+                )
+
+                if ang_dist < min_dist:
+                    min_dist = ang_dist
+                    nearest_cat_star = cat_star
+
+            if nearest_cat_star is None:
+                continue
+
+            # Get catalog star position in image coordinates
+            cat_ra, cat_dec, cat_mag = nearest_cat_star
+            cat_x, cat_y = raDecToXYPP(np.array([cat_ra]), np.array([cat_dec]), jd, self.platepar)
+            cat_x, cat_y = cat_x[0], cat_y[0]
+
+            # Compute image residual
+            delta_x = cat_x - det_x
+            delta_y = cat_y - det_y
+
+            angle = np.arctan2(delta_y, delta_x)
+            distance = np.sqrt(delta_x**2 + delta_y**2)
+
+            # Angular distance in degrees
+            angular_distance = np.degrees(min_dist)
+
+            # Only include stars with matches within the threshold
+            if distance <= self.all_calstars_residuals_threshold:
+                residuals.append([det_x, det_y, angle, distance, angular_distance, cat_ra, cat_dec])
+
+        return residuals
+
+
+    def updateAllCalstarsResiduals(self):
+        """ Draw residual lines for all detected CALSTARS stars. """
+
+        if not self.show_all_calstars_residuals:
+            self.all_calstars_residual_lines.clear()
+            return
+
+        # Compute residuals
+        self.all_calstars_residuals = self.computeAllCalstarsResiduals()
+
+        if self.all_calstars_residuals is None or len(self.all_calstars_residuals) == 0:
+            self.all_calstars_residual_lines.clear()
+            return
+
+        x_pairs = []
+        y_pairs = []
+
+        # Plot the residuals (enlarge 100x, same as picked pairs)
+        res_scale = 100
+
+        for entry in self.all_calstars_residuals:
+            img_x, img_y, angle, distance, angular_distance, cat_ra, cat_dec = entry
+
+            ### Limit the distance to the edge of the image ###
+            ang_test = angle % (2*np.pi)
+
+            # Compute the angles of every corner relative to the point
+            ul_ang = np.arctan2(0 - img_y, 0 - img_x) % (2*np.pi)
+            ur_ang = np.arctan2(0 - img_y, self.platepar.X_res - img_x) % (2*np.pi)
+            ll_ang = np.arctan2(self.platepar.Y_res - img_y, 0 - img_x) % (2*np.pi)
+            lr_ang = np.arctan2(self.platepar.Y_res - img_y, self.platepar.X_res - img_x) % (2*np.pi)
+
+            # Locate the point in the correct quadrant and compute the distance to the edge
+            dist_side = distance
+            if (ang_test > ul_ang) and (ang_test < ur_ang):
+                # Upper side
+                dist_side = abs(img_y / np.cos(ang_test - 3/2*np.pi))
+            elif (ang_test > ur_ang) or (ang_test < lr_ang):
+                # Right side
+                dist_side = abs((self.platepar.X_res - img_x) / np.cos(ang_test))
+            elif (ang_test > lr_ang) and (ang_test < ll_ang):
+                # Bottom side
+                dist_side = abs((self.platepar.Y_res - img_y) / np.cos(ang_test - np.pi/2))
+            else:
+                # Left side
+                dist_side = abs(img_x / np.cos(ang_test - np.pi))
+
+            # Limit the distance for plotting to the side of the image
+            distance_plot = min([res_scale*distance, dist_side])
+
+            # Calculate coordinates of the end of the residual line
+            res_x = img_x + np.cos(angle)*distance_plot
+            res_y = img_y + np.sin(angle)*distance_plot
+
+            x_pairs.extend([img_x, res_x])
+            y_pairs.extend([img_y, res_y])
+
+        self.all_calstars_residual_lines.setData(x=np.array(x_pairs) + 0.5, y=np.array(y_pairs) + 0.5)
+
+
+    def autoPairStars(self, max_distance_px=None):
+        """ Automatically create picked pairs by matching detected stars to nearest catalog stars.
+
+        Keyword arguments:
+            max_distance_px: [float] Maximum distance in pixels for a match to be considered valid.
+                            If None, uses self.all_calstars_residuals_threshold.
+
+        Returns:
+            [int] Number of pairs created.
+        """
+
+        # Use the configured threshold if not specified
+        if max_distance_px is None:
+            max_distance_px = self.all_calstars_residuals_threshold
+
+        # Check if we have a valid platepar
+        if self.platepar is None:
+            print("No platepar available for auto-pairing")
+            return 0
+
+        # Compute residuals for all CALSTARS
+        residuals = self.computeAllCalstarsResiduals()
+
+        if residuals is None or len(residuals) == 0:
+            print("No CALSTARS residuals could be computed for auto-pairing")
+            return 0
+
+        # Get the FF name for the current image
+        ff_name_c = convertFRNameToFF(self.img_handle.name())
+
+        if ff_name_c not in self.calstars:
+            print(f"No CALSTARS data for {ff_name_c}")
+            return 0
+
+        star_data = np.array(self.calstars[ff_name_c])
+
+        # Get current image identifier and Julian Date for multi-image tracking
+        image_id = self.img_handle.name()
+        jd = date2JD(*self.img_handle.currentTime())
+
+        pairs_created = 0
+
+        for entry in residuals:
+            img_x, img_y, angle, distance, angular_distance, cat_ra, cat_dec = entry
+
+            # Only pair if distance is within threshold
+            if distance > max_distance_px:
+                continue
+
+            # Find the matching CALSTAR entry (has more data like FWHM, intensity, SNR, etc.)
+            # Match by position (within 0.5 pixel tolerance)
+            for star in star_data:
+                star_y, star_x = star[0], star[1]
+
+                if abs(star_x - img_x) < 0.5 and abs(star_y - img_y) < 0.5:
+                    # Found the matching star
+                    # Extract star properties from CALSTARS
+                    # CALSTARS format: y, x, intensity, fwhm (approximately)
+                    fwhm = star[3] if len(star) > 3 else 3.0
+                    intensity = star[2] if len(star) > 2 else 1000.0
+
+                    # Compute SNR (rough estimate)
+                    snr = intensity / 10.0 if intensity > 0 else 10.0
+                    saturated = False
+
+                    # Find the catalog star magnitude
+                    # Search for the catalog star that matches this RA/Dec
+                    cat_mag = 6.0  # Default magnitude
+                    for cat_star in self.catalog_stars:
+                        if abs(cat_star[0] - cat_ra) < 0.001 and abs(cat_star[1] - cat_dec) < 0.001:
+                            cat_mag = cat_star[2]
+                            break
+
+                    # Create catalog star pair object
+                    pair_obj = CatalogStar(cat_ra, cat_dec, cat_mag)
+
+                    # Add the pair to paired_stars
+                    self.paired_stars.addPair(
+                        star_x, star_y, fwhm, intensity, pair_obj,
+                        image_id=image_id, jd=jd,
+                        snr=snr, saturated=saturated
+                    )
+
+                    print(f"Auto-paired: ({star_x:.1f}, {star_y:.1f}) -> catalog RA={cat_ra:.4f}, Dec={cat_dec:.4f}, dist={distance:.2f}px")
+                    pairs_created += 1
+                    break
+
+        # Update the display
+        if pairs_created > 0:
+            self.updatePairedStars()
+            self.updateMultiImageStatus()
+            print(f"Auto-pairing complete: {pairs_created} pairs created (threshold: {max_distance_px:.1f}px)")
+        else:
+            print(f"Auto-pairing: No suitable pairs found within {max_distance_px:.1f}px threshold")
+
+        return pairs_created
 
 
     def updateDistortion(self):
@@ -2698,6 +3011,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.drawPhotometryColoring()
 
             self.updateStars()
+            self.updateAllCalstarsResiduals()
 
         # Manual reduction mode
         else:
@@ -4560,6 +4874,48 @@ class PlateTool(QtWidgets.QMainWindow):
         if self.coverage_grid_enabled:
             self.updateCoverageGrid()
 
+    def toggleErrorOverlay(self):
+        """ Toggle error overlay display. """
+        self.error_overlay_enabled = not self.error_overlay_enabled
+        self.updateErrorOverlay()
+
+    def updateErrorOverlayThreshold(self, threshold):
+        """ Update error overlay threshold and refresh display.
+
+        Arguments:
+            threshold: [float] Errors below this value (pixels) will be fully transparent
+        """
+        self.error_overlay_threshold = threshold
+        self.error_overlay_needs_update = True  # Force recomputation with new threshold
+
+        # Update the label in the settings panel
+        self.tab.settings.error_overlay_value_label.setText(f'{threshold:.2f} px')
+
+        # Refresh the overlay if it's enabled
+        if self.error_overlay_enabled:
+            self.updateErrorOverlay()
+
+    def toggleShowAllCalstarsResiduals(self):
+        """ Toggle display of residuals for all detected CALSTARS stars. """
+        self.show_all_calstars_residuals = not self.show_all_calstars_residuals
+        print(f"Show all CALSTARS residuals: {self.show_all_calstars_residuals}")
+        self.updateAllCalstarsResiduals()
+
+    def updateAllCalstarsThreshold(self, threshold):
+        """ Update all CALSTARS residuals threshold and refresh display.
+
+        Arguments:
+            threshold: [float] Only show stars with catalog matches within this distance (pixels)
+        """
+        self.all_calstars_residuals_threshold = threshold
+
+        # Update the label in the settings panel
+        self.tab.settings.all_calstars_threshold_label.setText(f'{threshold:.1f} px')
+
+        # Refresh the display if it's enabled
+        if self.show_all_calstars_residuals:
+            self.updateAllCalstarsResiduals()
+
     def updateCoverageGrid(self):
         """ Update the coverage grid overlay to show which cells have picked stars. """
 
@@ -4581,9 +4937,14 @@ class PlateTool(QtWidgets.QMainWindow):
         # Based on coordinate ranges, shape[0] is the x range (width) and shape[1] is y range (height)
         img_x_max, img_y_max = self.img.data.shape[:2]
 
-        # Calculate cell dimensions
-        cell_x = img_x_max / self.coverage_grid_size
-        cell_y = img_y_max / self.coverage_grid_size
+        # Calculate cell dimensions with corner cells centered on corners
+        # Grid origin offset by half cell naturally places corners at cell centers
+        if self.coverage_grid_size > 1:
+            cell_x = img_x_max / (self.coverage_grid_size - 1)
+            cell_y = img_y_max / (self.coverage_grid_size - 1)
+        else:
+            cell_x = img_x_max
+            cell_y = img_y_max
 
         # Get all picked star positions
         star_positions = []
@@ -4593,11 +4954,15 @@ class PlateTool(QtWidgets.QMainWindow):
         # Create grid and check which cells have stars
         for x_idx in range(self.coverage_grid_size):
             for y_idx in range(self.coverage_grid_size):
-                # Calculate cell boundaries
-                x_min = x_idx * cell_x
-                x_max = (x_idx + 1) * cell_x
-                y_min = y_idx * cell_y
-                y_max = (y_idx + 1) * cell_y
+                # Cell center at x_idx * cell_x (corners naturally at idx=0 and idx=N-1)
+                # Cell extends ±cell/2 from center (may extend beyond image - that's fine)
+                x_center = x_idx * cell_x
+                y_center = y_idx * cell_y
+
+                x_min = x_center - cell_x / 2
+                x_max = x_center + cell_x / 2
+                y_min = y_center - cell_y / 2
+                y_max = y_center + cell_y / 2
 
                 # Check if any star falls in this cell
                 has_star = False
@@ -4616,6 +4981,131 @@ class PlateTool(QtWidgets.QMainWindow):
                     rect.setZValue(1)  # Below markers but above image
                     self.img_frame.addItem(rect)
                     self.coverage_grid_cells.append(rect)
+
+
+    def updateErrorOverlay(self):
+        """ Update the round-trip error overlay to show platepar accuracy across the image. """
+
+        # Remove existing overlay
+        if self.error_overlay_item is not None:
+            self.img_frame.removeItem(self.error_overlay_item)
+            self.error_overlay_item = None
+
+        # Only draw if enabled and we're in skyfit mode
+        if not self.error_overlay_enabled or self.mode != 'skyfit':
+            return
+
+        # Check if image is loaded
+        if not hasattr(self, 'img') or self.img is None or self.img.data is None:
+            return
+
+        # Check if platepar has required data
+        if not hasattr(self.platepar, 'JD') or self.platepar.JD is None:
+            return
+
+        # Get image dimensions
+        img_x_max, img_y_max = self.img.data.shape[:2]
+
+        # If we have a cached pixmap and don't need to update, just redisplay it
+        if not self.error_overlay_needs_update and self.error_overlay_pixmap is not None:
+            self.error_overlay_item = QtWidgets.QGraphicsPixmapItem(self.error_overlay_pixmap)
+            self.error_overlay_item.setZValue(0.5)  # Between image (0) and grid (1)
+            self.img_frame.addItem(self.error_overlay_item)
+            return
+
+        # Create a grid for error computation
+        stride = self.error_overlay_stride
+        x_grid = np.arange(0, img_x_max, stride)
+        y_grid = np.arange(0, img_y_max, stride)
+
+        # Compute round-trip errors
+        error_grid = np.zeros((len(y_grid), len(x_grid)))
+
+        # Use platepar reference time for both directions to measure pure geometric accuracy
+        jd = self.platepar.JD
+        dt_tuple = jd2Date(jd)
+        time_data = dt_tuple  # (year, month, day, hour, minute, second, millisecond)
+
+        for i, y in enumerate(y_grid):
+            for j, x in enumerate(x_grid):
+                try:
+                    # Convert xy → RA/Dec
+                    _, ra_array, dec_array, _ = xyToRaDecPP(
+                        [time_data],
+                        [float(x)],
+                        [float(y)],
+                        [1],
+                        self.platepar,
+                        extinction_correction=False
+                    )
+
+                    ra = ra_array[0]
+                    dec = dec_array[0]
+
+                    # Convert RA/Dec → xy (using same time for true round-trip)
+                    x_recovered, y_recovered = raDecToXYPP(
+                        np.array([ra]),
+                        np.array([dec]),
+                        jd,
+                        self.platepar
+                    )
+                    x_recovered = x_recovered[0]
+                    y_recovered = y_recovered[0]
+
+                    # Compute error
+                    error = np.sqrt((x_recovered - x)**2 + (y_recovered - y)**2)
+                    error_grid[i, j] = error
+
+                except:
+                    # If computation fails, set error to 0 (transparent)
+                    error_grid[i, j] = 0
+
+        # Normalize errors for colormap: values below threshold are 0, above threshold scale to [0,1]
+        error_normalized = np.copy(error_grid)
+        error_normalized[error_normalized < self.error_overlay_threshold] = 0
+
+        # Scale errors above threshold to [0, 1] for colormap
+        max_error = np.max(error_normalized)
+        if max_error > self.error_overlay_threshold:
+            # Map [threshold, max_error] to [0, 1]
+            mask = error_normalized >= self.error_overlay_threshold
+            error_normalized[mask] = (error_normalized[mask] - self.error_overlay_threshold) / \
+                                     (max_error - self.error_overlay_threshold)
+
+        # Create RGBA image using hot colormap
+        cmap = matplotlib.colormaps.get_cmap('hot')
+        rgba_grid = cmap(error_normalized)  # Shape: (h, w, 4)
+
+        # Set alpha channel: 0 for errors below threshold, otherwise scale with error
+        alpha = np.where(error_grid < self.error_overlay_threshold, 0,
+                        np.clip(error_normalized * 0.6, 0, 0.6))  # Max 60% opacity
+        rgba_grid[:, :, 3] = alpha
+
+        # Convert to uint8
+        rgba_uint8 = (rgba_grid * 255).astype(np.uint8)
+
+        # Resize to match image dimensions
+        # cv2.resize expects (width, height) = (img_x_max, img_y_max)
+        rgba_resized = cv2.resize(rgba_uint8, (img_x_max, img_y_max),
+                                 interpolation=cv2.INTER_LINEAR)
+
+        # Convert to QImage
+        height, width, channel = rgba_resized.shape
+        bytes_per_line = 4 * width
+        q_img = QtGui.QImage(rgba_resized.data, width, height, bytes_per_line,
+                            QtGui.QImage.Format_RGBA8888)
+
+        # Convert to QPixmap
+        pixmap = QtGui.QPixmap.fromImage(q_img)
+
+        # Cache the pixmap for reuse
+        self.error_overlay_pixmap = pixmap
+        self.error_overlay_needs_update = False
+
+        # Create QGraphicsPixmapItem
+        self.error_overlay_item = QtWidgets.QGraphicsPixmapItem(pixmap)
+        self.error_overlay_item.setZValue(0.5)  # Between image (0) and grid (1)
+        self.img_frame.addItem(self.error_overlay_item)
 
 
     def updateMeasurementRefractionCorrection(self):
@@ -4921,6 +5411,62 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.img_handle = img_handle
 
+
+    def initStarDetectionOverrides(self):
+        """ Initialize star detection override parameters from config. """
+        if hasattr(self.config, 'intensity_threshold'):
+            self.override_intensity_threshold = self.config.intensity_threshold
+        else:
+            self.override_intensity_threshold = 18  # Default
+
+        if hasattr(self.config, 'neighborhood_size'):
+            self.override_neighborhood_size = self.config.neighborhood_size
+        else:
+            self.override_neighborhood_size = 10  # Default
+
+        if hasattr(self.config, 'max_stars'):
+            self.override_max_stars = self.config.max_stars
+        else:
+            self.override_max_stars = 200  # Default
+
+        print(f"Star detection overrides initialized: threshold={self.override_intensity_threshold}, neighborhood={self.override_neighborhood_size}, max_stars={self.override_max_stars}")
+
+    def redetectStars(self):
+        """ Re-detect stars on current image using override parameters. """
+        print(f"Re-detecting stars with: threshold={self.override_intensity_threshold}, neighborhood={self.override_neighborhood_size}, max_stars={self.override_max_stars}")
+
+        # Get current FF file name
+        ff_name = self.img_handle.name()
+
+        # Call extractStarsFF with override parameters
+        try:
+            star_list = extractStarsFF(
+                self.dir_path,
+                ff_name,
+                config=self.config,
+                flat_struct=self.flat_struct if hasattr(self, 'flat_struct') else None,
+                dark=self.dark if hasattr(self, 'dark') else None,
+                mask=self.mask if hasattr(self, 'mask') else None,
+                # Override parameters
+                intensity_threshold=self.override_intensity_threshold,
+                neighborhood_size=self.override_neighborhood_size,
+                max_stars=self.override_max_stars
+            )
+
+            if star_list:
+                # Store the override detected stars
+                self.star_detection_override_data[ff_name] = star_list[1]  # Star data is second element
+                print(f"Re-detected {len(star_list[1])} stars (original CALSTARS had {len(self.calstars.get(ff_name, []))} stars)")
+
+                # Update display
+                self.updateCalstars()
+            else:
+                print("Star re-detection failed")
+
+        except Exception as e:
+            print(f"Error re-detecting stars: {e}")
+            import traceback
+            traceback.print_exc()
 
     def loadCalstars(self):
         """ Loads data from calstars file and updates self.calstars """
@@ -5875,6 +6421,9 @@ class PlateTool(QtWidgets.QMainWindow):
             fit_only_pointing=self.fit_only_pointing, fixed_scale=self.fixed_scale)
         self.first_platepar_fit = False
 
+        # Mark error overlay for recomputation after platepar changed
+        self.error_overlay_needs_update = True
+
         # Show platepar parameters
         print()
         print(self.platepar)
@@ -6014,6 +6563,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateLeftLabels()
         self.updateStars()
         self.updateFitResiduals()
+        self.updateAllCalstarsResiduals()
         self.tab.param_manager.updatePlatepar()
 
 
@@ -6110,6 +6660,9 @@ class PlateTool(QtWidgets.QMainWindow):
             fixed_scale=self.fixed_scale
         )
         self.first_platepar_fit = False
+
+        # Mark error overlay for recomputation after platepar changed
+        self.error_overlay_needs_update = True
 
         # Show platepar parameters
         print()

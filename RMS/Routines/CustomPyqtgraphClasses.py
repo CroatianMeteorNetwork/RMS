@@ -2123,6 +2123,11 @@ class SettingsWidget(QtWidgets.QWidget):
     sigLivePhotometryToggled = QtCore.pyqtSignal()
     sigCoverageGridToggled = QtCore.pyqtSignal()
     sigCoverageGridSizeChanged = QtCore.pyqtSignal(int)
+    sigErrorOverlayToggled = QtCore.pyqtSignal()
+    sigErrorOverlayThresholdChanged = QtCore.pyqtSignal(float)
+    sigShowAllCalstarsResidualsToggled = QtCore.pyqtSignal()
+    sigAllCalstarsThresholdChanged = QtCore.pyqtSignal(float)
+    sigAutoPairStars = QtCore.pyqtSignal()
     sigGridToggled = QtCore.pyqtSignal()
     sigSelStarsToggled = QtCore.pyqtSignal()
     sigPicksToggled = QtCore.pyqtSignal()
@@ -2236,6 +2241,66 @@ class SettingsWidget(QtWidgets.QWidget):
         self.coverage_grid_value_label.setMinimumWidth(35)
         coverage_grid_hbox.addWidget(self.coverage_grid_value_label)
         vbox.addLayout(coverage_grid_hbox)
+
+        # Error overlay controls
+        self.error_overlay_chk = QtWidgets.QCheckBox('Show Error Overlay')
+        self.error_overlay_chk.released.connect(self.sigErrorOverlayToggled.emit)
+        self.error_overlay_chk.setChecked(False)  # Default OFF
+        vbox.addWidget(self.error_overlay_chk)
+
+        error_overlay_hbox = QtWidgets.QHBoxLayout()
+        error_overlay_label = QtWidgets.QLabel('Threshold:')
+        error_overlay_hbox.addWidget(error_overlay_label)
+
+        self.error_overlay_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.error_overlay_slider.setMinimum(1)  # 0.01 px
+        self.error_overlay_slider.setMaximum(200)  # 2.0 px
+        self.error_overlay_slider.setValue(10)  # Default 0.1 px
+        self.error_overlay_slider.setToolTip("Adjust transparency threshold (errors below this are invisible)")
+        self.error_overlay_slider.valueChanged.connect(lambda v: self.sigErrorOverlayThresholdChanged.emit(v/100.0))
+        error_overlay_hbox.addWidget(self.error_overlay_slider)
+
+        self.error_overlay_value_label = QtWidgets.QLabel('0.10 px')
+        self.error_overlay_value_label.setMinimumWidth(50)
+        error_overlay_hbox.addWidget(self.error_overlay_value_label)
+        vbox.addLayout(error_overlay_hbox)
+
+        # All CALSTARS residuals controls
+        self.show_all_calstars_residuals_chk = QtWidgets.QCheckBox('Show All Star Residuals')
+        self.show_all_calstars_residuals_chk.setToolTip(
+            "Show residuals for all detected stars (not just picked pairs)\n"
+            "by matching them to nearest catalog star. Requires a platepar fit."
+        )
+        self.show_all_calstars_residuals_chk.released.connect(self.sigShowAllCalstarsResidualsToggled.emit)
+        self.show_all_calstars_residuals_chk.setChecked(False)  # Default OFF
+        vbox.addWidget(self.show_all_calstars_residuals_chk)
+
+        # All CALSTARS residuals threshold slider
+        all_calstars_hbox = QtWidgets.QHBoxLayout()
+        all_calstars_label = QtWidgets.QLabel('Match threshold:')
+        all_calstars_hbox.addWidget(all_calstars_label)
+
+        self.all_calstars_threshold_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.all_calstars_threshold_slider.setMinimum(10)  # 1.0 px
+        self.all_calstars_threshold_slider.setMaximum(200)  # 20.0 px
+        self.all_calstars_threshold_slider.setValue(50)  # Default 5.0 px
+        self.all_calstars_threshold_slider.setToolTip("Only show residuals for stars with catalog match within this distance")
+        self.all_calstars_threshold_slider.valueChanged.connect(lambda v: self.sigAllCalstarsThresholdChanged.emit(v/10.0))
+        all_calstars_hbox.addWidget(self.all_calstars_threshold_slider)
+
+        self.all_calstars_threshold_label = QtWidgets.QLabel('5.0 px')
+        self.all_calstars_threshold_label.setMinimumWidth(50)
+        all_calstars_hbox.addWidget(self.all_calstars_threshold_label)
+        vbox.addLayout(all_calstars_hbox)
+
+        # Auto-pair stars button
+        self.auto_pair_stars_button = QtWidgets.QPushButton('Auto-Pair Stars')
+        self.auto_pair_stars_button.setToolTip(
+            "Automatically create picked pairs by matching detected stars\n"
+            "to nearest catalog stars (uses match threshold above). Requires a platepar fit."
+        )
+        self.auto_pair_stars_button.clicked.connect(self.sigAutoPairStars.emit)
+        vbox.addWidget(self.auto_pair_stars_button)
 
         self.meas_ground_points = QtWidgets.QCheckBox('Measure ground points')
         self.meas_ground_points.released.connect(self.sigMeasGroundPointsToggled.emit)

@@ -439,7 +439,7 @@ class Platepar(object):
                 pp_copy.F_scale = abs(F_scale)
 
             # Get image coordinates of catalog stars
-            catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(catalog_stars, jd, pp_copy)
+            catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(catalog_stars, jd, pp_copy, use_iterative=False)
 
             # Calculate the sum of squared distances between image stars and catalog stars
             dist_sum = np.sum((catalog_x - img_x) ** 2 + (catalog_y - img_y) ** 2)
@@ -670,7 +670,7 @@ class Platepar(object):
             img_x, img_y, _ = img_stars.T
 
             # Get image coordinates of catalog stars
-            catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(catalog_stars, jd, pp_copy)
+            catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(catalog_stars, jd, pp_copy, use_iterative=False)
 
             # Calculate the sum of squared distances between image stars and catalog stars
             dist_sum = np.sum((catalog_x - img_x) ** 2 + (catalog_y - img_y) ** 2)
@@ -998,7 +998,7 @@ class Platepar(object):
 
                 # Get image coordinates of catalog stars using this image's JD
                 catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(
-                    catalog_stars, jd, pp_copy
+                    catalog_stars, jd, pp_copy, use_iterative=False
                 )
 
                 # Calculate residuals
@@ -1069,7 +1069,7 @@ class Platepar(object):
 
                 # Get image coordinates of catalog stars using this image's JD
                 catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(
-                    catalog_stars, jd, pp_copy
+                    catalog_stars, jd, pp_copy, use_iterative=False
                 )
 
                 # Calculate residuals
