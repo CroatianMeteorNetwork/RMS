@@ -303,12 +303,16 @@ def _parse(fname):
     return station, dt
 
 
-def listImageBlocksBefore(cutoff, dir_path):
+def listImageBlocksBefore(cutoff, dir_path, max_gap_hours=2):
     """Group images into chronological, same-mode blocks before a cutoff.
 
     Arguments:
         cutoff: [datetime] Naive UTC timestamp; images >= cutoff are ignored.
         dir_path: [str] Root directory to search (walks sub-dirs recursively).
+
+    Keyword arguments:
+        max_gap_hours: [float] Maximum time gap in hours between consecutive
+            frames before starting a new block. 2 hours by default.
 
     Return:
         blocks: [list[list[str]]] Each sub-list is a consecutive sequence of
@@ -332,15 +336,34 @@ def listImageBlocksBefore(cutoff, dir_path):
     # 2. chronological sort -------------------------------------------------
     paths.sort(key=_timestampFromName)
 
-    # 3. first pass - break on mode changes ---------------------------------
+    # 3. first pass - break on mode changes AND time gaps ------------------
+    MAX_GAP = timedelta(hours=max_gap_hours)
     prelim_blocks, cur_block, cur_mode = [], [], None
+    prev_ts = None
+
     for path in paths:
         mode = _modeFromName(path)
-        if cur_block and mode != cur_mode:          # mode switch - new block
+        ts = _timestampFromName(path)
+
+        # Check if we should start a new block
+        should_split = False
+
+        if cur_block:
+            # Split on mode change
+            if mode != cur_mode:
+                should_split = True
+            # Split on significant time gap
+            elif prev_ts and (ts - prev_ts) > MAX_GAP:
+                should_split = True
+
+        if should_split:
             prelim_blocks.append(cur_block)
             cur_block = []
+
         cur_block.append(path)
         cur_mode = mode
+        prev_ts = ts
+
     if cur_block:
         prelim_blocks.append(cur_block)
 

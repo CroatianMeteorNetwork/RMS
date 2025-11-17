@@ -178,7 +178,7 @@ def lastNightToDaySwitch(config, whenUtc=None):
 
     Return:
         last_switch: [datetime] UTC time at which the Sun last rose above
-            ``SWITCH_HORIZON_DEG`` before *whenUtc* (or the preceding midnight
+            ``SWITCH_HORIZON_DEG`` before *whenUtc* (or *whenUtc* itself
             if the Sun is always up/down at that location).
     """
     if whenUtc is None:
@@ -199,11 +199,10 @@ def lastNightToDaySwitch(config, whenUtc=None):
         return previous_sunrise + wait
     
     except (ephem.AlwaysUpError, ephem.NeverUpError):
-        # Fallback: last midnight before whenUtc
-        midnight = whenUtc.replace(hour=0, minute=0, second=0, microsecond=0)
-        if midnight >= whenUtc:
-            midnight -= timedelta(days=1)
-        return midnight
+        # Fallback for polar regions: use current time as cutoff
+        # This ensures the entire just-completed capture session is processed
+        # immediately, rather than being split across UTC day boundaries
+        return whenUtc
 
 
     ### For testing switching only ###
