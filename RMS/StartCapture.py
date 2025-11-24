@@ -40,8 +40,8 @@ from Utils.LiveViewer import LiveViewer
 import RMS.ConfigReader as cr
 from RMS.Logger import LoggingManager, getLogger
 from RMS.BufferedCapture import BufferedCapture
-from RMS.CaptureDuration import captureDuration
-from RMS.CaptureModeSwitcher import captureModeSwitcher
+from RMS.CaptureDuration import captureDuration, daytimeSessionDuration
+from RMS.CaptureModeSwitcher import captureModeSwitcher, isPolarDay
 from RMS.Compression import Compressor
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
@@ -421,12 +421,48 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
         # Continuous mode only: Daytime capture
         if config.continuous_capture and daytime_mode.value:
-                        
+
             log.info('Capturing in daytime mode...')
 
-            # Capture until Ctrl+C is pressed / camera switches modes
+            # Check if we're in polar day conditions (sun won't set for a long time)
+            # If so, use configured boundary hour to prevent indefinite capture sessions
+            polar_day = isPolarDay(config)
+
+            # In polar day, use boundary hour; otherwise wait for mode switch
+            if polar_day:
+                daytime_duration = daytimeSessionDuration(config.daytime_session_boundary_hour)
+                log.info('Polar day detected - session will end at boundary hour {:02d}:00 UTC ({:.1f} hours from now)'.format(
+                    config.daytime_session_boundary_hour, daytime_duration/3600))
+            else:
+                # At regular latitudes, capture until mode switch (handled by wait() exiting early)
+                daytime_duration = duration  # Use the nighttime duration passed in
+                log.info('Daytime capture will continue until sunset or Ctrl+C')
+
+            # Capture until boundary time or mode switch
             daytime_mode_prev = daytime_mode.value
-            wait(duration, None, bc, video_file, daytime_mode)
+            wait(daytime_duration, None, bc, video_file, daytime_mode)
+
+            # Process accumulated frames after daytime session ends
+            # Only process if we completed a polar day session OR if mode switched
+            if config.timelapse_generate_from_frames and (polar_day or daytime_mode_prev != daytime_mode.value):
+                try:
+                    log.info("Processing daytime frame files...")
+                    archive_paths = processFramesFiles(config)          # may return None
+                    log.info("Processing daytime frame files done.")
+
+                except Exception:
+                    log.exception("An error occurred when processing daytime frame files!")
+                    archive_paths = None
+
+                # Upload the archive if available
+                if archive_paths and upload_manager:
+                    try:
+                        log.info("Adding daytime frames to upload list: %s", archive_paths)
+                        upload_manager.addFiles(archive_paths)
+                        log.info("File added.")
+
+                    except Exception:
+                        log.exception("Daytime frames upload failed")
 
 
         # Continuous OR standard mode: Nighttime capture

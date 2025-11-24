@@ -116,7 +116,37 @@ def captureDuration(lat, lon, elevation, current_time=None, max_hours=23):
         duration = max_duration
 
     return start_time, duration
-        
+
+
+def daytimeSessionDuration(boundary_hour, current_time=None):
+    """ Calculate duration until the configured UTC boundary hour for daytime capture sessions.
+    This prevents indefinite capture sessions during polar day by setting a fixed daily boundary.
+
+    Arguments:
+        boundary_hour: [int] UTC hour (0-23) when sessions should end
+
+    Keyword arguments:
+        current_time: [datetime object] Current UTC time. If None, uses current time.
+
+    Return:
+        duration: [float] Seconds until next boundary time
+    """
+
+    if current_time is None:
+        current_time = RmsDateTime.utcnow()
+
+    # Find next boundary time
+    next_boundary = current_time.replace(hour=boundary_hour, minute=0, second=0, microsecond=0)
+
+    # If we're past the boundary today, use tomorrow's boundary
+    if current_time >= next_boundary:
+        next_boundary += datetime.timedelta(days=1)
+
+    # Calculate duration in seconds
+    duration = (next_boundary - current_time).total_seconds()
+
+    return duration
+
 
 if __name__ == "__main__":
     

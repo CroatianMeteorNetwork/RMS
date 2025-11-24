@@ -164,6 +164,45 @@ def captureModeSwitcher(config, daytime_mode, camera_mode_switch_trigger):
 
 
 
+def isPolarDay(config, horizon_deg=None):
+    """Check if we're currently in polar day conditions (sun won't set for a long time).
+
+    Arguments:
+        config: [Config] RMS configuration object
+
+    Keyword arguments:
+        horizon_deg: [str] Sun horizon in degrees (e.g., "-9"). If None, uses SWITCH_HORIZON_DEG.
+
+    Return:
+        is_polar_day: [bool] True if sun won't set within 20 hours, False otherwise
+    """
+    if horizon_deg is None:
+        horizon_deg = SWITCH_HORIZON_DEG
+
+    obs = ephem.Observer()
+    obs.lat = str(config.latitude)
+    obs.long = str(config.longitude)
+    obs.elevation = config.elevation
+    obs.horizon = horizon_deg
+    obs.date = ephem.Date(RmsDateTime.utcnow())
+
+    sun = ephem.Sun()
+    try:
+        next_set = obs.next_setting(sun).datetime()
+        time_to_sunset = (next_set - RmsDateTime.utcnow()).total_seconds()
+
+        # If sunset is more than 20 hours away, treat as polar day
+        return time_to_sunset > 72000  # 20 hours
+
+    except ephem.AlwaysUpError:
+        # Sun won't set - definitely polar day
+        return True
+
+    except ephem.NeverUpError:
+        # Sun won't rise - polar night, not polar day
+        return False
+
+
 def lastNightToDaySwitch(config, whenUtc=None):
     """Return the UTC timestamp of the most recent night-to-day switch.
 

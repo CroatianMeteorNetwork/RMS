@@ -480,6 +480,11 @@ class Config:
         # Switch camera settings between day/night modes, for when continuous_capture is enabled
         self.switch_camera_modes = False
 
+        # UTC hour (0-23) when daytime capture sessions should end and process frames
+        # Used for continuous capture in polar regions to prevent indefinite sessions
+        # Default: 12 (noon UTC)
+        self.daytime_session_boundary_hour = 12
+
         ##### Upload
 
         # Flag determining if uploading is enabled or not
@@ -1043,6 +1048,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "continuous_capture_quota"):
         config.continuous_capture_quota = float(parser.get(section, "continuous_capture_quota"))
+
+    if parser.has_option(section, "daytime_session_boundary_hour"):
+        config.daytime_session_boundary_hour = int(parser.get(section, "daytime_session_boundary_hour"))
 
     if parser.has_option(section, "captured_dir"):
         config.captured_dir = parser.get(section, "captured_dir")
