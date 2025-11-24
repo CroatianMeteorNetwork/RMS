@@ -763,21 +763,25 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
         #noon_time = datetime.datetime(ct.year, ct.month, ct.date, 12)
 
         # Initialize the observer and find the time of next noon
-        o = ephem.Observer()  
+        o = ephem.Observer()
         o.lat = str(config.latitude)
         o.long = str(config.longitude)
         o.elevation = config.elevation
         sun = ephem.Sun()
 
-        sunrise = o.previous_rising(sun, start=ephem.now())
-        noon_time = o.next_transit(sun, start=sunrise).datetime()
+        try:
+            sunrise = o.previous_rising(sun, start=ephem.now())
+            noon_time = o.next_transit(sun, start=sunrise).datetime()
+        except (ephem.AlwaysUpError, ephem.NeverUpError):
+            # Polar regions: use current time for noon
+            noon_time = RmsDateTime.utcnow()
 
         # if ct.hour > 12:
         #     noon_time += datetime.timedelta(days=1)
 
 
         # Get the duration of the next night
-        _, duration = captureDuration(config.latitude, config.longitude, config.elevation, 
+        _, duration = captureDuration(config.latitude, config.longitude, config.elevation,
             current_time=noon_time)
 
 
