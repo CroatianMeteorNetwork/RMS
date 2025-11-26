@@ -21,7 +21,7 @@
 
     ["SetParam", "Camera", "ClearFog", "enable", "0"],
     ["SetParam", "Camera", "ClearFog", "level", "30"],
-    ["SetParam", "Camera", "Style", "type1"],
+    ["SetParam", "Camera", "Style", "type2"],
     ["SetParam", "Camera", "AeSensitivity", "1"],
     ["SetParam", "Camera", "ApertureMode", "0"],
     ["SetParam", "Camera", "BLCMode", "0"],
