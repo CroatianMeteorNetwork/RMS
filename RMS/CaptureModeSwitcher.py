@@ -17,6 +17,11 @@ log = getLogger("rmslogger")
 SWITCH_HORIZON_DEG = "-9"  # Used for continuous capture mode switching
 CAPTURE_HORIZON_DEG = "-5:26"  # Used for standard capture start/stop (matches CaptureDuration.py)
 
+# Buffer time (seconds) to account for capture pipeline shutdown inertia.
+# Capture continues briefly after the calculated end time while the pipeline shuts down.
+# This is added to the timelapse cutoff to ensure all captured frames are included.
+SHUTDOWN_INERTIA_SECONDS = 300  # 5 minutes - generous buffer since mode-based splitting prevents mixing
+
 
 def switchCameraMode(config, daytime_mode, camera_mode_switch_trigger):
     """
@@ -202,8 +207,8 @@ def lastNightToDaySwitch(config, whenUtc=None):
 
     sun = ephem.Sun()
     try:
-        # Account for programmed delay in mode switching
-        wait = timedelta(seconds=config.capture_wait_seconds)
+        # Account for programmed delay in mode switching and capture pipeline shutdown inertia
+        wait = timedelta(seconds=config.capture_wait_seconds + SHUTDOWN_INERTIA_SECONDS)
         previous_sunrise = obs.previous_rising(sun).datetime()
         return previous_sunrise + wait
     
