@@ -416,6 +416,58 @@ check_disk_space() {
     return 0
 }
 
+# Function to detect if git repository is corrupted (not just network issues)
+is_git_repo_corrupted() {
+    # Check for common signs of git corruption that warrant a reclone
+
+    # 1. Missing or corrupted .git directory
+    if [ ! -d ".git" ]; then
+        print_status "info" "Corruption check: .git directory missing"
+        return 0  # corrupted
+    fi
+
+    # 2. Missing HEAD file
+    if [ ! -f ".git/HEAD" ]; then
+        print_status "info" "Corruption check: .git/HEAD missing"
+        return 0  # corrupted
+    fi
+
+    # 3. git fsck detects corruption (only check critical objects, not full scan)
+    local fsck_output
+    fsck_output=$(git fsck --no-full --no-dangling 2>&1) || true
+    if echo "$fsck_output" | grep -qiE "(corrupt|missing|broken|invalid)"; then
+        print_status "info" "Corruption check: git fsck detected issues"
+        return 0  # corrupted
+    fi
+
+    # 4. Cannot parse HEAD reference
+    if ! git rev-parse HEAD &>/dev/null; then
+        # Could be corruption OR detached head with missing commit
+        # Check if it's specifically a bad object error
+        local revparse_err
+        revparse_err=$(git rev-parse HEAD 2>&1) || true
+        if echo "$revparse_err" | grep -qiE "(bad object|corrupt|invalid)"; then
+            print_status "info" "Corruption check: HEAD points to bad object"
+            return 0  # corrupted
+        fi
+    fi
+
+    # 5. Index file corruption that couldn't be fixed
+    if [ -f ".git/index" ]; then
+        if ! git ls-files &>/dev/null; then
+            local lsfiles_err
+            lsfiles_err=$(git ls-files 2>&1) || true
+            if echo "$lsfiles_err" | grep -qiE "(corrupt|invalid|bad signature)"; then
+                print_status "info" "Corruption check: index file corrupted"
+                return 0  # corrupted
+            fi
+        fi
+    fi
+
+    # No corruption detected - likely a network issue
+    return 1  # not corrupted
+}
+
 # Function to check and fix git index
 check_git_index() {
     if ! git status &>/dev/null; then
@@ -719,28 +771,36 @@ git_with_retry() {
                 depth_arg="--depth=1"
                 ;;
             5)
-                print_status "warning" "Final Git attempt: Recloning repository using HTTP/1.1"
+                # Final attempt - only reclone if repository is actually corrupted
+                # Network failures should not trigger a reclone
+                if is_git_repo_corrupted; then
+                    print_status "warning" "Git repository appears corrupted. Attempting reclone..."
 
-                cd ~ || exit 1
-                mv "$RMSSOURCEDIR" "$backup_dir"
+                    cd ~ || exit 1
+                    mv "$RMSSOURCEDIR" "$backup_dir"
 
-                if git clone --config http.version=HTTP/1.1 --config http.sslverify=false https://github.com/CroatianMeteorNetwork/RMS.git "$RMSSOURCEDIR"; then
-                    print_status "success" "Repository successfully recloned using HTTP/1.1"
-                    cd "$RMSSOURCEDIR" || exit 1
+                    if git clone --config http.version=HTTP/1.1 --config http.sslverify=false https://github.com/CroatianMeteorNetwork/RMS.git "$RMSSOURCEDIR"; then
+                        print_status "success" "Repository successfully recloned using HTTP/1.1"
+                        cd "$RMSSOURCEDIR" || exit 1
 
-                    # Restore critical files from backup
-                    for file in .config mask.bmp camera_settings.json; do
-                        if [ -f "$backup_dir/$file" ]; then
-                            print_status "info" "Restoring $file from backup"
-                            cp "$backup_dir/$file" "$RMSSOURCEDIR/"
-                        fi
-                    done
-                    return 0
+                        # Restore critical files from backup
+                        for file in .config mask.bmp camera_settings.json; do
+                            if [ -f "$backup_dir/$file" ]; then
+                                print_status "info" "Restoring $file from backup"
+                                cp "$backup_dir/$file" "$RMSSOURCEDIR/"
+                            fi
+                        done
+                        return 0
+                    else
+                        print_status "error" "Reclone failed, restoring original directory..."
+                        mv "$backup_dir" "$RMSSOURCEDIR"
+                        cd "$RMSSOURCEDIR" || exit 1
+                        print_status "info" "Original RMS directory restored from backup"
+                        return 1
+                    fi
                 else
-                    print_status "error" "Reclone failed, restoring original directory..."
-                    mv "$backup_dir" "$RMSSOURCEDIR"
-                    cd "$RMSSOURCEDIR" || exit 1
-                    print_status "info" "Original RMS directory restored from backup"
+                    print_status "error" "Git $cmd failed after $GIT_RETRY_LIMIT attempts (network issue likely)"
+                    print_status "info" "Repository is intact. Retry when network is available."
                     return 1
                 fi
                 ;;
