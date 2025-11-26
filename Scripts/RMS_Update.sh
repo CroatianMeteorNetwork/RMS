@@ -737,7 +737,10 @@ git_with_retry() {
                     done
                     return 0
                 else
-                    print_status "error" "Reclone failed after all Git recovery attempts."
+                    print_status "error" "Reclone failed, restoring original directory..."
+                    mv "$backup_dir" "$RMSSOURCEDIR"
+                    cd "$RMSSOURCEDIR" || exit 1
+                    print_status "info" "Original RMS directory restored from backup"
                     return 1
                 fi
                 ;;
