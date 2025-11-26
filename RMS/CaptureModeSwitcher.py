@@ -14,7 +14,8 @@ log = getLogger("rmslogger")
 
 # Sun altitude (in degrees) that defines the switch point.
 # Negative numbers mean the Sun is below the horizon.
-SWITCH_HORIZON_DEG = "-9"
+SWITCH_HORIZON_DEG = "-9"  # Used for continuous capture mode switching
+CAPTURE_HORIZON_DEG = "-5:26"  # Used for standard capture start/stop (matches CaptureDuration.py)
 
 
 def switchCameraMode(config, daytime_mode, camera_mode_switch_trigger):
@@ -169,7 +170,7 @@ def lastNightToDaySwitch(config, whenUtc=None):
 
     Arguments:
         config: [Config] RMS configuration object; must expose latitude,
-            longitude and elevation attributes.
+            longitude, elevation, and continuous_capture attributes.
 
     Keyword arguments:
         whenUtc: [datetime] Naive UTC time used as the upper bound of the
@@ -178,17 +179,25 @@ def lastNightToDaySwitch(config, whenUtc=None):
 
     Return:
         last_switch: [datetime] UTC time at which the Sun last rose above
-            ``SWITCH_HORIZON_DEG`` before *whenUtc* (or *whenUtc* itself
+            the horizon threshold before *whenUtc* (or *whenUtc* itself
             if the Sun is always up/down at that location).
     """
     if whenUtc is None:
         whenUtc = RmsDateTime.utcnow()
 
+    # Use different horizon based on capture mode:
+    # - Continuous capture: mode switches at -9 degrees
+    # - Standard capture: capture ends at -5:26 degrees
+    if config.continuous_capture:
+        horizon = SWITCH_HORIZON_DEG
+    else:
+        horizon = CAPTURE_HORIZON_DEG
+
     obs = ephem.Observer()
     obs.lat = str(config.latitude)
     obs.long = str(config.longitude)
     obs.elevation = config.elevation
-    obs.horizon = SWITCH_HORIZON_DEG
+    obs.horizon = horizon
     obs.date = ephem.Date(whenUtc)
 
     sun = ephem.Sun()
