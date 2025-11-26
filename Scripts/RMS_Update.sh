@@ -470,8 +470,9 @@ is_git_repo_corrupted() {
         local lsfiles_status
         lsfiles_err=$(git ls-files 2>&1) && lsfiles_status=0 || lsfiles_status=$?
         if [ $lsfiles_status -ne 0 ]; then
-            if echo "$lsfiles_err" | grep -qiE "(corrupt|bad signature|index file .* is corrupt)"; then
-                print_status "info" "Corruption check: index file corrupted"
+            # Check for various index corruption error messages
+            if echo "$lsfiles_err" | grep -qiE "(corrupt|bad signature|index file|smaller than expected|invalid)"; then
+                print_status "info" "Corruption check: index file corrupted: $lsfiles_err"
                 return 0  # corrupted
             fi
         fi
