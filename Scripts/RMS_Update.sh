@@ -417,54 +417,79 @@ check_disk_space() {
 }
 
 # Function to detect if git repository is corrupted (not just network issues)
+# Returns 0 (true) if corrupted, 1 (false) if healthy
 is_git_repo_corrupted() {
     # Check for common signs of git corruption that warrant a reclone
+    # Be conservative - only return "corrupted" for clear corruption signs
+    # Network issues should NOT trigger this
 
-    # 1. Missing or corrupted .git directory
+    # 1. Missing .git directory entirely
     if [ ! -d ".git" ]; then
         print_status "info" "Corruption check: .git directory missing"
         return 0  # corrupted
     fi
 
-    # 2. Missing HEAD file
+    # 2. Missing critical git files
     if [ ! -f ".git/HEAD" ]; then
         print_status "info" "Corruption check: .git/HEAD missing"
         return 0  # corrupted
     fi
 
-    # 3. git fsck detects corruption (only check critical objects, not full scan)
-    local fsck_output
-    fsck_output=$(git fsck --no-full --no-dangling 2>&1) || true
-    if echo "$fsck_output" | grep -qiE "(corrupt|missing|broken|invalid)"; then
-        print_status "info" "Corruption check: git fsck detected issues"
+    if [ ! -d ".git/objects" ]; then
+        print_status "info" "Corruption check: .git/objects directory missing"
         return 0  # corrupted
     fi
 
-    # 4. Cannot parse HEAD reference
+    # 3. git fsck detects corruption
+    # Use --connectivity-only for speed - checks object connectivity without reading all data
+    # Only look for actual corruption keywords, not warnings about missing remote refs
+    local fsck_output
+    fsck_output=$(git fsck --connectivity-only 2>&1) || true
+    # Check for specific corruption indicators (not "missing" alone - that can be remote refs)
+    if echo "$fsck_output" | grep -qE "(corrupt|broken|bad [a-z]+ [0-9a-f]+|invalid [a-z]+)"; then
+        print_status "info" "Corruption check: git fsck detected issues: $(echo "$fsck_output" | head -3)"
+        return 0  # corrupted
+    fi
+
+    # 4. HEAD points to an invalid/corrupted object
     if ! git rev-parse HEAD &>/dev/null; then
-        # Could be corruption OR detached head with missing commit
-        # Check if it's specifically a bad object error
         local revparse_err
         revparse_err=$(git rev-parse HEAD 2>&1) || true
-        if echo "$revparse_err" | grep -qiE "(bad object|corrupt|invalid)"; then
+        # Only consider it corruption if it's specifically a bad object, not just missing ref
+        if echo "$revparse_err" | grep -qE "(bad object|corrupt|invalid object)"; then
             print_status "info" "Corruption check: HEAD points to bad object"
             return 0  # corrupted
         fi
+        # If HEAD just doesn't resolve (e.g., detached at missing commit), that's unusual
+        # but might not be corruption - let other checks handle it
     fi
 
-    # 5. Index file corruption that couldn't be fixed
+    # 5. Index file is unreadable/corrupted
     if [ -f ".git/index" ]; then
-        if ! git ls-files &>/dev/null; then
-            local lsfiles_err
-            lsfiles_err=$(git ls-files 2>&1) || true
-            if echo "$lsfiles_err" | grep -qiE "(corrupt|invalid|bad signature)"; then
+        local lsfiles_err
+        local lsfiles_status
+        lsfiles_err=$(git ls-files 2>&1) && lsfiles_status=0 || lsfiles_status=$?
+        if [ $lsfiles_status -ne 0 ]; then
+            if echo "$lsfiles_err" | grep -qiE "(corrupt|bad signature|index file .* is corrupt)"; then
                 print_status "info" "Corruption check: index file corrupted"
                 return 0  # corrupted
             fi
         fi
     fi
 
+    # 6. Config file corrupted
+    if [ -f ".git/config" ]; then
+        if ! git config --local --list &>/dev/null; then
+            print_status "info" "Corruption check: .git/config is unreadable"
+            return 0  # corrupted
+        fi
+    else
+        print_status "info" "Corruption check: .git/config missing"
+        return 0  # corrupted
+    fi
+
     # No corruption detected - likely a network issue
+    print_status "info" "Corruption check: repository appears healthy"
     return 1  # not corrupted
 }
 
@@ -777,7 +802,12 @@ git_with_retry() {
                     print_status "warning" "Git repository appears corrupted. Attempting reclone..."
 
                     cd ~ || exit 1
-                    mv "$RMSSOURCEDIR" "$backup_dir"
+                    if ! mv "$RMSSOURCEDIR" "$backup_dir"; then
+                        print_status "error" "Failed to move RMS directory to backup location"
+                        print_status "info" "Repository left intact. Manual intervention may be needed."
+                        cd "$RMSSOURCEDIR" 2>/dev/null || true
+                        return 1
+                    fi
 
                     if git clone --config http.version=HTTP/1.1 --config http.sslverify=false https://github.com/CroatianMeteorNetwork/RMS.git "$RMSSOURCEDIR"; then
                         print_status "success" "Repository successfully recloned using HTTP/1.1"
@@ -793,9 +823,13 @@ git_with_retry() {
                         return 0
                     else
                         print_status "error" "Reclone failed, restoring original directory..."
-                        mv "$backup_dir" "$RMSSOURCEDIR"
-                        cd "$RMSSOURCEDIR" || exit 1
-                        print_status "info" "Original RMS directory restored from backup"
+                        if mv "$backup_dir" "$RMSSOURCEDIR"; then
+                            cd "$RMSSOURCEDIR" || exit 1
+                            print_status "info" "Original RMS directory restored from backup"
+                        else
+                            print_status "error" "CRITICAL: Failed to restore backup directory!"
+                            print_status "error" "Manual recovery needed: mv $backup_dir $RMSSOURCEDIR"
+                        fi
                         return 1
                     fi
                 else
