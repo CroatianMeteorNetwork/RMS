@@ -9,7 +9,7 @@ BLC		Param.[0].BLCMode			                '0x00000000'
 Auto Iris	Param.[0].ApertureMode			        '0x00000000'  
 White Balance	Param.[0].WhiteBalance			    '0x00000002'  
 AE Ref		Param.[0].ElecLevel			            100  
-Image Style	ParamEx.[0].Style 			            'type1'  
+Image Style	ParamEx.[0].Style 			            'type2'  
 DNC Thresh	Param.[0].DncThr			            50  
 DWDR		ParamEx.[0].BroadTrends.AutoGain	    0    
 DWDR Lim	ParamEx.[0].BroadTrends.Gain		    50  
