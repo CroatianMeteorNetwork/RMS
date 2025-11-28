@@ -303,6 +303,54 @@ def _parse(fname):
     return station, dt
 
 
+def findLastNightFrameInWindow(dir_path, window_start, window_end):
+    """Find the timestamp of the last night-mode frame within a time window.
+
+    This is used to determine the correct cutoff for night timelapse generation.
+    After sunrise, there may be a few night frames captured during the inertia
+    period before the mode switch completes. We want to include those frames
+    in the night timelapse, but exclude any day frames that follow.
+
+    Arguments:
+        dir_path: [str] Root directory to search (walks sub-dirs recursively).
+        window_start: [datetime] Start of the search window (e.g., sunrise).
+        window_end: [datetime] End of the search window (e.g., sunrise + inertia).
+
+    Return:
+        last_n_timestamp: [datetime | None] Timestamp of the last _n frame in
+            the window, or None if no night frames were found.
+    """
+    last_n_frame = None
+    last_n_timestamp = None
+
+    for root, _, files in os.walk(dir_path):
+        for fname in files:
+            if not IMAGE_PATTERN.match(fname):
+                continue
+
+            # Check if it's a night frame
+            mode = _modeFromName(fname)
+            if mode != 'n':
+                continue
+
+            # Get the timestamp
+            try:
+                ts = _timestampFromName(fname)
+            except ValueError:
+                continue
+
+            # Check if it's within the window
+            if ts < window_start or ts >= window_end:
+                continue
+
+            # Track the latest night frame
+            if last_n_timestamp is None or ts > last_n_timestamp:
+                last_n_timestamp = ts
+                last_n_frame = fname
+
+    return last_n_timestamp
+
+
 def listImageBlocksBefore(cutoff, dir_path, max_gap_hours=2):
     """Group images into chronological, same-mode blocks before a cutoff.
 

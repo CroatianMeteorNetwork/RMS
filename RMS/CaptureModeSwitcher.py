@@ -183,9 +183,10 @@ def lastNightToDaySwitch(config, whenUtc=None):
             ``RmsDateTime.utcnow()`` is used.
 
     Return:
-        last_switch: [datetime] UTC time at which the Sun last rose above
-            the horizon threshold before *whenUtc* (or *whenUtc* itself
-            if the Sun is always up/down at that location).
+        (sunrise, max_cutoff): [tuple[datetime, datetime]] Tuple of:
+            - sunrise: The actual sunrise time (sun crossing horizon threshold)
+            - max_cutoff: sunrise + inertia delay (maximum possible cutoff)
+        For polar regions where sun doesn't rise/set, returns (whenUtc, whenUtc).
     """
     if whenUtc is None:
         whenUtc = RmsDateTime.utcnow()
@@ -210,13 +211,13 @@ def lastNightToDaySwitch(config, whenUtc=None):
         # Account for programmed delay in mode switching and capture pipeline shutdown inertia
         wait = timedelta(seconds=config.capture_wait_seconds + SHUTDOWN_INERTIA_SECONDS)
         previous_sunrise = obs.previous_rising(sun).datetime()
-        return previous_sunrise + wait
-    
+        return previous_sunrise, previous_sunrise + wait
+
     except (ephem.AlwaysUpError, ephem.NeverUpError):
         # Fallback for polar regions: use current time as cutoff
         # This ensures the entire just-completed capture session is processed
         # immediately, rather than being split across UTC day boundaries
-        return whenUtc
+        return whenUtc, whenUtc
 
 
     ### For testing switching only ###
