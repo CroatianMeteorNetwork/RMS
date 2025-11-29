@@ -662,8 +662,13 @@ class BufferedCapture(Process):
             port = parsed.port or 554
 
             last_error = None
+            stop_event = getattr(self, "exit", None)
             
             for attempt in range(max_attempts):
+
+                if stop_event is not None and stop_event.is_set():
+                    log.info("RTSP probe aborted - shutdown requested")
+                    return False, RtspProbeResult.UNKNOWN_ERROR
                 try:
                     # Try to resolve hostname first
                     try:
@@ -1342,7 +1347,7 @@ class BufferedCapture(Process):
                     self.pts_buffer = []
 
                     # Attempt to get a sample and determine the frame shape
-                    sample = self.device.emit("pull-sample")
+                    sample = self.device.emit("try-pull-sample", 500 * Gst.MSECOND)
                     if not sample:
                         raise ValueError("Could not obtain sample.")
 
