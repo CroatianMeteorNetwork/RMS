@@ -158,15 +158,16 @@ class QueuedPool(object):
 
         # Initialize queues (for some reason queues from Manager need to be created, otherwise they are 
         # blocking when using get_nowait)
-        manager = multiprocessing.Manager()
+        # Keep a reference to the Manager so it can be shut down explicitly
+        self.manager = multiprocessing.Manager()
 
         # Only init with maxsize if given, otherwise it return a TypeError when fed data from Compressor
         if input_queue_maxsize is None:
-            self.input_queue = manager.Queue()
+            self.input_queue = self.manager.Queue()
         else:
-            self.input_queue = manager.Queue(maxsize=input_queue_maxsize)
+            self.input_queue = self.manager.Queue(maxsize=input_queue_maxsize)
 
-        self.output_queue = manager.Queue()
+        self.output_queue = self.manager.Queue()
 
         self.func = func
         self.pool = None
@@ -658,6 +659,43 @@ class QueuedPool(object):
                     break
             
         return results
+
+
+    def cleanup(self):
+        """Release resources held by the pool/manager."""
+
+        # Clear queues to drop references held by the manager process
+        for q in (getattr(self, "input_queue", None), getattr(self, "output_queue", None)):
+            if q is None:
+                continue
+            try:
+                while not q.empty():
+                    try:
+                        q.get_nowait()
+                    except Exception:
+                        break
+            except Exception:
+                pass
+
+        # Clear backup dict of cached results
+        try:
+            if hasattr(self, "bkup_dict"):
+                self.bkup_dict.clear()
+        except Exception:
+            pass
+
+        # Drop queue references so the manager can exit
+        self.input_queue = None
+        self.output_queue = None
+
+        # Shut down the manager process explicitly
+        try:
+            if hasattr(self, "manager") and self.manager is not None:
+                self.manager.shutdown()
+        except Exception:
+            pass
+        finally:
+            self.manager = None
 
 
 
