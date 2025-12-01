@@ -260,7 +260,11 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             ) = recalibrateIndividualFFsAndApplyAstrometry(night_data_dir,
                 os.path.join(night_data_dir, ftpdetectinfo_name), calstars_data, config, platepar)
 
-
+            # Touch the FTPdetectinfo file to update its timestamp, preventing
+            # infinite reprocessing loops when no meteors are detected
+            ftpdetectinfo_path = os.path.join(night_data_dir, ftpdetectinfo_name)
+            if os.path.exists(ftpdetectinfo_path):
+                os.utime(ftpdetectinfo_path, None)
 
 
             log.info("Converting RMS format to UFOOrbit format...")
@@ -855,3 +859,6 @@ if __name__ == "__main__":
         # Delete detection backup files
         if detector is not None:
             detector.deleteBackupFiles()
+            # Explicitly clean up detector resources (queues/manager) when running in a long-lived process
+            if hasattr(detector, "cleanup"):
+                detector.cleanup()
