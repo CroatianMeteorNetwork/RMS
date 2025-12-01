@@ -56,20 +56,13 @@ fi
 source "$HOME/vRMS/bin/activate"
 cd "$HOME/source/RMS"
 
-LOGDIR="$HOME/RMS_data/logs"
-mkdir -p "$LOGDIR"
-
 configpath="/home/$(whoami)/source/Stations/$1/.config"
 echo "Using config from $configpath"
 
 # ----- decide how we were launched ---------------------------------
 # real TTY (manual or .desktop launch)
 if [[ -t 1 ]]; then
-    # TTY mode: output goes to screen, no need for separate log file (RMS logs internally)
-    LOGFILE="/dev/null"
-
-    # duplicate output but shield tee from SIGINT
-    exec > >(bash -c 'trap "" INT TERM; tee -a "$1"' _ "$LOGFILE") 2>&1
+    # TTY mode: output goes to screen (no additional logging, RMS logs internally)
 
     python -u -m RMS.StartCapture -c "$configpath" &
     child=$!
@@ -108,13 +101,10 @@ if [[ -t 1 ]]; then
     exit "$status"
 
 else
-    # no TTY (cron / GRMSUpdater / nohup etc.) - capture output to log file
+    # no TTY (cron / GRMSUpdater / nohup etc.)
     # Run Python as a child process (not exec) so bash stays alive with the station ID
     # in its command line - this allows GRMSUpdater to find and signal the process
-    LOGFILE="$LOGDIR/$(date +%Y%m%d_%H%M%S)_log.txt"
-
-    # Use process substitution for tee so Python is a direct child (not in a pipeline)
-    exec > >(tee -a "$LOGFILE") 2>&1
+    # Note: no output redirection here - let the caller handle it (e.g., cron 2> logfile)
 
     python -u -m RMS.StartCapture -c "$configpath" &
     child=$!
