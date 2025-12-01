@@ -112,7 +112,11 @@ else
     # no TTY (cron / GRMSUpdater / nohup etc.) - just append to the log file
     # Run Python as a child process (not exec) so bash stays alive with the station ID
     # in its command line - this allows GRMSUpdater to find and signal the process
-    python -u -m RMS.StartCapture -c "$configpath" 2>&1 | tee -a "$LOGFILE" &
+
+    # Use process substitution for tee so Python is a direct child (not in a pipeline)
+    exec > >(tee -a "$LOGFILE") 2>&1
+
+    python -u -m RMS.StartCapture -c "$configpath" &
     child=$!
 
     # Forward SIGTERM as SIGINT to Python (same as TTY path)
