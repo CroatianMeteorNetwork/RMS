@@ -53,10 +53,10 @@ else
 	sleep $2
 fi
 
-source ~/vRMS/bin/activate
-cd ~/source/RMS
+source "$HOME/vRMS/bin/activate"
+cd "$HOME/source/RMS"
 
-LOGDIR=~/RMS_data/logs
+LOGDIR="$HOME/RMS_data/logs"
 mkdir -p "$LOGDIR"
 # LOGFILE="$LOGDIR/$(date +%F_%T)_startcap.log"
 LOGFILE="/dev/null"  # Disable duplicate logging - RMS already logs
@@ -110,6 +110,12 @@ if [[ -t 1 ]]; then
 
 else
     # no TTY (cron / GRMSUpdater / nohup etc.) - just append to the log file
-    { exec -a "StartCapture.sh $1" \
-        python -u -m RMS.StartCapture -c "$configpath"; } 2>&1 | tee -a "$LOGFILE"
+    # Run Python as a child process (not exec) so bash stays alive with the station ID
+    # in its command line - this allows GRMSUpdater to find and signal the process
+    python -u -m RMS.StartCapture -c "$configpath" 2>&1 | tee -a "$LOGFILE" &
+    child=$!
+
+    # Forward SIGTERM as SIGINT to Python (same as TTY path)
+    trap 'kill -INT "$child" 2>/dev/null; wait "$child"; exit $?' TERM INT
+    wait "$child"
 fi
