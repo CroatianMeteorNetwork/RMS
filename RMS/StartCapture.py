@@ -689,6 +689,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             # Delete detector backup files
             if detector is not None:
                 detector.deleteBackupFiles()
+                if hasattr(detector, "cleanup"):
+                    detector.cleanup()
 
 
             # frames -> timelapse(s) -> archive(s) -> upload
@@ -845,6 +847,9 @@ def processIncompleteCaptures(config, upload_manager):
             # Delete detection backup files
             if detector is not None:
                 detector.deleteBackupFiles()
+                # Ensure detector resources are released when running inside StartCapture
+                if hasattr(detector, "cleanup"):
+                    detector.cleanup()
 
 
             # Run the external script if running after autoreprocess is enabled

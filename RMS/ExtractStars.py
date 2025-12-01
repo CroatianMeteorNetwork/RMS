@@ -873,6 +873,9 @@ def extractStarsAndSave(config, ff_dir):
     # Delete QueuedPool backed up files
     if workpool is not None:
         workpool.deleteBackupFiles()
+        # Ensure manager/queues are torn down when using QueuedPool
+        if hasattr(workpool, "cleanup"):
+            workpool.cleanup()
 
     log.info('Total time taken: {:.2f} s'.format(time.time() - time_start))
 
@@ -1069,6 +1072,5 @@ if __name__ == "__main__":
         plt.savefig(os.path.join(ff_dir, 'PSF_radius_vs_FWHM.png'), dpi=300)
 
         plt.show()
-
 
 
