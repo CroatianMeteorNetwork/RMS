@@ -2,14 +2,6 @@
 
 from __future__ import print_function, division, absolute_import
 
-try:
-    import imreg_dft
-    IMREG_INSTALLED = True
-
-except ImportError:
-    IMREG_INSTALLED = False
-
-
 import os
 import sys
 import copy
@@ -19,6 +11,10 @@ import argparse
 
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.fft import fft2, fftshift
+from skimage.transform import warp_polar, warp, SimilarityTransform
+from skimage.registration import phase_cross_correlation
+from skimage.filters import window
 
 from RMS.Astrometry import ApplyAstrometry
 from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle, raDec2AltAz
@@ -110,16 +106,6 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
             - translation_y: [float]
     """
 
-    # If the image registration library is not installed, return nothing
-    if not IMREG_INSTALLED:
-        log.warning("WARNING:")
-        log.warning('The imreg_dft library is not installed! Install it by running either:')
-        log.warning(' a) pip install imreg_dft')
-        log.warning(' b) conda install -c conda-forge imreg_dft')
-
-        return 0.0, 1.0, 0.0, 0.0
-
-
     # Set input types
     reference_list = np.array(reference_list).astype(float)
     moved_list = np.array(moved_list).astype(float)
@@ -141,37 +127,80 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
     moved_list[:, 1] += shift_y
 
     # Construct the reference and moved images
-    img_ref = constructImage(img_size, reference_list, dot_radius)
-    img_mov = constructImage(img_size, moved_list, dot_radius)
+    img_ref = constructImage(img_size, reference_list, dot_radius).astype(np.float64)
+    img_mov = constructImage(img_size, moved_list, dot_radius).astype(np.float64)
 
-
-    # Run the FFT registration
+    # Run the FFT registration using scikit-image log-polar transform + phase correlation
     try:
-        res = imreg_dft.imreg.similarity(img_ref, img_mov)
+        # Apply Hann window to reduce spectral leakage from image borders
+        winhann = window('hann', img_ref.shape)
+        img_ref_windowed = img_ref * winhann
+        img_mov_windowed = img_mov * winhann
 
-    except ValueError:
-        log.warning('imreg_dft error: The scale correction is too high!')
+        # Compute FFT magnitude spectra (translation-invariant representation)
+        img_ref_fs = np.abs(fftshift(fft2(img_ref_windowed)))
+        img_mov_fs = np.abs(fftshift(fft2(img_mov_windowed)))
+
+        # Apply log-polar transform to convert rotation/scale to translation
+        radius = img_ref_fs.shape[0] // 8
+        shape = img_ref_fs.shape
+        warped_ref = warp_polar(img_ref_fs, radius=radius, output_shape=shape, scaling='log', order=0)
+        warped_mov = warp_polar(img_mov_fs, radius=radius, output_shape=shape, scaling='log', order=0)
+
+        # Use only the valid half of the FFT (the other half is symmetric)
+        warped_ref = warped_ref[:shape[0]//2, :]
+        warped_mov = warped_mov[:shape[0]//2, :]
+
+        # Find rotation and scale via phase correlation on log-polar images
+        shifts, error, phasediff = phase_cross_correlation(
+            warped_ref, warped_mov, upsample_factor=10, normalization=None
+        )
+
+        # Convert shifts to rotation angle and scale factor
+        shiftr, shiftc = shifts[:2]
+        angle = -(360 / shape[0]) * shiftr  # Negative to match imreg_dft convention
+        klog = shape[1] / np.log(radius)
+        scale = np.exp(shiftc / klog)
+
+        # Check for unreasonable scale values
+        if scale < 0.5 or scale > 2.0:
+            log.warning('FFT registration error: The scale correction is too high ({:.3f})!'.format(scale))
+            return 0.0, 1.0, 0.0, 0.0
+
+        # Now find translation by applying the recovered rotation/scale and using phase correlation
+        # Create transformation matrix for rotation around image center
+        center = np.array(img_mov.shape) / 2
+
+        # Apply inverse rotation and scale to the moved image to align it with reference
+        tform = SimilarityTransform(scale=1.0/scale, rotation=np.radians(angle), translation=(0, 0))
+
+        # Transform around center
+        shift_to_origin = SimilarityTransform(translation=-center)
+        shift_back = SimilarityTransform(translation=center)
+        full_tform = shift_to_origin + tform + shift_back
+
+        img_mov_corrected = warp(img_mov, full_tform.inverse, preserve_range=True)
+
+        # Find translation between reference and rotation/scale-corrected moved image
+        translation_shifts, _, _ = phase_cross_correlation(
+            img_ref, img_mov_corrected, upsample_factor=10, normalization=None
+        )
+
+        # Extract translation (note: phase_cross_correlation returns (row, col) = (y, x))
+        translate_y, translate_x = translation_shifts[:2]
+
+    except (ValueError, IndexError) as e:
+        log.warning('FFT registration error: {}'.format(str(e)))
         return 0.0, 1.0, 0.0, 0.0
 
-    except IndexError:
-        log.warning('imreg_dft error: Index out of bounds!')
-        return 0.0, 1.0, 0.0, 0.0
-
-
-    angle = res['angle']
-    scale = res['scale']
-    translate = res['tvec']
-
-    # Extract translation and rescale it
-    translation_x = rescale_factor*translate[1]
-    translation_y = rescale_factor*translate[0]
-
+    # Rescale translation back to original image coordinates
+    translation_x = rescale_factor * translate_x
+    translation_y = rescale_factor * translate_y
 
     log.info('Platepar correction:')
     log.info('    Rotation: {:.5f} deg'.format(angle))
     log.info('    Scale: {:.5f}'.format(scale))
     log.info('    Translation X, Y: ({:.2f}, {:.2f}) px'.format(translation_x, translation_y))
-
 
     # Plot comparison
     if show_plot:
@@ -184,10 +213,10 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
         ax2.imshow(img_mov, cmap='gray')
         ax2.set_title('Moved')
 
-        ax3.imshow(res['timg'], cmap='gray')
+        ax3.imshow(img_mov_corrected, cmap='gray')
         ax3.set_title('Transformed')
 
-        ax4.imshow(np.abs(res['timg'].astype(int) - img_ref.astype(int)).astype(np.uint8), cmap='gray')
+        ax4.imshow(np.abs(img_mov_corrected - img_ref), cmap='gray')
         ax4.set_title('Difference')
 
         plt.tight_layout()
