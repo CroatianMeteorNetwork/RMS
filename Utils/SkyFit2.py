@@ -66,7 +66,13 @@ from RMS.Routines.MaskImage import getMaskFile
 from RMS.Routines import RollingShutterCorrection
 from RMS.Routines.MaskImage import loadMask, MaskStructure, getMaskFile
 from RMS.Misc import maxDistBetweenPoints, getRmsRootDir
-from Utils.KalmanFilter import KalmanFilter
+
+try:
+    from Utils.KalmanFilter import KalmanFilter
+    KALMAN_IMPORTED = True
+except ImportError as e:
+    KALMAN_IMPORTED = False
+    print(f'KalmanFilter not available (optional, only needed for trajectory post-processing): {e}')
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
@@ -89,7 +95,7 @@ try:
 
 except Exception as e:
     ASTRA_IMPORTED = False
-    print(f'ASTRA import error: {e}')
+    print(f'ASTRA not available (optional, only needed for trajectory post-processing): {e}')
 
 
 

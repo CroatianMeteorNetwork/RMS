@@ -5,7 +5,12 @@ from datetime import datetime as dt
 import shutil
 
 import numpy as np
-import pandas as pd
+
+try:
+    import pandas as pd
+    PANDAS_INSTALLED = True
+except ImportError:
+    PANDAS_INSTALLED = False
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
 from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz
@@ -558,6 +563,10 @@ def loadECSV(ECSV_file_path):
         raise Exception(f"Unknown Error reading ECSV file, check correct file loaded.: {str(e)}")
             
 def saveECSV(picks, times, platepar, save_path, orig_path):
+    # Check if pandas is available
+    if not PANDAS_INSTALLED:
+        raise ImportError("pandas is required for saving ECSV files. Install with: pip install pandas")
+
     # Copy the original ecsv to the save location
     shutil.copy(orig_path, os.path.join(save_path, os.path.basename(orig_path) + '_kalman.ecsv'))
 

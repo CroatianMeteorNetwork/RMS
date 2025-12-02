@@ -26,8 +26,10 @@ from RMS.Routines import Image
 
 try:
     from pyswarms.single.global_best import GlobalBestPSO
-except Exception as e:
-    print(f'ASTRA cannot be run, pyswarms not installed: {e}')
+    PYSWARMS_INSTALLED = True
+except ImportError as e:
+    PYSWARMS_INSTALLED = False
+    print(f'pyswarms not available (optional, only needed for ASTRA trajectory post-processing): {e}')
 
 
 
@@ -73,7 +75,12 @@ class ASTRA:
         Raises:
             KeyError: If required config keys are missing and not defaulted.
             ValueError: If inputs have incompatible shapes or types.
+            ImportError: If pyswarms is not installed.
         """
+        # Check if pyswarms is available
+        if not PYSWARMS_INSTALLED:
+            raise ImportError("pyswarms is required for ASTRA. Install with: pip install pyswarms")
+
         # -- Constants & Settings --
 
         # Unpack calculated args
