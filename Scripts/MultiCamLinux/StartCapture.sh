@@ -53,13 +53,8 @@ else
 	sleep $2
 fi
 
-source ~/vRMS/bin/activate
-cd ~/source/RMS
-
-LOGDIR=~/RMS_data/logs
-mkdir -p "$LOGDIR"
-# LOGFILE="$LOGDIR/$(date +%F_%T)_startcap.log"
-LOGFILE="/dev/null"  # Disable duplicate logging - RMS already logs
+source "$HOME/vRMS/bin/activate"
+cd "$HOME/source/RMS"
 
 configpath="/home/$(whoami)/source/Stations/$1/.config"
 echo "Using config from $configpath"
@@ -67,10 +62,7 @@ echo "Using config from $configpath"
 # ----- decide how we were launched ---------------------------------
 # real TTY (manual or .desktop launch)
 if [[ -t 1 ]]; then
-    # echo "Logging to $LOGFILE"  # Disabled since we're using /dev/null
-    
-    # duplicate output but shield tee from SIGINT
-    exec > >(bash -c 'trap "" INT TERM; tee -a "$1"' _ "$LOGFILE") 2>&1
+    # TTY mode: output goes to screen (no additional logging, RMS logs internally)
 
     python -u -m RMS.StartCapture -c "$configpath" &
     child=$!
@@ -109,7 +101,15 @@ if [[ -t 1 ]]; then
     exit "$status"
 
 else
-    # no TTY (cron / GRMSUpdater / nohup etc.) - just append to the log file
-    { exec -a "StartCapture.sh $1" \
-        python -u -m RMS.StartCapture -c "$configpath"; } 2>&1 | tee -a "$LOGFILE"
+    # no TTY (cron / GRMSUpdater / nohup etc.)
+    # Run Python as a child process so bash stays alive with the station ID
+    # in its command line - this allows GRMSUpdater to find and signal the process.
+    # Use job control to ensure proper signal handling and output inheritance.
+    set -m  # Enable job control
+    python -u -m RMS.StartCapture -c "$configpath" &
+    child=$!
+
+    # Forward SIGTERM as SIGINT to Python for graceful shutdown
+    trap 'kill -INT "$child" 2>/dev/null; wait "$child"; exit $?' TERM INT
+    wait "$child"
 fi
