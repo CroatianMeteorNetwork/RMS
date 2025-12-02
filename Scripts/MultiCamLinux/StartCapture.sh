@@ -102,14 +102,9 @@ if [[ -t 1 ]]; then
 
 else
     # no TTY (cron / GRMSUpdater / nohup etc.)
-    # Run Python as a child process (not exec) so bash stays alive with the station ID
-    # in its command line - this allows GRMSUpdater to find and signal the process
-    # Note: no output redirection here - let the caller handle it (e.g., cron 2> logfile)
-
-    python -u -m RMS.StartCapture -c "$configpath" &
-    child=$!
-
-    # Forward SIGTERM as SIGINT to Python (same as TTY path)
-    trap 'kill -INT "$child" 2>/dev/null; wait "$child"; exit $?' TERM INT
-    wait "$child"
+    # Run Python in foreground so it inherits cron's redirections properly.
+    # Bash stays alive as the parent, keeping the station ID visible to GRMSUpdater.
+    # Forward SIGTERM as SIGINT to Python for graceful shutdown.
+    trap 'kill -INT 0' TERM
+    python -u -m RMS.StartCapture -c "$configpath"
 fi
