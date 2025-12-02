@@ -1136,12 +1136,10 @@ if __name__ == "__main__":
 
             log.debug('Less than 15 minutes left to record, waiting for a new recording session tonight...')
 
-            # Reset the Ctrl+C to KeyboardInterrupt
-            resetSIGINT()
-
             try:
-                # Wait for 30 mins before checking again
-                time.sleep(30*60)
+                # Wait for 30 mins before checking again (interruptible)
+                from RMS.Misc import interruptibleWait
+                interruptibleWait(30*60)
 
             except KeyboardInterrupt:
 
@@ -1240,15 +1238,13 @@ if __name__ == "__main__":
                 log.info('Waiting {:s} to start recording for {:.3f} hrs'.format(str(waiting_time), \
                     duration/60/60))
 
-                # Reset the Ctrl+C to KeyboardInterrupt
-                resetSIGINT()
-
                 try:
 
-                    # Wait until sunset
+                    # Wait until sunset (interruptible)
                     waiting_time_seconds = int(waiting_time.total_seconds())
                     if waiting_time_seconds > 0:
-                        time.sleep(waiting_time_seconds)
+                        from RMS.Misc import interruptibleWait
+                        interruptibleWait(waiting_time_seconds)
 
                 except KeyboardInterrupt:
 
