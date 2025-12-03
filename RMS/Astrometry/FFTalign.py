@@ -12,7 +12,7 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.fft import fft2, fftshift
-from skimage.transform import warp_polar, warp, SimilarityTransform
+from skimage.transform import warp_polar, rotate
 from skimage.registration import phase_cross_correlation
 from skimage.filters import window
 
@@ -142,10 +142,11 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
         img_mov_fs = np.abs(fftshift(fft2(img_mov_windowed)))
 
         # Apply log-polar transform to convert rotation/scale to translation
-        radius = img_ref_fs.shape[0] // 8
+        # Use larger radius for better rotation detection accuracy
+        radius = img_ref_fs.shape[0] // 2
         shape = img_ref_fs.shape
-        warped_ref = warp_polar(img_ref_fs, radius=radius, output_shape=shape, scaling='log', order=0)
-        warped_mov = warp_polar(img_mov_fs, radius=radius, output_shape=shape, scaling='log', order=0)
+        warped_ref = warp_polar(img_ref_fs, radius=radius, output_shape=shape, scaling='log', order=1)
+        warped_mov = warp_polar(img_mov_fs, radius=radius, output_shape=shape, scaling='log', order=1)
 
         # Use only the valid half of the FFT (the other half is symmetric)
         warped_ref = warped_ref[:shape[0]//2, :]
@@ -168,18 +169,22 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
             return 0.0, 1.0, 0.0, 0.0
 
         # Now find translation by applying the recovered rotation/scale and using phase correlation
-        # Create transformation matrix for rotation around image center
-        center = np.array(img_mov.shape) / 2
+        # Apply inverse rotation to the moved image to align it with reference
+        center = (img_mov.shape[1] / 2, img_mov.shape[0] / 2)
+        img_mov_corrected = rotate(img_mov, angle, center=center, preserve_range=True)
 
-        # Apply inverse rotation and scale to the moved image to align it with reference
-        tform = SimilarityTransform(scale=1.0/scale, rotation=np.radians(angle), translation=(0, 0))
-
-        # Transform around center
-        shift_to_origin = SimilarityTransform(translation=-center)
-        shift_back = SimilarityTransform(translation=center)
-        full_tform = shift_to_origin + tform + shift_back
-
-        img_mov_corrected = warp(img_mov, full_tform.inverse, preserve_range=True)
+        # Apply scale correction if needed
+        if abs(scale - 1.0) > 0.001:
+            from scipy.ndimage import zoom
+            img_mov_corrected = zoom(img_mov_corrected, 1.0/scale, order=1)
+            # Crop or pad to match original size
+            if img_mov_corrected.shape[0] > img_mov.shape[0]:
+                start = (img_mov_corrected.shape[0] - img_mov.shape[0]) // 2
+                img_mov_corrected = img_mov_corrected[start:start+img_mov.shape[0],
+                                                       start:start+img_mov.shape[1]]
+            elif img_mov_corrected.shape[0] < img_mov.shape[0]:
+                pad = (img_mov.shape[0] - img_mov_corrected.shape[0]) // 2
+                img_mov_corrected = np.pad(img_mov_corrected, pad, mode='constant')
 
         # Find translation between reference and rotation/scale-corrected moved image
         translation_shifts, _, _ = phase_cross_correlation(
@@ -187,7 +192,8 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
         )
 
         # Extract translation (note: phase_cross_correlation returns (row, col) = (y, x))
-        translate_y, translate_x = translation_shifts[:2]
+        # Negate to get the transform from reference to moved
+        translate_y, translate_x = -translation_shifts[0], -translation_shifts[1]
 
     except (ValueError, IndexError) as e:
         log.warning('FFT registration error: {}'.format(str(e)))
