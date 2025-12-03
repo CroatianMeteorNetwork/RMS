@@ -11,8 +11,9 @@ import argparse
 
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.fft import fft2, fftshift
-from skimage.transform import warp_polar, rotate
+from scipy.fft import fft2, fftshift, ifft2
+from scipy.ndimage import map_coordinates
+from skimage.transform import rotate
 from skimage.registration import phase_cross_correlation
 from skimage.filters import window
 
@@ -83,6 +84,110 @@ def constructImage(img_size, point_list, dot_radius):
     return img
 
 
+def logpolarFilter(shape):
+    """ Make a radial cosine filter that suppresses low frequencies in the FFT.
+
+    This filter is essential for accurate rotation detection - it suppresses the
+    DC component and low frequencies that would otherwise dominate the correlation.
+    """
+    yy = np.linspace(-np.pi/2, np.pi/2, shape[0])[:, np.newaxis]
+    xx = np.linspace(-np.pi/2, np.pi/2, shape[1])[np.newaxis, :]
+    rads = np.sqrt(yy**2 + xx**2)
+    filt = 1.0 - np.cos(rads)**2
+    filt[np.abs(rads) > np.pi/2] = 1
+    return filt
+
+
+def getLogBase(shape, new_r):
+    """ Calculate the logarithmic base for the log-polar transform. """
+    EXCESS_CONST = 1.1
+    old_r = shape[0] * EXCESS_CONST / 2.0
+    log_base = np.exp(np.log(old_r) / new_r)
+    return log_base
+
+
+def logpolarTransform(image, shape, log_base):
+    """ Apply a log-polar transform to the image.
+
+    Arguments:
+        image: Input image (typically FFT magnitude)
+        shape: Output shape (rows=angles, cols=radii)
+        log_base: Base for logarithmic radial sampling
+
+    Returns:
+        Log-polar transformed image
+    """
+    bgval = np.percentile(image, 1)
+    imshape = np.array(image.shape)
+    center = imshape[0] / 2.0, imshape[1] / 2.0
+
+    # Build coordinate grids
+    theta = np.zeros(shape, dtype=np.float64)
+    theta -= np.linspace(0, np.pi, shape[0])[:, np.newaxis]
+
+    radius = np.zeros(shape, dtype=np.float64)
+    radius += np.power(log_base, np.arange(shape[1], dtype=float))[np.newaxis, :]
+
+    # Convert polar to cartesian
+    y = radius * np.sin(theta) + center[0]
+    x = radius * np.cos(theta) + center[1]
+
+    output = np.empty_like(y)
+    map_coordinates(image, [y, x], output=output, order=3, mode="constant", cval=bgval)
+    return output
+
+
+def subpixelPeak(cps, rad=2):
+    """ Find the subpixel peak location using center-of-mass interpolation.
+
+    Arguments:
+        cps: Cross-power spectrum (shifted so peak is near center)
+        rad: Radius around peak for center-of-mass calculation
+
+    Returns:
+        Subpixel peak coordinates as numpy array [y, x]
+    """
+    peak = np.unravel_index(np.argmax(cps), cps.shape)
+    peak = np.array(peak)
+
+    # Extract sub-region around peak
+    y0, x0 = max(0, peak[0]-rad), max(0, peak[1]-rad)
+    y1, x1 = min(cps.shape[0], peak[0]+rad+1), min(cps.shape[1], peak[1]+rad+1)
+    subarr = cps[y0:y1, x0:x1]
+
+    # Compute center of mass
+    col = np.arange(subarr.shape[0])[:, np.newaxis]
+    row = np.arange(subarr.shape[1])[np.newaxis, :]
+    arrsum = subarr.sum()
+
+    if arrsum == 0:
+        return peak.astype(float)
+
+    com_y = np.sum(subarr * col) / arrsum
+    com_x = np.sum(subarr * row) / arrsum
+
+    return np.array([y0 + com_y, x0 + com_x])
+
+
+def phaseCorrelationSubpixel(im0, im1):
+    """ Compute phase correlation with subpixel precision.
+
+    Arguments:
+        im0: Reference image
+        im1: Moved image
+
+    Returns:
+        Subpixel shift as numpy array [y, x]
+    """
+    f0, f1 = fft2(im0), fft2(im1)
+    eps = np.abs(f1).max() * 1e-15
+    cps = np.abs(ifft2((f0 * f1.conjugate()) / (np.abs(f0) * np.abs(f1) + eps)))
+    scps = fftshift(cps)
+    peak = subpixelPeak(scps)
+    ret = peak - np.array(f0.shape) // 2
+    return ret
+
+
 
 def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_radius=2, show_plot=False):
     """ Given a list of reference and predicted star positions, return a transform (rotation, scale, \
@@ -130,7 +235,7 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
     img_ref = constructImage(img_size, reference_list, dot_radius).astype(np.float64)
     img_mov = constructImage(img_size, moved_list, dot_radius).astype(np.float64)
 
-    # Run the FFT registration using scikit-image log-polar transform + phase correlation
+    # Run the FFT registration using custom imreg_dft-style algorithm
     try:
         # Apply Hann window to reduce spectral leakage from image borders
         winhann = window('hann', img_ref.shape)
@@ -138,53 +243,67 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
         img_mov_windowed = img_mov * winhann
 
         # Compute FFT magnitude spectra (translation-invariant representation)
-        img_ref_fs = np.abs(fftshift(fft2(img_ref_windowed)))
-        img_mov_fs = np.abs(fftshift(fft2(img_mov_windowed)))
+        dft_ref = fftshift(fft2(img_ref_windowed))
+        dft_mov = fftshift(fft2(img_mov_windowed))
 
-        # Apply log-polar transform to convert rotation/scale to translation
-        # Use larger radius for better rotation detection accuracy
-        radius = img_ref_fs.shape[0] // 2
-        shape = img_ref_fs.shape
-        warped_ref = warp_polar(img_ref_fs, radius=radius, output_shape=shape, scaling='log', order=1)
-        warped_mov = warp_polar(img_mov_fs, radius=radius, output_shape=shape, scaling='log', order=1)
+        # Apply log-polar filter to suppress low frequencies (essential for rotation accuracy)
+        filt = logpolarFilter(img_ref.shape)
+        dft_ref_filt = dft_ref * filt
+        dft_mov_filt = dft_mov * filt
 
-        # Use only the valid half of the FFT (the other half is symmetric)
-        warped_ref = warped_ref[:shape[0]//2, :]
-        warped_mov = warped_mov[:shape[0]//2, :]
+        # Apply custom log-polar transform
+        pcorr_shape = (int(max(img_ref.shape)),) * 2
+        log_base = getLogBase(img_ref.shape, pcorr_shape[1])
+
+        lp_ref = logpolarTransform(np.abs(dft_ref_filt), pcorr_shape, log_base)
+        lp_mov = logpolarTransform(np.abs(dft_mov_filt), pcorr_shape, log_base)
 
         # Find rotation and scale via phase correlation on log-polar images
-        shifts, error, phasediff = phase_cross_correlation(
-            warped_ref, warped_mov, upsample_factor=10, normalization=None
-        )
+        shifts = phaseCorrelationSubpixel(lp_ref, lp_mov)
+        arg_ang, arg_rad = shifts
 
         # Convert shifts to rotation angle and scale factor
-        shiftr, shiftc = shifts[:2]
-        angle = -(360 / shape[0]) * shiftr  # Negative to match imreg_dft convention
-        klog = shape[1] / np.log(radius)
-        scale = np.exp(shiftc / klog)
+        angle = -np.pi * arg_ang / float(pcorr_shape[0])
+        angle = np.rad2deg(angle)
+        angle = ((angle + 180) % 360) - 180  # Normalize to [-180, 180]
+
+        scale = log_base ** arg_rad
+
+        # Invert to get the transform from reference to moved (matching imreg_dft convention)
+        angle = -angle
+        scale = 1.0 / scale
 
         # Check for unreasonable scale values
         if scale < 0.5 or scale > 2.0:
             log.warning('FFT registration error: The scale correction is too high ({:.3f})!'.format(scale))
             return 0.0, 1.0, 0.0, 0.0
 
-        # Now find translation by applying the recovered rotation/scale and using phase correlation
-        # Apply inverse rotation to the moved image to align it with reference
-        center = (img_mov.shape[1] / 2, img_mov.shape[0] / 2)
-        img_mov_corrected = rotate(img_mov, angle, center=center, preserve_range=True)
+        # Apply rotation correction to moved image to find translation
+        # Use skimage.transform.rotate which handles center rotation properly
+        img_mov_corrected = rotate(img_mov, angle, resize=False, mode='constant', cval=0, order=1)
 
-        # Apply scale correction if needed
+        # Handle scale correction if significant
         if abs(scale - 1.0) > 0.001:
             from scipy.ndimage import zoom
             img_mov_corrected = zoom(img_mov_corrected, 1.0/scale, order=1)
             # Crop or pad to match original size
-            if img_mov_corrected.shape[0] > img_mov.shape[0]:
-                start = (img_mov_corrected.shape[0] - img_mov.shape[0]) // 2
-                img_mov_corrected = img_mov_corrected[start:start+img_mov.shape[0],
-                                                       start:start+img_mov.shape[1]]
-            elif img_mov_corrected.shape[0] < img_mov.shape[0]:
-                pad = (img_mov.shape[0] - img_mov_corrected.shape[0]) // 2
-                img_mov_corrected = np.pad(img_mov_corrected, pad, mode='constant')
+            target_shape = img_mov.shape
+            current_shape = img_mov_corrected.shape
+            if current_shape[0] > target_shape[0] or current_shape[1] > target_shape[1]:
+                start_y = (current_shape[0] - target_shape[0]) // 2
+                start_x = (current_shape[1] - target_shape[1]) // 2
+                img_mov_corrected = img_mov_corrected[
+                    max(0, start_y):max(0, start_y)+target_shape[0],
+                    max(0, start_x):max(0, start_x)+target_shape[1]
+                ]
+            if img_mov_corrected.shape[0] < target_shape[0] or img_mov_corrected.shape[1] < target_shape[1]:
+                pad_y = target_shape[0] - img_mov_corrected.shape[0]
+                pad_x = target_shape[1] - img_mov_corrected.shape[1]
+                img_mov_corrected = np.pad(
+                    img_mov_corrected,
+                    ((pad_y // 2, pad_y - pad_y // 2), (pad_x // 2, pad_x - pad_x // 2)),
+                    mode='constant'
+                )
 
         # Find translation between reference and rotation/scale-corrected moved image
         translation_shifts, _, _ = phase_cross_correlation(
@@ -192,8 +311,8 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
         )
 
         # Extract translation (note: phase_cross_correlation returns (row, col) = (y, x))
-        # Negate to get the transform from reference to moved
-        translate_y, translate_x = -translation_shifts[0], -translation_shifts[1]
+        # Keep same sign convention as imreg_dft (transform from moved to reference)
+        translate_y, translate_x = translation_shifts[0], translation_shifts[1]
 
     except (ValueError, IndexError) as e:
         log.warning('FFT registration error: {}'.format(str(e)))
