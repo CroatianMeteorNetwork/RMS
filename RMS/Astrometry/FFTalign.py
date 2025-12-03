@@ -485,8 +485,8 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
 
     # Compute the new reference RA and Dec
     _, ra_centre_new, dec_centre_new, _ = ApplyAstrometry.xyToRaDecPP([jd2Date(platepar_aligned.JD)], \
-        [platepar_aligned.X_res/2 - 2*translation_x], \
-        [platepar_aligned.Y_res/2 - 2*translation_y], [1], platepar_aligned, \
+        [platepar_aligned.X_res/2 + translation_x], \
+        [platepar_aligned.Y_res/2 + translation_y], [1], platepar_aligned, \
         extinction_correction=False)
     
 
