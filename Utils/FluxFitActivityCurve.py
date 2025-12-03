@@ -6,7 +6,8 @@ import datetime
 import calendar
 from collections import OrderedDict
 
-import pandas as pd
+import astropy.units as u
+from astropy.table import Table
 import numpy as np
 import scipy.optimize
 import matplotlib.pyplot as plt
@@ -18,7 +19,7 @@ from RMS.Formats.Showers import FluxShowers
 from RMS.Misc import formatScientific, RmsDateTime
 from RMS.Math import lineFunc
 from RMS.Routines.SolarLongitude import jd2SolLonSteyaert, solLon2jdSteyaert
-from Utils.Flux import calculateZHR
+from Utils.Flux import calculateZHR, massVerniani
 
 def showerActivity(sol, sol_peak, background_flux, peak_flux, bp, bm):
     """ Shower activity model described with a double exponential. 
@@ -1530,11 +1531,10 @@ if __name__ == "__main__":
 
 
     # Column names in the CSV files that will be extracted
-    sol_column = ' Mean Sol (deg)'
-    flux_column = ' Flux@+6.5M (met / 1000 km^2 h)'
-    flux_ci_low_column = ' Flux CI low'
-    flux_ci_high_column = ' Flux CI high'
-    zhr_column = ' ZHR'
+    sol_column = 'sol'
+    flux_column = 'flux_6_5_lm'
+    flux_ci_low_column = 'flux_6_5_lm_ci_lower'
+    flux_ci_high_column = 'flux_6_5_lm_ci_upper'
 
 
 
@@ -1837,7 +1837,7 @@ if __name__ == "__main__":
 
     # Load files in the CSV directory
     csv_files = [os.path.join(os.path.abspath(csv_path), file_name) 
-        for file_name in sorted(os.listdir(csv_path)) if file_name.lower().endswith('.csv')]
+        for file_name in sorted(os.listdir(csv_path)) if file_name.lower().endswith('.ecsv')]
 
 
     # Go through all shower codes
@@ -1863,46 +1863,37 @@ if __name__ == "__main__":
             csv_file = csv_candidates[0]
 
             # Read the CSV file
-            with open(csv_file) as f:
-                csv_contents = f.readlines()
+            # Read the ECSV file
+            data = Table.read(csv_file, format='ascii.ecsv')
 
             # Read metadata
-            for line in csv_contents:
+            if 'population_index' in data.meta:
+                population_index = float(data.meta['population_index'])
+            
+            # Calculate m_lim_6_5m
+            if 'shower_velocity' in data.meta:
+                v_inf = data.meta['shower_velocity']
+                if hasattr(v_inf, 'value'):
+                    v_inf = v_inf.value
+                m_lim_6_5m = massVerniani(6.5, v_inf)
 
-                # Read the mass limit
-                if "m_lim @ +6.5M" in line:
-                    line = line.split('=')
-                    m_lim_6_5m = float(line[-1].strip().replace("kg", "").strip())
-                    
-                # Read the population index
-                if " r     " in line:
-                    line = line.split('=')
-                    population_index = float(line[-1].strip())
-
-            # Load the CSV info pandas
-            data = pd.read_csv(csv_file, delimiter=',', skiprows=13, escapechar='#')
-
-            # Prune the last line (only the sol bin edge)
-            data = data[:-1]
-
-            # Pune the first and the last point (some points are outliers)
+            # Prune the first and the last point (some points are outliers)
             data = data[1:-1]
 
-            # print(data)
-            # print(data.columns)
-
-
             # Extract sol, flux, and ZHR data
-            sol_data = data[sol_column].to_numpy()
-            flux_data = data[flux_column].to_numpy()
-            zhr_data = data[zhr_column].to_numpy()
+            # We use .value to strip units (as Utils/Flux.py saves them as Quantities)
+            sol_data = data[sol_column].value
+            flux_data = data[flux_column].value
+            
+            # Calculate ZHR
+            zhr_data = calculateZHR(flux_data, population_index)
 
 
             ### Compute the fit weights ###
 
             # Extract the flux confidence interval
-            flux_ci_low = data[flux_ci_low_column].to_numpy()
-            flux_ci_high = data[flux_ci_high_column].to_numpy()
+            flux_ci_low = data[flux_ci_low_column].value
+            flux_ci_high = data[flux_ci_high_column].value
 
             # Compute the weights (smaller range = higher weight), handle zero values
             flux_ci_diff = np.abs(flux_ci_high - flux_ci_low)
