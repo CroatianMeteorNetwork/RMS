@@ -24,7 +24,7 @@ pyclean>=2.7.6; python_version >= "3.5"
 wheel>=0.30.0
 setuptools>=40.0.0
 ifaddr; sys_platform =="win32"
-PyGObject<=3.50; python_version >= '3.6'
+PyGObject; python_version >= '3.6'
 rawpy; sys_platform == "win32"
 rawpy; sys_platform == "darwin"
 rawpy; sys_platform == "linux" and platform_machine == "x86_64"
