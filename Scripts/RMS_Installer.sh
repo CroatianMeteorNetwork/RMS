@@ -41,7 +41,7 @@ sudo apt-get install -y \
     socat chrony \
     imagemagick ffmpeg \
     qt5-qmake lxterminal \
-    python3-virtualenv \
+    python3-venv \
     gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
     libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
     gobject-introspection \
@@ -64,16 +64,16 @@ git clone https://github.com/CroatianMeteorNetwork/cmn_binviewer.git
 
 # Set up Python virtual environment
 cd ~
-virtualenv vRMS
+python3 -m venv vRMS
 source ~/vRMS/bin/activate
 
 # Install Python packages
-pip3 install --upgrade pip setuptools wheel
-pip3 install -r ~/source/RMS/requirements.txt
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -r ~/source/RMS/requirements.txt
 
 # Install PyQt5 - use system package on ARM (pip wheels not available), pip on x86
 if [[ $(uname -m) == "x86_64" ]]; then
-    pip3 install PyQt5
+    python -m pip install PyQt5
 else
     sudo apt-get install -y python3-pyqt5
 fi
@@ -83,7 +83,7 @@ cd ~/source/RMS
 ~/source/RMS/Scripts/RMS_OpenCV_Install.sh ~/vRMS
 
 # Install RMS
-python setup.py install
+python -m pip install -e . --no-deps --no-build-isolation
 
 # Create desktop shortcuts if running in desktop environment
 if [ -d "$HOME/Desktop" ]; then
