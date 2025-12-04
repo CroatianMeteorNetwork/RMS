@@ -24,7 +24,8 @@ pyclean>=2.7.6; python_version >= "3.5"
 wheel>=0.30.0
 setuptools>=40.0.0
 ifaddr; sys_platform =="win32"
-PyGObject; python_version >= '3.6'
+# PyGObject installed via system package (python3-gi) on Linux
+PyGObject; python_version >= '3.6' and sys_platform != 'linux'
 rawpy; sys_platform == "win32"
 rawpy; sys_platform == "darwin"
 rawpy; sys_platform == "linux" and platform_machine == "x86_64"
