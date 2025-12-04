@@ -33,9 +33,6 @@ sudo apt-get install -y \
     git wget zip openssh-server \
     python3 python3-dev python3-pip python3-tk python3-pil \
     mplayer \
-    libblas-dev libatlas-base-dev liblapack-dev \
-    libffi-dev libssl-dev \
-    libxml2-dev libxslt1-dev \
     socat chrony \
     imagemagick ffmpeg \
     lxterminal \
