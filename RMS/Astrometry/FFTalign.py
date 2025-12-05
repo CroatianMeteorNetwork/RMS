@@ -12,7 +12,7 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.fft import fft2, fftshift, ifft2
-from scipy.ndimage import map_coordinates
+from scipy.ndimage import map_coordinates, zoom
 from skimage.transform import rotate
 from skimage.registration import phase_cross_correlation
 from skimage.filters import window
@@ -284,7 +284,6 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
 
         # Handle scale correction if significant
         if abs(scale - 1.0) > 0.001:
-            from scipy.ndimage import zoom
             img_mov_corrected = zoom(img_mov_corrected, 1.0/scale, order=1)
             # Crop or pad to match original size
             target_shape = img_mov.shape
