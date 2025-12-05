@@ -13,9 +13,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.fft import fft2, fftshift, ifft2
 from scipy.ndimage import map_coordinates, zoom
-from skimage.transform import rotate
+from skimage.transform import rotate, SimilarityTransform
 from skimage.registration import phase_cross_correlation
 from skimage.filters import window
+from skimage.measure import ransac
 
 from RMS.Astrometry import ApplyAstrometry
 from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle, raDec2AltAz
@@ -213,9 +214,6 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
             - translation_x: [float]
             - translation_y: [float]
     """
-    from skimage.measure import ransac
-    from skimage.transform import SimilarityTransform
-
     x0, y0 = distortion_offset
 
     # Distortion center in image coordinates
