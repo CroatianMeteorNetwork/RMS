@@ -11,21 +11,16 @@ import argparse
 
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.fft import fft2, fftshift, ifft2
-from scipy.ndimage import map_coordinates, zoom
-from skimage.transform import rotate, SimilarityTransform
-from skimage.registration import phase_cross_correlation
-from skimage.filters import window
+from skimage.transform import SimilarityTransform
 from skimage.measure import ransac
 
 from RMS.Astrometry import ApplyAstrometry
-from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle, raDec2AltAz
+from RMS.Astrometry.Conversions import date2JD, jd2Date
 import RMS.ConfigReader as cr
 from RMS.Formats import CALSTARS
 from RMS.Formats.FFfile import getMiddleTimeFF
 from RMS.Formats import Platepar
 from RMS.Formats import StarCatalog
-from RMS.Math import rotatePoint
 from RMS.Logger import LoggingManager, getLogger
 
 # Import Cython functions
@@ -35,159 +30,6 @@ from RMS.Astrometry.CyFunctions import subsetCatalog
 
 
 log = getLogger('rmslogger')
-
-
-def addPoint(img, xc, yc, radius):
-    """ Add a point to the image. """
-
-    img_w = img.shape[1]
-    img_h = img.shape[0]
-
-    sigma, mu = 1.0, 0.0
-
-    # Generate a small array with a gaussian
-    grid_arr = np.linspace(-radius, radius, 2*radius + 1, dtype=int)
-    x, y = np.meshgrid(grid_arr, grid_arr)
-    d = np.sqrt(x**2 + y**2)
-    gauss = 255*np.exp(-((d - mu)**2/(2.0*sigma**2)))
-
-    # Overlay the Gaussian on the image
-    for xi, i in enumerate(grid_arr):
-        for yj, j in enumerate(grid_arr):
-
-            # Compute the coordinates of the point
-            xp = int(i + xc)
-            yp = int(j + yc)
-
-            # Check that the point is inside the image
-            if (xp >=0) and (xp < img_w) and (yp >= 0) and (yp < img_h):
-
-                # Set the value of the gaussian to the image
-                img[yp, xp] = max(gauss[yj, xi], img[yp, xp])
-
-
-    return img
-
-
-
-
-def constructImage(img_size, point_list, dot_radius):
-    """ Construct the image that will be fed into the FFT registration algorithm. """
-
-    # Construct images using given star positions. Map coordinates to img_size x img_size image
-    img = np.zeros((img_size, img_size), dtype=np.uint8)
-
-    # Add all given points to the imge
-    for point in point_list:
-        x, y = point
-        img = addPoint(img, x, y, dot_radius)
-
-    return img
-
-
-def logpolarFilter(shape):
-    """ Make a radial cosine filter that suppresses low frequencies in the FFT.
-
-    This filter is essential for accurate rotation detection - it suppresses the
-    DC component and low frequencies that would otherwise dominate the correlation.
-    """
-    yy = np.linspace(-np.pi/2, np.pi/2, shape[0])[:, np.newaxis]
-    xx = np.linspace(-np.pi/2, np.pi/2, shape[1])[np.newaxis, :]
-    rads = np.sqrt(yy**2 + xx**2)
-    filt = 1.0 - np.cos(rads)**2
-    filt[np.abs(rads) > np.pi/2] = 1
-    return filt
-
-
-def getLogBase(shape, new_r):
-    """ Calculate the logarithmic base for the log-polar transform. """
-    EXCESS_CONST = 1.1
-    old_r = shape[0] * EXCESS_CONST / 2.0
-    log_base = np.exp(np.log(old_r) / new_r)
-    return log_base
-
-
-def logpolarTransform(image, shape, log_base):
-    """ Apply a log-polar transform to the image.
-
-    Arguments:
-        image: Input image (typically FFT magnitude)
-        shape: Output shape (rows=angles, cols=radii)
-        log_base: Base for logarithmic radial sampling
-
-    Returns:
-        Log-polar transformed image
-    """
-    bgval = np.percentile(image, 1)
-    imshape = np.array(image.shape)
-    center = imshape[0] / 2.0, imshape[1] / 2.0
-
-    # Build coordinate grids
-    theta = np.zeros(shape, dtype=np.float64)
-    theta -= np.linspace(0, np.pi, shape[0])[:, np.newaxis]
-
-    radius = np.zeros(shape, dtype=np.float64)
-    radius += np.power(log_base, np.arange(shape[1], dtype=float))[np.newaxis, :]
-
-    # Convert polar to cartesian
-    y = radius * np.sin(theta) + center[0]
-    x = radius * np.cos(theta) + center[1]
-
-    output = np.empty_like(y)
-    map_coordinates(image, [y, x], output=output, order=3, mode="constant", cval=bgval)
-    return output
-
-
-def subpixelPeak(cps, rad=2):
-    """ Find the subpixel peak location using center-of-mass interpolation.
-
-    Arguments:
-        cps: Cross-power spectrum (shifted so peak is near center)
-        rad: Radius around peak for center-of-mass calculation
-
-    Returns:
-        Subpixel peak coordinates as numpy array [y, x]
-    """
-    peak = np.unravel_index(np.argmax(cps), cps.shape)
-    peak = np.array(peak)
-
-    # Extract sub-region around peak
-    y0, x0 = max(0, peak[0]-rad), max(0, peak[1]-rad)
-    y1, x1 = min(cps.shape[0], peak[0]+rad+1), min(cps.shape[1], peak[1]+rad+1)
-    subarr = cps[y0:y1, x0:x1]
-
-    # Compute center of mass
-    col = np.arange(subarr.shape[0])[:, np.newaxis]
-    row = np.arange(subarr.shape[1])[np.newaxis, :]
-    arrsum = subarr.sum()
-
-    if arrsum == 0:
-        return peak.astype(float)
-
-    com_y = np.sum(subarr * col) / arrsum
-    com_x = np.sum(subarr * row) / arrsum
-
-    return np.array([y0 + com_y, x0 + com_x])
-
-
-def phaseCorrelationSubpixel(im0, im1):
-    """ Compute phase correlation with subpixel precision.
-
-    Arguments:
-        im0: Reference image
-        im1: Moved image
-
-    Returns:
-        Subpixel shift as numpy array [y, x]
-    """
-    f0, f1 = fft2(im0), fft2(im1)
-    eps = np.abs(f1).max() * 1e-15
-    cps = np.abs(ifft2((f0 * f1.conjugate()) / (np.abs(f0) * np.abs(f1) + eps)))
-    scps = fftshift(cps)
-    peak = subpixelPeak(scps)
-    ret = peak - np.array(f0.shape) // 2
-    return ret
-
 
 
 def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_radius=2, show_plot=False,
