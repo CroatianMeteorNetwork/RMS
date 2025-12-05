@@ -484,9 +484,11 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
         platepar_aligned.F_scale *= scale
 
     # Compute the new reference RA and Dec
+    # Translation tells us how catalog needs to shift to match detected stars,
+    # so we shift the platepar pointing in the opposite direction
     _, ra_centre_new, dec_centre_new, _ = ApplyAstrometry.xyToRaDecPP([jd2Date(platepar_aligned.JD)], \
-        [platepar_aligned.X_res/2 + translation_x], \
-        [platepar_aligned.Y_res/2 + translation_y], [1], platepar_aligned, \
+        [platepar_aligned.X_res/2 - translation_x], \
+        [platepar_aligned.Y_res/2 - translation_y], [1], platepar_aligned, \
         extinction_correction=False)
     
 
