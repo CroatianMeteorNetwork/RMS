@@ -190,23 +190,22 @@ def phaseCorrelationSubpixel(im0, im1):
 
 
 def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_radius=2, show_plot=False,
-                       distortion_offset=(0.0, 0.0)):
+                       distortion_offset=(0.0, 0.0), residual_threshold=5.0):
     """ Given a list of reference and predicted star positions, return a transform (rotation, scale, \
-        translation) between the two lists using FFT image registration. This is achieved by creating a
-        synthetic star image using both lists and searching for the transform using phase correlation.
+        translation) between the two lists using RANSAC with SimilarityTransform.
 
     Arguments:
         config: [Config instance]
-        reference_list: [2D list] A list of reference (x, y) star coordinates.
-        moved_list: [2D list] A list of moved (x, y) star coordinates.
+        reference_list: [2D list] A list of reference (x, y) star coordinates (catalog projected via platepar).
+        moved_list: [2D list] A list of moved (x, y) star coordinates (detected stars in image).
     Keyword arguments:
-        img_size: [int] Power of 2 image size (e.g. 128, 256, etc.) which will be created and fed into the
-            FFT registration algorithm.
-        dot_radius: [int] The radius of the dot which will be drawn on the synthetic image.
-        show_plot: [bool] Show the comparison between the reference and image synthetic images.
+        img_size: [int] Unused, kept for backward compatibility.
+        dot_radius: [int] Unused, kept for backward compatibility.
+        show_plot: [bool] Show the comparison between reference and transformed positions.
         distortion_offset: [tuple] (x0, y0) offset of distortion center from image center in pixels.
             Rotation and scale are applied around this point. Default (0, 0) uses image center.
             Computed as: x0 = x_poly_fwd[0] * (X_res/2), y0 = x_poly_fwd[1] * (Y_res/2)
+        residual_threshold: [float] RANSAC inlier threshold in pixels. Default 5.0.
     Return:
         angle, scale, translation_x, translation_y:
             - angle: [float] Angle of rotation (deg).
@@ -214,149 +213,103 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
             - translation_x: [float]
             - translation_y: [float]
     """
+    from skimage.measure import ransac
+    from skimage.transform import SimilarityTransform
 
     x0, y0 = distortion_offset
 
+    # Distortion center in image coordinates
+    dc_x = config.width / 2.0 + x0
+    dc_y = config.height / 2.0 + y0
+
     # Set input types
-    reference_list = np.array(reference_list).astype(float)
-    moved_list = np.array(moved_list).astype(float)
+    ref = np.array(reference_list).astype(float)
+    mov = np.array(moved_list).astype(float)
 
-    # Rescale the coordinates so the whole image fits inside the square
-    rescale_factor = min(config.width, config.height) / img_size
-
-    reference_list /= rescale_factor
-    moved_list /= rescale_factor
-
-    # The distortion center in scaled coordinates
-    dc_x = (config.width / 2.0 + x0) / rescale_factor
-    dc_y = (config.height / 2.0 + y0) / rescale_factor
-
-    # Shift coordinates so that the distortion center is at the center of img_size
-    shift_x = img_size / 2 - dc_x
-    shift_y = img_size / 2 - dc_y
-
-    reference_list[:, 0] += shift_x
-    reference_list[:, 1] += shift_y
-    moved_list[:, 0] += shift_x
-    moved_list[:, 1] += shift_y
-
-    # Construct the reference and moved images
-    img_ref = constructImage(img_size, reference_list, dot_radius).astype(np.float64)
-    img_mov = constructImage(img_size, moved_list, dot_radius).astype(np.float64)
-
-    # Run the FFT registration using custom imreg_dft-style algorithm
-    try:
-        # Apply Hann window to reduce spectral leakage from image borders
-        winhann = window('hann', img_ref.shape)
-        img_ref_windowed = img_ref * winhann
-        img_mov_windowed = img_mov * winhann
-
-        # Compute FFT magnitude spectra (translation-invariant representation)
-        dft_ref = fftshift(fft2(img_ref_windowed))
-        dft_mov = fftshift(fft2(img_mov_windowed))
-
-        # Apply log-polar filter to suppress low frequencies (essential for rotation accuracy)
-        filt = logpolarFilter(img_ref.shape)
-        dft_ref_filt = dft_ref * filt
-        dft_mov_filt = dft_mov * filt
-
-        # Apply custom log-polar transform
-        pcorr_shape = (int(max(img_ref.shape)),) * 2
-        log_base = getLogBase(img_ref.shape, pcorr_shape[1])
-
-        lp_ref = logpolarTransform(np.abs(dft_ref_filt), pcorr_shape, log_base)
-        lp_mov = logpolarTransform(np.abs(dft_mov_filt), pcorr_shape, log_base)
-
-        # Find rotation and scale via phase correlation on log-polar images
-        shifts = phaseCorrelationSubpixel(lp_ref, lp_mov)
-        arg_ang, arg_rad = shifts
-
-        # Convert shifts to rotation angle and scale factor
-        # Log-polar maps 0 to -pi (theta goes 0 to -180 degrees) to pcorr_shape[0] rows
-        angle = -np.pi * arg_ang / float(pcorr_shape[0])
-        angle = np.rad2deg(angle)
-        angle = ((angle + 180) % 360) - 180  # Normalize to [-180, 180]
-
-        scale = log_base ** arg_rad
-
-        # Invert angle to get the transform from reference to moved (matching imreg_dft convention)
-        # Scale is NOT inverted - we return the detected scale factor, not the correction
-        angle = -angle
-
-        # Check for unreasonable scale values
-        if scale < 0.5 or scale > 2.0:
-            log.warning('FFT registration error: The scale correction is too high ({:.3f})!'.format(scale))
-            return 0.0, 1.0, 0.0, 0.0
-
-        # Apply rotation correction to moved image to find translation
-        # Rotation is around image center, which is where we placed the distortion center
-        img_mov_corrected = rotate(img_mov, angle, resize=False, mode='constant', cval=0, order=1)
-
-        # Handle scale correction if significant
-        if abs(scale - 1.0) > 0.001:
-            img_mov_corrected = zoom(img_mov_corrected, 1.0/scale, order=1)
-            # Crop or pad to match original size
-            target_shape = img_mov.shape
-            current_shape = img_mov_corrected.shape
-            if current_shape[0] > target_shape[0] or current_shape[1] > target_shape[1]:
-                start_y = (current_shape[0] - target_shape[0]) // 2
-                start_x = (current_shape[1] - target_shape[1]) // 2
-                img_mov_corrected = img_mov_corrected[
-                    max(0, start_y):max(0, start_y)+target_shape[0],
-                    max(0, start_x):max(0, start_x)+target_shape[1]
-                ]
-            if img_mov_corrected.shape[0] < target_shape[0] or img_mov_corrected.shape[1] < target_shape[1]:
-                pad_y = target_shape[0] - img_mov_corrected.shape[0]
-                pad_x = target_shape[1] - img_mov_corrected.shape[1]
-                img_mov_corrected = np.pad(
-                    img_mov_corrected,
-                    ((pad_y // 2, pad_y - pad_y // 2), (pad_x // 2, pad_x - pad_x // 2)),
-                    mode='constant'
-                )
-
-        # Find translation between reference and rotation/scale-corrected moved image
-        translation_shifts, _, _ = phase_cross_correlation(
-            img_ref, img_mov_corrected, upsample_factor=10, normalization=None
-        )
-
-        # Extract translation (note: phase_cross_correlation returns (row, col) = (y, x))
-        # Keep same sign convention as imreg_dft (transform from moved to reference)
-        translate_y, translate_x = translation_shifts[0], translation_shifts[1]
-
-    except (ValueError, IndexError) as e:
-        log.warning('FFT registration error: {}'.format(str(e)))
+    # Need at least 3 points for SimilarityTransform
+    if len(ref) < 3 or len(mov) < 3:
+        log.warning('RANSAC registration error: Need at least 3 points')
         return 0.0, 1.0, 0.0, 0.0
 
-    # Rescale translation back to original image coordinates
-    translation_x = rescale_factor * translate_x
-    translation_y = rescale_factor * translate_y
+    # Center both point sets on distortion center
+    # This ensures rotation/scale are computed around the correct point
+    ref_centered = ref - np.array([dc_x, dc_y])
+    mov_centered = mov - np.array([dc_x, dc_y])
+
+    try:
+        model, inliers = ransac(
+            (ref_centered, mov_centered),
+            SimilarityTransform,
+            min_samples=3,
+            residual_threshold=residual_threshold,
+            max_trials=1000
+        )
+
+        angle = np.rad2deg(model.rotation)
+        scale = model.scale
+        translation_x, translation_y = model.translation
+
+        n_inliers = np.sum(inliers)
+
+    except Exception as e:
+        log.warning('RANSAC registration error: {}'.format(str(e)))
+        return 0.0, 1.0, 0.0, 0.0
+
+    # Check for unreasonable values
+    if scale < 0.5 or scale > 2.0:
+        log.warning('RANSAC registration error: Scale out of range ({:.3f})'.format(scale))
+        return 0.0, 1.0, 0.0, 0.0
 
     log.info('Platepar correction:')
     log.info('    Rotation: {:.5f} deg'.format(angle))
     log.info('    Scale: {:.5f}'.format(scale))
     log.info('    Translation X, Y: ({:.2f}, {:.2f}) px'.format(translation_x, translation_y))
+    log.info('    Inliers: {}/{}'.format(n_inliers, len(ref)))
 
     # Plot comparison
     if show_plot:
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
 
-        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(nrows=2, ncols=2)
+        # Apply detected transform to reference points
+        angle_rad = np.radians(angle)
+        cos_a, sin_a = np.cos(angle_rad), np.sin(angle_rad)
+        ref_transformed = ref_centered.copy()
+        x_rot = scale * (ref_transformed[:, 0] * cos_a - ref_transformed[:, 1] * sin_a)
+        y_rot = scale * (ref_transformed[:, 0] * sin_a + ref_transformed[:, 1] * cos_a)
+        ref_transformed[:, 0] = x_rot + translation_x + dc_x
+        ref_transformed[:, 1] = y_rot + translation_y + dc_y
 
-        ax1.imshow(img_ref, cmap='gray')
-        ax1.set_title('Reference')
+        # Before correction
+        ax1.scatter(ref[:, 0], ref[:, 1], c='blue', marker='o', label='Reference (catalog)', alpha=0.7)
+        ax1.scatter(mov[:, 0], mov[:, 1], c='red', marker='x', label='Moved (detected)', alpha=0.7)
+        ax1.scatter(dc_x, dc_y, c='green', marker='*', s=200, label='Distortion center')
+        ax1.set_title('Before correction')
+        ax1.legend()
+        ax1.set_xlim(0, config.width)
+        ax1.set_ylim(config.height, 0)
+        ax1.set_aspect('equal')
 
-        ax2.imshow(img_mov, cmap='gray')
-        ax2.set_title('Moved')
+        # After correction
+        ax2.scatter(ref_transformed[:, 0], ref_transformed[:, 1], c='blue', marker='o',
+                    label='Reference (transformed)', alpha=0.7)
+        ax2.scatter(mov[:, 0], mov[:, 1], c='red', marker='x', label='Moved (detected)', alpha=0.7)
+        ax2.scatter(dc_x, dc_y, c='green', marker='*', s=200, label='Distortion center')
 
-        ax3.imshow(img_mov_corrected, cmap='gray')
-        ax3.set_title('Transformed')
+        # Mark outliers
+        if inliers is not None:
+            outliers = ~inliers
+            if np.any(outliers):
+                ax2.scatter(mov[outliers, 0], mov[outliers, 1], c='orange', marker='s',
+                            s=100, facecolors='none', linewidths=2, label='Outliers')
 
-        ax4.imshow(np.abs(img_mov_corrected - img_ref), cmap='gray')
-        ax4.set_title('Difference')
+        ax2.set_title('After correction (inliers: {}/{})'.format(n_inliers, len(ref)))
+        ax2.legend()
+        ax2.set_xlim(0, config.width)
+        ax2.set_ylim(config.height, 0)
+        ax2.set_aspect('equal')
 
         plt.tight_layout()
-
         plt.show()
-
 
     return angle, scale, translation_x, translation_y
 
