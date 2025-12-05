@@ -189,7 +189,8 @@ def phaseCorrelationSubpixel(im0, im1):
 
 
 
-def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_radius=2, show_plot=False):
+def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_radius=2, show_plot=False,
+                       distortion_offset=(0.0, 0.0)):
     """ Given a list of reference and predicted star positions, return a transform (rotation, scale, \
         translation) between the two lists using FFT image registration. This is achieved by creating a
         synthetic star image using both lists and searching for the transform using phase correlation.
@@ -203,6 +204,9 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
             FFT registration algorithm.
         dot_radius: [int] The radius of the dot which will be drawn on the synthetic image.
         show_plot: [bool] Show the comparison between the reference and image synthetic images.
+        distortion_offset: [tuple] (x0, y0) offset of distortion center from image center in pixels.
+            Rotation and scale are applied around this point. Default (0, 0) uses image center.
+            Computed as: x0 = x_poly_fwd[0] * (X_res/2), y0 = x_poly_fwd[1] * (Y_res/2)
     Return:
         angle, scale, translation_x, translation_y:
             - angle: [float] Angle of rotation (deg).
@@ -211,20 +215,25 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
             - translation_y: [float]
     """
 
+    x0, y0 = distortion_offset
+
     # Set input types
     reference_list = np.array(reference_list).astype(float)
     moved_list = np.array(moved_list).astype(float)
 
-    # Rescale the coordinates so the whole image fits inside the square (rescale by the smaller image axis)
-    rescale_factor = min(config.width, config.height)/img_size
+    # Rescale the coordinates so the whole image fits inside the square
+    rescale_factor = min(config.width, config.height) / img_size
 
     reference_list /= rescale_factor
     moved_list /= rescale_factor
 
-    # Take only those coordinates which are inside img_size/2 distance from the centre, and
-    #   shift the coordinates
-    shift_x = img_size/2 - config.width/(2*rescale_factor)
-    shift_y = img_size/2 - config.height/(2*rescale_factor)
+    # The distortion center in scaled coordinates
+    dc_x = (config.width / 2.0 + x0) / rescale_factor
+    dc_y = (config.height / 2.0 + y0) / rescale_factor
+
+    # Shift coordinates so that the distortion center is at the center of img_size
+    shift_x = img_size / 2 - dc_x
+    shift_y = img_size / 2 - dc_y
 
     reference_list[:, 0] += shift_x
     reference_list[:, 1] += shift_y
@@ -263,15 +272,16 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
         arg_ang, arg_rad = shifts
 
         # Convert shifts to rotation angle and scale factor
+        # Log-polar maps 0 to -pi (theta goes 0 to -180 degrees) to pcorr_shape[0] rows
         angle = -np.pi * arg_ang / float(pcorr_shape[0])
         angle = np.rad2deg(angle)
         angle = ((angle + 180) % 360) - 180  # Normalize to [-180, 180]
 
         scale = log_base ** arg_rad
 
-        # Invert to get the transform from reference to moved (matching imreg_dft convention)
+        # Invert angle to get the transform from reference to moved (matching imreg_dft convention)
+        # Scale is NOT inverted - we return the detected scale factor, not the correction
         angle = -angle
-        scale = 1.0 / scale
 
         # Check for unreasonable scale values
         if scale < 0.5 or scale > 2.0:
@@ -279,7 +289,7 @@ def findStarsTransform(config, reference_list, moved_list, img_size=256, dot_rad
             return 0.0, 1.0, 0.0, 0.0
 
         # Apply rotation correction to moved image to find translation
-        # Use skimage.transform.rotate which handles center rotation properly
+        # Rotation is around image center, which is where we placed the distortion center
         img_mov_corrected = rotate(img_mov, angle, resize=False, mode='constant', cval=0, order=1)
 
         # Handle scale correction if significant
@@ -451,8 +461,15 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
     # log.info('Final catalog limiting magnitude: {:.3f}'.format(config.catalog_mag_limit))
 
 
+    # Compute the distortion center offset from image center
+    # (see CyFunctions.pyx lines 1501-1511 for the calculation)
+    # This is where pos_angle_ref rotates around
+    x0 = platepar.x_poly_fwd[0] * (platepar.X_res / 2.0)
+    y0 = platepar.x_poly_fwd[1] * (platepar.Y_res / 2.0)
+
     # Find the transform between the image coordinates and predicted platepar coordinates
-    res = findStarsTransform(config, calstars_coords, catalog_xy, show_plot=show_plot)
+    res = findStarsTransform(config, calstars_coords, catalog_xy, show_plot=show_plot,
+                             distortion_offset=(x0, y0))
     angle, scale, translation_x, translation_y = res
 
     # Check if the translation and rotation are within the limits
@@ -475,30 +492,24 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
 
     platepar_aligned = copy.deepcopy(platepar)
 
-    # Correct the rotation
-    platepar_aligned.pos_angle_ref = (platepar_aligned.pos_angle_ref - angle)%360
+    # Correct the rotation FIRST - this changes the pixel-to-sky mapping
+    platepar_aligned.pos_angle_ref = (platepar_aligned.pos_angle_ref - angle) % 360
 
-    # Update the scale if needed
+    # Update the scale if needed (before computing translation)
     if scale_update:
         platepar_aligned.F_scale *= scale
 
-    # Compute the new reference RA and Dec
+    # Compute the new reference RA and Dec using the ROTATION-CORRECTED platepar.
     # Translation tells us how catalog needs to shift to match detected stars,
-    # so we shift the platepar pointing in the opposite direction
-    _, ra_centre_new, dec_centre_new, _ = ApplyAstrometry.xyToRaDecPP([jd2Date(platepar_aligned.JD)], \
-        [platepar_aligned.X_res/2 - translation_x], \
-        [platepar_aligned.Y_res/2 - translation_y], [1], platepar_aligned, \
+    # so we shift the platepar pointing in the opposite direction.
+    _, ra_centre_new, dec_centre_new, _ = ApplyAstrometry.xyToRaDecPP(
+        [jd2Date(platepar_aligned.JD)],
+        [platepar_aligned.X_res/2 - translation_x],
+        [platepar_aligned.Y_res/2 - translation_y],
+        [1], platepar_aligned,  # Use ROTATION-CORRECTED platepar
         extinction_correction=False)
-    
 
-    # print("RA:")
-    # print(" - old: {:.5f}".format(ra_centre_old[0]))
-    # print(" - new: {:.5f}".format(ra_centre_new[0]))
-    # print("Dec:")
-    # print(" - old: {:.5f}".format(dec_centre_old[0]))
-    # print(" - new: {:.5f}".format(dec_centre_new[0]))
-
-    # Correct RA/Dec
+    # Apply the translation correction
     platepar_aligned.RA_d = ra_centre_new[0]
     platepar_aligned.dec_d = dec_centre_new[0]
 
