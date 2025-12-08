@@ -40,7 +40,7 @@ import json
 
 
 from RMS.Misc import obfuscatePassword
-from RMS.Routines.GstreamerCapture import GstVideoFile
+from RMS.Routines.GstreamerCapture import GstVideoFile, getStructureValue, getStructureFraction
 from RMS.Formats.ObservationSummary import getObsDBConn, addObsParam
 from RMS.RawFrameSave import RawFrameSaver
 from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp
@@ -1366,8 +1366,8 @@ class BufferedCapture(Process):
                         raise ValueError("Could not determine frame shape.")
                     
                     # Extract width, height, and format, and create frame
-                    width = structure.get_value('width')
-                    height = structure.get_value('height')
+                    width = getStructureValue(structure, 'width')
+                    height = getStructureValue(structure, 'height')
 
                     if self.config.gst_colorspace == 'GRAY8':
                         self.frame_shape = (height, width)
@@ -2396,8 +2396,8 @@ if __name__ == "__main__":
         print('Structure obtained!')
 
         print('Extracting width and height...', end=' ')
-        width = structure.get_value('width')
-        height = structure.get_value('height')
+        width = getStructureValue(structure, 'width')
+        height = getStructureValue(structure, 'height')
         print('Width and height extracted!')
 
         print('Creating frame...', end=' ')
