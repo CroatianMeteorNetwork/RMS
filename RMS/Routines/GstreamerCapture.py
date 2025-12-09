@@ -287,7 +287,7 @@ class GstVideoFile():
 
         # Get the framerate
         framerate = structure.get_fraction('framerate')
-        self.fps = framerate[1]/framerate[0]
+        self.fps = framerate[1]/framerate[2]
 
         # Calculate total frames
         self.total_frames = int(self.duration*self.fps)
