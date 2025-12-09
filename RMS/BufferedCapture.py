@@ -40,7 +40,7 @@ import json
 
 
 from RMS.Misc import obfuscatePassword
-from RMS.Routines.GstreamerCapture import GstVideoFile, getStructureValue, getStructureFraction
+from RMS.Routines.GstreamerCapture import GstVideoFile, getStructureValue
 from RMS.Formats.ObservationSummary import getObsDBConn, addObsParam
 from RMS.RawFrameSave import RawFrameSaver
 from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp
