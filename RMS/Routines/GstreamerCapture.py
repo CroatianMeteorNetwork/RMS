@@ -20,6 +20,33 @@ except ValueError as e:
     print('Could not import Gst: {}. Using OpenCV.'.format(e))
 
 
+def _getInnerStructure(structure):
+    """Get the inner Gst.Structure from a StructureWrapper if needed.
+
+    Newer versions of PyGObject (with GStreamer 1.26+) return a StructureWrapper
+    from caps.get_structure() which doesn't expose methods like get_value() or
+    get_fraction() directly. This helper unwraps it.
+    """
+    if hasattr(structure, '_StructureWrapper__structure'):
+        return structure._StructureWrapper__structure
+    return structure
+
+
+def getStructureValue(structure, key):
+    """Get value from GStreamer structure, handling both old and new PyGObject APIs.
+
+    Compatibility fix for PyGObject 3.50+/GStreamer 1.26+.
+    """
+    return _getInnerStructure(structure).get_value(key)
+
+
+def getStructureFraction(structure, key):
+    """Get fraction from GStreamer structure, handling both old and new PyGObject APIs.
+
+    Compatibility fix for PyGObject 3.50+/GStreamer 1.26+.
+    """
+    return _getInnerStructure(structure).get_fraction(key)
+
 
 class GstCaptureTest(multiprocessing.Process):
     def __init__(self, device_url, gst_decoder, video_format='BGR', video_file_dir=None, 
@@ -109,8 +136,8 @@ class GstCaptureTest(multiprocessing.Process):
             raise ValueError("Could not determine frame shape.")
         
         # Extract width, height, and format, and create frame
-        width = structure.get_value('width')
-        height = structure.get_value('height')
+        width = getStructureValue(structure, 'width')
+        height = getStructureValue(structure, 'height')
         self.frame_shape = (height, width, 3)
 
         frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
@@ -168,8 +195,8 @@ class GstCaptureTest(multiprocessing.Process):
 
         caps = sample.get_caps()
         structure = caps.get_structure(0)
-        width = structure.get_value('width')
-        height = structure.get_value('height')
+        width = getStructureValue(structure, 'width')
+        height = getStructureValue(structure, 'height')
         frame_shape = (height, width, 3)
         frame = np.ndarray(shape=frame_shape, buffer=map_info.data, dtype=np.uint8)
         buffer.unmap(map_info)
@@ -275,8 +302,8 @@ class GstVideoFile():
         self.duration = self.pipeline.query_duration(Gst.Format.TIME)[1]/Gst.SECOND
         
         # Extract width, height, and format, and create frame
-        self.width = structure.get_value('width')
-        self.height = structure.get_value('height')
+        self.width = getStructureValue(structure, 'width')
+        self.height = getStructureValue(structure, 'height')
         
         # Determine the frame shape, depending on whether the video is grayscale or color
         if self.video_format == 'GRAY8':
@@ -286,7 +313,7 @@ class GstVideoFile():
 
 
         # Get the framerate
-        framerate = structure.get_fraction('framerate')
+        framerate = getStructureFraction(structure, 'framerate')
         self.fps = framerate[1]/framerate[0]
 
         # Calculate total frames
