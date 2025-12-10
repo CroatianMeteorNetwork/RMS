@@ -49,8 +49,8 @@ def getStructureFraction(structure, key):
 
 
 class GstCaptureTest(multiprocessing.Process):
-    def __init__(self, device_url, gst_decoder, video_format='BGR', video_file_dir=None, 
-                 segment_duration_sec=30, nframes=100):
+    def __init__(self, device_url, gst_decoder, video_format='BGR', video_file_dir=None,
+                 segment_duration_sec=30, nframes=100, codec='h264'):
 
         super(GstCaptureTest, self).__init__()
 
@@ -59,6 +59,7 @@ class GstCaptureTest(multiprocessing.Process):
         self.device_url = device_url
         self.gst_decoder = gst_decoder
         self.video_format = video_format
+        self.codec = codec.lower()
 
         self.video_file_dir = video_file_dir
         self.segment_duration_sec = segment_duration_sec
@@ -72,28 +73,36 @@ class GstCaptureTest(multiprocessing.Process):
 
         Gst.init(None)
 
+        # Select codec-specific GStreamer elements
+        if self.codec in ('h265', 'hevc'):
+            rtp_depay = "rtph265depay"
+            codec_parse = "h265parse"
+        else:
+            rtp_depay = "rtph264depay"
+            codec_parse = "h264parse"
+
         # Define the source up to the point where we want to branch off
         source_to_tee = (
             "rtspsrc buffer-mode=1 protocols=tcp tcp-timeout=5000000 retry=5 "
             "location=\"{}\" ! "
-            "rtph264depay ! tee name=t"
-            ).format(self.device_url)
+            "{} ! tee name=t"
+            ).format(self.device_url, rtp_depay)
 
         # Branch for processing
         processing_branch = (
-            "t. ! queue ! h264parse ! {} ! videoconvert ! video/x-raw,format={} ! "
+            "t. ! queue ! {} ! {} ! videoconvert ! video/x-raw,format={} ! "
             "queue leaky=downstream max-size-buffers=100 max-size-bytes=0 max-size-time=0 ! "
             "appsink max-buffers=100 drop=true sync=0 name=appsink"
-            ).format(self.gst_decoder, self.video_format)
-        
+            ).format(codec_parse, self.gst_decoder, self.video_format)
+
          # Branch for storage - if video_file_dir is not None, save the raw stream to a file
         if self.video_file_dir is not None:
 
             video_location = os.path.join(self.video_file_dir, "video_%05d.mkv")
             storage_branch = (
-                "t. ! queue ! h264parse ! "
+                "t. ! queue ! {} ! "
                 "splitmuxsink location={} max-size-time={} muxer-factory=matroskamux"
-                ).format(video_location, int(self.segment_duration_sec*1e9))
+                ).format(codec_parse, video_location, int(self.segment_duration_sec*1e9))
 
         # Otherwise, skip saving the raw stream to disk
         else:
@@ -218,7 +227,8 @@ class GstVideoFile():
             file_path: [str] The path to the video file.
 
         Keyword Arguments:
-            decoder: [str] The decoder to use. Default is 'decodebin'. Examples: 'nvh264dec', 'avdec_h264'.
+            decoder: [str] The decoder to use. Default is 'decodebin'.
+                Examples: 'nvh264dec', 'avdec_h264', 'nvh265dec', 'avdec_h265'.
             video_format: [str] The video format to use. Default is 'GRAY8'. Examples: 'BGR', 'GRAY8'.
         
         """
@@ -242,11 +252,21 @@ class GstVideoFile():
         # Initialize GStreamer
         Gst.init(None)
 
-        # Unless nvdec is specified, use decodebin
-        if self.decoder == 'nvh264dec':
-
+        # Use hardware decoders if specified, otherwise use decodebin for auto-detection
+        if self.decoder in ('nvh264dec', 'avdec_h264'):
+            # H.264 hardware/software decoder
             pipeline_str = (
                 "filesrc location={} ! matroskademux ! h264parse ! {} ! "
+                "videoconvert ! video/x-raw,format={} ! "
+                "queue leaky=downstream max-size-buffers=100 ! "
+                "appsink emit-signals=True max-buffers=100 drop=False sync=0 name=appsink"
+                "".format(self.file_path, self.decoder, self.video_format)
+            )
+
+        elif self.decoder in ('nvh265dec', 'avdec_h265'):
+            # H.265/HEVC hardware/software decoder
+            pipeline_str = (
+                "filesrc location={} ! matroskademux ! h265parse ! {} ! "
                 "videoconvert ! video/x-raw,format={} ! "
                 "queue leaky=downstream max-size-buffers=100 ! "
                 "appsink emit-signals=True max-buffers=100 drop=False sync=0 name=appsink"

@@ -1070,12 +1070,23 @@ class BufferedCapture(Process):
         else:
             protocol_str = f"protocols=tcp {common_timeouts}"
 
+        # Select codec-specific GStreamer elements based on config
+        codec = getattr(self.config, 'gst_codec', 'h264').lower()
+        if codec in ('h265', 'hevc'):
+            rtp_depay = "rtph265depay"
+            codec_parse = "h265parse"
+            log.info("Using H.265/HEVC codec elements")
+        else:
+            rtp_depay = "rtph264depay"
+            codec_parse = "h264parse"
+            log.info("Using H.264 codec elements")
+
         # Define the source up to the point where we want to branch off
         source_to_tee = (
             "rtspsrc name=src buffer-mode=1 {:s} "
             "location=\"{:s}\" ! "
-            "rtph264depay ! h264parse ! tee name=t"
-            ).format(protocol_str, device_url)
+            "{:s} ! {:s} ! tee name=t"
+            ).format(protocol_str, device_url, rtp_depay, codec_parse)
 
         # Branch for processing
         processing_branch = (
@@ -1096,9 +1107,9 @@ class BufferedCapture(Process):
             # queue2 smooths out the writes, but doesn't wait until the buffers fill up for writing
             storage_branch = (
                 "t. ! queue2 max-size-buffers=150 max-size-bytes=2097152 max-size-time=5000000000 ! "
-                "h264parse ! "
+                "{:s} ! "
                 "splitmuxsink name=splitmuxsink0 async-finalize=true max-size-time={:d} muxer-factory=matroskamux"
-                ).format(int(segment_duration_sec*1e9))
+                ).format(codec_parse, int(segment_duration_sec*1e9))
 
         # Otherwise, skip saving the raw stream to disk
         else:

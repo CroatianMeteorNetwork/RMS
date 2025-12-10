@@ -298,6 +298,9 @@ class Config:
         # Decoder for the gstreamer media backend (e.g. decodebin, avdec_h264, nvh264dec)
         self.gst_decoder = "avdec_h264"
 
+        # Video codec for RTSP streams (h264 or h265)
+        self.gst_codec = "h264"
+
         # Path to the json file containing camera settings
         self.camera_settings_path = "./camera_settings.json"
 
@@ -1151,6 +1154,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "gst_decoder"):
         config.gst_decoder = parser.get(section, "gst_decoder")
+
+    if parser.has_option(section, "gst_codec"):
+        config.gst_codec = parser.get(section, "gst_codec").lower()
 
     if parser.has_option(section, "camera_settings_path") and os.path.isfile(parser.get(section, "camera_settings_path")):
         config.camera_settings_path = parser.get(section, "camera_settings_path")
