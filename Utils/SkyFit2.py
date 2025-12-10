@@ -83,12 +83,17 @@ try:
     from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject
     from PyQt5 import QtCore
 
-    from Utils.Astra import ASTRA
+    from Utils.Astra import ASTRA, PYSWARMS_AVAILABLE
+
+    if not PYSWARMS_AVAILABLE:
+        raise ImportError("pyswarms not installed in Utils.Astra")
 
     ASTRA_IMPORTED = True
 
 except Exception as e:
     ASTRA_IMPORTED = False
+    print("ASTRA is an automated tool for picking positions of meteors.")
+    print("If you don't plan to use it, you can ignore this error message.")
     print(f'ASTRA import error: {e}')
 
 

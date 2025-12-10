@@ -26,8 +26,10 @@ from RMS.Routines import Image
 
 try:
     from pyswarms.single.global_best import GlobalBestPSO
+    PYSWARMS_AVAILABLE = True
 except Exception as e:
     print(f'ASTRA cannot be run, pyswarms not installed: {e}')
+    PYSWARMS_AVAILABLE = False
 
 
 
@@ -249,7 +251,7 @@ class ASTRA:
         background_mean = np.median(self.corrected_avepixel)
 
         # Calculate the masking threshold
-        threshold = background_mean + self.BACKGROUND_STD_THRESHOLD * background_std
+        threshold = background_mean + self.BACKGROUND_STD_THRESHOLD*background_std
 
         # Save star mask as a class variable
         self.star_mask = np.ma.MaskedArray(self.corrected_avepixel > threshold)        
@@ -286,10 +288,54 @@ class ASTRA:
         """
 
         # 1) -- Unpack variables & Calculate seed picks/frames--
+        
+        # Sort picks by frame index to ensure monotonic time order
+        sorted_indices = np.argsort(self.pick_frame_indices)
+        self.pick_frame_indices = [self.pick_frame_indices[i] for i in sorted_indices]
+        self.picks = self.picks[sorted_indices]
+
         seed_picks_global, seed_indices = self.selectSeedTriplet(self.picks, self.pick_frame_indices)
 
-        omega = np.arctan2(self.picks[-1][1] - self.picks[0][1], 
-                           -self.picks[-1][0] + self.picks[0][0])  % (2*np.pi)
+        # Estimate the line of motion using a robust fit on all picks
+        # Use simple L1/Huber fit or Welsch if available, but L2 (DIST_L2) is least squares.
+        # DIST_L1 is more robust to outliers than default least squares.
+        # points must be float32 for fitLine
+        points = self.picks.astype(np.float32)
+        [vx, vy, x, y] = cv2.fitLine(points, cv2.DIST_L1, 0, 0.01, 0.01)
+        self.robust_line_params = (vx[0], vy[0], x[0], y[0])
+        
+        # Store event extent boundaries from initial picks
+        self.initial_min_frame = self.pick_frame_indices[0]
+        self.initial_max_frame = self.pick_frame_indices[-1]
+
+        # Compute Kinematic Models (Robust Linear Fit: Time vs Space)
+        # Prepare data: (N, 2) arrays for fitLine
+        # Time vs X: point = (frame_idx, x)
+        tx_points = np.column_stack((self.pick_frame_indices, self.picks[:, 0])).astype(np.float32)
+        [v_tx, v_x, t0_x, x0_x] = cv2.fitLine(tx_points, cv2.DIST_L1, 0, 0.01, 0.01)
+        # Normalize so dt = 1 (slope = dx/dt)
+        slope_x = v_x[0] / v_tx[0]
+        intercept_x = x0_x[0] - slope_x*t0_x[0]
+        self.kinematic_params_x = (slope_x, intercept_x)
+
+        # Time vs Y: point = (frame_idx, y)
+        ty_points = np.column_stack((self.pick_frame_indices, self.picks[:, 1])).astype(np.float32)
+        [v_ty, v_y, t0_y, y0_y] = cv2.fitLine(ty_points, cv2.DIST_L1, 0, 0.01, 0.01)
+        slope_y = v_y[0] / v_ty[0]
+        intercept_y = y0_y[0] - slope_y*t0_y[0]
+        self.kinematic_params_y = (slope_y, intercept_y)
+        
+        # We want the angle of motion from first to last pick
+        # fitLine returns a normalized vector (vx, vy). We need to check if it points
+        # in the general direction of picks[-1] - picks[0]
+        dx_global = self.picks[-1][0] - self.picks[0][0]
+        dy_global = self.picks[-1][1] - self.picks[0][1]
+        
+        # Dot product
+        if vx*dx_global + vy*dy_global < 0:
+            vx, vy = -vx, -vy
+            
+        omega = float(np.arctan2(vy, vx) % (2*np.pi))
 
         if self.verbose:
             print(f"Starting recursive cropping with {len(seed_indices)} seed picks at indices" 
@@ -312,7 +358,7 @@ class ASTRA:
         # 3) -- Instantiate nessesary instance arrays --
 
         # (N, w, h) array of cropped frames
-        self.cropped_frames = [None] * len(seed_indices)
+        self.cropped_frames = [None]*len(seed_indices)
 
         # (N, 5) array of first pass parameters (level_sum, height, x0)
         self.first_pass_params = np.zeros((len(seed_indices), 5), dtype=np.float32) 
@@ -320,18 +366,24 @@ class ASTRA:
         # (N, 6) array of crop variables (cx, cy, xmin, xmax, ymin, ymax)
         self.crop_vars = np.zeros((len(seed_indices), 6), dtype=np.float32) 
 
+        # List to store the planned trajectory for visualization
+        self.planned_trajectory = []
+
         # Load in the subtracted seed frames
         seed_subtracted_frames = self.getFrame(seed_indices)
 
         # # 4) -- Process each seed pick to kick-start recursion --
         for i in range(len(seed_indices)):
 
+            # Add seed pick to planned trajectory
+            self.planned_trajectory.append(seed_picks_global[i])
+
             # Crop initial frames
             self.cropped_frames[i], self.crop_vars[i] = self.cropFrameToGaussian(
                         seed_subtracted_frames[i],
                         self.estimateCenter(seed_picks_global[i], omega, init_length, directions=directions),
                         self.cropping_settings["init_sigma_guess"],
-                        init_length * self.cropping_settings["max_length_coeff"],
+                        init_length*self.cropping_settings["max_length_coeff"],
                         omega
                         )
             
@@ -362,6 +414,7 @@ class ASTRA:
             omega,
             directions=directions
         )
+        forward_next_center_global = self.constrainPointToKinematics(forward_next_center_global, seed_indices[-1] + 1)
 
         # Begin forwards pass on crop
         self.recursiveCroppingAlgorithm(seed_indices[-1] + 1,
@@ -380,6 +433,7 @@ class ASTRA:
             omega,
             directions=tuple(-x for x in list(directions)) # Invert directions
         )
+        backward_next_center_global = self.constrainPointToKinematics(backward_next_center_global, seed_indices[0] - 1)
 
         # Begin backwards pass on crop
         self.recursiveCroppingAlgorithm(seed_indices[0] - 1,
@@ -389,6 +443,45 @@ class ASTRA:
                                       directions=tuple(-x for x in list(directions)), # Invert directions
                                       forward_pass=False,
                                       )
+
+        # Save planned trajectory plot
+        if self.save_animation:
+
+            # Get frames
+            # Note: getFrame usually returns (subtracted, [raw], [non_sub]), so strict unpacking needed
+            # Calling with include_non_subtracted=True returns (subtracted, non_subtracted)
+            _, non_sub_frames = self.getFrame(self.pick_frame_indices, include_non_subtracted=True)
+            
+            # Compute maxpixel
+            if len(non_sub_frames) > 0:
+                maxpixel = np.max(non_sub_frames, axis=0)
+
+                # Create plot
+                current_backend = matplotlib.get_backend()
+                matplotlib.use("Agg")
+                
+                fig, ax = plt.subplots(figsize=(10, 10))
+                
+                # Dynamic scaling
+                vmin, vmax = np.percentile(maxpixel, [1, 99])
+                ax.imshow(maxpixel, cmap='gray', vmin=vmin, vmax=vmax)
+
+                # Plot trajectory
+                traj = np.array(self.planned_trajectory)
+                if len(traj) > 0:
+                    ax.scatter(traj[:, 0], traj[:, 1], c='r', s=2, label='Planned Trajectory')
+                
+                ax.legend()
+                ax.set_title('Planned Cropping Trajectory')
+
+                # Save
+                save_dir = os.path.join(self.data_path, "ASTRA_Kalman_Results")
+                os.makedirs(save_dir, exist_ok=True)
+                path = os.path.join(save_dir, 'planned_trajectory.png')
+                fig.savefig(path)
+                plt.close(fig)
+                
+                matplotlib.use(current_backend)
 
     def refineAllMeteorCrops(self, first_pass_params, cropped_frames, omega, directions):
         """
@@ -503,9 +596,20 @@ class ASTRA:
             photom_pixels = self.computePhotometryPixels(fit_imgs[i], cropped_frames[i], crop_vars[i])
 
             # Calculate SNR, and photom values
-            snr = self.computeIntensitySum(photom_pixels, 
-                    self.translatePicksToGlobal((refined_params[i, 2], refined_params[i, 3]), crop_vars[i]), 
-                    frame, uncorr_frame, non_sub_frame)
+            if not photom_pixels:
+                snr = 0.0
+                print(f"DEBUG: Frame {frame_idx} rejected: Empty photometry pixels. "
+                      f"Crop max: {np.max(cropped_frames[i]):.2f}, Mean: {np.mean(cropped_frames[i]):.2f}")
+                
+                # Append placeholders to keep lists in sync with frame count
+                self.photometry_pixels.append([])
+                self.saturated_bool_list.append(False)
+                self.abs_level_sums.append(0.0)
+                self.background_levels.append(0.0)
+            else:
+                snr = self.computeIntensitySum(photom_pixels, 
+                        self.translatePicksToGlobal((refined_params[i, 2], refined_params[i, 3]), crop_vars[i]), 
+                        frame, uncorr_frame, non_sub_frame)
 
             # Set index for previous parameters 
             # (util. previous since optim. will reshape curr params to fit even if streak is partially OOB)
@@ -513,6 +617,9 @@ class ASTRA:
 
             # Reject SNR below the threshold
             if snr < self.snr_threshold:
+                if snr > 0:
+                    print(f"DEBUG: Frame {frame_idx} rejected: SNR {snr:.2f} < {self.snr_threshold}. "
+                          f"Crop max: {np.max(cropped_frames[i]):.2f}, Mean: {np.mean(cropped_frames[i]):.2f}")
                 snr_rejection_bool[i] = True
 
                 if self.verbose:
@@ -818,7 +925,7 @@ class ASTRA:
             length (float): Fitted length.
             directions (tuple[int, int]): Multipliers (+1/-1) for x and y axes.
             pick_offset (float | None): Optional center-to-edge coefficient; if provided,
-                the used length is `(length/3) * pick_offset`.
+                the used length is `(length/3)*pick_offset`.
 
         Returns:
             tuple[float, float]: Edge (x, y).
@@ -830,11 +937,11 @@ class ASTRA:
 
         if pick_offset is not None:
             # Add length adjustment
-            length = (length / 3) * pick_offset
+            length = (length / 3)*pick_offset
 
         # Calculate the offset
-        x_midpoint_offset = (length / 2) * np.abs(np.cos(omega)) * directions[0]
-        y_midpoint_offset = (length / 2) * np.abs(np.sin(omega)) * directions[1]
+        x_midpoint_offset = (length / 2)*np.abs(np.cos(omega))*directions[0]
+        y_midpoint_offset = (length / 2)*np.abs(np.sin(omega))*directions[1]
 
         # Calculate the new pick position
         edge_x = x0 + x_midpoint_offset
@@ -890,7 +997,7 @@ class ASTRA:
         parameter_ranges = ub - lb
 
         # Set fraction of parameter domain
-        adaptive_velocity_clamps = parameter_ranges * self.first_pass_settings['Velocity_coeff']
+        adaptive_velocity_clamps = parameter_ranges*self.first_pass_settings['Velocity_coeff']
 
         # Return the velocity clamp as a tuple
         return (-adaptive_velocity_clamps, adaptive_velocity_clamps)
@@ -924,17 +1031,17 @@ class ASTRA:
         # Calculate the adaptive bounds based on the mean and std of the first pass parameters
         # The std_parameter_constraint is a list of multiples of the std to use for each parameter
         adaptive_bounds = (
-        np.array([p0[0] - self.std_parameter_constraint[0] * std_parameters[0], # level_sum
-                    p0[1] - self.std_parameter_constraint[1] * std_parameters[1], # STD / height of gaussian
-                    p0[2] - self.std_parameter_constraint[2] * std_parameters[2], # X-center of gaussian
-                    p0[3] - self.std_parameter_constraint[3] * std_parameters[3], # Y-center of gaussian
-                    p0[4] - self.std_parameter_constraint[4] * std_parameters[4] # 3*STD / length of gaussian
+        np.array([p0[0] - self.std_parameter_constraint[0]*std_parameters[0], # level_sum
+                    p0[1] - self.std_parameter_constraint[1]*std_parameters[1], # STD / height of gaussian
+                    p0[2] - self.std_parameter_constraint[2]*std_parameters[2], # X-center of gaussian
+                    p0[3] - self.std_parameter_constraint[3]*std_parameters[3], # Y-center of gaussian
+                    p0[4] - self.std_parameter_constraint[4]*std_parameters[4] # 3*STD / length of gaussian
                     ]), # Lower bounds
-        np.array([p0[0] + self.std_parameter_constraint[0] * std_parameters[0], # level_sum
-                    p0[1] + self.std_parameter_constraint[1] * std_parameters[1], # STD / height of gaussian
-                    p0[2] + self.std_parameter_constraint[2] * std_parameters[2], # X-center of gaussian
-                    p0[3] + self.std_parameter_constraint[3] * std_parameters[3], # Y-center of gaussian
-                    p0[4] + self.std_parameter_constraint[4] * std_parameters[4] # 3*STD / length of gaussian
+        np.array([p0[0] + self.std_parameter_constraint[0]*std_parameters[0], # level_sum
+                    p0[1] + self.std_parameter_constraint[1]*std_parameters[1], # STD / height of gaussian
+                    p0[2] + self.std_parameter_constraint[2]*std_parameters[2], # X-center of gaussian
+                    p0[3] + self.std_parameter_constraint[3]*std_parameters[3], # Y-center of gaussian
+                    p0[4] + self.std_parameter_constraint[4]*std_parameters[4] # 3*STD / length of gaussian
                     ]) # Upper bounds
         )
 
@@ -942,6 +1049,10 @@ class ASTRA:
         adaptive_bounds = (np.clip(adaptive_bounds[0], 1e-5, None),
                            np.clip(adaptive_bounds[1], 1e-4, None))
         
+        # Ensure upper bounds are strictly greater than lower bounds
+        # This prevents zero-width bounds which cause L-BFGS-B to fail
+        adaptive_bounds = (adaptive_bounds[0], np.maximum(adaptive_bounds[1], adaptive_bounds[0] + 1e-6))
+
         # Change the adaptive bounds format to scipy format if requested
         if scipy_format:
             lb, ub = adaptive_bounds
@@ -970,8 +1081,8 @@ class ASTRA:
         x0, y0 = current_global_center
 
         # Calculate the offset
-        x_midpoint_offset = length * np.abs(np.cos(omega)) * directions[0]
-        y_midpoint_offset = length * np.abs(np.sin(omega)) * directions[1]
+        x_midpoint_offset = length*np.abs(np.cos(omega))*directions[0]
+        y_midpoint_offset = length*np.abs(np.sin(omega))*directions[1]
 
         # Calculate the next center position
         next_x = x0 + x_midpoint_offset
@@ -979,6 +1090,46 @@ class ASTRA:
 
         # Return the new picks
         return (next_x, next_y)
+
+    def constrainPointToKinematics(self, point, frame_index, max_drift=10.0):
+        """
+        Constrain a point to be within `max_drift` of the kinematic model (Time vs Space).
+        This essentially leashes the prediction to the robust linear velocity model.
+
+        Args:
+            point (tuple[float, float]): Predicted point (x, y).
+            frame_index (int): Frame index for the prediction.
+            max_drift (float): Maximum allowed distance from the kinematic model position.
+
+        Returns:
+            tuple[float, float]: Constrained point (x, y).
+        """
+        px, py = point
+        
+        # Calculate model position
+        slope_x, intercept_x = self.kinematic_params_x
+        slope_y, intercept_y = self.kinematic_params_y
+        
+        model_x = slope_x*frame_index + intercept_x
+        model_y = slope_y*frame_index + intercept_y
+
+        # Calculate drift vector
+        drift_x = px - model_x
+        drift_y = py - model_y
+
+        # Distance from model position
+        dist = np.sqrt(drift_x**2 + drift_y**2)
+
+        # If inside the leash, return original point
+        if dist <= max_drift:
+            return (float(px), float(py))
+        
+        # If outside, project onto the boundary of the leash
+        scale = max_drift / dist
+        new_x = model_x + drift_x*scale
+        new_y = model_y + drift_y*scale
+
+        return (float(new_x), float(new_y))
 
     # 3) -- Helper Methods --
 
@@ -1209,26 +1360,29 @@ class ASTRA:
             est_height, # height / sigma_y
             x_len / 2, # x0
             y_len / 2, # y0
-            est_length # length (std_x * 6)
+            est_length # length (std_x*6)
         ]
 
         bounds = (
                 np.array([100, # level_sum 
-                        p0[1] * 0.2, # STD / height of gaussian
-                        x_len * 0.25, # X-center of gaussian
-                        y_len * 0.25, # Y-center of gaussian
-                        p0[4] * 0.5, # 3*STD / length of gaussian
+                        max(0.5, p0[1]*0.2), # STD / width of gaussian (can never be less than 0.5)
+                        x_len*0.25, # X-center of gaussian
+                        y_len*0.25, # Y-center of gaussian
+                        p0[4]*0.5, # 3*STD / length of gaussian
                         ]), # Lower bounds
                 np.array([np.sum(cropped_frame), # level_sum
-                        est_height * 1.35, # STD / height of gaussian
-                        x_len * 0.75, # X-center of gaussian
-                        y_len * 0.75, # Y-center of gaussian
-                        p0[4] * 1.5, # 3*STD / length of gaussian
+                        est_height*1.35, # STD / width of gaussian
+                        x_len*0.75, # X-center of gaussian
+                        y_len*0.75, # Y-center of gaussian
+                        p0[4]*1.5, # 3*STD / length of gaussian
                         ]) # Upper bounds
             )
 
         # Clip bounds to above zero, and p0 to bounds
         bounds = (np.clip(bounds[0], 0.01, None), np.clip(bounds[1], 0.1, None))
+        
+        # Ensure upper bounds are strictly greater than lower bounds
+        bounds = (bounds[0], np.maximum(bounds[1], bounds[0] + 1e-6))
         p0 = np.clip(p0, bounds[0], bounds[1])
         
         # Generate initial particle positions
@@ -1239,14 +1393,25 @@ class ASTRA:
 
         # 3) -- Run PSO --
         try:
+            # Debug logging for bounds issue
+            # print(f"DEBUG: Bounds lower: {bounds[0]}")
+            # print(f"DEBUG: Bounds upper: {bounds[1]}")
+            # print(f"DEBUG: i0 min: {np.min(i0, axis=0)}")
+            # print(f"DEBUG: i0 max: {np.max(i0, axis=0)}")
+            # print(f"DEBUG: i0 < lb: {np.any(i0 < bounds[0])}")
+            # print(f"DEBUG: i0 > ub: {np.any(i0 > bounds[1])}")
+            
+            # Double clip to be absolutely sure
+            i0 = np.clip(i0, bounds[0] + 1e-9, bounds[1] - 1e-9)
+
             optimizer = GlobalBestPSO(
-                n_particles = self.first_pass_settings["n_particles"],
+                n_particles=self.first_pass_settings["n_particles"],
                 bh_strategy=self.first_pass_settings["bh_strategy"],
                 vh_strategy=self.first_pass_settings["vh_strategy"],
-                ftol = self.first_pass_settings["ftol"],
-                ftol_iter= self.first_pass_settings["ftol_iter"],
-                velocity_clamp = v0,
-                dimensions = 5,
+                ftol=self.first_pass_settings["ftol"],
+                ftol_iter=self.first_pass_settings["ftol_iter"],
+                velocity_clamp=v0,
+                dimensions=5,
                 bounds=bounds,
                 options=self.first_pass_settings["options"],
                 init_pos=i0
@@ -1254,15 +1419,15 @@ class ASTRA:
 
             # Solve optimizer
             best_cost, best_pos = optimizer.optimize(
-                objective_func = self.psoObjectiveFunction,
-                iters = self.first_pass_settings["max_iter"],
-                verbose = self.verbose,
-                data_tuple = data_tuple,
-                y_obs = y_obs,
-                a0 = 0,
-                bounds = bounds,
-                omega = omega,
-                directions = directions
+                objective_func=self.psoObjectiveFunction,
+                iters=self.first_pass_settings["max_iter"],
+                verbose=self.verbose,
+                data_tuple=data_tuple,
+                y_obs=y_obs,
+                a0=0,
+                bounds=bounds,
+                omega=omega,
+                directions=directions
             )
         except Exception as e:
             raise Exception(f"Error running PSO: {e}")
@@ -1428,11 +1593,11 @@ class ASTRA:
 
         # Determine maximum size values
         if cropping_settings is None:
-            max_sigma = max_sigma * self.cropping_settings['max_sigma_coeff']
-            max_length = max_length * self.cropping_settings['max_length_coeff']
+            max_sigma = max_sigma*self.cropping_settings['max_sigma_coeff']
+            max_length = max_length*self.cropping_settings['max_length_coeff']
         else:
-            max_sigma = max_sigma * cropping_settings['max_sigma_coeff']
-            max_length = max_length * cropping_settings['max_length_coeff']
+            max_sigma = max_sigma*cropping_settings['max_sigma_coeff']
+            max_length = max_length*cropping_settings['max_length_coeff']
 
         # Unpack other values
         y, x = np.indices(sub_frame.shape)
@@ -1455,11 +1620,54 @@ class ASTRA:
         # set the sub frame to zero where the mask is zero
         sub_frame[optim_mask == 0] = 0
 
-        # Crop the sub_frame to the non-zero indices (plus one for indexing start/stop properly)
-        xmin = int(np.min(non_zero_indices[1]))
-        xmax = int(np.max(non_zero_indices[1]) + 1)
-        ymin = int(np.min(non_zero_indices[0]))
-        ymax = int(np.max(non_zero_indices[0]) + 1)
+        # Check if we have any non-zero indices
+        if len(non_zero_indices[0]) == 0:
+            # Fallback: crop a small window around the estimated center
+            # This prevents the crash when the Gaussian is fully out of bounds
+            h, w = sub_frame.shape
+            cx, cy = int(est_global_center[0]), int(est_global_center[1])
+            r = 10 # small radius
+            
+            xmin = max(0, cx - r)
+            xmax = min(w, cx + r + 1)
+            ymin = max(0, cy - r)
+            ymax = min(h, cy + r + 1)
+            
+            # If even that is invalid (e.g. center way off), just take a 1x1 at 0,0
+            if xmax <= xmin or ymax <= ymin:
+                xmin, xmax, ymin, ymax = 0, 1, 0, 1
+        else:
+            # Crop the sub_frame to the non-zero indices (plus one for indexing start/stop properly)
+            xmin = int(np.min(non_zero_indices[1]))
+            xmax = int(np.max(non_zero_indices[1]) + 1)
+            ymin = int(np.min(non_zero_indices[0]))
+            ymax = int(np.max(non_zero_indices[0]) + 1)
+
+            # Enforce minimum crop size of 10x10
+            min_size = 10
+            h, w = sub_frame.shape
+            
+            if (xmax - xmin) < min_size:
+                cx = (xmin + xmax) // 2
+                half_size = min_size // 2
+                xmin = max(0, cx - half_size)
+                xmax = min(w, xmin + min_size)
+                # Re-adjust xmin if xmax hit the boundary
+                if (xmax - xmin) < min_size:
+                    xmin = max(0, xmax - min_size)
+
+            if (ymax - ymin) < min_size:
+                cy = (ymin + ymax) // 2
+                half_size = min_size // 2
+                ymin = max(0, cy - half_size)
+                ymax = min(h, ymin + min_size)
+                # Re-adjust ymin if ymax hit the boundary
+                if (ymax - ymin) < min_size:
+                    ymin = max(0, ymax - min_size)
+
+            # DEBUG: Print crop dimensions if small
+            if (xmax - xmin) < 10 or (ymax - ymin) < 10:
+                print(f"DEBUG: Small crop detected! x: {xmin}-{xmax} ({xmax-xmin}), y: {ymin}-{ymax} ({ymax-ymin}). Frame shape: {h}x{w}")
 
         # Crop the sub_frame to the bounds
         cropped_frame = sub_frame[ymin:ymax, xmin:xmax]
@@ -1559,20 +1767,31 @@ class ASTRA:
             sigma = np.minimum(dist_to_lower, dist_to_upper) / explorative_coefficient
 
             # 2) But make sure sigma isn't vanishingly small:
-            min_sigma = (ub - lb) / (explorative_coefficient * 10)
+            min_sigma = (ub - lb) / (explorative_coefficient*10)
             sigma = np.maximum(sigma, min_sigma)
 
             # 3) Build the standardized bounds a, b for truncnorm
+            # Ensure sigma is strictly positive to avoid domain errors
+            sigma = np.maximum(sigma, 1e-9)
+            
             a = (lb - p0) / sigma
             b = (ub - p0) / sigma
 
             # 4) Draw each dim from its 1D truncated normal
             for i in range(D):
-                pos[:, i] = scipy.stats.truncnorm.rvs(
-                    a[i], b[i],
-                    loc=p0[i], scale=sigma[i],
-                    size=n_particles
-                )
+                # Fallback to uniform if bounds are invalid or sigma is bad
+                if sigma[i] <= 0 or lb[i] >= ub[i]:
+                     pos[:, i] = np.random.uniform(low=lb[i], high=ub[i], size=n_particles)
+                else:
+                    try:
+                        pos[:, i] = scipy.stats.truncnorm.rvs(
+                            a[i], b[i],
+                            loc=p0[i], scale=sigma[i],
+                            size=n_particles
+                        )
+                    except ValueError:
+                         # Fallback if truncnorm fails (e.g. numerical issues)
+                         pos[:, i] = np.random.uniform(low=lb[i], high=ub[i], size=n_particles)
             
         # Return a uniformly distributed particles if p0 is None
         else:
@@ -1580,6 +1799,10 @@ class ASTRA:
             pos = np.random.uniform(low=lb, high=ub, size=(n_particles, len(lb)))
 
         # Return the generated particles
+        # Clip to ensure they are strictly within bounds (pyswarms is sensitive to this)
+        # Use a small epsilon to avoid floating point issues at the exact boundary
+        epsilon = 1e-9
+        pos = np.clip(pos, lb + epsilon, ub - epsilon)
         return pos
 
     def getFrame(self, fr_no, include_raw=False, crop_vars=None, include_non_subtracted=False):
@@ -1732,8 +1955,8 @@ class ASTRA:
             None
         """
 
-        # If the frame is outside the event bounds, quit cropping
-        if frame_index > max(self.pick_frame_indices) or frame_index < min(self.pick_frame_indices):
+        # If the frame is outside the event bounds (user defined extent), quit cropping
+        if frame_index > self.initial_max_frame or frame_index < self.initial_min_frame:
             return
 
         # Estimate next parameters using the parameter estimation functions
@@ -1742,11 +1965,14 @@ class ASTRA:
                                                       forward_pass=forward_pass
                                                       )
 
+        # Append the planned center to the trajectory list
+        self.planned_trajectory.append(est_center_global)
+
         # Crop the frame around the new center
         cropped_frame, crop_vars = self.cropFrameToGaussian(self.getFrame(frame_index), 
                                     est_center_global, 
-                                    est_next_params['height'] * self.cropping_settings['max_sigma_coeff'], 
-                                    est_next_params['length'] * self.cropping_settings['max_length_coeff'],
+                                    est_next_params['height']*self.cropping_settings['max_sigma_coeff'], 
+                                    est_next_params['length']*self.cropping_settings['max_length_coeff'],
                                     omega
                                     )
 
@@ -1798,6 +2024,11 @@ class ASTRA:
         # Set the pass coeff (index step) based on forward pass or not
         pass_coeff = 1 if forward_pass else -1
 
+        # Constrain the next center to the robust global line to prevent random walk drift
+        # Using kinematic leash (Time vs Space)
+        next_center_global = self.constrainPointToKinematics(next_center_global, 
+                                                             frame_index + pass_coeff)
+
         # Update progress
         self.progressed_frames['cropping'] += 1
         self.updateProgress()
@@ -1836,22 +2067,22 @@ class ASTRA:
 
         elif self.progress_callback is not None:
             current_percentage = sum(
-                self.progressed_frames[step] * time_weights_gaus[step]
+                self.progressed_frames[step]*time_weights_gaus[step]
                 for step in self.progressed_frames.keys()
-            ) / self.total_frames * 100
+            ) / self.total_frames*100
             self.progress_callback(int(current_percentage))
 
         # Else print callback to console
         if self.progress_callback is None:
             if progress is not None:
-                progress_bar = '*' * int(progress) + '-' * (100 - int(progress))
+                progress_bar = '*'*int(progress) + '-'*(100 - int(progress))
                 print(f'Progress: {progress_bar} : {int(progress)}%')
             else:
                 current_percentage = sum(
-                    self.progressed_frames[step] * time_weights_gaus[step]
+                    self.progressed_frames[step]*time_weights_gaus[step]
                     for step in self.progressed_frames.keys()
-                ) / self.total_frames * 100
-                progress_bar = '*' * int(current_percentage) + '-' * (100 - int(current_percentage))
+                ) / self.total_frames*100
+                progress_bar = '*'*int(current_percentage) + '-'*(100 - int(current_percentage))
                 print(f'{self.config.stationID} Progress: {progress_bar} : {int(current_percentage)}%')
 
     def selectSeedTriplet(self, picks, pick_frame_indices):
@@ -1911,7 +2142,7 @@ class ASTRA:
         pref1 = touch_end.astype(np.int64)                           # 0 is better than 1
 
         # 2) then prefer middle frame closest to center of [keys[0], keys[-1]]
-        center = 0.5 * (keys[0] + keys[-1])
+        center = 0.5*(keys[0] + keys[-1])
         middle_frames = keys[starts + 1]
         dist = np.abs(middle_frames - center).astype(np.float64)
 
@@ -1954,6 +2185,11 @@ class ASTRA:
         x_color_size = np.max(photom_x_indices) - np.min(photom_x_indices)
         y_color_size = np.max(photom_y_indices) - np.min(photom_y_indices)
 
+        # Enforce minimum crop size of 10x10
+        min_half_size = 5
+        x_color_size = max(x_color_size, min_half_size)
+        y_color_size = max(y_color_size, min_half_size)
+
         xmin = int(np.floor(global_centroid[0] - x_color_size))
         xmax = int(np.ceil(global_centroid[0] + x_color_size)) + 1
         ymin = int(np.floor(global_centroid[1] - y_color_size))
@@ -1991,7 +2227,15 @@ class ASTRA:
             photom_x_indices = photom_x_indices[valid_mask]
             photom_y_indices = photom_y_indices[valid_mask]
             if photom_x_indices.size == 0:
-                raise ValueError("No valid photometry pixels remain within the crop window")
+                # raise ValueError("No valid photometry pixels remain within the crop window")
+                
+                # Append placeholders to keep lists in sync with frame count
+                self.photometry_pixels.append([])
+                self.saturated_bool_list.append(False)
+                self.abs_level_sums.append(0.0)
+                self.background_levels.append(0.0)
+                
+                return 0.0
 
         # Create combined masks
 
@@ -2073,115 +2317,115 @@ class ASTRA:
         # Compute SNR using CCD equation
         snr = signalToNoise(intensity_sum, source_px_count, background_lvl, background_stddev)
 
-        # DEBUG - Save diagnostic photometry images
-        # try:
-        #     # Save the current matplotlib backend and switch to Agg
-        #     current_backend = matplotlib.get_backend()
-        #     matplotlib.use('Agg')
+        if self.save_animation:
+            try:
+                # Save the current matplotlib backend and switch to Agg
+                current_backend = matplotlib.get_backend()
+                matplotlib.use('Agg')
 
-        #     # Create directory for photometry diagnostics if it doesn't exist
-        #     photom_dir = os.path.join(self.data_path, "ASTRA_Photometry_Diagnostics")
-        #     os.makedirs(photom_dir, exist_ok=True)
+                # Create directory for photometry diagnostics if it doesn't exist
+                photom_dir = os.path.join(self.data_path, "ASTRA_Photometry_Diagnostics")
+                os.makedirs(photom_dir, exist_ok=True)
 
-        #     # Get frame number for filename
-        #     frame_number = self.pick_frame_indices[len(self.photometry_pixels)-1] + self.first_pick_global_index
+                # Get frame number for filename
+                frame_number = self.pick_frame_indices[len(self.photometry_pixels)-1] + self.first_pick_global_index
 
-        #     # Create a figure with a 3x2 grid - use Figure directly for thread safety
-        #     fig = Figure(figsize=(15, 10))
-        #     canvas = FigureCanvas(fig)
-        #     grid = fig.add_gridspec(3, 2, hspace=0.3, wspace=0.3)
+                # Create a figure with a 3x2 grid - use Figure directly for thread safety
+                fig = Figure(figsize=(15, 10))
+                canvas = FigureCanvas(fig)
+                grid = fig.add_gridspec(3, 2, hspace=0.3, wspace=0.3)
 
-        #     # Create all needed axes
-        #     ax1 = fig.add_subplot(grid[0, 0])  # Original cropped frame
-        #     ax2 = fig.add_subplot(grid[0, 1])  # Background subtracted
-        #     ax3 = fig.add_subplot(grid[1, 0])  # Star mask
-        #     ax4 = fig.add_subplot(grid[1, 1])  # Photometry mask
-        #     ax5 = fig.add_subplot(grid[2, 0])  # Final photometry pixels
-        #     ax6 = fig.add_subplot(grid[2, 1])  # Combined result
+                # Create all needed axes
+                ax1 = fig.add_subplot(grid[0, 0])  # Original cropped frame
+                ax2 = fig.add_subplot(grid[0, 1])  # Background subtracted
+                ax3 = fig.add_subplot(grid[1, 0])  # Star mask
+                ax4 = fig.add_subplot(grid[1, 1])  # Photometry mask
+                ax5 = fig.add_subplot(grid[2, 0])  # Final photometry pixels
+                ax6 = fig.add_subplot(grid[2, 1])  # Combined result
 
-        #     # Show cropped_corrected_frame
-        #     vmin1 = np.percentile(cropped_corrected_frame, 1)
-        #     vmax1 = np.percentile(cropped_corrected_frame, 99)
-        #     im1 = ax1.imshow(cropped_corrected_frame, cmap='gray', vmin=vmin1, vmax=vmax1)
-        #     ax1.set_title("cropped_corrected_frame")
-        #     fig.colorbar(im1, ax=ax1, shrink=0.7)
+                # Show cropped_corrected_frame
+                vmin1 = np.percentile(cropped_corrected_frame, 1)
+                vmax1 = np.percentile(cropped_corrected_frame, 99)
+                im1 = ax1.imshow(cropped_corrected_frame, cmap='gray', vmin=vmin1, vmax=vmax1)
+                ax1.set_title("cropped_corrected_frame")
+                fig.colorbar(im1, ax=ax1, shrink=0.7)
 
-        #     # Show photometry pixels with background subtracted
-        #     filled_nobg = photom_pixels_nobg.filled(0)
-        #     vmax2 = np.percentile(filled_nobg, 99)
-        #     im2 = ax2.imshow(filled_nobg, cmap='gray', vmin=0, vmax=vmax2)
-        #     ax2.set_title("photom_pixels_nobg")
-        #     fig.colorbar(im2, ax=ax2, shrink=0.7)
+                # Show photometry pixels with background subtracted
+                filled_nobg = photom_pixels_nobg.filled(0)
+                vmax2 = np.percentile(filled_nobg, 99)
+                im2 = ax2.imshow(filled_nobg, cmap='gray', vmin=0, vmax=vmax2)
+                ax2.set_title("photom_pixels_nobg")
+                fig.colorbar(im2, ax=ax2, shrink=0.7)
 
-        #     # Show star mask
-        #     star_mask_viz = np.ones_like(cropped_star_mask)
-        #     im3 = ax3.imshow(cropped_star_mask, cmap='Reds', vmin=0, vmax=1)
-        #     ax3.set_title("cropped_star_mask")
+                # Show star mask
+                star_mask_viz = np.ones_like(cropped_star_mask)
+                im3 = ax3.imshow(cropped_star_mask, cmap='Reds', vmin=0, vmax=1)
+                ax3.set_title("cropped_star_mask")
 
-        #     # Show photometry mask (included and excluded)
-        #     im4 = ax4.imshow(cropped_mask_photom_excluded, cmap='Blues', vmin=0, vmax=1)
-        #     ax4.set_title("cropped_mask_photom_excluded")
+                # Show photometry mask (included and excluded)
+                im4 = ax4.imshow(cropped_mask_photom_excluded, cmap='Blues', vmin=0, vmax=1)
+                ax4.set_title("cropped_mask_photom_excluded")
 
-        #     # Visualization for final photometry pixels 
-        #     phot_final = np.zeros_like(cropped_corrected_frame)
-        #     for p in photom_pixels:
-        #         # Convert to local coordinates
-        #         px, py = p[0] - xmin, p[1] - ymin
-        #         # Check if within crop bounds
-        #         if 0 <= px < phot_final.shape[1] and 0 <= py < phot_final.shape[0]:
-        #             phot_final[py, px] = 1
+                # Visualization for final photometry pixels 
+                phot_final = np.zeros_like(cropped_corrected_frame)
+                for p in photom_pixels:
+                    # Convert to local coordinates
+                    px, py = p[0] - xmin, p[1] - ymin
+                    # Check if within crop bounds
+                    if 0 <= px < phot_final.shape[1] and 0 <= py < phot_final.shape[0]:
+                        phot_final[py, px] = 1
 
-        #     im5 = ax5.imshow(phot_final, cmap='viridis', vmin=0, vmax=1)
-        #     ax5.set_title("photometry_pixels")
+                im5 = ax5.imshow(phot_final, cmap='viridis', vmin=0, vmax=1)
+                ax5.set_title("photometry_pixels")
 
-        #     # Combined visualization - frame with photometry overlay
-        #     combined = np.zeros((*cropped_corrected_frame.shape, 3))
-        #     # Grayscale background
-        #     normalized = np.clip(cropped_corrected_frame / (vmax1 + 0.01), 0, 1)
-        #     for i in range(3):
-        #         combined[:,:,i] = normalized
+                # Combined visualization - frame with photometry overlay
+                combined = np.zeros((*cropped_corrected_frame.shape, 3))
+                # Grayscale background
+                normalized = np.clip(cropped_corrected_frame / (vmax1 + 0.01), 0, 1)
+                for i in range(3):
+                    combined[:,:,i] = normalized
 
-        #     # Add red overlay for photometry pixels
-        #     for p in photom_pixels:
-        #         px, py = p[0] - xmin, p[1] - ymin
-        #         if 0 <= px < combined.shape[1] and 0 <= py < combined.shape[0]:
-        #             combined[py, px, 0] = 1.0  # Red channel
-        #             combined[py, px, 1] = 0.3  # Green channel
-        #             combined[py, px, 2] = 0.3  # Blue channel
+                # Add red overlay for photometry pixels
+                for p in photom_pixels:
+                    px, py = p[0] - xmin, p[1] - ymin
+                    if 0 <= px < combined.shape[1] and 0 <= py < combined.shape[0]:
+                        combined[py, px, 0] = 1.0  # Red channel
+                        combined[py, px, 1] = 0.3  # Green channel
+                        combined[py, px, 2] = 0.3  # Blue channel
 
-        #     # Add blue overlay for stars
-        #     for y in range(cropped_star_mask.shape[0]):
-        #         for x in range(cropped_star_mask.shape[1]):
-        #             if cropped_star_mask[y, x]:
-        #                 combined[y, x, 0] = 0.3  # Red channel
-        #                 combined[y, x, 1] = 0.3  # Green channel
-        #                 combined[y, x, 2] = 1.0  # Blue channel
+                # Add blue overlay for stars
+                for y in range(cropped_star_mask.shape[0]):
+                    for x in range(cropped_star_mask.shape[1]):
+                        if cropped_star_mask[y, x]:
+                            combined[y, x, 0] = 0.3  # Red channel
+                            combined[y, x, 1] = 0.3  # Green channel
+                            combined[y, x, 2] = 1.0  # Blue channel
 
-        #     im6 = ax6.imshow(combined)
-        #     ax6.set_title("combined_visualization")
+                im6 = ax6.imshow(combined)
+                ax6.set_title("combined_visualization")
 
-        #     # Add summary stats as figure title
-        #     fig.suptitle(f"Frame {frame_number} - SNR: {snr:.2f}, Sum: {intensity_sum:.0f}, " + 
-        #         f"Bg: {background_lvl:.2f}, Pixels: {source_px_count}, " +
-        #         f"Saturated: {saturated_bool}", fontsize=12)
+                # Add summary stats as figure title
+                fig.suptitle(f"Frame {frame_number} - SNR: {snr:.2f}, Sum: {intensity_sum:.0f}, " + 
+                    f"Bg: {background_lvl:.2f}, Pixels: {source_px_count}, " +
+                    f"Saturated: {saturated_bool}, x={global_centroid[0]:.2f}, y={global_centroid[1]:.2f}", fontsize=12)
 
-        #     # Save the figure in a thread-safe way
-        #     if not hasattr(self, "_plot_lock"):
-        #         self._plot_lock = threading.RLock()
+                # Save the figure in a thread-safe way
+                if not hasattr(self, "_plot_lock"):
+                    self._plot_lock = threading.RLock()
 
-        #     with self._plot_lock:
-        #         fig_path = os.path.join(photom_dir, f"photometry_frame_{frame_number:04d}.jpg")
-        #         fig.savefig(fig_path, format='jpg', dpi=100, bbox_inches='tight', 
-        #             pil_kwargs={"quality": 90, "optimize": True})
+                with self._plot_lock:
+                    fig_path = os.path.join(photom_dir, f"photometry_frame_{frame_number:04d}.jpg")
+                    fig.savefig(fig_path, format='jpg', dpi=100, bbox_inches='tight', 
+                        pil_kwargs={"quality": 90, "optimize": True})
 
-        #     # Explicitly close to free memory
-        #     fig.clf()
+                # Explicitly close to free memory
+                fig.clf()
 
-        #     # Restore the original matplotlib backend
-        #     matplotlib.use(current_backend)
+                # Restore the original matplotlib backend
+                matplotlib.use(current_backend)
 
-        # except Exception as e:
-        #     print(f"Warning: Could not save photometry diagnostic plot for frame {frame_number}: {e}")
+            except Exception as e:
+                print(f"Warning: Could not save photometry diagnostic plot for frame {frame_number}: {e}")
 
         # Verbose print
         if self.verbose:
@@ -2224,7 +2468,7 @@ class ASTRA:
         fit_img[fit_img > 1] = 1
 
         # Mask cropped frame with fit image to remove the background
-        masked_cropped = fit_img * cropped_frame
+        masked_cropped = fit_img*cropped_frame
 
         masked_cropped[masked_cropped < np.nanpercentile(masked_cropped, 
                                                     float(self.astra_config['astra']['photom_thresh'])*100)
@@ -2436,7 +2680,7 @@ class ASTRA:
                 snr = 0.0
                 mag_err_random = 0.0
             else:
-                mag_err_random = 2.5 * np.log10(1 + 1 / snr)
+                mag_err_random = 2.5*np.log10(1 + 1 / snr)
 
                 mag_err_total = np.sqrt(mag_err_random**2 + self.platepar.mag_lev_stddev**2)
 
