@@ -30,3 +30,7 @@ PyGObject; python_version >= '3.6' and sys_platform != 'linux'
 rawpy; sys_platform == "win32"
 rawpy; sys_platform == "darwin"
 rawpy; sys_platform == "linux" and platform_machine == "x86_64"
+# Install pyswarms everywhere except for armv6l and armv7l (Raspberry Pi)
+pyswarms; sys_platform == "win32"
+pyswarms; sys_platform == "darwin"
+pyswarms; sys_platform == "linux" and platform_machine == "x86_64"
