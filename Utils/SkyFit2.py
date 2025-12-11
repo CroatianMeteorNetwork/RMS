@@ -364,7 +364,7 @@ if ASTRA_IMPORTED:
             astra_defaults = {
                 "star_thresh": "3", "min SNR": "5",
                 "P_crop": "1.5", "sigma_init (px)": "2", "sigma_max": "1.2",
-                "L_max": "1.5", "Verbose": "False", "photom_thresh" : "0.05", 
+                "L_max": "1.5", "Verbose": "False", "photom_thresh" : "0.01", 
                 "Save Animation": "False", "pick_offset" : "leading-edge"
             }
 

@@ -1749,8 +1749,9 @@ class ASTRA:
         x, y = data_tuple
 
         # Rotate the coordinates
-        x_m = (x - x0)*np.cos(omega) - (y - y0)*np.sin(omega)
-        y_m = (x - x0)*np.sin(omega) + (y - y0)*np.cos(omega)
+        # Rotate point by -omega to align with track along X-axis
+        x_m = (x - x0)*np.cos(omega) + (y - y0)*np.sin(omega)
+        y_m = -(x - x0)*np.sin(omega) + (y - y0)*np.cos(omega)
 
 
         u1 = (x_m + L/2.0)/(sigma*np.sqrt(2))
@@ -2571,25 +2572,20 @@ class ASTRA:
         fit_img = fit_img.copy()
         cropped_frame = cropped_frame.copy()
 
-        # Clip fit image to zero and one
-        fit_img[fit_img <= 1] = 0
-        fit_img[fit_img > 1] = 1
+        # Use relative threshold on the fitted Gaussian model
+        # photom_thresh is a fraction of the peak intensity
+        peak_intensity = np.max(fit_img)
+        threshold = peak_intensity * float(self.astra_config['astra']['photom_thresh'])
 
-        # Mask cropped frame with fit image to remove the background
-        masked_cropped = fit_img*cropped_frame
-
-        masked_cropped[masked_cropped < np.nanpercentile(masked_cropped, 
-                                                    float(self.astra_config['astra']['photom_thresh'])*100)
-                                                    ] = 0
-
-        # binarize mask_cropped
-        masked_cropped[masked_cropped > 0] = 1
-        masked_cropped[masked_cropped <= 0] = 0
+        # Create binary mask from the model
+        # We select pixels where the model contributes significantly
+        mask = np.zeros_like(fit_img, dtype=np.uint8)
+        mask[fit_img >= threshold] = 1
 
         # Use morphological operator to close up photometry pixels (complete holes etc)
         kernel = np.ones((3, 3), np.uint8)
 
-        masked_cropped = cv2.morphologyEx(masked_cropped, cv2.MORPH_CLOSE, kernel)
+        masked_cropped = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
 
         # Get indices for all non-zero pixels
         nonzero_indices = np.argwhere(masked_cropped > 0)
@@ -3286,7 +3282,7 @@ Usage Examples:
                                 'n_particles': 125, 'V_c (0-1)': 0.3, 'ftol': 1e-5, 'ftol_itter': 25, 
                                 'expl_c': 3, 'P_sigma': 3}, 
                         'astra': {'star_thresh': 3, 'min SNR': 10, 'P_crop': 1.5, 'sigma_init (px)': 2, 
-                                  'sigma_max': 1.2, 'L_max': 1.5, 'Verbose': False, 'photom_thresh': 0.05, 
+                                  'sigma_max': 1.2, 'L_max': 1.5, 'Verbose': False, 'photom_thresh': 0.01, 
                                   'Save Animation': False, 'pick_offset': 3}, 
                         'kalman': {'Monotonicity': True, 'sigma_xy (px)': 0.5, 'sigma_vxy (%)': 100, 
                                    'save results': False}}
