@@ -301,6 +301,14 @@ class Config:
         # Path to the json file containing camera settings
         self.camera_settings_path = "./camera_settings.json"
 
+        # Camera control protocol: 'dvrip' (Sofia/XMeye cameras) or 'onvif' (ONVIF-compliant cameras)
+        self.camera_control_protocol = "dvrip"
+
+        # ONVIF-specific settings (only used when camera_control_protocol is 'onvif')
+        self.onvif_user = "admin"
+        self.onvif_password = ""
+        self.onvif_port = 80
+
         # Whether to run the one-time camera setup defined in camera_settings.json
         self.initialize_camera = False
 
@@ -1158,9 +1166,29 @@ def parseCapture(config, parser):
         station_specific_file = os.path.expanduser(os.path.join(config.config_file_path,'camera_settings.json'))
         if os.path.isfile(station_specific_file):
             config.camera_settings_path = station_specific_file
-        else:    
+        else:
             config.camera_settings_path = './camera_settings.json'
     print(f'Camera settings file: {config.camera_settings_path}')
+
+    # Camera control protocol: 'dvrip' (default, for Sofia/XMeye cameras) or 'onvif'
+    if parser.has_option(section, "camera_control_protocol"):
+        protocol = parser.get(section, "camera_control_protocol").lower().strip()
+        if protocol in ('dvrip', 'onvif', 'sofia'):
+            # 'sofia' is an alias for 'dvrip'
+            config.camera_control_protocol = 'dvrip' if protocol == 'sofia' else protocol
+        else:
+            print(f"WARNING: Unknown camera_control_protocol '{protocol}', using 'dvrip'")
+            config.camera_control_protocol = 'dvrip'
+
+    # ONVIF-specific settings
+    if parser.has_option(section, "onvif_user"):
+        config.onvif_user = parser.get(section, "onvif_user")
+
+    if parser.has_option(section, "onvif_password"):
+        config.onvif_password = parser.get(section, "onvif_password")
+
+    if parser.has_option(section, "onvif_port"):
+        config.onvif_port = parser.getint(section, "onvif_port")
 
     if parser.has_option(section, "initialize_camera"):
         config.initialize_camera = parser.getboolean(section, "initialize_camera")

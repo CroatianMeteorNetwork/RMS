@@ -5,12 +5,31 @@ import json
 import time
 from datetime import timedelta
 import ephem
-import Utils.CameraControl as cc
 from RMS.Logger import getLogger
 from RMS.Misc import RmsDateTime
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
+
+
+def getCameraControlModule(config):
+    """Get the appropriate camera control module based on config.
+
+    Args:
+        config: RMS config object with camera_control_protocol attribute
+
+    Returns:
+        Camera control module (either CameraControl or CameraControlONVIF)
+    """
+    protocol = getattr(config, 'camera_control_protocol', 'dvrip').lower()
+
+    if protocol == 'onvif':
+        import Utils.CameraControlONVIF as cc
+        return cc
+    else:
+        # Default to DVRIP (Sofia) protocol
+        import Utils.CameraControl as cc
+        return cc
 
 # Sun altitude (in degrees) that defines the switch point.
 # Negative numbers mean the Sun is below the horizon.
@@ -35,6 +54,9 @@ def switchCameraMode(config, daytime_mode, camera_mode_switch_trigger):
     mode_name = "day" if daytime_mode.value else "night"
 
     mode_path = config.camera_settings_path
+
+    # Get the appropriate camera control module based on protocol
+    cc = getCameraControlModule(config)
 
     try:
         if not os.path.exists(mode_path):

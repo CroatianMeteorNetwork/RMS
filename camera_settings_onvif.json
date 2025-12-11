@@ -1,0 +1,29 @@
+{
+  "init": [
+    ["CameraTime", "set"],
+    ["SetColor", "50,50,50,50"],
+
+    ["SetParam", "Camera", "IrCutFilter", "AUTO"],
+    ["SetParam", "Camera", "Brightness", "50"],
+    ["SetParam", "Camera", "Contrast", "50"],
+    ["SetParam", "Camera", "ColorSaturation", "50"],
+    ["SetParam", "Camera", "Sharpness", "50"],
+    ["SetParam", "Camera", "ExposureParam", "Mode", "AUTO"]
+  ],
+
+  "day": [
+    ["CameraTime", "set"],
+    ["SetParam", "Camera", "IrCutFilter", "ON"],
+    ["SetParam", "Camera", "Brightness", "50"],
+    ["SetParam", "Camera", "ExposureParam", "Mode", "AUTO"],
+    ["reboot"]
+  ],
+
+  "night": [
+    ["CameraTime", "set"],
+    ["SetParam", "Camera", "IrCutFilter", "OFF"],
+    ["SetParam", "Camera", "Brightness", "60"],
+    ["SetParam", "Camera", "ExposureParam", "Mode", "AUTO"],
+    ["reboot"]
+  ]
+}

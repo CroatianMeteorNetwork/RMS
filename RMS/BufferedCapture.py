@@ -46,8 +46,7 @@ from RMS.RawFrameSave import RawFrameSaver
 from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp
 from RMS.Formats import FTfile, FTStruct
 from RMS.Logger import LoggingManager, getLogger, gstDebugLogger
-from RMS.CaptureModeSwitcher import switchCameraMode
-import Utils.CameraControl as cc
+from RMS.CaptureModeSwitcher import switchCameraMode, getCameraControlModule
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
@@ -1260,6 +1259,8 @@ class BufferedCapture(Process):
                                 raise KeyError("Mode '{}' not defined in {}.".format(mode_name, mode_path))
 
                             try:
+                                # Get the appropriate camera control module based on protocol
+                                cc = getCameraControlModule(self.config)
                                 cc.cameraControlV2(self.config, "SwitchMode", mode_name)
 
                                 # create empty sentinel file
