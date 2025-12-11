@@ -1903,6 +1903,54 @@ class PlateTool(QtWidgets.QMainWindow):
         self.geo_markers2.setZValue(4)
         self.zoom_window.addItem(self.geo_markers2)
 
+        # astrometry.net matched star markers (main window) - cyan color
+        # These show catalog star positions that matched to input stars
+        self.astrometry_matched_markers = pg.ScatterPlotItem()
+        self.astrometry_matched_markers.setPen('c', width=2)  # cyan
+        self.astrometry_matched_markers.setBrush((0, 0, 0, 0))
+        self.astrometry_matched_markers.setSize(15)
+        self.astrometry_matched_markers.setSymbol('o')  # circle
+        self.astrometry_matched_markers.setZValue(5)
+        self.img_frame.addItem(self.astrometry_matched_markers)
+
+        # astrometry.net matched star markers (zoom window)
+        self.astrometry_matched_markers2 = pg.ScatterPlotItem()
+        self.astrometry_matched_markers2.setPen('c', width=2)
+        self.astrometry_matched_markers2.setBrush((0, 0, 0, 0))
+        self.astrometry_matched_markers2.setSize(25)
+        self.astrometry_matched_markers2.setSymbol('o')
+        self.astrometry_matched_markers2.setZValue(5)
+        self.zoom_window.addItem(self.astrometry_matched_markers2)
+
+        # astrometry.net quad star markers (main window) - magenta color
+        # These are the specific catalog stars used for the initial quad pattern matching
+        self.astrometry_quad_markers = pg.ScatterPlotItem()
+        self.astrometry_quad_markers.setPen('m', width=2)  # magenta
+        self.astrometry_quad_markers.setBrush((0, 0, 0, 0))
+        self.astrometry_quad_markers.setSize(20)
+        self.astrometry_quad_markers.setSymbol('s')  # square
+        self.astrometry_quad_markers.setZValue(5)
+        self.img_frame.addItem(self.astrometry_quad_markers)
+
+        # astrometry.net quad star markers (zoom window)
+        self.astrometry_quad_markers2 = pg.ScatterPlotItem()
+        self.astrometry_quad_markers2.setPen('m', width=2)
+        self.astrometry_quad_markers2.setBrush((0, 0, 0, 0))
+        self.astrometry_quad_markers2.setSize(30)
+        self.astrometry_quad_markers2.setSymbol('s')
+        self.astrometry_quad_markers2.setZValue(5)
+        self.zoom_window.addItem(self.astrometry_quad_markers2)
+
+        # Store astrometry.net solution info (populated when astrometry.net is run)
+        self.astrometry_solution_info = None
+        self.astrometry_stars_visible = False
+
+        # Initially hide astrometry.net markers
+        self.astrometry_matched_markers.hide()
+        self.astrometry_matched_markers2.hide()
+        self.astrometry_quad_markers.hide()
+        self.astrometry_quad_markers2.hide()
+
         self.selected_stars_visible = True
         self.unsuitable_stars_visible = True
 
@@ -2178,6 +2226,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Connect astrometry & photometry buttons to functions
         self.tab.param_manager.sigFitPressed.connect(lambda: self.fitPickedStars())
+        self.tab.param_manager.sigAutoFitPressed.connect(self.autoFitAstrometryNet)
         self.tab.param_manager.sigNextStarPressed.connect(lambda: self.jumpNextStar())
         self.tab.param_manager.sigPhotometryPressed.connect(lambda: self.photometry(show_plot=True))
         self.tab.param_manager.sigAstrometryPressed.connect(self.showAstrometryFitPlots)
@@ -4396,9 +4445,21 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.tab.param_manager.updatePlatepar()
 
         # Toggle showing the catalog stars
-        elif event.key() == QtCore.Qt.Key_H:
+        elif event.key() == QtCore.Qt.Key_H and not (modifiers == QtCore.Qt.ShiftModifier):
             self.toggleShowCatStars()
             self.tab.settings.updateShowCatStars()
+
+        # Toggle showing astrometry.net matched stars (Shift+H)
+        elif event.key() == QtCore.Qt.Key_H and (modifiers == QtCore.Qt.ShiftModifier):
+            self.toggleShowAstrometryNetStars()
+            if self.astrometry_solution_info is not None:
+                matched_count = len(self.astrometry_solution_info.get('matched_pairs', []))
+                quad_count = len(self.astrometry_solution_info.get('quad_stars', []))
+                status = "shown" if self.astrometry_stars_visible else "hidden"
+                print("Astrometry.net stars {:s}: {:d} matched (cyan), {:d} quad (magenta)".format(
+                    status, matched_count, quad_count))
+            else:
+                print("No astrometry.net solution available. Run 'CTRL+X' or 'CTRL+SHIFT+X' first.")
 
         # Toggle inverting colors
         elif (event.key() == QtCore.Qt.Key_I) and not (modifiers == QtCore.Qt.ControlModifier):
@@ -5904,6 +5965,54 @@ class PlateTool(QtWidgets.QMainWindow):
             self.calstar_markers.hide()
             self.calstar_markers2.hide()
 
+    def toggleShowAstrometryNetStars(self):
+        """ Toggle whether to show astrometry.net matched stars """
+        self.astrometry_stars_visible = not self.astrometry_stars_visible
+        if self.astrometry_stars_visible:
+            self.astrometry_matched_markers.show()
+            self.astrometry_matched_markers2.show()
+            self.astrometry_quad_markers.show()
+            self.astrometry_quad_markers2.show()
+            # Update the markers with current solution info
+            self.updateAstrometryNetStarMarkers()
+        else:
+            self.astrometry_matched_markers.hide()
+            self.astrometry_matched_markers2.hide()
+            self.astrometry_quad_markers.hide()
+            self.astrometry_quad_markers2.hide()
+
+    def updateAstrometryNetStarMarkers(self):
+        """ Update the astrometry.net star markers from stored solution info """
+        if self.astrometry_solution_info is None:
+            self.astrometry_matched_markers.setData(pos=[])
+            self.astrometry_matched_markers2.setData(pos=[])
+            self.astrometry_quad_markers.setData(pos=[])
+            self.astrometry_quad_markers2.setData(pos=[])
+            return
+
+        matched_pairs = self.astrometry_solution_info.get('matched_pairs', [])
+        quad_stars = self.astrometry_solution_info.get('quad_stars', [])
+
+        # Update matched star markers (catalog positions of matched stars)
+        if matched_pairs:
+            x_matched = [p['catalog_x'] for p in matched_pairs]
+            y_matched = [p['catalog_y'] for p in matched_pairs]
+            self.astrometry_matched_markers.setData(x=x_matched, y=y_matched)
+            self.astrometry_matched_markers2.setData(x=x_matched, y=y_matched)
+        else:
+            self.astrometry_matched_markers.setData(pos=[])
+            self.astrometry_matched_markers2.setData(pos=[])
+
+        # Update quad star markers
+        if quad_stars:
+            x_quad = [s['x_pix'] for s in quad_stars]
+            y_quad = [s['y_pix'] for s in quad_stars]
+            self.astrometry_quad_markers.setData(x=x_quad, y=y_quad)
+            self.astrometry_quad_markers2.setData(x=x_quad, y=y_quad)
+        else:
+            self.astrometry_quad_markers.setData(pos=[])
+            self.astrometry_quad_markers2.setData(pos=[])
+
     def toggleShowPicks(self):
         """ Toggle whether to show the picks for manualreduction """
 
@@ -6039,8 +6148,25 @@ class PlateTool(QtWidgets.QMainWindow):
         return filtered_indices, filtered_catalog_stars
 
 
+    def autoFitAstrometryNet(self):
+        """ Auto fit using astrometry.net. Called from Auto Fit button. """
+
+        # Use detected stars (faster than uploading image)
+        self.getInitialParamsAstrometryNet(upload_image=False)
+
+        # Update the GUI
+        self.updateDistortion()
+        self.updateLeftLabels()
+        self.updateStars()
+        self.tab.param_manager.updatePlatepar()
+
+
     def getInitialParamsAstrometryNet(self, upload_image=True):
         """ Get the estimate of the initial astrometric parameters using astrometry.net. """
+
+        # Show status and process events so GUI updates
+        self.status_bar.showMessage("Solving with astrometry.net...")
+        QtWidgets.QApplication.processEvents()
 
         fail = False
         solution = None
@@ -6053,6 +6179,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Find and load a mask file is there is one
         mask = getMaskFile(self.dir_path, self.config)
+
+        # Compute JD for astrometry.net matching
+        jd = date2JD(*self.img_handle.currentTime())
 
         # Check if the given FF files is in the calstars list
         if (ff_name_c in self.calstars) and (not upload_image):
@@ -6071,10 +6200,18 @@ class PlateTool(QtWidgets.QMainWindow):
                 y_data = star_data[:, 0]
                 x_data = star_data[:, 1]
 
+                # Get star intensities for brightness-based matching (column 3 is 'level')
+                input_intensities = None
+                if star_data.shape[1] > 3:
+                    input_intensities = star_data[:, 3]
+
                 # Get astrometry.net solution, pass the FOV width estimate
-                solution = astrometryNetSolve(x_data=x_data, y_data=y_data, fov_w_range=fov_w_range, 
-                                              mask=mask, 
-                                              x_center=self.platepar.X_res/2, y_center=self.platepar.Y_res/2)
+                solution = astrometryNetSolve(x_data=x_data, y_data=y_data, fov_w_range=fov_w_range,
+                                              mask=mask,
+                                              x_center=self.platepar.X_res/2, y_center=self.platepar.Y_res/2,
+                                              lat=self.platepar.lat, lon=self.platepar.lon, jd=jd,
+                                              input_intensities=input_intensities,
+                                              verbose=True)
 
         else:
             fail = True
@@ -6083,6 +6220,8 @@ class PlateTool(QtWidgets.QMainWindow):
         if fail or upload_image:
 
             print("Using the whole image in astrometry.net...")
+            self.status_bar.showMessage("Uploading image to astrometry.net...")
+            QtWidgets.QApplication.processEvents()
 
             # If the image is 16bit or larger, rescale and convert it to 8 bit
             if self.img.data.itemsize*8 > 8:
@@ -6097,9 +6236,11 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
                 img_data = self.img.data
 
-            solution = astrometryNetSolve(img=img_data.T, fov_w_range=fov_w_range, mask=mask)
+            solution = astrometryNetSolve(img=img_data.T, fov_w_range=fov_w_range, mask=mask,
+                                          lat=self.platepar.lat, lon=self.platepar.lon, jd=jd)
 
         if solution is None:
+            self.status_bar.showMessage("Astrometry.net failed to find a solution")
             qmessagebox(title='Astrometry.net error',
                         message='Astrometry.net failed to find a solution!',
                         message_type="error")
@@ -6107,14 +6248,40 @@ class PlateTool(QtWidgets.QMainWindow):
             return None
         
 
-        # Reset the lens distortion parameters
-        self.platepar.resetDistortionParameters()
+        # Update status: solution found
+        self.status_bar.showMessage("Astrometry.net solution found, processing...")
+        QtWidgets.QApplication.processEvents()
+
+        # Save user's settings for the final fit
+        user_distortion_type = self.platepar.distortion_type
+        user_equal_aspect = self.platepar.equal_aspect
+        user_asymmetry_corr = self.platepar.asymmetry_corr
+        user_force_distortion_centre = self.platepar.force_distortion_centre
+        user_refraction = self.platepar.refraction
+        user_fit_only_pointing = self.fit_only_pointing
+        user_fixed_scale = self.fixed_scale
+
+        # Set intermediate fitting parameters (simple, robust settings)
+        # Use simple settings for stability with few stars during initial passes
+        self.platepar.refraction = True
+        self.platepar.equal_aspect = True
+        self.platepar.asymmetry_corr = False
+        self.platepar.force_distortion_centre = False
+
+        # Start with radial5-odd for initial fitting, reset distortion params
+        self.platepar.setDistortionType("radial5-odd", reset_params=True)
 
 
         # Extract the parameters
-        ra, dec, rot_standard, scale, fov_w, fov_h, star_data = solution
+        ra, dec, rot_standard, scale, fov_w, fov_h, star_data, solution_info = solution
 
-        jd = date2JD(*self.img_handle.currentTime())
+        # Store solution info for potential visualization
+        self.astrometry_solution_info = solution_info
+
+        # Set the platepar reference JD and compute the reference hour angle
+        # (jd was computed earlier for the astrometry.net call)
+        self.platepar.JD = jd
+        self.platepar.Ho = JD2HourAngle(jd) % 360
 
         # Compute reference azimuth and altitude
         azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, self.platepar.lat, self.platepar.lon)
@@ -6142,37 +6309,140 @@ class PlateTool(QtWidgets.QMainWindow):
         print(' Scale = {:.3f} arcmin/px'.format(60/self.platepar.F_scale))
         print(' FOV = {:.2f} x {:.2f} deg'.format(fov_w, fov_h))
 
+        # Print solution info if available
+        if solution_info is not None:
+            quad_stars = solution_info.get('quad_stars', [])
+            logodds = solution_info.get('logodds')
+            input_count = solution_info.get('input_star_count', 0)
 
-        # If a list of detected stars is provided by the astrometry.net, use it to run FFT alignment
-        if star_data is not None:
+            if logodds is not None:
+                print(' Log odds = {:.2f}'.format(logodds))
+            print(' Input stars = {:d}'.format(input_count))
+            print(' Quad stars = {:d}'.format(len(quad_stars)))
 
+
+        # Match detected stars to RMS catalog and fit distortion iteratively
+        # Use RMS's own catalog (better than astrometry.net's index stars)
+        # Iterative approach: start with bright stars + wide radius, fit, then tighten
+        print()
+        print("Iterative star matching with RMS catalog...")
+        self.status_bar.showMessage("Matching stars with catalog...")
+        QtWidgets.QApplication.processEvents()
+
+        # Use the same catalog filtering as the GUI display (proven to work correctly)
+        # self.catalog_stars is the full catalog, filterCatalogStarsInsideFOV does RA/Dec filtering
+        _, catalog_stars_extended = self.filterCatalogStarsInsideFOV(self.catalog_stars)
+        print("  Catalog stars within FOV (filterCatalogStarsInsideFOV): {:d}".format(len(catalog_stars_extended)))
+
+        # Strict XY filter: project to image and keep only those inside image bounds
+        catalog_x_ext, catalog_y_ext, catalog_mag_ext = getCatalogStarsImagePositions(
+            catalog_stars_extended, jd, self.platepar)
+        in_fov_xy = (catalog_x_ext >= 0) & (catalog_x_ext < self.platepar.X_res) & \
+                    (catalog_y_ext >= 0) & (catalog_y_ext < self.platepar.Y_res)
+
+        catalog_stars = catalog_stars_extended[in_fov_xy]
+        catalog_x = catalog_x_ext[in_fov_xy]
+        catalog_y = catalog_y_ext[in_fov_xy]
+        catalog_mag = catalog_mag_ext[in_fov_xy]
+
+        print("  Catalog stars in strict FOV: {:d}".format(len(catalog_stars)))
+
+        # Get detected stars from calstars
+        if ff_name_c in self.calstars:
+            detected_stars = np.array(self.calstars[ff_name_c])
+            det_y = detected_stars[:, 0]
+            det_x = detected_stars[:, 1]
+            det_intens = detected_stars[:, 3] if detected_stars.shape[1] > 3 else np.ones(len(det_x))
+        else:
+            print("No detected stars available for matching")
+            det_x, det_y, det_intens = np.array([]), np.array([]), np.array([])
+
+        print("  Detected stars: {:d}".format(len(det_x)))
+
+        # First pass: Use NN cost function to refine pointing + distortion
+        # This doesn't require explicit star matching - more robust for initial fit
+        if len(det_x) >= 10 and len(catalog_stars) >= 10:
             print()
-            print("Running FFT alignment...")
+            print("NN-based fitting (no explicit matching)...")
 
-            # Construct an array with star coordinates (x, y per row)
-            calstars_coords = np.array(star_data).T
+            # Prepare detected stars array [x, y, intensity]
+            img_stars_arr = np.column_stack([det_x, det_y, det_intens])
 
-            # Get the time of the image
-            calstars_time = self.img_handle.currentTime()
-
-            self.platepar = alignPlatepar(
-                self.config, self.platepar, 
-                calstars_time, calstars_coords, 
-                scale_update=True, show_plot=False
+            # Use NN cost function to fit pointing + distortion
+            # Pass full catalog - RANSAC re-filters to strict FOV each iteration using pp_temp
+            self.platepar.setDistortionType("radial5-odd", reset_params=True)
+            try:
+                self.platepar.fitAstrometry(
+                    jd, img_stars_arr, self.catalog_stars,  # Full catalog, RANSAC filters each iter
+                    first_platepar_fit=True,
+                    use_nn_cost=True
                 )
-            
-            self.platepar.updateRefRADec(skip_rot_update=True)
-            
+                print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
+                    self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
+            except Exception as e:
+                print("  NN fit failed: {}".format(str(e)))
+
+            # Populate paired_stars from NN matches for visualization
+            self.paired_stars = PairedStars()
+            if self.platepar.star_list:
+                for entry in self.platepar.star_list:
+                    # star_list format: [jd, x, y, intensity, ra, dec, mag]
+                    _, x, y, intensity, ra, dec, mag = entry
+                    sky_obj = CatalogStar(ra, dec, mag)
+                    self.paired_stars.addPair(x, y, 0.0, intensity, sky_obj, snr=1.0)
+                print("  Loaded {} matched pairs".format(len(self.platepar.star_list)))
+
+        # Finalize the fit with user's settings
+        if len(self.paired_stars) >= 10:
+            # Restore user's settings for the final fit
             print()
-            print('FFT aligned:')
-            print('------------------------')
-            print(' RA    = {:.2f} deg'.format(self.platepar.RA_d))
-            print(' Dec   = {:.2f} deg'.format(self.platepar.dec_d))
-            print(' Azim  = {:.2f} deg'.format(self.platepar.az_centre))
-            print(' Alt   = {:.2f} deg'.format(self.platepar.alt_centre))
-            print(' Rot horiz   = {:.2f} deg'.format(self.platepar.rotation_from_horiz))
-            print(' Pos angle   = {:.2f} deg'.format(self.platepar.pos_angle_ref))
-            print(' Scale = {:.3f} arcmin/px'.format(60/self.platepar.F_scale))
+            print("Restoring user settings: {:s}".format(user_distortion_type))
+            self.platepar.equal_aspect = user_equal_aspect
+            self.platepar.asymmetry_corr = user_asymmetry_corr
+            self.platepar.force_distortion_centre = user_force_distortion_centre
+            self.platepar.setDistortionType(user_distortion_type, reset_params=False)
+            self.platepar.refraction = user_refraction
+            self.fit_only_pointing = user_fit_only_pointing
+            self.fixed_scale = user_fixed_scale
+
+            # Do the final fit with user's settings
+            print()
+            print("Final fit with user settings...")
+            self.status_bar.showMessage("Fitting astrometry with {:d} stars...".format(len(self.paired_stars)))
+            QtWidgets.QApplication.processEvents()
+            self.first_platepar_fit = True
+            self.fitPickedStars()
+            self.fitPickedStars()  # Do twice like Ctrl+Z does for first fit
+
+            # Update the display
+            self.updateStars()
+            self.status_bar.showMessage("Auto-fit complete: {:d} stars matched".format(len(self.paired_stars)))
+        else:
+            # Restore user's settings even if fit failed
+            self.platepar.equal_aspect = user_equal_aspect
+            self.platepar.asymmetry_corr = user_asymmetry_corr
+            self.platepar.force_distortion_centre = user_force_distortion_centre
+            self.platepar.setDistortionType(user_distortion_type, reset_params=True)
+            self.platepar.refraction = user_refraction
+            self.fit_only_pointing = user_fit_only_pointing
+            self.fixed_scale = user_fixed_scale
+
+            print("  Not enough matched stars for fitting (need >= 10)")
+            self.updateStars()
+            self.status_bar.showMessage("Auto-fit: not enough star matches")
+
+        # Show astrometry.net quad stars if available
+        if self.astrometry_solution_info is not None:
+            quad_count = len(self.astrometry_solution_info.get('quad_stars', []))
+            if quad_count > 0:
+                self.astrometry_stars_visible = True
+                self.astrometry_quad_markers.show()
+                self.astrometry_quad_markers2.show()
+                self.updateAstrometryNetStarMarkers()
+                print()
+                print("Showing astrometry.net quad stars: {:d} (magenta)".format(quad_count))
+                print("  Magenta = catalog stars used for initial geometric match")
+                print("Press Shift+H to toggle visibility")
 
 
     def getFOVcentre(self):
