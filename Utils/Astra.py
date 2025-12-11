@@ -302,7 +302,8 @@ class ASTRA:
         # points must be float32 for fitLine
         points = self.picks.astype(np.float32)
         [vx, vy, x, y] = cv2.fitLine(points, cv2.DIST_L1, 0, 0.01, 0.01)
-        self.robust_line_params = (vx[0], vy[0], x[0], y[0])
+        vx, vy, x, y = vx[0], vy[0], x[0], y[0]
+        self.robust_line_params = (vx, vy, x, y)
         
         # Store event extent boundaries from initial picks
         self.initial_min_frame = self.pick_frame_indices[0]
@@ -313,16 +314,20 @@ class ASTRA:
         # Time vs X: point = (frame_idx, x)
         tx_points = np.column_stack((self.pick_frame_indices, self.picks[:, 0])).astype(np.float32)
         [v_tx, v_x, t0_x, x0_x] = cv2.fitLine(tx_points, cv2.DIST_L1, 0, 0.01, 0.01)
+        v_tx, v_x, t0_x, x0_x = float(v_tx[0]), float(v_x[0]), float(t0_x[0]), float(x0_x[0])
+
         # Normalize so dt = 1 (slope = dx/dt)
-        slope_x = v_x[0] / v_tx[0]
-        intercept_x = x0_x[0] - slope_x*t0_x[0]
+        slope_x = v_x / v_tx
+        intercept_x = x0_x - slope_x*t0_x
         self.kinematic_params_x = (slope_x, intercept_x)
 
         # Time vs Y: point = (frame_idx, y)
         ty_points = np.column_stack((self.pick_frame_indices, self.picks[:, 1])).astype(np.float32)
         [v_ty, v_y, t0_y, y0_y] = cv2.fitLine(ty_points, cv2.DIST_L1, 0, 0.01, 0.01)
-        slope_y = v_y[0] / v_ty[0]
-        intercept_y = y0_y[0] - slope_y*t0_y[0]
+        v_ty, v_y, t0_y, y0_y = float(v_ty[0]), float(v_y[0]), float(t0_y[0]), float(y0_y[0])
+
+        slope_y = v_y / v_ty
+        intercept_y = y0_y - slope_y*t0_y
         self.kinematic_params_y = (slope_y, intercept_y)
         
         # We want the angle of motion from first to last pick
@@ -1163,7 +1168,7 @@ class ASTRA:
         # Calculate magnitudes of all norms
         global_centroids = all_params[:, 2:4] + xymin
 
-        # Calculate and sort norms between all consequitive frames
+        # Calculate and sort norms between all consecutive frames
         global_centroids = global_centroids[np.argsort(global_centroids[:, 0])]
         deltas = global_centroids[1:] - global_centroids[:-1]
         norms = np.linalg.norm(deltas, axis=1)
@@ -1175,7 +1180,7 @@ class ASTRA:
         level_sums = np.log(level_sums)
 
         # Use moving linear method for level_sum (Use three last point to estimate next)
-        paramter_estimation_functions = {
+        parameter_estimation_functions = {
             'level_sum': np.polynomial.Polynomial.fit((np.array([0, 1, 2]) + (len(level_sums) - 3)), 
                         level_sums[-3:], 1) if forward_pass 
                         else np.polynomial.Polynomial.fit(range(3), level_sums[:3], 1),
@@ -1186,10 +1191,10 @@ class ASTRA:
             'norm' : np.polynomial.Polynomial.fit(range(len(norms)), norms, 1)
         }
 
-        return paramter_estimation_functions
+        return parameter_estimation_functions
 
 
-    def estimateNextParameters(self, paramter_estimation_functions, n_points, forward_pass):
+    def estimateNextParameters(self, parameter_estimation_functions, n_points, forward_pass):
         """
         Extrapolate next parameter magnitudes using fitted polynomials.
 
@@ -1198,7 +1203,7 @@ class ASTRA:
         evaluates at -1 with fallback to 0. Restores `level_sum` from log-space.
 
         Args:
-            paramter_estimation_functions (dict[str, Polynomial]): Predictors from
+            parameter_estimation_functions (dict[str, Polynomial]): Predictors from
                 `updateParameterEstimationFunctions`.
             n_points (int): Current number of param rows.
             forward_pass (bool): Direction flag.
@@ -1217,23 +1222,23 @@ class ASTRA:
             prev = 0
 
         # Estimate next values
-        next_level_sum = paramter_estimation_functions['level_sum'](x)
-        next_height = paramter_estimation_functions['height'](x)
-        next_length = paramter_estimation_functions['length'](x)
-        next_norm = paramter_estimation_functions['norm'](x)
+        next_level_sum = parameter_estimation_functions['level_sum'](x)
+        next_height = parameter_estimation_functions['height'](x)
+        next_length = parameter_estimation_functions['length'](x)
+        next_norm = parameter_estimation_functions['norm'](x)
 
-        # Translate next_level_sum back into regualr space from log space
+        # Translate next_level_sum back into regular space from log space
         next_level_sum = np.exp(next_level_sum)
 
         # Check if any values are below or equal to zero, and set them to the function evaluation at prev
         if next_level_sum <= 0:
-            next_level_sum = paramter_estimation_functions['level_sum'](prev)
+            next_level_sum = parameter_estimation_functions['level_sum'](prev)
         if next_height <= 0:
-            next_height = paramter_estimation_functions['height'](prev)
+            next_height = parameter_estimation_functions['height'](prev)
         if next_length <= 0:
-            next_length = paramter_estimation_functions['length'](prev)
+            next_length = parameter_estimation_functions['length'](prev)
         if next_norm <= 0:
-            next_norm = paramter_estimation_functions['norm'](prev)
+            next_norm = parameter_estimation_functions['norm'](prev)
 
         # Pack next parameters as a dict
         next_params = {
@@ -1383,7 +1388,12 @@ class ASTRA:
         
         # Ensure upper bounds are strictly greater than lower bounds
         bounds = (bounds[0], np.maximum(bounds[1], bounds[0] + 1e-6))
-        p0 = np.clip(p0, bounds[0], bounds[1])
+        
+        # Clip p0 and warn if it changed
+        p0_clipped = np.clip(p0, bounds[0], bounds[1])
+        if self.verbose and not np.allclose(p0, p0_clipped):
+            print(f"DEBUG: p0 was clipped to match bounds. Original: {p0}, Clipped: {p0_clipped}")
+        p0 = p0_clipped
         
         # Generate initial particle positions
         i0 = self.generateInitialParticles(bounds, self.first_pass_settings['n_particles'], p0=p0)
@@ -1393,13 +1403,11 @@ class ASTRA:
 
         # 3) -- Run PSO --
         try:
-            # Debug logging for bounds issue
-            # print(f"DEBUG: Bounds lower: {bounds[0]}")
-            # print(f"DEBUG: Bounds upper: {bounds[1]}")
-            # print(f"DEBUG: i0 min: {np.min(i0, axis=0)}")
-            # print(f"DEBUG: i0 max: {np.max(i0, axis=0)}")
-            # print(f"DEBUG: i0 < lb: {np.any(i0 < bounds[0])}")
-            # print(f"DEBUG: i0 > ub: {np.any(i0 > bounds[1])}")
+            # Check for OOB particles
+            if self.verbose:
+                if np.any(i0 < bounds[0]) or np.any(i0 > bounds[1]):
+                    print(f"DEBUG: Initial particles OOB. Min/Max i0: {np.min(i0, axis=0)} / {np.max(i0, axis=0)}")
+                    print(f"DEBUG: Bounds: {bounds[0]} - {bounds[1]}")
             
             # Double clip to be absolutely sure
             i0 = np.clip(i0, bounds[0] + 1e-9, bounds[1] - 1e-9)
@@ -1932,7 +1940,7 @@ class ASTRA:
         else:
             return final_frame
 
-    def recursiveCroppingAlgorithm(self, frame_index, est_center_global, paramter_estimation_functions, omega, 
+    def recursiveCroppingAlgorithm(self, frame_index, est_center_global, parameter_estimation_functions, omega, 
                                    directions, forward_pass=False):
         """
         Recursive forward/backward pass to crop and fit subsequent frames.
@@ -1945,7 +1953,7 @@ class ASTRA:
         Args:
             frame_index (int): Index of the frame to process next.
             est_center_global (tuple[float, float]): Estimated global center (x, y).
-            paramter_estimation_functions (dict): Predictors from
+            parameter_estimation_functions (dict): Predictors from
                 `updateParameterEstimationFunctions`.
             omega (float): Track angle [rad].
             directions (tuple[int, int]): Direction multipliers (+1/-1) for x/y.
@@ -1960,10 +1968,30 @@ class ASTRA:
             return
 
         # Estimate next parameters using the parameter estimation functions
-        est_next_params = self.estimateNextParameters(paramter_estimation_functions, 
+        est_next_params = self.estimateNextParameters(parameter_estimation_functions, 
                                                       self.first_pass_params.shape[0], 
                                                       forward_pass=forward_pass
                                                       )
+
+        # Sanity check on estimated parameters to prevent runaway extrapolation
+        # Clamp length and height to be within [0.5, 2.0] * median of previous params if available
+        # Ideally we use the last valid param, but here we can just clamp to reasonable absolute limits if needed
+        # OR just comparing to the last fitted value.
+        
+        # Get last fitted values
+        if forward_pass:
+            last_params = self.first_pass_params[-1]
+        else:
+            last_params = self.first_pass_params[0]
+            
+        last_height = last_params[1]
+        last_length = last_params[4]
+
+        # Clamp next height/length to be within 50% to 200% of the last fitted value
+        # This prevents exponential explosion in the prediction
+        est_next_params['height'] = np.clip(est_next_params['height'], last_height * 0.5, last_height * 2.0)
+        est_next_params['length'] = np.clip(est_next_params['length'], last_length * 0.5, last_length * 2.0)
+
 
         # Append the planned center to the trajectory list
         self.planned_trajectory.append(est_center_global)
