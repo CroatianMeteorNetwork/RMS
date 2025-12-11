@@ -46,7 +46,7 @@ from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, raDec2AltAz, \
     apparentAltAz2TrueRADec, J2000_JD, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
 from RMS.Astrometry.AstrometryNet import astrometryNetSolve
-from RMS.Astrometry.FFTalign import alignPlatepar
+from RMS.Astrometry.NNalign import alignPlatepar
 import RMS.ConfigReader as cr
 from RMS.ExtractStars import extractStarsAndSave
 import RMS.Formats.CALSTARS as CALSTARS
@@ -6148,11 +6148,205 @@ class PlateTool(QtWidgets.QMainWindow):
         return filtered_indices, filtered_catalog_stars
 
 
+    def tryQuickAlignment(self):
+        """ Try to align platepar using existing pointing as starting point.
+
+        Uses alignPlatepar() to refine pointing, then checks if the fit is good enough
+        by counting matched stars. If successful, performs full NN-based astrometry fit.
+
+        Returns:
+            success: [bool] True if quick alignment succeeded and we can skip astrometry.net
+        """
+        from RMS.Formats.FFfile import convertFRNameToFF
+
+        print()
+        print("Trying quick alignment with existing platepar...")
+        self.status_bar.showMessage("Trying quick alignment...")
+        QtWidgets.QApplication.processEvents()
+
+        # Get current FF file name
+        ff_name_c = convertFRNameToFF(self.img_handle.name())
+
+        # Check if we have detected stars for the current frame
+        if ff_name_c not in self.calstars:
+            print("  No detected stars available - falling back to astrometry.net")
+            return False
+
+        detected_stars = np.array(self.calstars[ff_name_c])
+        if len(detected_stars) < 10:
+            print("  Less than 10 detected stars - falling back to astrometry.net")
+            return False
+
+        # Get detected star coordinates (note: calstars format is [y, x, ...])
+        det_y = detected_stars[:, 0]
+        det_x = detected_stars[:, 1]
+        det_intens = detected_stars[:, 3] if detected_stars.shape[1] > 3 else np.ones(len(det_x))
+
+        # Prepare calstars_coords for alignPlatepar (x, y format)
+        calstars_coords = np.column_stack([det_x, det_y])
+
+        # Get time for the current frame
+        calstars_time = list(self.img_handle.currentTime())
+
+        # Compute JD
+        jd = date2JD(*calstars_time)
+
+        # Try alignPlatepar to refine pointing
+        try:
+            pp_aligned = alignPlatepar(self.config, self.platepar, calstars_time, calstars_coords)
+        except Exception as e:
+            print("  alignPlatepar failed: {} - falling back to astrometry.net".format(str(e)))
+            return False
+
+        # Check if alignPlatepar improved the fit by counting matched stars
+        # Get catalog stars within FOV using the aligned platepar
+        _, catalog_stars_fov = self.filterCatalogStarsInsideFOV(self.catalog_stars)
+
+        if len(catalog_stars_fov) < 10:
+            print("  Not enough catalog stars in FOV - falling back to astrometry.net")
+            return False
+
+        # Project catalog stars to image coordinates
+        catalog_x, catalog_y, _ = getCatalogStarsImagePositions(catalog_stars_fov, jd, pp_aligned)
+
+        # Count matches: detected stars with a catalog star within match_radius pixels
+        match_radius = 10.0  # pixels
+        n_matched = 0
+        for i in range(len(det_x)):
+            dist = np.sqrt((catalog_x - det_x[i])**2 + (catalog_y - det_y[i])**2)
+            if np.min(dist) < match_radius:
+                n_matched += 1
+
+        match_fraction = n_matched / len(det_x) if len(det_x) > 0 else 0
+
+        print("  Quick alignment: {}/{} stars matched ({:.1f}%) within {}px".format(
+            n_matched, len(det_x), 100*match_fraction, match_radius))
+
+        # Require at least 10 matched stars and >50% match rate
+        min_matched_stars = 10
+        min_match_fraction = 0.5
+
+        if n_matched < min_matched_stars or match_fraction < min_match_fraction:
+            print("  Insufficient matches - falling back to astrometry.net")
+            return False
+
+        # Quick alignment succeeded - apply the aligned platepar and do full NN fit
+        print("  Quick alignment successful! Skipping astrometry.net")
+        self.platepar = pp_aligned
+
+        # Update JD and hour angle
+        self.platepar.JD = jd
+        self.platepar.Ho = JD2HourAngle(jd) % 360
+
+        # Save user's distortion settings for final fit
+        user_distortion_type = self.platepar.distortion_type
+        user_equal_aspect = self.platepar.equal_aspect
+        user_asymmetry_corr = self.platepar.asymmetry_corr
+        user_force_distortion_centre = self.platepar.force_distortion_centre
+        user_refraction = self.platepar.refraction
+        user_fit_only_pointing = self.fit_only_pointing
+        user_fixed_scale = self.fixed_scale
+
+        # Use standard fitting settings for NN fit, but KEEP existing distortion params
+        # The aligned platepar from alignPlatepar() has good pointing AND distortion coefficients
+        # Setting reset_params=True would zero out distortion and cause RANSAC to diverge
+        self.platepar.refraction = True
+        self.platepar.equal_aspect = True
+        self.platepar.asymmetry_corr = False
+        self.platepar.force_distortion_centre = False
+        self.platepar.setDistortionType("radial5-odd", reset_params=False)
+
+        # Prepare detected stars array for NN fit
+        img_stars_arr = np.column_stack([det_x, det_y, det_intens])
+
+        # Perform full NN-based fit
+        print()
+        print("NN-based fitting...")
+        print("  Starting from: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
+            self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
+        self.status_bar.showMessage("Fitting astrometry...")
+        QtWidgets.QApplication.processEvents()
+
+        try:
+            self.platepar.fitAstrometry(
+                jd, img_stars_arr, self.catalog_stars,
+                first_platepar_fit=True,
+                use_nn_cost=True
+            )
+            print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
+                self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
+        except Exception as e:
+            print("  NN fit failed: {} - falling back to astrometry.net".format(str(e)))
+            return False
+
+        # Populate paired_stars from NN matches for visualization
+        self.paired_stars = PairedStars()
+
+        # Re-project catalog stars with final platepar
+        _, catalog_stars_fov = self.filterCatalogStarsInsideFOV(self.catalog_stars)
+        catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(
+            catalog_stars_fov, jd, self.platepar)
+
+        # Match detected stars to catalog
+        for i in range(len(det_x)):
+            dist = np.sqrt((catalog_x - det_x[i])**2 + (catalog_y - det_y[i])**2)
+            min_idx = np.argmin(dist)
+            if dist[min_idx] < match_radius:
+                cat_star = catalog_stars_fov[min_idx]
+                sky_obj = CatalogStar(cat_star[0], cat_star[1], cat_star[2])
+                self.paired_stars.addPair(
+                    det_x[i], det_y[i],
+                    detected_stars[i, 2] if detected_stars.shape[1] > 2 else 2.5,  # FWHM
+                    det_intens[i],
+                    sky_obj
+                )
+
+        print("  Matched {} star pairs".format(len(self.paired_stars)))
+
+        # Restore user's distortion settings for final refinement fit
+        self.platepar.distortion_type = user_distortion_type
+        self.platepar.equal_aspect = user_equal_aspect
+        self.platepar.asymmetry_corr = user_asymmetry_corr
+        self.platepar.force_distortion_centre = user_force_distortion_centre
+        self.platepar.refraction = user_refraction
+        self.fit_only_pointing = user_fit_only_pointing
+        self.fixed_scale = user_fixed_scale
+
+        # Do a final fit with user's distortion settings
+        if len(self.paired_stars) >= 10:
+            print("Final refinement with user settings (distortion={})...".format(user_distortion_type))
+            self.fitPickedStars()
+
+        # Reset photometry fit residuals
+        self.photom_fit_resids = None
+
+        self.status_bar.showMessage("Quick alignment complete: {} stars".format(len(self.paired_stars)))
+
+        return True
+
+
     def autoFitAstrometryNet(self):
         """ Auto fit using astrometry.net. Called from Auto Fit button. """
 
-        # Use detected stars (faster than uploading image)
-        self.getInitialParamsAstrometryNet(upload_image=False)
+        # If there are existing matched star pairs, warn the user they will be replaced
+        if len(self.paired_stars) > 0:
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                "Replace Matched Stars?",
+                "You have {} matched star pair(s) that will be replaced by auto-fit.\n\n"
+                "Do you want to continue?".format(len(self.paired_stars)),
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No
+            )
+            if reply != QtWidgets.QMessageBox.Yes:
+                return
+
+        # First, try quick alignment with existing platepar (much faster than astrometry.net)
+        quick_fit_success = self.tryQuickAlignment()
+
+        if not quick_fit_success:
+            # Fall back to astrometry.net if quick alignment failed
+            self.getInitialParamsAstrometryNet(upload_image=False)
 
         # Update the GUI
         self.updateDistortion()
@@ -7603,9 +7797,19 @@ class PlateTool(QtWidgets.QMainWindow):
         print(
             ' No,       Img X,       Img Y, RA cat (deg), Dec cat (deg),    Cat X,   Cat Y, RA img (deg), Dec img (deg), Err amin,  Err px, Direction,  FWHM,    Mag, -2.5*LSP, Mag err,    SNR, Saturated')
 
+        # Use zeros for photometry residuals if not available or has wrong length
+        # (e.g., after auto-fit before photometry fit, or after RANSAC removed stars)
+        if self.photom_fit_resids is not None and len(self.photom_fit_resids) == len(catalog_x):
+            photom_resids = self.photom_fit_resids
+        else:
+            photom_resids = [0.0]*len(catalog_x)
+
+        # Get all coordinates from paired stars
+        all_coords = self.paired_stars.allCoords()
+
         # Calculate the distance and the angle between each pair of image positions and catalog predictions
         for star_no, (cat_x, cat_y, cat_coords, paired_stars, mag_err) in enumerate(
-            zip(catalog_x, catalog_y, catalog_stars, self.paired_stars.allCoords(), self.photom_fit_resids)):
+            zip(catalog_x, catalog_y, catalog_stars, all_coords, photom_resids)):
 
             img_x, img_y, fwhm, sum_intens, snr, saturated = paired_stars[0]
             ra, dec, mag = cat_coords

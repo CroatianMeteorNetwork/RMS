@@ -505,6 +505,106 @@ class Platepar(object):
         # Update alt/az of pointing
         self.updateRefAltAz()
 
+    def fitPointingNN(self, jd, img_stars, catalog_stars, fixed_scale=True):
+        """Fit pointing parameters using nearest-neighbor cost function in pixel space.
+
+        Unlike fitPointing() which requires pre-matched star pairs, this method finds the
+        nearest catalog star for each detected star and optimizes to minimize the sum of
+        NN distances. This is more robust when the initial pointing is off.
+
+        Use this as a replacement for NNalign - it fits RA_d, dec_d, pos_angle_ref, and
+        optionally F_scale without requiring explicit star matching.
+
+        The cost function works in pixel space (like matchStarsResiduals) by projecting
+        catalog stars onto the image and computing pixel distances. This is more robust
+        than working in sky coordinates because it correctly handles distortion and timing.
+
+        Arguments:
+            jd: [float] Julian date of the image.
+            img_stars: [ndarray] Detected stars as Nx3 array (x, y, intensity).
+            catalog_stars: [ndarray] Catalog stars in FOV as Mx3 array (ra, dec, mag).
+
+        Keyword arguments:
+            fixed_scale: [bool] Keep scale fixed. True by default (for camera drift correction).
+
+        """
+
+        from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
+
+        # Create a single working copy of platepar to reuse in cost function
+        # This avoids expensive deepcopy on every optimizer iteration
+        pp_work = copy.deepcopy(self)
+
+        # Pre-extract catalog coordinates (constant across iterations)
+        ra_catalog, dec_catalog, _ = catalog_stars.T
+
+        # Pre-extract detected star positions (constant across iterations)
+        img_x, img_y, _ = img_stars.T
+
+        def _calcPointingNNCostPixel(params, pp_work, jd, ra_catalog, dec_catalog, img_x, img_y, fixed_scale):
+            """NN cost function in pixel space for pointing fit.
+
+            Projects catalog stars to image coordinates and computes pixel-space NN distances.
+            This is more robust than sky-space comparison because it correctly handles
+            distortion and timing through the standard coordinate transforms.
+
+            Uses a pre-allocated working platepar to avoid deepcopy overhead.
+            """
+
+            # Update working platepar with current parameters (no copy needed)
+            pp_work.RA_d, pp_work.dec_d, pp_work.pos_angle_ref = params[:3]
+            if not fixed_scale:
+                pp_work.F_scale = abs(params[3])
+
+            # Project catalog stars to image coordinates
+            cat_x, cat_y = raDecToXYPP(ra_catalog, dec_catalog, jd, pp_work)
+
+            # Filter out catalog stars that project outside the image
+            valid_mask = (cat_x >= 0) & (cat_x < pp_work.X_res) & (cat_y >= 0) & (cat_y < pp_work.Y_res)
+            cat_x_valid = cat_x[valid_mask]
+            cat_y_valid = cat_y[valid_mask]
+
+            if len(cat_x_valid) < 3:
+                return 1e10  # Return large cost if too few valid catalog stars
+
+            # Vectorized NN: compute NxM distance matrix in pixel space
+            # Shape: img_x[:, None] is (N, 1), cat_x_valid[None, :] is (1, M)
+            dx = img_x[:, np.newaxis] - cat_x_valid[np.newaxis, :]  # (N, M)
+            dy = img_y[:, np.newaxis] - cat_y_valid[np.newaxis, :]  # (N, M)
+            dist_matrix = np.sqrt(dx**2 + dy**2)  # (N, M)
+
+            # For each detected star, find nearest catalog star
+            nn_distances = np.min(dist_matrix, axis=1)
+
+            # Use sum of squared distances as cost
+            total_cost = np.sum(nn_distances ** 2)
+
+            return total_cost
+
+        # Initial parameters
+        p0 = [self.RA_d, self.dec_d, self.pos_angle_ref]
+        if not fixed_scale:
+            p0.append(abs(self.F_scale))
+
+        # Fit using Nelder-Mead (robust for NN cost landscape)
+        res = scipy.optimize.minimize(
+            _calcPointingNNCostPixel,
+            p0,
+            args=(pp_work, jd, ra_catalog, dec_catalog, img_x, img_y, fixed_scale),
+            method='Nelder-Mead',
+            options={'maxiter': 5000, 'adaptive': True},
+        )
+
+        # Update fitted parameters
+        self.RA_d, self.dec_d, self.pos_angle_ref = res.x[:3]
+        if not fixed_scale:
+            self.F_scale = abs(res.x[3])
+
+        # Update alt/az of pointing
+        self.updateRefAltAz()
+
+        return res.success
+
     def fitAstrometry(
         self,
         jd,
@@ -736,19 +836,16 @@ class Platepar(object):
             # Catalog is pre-filtered to FOV by caller - no need to re-filter here
             ra_catalog, dec_catalog, _ = catalog_stars.T
 
-            # Simple NN: for each detected star, find nearest catalog star
-            ra_det_rad = np.radians(ra_det)
-            dec_det_rad = np.radians(dec_det)
-            ra_cat_rad = np.radians(ra_catalog)
-            dec_cat_rad = np.radians(dec_catalog)
+            # Vectorized NN: compute NxM angular separation matrix, then take row-wise min
+            ra_det_rad = np.radians(ra_det)[:, np.newaxis]  # (N, 1)
+            dec_det_rad = np.radians(dec_det)[:, np.newaxis]  # (N, 1)
+            ra_cat_rad = np.radians(ra_catalog)[np.newaxis, :]  # (1, M)
+            dec_cat_rad = np.radians(dec_catalog)[np.newaxis, :]  # (1, M)
 
-            total_cost = 0.0
-            for i in range(len(ra_det)):
-                separations = angularSeparation(
-                    ra_det_rad[i], dec_det_rad[i],
-                    ra_cat_rad, dec_cat_rad
-                )
-                total_cost += np.min(separations) ** 2
+            # angularSeparation broadcasts to (N, M) separation matrix
+            sep_matrix = angularSeparation(ra_det_rad, dec_det_rad, ra_cat_rad, dec_cat_rad)
+            nn_distances = np.min(sep_matrix, axis=1)  # (N,)
+            total_cost = np.sum(nn_distances ** 2)
 
             return total_cost
 
@@ -1036,14 +1133,13 @@ class Platepar(object):
                         catalog_stars_iter = catalog_stars[in_fov_iter]
                         ra_catalog, dec_catalog, _ = catalog_stars_iter.T
 
-                        nn_seps = []
-                        for i in range(n_stars):
-                            separations = angularSeparation(
-                                np.radians(ra_det[i]), np.radians(dec_det[i]),
-                                np.radians(ra_catalog), np.radians(dec_catalog),
-                            )
-                            nn_seps.append(np.min(separations))
-                        nn_seps = np.array(nn_seps)
+                        # Vectorized NN: compute NxM separation matrix
+                        ra_det_rad = np.radians(ra_det)[:, np.newaxis]  # (N, 1)
+                        dec_det_rad = np.radians(dec_det)[:, np.newaxis]  # (N, 1)
+                        ra_cat_rad = np.radians(ra_catalog)[np.newaxis, :]  # (1, M)
+                        dec_cat_rad = np.radians(dec_catalog)[np.newaxis, :]  # (1, M)
+                        sep_matrix = angularSeparation(ra_det_rad, dec_det_rad, ra_cat_rad, dec_cat_rad)
+                        nn_seps = np.min(sep_matrix, axis=1)  # (N,)
 
                         median_sep = np.median(nn_seps)
                         base_threshold = 3.0 * median_sep
@@ -1103,16 +1199,14 @@ class Platepar(object):
                     catalog_stars_fov = catalog_stars[in_fov_final]
                     ra_catalog, dec_catalog, _ = catalog_stars_fov.T
 
-                    matched_catalog = []
-                    for i in range(len(img_stars_clean)):
-                        separations = angularSeparation(
-                            np.radians(ra_det[i]), np.radians(dec_det[i]),
-                            np.radians(ra_catalog), np.radians(dec_catalog),
-                        )
-                        nearest_idx = np.argmin(separations)
-                        matched_catalog.append(catalog_stars_fov[nearest_idx])
-
-                    matched_catalog = np.array(matched_catalog)
+                    # Vectorized NN matching: compute NxM separation matrix
+                    ra_det_rad = np.radians(ra_det)[:, np.newaxis]  # (N, 1)
+                    dec_det_rad = np.radians(dec_det)[:, np.newaxis]  # (N, 1)
+                    ra_cat_rad = np.radians(ra_catalog)[np.newaxis, :]  # (1, M)
+                    dec_cat_rad = np.radians(dec_catalog)[np.newaxis, :]  # (1, M)
+                    sep_matrix = angularSeparation(ra_det_rad, dec_det_rad, ra_cat_rad, dec_cat_rad)
+                    nearest_indices = np.argmin(sep_matrix, axis=1)  # (N,)
+                    matched_catalog = catalog_stars_fov[nearest_indices]
 
                     # Restore original distortion type for final matched-pair fit
                     self.setDistortionType(original_dist_type, reset_params=False)

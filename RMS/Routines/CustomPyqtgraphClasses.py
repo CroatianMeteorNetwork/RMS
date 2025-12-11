@@ -1621,6 +1621,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
     sigVignettingChanged = QtCore.pyqtSignal()
 
     sigFitPressed = QtCore.pyqtSignal()
+    sigAutoFitPressed = QtCore.pyqtSignal()
     sigNextStarPressed = QtCore.pyqtSignal()
     sigAstrometryPressed = QtCore.pyqtSignal()
     sigPhotometryPressed = QtCore.pyqtSignal()
@@ -1646,9 +1647,17 @@ class PlateparParameterManager(QtWidgets.QWidget):
         box = QtWidgets.QVBoxLayout()
 
 
+        # Fit buttons in a horizontal layout
+        fit_hbox = QtWidgets.QHBoxLayout()
         self.fit_astrometry_button = QtWidgets.QPushButton("Fit")
         self.fit_astrometry_button.clicked.connect(self.sigFitPressed.emit)
-        box.addWidget(self.fit_astrometry_button)
+        fit_hbox.addWidget(self.fit_astrometry_button)
+
+        self.auto_fit_button = QtWidgets.QPushButton("Auto Fit")
+        self.auto_fit_button.setToolTip("Automatic plate solving using astrometry.net (Ctrl+X)")
+        self.auto_fit_button.clicked.connect(self.sigAutoFitPressed.emit)
+        fit_hbox.addWidget(self.auto_fit_button)
+        box.addLayout(fit_hbox)
 
         self.next_star_button = QtWidgets.QPushButton("Next Star")
         self.next_star_button.clicked.connect(self.sigNextStarPressed.emit)

@@ -3,6 +3,7 @@ from __future__ import print_function, division, absolute_import
 
 import os
 import inspect
+import math
 
 import numpy as np
 from PIL import Image
@@ -10,7 +11,10 @@ from astropy.wcs import WCS
 
 from RMS.ExtractStars import extractStarsAuto
 from RMS.Formats.FFfile import read as readFF
+from RMS.Formats.Platepar import Platepar
 from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
+from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
+from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz
 from RMS.Logger import getLogger
 
 try:
@@ -21,10 +25,172 @@ except ImportError:
     ASTROMETRY_NET_AVAILABLE = False
 
 
+def matchStarsIterative(x_data, y_data, input_intensities, catalog_stars, wcs_obj,
+                        img_width, img_height, lat, lon, scale_px_per_deg, jd, verbose=False):
+    """
+    Iteratively match input stars to catalog stars, starting with bright stars.
 
-def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None, y_data=None, 
-                            fov_w_range=None, max_stars=100, verbose=False, x_center=None, y_center=None):
-    """ Find an astrometric solution of X, Y image coordinates of stars detected on an image using the 
+    Uses WCS for first pass, then fits a platepar and uses it for subsequent passes
+    with progressively more stars and tighter radius. This handles lens distortion
+    by fitting distortion parameters early with bright, unambiguous matches.
+
+    Args:
+        x_data, y_data: Input star pixel coordinates (arrays)
+        input_intensities: Input star intensities for sorting (array, can be None)
+        catalog_stars: List of catalog stars from astrometry.net (match.stars)
+        wcs_obj: Initial WCS from astrometry.net solution
+        img_width, img_height: Image dimensions
+        lat, lon: Station latitude/longitude (degrees)
+        scale_px_per_deg: Image scale in pixels per degree (F_scale)
+        jd: Julian date
+        verbose: Print progress info
+
+    Returns:
+        matched_pairs: List of dicts with input_x, input_y, catalog_ra, catalog_dec, dist_px
+        pp: Fitted Platepar object (or None if fitting failed)
+    """
+    # Sort catalog stars by magnitude (brightest first, lower mag = brighter)
+    catalog_sorted = sorted(catalog_stars,
+                           key=lambda s: s.metadata.get('mag', 99) if hasattr(s, 'metadata') else 99)
+
+    # Sort input stars by intensity (brightest first, higher intensity = brighter)
+    if input_intensities is not None and len(input_intensities) == len(x_data):
+        bright_order = np.argsort(-np.array(input_intensities))  # descending
+    else:
+        bright_order = np.arange(len(x_data))
+
+    # Get image center RA/Dec from WCS
+    ra_center, dec_center = wcs_obj.all_pix2world(img_width/2, img_height/2, 1)
+
+    # Create a minimal platepar for fitting
+    pp = Platepar()
+    pp.lat = lat
+    pp.lon = lon
+    pp.X_res = int(img_width)
+    pp.Y_res = int(img_height)
+    pp.F_scale = scale_px_per_deg
+    pp.RA_d = float(ra_center)
+    pp.dec_d = float(dec_center)
+    pp.pos_angle_ref = 0.0
+    pp.JD = jd
+    pp.refraction = False
+
+    # Compute Ho (hour angle offset)
+    J2000_DAYS = 2451545.0
+    T = (jd - J2000_DAYS) / 36525.0
+    pp.Ho = (280.46061837 + 360.98564736629*(jd - J2000_DAYS)
+             + 0.000387933*T**2 - T**3/38710000.0) % 360
+
+    # Set distortion type and zero distortion for initial fit
+    pp.setDistortionType("radial3-odd", reset_params=True)
+
+    # Compute az/alt center for platepar
+    azim, alt = cyTrueRaDec2ApparentAltAz(
+        math.radians(pp.RA_d), math.radians(pp.dec_d),
+        jd, math.radians(lat), math.radians(lon), refraction=False
+    )
+    pp.az_centre = math.degrees(azim)
+    pp.alt_centre = math.degrees(alt)
+
+    # Iteration parameters: n_catalog_stars, n_input_stars, radius_px, do_fit
+    iterations = [
+        {'n_cat': 10,  'n_input': 10,  'radius_px': 50, 'fit': True,  'desc': 'bright'},
+        {'n_cat': 30,  'n_input': 50,  'radius_px': 20, 'fit': True,  'desc': 'medium'},
+        {'n_cat': 999, 'n_input': 999, 'radius_px': 10, 'fit': False, 'desc': 'all'},
+    ]
+
+    matched_pairs = []
+    use_platepar = False  # Start with WCS
+
+    print("Iterative star matching:")
+    print("  Catalog stars available: {:d}".format(len(catalog_sorted)))
+    print("  Input stars available: {:d}".format(len(x_data)))
+    if input_intensities is not None:
+        print("  Input intensities: provided (sorting by brightness)")
+    else:
+        print("  Input intensities: not provided (using original order)")
+
+    for iteration in iterations:
+        # Select brightest N catalog stars
+        n_cat = min(iteration['n_cat'], len(catalog_sorted))
+        cat_subset = catalog_sorted[:n_cat]
+
+        # Select brightest N input stars
+        n_input = min(iteration['n_input'], len(x_data))
+        input_indices = bright_order[:n_input]
+
+        print("  Pass '{}': {} cat stars, {} input stars, radius={} px".format(
+            iteration['desc'], n_cat, n_input, iteration['radius_px']))
+
+        # Project catalog stars to pixel coordinates
+        catalog_pixels = []
+        for star in cat_subset:
+            if not use_platepar:
+                # First iteration: use WCS
+                cx, cy = wcs_obj.all_world2pix(star.ra_deg, star.dec_deg, 1)
+            else:
+                # Subsequent: use fitted platepar
+                cx_arr, cy_arr = raDecToXYPP(
+                    np.array([star.ra_deg]), np.array([star.dec_deg]), jd, pp
+                )
+                cx, cy = cx_arr[0], cy_arr[0]
+
+            cat_mag = star.metadata.get('mag', 99) if hasattr(star, 'metadata') else 99
+            catalog_pixels.append((float(cx), float(cy), star.ra_deg, star.dec_deg, cat_mag))
+
+        # Match input stars to catalog (nearest within radius)
+        new_pairs = []
+        used_catalog = set()  # Prevent multiple inputs matching same catalog star
+
+        for idx in input_indices:
+            ix, iy = x_data[idx], y_data[idx]
+            best_dist = float('inf')
+            best_cat_idx = None
+            best_cat = None
+
+            for cat_idx, (cx, cy, ra, dec, mag) in enumerate(catalog_pixels):
+                if cat_idx in used_catalog:
+                    continue
+                dist = np.sqrt((ix - cx)**2 + (iy - cy)**2)
+                if dist < best_dist and dist < iteration['radius_px']:
+                    best_dist = dist
+                    best_cat_idx = cat_idx
+                    best_cat = (cx, cy, ra, dec, mag)
+
+            if best_cat is not None:
+                used_catalog.add(best_cat_idx)
+                new_pairs.append({
+                    'input_x': float(ix),
+                    'input_y': float(iy),
+                    'catalog_x': best_cat[0],
+                    'catalog_y': best_cat[1],
+                    'catalog_ra': best_cat[2],
+                    'catalog_dec': best_cat[3],
+                    'dist_px': best_dist
+                })
+
+        matched_pairs = new_pairs
+        print("    -> {:d} matches found".format(len(matched_pairs)))
+
+        # Fit platepar with current matches (except last iteration)
+        if iteration['fit'] and len(matched_pairs) >= 4:
+            img_stars = np.array([[m['input_x'], m['input_y'], 1.0] for m in matched_pairs])
+            cat_stars = np.array([[m['catalog_ra'], m['catalog_dec'], 1.0] for m in matched_pairs])
+
+            try:
+                pp.fitAstrometry(jd, img_stars, cat_stars, first_platepar_fit=True)
+                use_platepar = True  # Switch to using platepar for next iteration
+                print("    -> Fit OK, RA={:.2f} Dec={:.2f}".format(pp.RA_d, pp.dec_d))
+            except Exception as e:
+                print("    -> Fit FAILED: {}".format(e))
+
+    return matched_pairs, pp if use_platepar else None
+
+
+def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None, y_data=None,
+                            fov_w_range=None, max_stars=100, verbose=False, x_center=None, y_center=None,
+                            lat=None, lon=None, jd=None, input_intensities=None):
+    """ Find an astrometric solution of X, Y image coordinates of stars detected on an image using the
         local installation of astrometry.net.
 
     Keyword arguments:
@@ -33,12 +199,16 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
         mask: [ndarray] Mask image. None by default.
         x_data: [list] A list of star x image coordinates.
         y_data: [list] A list of star y image coordinates
-        fov_w_range: [2 element tuple] A tuple of scale_lower and scale_upper, i.e. the estimate of the 
+        fov_w_range: [2 element tuple] A tuple of scale_lower and scale_upper, i.e. the estimate of the
             width of the FOV in degrees.
         max_stars: [int] Maximum number of stars to use for the astrometry.net solution. Default is 100.
         verbose: [bool] Print verbose output. Default is False.
         x_center: [float] X coordinate of the image center. Default is None.
         y_center: [float] Y coordinate of the image center. Default is None.
+        lat: [float] Station latitude in degrees. Required for iterative matching.
+        lon: [float] Station longitude in degrees. Required for iterative matching.
+        jd: [float] Julian date. Required for iterative matching.
+        input_intensities: [ndarray] Star intensities for brightness-based matching. Optional.
 
     Returns:
         [tuple] A tuple containing the following elements:
@@ -83,17 +253,27 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
             
 
 
-    # If there are too many stars (more than 100), randomly select them to reduce the number
+    # If there are too many stars, select the brightest ones (or random if no intensities)
     if len(x_data) > max_stars:
-        
+
         if verbose:
             print("Too many stars found: ", len(x_data))
-            print("Randomly selecting {:d} stars...".format(max_stars))
 
-        # Randomly select max_stars stars
-        rand_indices = np.random.choice(len(x_data), max_stars, replace=False)
-        x_data = x_data[rand_indices]
-        y_data = y_data[rand_indices]
+        if input_intensities is not None and len(input_intensities) == len(x_data):
+            # Select the brightest stars (highest intensity)
+            if verbose:
+                print("Selecting {:d} brightest stars...".format(max_stars))
+            bright_indices = np.argsort(-np.array(input_intensities))[:max_stars]
+            x_data = x_data[bright_indices]
+            y_data = y_data[bright_indices]
+            input_intensities = np.array(input_intensities)[bright_indices]
+        else:
+            # Fall back to random selection if no intensities available
+            if verbose:
+                print("Randomly selecting {:d} stars...".format(max_stars))
+            rand_indices = np.random.choice(len(x_data), max_stars, replace=False)
+            x_data = x_data[rand_indices]
+            y_data = y_data[rand_indices]
 
 
     # Print the found star coordinates
@@ -251,7 +431,41 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
 
         star_data = [x_data, y_data]
 
-        return ra_mid, dec_mid, rot_eq_standard, scale, fov_w, fov_h, star_data
+        match = solution.best_match()
+
+        # Note: match.stars contains ALL catalog stars in the FOV region from the index,
+        # NOT just the ones that matched to input stars.
+        # We don't use these - RMS has its own better star catalog for matching.
+
+        # Extract quad stars (the specific catalog stars used for initial geometric matching)
+        quad_stars = []
+        if hasattr(match, 'quad_stars') and match.quad_stars:
+            for star in match.quad_stars:
+                x_pix, y_pix = wcs_obj.all_world2pix(star.ra_deg, star.dec_deg, 1)
+                quad_stars.append({
+                    'ra_deg': star.ra_deg,
+                    'dec_deg': star.dec_deg,
+                    'x_pix': float(x_pix),
+                    'y_pix': float(y_pix),
+                    'metadata': star.metadata if hasattr(star, 'metadata') else {}
+                })
+
+        # Additional solution info - no matched pairs from astrometry.net
+        # Star matching will be done in SkyFit2 using RMS's own catalog
+        solution_info = {
+            'logodds': match.logodds,
+            'quad_stars': quad_stars,
+            'index_path': str(match.index_path) if hasattr(match, 'index_path') else None,
+            'wcs_obj': wcs_obj,
+            'input_star_count': len(x_data)  # How many stars we sent to the solver
+        }
+
+        if verbose:
+            print()
+            print("Quad stars: {:d}".format(len(quad_stars)))
+            print("Log odds: {:.2f}".format(match.logodds))
+
+        return ra_mid, dec_mid, rot_eq_standard, scale, fov_w, fov_h, star_data, solution_info
     
 
     else:
@@ -260,8 +474,9 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
 
 
 def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_data=None, fov_w_range=None,
-                       max_stars=100, verbose=False, x_center=None, y_center=None):
-    """ Find an astrometric solution of X, Y image coordinates of stars detected on an image using the 
+                       max_stars=100, verbose=False, x_center=None, y_center=None,
+                       lat=None, lon=None, jd=None, input_intensities=None):
+    """ Find an astrometric solution of X, Y image coordinates of stars detected on an image using the
         local installation of astrometry.net.
 
     Keyword arguments:
@@ -270,32 +485,37 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
         mask: [ndarray] Mask image. None by default.
         x_data: [list] A list of star x image coordinates.
         y_data: [list] A list of star y image coordinates
-        fov_w_range: [2 element tuple] A tuple of scale_lower and scale_upper, i.e. the estimate of the 
+        fov_w_range: [2 element tuple] A tuple of scale_lower and scale_upper, i.e. the estimate of the
             width of the FOV in degrees.
         max_stars: [int] Maximum number of stars to use for the astrometry.net solution. Default is 100.
         verbose: [bool] Print verbose output. Default is False.
         x_center: [float] X coordinate of the image center. Default is None.
         y_center: [float] Y coordinate of the image center. Default is None.
+        lat: [float] Station latitude in degrees. Required for iterative matching.
+        lon: [float] Station longitude in degrees. Required for iterative matching.
+        jd: [float] Julian date. Required for iterative matching.
+        input_intensities: [ndarray] Star intensities for brightness-based matching. Optional.
     """
 
     # If the local installation of astrometry.net is not available, use the nova.astrometry.net API
     if not ASTROMETRY_NET_AVAILABLE:
         return novaAstrometryNetSolve(
-            ff_file_path=ff_file_path, img=img, x_data=x_data, y_data=y_data, 
+            ff_file_path=ff_file_path, img=img, x_data=x_data, y_data=y_data,
             fov_w_range=fov_w_range, x_center=x_center, y_center=y_center
             )
-    
+
 
     else:
 
         # Try to solve the image using the local installation of astrometry.net
         try:
             return astrometryNetSolveLocal(
-                ff_file_path=ff_file_path, img=img, mask=mask, x_data=x_data, y_data=y_data, 
-                fov_w_range=fov_w_range, max_stars=max_stars, verbose=verbose, 
-                x_center=x_center, y_center=y_center
+                ff_file_path=ff_file_path, img=img, mask=mask, x_data=x_data, y_data=y_data,
+                fov_w_range=fov_w_range, max_stars=max_stars, verbose=verbose,
+                x_center=x_center, y_center=y_center,
+                lat=lat, lon=lon, jd=jd, input_intensities=input_intensities
                 )
-        
+
         # If it fails, use the nova.astrometry.net API
         except Exception as e:
 
@@ -304,7 +524,7 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
             print("Trying the nova.astrometry.net API...")
 
             return novaAstrometryNetSolve(
-                ff_file_path=ff_file_path, img=img, x_data=x_data, y_data=y_data, 
+                ff_file_path=ff_file_path, img=img, x_data=x_data, y_data=y_data,
                 fov_w_range=fov_w_range, x_center=x_center, y_center=y_center
                 )
 
@@ -336,7 +556,7 @@ if __name__ == "__main__":
 
     if status is not None:
 
-        ra_mid, dec_mid, rot_eq_standard, scale, fov_w, fov_h = status
+        ra_mid, dec_mid, rot_eq_standard, scale, fov_w, fov_h, star_data, solution_info = status
 
         print("Astrometry.net solution:")
         print()
@@ -345,6 +565,27 @@ if __name__ == "__main__":
         print("Scale = {:.2f} arcmin/pixel".format(scale))
         print("Rot. eq. standard = {:.2f} deg".format(rot_eq_standard))
         print("FOV = {:.2f} x {:.2f} deg".format(fov_w, fov_h))
+
+        # Print matched star info if available
+        if solution_info is not None:
+            matched_stars = solution_info.get('matched_stars', [])
+            quad_stars = solution_info.get('quad_stars', [])
+            logodds = solution_info.get('logodds')
+
+            print()
+            print("Solution info:")
+            if logodds is not None:
+                print("  Log odds: {:.2f}".format(logodds))
+            print("  Matched stars: {:d}".format(len(matched_stars)))
+            print("  Quad stars: {:d}".format(len(quad_stars)))
+
+            if matched_stars:
+                print()
+                print("Matched stars (first 10):")
+                print("  {:>10s} {:>10s} {:>8s} {:>8s}".format("RA", "Dec", "X", "Y"))
+                for star in matched_stars[:10]:
+                    print("  {:10.5f} {:+10.5f} {:8.2f} {:8.2f}".format(
+                        star['ra_deg'], star['dec_deg'], star['x_pix'], star['y_pix']))
 
     else:
         print("No solution found.")
