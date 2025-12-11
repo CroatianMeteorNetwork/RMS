@@ -37,44 +37,33 @@ class ASTRA:
 
     def __init__(self, img_obj, pick_dict, astra_config, data_path, config, dark, flat, 
                  progress_callback=None, ECSV_save_path=None):
-        """
-        ASTRA: Astrometric Streak Tracking and Refinement Algorithm.
+        """ ASTRA: Astrometric Streak Tracking and Refinement Algorithm.
 
         Initializes an ASTRA instance with imaging data, picks, configuration, and
         processing options. This constructor also parses configuration blocks
         (ASTRA, PSO, second-pass optimizer, Kalman), sets operational thresholds, and
         prepares instance attributes used throughout the pipeline.
 
-        Args:
-            img_obj: Imaging source object providing frame access and timing
+        Arguments:
+            img_obj: [Imaging Source Object] Imaging source object providing frame access and timing
                 (must support .loadChunk() returning an object with .avepixel
                 and a per-frame timestamp dictionary like `frame_dt_dict`).
-            frames (np.ndarray): Array of corrected or raw frames,
-                shape (N, H, W), dtype numeric.
-            picks (array-like): Meteor detection picks, shape (M, 2), as (x, y) pixel coords.
-            pick_frame_indices (array-like): Length-M list/array of frame indices
-                corresponding to `picks`.
-            times (list[datetime.datetime]): Timestamps for frames containing picks.
-            astra_config (dict): Nested config for sections 'astra', 'pso', 'kalman'
+            pick_dict: [dict] Dictionary of initial picks.
+            astra_config: [dict] Nested config for sections 'astra', 'pso', 'kalman'
                 and others as used in code.
-            saturation_threshold (float | int): Saturation cap for intensity modeling.
-            data_path (str | os.PathLike): Root path used for saving outputs (e.g., frames/animations).
-            camera_config: Object with camera settings used for gamma/bit-depth corrections
+            data_path: [str or os.PathLike] Root path used for saving outputs (e.g., frames/animations).
+            config: [Config Object] Object with camera settings used for gamma/bit-depth corrections
                 (must expose `.gamma` and `.bit_depth`).
-            dark (np.ndarray | None): Optional dark frame, shape (H, W).
-            flat (Any | None): Optional flat-field structure accepted by `Image.applyFlat`.
-            progress_callback (callable | None): Optional function taking a single float/int
+            dark: [ndarray or None] Optional dark frame, shape (H, W).
+            flat: [Any or None] Optional flat-field structure accepted by `Image.applyFlat`.
+
+        Keyword arguments:
+            progress_callback: [callable or None] Optional function taking a single float/int
                 to update progress (0–100).
+            ECSV_save_path: [str or None] Optional path for saving ECSV file.
 
-        Sets:
-            - Multiple configuration dicts (PSO, cropping, second-pass, Kalman).
-            - Processing thresholds (SNR, background, oob penalties).
-            - Raw I/O and working arrays (frames, times, picks, masks, logs).
-            - Verbosity and save flags.
-
-        Raises:
-            KeyError: If required config keys are missing and not defaulted.
-            ValueError: If inputs have incompatible shapes or types.
+        Return:
+            None
         """
         # -- Constants & Settings --
 
@@ -159,10 +148,10 @@ class ASTRA:
         std_parameter_constraint = float(self.astra_config.get('pso', {}).get('P_sigma', 3))
         self.std_parameter_constraint = [
             std_parameter_constraint, # level_sum
-            std_parameter_constraint, # height / sigma_y
+            std_parameter_constraint, # height/sigma_y
             std_parameter_constraint, # x0
             std_parameter_constraint, # y0
-            std_parameter_constraint  # length / sigma_x
+            std_parameter_constraint  # length/sigma_x
         ]
 
 
@@ -192,8 +181,7 @@ class ASTRA:
     # 1) -- Functional Methods --
 
     def processImageData(self):
-        """
-        Correct frames, subtract background, and apply star masking.
+        """ Correct frames, subtract background, and apply star masking.
 
         Steps:
             - Apply dark and flat corrections where provided.
@@ -203,19 +191,16 @@ class ASTRA:
             - Compute a robust star mask from background mean/std and apply it
             consistently to data and background.
 
-        Args:
-            img_obj: Imaging object providing `loadChunk()` that returns an object
-                with `.avepixel`.
-            frames (np.ndarray): Input frames, shape (N, H, W).
+        Arguments:
+            None
 
-        Returns:
-            tuple:
-                avepixel_background (np.ma.MaskedArray | np.ndarray): Corrected background, shape (H, W).
-                subtracted_frames (np.ma.MaskedArray): BG-subtracted frames with star mask, shape (N, H, W).
-                masked_frames (np.ma.MaskedArray): Corrected frames with same mask, shape (N, H, W).
+        Keyword arguments:
+            None
 
-        Raises:
-            Exception: On background load/subtraction or mask application failure.
+        Return:
+            avepixel_background: [MaskedArray or ndarray] Corrected background, shape (H, W).
+            subtracted_frames: [MaskedArray] BG-subtracted frames with star mask, shape (N, H, W).
+            masked_frames: [MaskedArray] Corrected frames with same mask, shape (N, H, W).
         """
 
         # 1) -- Background Subtraction --
@@ -258,8 +243,7 @@ class ASTRA:
 
 
     def cropAllMeteorFrames(self):
-        """ 
-        Recursively crop all meteor frames and fit a moving Gaussian (first pass).
+        """ Recursively crop all meteor frames and fit a moving Gaussian (first pass).
 
         Algorithm:
             - Pick an initial consecutive seed triplet of frames and estimate direction,
@@ -271,20 +255,17 @@ class ASTRA:
             - Recurse forward and backward across the event using
             `recursiveCroppingAlgorithm`.
 
-        Args:
-            pick_frame_indices (Sequence[int]): Frame indices for all picks.
-            picks (np.ndarray): Global (x, y) picks, shape (M, 2).
+        Arguments:
+            None
 
-        Returns:
-            tuple:
-                cropped_frames (list[np.ndarray]): Crops used for fitting.
-                first_pass_params (np.ndarray): PSO parameters per frame,
-                    columns [level_sum, sigma, x0, y0, length], shape (K, 5).
-                crop_vars (np.ndarray): [cx, cy, xmin, xmax, ymin, ymax] per crop, shape (K, 6).
+        Keyword arguments:
+            None
 
-        Raises:
-            ValueError: If a seed triplet cannot be established (e.g., <3 points or
-                no consecutive triple).
+        Return:
+            cropped_frames: [list] Crops used for fitting.
+            first_pass_params: [ndarray] PSO parameters per frame,
+                columns [level_sum, sigma, x0, y0, length], shape (K, 5).
+            crop_vars: [ndarray] [cx, cy, xmin, xmax, ymin, ymax] per crop, shape (K, 6).
         """
 
         # 1) -- Unpack variables & Calculate seed picks/frames--
@@ -317,7 +298,7 @@ class ASTRA:
         v_tx, v_x, t0_x, x0_x = float(v_tx[0]), float(v_x[0]), float(t0_x[0]), float(x0_x[0])
 
         # Normalize so dt = 1 (slope = dx/dt)
-        slope_x = v_x / v_tx
+        slope_x = v_x/v_tx
         intercept_x = x0_x - slope_x*t0_x
         self.kinematic_params_x = (slope_x, intercept_x)
 
@@ -326,7 +307,7 @@ class ASTRA:
         [v_ty, v_y, t0_y, y0_y] = cv2.fitLine(ty_points, cv2.DIST_L1, 0, 0.01, 0.01)
         v_ty, v_y, t0_y, y0_y = float(v_ty[0]), float(v_y[0]), float(t0_y[0]), float(y0_y[0])
 
-        slope_y = v_y / v_ty
+        slope_y = v_y/v_ty
         intercept_y = y0_y - slope_y*t0_y
         self.kinematic_params_y = (slope_y, intercept_y)
         
@@ -489,27 +470,24 @@ class ASTRA:
                 matplotlib.use(current_backend)
 
     def refineAllMeteorCrops(self, first_pass_params, cropped_frames, omega, directions):
-        """
-        Second-pass local optimization of moving-Gaussian fits (per crop).
+        """ Locally refine all Gaussian fits using L-BFGS-B (second pass).
 
-        Uses L-BFGS-B with adaptive bounds derived from first-pass variability to refine
-        [level_sum, sigma, x0, y0, length]. Also renders fitted images for diagnostics.
+        Iterates through all cropped frames and corresponding first-pass parameters.
+        Applies a local optimizer to refine the fit (`level_sum`, `sigma`, `x0`, `y0`,
+        `length`) subject to adaptive bounds derived from the first pass. Updates
+        `refined_fit_params` and `fit_costs`.
 
-        Args:
-            first_pass_params (np.ndarray): Initial params, shape (K, 5).
-            cropped_frames (Sequence[np.ndarray]): Cropped images, length K.
-            omega (float): Track angle in radians.
-            directions (tuple[int, int]): Direction multipliers (+1/-1) for x/y axes.
+        Arguments:
+            first_pass_params: [ndarray] Initial PSO parameters per frame, shape (K, 5).
+            cropped_frames: [list] List of crop images used for fitting.
+            omega: [float] Track angle [rad].
+            directions: [tuple] Direction multipliers (+1/-1) for x/y.
 
-        Returns:
-            tuple:
-                refined_fit_params (np.ndarray): Refined parameters, shape (K, 5).
-                fit_costs (np.ndarray): Objective values per crop, shape (K,).
-                fit_imgs (list[np.ndarray]): Reconstructed fitted images, len K.
+        Keyword arguments:
+            None
 
-        Raises:
-            ValueError: If bounds are malformed.
-            RuntimeError: If optimizer fails catastrophically (non-recoverable).
+        Return:
+            None
         """
 
 
@@ -542,40 +520,35 @@ class ASTRA:
             self.updateProgress()
 
 
-    def removeLowSNRPicks(self, refined_params, fit_imgs, cropped_frames, crop_vars, 
-                          pick_frame_indices, fit_costs):
-        """
-        Filter out low-SNR or out-of-bounds picks and materialize global outputs.
+    def removeLowSNRPicks(self, refined_params, fit_imgs, cropped_frames, crop_vars, pick_frame_indices, fit_costs):
+        """ Filter out low-SNR or out-of-bounds picks and materialize global outputs.
 
         For each fitted crop, build a photometric mask from the fitted image,
         measure SNR using a CCD equation, enforce geometric in-bounds constraints,
         and retain only valid frames. Also translates centers into global coordinates
         and moves them to the leading edge of the streak.
 
-        Args:
-            refined_params (np.ndarray): Refined Gaussian params, shape (K, 5).
-            fit_imgs (Sequence[np.ndarray]): Per-crop fitted images.
-            frames (np.ndarray): Full frame stack (N, H, W), used for SNR computation.
-            cropped_frames (Sequence[np.ndarray]): Per-crop image crops.
-            crop_vars (np.ndarray): Crop bookkeeping (K, 6): [cx, cy, xmin, xmax, ymin, ymax].
-            pick_frame_indices (Sequence[int]): Frame index per crop, length K.
-            fit_costs (np.ndarray): Objective values per crop, shape (K,).
-            times (Sequence[datetime.datetime]): Original timestamps.
+        Arguments:
+            refined_params: [ndarray] Refined Gaussian params, shape (K, 5).
+            fit_imgs: [Sequence] Per-crop fitted images.
+            cropped_frames: [Sequence] Per-crop image crops.
+            crop_vars: [ndarray] Crop bookkeeping (K, 6): [cx, cy, xmin, xmax, ymin, ymax].
+            pick_frame_indices: [Sequence] Frame index per crop, length K.
+            fit_costs: [ndarray] Objective values per crop, shape (K,).
 
-        Returns:
-            tuple:
-                refined_params (np.ndarray): Post-filter params, shape (M, 5).
-                fit_imgs (list[np.ndarray]): Post-filter fit images, len M.
-                cropped_frames (list[np.ndarray]): Post-filter crops, len M.
-                crop_vars (np.ndarray): Post-filter crop vars, shape (M, 6).
-                pick_frame_indices (np.ndarray): Post-filter frame indices, shape (M,).
-                global_picks (np.ndarray): Edge-aligned global picks, shape (M, 2).
-                fit_costs (np.ndarray): Post-filter costs, shape (M,).
-                times (np.ndarray): Post-filter timestamps, shape (M,).
-                abs_level_sums (np.ndarray): Background-subtracted flux sums, shape (M,).
+        Keyword arguments:
+            None
 
-        Raises:
-            Exception: If photometry or SNR computation fails catastrophically.
+        Return:
+            refined_params: [ndarray] Post-filter params, shape (M, 5).
+            fit_imgs: [list] Post-filter fit images, len M.
+            cropped_frames: [list] Post-filter crops, len M.
+            crop_vars: [ndarray] Post-filter crop vars, shape (M, 6).
+            pick_frame_indices: [ndarray] Post-filter frame indices, shape (M,).
+            global_picks: [ndarray] Edge-aligned global picks, shape (M, 2).
+            fit_costs: [ndarray] Post-filter costs, shape (M,).
+            times: [ndarray] Post-filter timestamps, shape (M,).
+            abs_level_sums: [ndarray] Background-subtracted flux sums, shape (M,).
         """
 
 
@@ -698,21 +671,20 @@ class ASTRA:
 
 
     def saveAni(self, data_path):
-        """
-        Save diagnostic frames as JPEGs (thread-safe, headless-safe).
+        """ Save diagnostic frames as JPEGs (thread-safe, headless-safe).
 
         Renders a 3-panel figure per kept crop (crop, fit, absolute residuals) and
         annotates key parameters/SNR. Uses Matplotlib's Agg backend and writes
         to `<data_path>/ASTRA_Kalman_Results/ASTRA_frames_YYYYmmdd_HHMMSS/`.
 
-        Args:
-            data_path (str | os.PathLike): Root directory for output.
+        Arguments:
+            data_path: [str or os.PathLike] Root directory for output.
 
-        Returns:
+        Keyword arguments:
             None
 
-        Raises:
-            OSError: If directories cannot be created or files written.
+        Return:
+            None
         """
 
         current_backend = matplotlib.get_backend()
@@ -828,21 +800,22 @@ class ASTRA:
     # 2) -- Calculation/Conversion Methods --
 
     def checkStreakInBounds(self, global_pick, prev_length, prev_sigma, omega, directions):
-        """
-        Check whether a streak centered at `global_pick` (with length/sigma
-        from the previous frame) lies safely within image bounds.
+        """ Check whether a streak is within image bounds (incorporating length/sigma).
 
         The check considers both along-track edges (front/back) and cross-track
-        extents (~1 sigma) and enforces a small edge buffer.
+        extents (~1 sigma) and enforces a small edge buffer (3 pixels).
 
-        Args:
-            global_pick (tuple[float, float]): Global (x, y) centroid.
-            prev_length (float): Fitted track length from a previous step.
-            prev_sigma (float): Fitted cross-track sigma from a previous step.
-            omega (float): Track angle [rad].
-            directions (tuple[int, int]): Direction multipliers (+1/-1) for x/y.
+        Arguments:
+            global_pick: [tuple] Global (x, y) centroid.
+            prev_length: [float] Fitted track length from a previous step.
+            prev_sigma: [float] Fitted cross-track sigma from a previous step.
+            omega: [float] Track angle [rad].
+            directions: [tuple] Direction multipliers (+1/-1) for x/y.
 
-        Returns:
+        Keyword arguments:
+            None
+
+        Return:
             bool: True if fully in-bounds (with buffer), False otherwise.
         """
 
@@ -856,9 +829,9 @@ class ASTRA:
 
         # Calculate the top and bottom of the streak (only check a single sigma,
         # as long as there is clearence for center pick it is okay)
-        top_pick = self.movePickToEdge(global_pick, omega+(np.pi / 2), prev_sigma,
+        top_pick = self.movePickToEdge(global_pick, omega+(np.pi/2), prev_sigma,
                                        directions=(directions[0], -directions[1]))
-        bottom_pick = self.movePickToEdge(global_pick, omega+(np.pi / 2), prev_sigma,
+        bottom_pick = self.movePickToEdge(global_pick, omega+(np.pi/2), prev_sigma,
                                           directions=(-directions[0], directions[1]))
 
         # Package all picks into a list
@@ -885,19 +858,20 @@ class ASTRA:
 
 
     def translatePicksToGlobal(self, local_pick, frame_crop_vars, global_to_local=False):
-        """
-        Translate between local-crop and global image coordinates.
+        """ Translate between local-crop and global image coordinates.
 
-        Args:
-            local_pick (tuple[float, float]): (x, y) coordinates in the source space;
+        Arguments:
+            local_pick: [tuple] (x, y) coordinates in the source space;
                 interpreted as local or global based on `global_to_local`.
-            frame_crop_vars (Sequence[float]): [cx, cy, xmin, xmax, ymin, ymax] for
+            frame_crop_vars: [Sequence] [cx, cy, xmin, xmax, ymin, ymax] for
                 the crop.
-            global_to_local (bool): If True, treat `local_pick` as global and convert
+
+        Keyword arguments:
+            global_to_local: [bool] If True, treat `local_pick` as global and convert
                 to crop-local; otherwise local→global.
 
-        Returns:
-            tuple[float, float]: Converted (x, y) coordinate.
+        Return:
+            tuple: Converted (x, y) coordinate.
         """
 
         # Unpack crop variables
@@ -917,23 +891,24 @@ class ASTRA:
             return (x_global, y_global)
     
 
-    def movePickToEdge(self, center_pick, omega, length, directions=(1, 1), pick_offset=None):
-        """
-        Move a center pick to the leading edge of the streak.
+    def movePickToEdge(self, center_pick, omega, length, directions=None, pick_offset=None):
+        """ Move a center pick to the leading edge of the streak.
 
         Computes a half-length offset along `omega` using direction multipliers,
         optionally scaled by `pick_offset` for “center-to-edge” behavior.
 
-        Args:
-            center_pick (tuple[float, float]): Center (x0, y0).
-            omega (float): Track angle [rad].
-            length (float): Fitted length.
-            directions (tuple[int, int]): Multipliers (+1/-1) for x and y axes.
-            pick_offset (float | None): Optional center-to-edge coefficient; if provided,
+        Arguments:
+            center_pick: [tuple] Center (x0, y0).
+            omega: [float] Track angle [rad].
+            length: [float] Fitted length.
+
+        Keyword arguments:
+            directions: [tuple] Multipliers (+1/-1) for x and y axes.
+            pick_offset: [float or None] Optional center-to-edge coefficient; if provided,
                 the used length is `(length/3)*pick_offset`.
 
-        Returns:
-            tuple[float, float]: Edge (x, y).
+        Return:
+            tuple: Edge (x, y).
         """
 
 
@@ -942,11 +917,11 @@ class ASTRA:
 
         if pick_offset is not None:
             # Add length adjustment
-            length = (length / 3)*pick_offset
+            length = (length/3)*pick_offset
 
         # Calculate the offset
-        x_midpoint_offset = (length / 2)*np.abs(np.cos(omega))*directions[0]
-        y_midpoint_offset = (length / 2)*np.abs(np.sin(omega))*directions[1]
+        x_midpoint_offset = (length/2)*np.abs(np.cos(omega))*directions[0]
+        y_midpoint_offset = (length/2)*np.abs(np.sin(omega))*directions[1]
 
         # Calculate the new pick position
         edge_x = x0 + x_midpoint_offset
@@ -956,21 +931,22 @@ class ASTRA:
         return (edge_x, edge_y)
     
 
-    def estimateCenter(self, edge_pick, omega, length, directions=(1, 1)):
-        """
-        Estimate center (x, y) from an edge pick, angle, and length.
+    def estimateCenter(self, edge_pick, omega, length, directions=None):
+        """ Estimate center (x, y) from an edge pick, angle, and length.
 
         This is the inverse of `movePickToEdge`—it moves from an edge back to the center
         by flipping the direction multipliers.
 
-        Args:
-            edge_pick (tuple[float, float]): Edge (x, y).
-            omega (float): Track angle [rad].
-            length (float): Fitted length.
-            directions (tuple[int, int]): Multipliers (+1/-1) for x and y.
+        Arguments:
+            edge_pick: [tuple] Edge (x, y).
+            omega: [float] Track angle [rad].
+            length: [float] Fitted length.
 
-        Returns:
-            tuple[float, float]: Center (x, y).
+        Keyword arguments:
+            directions: [tuple] Multipliers (+1/-1) for x and y.
+
+        Return:
+            tuple: Center (x, y).
         """
 
         # Invert directions
@@ -984,15 +960,19 @@ class ASTRA:
     
 
     def calculateAdaptiveVelocityClamp(self, bounds):
-        """
-        Compute a per-dimension PSO velocity clamp as a fraction of each
-        parameter’s feasible domain (lower/upper bounds).
+        """ Compute a per-dimension PSO velocity clamp.
 
-        Args:
-            bounds (tuple[np.ndarray, np.ndarray]): (lb, ub), each shape (D,).
+        Velocity clamp is calculated as a fraction of each parameter’s feasible domain
+        (lower/upper bounds).
 
-        Returns:
-            tuple[np.ndarray, np.ndarray]: (vmin, vmax), shape (D,).
+        Arguments:
+            bounds: [tuple] (lb, ub), each shape (D,).
+
+        Keyword arguments:
+            None
+
+        Return:
+            tuple: (vmin, vmax), shape (D,).
         """
 
         # Unpack bounds
@@ -1008,26 +988,24 @@ class ASTRA:
         return (-adaptive_velocity_clamps, adaptive_velocity_clamps)
     
 
-    def calculateAdaptiveBounds(self, first_pass_parameters, p0, scipy_format = False):
-        """
-        Build adaptive bounds around a point `p0` using first-pass variability.
+    def calculateAdaptiveBounds(self, first_pass_parameters, p0, scipy_format=False):
+        """ Build adaptive bounds around a point `p0` using first-pass variability.
 
         Bounds are centered at `p0` with half-widths proportional to the empirical
         std across first-pass params. Optionally returns SciPy “(low, high)” pairs.
 
-        Args:
-            first_pass_parameters (np.ndarray): Prior params, shape (K, 5).
-            p0 (array-like): Center point for bounds, length 5.
-            scipy_format (bool): If True, return tuple[(low, high), ...] for L-BFGS-B.
+        Arguments:
+            first_pass_parameters: [ndarray] Prior params, shape (K, 5).
+            p0: [array-like] Center point for bounds, length 5.
+
+        Keyword arguments:
+            scipy_format: [bool] If True, return tuple[(low, high), ...] for L-BFGS-B.
                 Otherwise return (lb, ub) arrays.
 
-        Returns:
+        Return:
             tuple:
                 - If `scipy_format` is False: (lb, ub) as np.ndarrays, shape (5,).
                 - If True: tuple of 5 (low, high) pairs.
-
-        Raises:
-            ValueError: If shapes do not match expected 5-parameter layout.
         """
 
         # Calculate the std of all values from the first pass
@@ -1037,16 +1015,16 @@ class ASTRA:
         # The std_parameter_constraint is a list of multiples of the std to use for each parameter
         adaptive_bounds = (
         np.array([p0[0] - self.std_parameter_constraint[0]*std_parameters[0], # level_sum
-                    p0[1] - self.std_parameter_constraint[1]*std_parameters[1], # STD / height of gaussian
+                    p0[1] - self.std_parameter_constraint[1]*std_parameters[1], # STD/height of gaussian
                     p0[2] - self.std_parameter_constraint[2]*std_parameters[2], # X-center of gaussian
                     p0[3] - self.std_parameter_constraint[3]*std_parameters[3], # Y-center of gaussian
-                    p0[4] - self.std_parameter_constraint[4]*std_parameters[4] # 3*STD / length of gaussian
+                    p0[4] - self.std_parameter_constraint[4]*std_parameters[4] # 3*STD/length of gaussian
                     ]), # Lower bounds
         np.array([p0[0] + self.std_parameter_constraint[0]*std_parameters[0], # level_sum
-                    p0[1] + self.std_parameter_constraint[1]*std_parameters[1], # STD / height of gaussian
+                    p0[1] + self.std_parameter_constraint[1]*std_parameters[1], # STD/height of gaussian
                     p0[2] + self.std_parameter_constraint[2]*std_parameters[2], # X-center of gaussian
                     p0[3] + self.std_parameter_constraint[3]*std_parameters[3], # Y-center of gaussian
-                    p0[4] + self.std_parameter_constraint[4]*std_parameters[4] # 3*STD / length of gaussian
+                    p0[4] + self.std_parameter_constraint[4]*std_parameters[4] # 3*STD/length of gaussian
                     ]) # Upper bounds
         )
 
@@ -1067,18 +1045,19 @@ class ASTRA:
         return adaptive_bounds
     
 
-    def estimateNextCenter(self, current_global_center, length, omega, directions=(1, 1)):
-        """
-        Project the next center along the track from a current center.
+    def estimateNextCenter(self, current_global_center, length, omega, directions=None):
+        """ Project the next center along the track from a current center.
 
-        Args:
-            current_global_center (tuple[float, float]): Current (x, y).
-            length (float): Step size to move along the track (e.g., predicted norm).
-            omega (float): Track angle [rad].
-            directions (tuple[int, int]): Direction multipliers (+1/-1) for x/y.
+        Arguments:
+            current_global_center: [tuple] Current (x, y).
+            length: [float] Step size to move along the track (e.g., predicted norm).
+            omega: [float] Track angle [rad].
 
-        Returns:
-            tuple[float, float]: Next center (x, y).
+        Keyword arguments:
+            directions: [tuple] Direction multipliers (+1/-1) for x/y.
+
+        Return:
+            tuple: Next center (x, y).
         """
 
 
@@ -1096,18 +1075,21 @@ class ASTRA:
         # Return the new picks
         return (next_x, next_y)
 
-    def constrainPointToKinematics(self, point, frame_index, max_drift=10.0):
-        """
-        Constrain a point to be within `max_drift` of the kinematic model (Time vs Space).
-        This essentially leashes the prediction to the robust linear velocity model.
+    def constrainPointToKinematics(self, point, frame_index, max_drift=12.0):
+        """ Constrain a point to be within `max_drift` of the kinematic model.
 
-        Args:
-            point (tuple[float, float]): Predicted point (x, y).
-            frame_index (int): Frame index for the prediction.
-            max_drift (float): Maximum allowed distance from the kinematic model position.
+        This essentially leashes the prediction to the robust linear velocity model
+        (Time vs Space) to prevent drift.
 
-        Returns:
-            tuple[float, float]: Constrained point (x, y).
+        Arguments:
+            point: [tuple] Predicted point (x, y).
+            frame_index: [int] Frame index for the prediction.
+
+        Keyword arguments:
+            max_drift: [float] Maximum allowed distance from the kinematic model position.
+
+        Return:
+            tuple: Constrained point (x, y).
         """
         px, py = point
         
@@ -1130,7 +1112,7 @@ class ASTRA:
             return (float(px), float(py))
         
         # If outside, project onto the boundary of the leash
-        scale = max_drift / dist
+        scale = max_drift/dist
         new_x = model_x + drift_x*scale
         new_y = model_y + drift_y*scale
 
@@ -1138,22 +1120,22 @@ class ASTRA:
 
     # 3) -- Helper Methods --
 
-    def updateParameterEstimationFunctions(self, crop_vars, first_pass_params, forward_pass):
-        """
-        Fit simple polynomial predictors for level_sum, height (sigma), length, and
-        inter-frame norm based on first-pass parameters.
+    def updateParameterEstimationFunctions(self, crop_vars, first_pass_params, forward_pass=False):
+        """ Fit simple polynomial predictors for next-crop parameters.
 
-        Used to extrapolate the next crop’s expected magnitude and spacing during
-        the recursive pass.
+        Fits degree-1 polynomials for level_sum, height (sigma), length, and
+        inter-frame norm based on first-pass parameters. Used to extrapolate the
+        next crop’s expected magnitude and spacing during the recursive pass.
 
-        Args:
-            crop_vars (np.ndarray): Crop vars, shape (K, 6).
-            first_pass_params (np.ndarray): Params [level_sum, sigma, x0, y0, length], shape (K, 5).
-            forward_pass (bool): If True, fit end-anchored predictors; otherwise start-anchored.
+        Arguments:
+            crop_vars: [ndarray] Crop vars, shape (K, 6).
+            first_pass_params: [ndarray] Params [level_sum, sigma, x0, y0, length], shape (K, 5).
 
-        Returns:
-            dict[str, numpy.polynomial.Polynomial]:
-                Keys: {"level_sum", "height", "length", "norm"}; each maps to a
+        Keyword arguments:
+            forward_pass: [bool] If True, fit end-anchored predictors; otherwise start-anchored.
+
+        Return:
+            dict: Keys {"level_sum", "height", "length", "norm"}, each maps to a
                 degree-1 Polynomial used for extrapolation.
         """
 
@@ -1194,22 +1176,22 @@ class ASTRA:
         return parameter_estimation_functions
 
 
-    def estimateNextParameters(self, parameter_estimation_functions, n_points, forward_pass):
-        """
-        Extrapolate next parameter magnitudes using fitted polynomials.
+    def estimateNextParameters(self, parameter_estimation_functions, n_points, forward_pass=False):
+        """ Extrapolate next parameter magnitudes using fitted polynomials.
 
         For forward passes, evaluates predictors at `n_points + 1` with fallback to
         previous index if any prediction is non-positive; for backward passes,
         evaluates at -1 with fallback to 0. Restores `level_sum` from log-space.
 
-        Args:
-            parameter_estimation_functions (dict[str, Polynomial]): Predictors from
-                `updateParameterEstimationFunctions`.
-            n_points (int): Current number of param rows.
-            forward_pass (bool): Direction flag.
+        Arguments:
+            parameter_estimation_functions: [dict] Predictors from `updateParameterEstimationFunctions`.
+            n_points: [int] Current number of param rows.
 
-        Returns:
-            dict[str, float]: {'level_sum', 'height', 'length', 'norm'} predictions.
+        Keyword arguments:
+            forward_pass: [bool] Direction flag.
+
+        Return:
+            dict: {'level_sum', 'height', 'length', 'norm'} predictions.
         """
 
 
@@ -1253,27 +1235,26 @@ class ASTRA:
 
 
     def localGaussianFit(self, p0, obs_frame, omega, bounds, directions):
-        """
-        Locally refine a moving-Gaussian fit on a single crop using L-BFGS-B.
+        """ Locally refine a moving-Gaussian fit on a single crop using L-BFGS-B.
 
         Objective variants include absolute, squared, or cubed residuals. Adds
         penalties for parameter bound violations and for the streak leaving crop bounds.
 
-        Args:
-            p0 (np.ndarray): Initial params [level_sum, sigma, x0, y0, length], shape (5,).
-            obs_frame (np.ndarray): Crop image, shape (h, w).
-            omega (float): Track angle [rad].
-            bounds (Sequence[tuple[float, float]]): Per-param bounds for L-BFGS-B.
-            directions (tuple[int, int]): Direction multipliers (+1/-1) for x/y.
+        Arguments:
+            p0: [ndarray] Initial params [level_sum, sigma, x0, y0, length], shape (5,).
+            obs_frame: [ndarray] Crop image, shape (h, w).
+            omega: [float] Track angle [rad].
+            bounds: [Sequence] Per-param bounds for L-BFGS-B.
+            directions: [tuple] Direction multipliers (+1/-1) for x/y.
 
-        Returns:
+        Keyword arguments:
+            None
+
+        Return:
             tuple:
                 best_pos (np.ndarray): Optimized parameters, shape (5,).
                 best_cost (float): Objective value at optimum.
                 img (np.ndarray): Reconstructed fitted image, shape (h, w).
-
-        Raises:
-            ValueError: On unknown residual method.
         """
 
         # Define initial parameters
@@ -1308,33 +1289,31 @@ class ASTRA:
                 print(f"Warning: Parameter {i} (value: {val}) is outside the bounds [{lower}, {upper}]")
 
         # Calculate the fitted image
-        img = self.movingGaussian(data_tuple, omega, 0, *best_pos).reshape(obs_frame.shape)
+        img = self.movingGaussian(data_tuple, omega, 0, *best_pos)
 
         # Return all values
         return best_pos, best_cost, img
 
         
     def gaussianPSO(self, cropped_frame, omega, directions, estim_next_params=None, init_length=None):
-        """
-        First-pass moving-Gaussian fit per crop using Particle Swarm Optimization.
+        """ First-pass moving-Gaussian fit per crop using Particle Swarm Optimization.
 
         Initial guesses come from the crop’s sum/size or predicted magnitudes from
         splines. Applies an out-of-bounds penalty and enforces parameter constraints.
 
-        Args:
-            cropped_frame (np.ndarray): Crop image, shape (h, w).
-            omega (float): Track angle [rad].
-            directions (tuple[int, int]): Direction multipliers (+1/-1) for x/y.
-            estim_next_params (dict | None): Optional predictions {'level_sum','height','length'}.
-            init_length (float | None): Optional initial length for first seed crops.
+        Arguments:
+            cropped_frame: [ndarray] Crop image, shape (h, w).
+            omega: [float] Track angle [rad].
+            directions: [tuple] Direction multipliers (+1/-1) for x/y.
 
-        Returns:
+        Keyword arguments:
+            estim_next_params: [dict or None] Optional predictions {'level_sum','height','length'}.
+            init_length: [float or None] Optional initial length for first seed crops.
+
+        Return:
             tuple:
                 best_pos (np.ndarray): Best parameters [level_sum, sigma, x0, y0, length], shape (5,).
                 best_cost (float): Objective value.
-
-        Raises:
-            Exception: If PSO setup or optimization fails.
         """
 
         # 1) -- Define inital params --
@@ -1362,24 +1341,24 @@ class ASTRA:
         # 2) -- Build up p0, i0, v0 and bounds --
         p0 = [
             est_level_sum, # level_sum
-            est_height, # height / sigma_y
-            x_len / 2, # x0
-            y_len / 2, # y0
+            est_height, # height/sigma_y
+            x_len/2, # x0
+            y_len/2, # y0
             est_length # length (std_x*6)
         ]
 
         bounds = (
                 np.array([100, # level_sum 
-                        max(0.5, p0[1]*0.2), # STD / width of gaussian (can never be less than 0.5)
+                        max(0.5, p0[1]*0.2), # STD/width of gaussian (can never be less than 0.5)
                         x_len*0.25, # X-center of gaussian
                         y_len*0.25, # Y-center of gaussian
-                        p0[4]*0.5, # 3*STD / length of gaussian
+                        p0[4]*0.5, # 3*STD/length of gaussian
                         ]), # Lower bounds
                 np.array([np.sum(cropped_frame), # level_sum
-                        est_height*1.35, # STD / width of gaussian
+                        est_height*1.35, # STD/width of gaussian
                         x_len*0.75, # X-center of gaussian
                         y_len*0.75, # Y-center of gaussian
-                        p0[4]*1.5, # 3*STD / length of gaussian
+                        p0[4]*1.5, # 3*STD/length of gaussian
                         ]) # Upper bounds
             )
 
@@ -1406,7 +1385,7 @@ class ASTRA:
             # Check for OOB particles
             if self.verbose:
                 if np.any(i0 < bounds[0]) or np.any(i0 > bounds[1]):
-                    print(f"DEBUG: Initial particles OOB. Min/Max i0: {np.min(i0, axis=0)} / {np.max(i0, axis=0)}")
+                    print(f"DEBUG: Initial particles OOB. Min/Max i0: {np.min(i0, axis=0)}/{np.max(i0, axis=0)}")
                     print(f"DEBUG: Bounds: {bounds[0]} - {bounds[1]}")
             
             # Double clip to be absolutely sure
@@ -1449,90 +1428,142 @@ class ASTRA:
 
 
     def psoObjectiveFunction(self, params, data_tuple, y_obs, a0, omega, bounds, directions):
-        """
-        PSO objective: residuals between observed crop and moving-Gaussian image.
+        """ PSO objective: residuals between observed crop and moving-Gaussian image.
 
-        For each particle, this computes the fitted intensity image and evaluates
-        the requested residual metric. Also applies penalties if params leave bounds
-        or if the streak’s front/back leave the crop area.
+        Vectorized for speed: computes residuals for all particles simultaneously using
+        NumPy broadcasting.
 
-        Args:
-            params (np.ndarray): Swarm positions, shape (P, 5).
-            data_tuple (tuple[np.ndarray, np.ndarray]): (x_index, y_index) grids.
-            y_obs (np.ndarray): Observed crop flattened, shape (h*w,).
-            a0 (float): Background level (kept at 0 in current calls).
-            omega (float): Track angle [rad].
-            bounds (tuple[np.ndarray, np.ndarray]): (lb, ub) arrays, each shape (5,).
-            directions (tuple[int, int]): Direction multipliers for x/y.
+        Arguments:
+            params: [ndarray] Swarm positions, shape (P, 5).
+            data_tuple: [tuple] (x_img, y_img), shapes (H, W).
+            y_obs: [ndarray] Observed crop flattened, shape (H*W,).
+            a0: [float] Background level (kept at 0).
+            omega: [float] Track angle [rad].
+            bounds: [tuple] (lb, ub) arrays.
+            directions: [tuple] Direction multipliers.
 
-        Returns:
-            np.ndarray: Residual per particle, shape (P,).
+        Keyword arguments:
+            None
 
-        Raises:
-            ValueError: On unknown residual method.
+        Return:
+            ndarray: Residual per particle, shape (P,).
         """
 
-        # 1) -- Instantiate residuals object --
-        residuals = np.zeros(params.shape[0])
+        # Number of particles
+        n_particles = params.shape[0]
 
-        # 2) -- Compute each p gaussian --
-        for i, p in enumerate(params):
+        # Reshape params for broadcasting: (P, 5, 1, 1) to match images (1, 1, H, W)
+        # We need to reshape data_tuple's x and y to (1, H, W) for broadcasting against particles
+        x_img, y_img = data_tuple
+        
+        # NOTE: y_obs is flattened (H*W,), but to vectorized residual calc we might want (H, W). 
+        # But 'movingGaussian' returns (H, W). Let's reshape y_obs to (H, W) or (1, H, W).
+        h, w = x_img.shape
+        y_obs_2d = y_obs.reshape(h, w)
 
-            # Unpack parameters
-            level_sum, sigma, x0, y0, length = p
-            
-            # Calculate intensity of the moving gaussian
-            intens = self.movingGaussian(data_tuple, omega, a0, level_sum, sigma, x0, y0, length)
+        # Unpack parameters: slicing preserves dimension 0 (particles)
+        # resulting shape: (P, 1, 1)
+        level_sum = params[:, 0].reshape(n_particles, 1, 1)
+        sigma     = params[:, 1].reshape(n_particles, 1, 1)
+        x0        = params[:, 2].reshape(n_particles, 1, 1)
+        y0        = params[:, 3].reshape(n_particles, 1, 1)
+        length    = params[:, 4].reshape(n_particles, 1, 1)
 
-            # Calculate the residuals based on the specified method
-            if self.first_pass_settings["residuals_method"] == 'abs_squared':
-                residuals[i] = np.sum(np.abs(intens - y_obs)**2)
-            elif self.first_pass_settings["residuals_method"] == 'abs':
-                residuals[i] = np.sum(np.abs(intens - y_obs))
-            elif self.first_pass_settings["residuals_method"] == 'abs_cubed':
-                residuals[i] = np.sum(np.abs(intens - y_obs)**3)
-            else:
-                raise ValueError(f"Unknown residuals method: {self.first_pass_settings['residuals_method']}")
+        # Prepare grids for broadcasting: (1, H, W)
+        data_tuple_broadcast = (x_img[np.newaxis, :, :], y_img[np.newaxis, :, :])
 
-            # Penalty function for OOB particles
-            if np.any(p < bounds[0]) or np.any(p > bounds[1]):
-                residuals[i] += self.first_pass_settings["oob_penalty"]
+        # Compute intensities for all particles: (P, H, W)
+        intens_batch = self.movingGaussian(
+            data_tuple_broadcast, 
+            omega, 
+            a0, 
+            level_sum, 
+            sigma, 
+            x0, 
+            y0, 
+            length
+        )
 
-            # Penalty for OOB streaks
-            front = self.movePickToEdge((p[2:4]), omega, p[4], directions=directions)
-            back = self.movePickToEdge((p[2:4]), omega, -p[4], directions=directions)
+        # Compute Residuals: (P, H, W) -> sum over (H, W) -> (P,)
+        res_diff = intens_batch - y_obs_2d[np.newaxis, :, :]
+        
+        if self.first_pass_settings["residuals_method"] == 'abs_squared':
+            residuals = np.sum(np.abs(res_diff)**2, axis=(1, 2))
+        elif self.first_pass_settings["residuals_method"] == 'abs':
+            residuals = np.sum(np.abs(res_diff), axis=(1, 2))
+        elif self.first_pass_settings["residuals_method"] == 'abs_cubed':
+            residuals = np.sum(np.abs(res_diff)**3, axis=(1, 2))
+        else:
+            raise ValueError(f"Unknown residuals method: {self.first_pass_settings['residuals_method']}")
 
-            if (front[0] < 0 or front[0] >= data_tuple[0].shape[1] or 
-                    front[1] < 0 or front[1] >= data_tuple[0].shape[0]):
-                residuals[i] += self.first_pass_settings["oob_penalty"]
-            if (back[0] < 0 or back[0] >= data_tuple[0].shape[1] or 
-                    back[1] < 0 or back[1] >= data_tuple[0].shape[0]):
-                residuals[i] += self.first_pass_settings["oob_penalty"]
+        # Particle Bounds Penalty
+        # params: (P, 5). bounds: (5,). Broadcasting works.
+        # Mask of out-of-bounds particles: (P,)
+        lb, ub = bounds
+        oob_mask = np.any((params < lb) | (params > ub), axis=1)
+        residuals[oob_mask] += self.first_pass_settings["oob_penalty"]
+
+        # Streak Bounds Penalty
+        # Call movePickToEdge vectorized if possible. 
+        # But movePickToEdge assumes scalar/tuple input mostly. 
+        # Let's vectorize the math inline or adapt movePickToEdge.
+        # movePickToEdge is simple math, we can reimplement vectorized data here efficiently.
+        
+        # Directions: (dx, dy) scalars
+        dx_dir, dy_dir = directions
+
+        # params slice: (P,). 
+        # x0, y0, length are (P, 1, 1) previously, let's use flat (P,)
+        x0_flat = params[:, 2]
+        y0_flat = params[:, 3]
+        len_flat = params[:, 4]
+
+        # Calculate offsets (vectorized)
+        x_offset = (len_flat/2) * np.abs(np.cos(omega)) * dx_dir
+        y_offset = (len_flat/2) * np.abs(np.sin(omega)) * dy_dir
+
+        # Front point (P,) arrays
+        front_x = x0_flat + x_offset
+        front_y = y0_flat + y_offset
+
+        # Back point (P,) arrays
+        back_x = x0_flat - x_offset
+        back_y = y0_flat - y_offset
+
+        # Check bounds (P,) boolean masks
+        # 0 <= x < W, 0 <= y < H
+        oob_streak_mask = (
+            (front_x < 0) | (front_x >= w) |
+            (front_y < 0) | (front_y >= h) |
+            (back_x < 0) | (back_x >= w) |
+            (back_y < 0) | (back_y >= h)
+        )
+        
+        residuals[oob_streak_mask] += self.first_pass_settings["oob_penalty"]
 
         return residuals
     
 
     def localObjectiveFunction(self, params, data_tuple, y_obs, a0, omega, bounds, directions):
-        """
-        Local optimizer objective: residual for a single parameter vector.
+        """ Local optimizer objective: residual for a single parameter vector.
 
         Evaluates residuals (abs, squared, or cubed) and applies parameter
         bounds penalties and crop out-of-bounds penalties for the streak’s ends.
 
-        Args:
-            params (np.ndarray): [level_sum, sigma, x0, y0, length], shape (5,).
-            data_tuple (tuple[np.ndarray, np.ndarray]): (x_index, y_index) grids.
-            y_obs (np.ndarray): Observed crop flattened, shape (h*w,).
-            a0 (float): Background level (0 in current calls).
-            omega (float): Track angle [rad].
-            bounds (Sequence[tuple[float, float]]): L-BFGS-B bounds.
-            directions (tuple[int, int]): Direction multipliers (+1/-1) for x/y.
+        Arguments:
+            params: [ndarray] [level_sum, sigma, x0, y0, length], shape (5,).
+            data_tuple: [tuple] (x_index, y_index) grids.
+            y_obs: [ndarray] Observed crop flattened, shape (h*w,).
+            a0: [float] Background level (0 in current calls).
+            omega: [float] Track angle [rad].
+            bounds: [Sequence] L-BFGS-B bounds.
+            directions: [tuple] Direction multipliers (+1/-1) for x/y.
 
-        Returns:
+        Keyword arguments:
+            None
+
+        Return:
             float: Objective value.
-
-        Raises:
-            ValueError: On unknown residual method.
         """
 
             
@@ -1540,7 +1571,7 @@ class ASTRA:
         level_sum, sigma, x0, y0, length = params
         
         # Calculate intensity of the moving gaussian
-        intens = self.movingGaussian(data_tuple, omega, a0, level_sum, sigma, x0, y0, length)
+        intens = self.movingGaussian(data_tuple, omega, a0, level_sum, sigma, x0, y0, length).ravel()
 
         # Calculate the residuals based on the specified method
         if self.second_pass_settings["residuals_method"] == 'abs_squared':
@@ -1573,29 +1604,27 @@ class ASTRA:
 
     def cropFrameToGaussian(self, sub_frame, est_global_center, max_sigma, max_length, omega, 
                             cropping_settings=None):
-        """
-        Crop a frame tightly around a maximal moving-Gaussian envelope.
+        """ Crop a frame tightly around a maximal moving-Gaussian envelope.
 
         Generates a binary mask from a high-flux, long Gaussian envelope centered on
         `est_global_center` with provided maximum sigma/length, zeros out background,
         and returns the minimal rectangular crop bounding the non-zero region.
 
-        Args:
-            sub_frame (np.ndarray): Background-subtracted frame, shape (H, W).
-            est_global_center (tuple[float, float]): Estimated global center (x, y).
-            max_sigma (float): Max sigma for envelope (scaled by config).
-            max_length (float): Max length for envelope (scaled by config).
-            omega (float): Track angle [rad].
-            cropping_settings (dict | None): Optional override dict containing
+        Arguments:
+            sub_frame: [ndarray] Background-subtracted frame, shape (H, W).
+            est_global_center: [tuple] Estimated global center (x, y).
+            max_sigma: [float] Max sigma for envelope (scaled by config).
+            max_length: [float] Max length for envelope (scaled by config).
+            omega: [float] Track angle [rad].
+
+        Keyword arguments:
+            cropping_settings: [dict or None] Optional override dict containing
                 'max_sigma_coeff' and 'max_length_coeff'.
 
-        Returns:
+        Return:
             tuple:
                 cropped_frame (np.ndarray): Crop image, shape (h, w).
                 crop_vars (list[float]): [cx, cy, xmin, xmax, ymin, ymax].
-
-        Raises:
-            ValueError: If mask has no non-zero region (degenerate crop).
         """
 
 
@@ -1695,27 +1724,26 @@ class ASTRA:
         Based on:
             Peter Veres, Robert Jedicke, Larry Denneau, Richard Wainscoat, Matthew J. Holman and Hsing-Wen Lin
             Publications of the Astronomical Society of the Pacific
-            Vol. 124, No. 921 (November 2012), pp. 1197-1207 
+            Vol. 124, No. 921 (November 2012), pp. 1197-1207
 
-            The original equation given in the paper has a typo in the exp term, after sin(omega) there 
+            The original equation given in the paper has a typo in the exp term, after sin(omega) there
             should be a minus, not a plus.
 
-
         Arguments:
-            data_tuple: [tuple]
-                - x: [ndarray] Array of X image coordinates.
-                - y: [ndarray] Array of Y image coordiantes.
+            data_tuple: [tuple] (x, y) ndarrays of image coordinates.
+            omega: [float] Angle of the track.
             a0: [float] Background level.
             level_sum: [float] Total flux of the Gaussian.
             sigma: [float] Standard deviation.
             x0: [float] X coordinate of the centre of the track.
             y0: [float] Y coordinate of the centre of the track.
             L: [float] Length of the track.
-            omega: [float] Angle of the track.
 
         Keyword arguments:
             saturation_level: [float] Level of saturation. None by default.
 
+        Return:
+            intens: [ndarray] Intensity map (same shape as x/y).
         """
 
         x, y = data_tuple
@@ -1736,26 +1764,28 @@ class ASTRA:
 
         # Limit intensity values to the given saturation limit
         if saturation_level is not None:
-            intens[intens > saturation_level] = saturation_level
+             # Use minimum to avoid boolean indexing issues with broadcasted arrays
+             intens = np.minimum(intens, saturation_level)
 
-        return intens.ravel()
+        return intens
 
 
     def generateInitialParticles(self, bounds, n_particles, p0=None):
-        """
-        Generate PSO initial particles within bounds.
+        """ Generate PSO initial particles within bounds.
 
         If `p0` is provided, draws each dimension from a truncated normal centered at
         `p0` with sigma scaled by the distance to bounds and an explorative coefficient;
         otherwise, samples uniformly within [lb, ub].
 
-        Args:
-            bounds (tuple[np.ndarray, np.ndarray]): (lb, ub), each shape (D,).
-            n_particles (int): Number of particles.
-            p0 (np.ndarray | None): Optional center, shape (D,).
+        Arguments:
+            bounds: [tuple] (lb, ub), each shape (D,).
+            n_particles: [int] Number of particles.
 
-        Returns:
-            np.ndarray: Particle positions, shape (n_particles, D).
+        Keyword arguments:
+            p0: [ndarray or None] Optional center, shape (D,).
+
+        Return:
+            ndarray: Particle positions, shape (n_particles, D).
         """
 
 
@@ -1772,18 +1802,18 @@ class ASTRA:
             # 1) Compute a “natural” sigma for each dimension:
             dist_to_lower = p0 - lb
             dist_to_upper = ub - p0
-            sigma = np.minimum(dist_to_lower, dist_to_upper) / explorative_coefficient
+            sigma = np.minimum(dist_to_lower, dist_to_upper)/explorative_coefficient
 
             # 2) But make sure sigma isn't vanishingly small:
-            min_sigma = (ub - lb) / (explorative_coefficient*10)
+            min_sigma = (ub - lb)/(explorative_coefficient*10)
             sigma = np.maximum(sigma, min_sigma)
 
             # 3) Build the standardized bounds a, b for truncnorm
             # Ensure sigma is strictly positive to avoid domain errors
             sigma = np.maximum(sigma, 1e-9)
             
-            a = (lb - p0) / sigma
-            b = (ub - p0) / sigma
+            a = (lb - p0)/sigma
+            b = (ub - p0)/sigma
 
             # 4) Draw each dim from its 1D truncated normal
             for i in range(D):
@@ -1814,8 +1844,23 @@ class ASTRA:
         return pos
 
     def getFrame(self, fr_no, include_raw=False, crop_vars=None, include_non_subtracted=False):
-        """
-        Loads the frame number from the img_obj and returns the subtracted, and cropped if vars are passed on
+        """ Loads a frame by number, optionally returning variants (raw/non-subtracted).
+
+        Adjusts for global start index, handles single or list inputs, and applies
+        optional cropping based on `crop_vars`.
+
+        Arguments:
+            fr_no: [int or list] Relative frame number(s).
+
+        Keyword arguments:
+            include_raw: [bool] Return raw frame(s) alongside processed ones.
+            crop_vars: [Sequence or None] [cx, cy, xmin, xmax, ymin, ymax] to crop.
+            include_non_subtracted: [bool] Return non-subtracted (but corrected) frames.
+
+        Return:
+            Varies based on flags:
+            - Default: `frames` (processed).
+            - Variants: tuple of (`frames`, optional `raw`, optional `non_sub`).
         """
 
         # Adjust to total frame index
@@ -1908,6 +1953,17 @@ class ASTRA:
 
 
     def correctFrame(self, frame, include_non_subtracted=False):
+        """ Apply dark/flat/gamma correction and background subtraction.
+
+        Arguments:
+            frame: [ndarray] Raw image frame.
+
+        Keyword arguments:
+            include_non_subtracted: [bool] If True, return (final, unsubtracted_corrected).
+
+        Return:
+            ndarray or tuple: Corrected frame (masked), or (corrected, unsubtracted).
+        """
 
         # 1. correct using dark, flat, gamma
         corr_frame = frame.copy()
@@ -1942,24 +1998,24 @@ class ASTRA:
 
     def recursiveCroppingAlgorithm(self, frame_index, est_center_global, parameter_estimation_functions, omega, 
                                    directions, forward_pass=False):
-        """
-        Recursive forward/backward pass to crop and fit subsequent frames.
+        """ Recursive forward/backward pass to crop and fit subsequent frames.
 
         Uses parameter predictors to estimate the next crop window and magnitudes,
         runs PSO on that crop, appends/inserts the result according to pass direction,
         updates predictors, projects the next center, and recurses until indices run
         out of event bounds.
 
-        Args:
-            frame_index (int): Index of the frame to process next.
-            est_center_global (tuple[float, float]): Estimated global center (x, y).
-            parameter_estimation_functions (dict): Predictors from
-                `updateParameterEstimationFunctions`.
-            omega (float): Track angle [rad].
-            directions (tuple[int, int]): Direction multipliers (+1/-1) for x/y.
-            forward_pass (bool): Direction flag; True for forward, False for backward.
+        Arguments:
+            frame_index: [int] Index of the frame to process next.
+            est_center_global: [tuple] Estimated global center (x, y).
+            parameter_estimation_functions: [dict] Predictors from `updateParameterEstimationFunctions`.
+            omega: [float] Track angle [rad].
+            directions: [tuple] Direction multipliers (+1/-1) for x/y.
 
-        Returns:
+        Keyword arguments:
+            forward_pass: [bool] Direction flag; True for forward, False for backward.
+
+        Return:
             None
         """
 
@@ -2076,10 +2132,19 @@ class ASTRA:
                                         )
     
     def updateProgress(self, progress=None):
-        """
-        Calculates approx. progress based on either Gaussian or Kalman mode. Updates the progress callback.
-        The progress is calculated based on the number of frames processed in each step and total num frames.
-        The weights for each step are defined in the time_weights_gaus dictionary.
+        """ Calculates approx. progress based on Gaussian or Kalman mode weights.
+
+        Updates the progress callback relative to total frames and specific step
+        weights (cropping vs refining vs removing).
+
+        Arguments:
+            None
+
+        Keyword arguments:
+            progress: [float or None] Explicit percentage override.
+
+        Return:
+            None
         """
 
         # Weight the different phases of the program by differeing weights
@@ -2097,7 +2162,7 @@ class ASTRA:
             current_percentage = sum(
                 self.progressed_frames[step]*time_weights_gaus[step]
                 for step in self.progressed_frames.keys()
-            ) / self.total_frames*100
+            )/self.total_frames*100
             self.progress_callback(int(current_percentage))
 
         # Else print callback to console
@@ -2109,31 +2174,29 @@ class ASTRA:
                 current_percentage = sum(
                     self.progressed_frames[step]*time_weights_gaus[step]
                     for step in self.progressed_frames.keys()
-                ) / self.total_frames*100
+                )/self.total_frames*100
                 progress_bar = '*'*int(current_percentage) + '-'*(100 - int(current_percentage))
                 print(f'{self.config.stationID} Progress: {progress_bar} : {int(current_percentage)}%')
 
     def selectSeedTriplet(self, picks, pick_frame_indices):
-        """
-        Select a consecutive seed triplet of picks/frames to initialize recursion.
+        """ Select a consecutive seed triplet of picks/frames to initialize recursion.
 
         Sorts picks by frame index, finds indices `i` such that frames
         [k[i], k[i+1], k[i+2]] are consecutive, prefers triplets not touching the
         sequence ends, then those whose middle frame is closest to the sequence center,
         and finally earliest start as a tiebreaker.
 
-        Args:
-            picks (array-like): (M, 2) float array of (x, y) picks.
-            pick_frame_indices (array-like): (M,) integer frame indices.
+        Arguments:
+            picks: [array-like] (M, 2) float array of (x, y) picks.
+            pick_frame_indices: [array-like] (M,) integer frame indices.
 
-        Returns:
-            tuple[np.ndarray, np.ndarray]:
+        Keyword arguments:
+            None
+
+        Return:
+            tuple:
                 seed_picks: (3, 2) picks for the chosen triplet.
                 seed_pick_frame_indices: (3,) frame indices for the triplet.
-
-        Raises:
-            ValueError: If fewer than 3 points or no consecutive triple is found,
-                or if shapes are inconsistent.
         """
 
         # Convert & validate
@@ -2185,8 +2248,22 @@ class ASTRA:
         return seed_picks, seed_pick_frame_indices
 
     def computeIntensitySum(self, photom_pixels, global_centroid, corr_frame, uncorr_frame, unsub_frame):
-        
-        # Get photometry pixels as as an array of x_indices, and y_indices
+        """ Calculate total intensity, background metrics, and saturation for a photometric crop.
+
+        Arguments:
+            photom_pixels: [ndarray] (N, 2) array of (x, y) pixel coordinates.
+            global_centroid: [tuple] Global (x, y) center of the crop.
+            corr_frame: [ndarray] Corrected frame.
+            uncorr_frame: [ndarray] Uncorrected (raw/flat-only) frame.
+            unsub_frame: [ndarray] Unsubtracted frame.
+
+        Keyword arguments:
+            None
+
+        Return:
+            None: Updates instance lists (photometry_pixels, saturated_bool_list, etc.)
+                in-place.
+        """
         photom_pixels = np.asarray(photom_pixels, dtype=np.int64)
         if photom_pixels.size == 0:
             raise ValueError("photom_pixels must contain at least one coordinate")
@@ -2409,7 +2486,7 @@ class ASTRA:
                 # Combined visualization - frame with photometry overlay
                 combined = np.zeros((*cropped_corrected_frame.shape, 3))
                 # Grayscale background
-                normalized = np.clip(cropped_corrected_frame / (vmax1 + 0.01), 0, 1)
+                normalized = np.clip(cropped_corrected_frame/(vmax1 + 0.01), 0, 1)
                 for i in range(3):
                     combined[:,:,i] = normalized
 
@@ -2468,20 +2545,23 @@ class ASTRA:
         return snr  
 
     def computePhotometryPixels(self, fit_img, cropped_frame, crop_vars):
-        """
-        Derive photometry pixels by thresholding the fitted image and cleaning morphology.
+        """ Determine photometry pixels for all processed frames.
 
+        Derive photometry pixels by thresholding the fitted image and cleaning morphology.
         Creates a binary mask from the fitted image, thresholds by a configured
         percentile over the masked crop, runs a morphological close to fill gaps,
         and returns the non-zero locations in global (x, y) order.
 
-        Args:
-            fit_img (np.ndarray): Fitted image for the crop, shape (h, w).
-            cropped_frame (np.ndarray): Crop image, shape (h, w).
-            crop_vars (Sequence[int | float]): [cx, cy, xmin, xmax, ymin, ymax].
+        Arguments:
+            fit_img: [ndarray] Fitted image for the crop, shape (h, w).
+            cropped_frame: [ndarray] Crop image, shape (h, w).
+            crop_vars: [Sequence] [cx, cy, xmin, xmax, ymin, ymax].
 
-        Returns:
-            list[tuple[int, int]]: Global (x, y) coordinates of photometry pixels.
+        Keyword arguments:
+            None
+
+        Return:
+            list: Global (x, y) coordinates of photometry pixels (tuples).
         """
 
         # Round crop variables to integers for indexing
@@ -2522,7 +2602,17 @@ class ASTRA:
         return photometry_pixels
 
     def refactorPicksToSkyFitFormat(self):
+        """ Convert internal picks to SkyFit-compatible format.
 
+        Arguments:
+            None
+
+        Keyword arguments:
+            None
+
+        Return:
+            ndarray: Array of shape (M, 4) containing [frame_index, x, y, level_sum].
+        """
         self.pick_list = {}
 
         for i, frame_index in enumerate(self.pick_frame_indices):
@@ -2541,8 +2631,7 @@ class ASTRA:
 #  --- Interfacing Functions --- 
 
     def process(self):
-        """
-        Run the full ASTRA pipeline on the provided frames/picks.
+        """ Run the full ASTRA pipeline on the provided frames/picks.
 
         Pipeline:
             1) Preprocess frames (dark/flat correction, gamma, background subtraction,
@@ -2554,23 +2643,15 @@ class ASTRA:
             via `removeLowSNRPicks`.
             5) Optionally save a diagnostic animation via `saveAni`.
 
-        Returns:
-            ASTRA: The same instance with the following key fields populated:
-                - avepixel_background (np.ndarray): Background model, shape (H, W).
-                - subtracted_frames (np.ma.MaskedArray): BG-subtracted & star-masked frames, shape (N, H, W).
-                - cropped_frames (list[np.ndarray]): Per-pick crops for fitting.
-                - first_pass_params (np.ndarray): PSO fit params per crop, shape (K, 5).
-                - refined_fit_params (np.ndarray): Local-refined params per crop, shape (K, 5).
-                - crop_vars (np.ndarray): Crop bookkeeping (cx, cy, xmin, xmax, ymin, ymax), shape (K, 6).
-                - global_picks (np.ndarray): Edge-aligned global picks, shape (K, 2).
-                - pick_frame_indices (np.ndarray): Frame index per kept crop, shape (K,).
-                - fit_costs (np.ndarray): Objective values per refined crop, shape (K,).
-                - times (np.ndarray): Timestamps per kept crop, shape (K,).
-                - snr (list[float]): SNR per kept crop (post filtering).
+        Arguments:
+            None
 
-        Raises:
-            Exception: If any individual stage throws; errors are caught/logged per step,
-                but uncaught exceptions will propagate.
+        Keyword arguments:
+            None
+
+        Return:
+            bool: True if pipeline finishes, False otherwise (unlikely to occur
+                due to exception raising).
         """
 
 
@@ -2604,7 +2685,17 @@ class ASTRA:
         return True
 
     def saveECSV(self, platepar):
-        """ Save the picks into the GDEF ECSV standard. """
+        """ Save the picks into the GDEF ECSV standard.
+
+        Arguments:
+            platepar: [Platepar] Astrometric plate parameters.
+
+        Keyword arguments:
+            None
+
+        Return:
+            bool: True if saving is successful, False if no picks to save.
+        """
 
         self.platepar = platepar
 
@@ -2708,7 +2799,7 @@ class ASTRA:
                 snr = 0.0
                 mag_err_random = 0.0
             else:
-                mag_err_random = 2.5*np.log10(1 + 1 / snr)
+                mag_err_random = 2.5*np.log10(1 + 1/snr)
 
                 mag_err_total = np.sqrt(mag_err_random**2 + self.platepar.mag_lev_stddev**2)
 
@@ -2747,25 +2838,71 @@ class ASTRA:
         return True
 
     def getResults(self, skyfit_format=False):
-        
-        if skyfit_format is True:
+        """ Retrieve current best fit results.
 
+        Arguments:
+            None
+
+        Keyword arguments:
+            skyfit_format: [bool] If True, returns dict compatible with SkyFit;
+                else a tuple of arrays/lists.
+
+        Return:
+            dict or tuple:
+                - If `skyfit_format` is True: Dict mapping frame_index -> pick_data.
+                - If False: (global_picks, global_pick_indices, snr, abs_level_sums,
+                  photometry_pixels, background_levels, saturated_bool_list).
+        """
+        if skyfit_format:
+            if not hasattr(self, 'pick_list') or self.pick_list is None:
+                self.refactorPicksToSkyFitFormat()
             return self.pick_list
-
         else:
-            global_pick_indices = [fr + self.first_pick_global_index for fr in self.pick_frame_indices]
-            return (self.global_picks, global_pick_indices, self.snr, self.abs_level_sums, 
+            return (self.global_picks, self.pick_frame_indices, self.snr, self.abs_level_sums, 
                 self.photometry_pixels, self.background_levels, self.saturated_bool_list)
     
     def getTotalPicks(self):
-        return len(self.pick_frame_indices)
+        """ Get total number of retained picks.
+
+        Arguments:
+            None
+
+        Keyword arguments:
+            None
+
+        Return:
+            int: Count of picks.
+        """
+        return len(self.global_picks)
     
     def getMinSnr(self):
+        """ Get configured minimum SNR.
+
+        Arguments:
+            None
+
+        Keyword arguments:
+            None
+
+        Return:
+            float: SNR threshold.
+        """
         return self.snr_threshold
 
 # Terminal call functions
 def checkAstraConfig(astra_config):
-    """Checks the config only has valid values"""
+    """ Checks the config only has valid values.
+
+    Arguments:
+        astra_config: [dict] Configuration object to validate.
+
+    Keyword arguments:
+        None
+
+    Return:
+        dict: Keys are config paths (e.g. "pso.w"), values are error strings.
+            Empty dict means validation passed.
+    """
     config = astra_config
     pso_ranges_and_types = {
         "w (0-1)": (0.0, 1.0, float),
@@ -2848,12 +2985,16 @@ def checkAstraConfig(astra_config):
     return errors
 
 def loadEvTxt(txt_file_path):
-    """
-    Loads the Ev*.txt file and adds the relevant info to pick_list
-    Args:
-        txt_file_path (str): Path to the Ev*.txt file to load
-    Returns:
-        picks (dict): (N : [8]) dict following same format as self.pick_list 
+    """ Load an Ev*.txt file and return picks in ASTRA format.
+
+    Arguments:
+        txt_file_path: [str] Absolute path to the .txt file.
+
+    Keyword arguments:
+        None
+
+    Return:
+        dict: Mapping frame_index -> {'x_centroid': float, 'y_centroid': float}.
     """
 
     picks = [] # (N, x, y) array of picks
@@ -2915,14 +3056,18 @@ def loadEvTxt(txt_file_path):
     
 def loadECSV(ECSV_file_path, dir_path, img_obj):
     # ASTRA Addition - Justin DT
-    """
-    Loads the ECSV file and adds the relevant info to pick_list
-    Args:
-        ECSV_file_path (str): Path to the ECSV file to load
-    Returns:
-        picks (np.ndarray): (N, 2) array of (x, y) picks
-        pick_frame_indices (np.ndarray): (N,) array of frame indices for each pick
-        mags (np.ndarray): (N,) array of magnitudes for each pick
+    """ Load an ECSV file and translate it to ASTRA pick format.
+
+    Arguments:
+        ECSV_file_path: [str] Full path to the .ecsv file.
+        dir_path: [str] Root directory path (unused in logic but kept for sig).
+        img_obj: [ImageSequence] Source image sequence reference (for time conversion).
+
+    Keyword arguments:
+        None
+
+    Return:
+        dict: Mapping frame_index -> {'x_centroid': float, 'y_centroid': float}.
     """
 
     # Instantiate arrays to be populated
@@ -3264,7 +3409,7 @@ Usage Examples:
         pick_dicts.append(pick_dict)
         platepars.append(platepar)
 
-        print(f"Loaded data ({i+1} / {len(config_folders)}) from {config_path}")
+        print(f"Loaded data ({i+1}/{len(config_folders)}) from {config_path}")
         
 
     # Using a threadpool run all astra processes (if only one, do not use threadpool)
