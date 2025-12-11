@@ -1845,12 +1845,15 @@ class Platepar(object):
                 if self.equal_aspect:
                     asym_ang_index -= 1
 
-                x_poly_fwd_print[asym_ang_index] = np.degrees(
-                    (2 * np.pi * x_poly_fwd_print[asym_ang_index]) % (2 * np.pi)
-                )
-                x_poly_rev_print[asym_ang_index] = np.degrees(
-                    (2 * np.pi * x_poly_rev_print[asym_ang_index]) % (2 * np.pi)
-                )
+                # Only convert if the array actually has the asymmetry parameter
+                if asym_ang_index < len(x_poly_fwd_print):
+                    x_poly_fwd_print[asym_ang_index] = np.degrees(
+                        (2 * np.pi * x_poly_fwd_print[asym_ang_index]) % (2 * np.pi)
+                    )
+                if asym_ang_index < len(x_poly_rev_print):
+                    x_poly_rev_print[asym_ang_index] = np.degrees(
+                        (2 * np.pi * x_poly_rev_print[asym_ang_index]) % (2 * np.pi)
+                    )
 
         out_str += "img2sky {:s} = {:s}\n".format(
             dist_string,
