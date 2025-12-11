@@ -636,7 +636,7 @@ class Platepar(object):
 
             # Unnormalize the pointing parameters
             pp_copy.RA_d = (360 * ra_ref) % (360)
-            pp_copy.dec_d = dec_ref * 90.0 - 90.0  # Inverse of (dec + 90) / 90
+            pp_copy.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
             pp_copy.pos_angle_ref = (360 * pos_angle_ref) % (360)
             pp_copy.F_scale = abs(F_scale)
 
@@ -670,7 +670,7 @@ class Platepar(object):
 
             # Unnormalize the pointing parameters
             pp_copy.RA_d = (360 * ra_ref) % (360)
-            pp_copy.dec_d = dec_ref * 90.0 - 90.0  # Inverse of (dec + 90) / 90
+            pp_copy.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
             pp_copy.pos_angle_ref = (360 * pos_angle_ref) % (360)
             pp_copy.F_scale = abs(F_scale)
 
@@ -721,7 +721,7 @@ class Platepar(object):
 
             # Unnormalize the pointing parameters
             pp_copy.RA_d = (360 * ra_ref) % (360)
-            pp_copy.dec_d = dec_ref * 90.0 - 90.0  # Inverse of (dec + 90) / 90
+            pp_copy.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
             pp_copy.pos_angle_ref = (360 * pos_angle_ref) % (360)
             pp_copy.F_scale = abs(F_scale)
 
@@ -920,7 +920,7 @@ class Platepar(object):
 
                     p0_current = [
                         self.RA_d / 360.0,
-                        (self.dec_d + 90) / 90.0,
+                        self.dec_d / 90,
                         self.pos_angle_ref / 360.0,
                         self.F_scale,
                     ] + self.x_poly_fwd.tolist()
@@ -950,7 +950,7 @@ class Platepar(object):
                             if best_res is not None:
                                 ra_ref, dec_ref, pos_angle_ref, F_scale = best_res.x[:4]
                                 self.RA_d = (360 * ra_ref) % (360)
-                                self.dec_d = dec_ref * 90.0 - 90.0  # Inverse of (dec + 90) / 90
+                                self.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
                                 self.pos_angle_ref = (360 * pos_angle_ref) % (360)
                                 self.F_scale = abs(F_scale)
                                 # Get all 3 radial3-odd coefficients: [x0, y0, k1]
@@ -967,7 +967,7 @@ class Platepar(object):
 
                             p0_current = [
                                 self.RA_d / 360.0,
-                                (self.dec_d + 90) / 90.0,
+                                self.dec_d / 90,
                                 self.pos_angle_ref / 360.0,
                                 self.F_scale,
                             ] + warm_start_coeffs
@@ -996,7 +996,7 @@ class Platepar(object):
                         # This avoids re-filtering inside every optimizer function evaluation
                         pp_filter = copy.deepcopy(self)
                         pp_filter.RA_d = (360 * start_params[0]) % 360
-                        pp_filter.dec_d = start_params[1] * 90.0 - 90.0
+                        pp_filter.dec_d = -90 + (90 * start_params[1] + 90) % (180.000001)
                         pp_filter.pos_angle_ref = (360 * start_params[2]) % 360
                         pp_filter.F_scale = abs(start_params[3])
                         ra_cat_all, dec_cat_all, _ = catalog_stars.T
@@ -1017,7 +1017,7 @@ class Platepar(object):
                         pp_temp = copy.deepcopy(self)
                         ra_ref, dec_ref, pos_angle_ref, F_scale = res.x[:4]
                         pp_temp.RA_d = (360 * ra_ref) % (360)
-                        pp_temp.dec_d = dec_ref * 90.0 - 90.0  # Inverse of (dec + 90) / 90
+                        pp_temp.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
                         pp_temp.pos_angle_ref = (360 * pos_angle_ref) % (360)
                         pp_temp.F_scale = abs(F_scale)
                         pp_temp.x_poly_fwd = np.array(res.x[4:])
@@ -1081,7 +1081,7 @@ class Platepar(object):
                     # Apply best RANSAC params to platepar
                     ra_ref, dec_ref, pos_angle_ref, F_scale = best_res.x[:4]
                     self.RA_d = (360 * ra_ref) % (360)
-                    self.dec_d = dec_ref * 90.0 - 90.0  # Inverse of (dec + 90) / 90
+                    self.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
                     self.pos_angle_ref = (360 * pos_angle_ref) % (360)
                     self.F_scale = abs(F_scale)
                     self.x_poly_fwd = np.array(best_res.x[4:])  # Ensure numpy array
@@ -1138,7 +1138,7 @@ class Platepar(object):
                 # Update fitted astrometric parameters (Unnormalize the pointing parameters)
                 ra_ref, dec_ref, pos_angle_ref, F_scale = res.x[:4]
                 self.RA_d = (360 * ra_ref) % (360)
-                self.dec_d = dec_ref * 90.0 - 90.0  # Inverse of (dec + 90) / 90
+                self.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
                 self.pos_angle_ref = (360 * pos_angle_ref) % (360)
                 self.F_scale = abs(F_scale)
 
