@@ -247,9 +247,14 @@ class Platepar(object):
             # Preserve centre for the radial distortion
             if self.distortion_type.startswith("radial"):
 
-                # Note that the radial distortion parameters are kept in the X poly array
-                x_centre_fwd, y_centre_fwd = self.x_poly_fwd[0], self.x_poly_fwd[1]
-                x_centre_rev, y_centre_rev = self.x_poly_rev[0], self.x_poly_rev[1]
+                # If force_distortion_centre is True, there are no centre coefficients to preserve
+                if self.force_distortion_centre:
+                    x_centre_fwd, y_centre_fwd = 0.0, 0.0
+                    x_centre_rev, y_centre_rev = 0.0, 0.0
+                else:
+                    # Note that the radial distortion parameters are kept in the X poly array
+                    x_centre_fwd, y_centre_fwd = self.x_poly_fwd[0], self.x_poly_fwd[1]
+                    x_centre_rev, y_centre_rev = self.x_poly_rev[0], self.x_poly_rev[1]
 
             else:
 

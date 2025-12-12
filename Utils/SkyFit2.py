@@ -3554,6 +3554,11 @@ class PlateTool(QtWidgets.QMainWindow):
             self.paired_stars = PairedStars()
             self.unsuitable_stars = PairedStars()
             self.residuals = None
+
+            # Clear residual overlay from previous image
+            self.updateFitResiduals()
+            self.residual_text.clear()
+
             self.drawPhotometryColoring()
 
             self.updateStars()
