@@ -71,7 +71,7 @@ from Utils.KalmanFilter import KalmanFilter
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
-from RMS.Routines.SatellitePositions import SatellitePredictor, loadTLEs, SKYFIELD_AVAILABLE
+from RMS.Routines.SatellitePositions import SatellitePredictor, loadTLEs, loadRobustTLEs, SKYFIELD_AVAILABLE
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
 from RMS.Astrometry.Conversions import datetime2JD
 from skyfield.api import load
@@ -618,7 +618,7 @@ if ASTRA_IMPORTED:
             super().closeEvent(event)
 
         def reject(self):
-            # Triggered by ESC / window manager close as well
+            # Triggered by ESC/window manager close as well
             self._handleClose()
             super().reject()
 
@@ -2546,7 +2546,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 status_str += ", Auto pan"
 
             if self.max_pixels_between_matched_stars != np.inf:
-                percentage_complete = min([100,100 * (len(self.paired_stars)+len(self.unsuitable_stars))/
+                percentage_complete = min([100,100*(len(self.paired_stars)+len(self.unsuitable_stars))/
                                                                 len(self.catalog_x_filtered)])
 
                 if self.max_pixels_between_matched_stars != 0:
@@ -7004,8 +7004,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         for i in range(img_crop.shape[0]):
             for j in range(img_crop.shape[1]):
-                i_rel = i - img_crop.shape[0] / 2
-                j_rel = j - img_crop.shape[1] / 2
+                i_rel = i - img_crop.shape[0]/2
+                j_rel = j - img_crop.shape[1]/2
                 pix_dist = math.sqrt(i_rel**2 + j_rel**2)
 
                 if pix_dist <= self.star_aperture_radius:
@@ -7013,8 +7013,8 @@ class PlateTool(QtWidgets.QMainWindow):
                     if net_flux > 0:
                         dx = i - x_centroid_crop
                         dy = j - y_centroid_crop
-                        moment_x += net_flux * dx**2
-                        moment_y += net_flux * dy**2
+                        moment_x += net_flux*dx**2
+                        moment_y += net_flux*dy**2
                         total_flux += net_flux
 
         # Compute sigma and FWHM
@@ -7026,10 +7026,10 @@ class PlateTool(QtWidgets.QMainWindow):
             sigma_y = math.sqrt(moment_y/total_flux)
 
             # Compute the circular sigma
-            sigma = math.sqrt((moment_x + moment_y) / (2 * total_flux))
+            sigma = math.sqrt((moment_x + moment_y)/(2*total_flux))
 
             # Compute a circular FWHM
-            fwhm = 2.355 * sigma
+            fwhm = 2.355*sigma
 
         ######################################################################################################
 
@@ -8437,8 +8437,21 @@ class PlateTool(QtWidgets.QMainWindow):
         t_end = None
         
         try:
+             # Use manually provided start time if available
+             if hasattr(self, 'beginning_time') and self.beginning_time is not None:
+                  t_start = self.beginning_time
+                  if t_start.tzinfo is None:
+                      t_start = t_start.replace(tzinfo=datetime.timezone.utc)
+                  
+                  # Determine end time from total frames and FPS, or fallback
+                  if hasattr(self, 'img_handle') and hasattr(self.img_handle, 'total_frames') and hasattr(self.img_handle, 'fps') and self.img_handle.fps > 0:
+                       duration = self.img_handle.total_frames/self.img_handle.fps
+                       t_end = t_start + datetime.timedelta(seconds=duration)
+                  else:
+                       t_end = t_start + datetime.timedelta(seconds=60)
+
              # Use current frame time as start
-             if hasattr(self, 'img_handle'):
+             elif hasattr(self, 'img_handle'):
                   
                   # Get the time of the first frame
                   t_start = self.img_handle.currentFrameTime(frame_no=0, dt_obj=True)
@@ -8449,7 +8462,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
                   # Determine end time from total frames and FPS
                   if hasattr(self.img_handle, 'total_frames') and hasattr(self.img_handle, 'fps') and self.img_handle.fps > 0:
-                       duration = self.img_handle.total_frames / self.img_handle.fps
+                       duration = self.img_handle.total_frames/self.img_handle.fps
                        t_end = t_start + datetime.timedelta(seconds=duration)
                   else:
                        # Fallback
@@ -8471,7 +8484,7 @@ class PlateTool(QtWidgets.QMainWindow):
         if self.tle_file and os.path.exists(self.tle_file):
              print(f"Loading TLEs from file: {self.tle_file}")
              try:
-                 sats = load.tle_file(self.tle_file)
+                 sats = loadRobustTLEs(self.tle_file)
              except Exception as e:
                  print(f"Error loading TLE file: {e}")
                  return
@@ -8524,10 +8537,10 @@ class PlateTool(QtWidgets.QMainWindow):
             print(f"Computed {len(self.satellite_tracks)} satellite tracks.")
             
             # Print details to console (matching CLI output)
-            print("-" * 60)
+            print("-"*60)
             print(f"Time Start (SkyFit2): {t_start}")
             print(f"Location: Lat={self.platepar.lat:.4f}, Lon={self.platepar.lon:.4f}, Elev={self.platepar.elev:.1f}m")
-            print("-" * 60)
+            print("-"*60)
             
             for track in self.satellite_tracks:
                 name = track['name']
@@ -8548,7 +8561,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     print(f"dec   = {d1:10.4f}, {d2:10.4f}")
                     print(f"x     = {x1:10.2f}, {x2:10.2f}")
                     print(f"y     = {y1:10.2f}, {y2:10.2f}")
-                    print("-" * 60)
+                    print("-"*60)
 
             self.drawSatelliteTracks()
             
@@ -8654,45 +8667,43 @@ class PlateTool(QtWidgets.QMainWindow):
             # Draw curve
             # Thicker line (width=2), alpha=0.5 (128)
             pen = pg.mkPen((100, 255, 255, 128), width=2)
-            curve = pg.PlotCurveItem(track['x'], track['y'], pen=pen, clickable=False)
+            
+            # Apply fixed scaling factor of 2.0 based on user observation
+            # The discrepancy is likely due to binning vs display resolution
+            x_plot = track['x']*2.0
+            y_plot = track['y']*2.0
+
+            
+            curve = pg.PlotCurveItem(x_plot, y_plot, pen=pen, clickable=False)
             self.view_widget.addItem(curve)
             self.sat_track_curves.append(curve)
             
             # Smart label placement
-            if len(track['x']) > 0:
-                x = track['x']
-                y = track['y']
+            if len(x_plot) > 0:
+                x = x_plot
+                y = y_plot
                 
                 # Default to middle point if no better point found
                 best_idx = len(x) // 2
                 
                 # Try to find a point well inside the image 
                 # (margin from edges)
-                found_good_spot = False
-                for i in range(0, len(x), max(1, len(x)//20)):
+                # Note: w and h are from platepar (e.g. 1920), but x_plot is scaled (e.g. 3840).
+                # We should scale w, h for the check effectively.
+                w_scaled = w*2.0
+                h_scaled = h*2.0
+                
+                for i in range(len(x)):
                     xi, yi = x[i], y[i]
-                    if (margin < xi < w - margin) and (margin < yi < h - margin):
-                        best_idx = i
-                        found_good_spot = True
-                        break
+                    if margin < xi < (w_scaled - margin) and margin < yi < (h_scaled - margin):
+                         best_idx = i
+                         break
                 
-                # If not found, try smaller margin
-                if not found_good_spot:
-                    for i in range(0, len(x), max(1, len(x)//20)):
-                        xi, yi = x[i], y[i]
-                        if (0 < xi < w) and (0 < yi < h):
-                            best_idx = i
-                            break
-
-                x_pos = x[best_idx]
-                y_pos = y[best_idx]
+                label_x = x[best_idx]
+                label_y = y[best_idx]
                 
-                # Clamp to screen just in case
-                x_pos = max(10, min(w - 10, x_pos))
-                y_pos = max(10, min(h - 10, y_pos))
-
-                text = pg.TextItem(track['name'], anchor=(0, 1), color=(200, 200, 200))
-                text.setPos(x_pos, y_pos)
+                text = pg.TextItem(track['name'], color=(100, 255, 255), anchor=(0, 1))
+                text.setPos(label_x, label_y)
                 self.view_widget.addItem(text)
                 self.sat_track_labels.append(text)
 

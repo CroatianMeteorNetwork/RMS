@@ -21,6 +21,80 @@ import urllib.request
 import traceback
 import argparse
 
+import tempfile
+
+def loadRobustTLEs(file_path):
+    """ Loads TLEs from a file, handling potential errors with non-standard IDs (e.g. 'T0000').
+    
+    Arguments:
+        file_path: [str] Path to the TLE file.
+        
+    Return:
+        satellites: [list] List of properties for EarthSatellite objects.
+    """
+    
+    try:
+        # Try loading normally first
+        return load.tle_file(file_path)
+    except ValueError as e:
+        # Check if it's the specific int conversion error
+        if "invalid literal for int()" not in str(e):
+            raise e
+            
+        print(f"Warning: Standard TLE loading failed ({e}). Attempting robust loading with sanitized IDs...")
+        
+        # Read the file
+        with open(file_path, 'r') as f:
+            lines = f.readlines()
+            
+        # Sanitize IDs
+        # We need to replace non-numeric IDs in columns 2-7 with a numeric dummy ID
+        # We must ensure line 1 and 2 for the same sat get the same ID.
+        
+        sanitized_lines = []
+        
+        # Map original bad ID -> new dummy ID
+        # Start from 90000 to avoid conflicts with common sats
+        next_dummy_id = 90000 
+        id_map = {}
+        
+        for line in lines:
+            # Check if line 1 or 2 of TLE
+            if len(line) > 60 and line[0] in ('1', '2') and line[1] == ' ':
+                # Extract ID
+                curr_id = line[2:7]
+                
+                # Check if it's alphanumeric
+                if not curr_id.strip().isdigit():
+                    # It's bad. Do we have a replacement?
+                    if curr_id not in id_map:
+                        id_map[curr_id] = f"{next_dummy_id:05d}"
+                        next_dummy_id += 1
+                        
+                    new_id = id_map[curr_id]
+                    # Replace in line
+                    line = line[:2] + new_id + line[7:]
+            
+            sanitized_lines.append(line)
+            
+        # Write to temp file and load
+        with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp:
+            tmp.writelines(sanitized_lines)
+            tmp_path = tmp.name
+            
+        try:
+             sats = load.tle_file(tmp_path)
+             # Restore names/original IDs? 
+             # The EarthSatellite object has .model.satnum (integer).
+             # The name is separate.
+             # We can't easily restore the textual string ID inside the object if it stores int.
+             # But functionality should be fine.
+             print(f"Successfully loaded {len(sats)} satellites after sanitization.")
+             return sats
+        finally:
+             if os.path.exists(tmp_path):
+                 os.remove(tmp_path)
+
 
 def loadTLEs(cache_dir, cache_file_name="active.txt", 
                          url="http://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=tle", 
@@ -69,7 +143,7 @@ def loadTLEs(cache_dir, cache_file_name="active.txt",
 
     # Load satellites from file
     try:
-        satellites = load.tle_file(cache_path)
+        satellites = loadRobustTLEs(cache_path)
         return satellites
     except Exception as e:
         print(f"Error loading TLEs from {cache_path}: {e}")
@@ -249,26 +323,36 @@ class SatellitePredictor:
                         y_all.append(y[0])
                         ra_all.append(r)
                         dec_all.append(d)
-                        
+                    
                     # Filter out ridiculous values (behind camera etc) if any
                     x_all = np.array(x_all)
                     y_all = np.array(y_all)
                     ra_all = np.array(ra_all)
                     dec_all = np.array(dec_all)
                     
-                    # Check if valid
-                    # Simple check: inside image bounds?
-                    # w = platepar.X_res
-                    # h = platepar.Y_res
+                    # Check if at least 2 points are inside the image bounds
+                    w = platepar.X_res
+                    h = platepar.Y_res
                     
-                    # If at least some points are within reasonable bounds
-                    if len(x_all) > 0:
+                    # Create a boolean mask for points inside the image
+                    inside_mask = (x_all >= 0) & (x_all <= w) & (y_all >= 0) & (y_all <= h)
+                    
+
+
+                    # If at least 2 points are within the image
+                    if np.sum(inside_mask) >= 2:
+                        # Clip the track to only include points inside the FOV
+                        x_clipped = x_all[inside_mask]
+                        y_clipped = y_all[inside_mask]
+                        ra_clipped = ra_all[inside_mask]
+                        dec_clipped = dec_all[inside_mask]
+
                         visible_tracks.append({
                             "name": sat.name,
-                            "x": x_all,
-                            "y": y_all,
-                            "ra": ra_all,
-                            "dec": dec_all
+                            "x": x_clipped,
+                            "y": y_clipped,
+                            "ra": ra_clipped,
+                            "dec": dec_clipped
                         })
                         
             except Exception as e:
