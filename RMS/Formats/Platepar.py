@@ -535,6 +535,29 @@ class Platepar(object):
         # This avoids expensive deepcopy on every optimizer iteration
         pp_work = copy.deepcopy(self)
 
+        # CRITICAL: Update the platepar's reference time to match the observation time.
+        # The coordinate transformation uses (JD, Ho) as the reference frame. If we don't
+        # update these to match the observation JD, changing RA_d won't have the expected
+        # effect on the catalog star projections.
+        #
+        # When we change JD/Ho, we must also adjust RA_d to maintain the same pointing direction.
+        # The relationship is: new_RA_d = old_RA_d + delta_Ho (sidereal rotation)
+        old_Ho = pp_work.Ho
+
+        pp_work.JD = jd
+        T = (jd - 2451545.0) / 36525.0
+        new_Ho = (
+            280.46061837
+            + 360.98564736629 * (jd - 2451545.0)
+            + 0.000387933 * T ** 2
+            - T ** 3 / 38710000.0
+        ) % 360
+        pp_work.Ho = new_Ho
+
+        # Compute delta Ho and adjust RA_d to preserve pointing direction
+        delta_Ho = (new_Ho - old_Ho) % 360
+        pp_work.RA_d = (self.RA_d + delta_Ho) % 360
+
         # Pre-extract catalog coordinates (constant across iterations)
         ra_catalog, dec_catalog, _ = catalog_stars.T
 
@@ -581,10 +604,15 @@ class Platepar(object):
 
             return total_cost
 
-        # Initial parameters
-        p0 = [self.RA_d, self.dec_d, self.pos_angle_ref]
+        # Initial parameters - use pp_work.RA_d which has been adjusted for the new JD/Ho
+        p0 = [pp_work.RA_d, self.dec_d, self.pos_angle_ref]
         if not fixed_scale:
             p0.append(abs(self.F_scale))
+
+        # Debug: compute initial cost
+        initial_cost = _calcPointingNNCostPixel(p0, pp_work, jd, ra_catalog, dec_catalog, img_x, img_y, fixed_scale)
+        print("    fitPointingNN: BEFORE RA={:.2f} Dec={:.2f} Rot={:.2f} cost={:.1f}".format(
+            p0[0], p0[1], p0[2], initial_cost))
 
         # Fit using Nelder-Mead (robust for NN cost landscape)
         res = scipy.optimize.minimize(
@@ -595,10 +623,25 @@ class Platepar(object):
             options={'maxiter': 5000, 'adaptive': True},
         )
 
+        # Debug: show result
+        print("    fitPointingNN: AFTER  RA={:.2f} Dec={:.2f} Rot={:.2f} cost={:.1f} success={}".format(
+            res.x[0], res.x[1], res.x[2], res.fun, res.success))
+
         # Update fitted parameters
         self.RA_d, self.dec_d, self.pos_angle_ref = res.x[:3]
         if not fixed_scale:
             self.F_scale = abs(res.x[3])
+
+        # Update JD and Ho to match the observation time
+        # This ensures the fitted RA_d is consistent with the new reference time
+        self.JD = jd
+        T = (jd - 2451545.0) / 36525.0
+        self.Ho = (
+            280.46061837
+            + 360.98564736629 * (jd - 2451545.0)
+            + 0.000387933 * T ** 2
+            - T ** 3 / 38710000.0
+        ) % 360
 
         # Update alt/az of pointing
         self.updateRefAltAz()
@@ -1012,8 +1055,18 @@ class Platepar(object):
                     total_iters = 14  # 7 + 7 iterations
                     switch_iter = 7   # Switch from radial3-odd to radial5-odd after iteration 7
 
-                    # Start with radial3-odd
-                    self.setDistortionType("radial3-odd", reset_params=False)
+                    # Start with radial3-odd - convert coefficients intelligently
+                    # This preserves k1 when converting from e.g. radial7-odd to radial3-odd
+                    if self.distortion_type.startswith("radial") and self.distortion_type != "radial3-odd":
+                        # Convert coefficients before changing distortion type
+                        radial3_x, radial3_y = self.convertDistortionCoeffs("radial3-odd")
+                        self.setDistortionType("radial3-odd", reset_params=False)
+                        self.x_poly_fwd = radial3_x
+                        self.x_poly_rev = radial3_x.copy()
+                        self.y_poly_fwd = radial3_y
+                        self.y_poly_rev = radial3_y.copy()
+                    else:
+                        self.setDistortionType("radial3-odd", reset_params=False)
 
                     p0_current = [
                         self.RA_d / 360.0,
@@ -1042,35 +1095,34 @@ class Platepar(object):
                         # Switch to radial5-odd after iteration 7 with warm start
                         if iteration == switch_iter:
                             # Save current best params from radial3-odd
-                            # radial3-odd array structure: [x0, y0, k1] (3 params)
-                            # radial5-odd array structure: [x0, y0, k1, k2] (4 params)
                             if best_res is not None:
                                 ra_ref, dec_ref, pos_angle_ref, F_scale = best_res.x[:4]
                                 self.RA_d = (360 * ra_ref) % (360)
                                 self.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
                                 self.pos_angle_ref = (360 * pos_angle_ref) % (360)
                                 self.F_scale = abs(F_scale)
-                                # Get all 3 radial3-odd coefficients: [x0, y0, k1]
-                                radial3_coeffs = list(best_res.x[4:7])  # params[4:7] = distortion
-                            else:
-                                radial3_coeffs = list(self.x_poly_fwd[:3])
+                                # Update x_poly_fwd with best radial3-odd coefficients
+                                self.x_poly_fwd = np.array(best_res.x[4:])
+                                self.x_poly_rev = self.x_poly_fwd.copy()
 
-                            # Switch to radial5-odd WITHOUT resetting params
+                            # Convert coefficients from radial3-odd to radial5-odd intelligently
+                            # This preserves x0, y0, xy, a1, a2, k1 and adds k2=0
+                            radial5_x, radial5_y = self.convertDistortionCoeffs("radial5-odd")
                             self.setDistortionType("radial5-odd", reset_params=False)
-                            # Warm start: [x0, y0, k1, 0.0] - carry over radial3 coeffs, add k2=0
-                            warm_start_coeffs = radial3_coeffs + [0.0]  # Add k2=0
-                            self.x_poly_fwd = np.array(warm_start_coeffs)
-                            self.x_poly_rev = np.array(warm_start_coeffs)
+                            self.x_poly_fwd = radial5_x
+                            self.x_poly_rev = radial5_x.copy()
+                            self.y_poly_fwd = radial5_y
+                            self.y_poly_rev = radial5_y.copy()
 
                             p0_current = [
                                 self.RA_d / 360.0,
                                 self.dec_d / 90,
                                 self.pos_angle_ref / 360.0,
                                 self.F_scale,
-                            ] + warm_start_coeffs
+                            ] + self.x_poly_fwd.tolist()
                             best_res = None  # Reset best result for new distortion type
                             best_cost = float('inf')
-                            print("      --- Switching to radial5-odd (warm start from [x0, y0, k1]) ---")
+                            print("      --- Switching to radial5-odd (warm start with coefficient conversion) ---")
 
                         # Exclude stars that were outliers in the previous iteration
                         # This ensures outliers don't contaminate subsequent fits
@@ -1159,9 +1211,12 @@ class Platepar(object):
                             best_res = res
 
                         dist_label = "radial5-odd" if iteration >= switch_iter else "radial3-odd"
-                        print("      Iter {}: {} (w={}) fit on {}, {} outliers, cost={:.6f}".format(
+                        # Debug: show RA/Dec at each iteration
+                        iter_ra = (360 * res.x[0]) % 360
+                        iter_dec = -90 + (90 * res.x[1] + 90) % 180.000001
+                        print("      Iter {}: {} (w={}) fit on {}, {} outliers, cost={:.6f}, RA={:.2f} Dec={:.2f}".format(
                             iteration + 1, dist_label, weight, len(subset_indices),
-                            np.sum(iteration_outliers), total_cost))
+                            np.sum(iteration_outliers), total_cost, iter_ra, iter_dec))
 
                     # Outlier mask: positive score = more outlier votes than inlier votes
                     # Max possible score: 7*1 + 7*2 = 7+14 = 21 (all outlier)
@@ -1356,6 +1411,218 @@ class Platepar(object):
             self.x_poly_rev = self.x_poly_rev[: self.poly_length]
             self.y_poly_fwd = self.y_poly_fwd[: self.poly_length]
             self.y_poly_rev = self.y_poly_rev[: self.poly_length]
+
+    def extractRadialCoeffs(self, x_poly=None):
+        """Extract logical radial distortion coefficients from the array.
+
+        The coefficient array structure depends on flags (force_distortion_centre, equal_aspect,
+        asymmetry_corr) and distortion type. This method extracts the logical values regardless
+        of array layout.
+
+        Arguments:
+            x_poly: [ndarray] Optional coefficient array to extract from. If None, uses self.x_poly_fwd.
+
+        Returns:
+            dict: Dictionary with keys 'x0', 'y0', 'xy', 'a1', 'a2', 'k1', 'k2', 'k3', 'k4'
+                  Values are 0.0 for coefficients not present in the current distortion type.
+        """
+        if x_poly is None:
+            x_poly = self.x_poly_fwd
+
+        # Only works for radial distortion types
+        if not self.distortion_type.startswith("radial"):
+            return None
+
+        # Compute index offset based on flags (same logic as CyFunctions.pyx)
+        index_offset = 0
+        if self.force_distortion_centre:
+            index_offset += 2
+        if self.equal_aspect:
+            index_offset += 1
+        if not self.asymmetry_corr:
+            index_offset += 2
+
+        result = {'x0': 0.0, 'y0': 0.0, 'xy': 0.0, 'a1': 0.0, 'a2': 0.0,
+                  'k1': 0.0, 'k2': 0.0, 'k3': 0.0, 'k4': 0.0}
+
+        # Extract coefficients based on current flags
+        idx = 0
+
+        # Distortion center
+        if not self.force_distortion_centre:
+            if idx < len(x_poly):
+                result['x0'] = x_poly[idx]
+            idx += 1
+            if idx < len(x_poly):
+                result['y0'] = x_poly[idx]
+            idx += 1
+
+        # Aspect ratio
+        if not self.equal_aspect:
+            if idx < len(x_poly):
+                result['xy'] = x_poly[idx]
+            idx += 1
+
+        # Asymmetry correction
+        if self.asymmetry_corr:
+            if idx < len(x_poly):
+                result['a1'] = x_poly[idx]
+            idx += 1
+            if idx < len(x_poly):
+                result['a2'] = x_poly[idx]
+            idx += 1
+
+        # Radial distortion coefficients (k1, k2, k3, k4)
+        # Number depends on distortion type: radial3-odd has k1, radial5-odd has k1,k2, etc.
+        if idx < len(x_poly):
+            result['k1'] = x_poly[idx]
+        idx += 1
+        if idx < len(x_poly):
+            result['k2'] = x_poly[idx]
+        idx += 1
+        if idx < len(x_poly):
+            result['k3'] = x_poly[idx]
+        idx += 1
+        if idx < len(x_poly):
+            result['k4'] = x_poly[idx]
+
+        return result
+
+    def buildRadialCoeffs(self, coeffs_dict, target_dist_type=None):
+        """Build a coefficient array from logical radial distortion coefficients.
+
+        Arguments:
+            coeffs_dict: [dict] Dictionary with keys 'x0', 'y0', 'xy', 'a1', 'a2', 'k1', 'k2', 'k3', 'k4'
+            target_dist_type: [str] Target distortion type. If None, uses current self.distortion_type.
+
+        Returns:
+            ndarray: Coefficient array for the target distortion type.
+        """
+        if target_dist_type is None:
+            target_dist_type = self.distortion_type
+
+        # Only works for radial distortion types
+        if not target_dist_type.startswith("radial"):
+            return None
+
+        result = []
+
+        # Distortion center
+        if not self.force_distortion_centre:
+            result.append(coeffs_dict.get('x0', 0.0))
+            result.append(coeffs_dict.get('y0', 0.0))
+
+        # Aspect ratio
+        if not self.equal_aspect:
+            result.append(coeffs_dict.get('xy', 0.0))
+
+        # Asymmetry correction
+        if self.asymmetry_corr:
+            result.append(coeffs_dict.get('a1', 0.0))
+            result.append(coeffs_dict.get('a2', 0.0))
+
+        # Radial distortion coefficients - number depends on target type
+        result.append(coeffs_dict.get('k1', 0.0))
+
+        if target_dist_type in ["radial5-odd", "radial7-odd", "radial9-odd",
+                                "radial4-all", "radial5-all"]:
+            result.append(coeffs_dict.get('k2', 0.0))
+
+        if target_dist_type in ["radial7-odd", "radial9-odd", "radial5-all"]:
+            result.append(coeffs_dict.get('k3', 0.0))
+
+        if target_dist_type in ["radial9-odd"]:
+            result.append(coeffs_dict.get('k4', 0.0))
+
+        return np.array(result)
+
+    def convertDistortionCoeffs(self, target_dist_type):
+        """Convert current distortion coefficients to a new distortion type.
+
+        This properly maps coefficients when switching between radial distortion types,
+        preserving k1 when going from e.g. radial7-odd to radial3-odd.
+
+        Arguments:
+            target_dist_type: [str] Target distortion type (e.g., "radial3-odd", "radial5-odd").
+
+        Returns:
+            tuple: (x_poly_new, y_poly_new) - New coefficient arrays for the target type.
+        """
+        # Only works for radial-to-radial conversions
+        if not self.distortion_type.startswith("radial") or not target_dist_type.startswith("radial"):
+            return self.x_poly_fwd.copy(), self.y_poly_fwd.copy()
+
+        # Extract logical coefficients from current arrays
+        x_coeffs = self.extractRadialCoeffs(self.x_poly_fwd)
+        y_coeffs = self.extractRadialCoeffs(self.y_poly_fwd)
+
+        # Build new arrays for target type
+        x_poly_new = self.buildRadialCoeffs(x_coeffs, target_dist_type)
+        y_poly_new = self.buildRadialCoeffs(y_coeffs, target_dist_type)
+
+        return x_poly_new, y_poly_new
+
+    def remapCoeffsForFlagChange(self, flag_name, new_value):
+        """Remap distortion coefficients when a flag changes.
+
+        This method properly remaps coefficients when toggling flags like
+        force_distortion_centre, equal_aspect, or asymmetry_corr. It extracts
+        the logical coefficient values BEFORE changing the flag, changes the flag,
+        then rebuilds the coefficient arrays with the new flag state.
+
+        Arguments:
+            flag_name: [str] Name of flag to change ('force_distortion_centre',
+                       'equal_aspect', or 'asymmetry_corr')
+            new_value: [bool] New value for the flag
+
+        Returns:
+            bool: True if remapping was performed, False if not applicable
+        """
+        # Only works for radial distortion types
+        if not self.distortion_type.startswith("radial"):
+            # Just set the flag directly for non-radial types
+            setattr(self, flag_name, new_value)
+            return False
+
+        # Get current flag value
+        old_value = getattr(self, flag_name)
+
+        # If flag isn't changing, nothing to do
+        if old_value == new_value:
+            return False
+
+        # Extract logical coefficients BEFORE changing the flag
+        x_coeffs_fwd = self.extractRadialCoeffs(self.x_poly_fwd)
+        x_coeffs_rev = self.extractRadialCoeffs(self.x_poly_rev)
+        y_coeffs_fwd = self.extractRadialCoeffs(self.y_poly_fwd)
+        y_coeffs_rev = self.extractRadialCoeffs(self.y_poly_rev)
+
+        if x_coeffs_fwd is None:
+            # Not radial, just set flag
+            setattr(self, flag_name, new_value)
+            return False
+
+        # Change the flag
+        setattr(self, flag_name, new_value)
+
+        # Update poly_length using setDistortionType (which recalculates it)
+        # but with reset_params=False to not zero out coefficients
+        self.setDistortionType(self.distortion_type, reset_params=False)
+
+        # Rebuild coefficient arrays with the new flag state
+        self.x_poly_fwd = self.buildRadialCoeffs(x_coeffs_fwd, self.distortion_type)
+        self.x_poly_rev = self.buildRadialCoeffs(x_coeffs_rev, self.distortion_type)
+        self.y_poly_fwd = self.buildRadialCoeffs(y_coeffs_fwd, self.distortion_type)
+        self.y_poly_rev = self.buildRadialCoeffs(y_coeffs_rev, self.distortion_type)
+
+        # Ensure proper length (in case of edge cases)
+        self.padDictParams()
+
+        # Update x_poly and y_poly references
+        self.x_poly = self.x_poly_fwd
+        self.y_poly = self.y_poly_fwd
+
+        return True
 
     def loadFromDict(self, platepar_dict, use_flat=None):
         """Load the platepar from a dictionary."""

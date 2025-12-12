@@ -4851,7 +4851,9 @@ class PlateTool(QtWidgets.QMainWindow):
             # Force distortion centre to image centre
             elif event.key() == QtCore.Qt.Key_B:
                 if self.platepar is not None:
-                    self.platepar.force_distortion_centre = not self.platepar.force_distortion_centre
+                    # Use remapCoeffsForFlagChange to preserve distortion coefficients
+                    new_value = not self.platepar.force_distortion_centre
+                    self.platepar.remapCoeffsForFlagChange('force_distortion_centre', new_value)
 
                     self.tab.param_manager.updatePlatepar()
                     self.updateLeftLabels()
@@ -4864,9 +4866,9 @@ class PlateTool(QtWidgets.QMainWindow):
             elif event.key() == QtCore.Qt.Key_G:
 
                 if self.platepar is not None:
-
-                    self.platepar.equal_aspect = not self.platepar.equal_aspect
-                    self.platepar.resetDistortionParameters()
+                    # Use remapCoeffsForFlagChange to preserve distortion coefficients
+                    new_value = not self.platepar.equal_aspect
+                    self.platepar.remapCoeffsForFlagChange('equal_aspect', new_value)
 
                     self.tab.param_manager.updatePlatepar()
                     self.updateLeftLabels()
@@ -4879,9 +4881,9 @@ class PlateTool(QtWidgets.QMainWindow):
             elif event.key() == QtCore.Qt.Key_Y:
 
                 if self.platepar is not None:
-
-                    self.platepar.asymmetry_corr = not self.platepar.asymmetry_corr
-                    self.platepar.resetDistortionParameters()
+                    # Use remapCoeffsForFlagChange to preserve distortion coefficients
+                    new_value = not self.platepar.asymmetry_corr
+                    self.platepar.remapCoeffsForFlagChange('asymmetry_corr', new_value)
 
                     self.tab.param_manager.updatePlatepar()
                     self.updateLeftLabels()
@@ -6304,13 +6306,16 @@ class PlateTool(QtWidgets.QMainWindow):
         print("  Matched {} star pairs".format(len(self.paired_stars)))
 
         # Restore user's distortion settings for final refinement fit
-        self.platepar.distortion_type = user_distortion_type
+        # Must restore flags BEFORE calling setDistortionType so poly_length is computed correctly
         self.platepar.equal_aspect = user_equal_aspect
         self.platepar.asymmetry_corr = user_asymmetry_corr
         self.platepar.force_distortion_centre = user_force_distortion_centre
         self.platepar.refraction = user_refraction
         self.fit_only_pointing = user_fit_only_pointing
         self.fixed_scale = user_fixed_scale
+        # Now set distortion type which will adjust poly_length and pad coefficients
+        # Use reset_params=False to preserve the fitted coefficients, just add zeros for new terms
+        self.platepar.setDistortionType(user_distortion_type, reset_params=False)
 
         # Do a final fit with user's distortion settings
         if len(self.paired_stars) >= 10:
