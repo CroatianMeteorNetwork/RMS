@@ -28,6 +28,7 @@ from RMS.Logger import LoggingManager, getLogger
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog
+from RMS.Math import angularSeparation
 
 
 log = getLogger('rmslogger')
@@ -50,8 +51,9 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
     Keyword arguments:
         scale_update: [bool] Update the platepar scale. False by default.
         show_plot: [bool] Unused, kept for backward compatibility.
-        translation_limit: [float] Unused, kept for backward compatibility.
-        rotation_limit: [float] Unused, kept for backward compatibility.
+        translation_limit: [float] Maximum allowed translation in pixels. Default is 200.
+            Converted to angular limit using the plate scale.
+        rotation_limit: [float] Maximum allowed rotation in degrees. Default is 30.
 
     Return:
         platepar_aligned: [Platepar instance] The aligned platepar.
@@ -125,6 +127,31 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
         log.info("    Rot: {:.4f} -> {:.4f} deg".format(platepar.pos_angle_ref, platepar_aligned.pos_angle_ref))
         if scale_update:
             log.info("    Scale: {:.4f} -> {:.4f}".format(platepar.F_scale, platepar_aligned.F_scale))
+
+        # Sanity check: reject if pointing has drifted too far from the original
+        # Convert translation_limit (pixels) to angular limit using plate scale
+        # F_scale is in arcsec/pixel, so: angular_limit = translation_limit * F_scale / 3600
+        pointing_limit_deg = (translation_limit * platepar.F_scale) / 3600.0
+
+        # Compute angular separation between original and fitted pointing
+        pointing_drift_deg = np.degrees(angularSeparation(
+            np.radians(platepar.RA_d), np.radians(platepar.dec_d),
+            np.radians(platepar_aligned.RA_d), np.radians(platepar_aligned.dec_d)
+        ))
+
+        # Check rotation change
+        rotation_change_deg = abs(platepar_aligned.pos_angle_ref - platepar.pos_angle_ref)
+        if rotation_change_deg > 180:
+            rotation_change_deg = 360 - rotation_change_deg
+
+        if pointing_drift_deg > pointing_limit_deg or rotation_change_deg > rotation_limit:
+            log.warning("alignPlatepar: Drift exceeds limits, returning original platepar")
+            log.warning("    Pointing drift: {:.2f} deg, limit: {:.2f} deg".format(
+                pointing_drift_deg, pointing_limit_deg))
+            log.warning("    Rotation change: {:.2f} deg, limit: {:.2f} deg".format(
+                rotation_change_deg, rotation_limit))
+            return platepar
+
     else:
         log.warning("alignPlatepar: Fit did not converge, returning original platepar")
         return platepar
