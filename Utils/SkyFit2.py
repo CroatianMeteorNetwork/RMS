@@ -8650,9 +8650,9 @@ class PlateTool(QtWidgets.QMainWindow):
         
         # Clear existing
         for curve in self.sat_track_curves:
-            self.view_widget.removeItem(curve)
+            self.img_frame.removeItem(curve)
         for label in self.sat_track_labels:
-            self.view_widget.removeItem(label)
+            self.img_frame.removeItem(label)
         self.sat_track_curves = []
         self.sat_track_labels = []
 
@@ -8668,34 +8668,23 @@ class PlateTool(QtWidgets.QMainWindow):
             # Thicker line (width=2), alpha=0.5 (128)
             pen = pg.mkPen((100, 255, 255, 128), width=2)
             
-            # Apply fixed scaling factor of 2.0 based on user observation
-            # The discrepancy is likely due to binning vs display resolution
-            x_plot = track['x']*2.0
-            y_plot = track['y']*2.0
-
-            
-            curve = pg.PlotCurveItem(x_plot, y_plot, pen=pen, clickable=False)
-            self.view_widget.addItem(curve)
+            curve = pg.PlotCurveItem(track['x'], track['y'], pen=pen, clickable=False)
+            self.img_frame.addItem(curve)
             self.sat_track_curves.append(curve)
             
             # Smart label placement
-            if len(x_plot) > 0:
-                x = x_plot
-                y = y_plot
+            if len(track['x']) > 0:
+                x = track['x']
+                y = track['y']
                 
                 # Default to middle point if no better point found
                 best_idx = len(x) // 2
                 
                 # Try to find a point well inside the image 
                 # (margin from edges)
-                # Note: w and h are from platepar (e.g. 1920), but x_plot is scaled (e.g. 3840).
-                # We should scale w, h for the check effectively.
-                w_scaled = w*2.0
-                h_scaled = h*2.0
-                
                 for i in range(len(x)):
                     xi, yi = x[i], y[i]
-                    if margin < xi < (w_scaled - margin) and margin < yi < (h_scaled - margin):
+                    if margin < xi < (w - margin) and margin < yi < (h - margin):
                          best_idx = i
                          break
                 
@@ -8704,7 +8693,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 
                 text = pg.TextItem(track['name'], color=(100, 255, 255), anchor=(0, 1))
                 text.setPos(label_x, label_y)
-                self.view_widget.addItem(text)
+                self.img_frame.addItem(text)
                 self.sat_track_labels.append(text)
 
 
