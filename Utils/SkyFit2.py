@@ -8663,10 +8663,28 @@ class PlateTool(QtWidgets.QMainWindow):
         h = self.platepar.Y_res
         margin = 100 # pixels from edge
 
-        for track in self.satellite_tracks:
+        # Define a list of high-contrast colors suitable for both dark and light backgrounds
+        # (R, G, B)
+        colors = [
+            (255, 0, 0),      # Red
+            (0, 255, 0),      # Green
+            (60, 100, 255),   # Lighter Blue
+            (255, 255, 0),    # Yellow
+            (255, 0, 255),    # Magenta
+            (0, 255, 255),    # Cyan
+            (255, 128, 0),    # Orange
+            (128, 0, 255),    # Purple
+        ]
+
+        for i, track in enumerate(self.satellite_tracks):
+            # Cycle through colors
+            color = colors[i % len(colors)]
+            
             # Draw curve
             # Thicker line (width=2), alpha=0.5 (128)
-            pen = pg.mkPen((100, 255, 255, 128), width=2)
+            # Use color with alpha
+            pen_color = color + (128,)
+            pen = pg.mkPen(pen_color, width=2)
             
             curve = pg.PlotCurveItem(track['x'], track['y'], pen=pen, clickable=False)
             self.img_frame.addItem(curve)
@@ -8691,7 +8709,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 label_x = x[best_idx]
                 label_y = y[best_idx]
                 
-                text = pg.TextItem(track['name'], color=(100, 255, 255), anchor=(0, 1))
+                text = pg.TextItem(track['name'], color=color, anchor=(0, 1))
                 text.setPos(label_x, label_y)
                 self.img_frame.addItem(text)
                 self.sat_track_labels.append(text)
