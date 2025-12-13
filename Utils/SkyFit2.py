@@ -3672,6 +3672,12 @@ class PlateTool(QtWidgets.QMainWindow):
         for remove in to_remove:
             del dic[remove]
 
+        # Explicitly remove pyqtgraph items that might not have been caught
+        if 'sat_track_curves' in dic:
+            del dic['sat_track_curves']
+        if 'sat_track_labels' in dic:
+            del dic['sat_track_labels']
+
         # if os.path.isdir(self.input_path):
         #     real_input_path = os.path.join(self.input_path, img_name)
         #     dic['input_path'] = real_input_path
