@@ -71,7 +71,7 @@ from Utils.KalmanFilter import KalmanFilter
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
-from RMS.Routines.SatellitePositions import SatellitePredictor, loadTLEs, loadRobustTLEs, SKYFIELD_AVAILABLE
+from RMS.Routines.SatellitePositions import SatellitePredictor, loadTLEs, loadRobustTLEs, findClosestTLEFile, SKYFIELD_AVAILABLE
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
 from RMS.Astrometry.Conversions import datetime2JD
 from skyfield.api import load
@@ -8482,12 +8482,24 @@ class PlateTool(QtWidgets.QMainWindow):
              return
 
         if self.tle_file and os.path.exists(self.tle_file):
-             print(f"Loading TLEs from file: {self.tle_file}")
-             try:
-                 sats = loadRobustTLEs(self.tle_file)
-             except Exception as e:
-                 print(f"Error loading TLE file: {e}")
-                 return
+             
+             tle_path_to_load = self.tle_file
+             
+             # If directory, find the best file
+             if os.path.isdir(self.tle_file):
+                 tle_path_to_load = findClosestTLEFile(self.tle_file, t_start)
+             
+             if tle_path_to_load:
+                 print(f"Loading TLEs from file: {tle_path_to_load}")
+                 try:
+                     sats = loadRobustTLEs(tle_path_to_load)
+                 except Exception as e:
+                     print(f"Error loading TLE file: {e}")
+                     return
+             else:
+                 # If None returned or path was bad, fallback to standard download/cache
+                 cache_dir = os.path.join(getRmsRootDir(), ".skyfield_cache")
+                 sats = loadTLEs(cache_dir, max_age_hours=24)
         else:
              cache_dir = os.path.join(getRmsRootDir(), ".skyfield_cache")
              sats = loadTLEs(cache_dir, max_age_hours=24)
@@ -9207,7 +9219,9 @@ if __name__ == '__main__':
                             help="Show satellite tracks overlaid on the image (requires internet to download TLEs).")
 
     arg_parser.add_argument('--tle_file', type=str, default=None,
-                            help="Path to a specific TLE file to use for satellite tracks (skips download).")
+                            help="Path to a specific TLE file to use for satellite tracks (skips download). "
+                            "Alternatively, a directory containing TLE files can be specified. The code will"
+                            " automatically select the TLE file closest to the beginning time of the video.")
 
 
 

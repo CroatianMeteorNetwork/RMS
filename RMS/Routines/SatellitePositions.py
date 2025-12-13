@@ -20,8 +20,76 @@ from RMS.Astrometry.Conversions import datetime2JD
 import urllib.request
 import traceback
 import argparse
+import re
+import glob
 
 import tempfile
+
+
+def findClosestTLEFile(directory_path, target_time):
+    """
+    Scans the given directory for TLE files with the format TLE_YYYYMMDD_HHMMSS_...
+    and finds the one closest to the target_time.
+    
+    Arguments:
+        directory_path: [str] Path to the directory containing TLE files.
+        target_time: [datetime] The time for which we want the closest TLEs.
+        
+    Returns:
+        [str] Path to the closest TLE file, or None if no suitable file found or "current time" is closer (indicating download is preferred).
+    """
+
+    if not os.path.exists(directory_path) or not os.path.isdir(directory_path):
+        return None
+
+    print(f"Scanning TLE directory: {directory_path}")
+
+    files = glob.glob(os.path.join(directory_path, "TLE_*.txt"))
+    
+    best_file = None
+    min_diff = None
+    
+    # Ensure target_time is UTC
+    if target_time.tzinfo is None:
+        target_time = target_time.replace(tzinfo=datetime.timezone.utc)
+        
+    # Current time for comparison (downloaded TLEs)
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    diff_now = abs((now_utc - target_time).total_seconds())
+    
+    print(f"Time difference to NOW (downloaded TLEs): {diff_now/3600:.2f} hours")
+    
+    for f in files:
+        basename = os.path.basename(f)
+        # Regex to capture the first timestamp group: YYYYMMDD_HHMMSS
+        match = re.search(r"TLE_(\d{8}_\d{6})_", basename)
+        if match:
+            ts_str = match.group(1)
+            try:
+                # Parse timestamp, assuming UTC
+                dt = datetime.datetime.strptime(ts_str, "%Y%m%d_%H%M%S")
+                dt = dt.replace(tzinfo=datetime.timezone.utc)
+                
+                diff = abs((dt - target_time).total_seconds())
+                
+                if min_diff is None or diff < min_diff:
+                    min_diff = diff
+                    best_file = f
+            except ValueError:
+                continue
+
+    if best_file:
+        print(f"Best file found: {os.path.basename(best_file)} (diff: {min_diff/3600:.2f} hours)")
+        # If "now" is closer than the best file, return None to signal "use downloaded"
+        if diff_now < min_diff:
+            print("Current time is closer than any file. Using downloaded TLEs.")
+            return None
+        else:
+            return best_file
+    else:
+        print("No matching TLE files found in directory.")
+        return None
+
 
 def loadRobustTLEs(file_path):
     """ Loads TLEs from a file, handling potential errors with non-standard IDs (e.g. 'T0000').
