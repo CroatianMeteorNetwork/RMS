@@ -88,6 +88,7 @@ try:
     )
     from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject
     from PyQt5 import QtCore
+    from PyQt5.QtGui import QFont
 
     from Utils.Astra import ASTRA, PYSWARMS_AVAILABLE
 
@@ -8693,10 +8694,10 @@ class PlateTool(QtWidgets.QMainWindow):
             color = colors[i % len(colors)]
             
             # Draw curve
-            # Thicker line (width=2), alpha=0.5 (128)
+            # Thicker line (width=8), alpha=0.125 (32)
             # Use color with alpha
-            pen_color = color + (128,)
-            pen = pg.mkPen(pen_color, width=2)
+            pen_color = color + (32,)
+            pen = pg.mkPen(pen_color, width=8)
             
             curve = pg.PlotCurveItem(track['x'], track['y'], pen=pen, clickable=False)
             self.img_frame.addItem(curve)
@@ -8708,7 +8709,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 y = track['y']
                 
                 # Default to middle point if no better point found
-                best_idx = len(x) // 2
+                best_idx = len(x)//2
                 
                 # Try to find a point well inside the image 
                 # (margin from edges)
@@ -8722,6 +8723,17 @@ class PlateTool(QtWidgets.QMainWindow):
                 label_y = y[best_idx]
                 
                 text = pg.TextItem(track['name'], color=color, anchor=(0, 1))
+                
+                # Increase text size by 50% and make it bold
+                font = QFont()
+                font.setBold(True)
+                
+                # Set the font size
+                base_size = 8
+                font.setPointSizeF(base_size)
+                
+                text.setFont(font)
+                
                 text.setPos(label_x, label_y)
                 self.img_frame.addItem(text)
                 self.sat_track_labels.append(text)
