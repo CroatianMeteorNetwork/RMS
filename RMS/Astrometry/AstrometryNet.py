@@ -188,7 +188,7 @@ def matchStarsIterative(x_data, y_data, input_intensities, catalog_stars, wcs_ob
 
 
 def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None, y_data=None,
-                            fov_w_range=None, max_stars=100, verbose=False, x_center=None, y_center=None,
+                            fov_w_range=None, fov_w_hint=None, max_stars=100, verbose=False, x_center=None, y_center=None,
                             lat=None, lon=None, jd=None, input_intensities=None):
     """ Find an astrometric solution of X, Y image coordinates of stars detected on an image using the
         local installation of astrometry.net.
@@ -253,9 +253,16 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
 
 
 
-    # For wide FOV images (>45 deg), filter to central region FIRST before selecting brightest
+    # For very wide FOV images (>90 deg), filter to central region FIRST before selecting brightest
     # This avoids distortion issues at the edges of fisheye lenses
-    if fov_w_range is not None and fov_w_range[1] > 45:
+    # Use fov_w_hint (best guess from config) if available, otherwise use range midpoint
+    estimated_fov = fov_w_hint if fov_w_hint is not None else (
+        (fov_w_range[0] + fov_w_range[1]) / 2.0 if fov_w_range is not None else None
+    )
+
+    print("DEBUG: fov_w_hint={}, fov_w_range={}, estimated_fov={}".format(fov_w_hint, fov_w_range, estimated_fov))
+
+    if estimated_fov is not None and estimated_fov > 90:
 
         # Determine image center
         if img is not None:
@@ -269,7 +276,7 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
             img_center_x = (np.max(x_data) + np.min(x_data)) / 2.0
             img_center_y = (np.max(y_data) + np.min(y_data)) / 2.0
 
-        # Calculate the radius that corresponds to ~45 deg FOV from center
+        # Calculate the radius that corresponds to ~60 deg FOV from center
         if img is not None:
             img_radius = min(img.shape[0], img.shape[1]) / 2.0
         elif x_center is not None and y_center is not None:
@@ -277,26 +284,38 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
         else:
             img_radius = max(np.max(x_data) - np.min(x_data), np.max(y_data) - np.min(y_data)) / 2.0
 
-        # Use central 45 degrees - use average of FOV range as estimated actual FOV
-        estimated_fov = (fov_w_range[0] + fov_w_range[1]) / 2.0
-        central_fov_fraction = min(45.0 / estimated_fov, 0.5)
+        # Use central 60 degrees for very wide FOV cameras
+        central_fov_fraction = min(60.0 / estimated_fov, 0.7)
         central_radius = img_radius * central_fov_fraction
 
         # Filter stars to only those within the central region
         distances = np.sqrt((x_data - img_center_x)**2 + (y_data - img_center_y)**2)
         central_mask = distances <= central_radius
+        central_star_count = np.sum(central_mask)
 
-        if np.sum(central_mask) >= 10:  # Only filter if we have enough central stars
+        print("Wide FOV check: estimated_fov={:.1f} deg, central_fov_fraction={:.2f}".format(
+            estimated_fov, central_fov_fraction))
+        print("  Image center: ({:.1f}, {:.1f}), radius: {:.1f} px".format(
+            img_center_x, img_center_y, img_radius))
+        print("  Central radius: {:.1f} px, stars in central region: {:d}/{:d}".format(
+            central_radius, central_star_count, len(x_data)))
+
+        if central_star_count >= 20:  # Only filter if we have enough central stars
             original_count = len(x_data)
             x_data = x_data[central_mask]
             y_data = y_data[central_mask]
             if input_intensities is not None:
                 input_intensities = np.array(input_intensities)[central_mask]
 
-            print("Wide FOV ({:.1f} deg): using central {:.1f} deg only".format(
-                estimated_fov, estimated_fov * central_fov_fraction * 2))
-            print("  Central radius: {:.1f} px, Stars: {:d} -> {:d}".format(
-                central_radius, original_count, len(x_data)))
+            # Update FOV range to reflect the filtered central region
+            filtered_fov = estimated_fov * central_fov_fraction * 2
+            fov_w_range = [filtered_fov * 0.75, filtered_fov * 1.5]
+            print("  -> Filtering to central {:.1f} deg, Stars: {:d} -> {:d}".format(
+                filtered_fov, original_count, len(x_data)))
+            print("  -> Updated FOV range for scale selection: {:.1f} - {:.1f} deg".format(
+                fov_w_range[0], fov_w_range[1]))
+        else:
+            print("  -> NOT filtering (need >= 20 central stars)")
 
     # Select brightest stars if too many
     if len(x_data) > max_stars:
@@ -397,23 +416,38 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
         # Find scales whose quad ranges overlap with our desired range
         # Add 10% margin on the lower bound to avoid boundary precision issues
         min_quad_with_margin = min_quad_size_deg * 0.9
-        scales = set()
+        matching_scales = []
+
+        # Target quad size is ~30% of FOV height (empirically good for matching)
+        target_quad_deg = fov_h * 0.30
+
         for scale_num, lower_deg, upper_deg in scale_quad_ranges_deg:
             # Check if this scale's quad range overlaps with our desired quad range
             if min_quad_with_margin <= upper_deg and max_quad_size_deg >= lower_deg:
-                scales.add(scale_num)
+                # Calculate how close this scale's midpoint is to our target
+                mid_deg = (lower_deg + upper_deg) / 2.0
+                distance = abs(mid_deg - target_quad_deg)
+                matching_scales.append((scale_num, distance))
+
+        # Sort by distance to target (closest first), then convert to set for astrometry lib
+        matching_scales.sort(key=lambda x: x[1])
+        scales = {s[0] for s in matching_scales}
 
         # If no scales found, fall back to defaults for ~45 deg FOV height
         if not scales:
             scales = {14, 15, 16, 17, 18, 19}
 
         if verbose:
-            print("Using index scales: {}".format(sorted(scales)))
-            for s in sorted(scales):
+            # Show scales in preferred order (closest to target quad size first)
+            preferred_order = [s[0] for s in matching_scales]
+            print("Using index scales (preferred order): {}".format(preferred_order))
+            print("Target quad size: {:.1f} deg (30% of FOV height)".format(target_quad_deg))
+            for s, dist in matching_scales:
                 lower_arcmin = base_arcmin * math.pow(math.sqrt(2), s - 7)
                 upper_arcmin = base_arcmin * math.pow(math.sqrt(2), s - 6)
-                print("  Scale {}: {:.0f}-{:.0f} arcmin ({:.1f}-{:.1f} deg)".format(
-                    s, lower_arcmin, upper_arcmin, lower_arcmin/60, upper_arcmin/60))
+                mid_deg = (lower_arcmin + upper_arcmin) / 2.0 / 60.0
+                print("  Scale {}: {:.0f}-{:.0f} arcmin ({:.1f}-{:.1f} deg), mid={:.1f} deg".format(
+                    s, lower_arcmin, upper_arcmin, lower_arcmin/60, upper_arcmin/60, mid_deg))
 
         # Compute pixel scale for size_hint (helps solver converge faster)
         lower_arcsec_per_pixel = fov_w_range[0] * 3600 / img_width
@@ -438,10 +472,11 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
 
     # Init solution parameters
     solution_parameters = astrometry.SolutionParameters(
-            # Return the first solution if the log odds ratio is greater than 100 (very good solution)
+            # Return the first solution if the log odds ratio is greater than 60 (good solution)
+            # Lower threshold means faster solving - logodds > 50 is typically reliable
             logodds_callback=lambda logodds_list: (
             astrometry.Action.STOP
-            if logodds_list[0] > 100.0
+            if logodds_list[0] > 60.0
             else astrometry.Action.CONTINUE
             )
     )
@@ -572,7 +607,7 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
 
 
 def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_data=None, fov_w_range=None,
-                       max_stars=100, verbose=False, x_center=None, y_center=None,
+                       fov_w_hint=None, max_stars=100, verbose=False, x_center=None, y_center=None,
                        lat=None, lon=None, jd=None, input_intensities=None):
     """ Find an astrometric solution of X, Y image coordinates of stars detected on an image using the
         local installation of astrometry.net.
@@ -609,7 +644,7 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
         try:
             return astrometryNetSolveLocal(
                 ff_file_path=ff_file_path, img=img, mask=mask, x_data=x_data, y_data=y_data,
-                fov_w_range=fov_w_range, max_stars=max_stars, verbose=verbose,
+                fov_w_range=fov_w_range, fov_w_hint=fov_w_hint, max_stars=max_stars, verbose=verbose,
                 x_center=x_center, y_center=y_center,
                 lat=lat, lon=lon, jd=jd, input_intensities=input_intensities
                 )

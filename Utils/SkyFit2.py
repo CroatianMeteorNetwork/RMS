@@ -6373,8 +6373,8 @@ class PlateTool(QtWidgets.QMainWindow):
         fail = False
         solution = None
 
-        # Construct FOV width estimate
-        fov_w_range = [0.5*self.config.fov_w, 2*self.config.fov_w]
+        # Construct FOV width estimate (0.75x to 1.5x range)
+        fov_w_range = [0.75*self.config.fov_w, 1.5*self.config.fov_w]
 
         # Handle using FR files too
         ff_name_c = convertFRNameToFF(self.img_handle.name())
@@ -6409,7 +6409,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # Get astrometry.net solution, pass the FOV width estimate
                 solution = astrometryNetSolve(x_data=x_data, y_data=y_data, fov_w_range=fov_w_range,
-                                              mask=mask,
+                                              fov_w_hint=self.config.fov_w, mask=mask,
                                               x_center=self.platepar.X_res/2, y_center=self.platepar.Y_res/2,
                                               lat=self.platepar.lat, lon=self.platepar.lon, jd=jd,
                                               input_intensities=input_intensities,
@@ -6438,7 +6438,8 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
                 img_data = self.img.data
 
-            solution = astrometryNetSolve(img=img_data.T, fov_w_range=fov_w_range, mask=mask,
+            solution = astrometryNetSolve(img=img_data.T, fov_w_range=fov_w_range,
+                                          fov_w_hint=self.config.fov_w, mask=mask,
                                           lat=self.platepar.lat, lon=self.platepar.lon, jd=jd)
 
         if solution is None:
