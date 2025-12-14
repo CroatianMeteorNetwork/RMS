@@ -544,7 +544,7 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
     fov_w = result['width_arcsec']/3600
     fov_h = result['height_arcsec']/3600
 
-    return ra_mid, dec_mid, rot_eq_standard, scale, fov_w, fov_h, None
+    return ra_mid, dec_mid, rot_eq_standard, scale, fov_w, fov_h, None, None
 
 
 if __name__ == '__main__':
