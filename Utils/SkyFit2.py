@@ -6164,8 +6164,6 @@ class PlateTool(QtWidgets.QMainWindow):
         Returns:
             success: [bool] True if quick alignment succeeded and we can skip astrometry.net
         """
-        from RMS.Formats.FFfile import convertFRNameToFF
-
         print()
         print("Trying quick alignment with existing platepar...")
         self.status_bar.showMessage("Trying quick alignment...")
@@ -6524,6 +6522,25 @@ class PlateTool(QtWidgets.QMainWindow):
             print(' Input stars = {:d}'.format(input_count))
             print(' Quad stars = {:d}'.format(len(quad_stars)))
 
+        # Update the GUI to show the astrometry.net solution before NN refinement
+        self.updateLeftLabels()
+        self.updateStars()
+        self.drawPhotometryColoring()
+        self.tab.setCurrentIndex(0)
+        QtWidgets.QApplication.processEvents()
+
+        # Ask user if they want to continue with NN refinement
+        reply = QtWidgets.QMessageBox.question(self, 'Astrometry.net Solution',
+            'Astrometry.net found a solution.\n\n'
+            'RA = {:.2f} deg, Dec = {:.2f} deg\n'
+            'Scale = {:.3f} arcmin/px\n\n'
+            'Continue with NN-based refinement?'.format(
+                self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale),
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.Yes)
+
+        if reply == QtWidgets.QMessageBox.No:
+            self.status_bar.showMessage("Astrometry.net solution applied (no refinement)")
+            return self.platepar
 
         # Match detected stars to RMS catalog and fit distortion iteratively
         # Use RMS's own catalog (better than astrometry.net's index stars)
@@ -6552,14 +6569,19 @@ class PlateTool(QtWidgets.QMainWindow):
         print("  Catalog stars in strict FOV: {:d}".format(len(catalog_stars)))
 
         # Get detected stars from calstars
+        # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
         if ff_name_c in self.calstars:
             detected_stars = np.array(self.calstars[ff_name_c])
             det_y = detected_stars[:, 0]
             det_x = detected_stars[:, 1]
             det_intens = detected_stars[:, 3] if detected_stars.shape[1] > 3 else np.ones(len(det_x))
+            det_fwhm = detected_stars[:, 4] if detected_stars.shape[1] > 4 else np.zeros(len(det_x))
+            det_snr = detected_stars[:, 6] if detected_stars.shape[1] > 6 else np.ones(len(det_x))
+            det_saturated = detected_stars[:, 7] if detected_stars.shape[1] > 7 else np.zeros(len(det_x))
         else:
             print("No detected stars available for matching")
             det_x, det_y, det_intens = np.array([]), np.array([]), np.array([])
+            det_fwhm, det_snr, det_saturated = np.array([]), np.array([]), np.array([])
 
         print("  Detected stars: {:d}".format(len(det_x)))
 
@@ -6593,7 +6615,19 @@ class PlateTool(QtWidgets.QMainWindow):
                     # star_list format: [jd, x, y, intensity, ra, dec, mag]
                     _, x, y, intensity, ra, dec, mag = entry
                     sky_obj = CatalogStar(ra, dec, mag)
-                    self.paired_stars.addPair(x, y, 0.0, intensity, sky_obj, snr=1.0)
+
+                    # Look up SNR, FWHM, and saturation from calstars by finding nearest detected star
+                    fwhm, snr, saturated = 0.0, 1.0, False
+                    if len(det_x) > 0:
+                        # Find the closest detected star to this matched star
+                        distances = np.sqrt((det_x - x)**2 + (det_y - y)**2)
+                        closest_idx = np.argmin(distances)
+                        if distances[closest_idx] < 3.0:  # Within 3 pixels
+                            fwhm = det_fwhm[closest_idx]
+                            snr = det_snr[closest_idx]
+                            saturated = det_saturated[closest_idx] > 0
+
+                    self.paired_stars.addPair(x, y, fwhm, intensity, sky_obj, snr=snr, saturated=saturated)
                 print("  Loaded {} matched pairs".format(len(self.platepar.star_list)))
 
         # Finalize the fit with user's settings

@@ -1,9 +1,9 @@
 
 from __future__ import print_function, division, absolute_import
 
-import os
 import inspect
 import math
+import os
 
 import numpy as np
 from PIL import Image
@@ -246,14 +246,59 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
         if x_data is None or y_data is None:
             
             # Automatically extract stars from the image
-            x_data, y_data, _, _, _, _, _, _  = extractStarsAuto(img, mask=mask, max_star_candidates=1500, 
-                segment_radius=8, min_stars_detect=50, max_stars_detect=150, bit_depth=bit_depth, 
+            x_data, y_data, _, _, _, _, _, _  = extractStarsAuto(img, mask=mask, max_star_candidates=1500,
+                segment_radius=8, min_stars_detect=50, max_stars_detect=150, bit_depth=bit_depth,
                 verbose=verbose
             )
-            
 
 
-    # If there are too many stars, select the brightest ones (or random if no intensities)
+
+    # For wide FOV images (>45 deg), filter to central region FIRST before selecting brightest
+    # This avoids distortion issues at the edges of fisheye lenses
+    if fov_w_range is not None and fov_w_range[1] > 45:
+
+        # Determine image center
+        if img is not None:
+            img_center_x = img.shape[1] / 2.0
+            img_center_y = img.shape[0] / 2.0
+        elif x_center is not None and y_center is not None:
+            img_center_x = x_center
+            img_center_y = y_center
+        else:
+            # Estimate center from star positions
+            img_center_x = (np.max(x_data) + np.min(x_data)) / 2.0
+            img_center_y = (np.max(y_data) + np.min(y_data)) / 2.0
+
+        # Calculate the radius that corresponds to ~45 deg FOV from center
+        if img is not None:
+            img_radius = min(img.shape[0], img.shape[1]) / 2.0
+        elif x_center is not None and y_center is not None:
+            img_radius = min(x_center, y_center)
+        else:
+            img_radius = max(np.max(x_data) - np.min(x_data), np.max(y_data) - np.min(y_data)) / 2.0
+
+        # Use central 45 degrees - use average of FOV range as estimated actual FOV
+        estimated_fov = (fov_w_range[0] + fov_w_range[1]) / 2.0
+        central_fov_fraction = min(45.0 / estimated_fov, 0.5)
+        central_radius = img_radius * central_fov_fraction
+
+        # Filter stars to only those within the central region
+        distances = np.sqrt((x_data - img_center_x)**2 + (y_data - img_center_y)**2)
+        central_mask = distances <= central_radius
+
+        if np.sum(central_mask) >= 10:  # Only filter if we have enough central stars
+            original_count = len(x_data)
+            x_data = x_data[central_mask]
+            y_data = y_data[central_mask]
+            if input_intensities is not None:
+                input_intensities = np.array(input_intensities)[central_mask]
+
+            print("Wide FOV ({:.1f} deg): using central {:.1f} deg only".format(
+                estimated_fov, estimated_fov * central_fov_fraction * 2))
+            print("  Central radius: {:.1f} px, Stars: {:d} -> {:d}".format(
+                central_radius, original_count, len(x_data)))
+
+    # Select brightest stars if too many
     if len(x_data) > max_stars:
 
         if verbose:
@@ -296,40 +341,96 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
         os.path.dirname(os.path.dirname(os.path.dirname(this_file_path))), "share", "astrometry_cache"
         )
 
-
-    # Solve the image using the local installation of astrometry.net
-    solver = astrometry.Solver(
-        astrometry.series_4100.index_files(
-            cache_directory=astrometry_cache_path,
-            scales={15, 18}, # Skymark diameter scales, chosen for meteor cameras. See: 
-                             # https://pypi.org/project/astrometry/#choosing-series
-        )
-    )
+    # Default scales for ~45 deg FOV height (covers 4.5° to 45° quads)
+    scales = {14, 15, 16, 17, 18, 19}
 
     size_hint = None
 
     if fov_w_range is not None:
 
-        # Get the image width
+        # Get image dimensions to compute aspect ratio
         if img is not None:
             img_width = img.shape[1]
+            img_height = img.shape[0]
         else:
             img_width = np.max(x_data)
+            img_height = np.max(y_data) if y_data is not None else img_width * 0.75
 
-        # Compute arcsec per pixel for the FOV range
-        lower_arcsec_per_pixel = fov_w_range[0]*3600/img_width
-        upper_arcsec_per_pixel = fov_w_range[1]*3600/img_width
+        aspect_ratio = img_height / img_width
+
+        # Use the average FOV estimate for the width
+        avg_fov_w = (fov_w_range[0] + fov_w_range[1]) / 2.0
+
+        # Compute FOV height (shorter dimension for landscape images)
+        fov_h = avg_fov_w * aspect_ratio
+
+        # Use the "10% to 100% of image size" rule on the short side
+        # Quad sizes should range from 10% to 100% of the shorter FOV dimension
+        min_quad_size_deg = fov_h * 0.10
+        max_quad_size_deg = fov_h
 
         if verbose:
-            print("FOV range:")
-            print("  {:.2f} - {:.2f} deg".format(fov_w_range[0], fov_w_range[1]))
-            print("  {:.2f} - {:.2f} arcsec/pixel".format(lower_arcsec_per_pixel, upper_arcsec_per_pixel))
+            print("FOV range: {:.2f} - {:.2f} deg (width)".format(fov_w_range[0], fov_w_range[1]))
+            print("FOV height estimate: {:.2f} deg".format(fov_h))
+            print("Quad size range: {:.2f} - {:.2f} deg".format(min_quad_size_deg, max_quad_size_deg))
 
+        # Index 4100 series quad diameter ranges (in degrees):
+        # Scale 14: 240-340 arcmin    (4.0-5.7°)
+        # Scale 15: 340-480 arcmin    (5.7-8.0°)
+        # Scale 16: 480-680 arcmin    (8.0-11.3°)
+        # Scale 17: 680-1000 arcmin   (11.3-16.7°)
+        # Scale 18: 1000-1400 arcmin  (16.7-23.3°)
+        # Scale 19: 1400-2000 arcmin  (23.3-33.3°)
 
-        size_hint=astrometry.SizeHint(
+        # Quad diameter boundaries for 4100 series scales
+        # Formula: quad diameter = 240/sqrt(2)^7 * sqrt(2)^N arcmin
+        # This gives scale 14 = 240-340 arcmin, matching astrometry.net docs
+        base_arcmin = 240.0 / math.pow(math.sqrt(2), 7)  # ~21.2 arcmin
+        scale_quad_ranges_deg = []
+        for scale_num in range(7, 20):
+            lower_arcmin = base_arcmin * math.pow(math.sqrt(2), scale_num - 7)
+            upper_arcmin = base_arcmin * math.pow(math.sqrt(2), scale_num - 6)
+            lower_deg = lower_arcmin / 60.0
+            upper_deg = upper_arcmin / 60.0
+            scale_quad_ranges_deg.append((scale_num, lower_deg, upper_deg))
+
+        # Find scales whose quad ranges overlap with our desired range
+        # Add 10% margin on the lower bound to avoid boundary precision issues
+        min_quad_with_margin = min_quad_size_deg * 0.9
+        scales = set()
+        for scale_num, lower_deg, upper_deg in scale_quad_ranges_deg:
+            # Check if this scale's quad range overlaps with our desired quad range
+            if min_quad_with_margin <= upper_deg and max_quad_size_deg >= lower_deg:
+                scales.add(scale_num)
+
+        # If no scales found, fall back to defaults for ~45 deg FOV height
+        if not scales:
+            scales = {14, 15, 16, 17, 18, 19}
+
+        if verbose:
+            print("Using index scales: {}".format(sorted(scales)))
+            for s in sorted(scales):
+                lower_arcmin = base_arcmin * math.pow(math.sqrt(2), s - 7)
+                upper_arcmin = base_arcmin * math.pow(math.sqrt(2), s - 6)
+                print("  Scale {}: {:.0f}-{:.0f} arcmin ({:.1f}-{:.1f} deg)".format(
+                    s, lower_arcmin, upper_arcmin, lower_arcmin/60, upper_arcmin/60))
+
+        # Compute pixel scale for size_hint (helps solver converge faster)
+        lower_arcsec_per_pixel = fov_w_range[0] * 3600 / img_width
+        upper_arcsec_per_pixel = fov_w_range[1] * 3600 / img_width
+
+        size_hint = astrometry.SizeHint(
             lower_arcsec_per_pixel=lower_arcsec_per_pixel,
             upper_arcsec_per_pixel=upper_arcsec_per_pixel
         )
+
+    # Solve the image using the local installation of astrometry.net
+    solver = astrometry.Solver(
+        astrometry.series_4100.index_files(
+            cache_directory=astrometry_cache_path,
+            scales=scales,
+        )
+    )
 
     # Print progress info
     if verbose:
@@ -368,19 +469,6 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
             )
 
     if solution.has_match():
-        
-        # print()
-        # print("Found solution for image center:")
-
-        if verbose:
-            # Print the WCS fields
-            print()
-            print("WCS fields:")
-            print('-----------------------------')
-            for key, value in solution.best_match().wcs_fields.items():
-                print("{:8s}: {}".format(key, ", ".join(map(str, value))))
-            
-            print()
 
         # Load the solution into an astropy WCS object
         wcs_obj = WCS(solution.best_match().wcs_fields)
@@ -394,10 +482,20 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
                 x_center = np.median(x_data)
                 y_center = np.median(y_data)
 
-        # print("Image center, x = {:.2f}, y = {:.2f}".format(x_center, y_center))
-
         # Use wcs.all_pix2world to get the RA and Dec at the new center
         ra_mid, dec_mid = wcs_obj.all_pix2world(x_center, y_center, 1)
+
+        if verbose:
+            # Print the WCS fields
+            print()
+            print("WCS fields from astrometry.net:")
+            print('-----------------------------')
+            for key, value in solution.best_match().wcs_fields.items():
+                print("{:8s}: {}".format(key, ", ".join(map(str, value))))
+            print()
+            print("Image center: x={:.1f}, y={:.1f}".format(x_center, y_center))
+            print("RA/Dec at image center: {:.4f}, {:.4f}".format(float(ra_mid), float(dec_mid)))
+            print()
 
         # Image coordinate slightly right of the centre
         x_right = x_center + 10
