@@ -10,6 +10,7 @@ import json
 import datetime
 import collections
 import glob
+import multiprocessing
 
 import numpy as np
 import matplotlib
@@ -53,6 +54,57 @@ from RMS.Misc import maxDistBetweenPoints, getRmsRootDir
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
+
+
+def _extractStarsFFWorker(args):
+    """Worker function for parallel FF file star extraction.
+
+    This function is defined at module level so it can be pickled for multiprocessing.
+
+    Arguments:
+        args: tuple of (ff_name, dir_path, config_dict, flat_struct, dark, mask)
+
+    Returns:
+        tuple: (ff_name, star_data, success, error_msg)
+            - ff_name: Name of the FF file
+            - star_data: List of (y, x, amplitude, intensity, fwhm, background, snr, saturated_count) tuples
+            - success: Boolean indicating success
+            - error_msg: Error message if failed, None otherwise
+    """
+    ff_name, dir_path, config_dict, flat_struct, dark, mask = args
+
+    try:
+        # Reconstruct config object from dict
+        class ConfigFromDict:
+            def __init__(self, config_dict):
+                for key, value in config_dict.items():
+                    setattr(self, key, value)
+
+        config = ConfigFromDict(config_dict)
+
+        # Extract stars for this FF file
+        star_list = extractStarsFF(
+            dir_path,
+            ff_name,
+            config=config,
+            flat_struct=flat_struct,
+            dark=dark,
+            mask=mask
+        )
+
+        if star_list:
+            # extractStarsFF returns: ff_name, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count
+            ff_name_ret, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count = star_list
+
+            # Construct star data in CALSTARS format
+            star_data = list(zip(y_arr, x_arr, amplitude, intensity, fwhm, background, snr, saturated_count))
+
+            return (ff_name, star_data, True, None)
+        else:
+            return (ff_name, None, False, "No stars detected")
+
+    except Exception as e:
+        return (ff_name, None, False, str(e))
 
 
 class QFOVinputDialog(QtWidgets.QDialog):
@@ -692,6 +744,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.override_intensity_threshold = None
         self.override_neighborhood_size = None
         self.override_max_stars = None
+        self.override_gamma = None
+        self.override_segment_radius = None
+        self.override_max_feature_ratio = None
+        self.override_roundness_threshold = None
 
         self.input_path = input_path
         if os.path.isfile(self.input_path):
@@ -1410,6 +1466,20 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigAllCalstarsThresholdChanged.connect(self.updateAllCalstarsThreshold)
         self.tab.settings.sigAutoPairStars.connect(self.autoPairStars)
         self.tab.settings.sigSingleClickPhotometryToggled.connect(self.toggleSingleClickPhotometry)
+
+        # Star Detection tab signals
+        self.tab.star_detection.sigRedetectStars.connect(self.redetectStars)
+        self.tab.star_detection.sigRedetectAllImages.connect(self.redetectAllImages)
+        self.tab.star_detection.sigUseOverrideToggled.connect(self.toggleStarDetectionOverride)
+        self.tab.star_detection.sigIntensityThresholdChanged.connect(self.updateIntensityThreshold)
+        self.tab.star_detection.sigNeighborhoodSizeChanged.connect(self.updateNeighborhoodSize)
+        self.tab.star_detection.sigMaxStarsChanged.connect(self.updateMaxStars)
+        self.tab.star_detection.sigGammaChanged.connect(self.updateGamma)
+        self.tab.star_detection.sigSegmentRadiusChanged.connect(self.updateSegmentRadius)
+        self.tab.star_detection.sigMaxFeatureRatioChanged.connect(self.updateMaxFeatureRatio)
+        self.tab.star_detection.sigRoundnessThresholdChanged.connect(self.updateRoundnessThreshold)
+        # Load initial values from config
+        self.tab.star_detection.loadFromConfig(self.config)
 
         layout.addWidget(self.tab, 0, 2)
 
@@ -2279,12 +2349,14 @@ class PlateTool(QtWidgets.QMainWindow):
         # Get the FF name for the current image
         ff_name_c = convertFRNameToFF(self.img_handle.name())
 
-        # Check if we have CALSTARS for this image
-        if ff_name_c not in self.calstars:
+        # Use override data if enabled and available, otherwise use original CALSTARS
+        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
+            star_data = np.array(self.star_detection_override_data[ff_name_c])
+        elif ff_name_c in self.calstars:
+            star_data = np.array(self.calstars[ff_name_c])
+        else:
             return None
 
-        # Get all detected stars for this image
-        star_data = np.array(self.calstars[ff_name_c])
         if len(star_data) == 0:
             return None
 
@@ -2467,11 +2539,14 @@ class PlateTool(QtWidgets.QMainWindow):
         # Get the FF name for the current image
         ff_name_c = convertFRNameToFF(self.img_handle.name())
 
-        if ff_name_c not in self.calstars:
+        # Use override data if enabled and available, otherwise use original CALSTARS
+        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
+            star_data = np.array(self.star_detection_override_data[ff_name_c])
+        elif ff_name_c in self.calstars:
+            star_data = np.array(self.calstars[ff_name_c])
+        else:
             print(f"No CALSTARS data for {ff_name_c}")
             return 0
-
-        star_data = np.array(self.calstars[ff_name_c])
 
         # Get current image identifier and Julian Date for multi-image tracking
         image_id = self.img_handle.name()
@@ -2494,9 +2569,10 @@ class PlateTool(QtWidgets.QMainWindow):
                 if abs(star_x - img_x) < 0.5 and abs(star_y - img_y) < 0.5:
                     # Found the matching star
                     # Extract star properties from CALSTARS
-                    # CALSTARS format: y, x, intensity, fwhm (approximately)
-                    fwhm = star[3] if len(star) > 3 else 3.0
-                    intensity = star[2] if len(star) > 2 else 1000.0
+                    # CALSTARS format: (y, x, amplitude, intensity, fwhm, background, snr, saturated_count)
+                    amplitude = star[2] if len(star) > 2 else 1000.0
+                    intensity = star[3] if len(star) > 3 else 1000.0
+                    fwhm = star[4] if len(star) > 4 else 3.0
 
                     # Compute SNR (rough estimate)
                     snr = intensity / 10.0 if intensity > 0 else 10.0
@@ -4489,8 +4565,28 @@ class PlateTool(QtWidgets.QMainWindow):
 
                         # Add the image/catalog pair to the list
                         if not unsuitable:
-                            # Get current image identifier and Julian Date for multi-image tracking
+                            # Check if override detections are enabled but current image lacks override data
+                            # This prevents mixing gamma values in multi-image calibration
                             image_id = self.img_handle.name()
+                            ff_name_check = convertFRNameToFF(image_id)
+
+                            if self.star_detection_override_enabled and ff_name_check not in self.star_detection_override_data:
+                                # Prevent picking from images with mismatched gamma
+                                qmessagebox(
+                                    title="Override Detection Required",
+                                    message=f"Cannot pick stars from this image.\n\n"
+                                            f"Override detections are enabled (gamma={self.override_gamma:.3f}), "
+                                            f"but this image has no override detection data.\n\n"
+                                            f"Please re-detect stars on this image first to ensure gamma consistency.",
+                                    message_type="warning"
+                                )
+                                print(f"Star picking blocked: Image {ff_name_check} requires re-detection with gamma={self.override_gamma:.3f}")
+
+                                # Reset cursor to centroiding mode
+                                self.cursor.setMode(0)
+                                return
+
+                            # Get Julian Date for multi-image tracking
                             jd = date2JD(*self.img_handle.currentTime())
 
                             self.paired_stars.addPair(self.x_centroid, self.y_centroid, self.star_fwhm,
@@ -5429,37 +5525,189 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             self.override_max_stars = 200  # Default
 
-        print(f"Star detection overrides initialized: threshold={self.override_intensity_threshold}, neighborhood={self.override_neighborhood_size}, max_stars={self.override_max_stars}")
+        if hasattr(self.config, 'gamma'):
+            self.override_gamma = self.config.gamma
+        else:
+            self.override_gamma = 1.0  # Default
+
+        if hasattr(self.config, 'segment_radius'):
+            self.override_segment_radius = self.config.segment_radius
+        else:
+            self.override_segment_radius = 4  # Default
+
+        if hasattr(self.config, 'max_feature_ratio'):
+            self.override_max_feature_ratio = self.config.max_feature_ratio
+        else:
+            self.override_max_feature_ratio = 0.8  # Default
+
+        if hasattr(self.config, 'roundness_threshold'):
+            self.override_roundness_threshold = self.config.roundness_threshold
+        else:
+            self.override_roundness_threshold = 0.5  # Default
+
+        print(f"Star detection overrides initialized: threshold={self.override_intensity_threshold}, neighborhood={self.override_neighborhood_size}, max_stars={self.override_max_stars}, gamma={self.override_gamma}, segment_radius={self.override_segment_radius}, max_feature_ratio={self.override_max_feature_ratio}, roundness_threshold={self.override_roundness_threshold}")
+
+    def updateIntensityThreshold(self, value):
+        """ Update intensity threshold override parameter. """
+        self.override_intensity_threshold = value
+
+    def updateNeighborhoodSize(self, value):
+        """ Update neighborhood size override parameter. """
+        self.override_neighborhood_size = value
+
+    def updateMaxStars(self, value):
+        """ Update max stars override parameter. """
+        self.override_max_stars = value
+
+    def updateGamma(self, value):
+        """ Update gamma override parameter for star detection.
+
+        Note: Gamma only affects star intensity measurement during star extraction.
+        Changing gamma here will only take effect when you click 'Re-Detect Stars'.
+        """
+        self.override_gamma = value
+        print(f"Gamma set to {value:.3f} - will be used for next star re-detection")
+
+    def updateSegmentRadius(self, value):
+        """ Update segment radius override parameter. """
+        self.override_segment_radius = value
+
+    def updateMaxFeatureRatio(self, value):
+        """ Update max feature ratio override parameter. """
+        self.override_max_feature_ratio = value
+
+    def updateRoundnessThreshold(self, value):
+        """ Update roundness threshold override parameter. """
+        self.override_roundness_threshold = value
+
+    def toggleStarDetectionOverride(self):
+        """ Toggle between using override detections and original CALSTARS. """
+        self.star_detection_override_enabled = not self.star_detection_override_enabled
+
+        # Update platepar.gamma to match the detection source
+        if self.platepar is not None:
+            if self.star_detection_override_enabled:
+                # Using override detections - use override gamma
+                self.platepar.gamma = self.override_gamma
+                print(f"Switched to override detections (gamma={self.override_gamma:.3f})")
+            else:
+                # Using original CALSTARS - restore original gamma from config
+                if hasattr(self.config, 'gamma'):
+                    self.platepar.gamma = self.config.gamma
+                    print(f"Switched to original CALSTARS (gamma={self.config.gamma:.3f})")
+
+        # Update the display
+        self.updateCalstars()
+        self.updateAllCalstarsResiduals()
+
+        # Update status in UI
+        ff_name = self.img_handle.name()
+        if self.star_detection_override_enabled and ff_name in self.star_detection_override_data:
+            star_count = len(self.star_detection_override_data[ff_name])
+            self.tab.star_detection.updateStatus(True, star_count)
+        else:
+            self.tab.star_detection.updateStatus(False)
 
     def redetectStars(self):
         """ Re-detect stars on current image using override parameters. """
-        print(f"Re-detecting stars with: threshold={self.override_intensity_threshold}, neighborhood={self.override_neighborhood_size}, max_stars={self.override_max_stars}")
+        print(f"Re-detecting stars with: threshold={self.override_intensity_threshold}, neighborhood={self.override_neighborhood_size}, max_stars={self.override_max_stars}, gamma={self.override_gamma}")
+
+        # Check if gamma is changing and we have picked pairs or override detections
+        gamma_changed = False
+        if self.platepar is not None and hasattr(self.platepar, 'gamma'):
+            gamma_changed = abs(self.override_gamma - self.platepar.gamma) > 0.001
+
+        if gamma_changed and (len(self.paired_stars) > 0 or len(self.star_detection_override_data) > 0):
+            # Show warning dialog
+            msg = QtWidgets.QMessageBox()
+            msg.setIcon(QtWidgets.QMessageBox.Warning)
+            msg.setWindowTitle("Gamma Change Warning")
+            msg.setText("Changing gamma will clear all picked pairs and all override detections to ensure consistency.")
+            msg.setInformativeText(f"Current gamma: {self.platepar.gamma:.3f}\nNew gamma: {self.override_gamma:.3f}\n\nDo you want to continue?")
+            msg.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+            msg.setDefaultButton(QtWidgets.QMessageBox.No)
+
+            if msg.exec_() == QtWidgets.QMessageBox.No:
+                print("Re-detection cancelled by user")
+                return
+
+            # User confirmed - clear all picks and override detections
+            print(f"Clearing all picked pairs ({len(self.paired_stars.paired_stars)} pairs) and override detections ({len(self.star_detection_override_data)} images)")
+            self.paired_stars = MultiImagePairedStars()
+            self.star_detection_override_data.clear()
+
+            # Update displays after clearing
+            self.updatePairedStars()
+            self.updateCalstars()
 
         # Get current FF file name
         ff_name = self.img_handle.name()
 
         # Call extractStarsFF with override parameters
         try:
-            star_list = extractStarsFF(
-                self.dir_path,
-                ff_name,
-                config=self.config,
-                flat_struct=self.flat_struct if hasattr(self, 'flat_struct') else None,
-                dark=self.dark if hasattr(self, 'dark') else None,
-                mask=self.mask if hasattr(self, 'mask') else None,
-                # Override parameters
-                intensity_threshold=self.override_intensity_threshold,
-                neighborhood_size=self.override_neighborhood_size,
-                max_stars=self.override_max_stars
-            )
+            # Temporarily modify config to use override parameters
+            # Save original values
+            original_intensity_threshold = self.config.intensity_threshold
+            original_neighborhood_size = self.config.neighborhood_size
+            original_max_stars = self.config.max_stars
+            original_gamma = self.config.gamma
+
+            # Set override values
+            self.config.intensity_threshold = self.override_intensity_threshold
+            self.config.neighborhood_size = self.override_neighborhood_size
+            self.config.max_stars = self.override_max_stars
+            self.config.gamma = self.override_gamma
+            self.config.segment_radius = self.override_segment_radius
+            self.config.max_feature_ratio = self.override_max_feature_ratio
+            self.config.roundness_threshold = self.override_roundness_threshold
+
+            try:
+                star_list = extractStarsFF(
+                    self.dir_path,
+                    ff_name,
+                    config=self.config,
+                    flat_struct=self.flat_struct if hasattr(self, 'flat_struct') else None,
+                    dark=self.dark if hasattr(self, 'dark') else None,
+                    mask=self.mask if hasattr(self, 'mask') else None
+                )
+            finally:
+                # Restore original config values
+                self.config.intensity_threshold = original_intensity_threshold
+                self.config.neighborhood_size = original_neighborhood_size
+                self.config.max_stars = original_max_stars
+                self.config.gamma = original_gamma
 
             if star_list:
+                # extractStarsFF returns: ff_name, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count
+                # Need to convert to CALSTARS format: list of (y, x, amplitude, intensity, fwhm, background, snr, saturated_count)
+                ff_name_ret, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count = star_list
+
+                # Construct star data in CALSTARS format
+                star_data = list(zip(y_arr, x_arr, amplitude, intensity, fwhm, background, snr, saturated_count))
+
                 # Store the override detected stars
-                self.star_detection_override_data[ff_name] = star_list[1]  # Star data is second element
-                print(f"Re-detected {len(star_list[1])} stars (original CALSTARS had {len(self.calstars.get(ff_name, []))} stars)")
+                self.star_detection_override_data[ff_name] = star_data
+                original_count = len(self.calstars.get(ff_name, []))
+                new_count = len(star_data)
+                print(f"Re-detected {new_count} stars (original CALSTARS had {original_count} stars)")
+
+                # Automatically enable override if detection succeeded
+                if not self.star_detection_override_enabled:
+                    self.star_detection_override_enabled = True
+                    self.tab.star_detection.use_override_checkbox.setChecked(True)
+
+                # Update platepar.gamma to reflect the gamma used for these stars
+                # This ensures the photometry plot displays the correct gamma
+                if self.platepar is not None:
+                    self.platepar.gamma = self.override_gamma
+                    print(f"Updated platepar.gamma to {self.override_gamma:.3f} to match re-detected stars")
 
                 # Update display
                 self.updateCalstars()
+                self.updateAllCalstarsResiduals()
+
+                # Update status
+                self.tab.star_detection.updateStatus(True, new_count)
             else:
                 print("Star re-detection failed")
 
@@ -5467,6 +5715,216 @@ class PlateTool(QtWidgets.QMainWindow):
             print(f"Error re-detecting stars: {e}")
             import traceback
             traceback.print_exc()
+
+    def redetectAllImages(self):
+        """ Re-detect stars on all FF files in directory using override parameters. """
+
+        # Check if gamma is changing and we have picked pairs or override detections
+        gamma_changed = False
+        if self.platepar is not None and hasattr(self.platepar, 'gamma'):
+            gamma_changed = abs(self.override_gamma - self.platepar.gamma) > 0.001
+
+        if gamma_changed and (len(self.paired_stars) > 0 or len(self.star_detection_override_data) > 0):
+            # Show warning dialog
+            msg = QtWidgets.QMessageBox()
+            msg.setIcon(QtWidgets.QMessageBox.Warning)
+            msg.setWindowTitle("Gamma Change Warning")
+            msg.setText("Changing gamma will clear all picked pairs and all override detections to ensure consistency.")
+            msg.setInformativeText(f"Current gamma: {self.platepar.gamma:.3f}\nNew gamma: {self.override_gamma:.3f}\n\nDo you want to continue?")
+            msg.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+            msg.setDefaultButton(QtWidgets.QMessageBox.No)
+
+            if msg.exec_() == QtWidgets.QMessageBox.No:
+                print("Batch re-detection cancelled by user")
+                return
+
+            # User confirmed - clear all picks and override detections
+            print(f"Clearing all picked pairs ({len(self.paired_stars.paired_stars)} pairs) and override detections ({len(self.star_detection_override_data)} images)")
+            self.paired_stars = MultiImagePairedStars()
+            self.star_detection_override_data.clear()
+
+            # Update displays after clearing
+            self.updatePairedStars()
+            self.updateCalstars()
+
+        # Get list of all FF files in the directory
+        from RMS.Formats import FFfile
+
+        all_files = os.listdir(self.dir_path)
+        ff_files = []
+        for file_name in all_files:
+            # Check if this is a valid FF file
+            if FFfile.validFFName(file_name):
+                ff_files.append(file_name)
+
+        if not ff_files:
+            msg = QtWidgets.QMessageBox()
+            msg.setIcon(QtWidgets.QMessageBox.Warning)
+            msg.setWindowTitle("No FF Files Found")
+            msg.setText("No FF files found in the current directory.")
+            msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
+            msg.exec_()
+            return
+
+        # Sort files for consistent processing
+        ff_files.sort()
+
+        print(f"\nStarting batch re-detection on {len(ff_files)} FF files...")
+        print(f"Parameters: threshold={self.override_intensity_threshold}, neighborhood={self.override_neighborhood_size}, max_stars={self.override_max_stars}, gamma={self.override_gamma}")
+
+        # Create progress dialog
+        progress = QtWidgets.QProgressDialog(
+            "Re-detecting stars on all images...",
+            "Cancel",
+            0,
+            len(ff_files),
+            self
+        )
+        progress.setWindowModality(QtCore.Qt.WindowModal)
+        progress.setWindowTitle("Batch Star Re-detection")
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+
+        # Process each FF file
+        success_count = 0
+        failed_count = 0
+        failed_files = []
+
+        # Temporarily modify config to use override parameters
+        original_intensity_threshold = self.config.intensity_threshold
+        original_neighborhood_size = self.config.neighborhood_size
+        original_max_stars = self.config.max_stars
+        original_gamma = self.config.gamma
+        original_segment_radius = self.config.segment_radius
+        original_max_feature_ratio = self.config.max_feature_ratio
+        original_roundness_threshold = self.config.roundness_threshold
+
+        try:
+            # Set override values
+            self.config.intensity_threshold = self.override_intensity_threshold
+            self.config.neighborhood_size = self.override_neighborhood_size
+            self.config.max_stars = self.override_max_stars
+            self.config.gamma = self.override_gamma
+            self.config.segment_radius = self.override_segment_radius
+            self.config.max_feature_ratio = self.override_max_feature_ratio
+            self.config.roundness_threshold = self.override_roundness_threshold
+
+            # Convert config to dict for pickling (multiprocessing requires picklable objects)
+            config_dict = {
+                'intensity_threshold': self.config.intensity_threshold,
+                'neighborhood_size': self.config.neighborhood_size,
+                'max_stars': self.config.max_stars,
+                'gamma': self.config.gamma,
+                'segment_radius': self.config.segment_radius,
+                'roundness_threshold': self.config.roundness_threshold,
+                'max_feature_ratio': self.config.max_feature_ratio,
+                'border': self.config.border,
+                'bit_depth': self.config.bit_depth,
+                'max_global_intensity': self.config.max_global_intensity
+            }
+
+            # Prepare arguments for parallel processing
+            flat_struct = self.flat_struct if hasattr(self, 'flat_struct') else None
+            dark = self.dark if hasattr(self, 'dark') else None
+            mask = self.mask if hasattr(self, 'mask') else None
+
+            args_list = [
+                (ff_name, self.dir_path, config_dict, flat_struct, dark, mask)
+                for ff_name in ff_files
+            ]
+
+            # Determine number of workers (CPU count - 1, minimum 1)
+            num_workers = max(1, multiprocessing.cpu_count() - 1)
+            print(f"Using {num_workers} parallel workers for file processing...")
+
+            # Process files in parallel using multiprocessing
+            # Use imap_unordered to get results as they complete (better for progress updates)
+            completed = 0
+            with multiprocessing.Pool(processes=num_workers) as pool:
+                for ff_name, star_data, success, error_msg in pool.imap_unordered(_extractStarsFFWorker, args_list):
+                    # Check if user cancelled
+                    if progress.wasCanceled():
+                        print(f"\nBatch re-detection cancelled by user after {completed}/{len(ff_files)} files")
+                        pool.terminate()
+                        break
+
+                    completed += 1
+
+                    # Update progress
+                    progress.setValue(completed)
+                    progress.setLabelText(f"Processing files in parallel...\n({completed}/{len(ff_files)} complete)")
+                    QtWidgets.QApplication.processEvents()
+
+                    # Process result
+                    if success:
+                        self.star_detection_override_data[ff_name] = star_data
+                        success_count += 1
+
+                        if completed % 10 == 0 or completed == 1:
+                            print(f"  [{completed}/{len(ff_files)}] {ff_name}: {len(star_data)} stars detected")
+                    else:
+                        failed_count += 1
+                        failed_files.append(ff_name)
+                        if error_msg == "No stars detected":
+                            print(f"  [{completed}/{len(ff_files)}] {ff_name}: FAILED (no stars detected)")
+                        else:
+                            print(f"  [{completed}/{len(ff_files)}] {ff_name}: ERROR - {error_msg}")
+
+            # Set final progress value
+            progress.setValue(len(ff_files))
+
+        finally:
+            # Restore original config values
+            self.config.intensity_threshold = original_intensity_threshold
+            self.config.neighborhood_size = original_neighborhood_size
+            self.config.max_stars = original_max_stars
+            self.config.gamma = original_gamma
+            self.config.segment_radius = original_segment_radius
+            self.config.max_feature_ratio = original_max_feature_ratio
+            self.config.roundness_threshold = original_roundness_threshold
+
+        # Report results
+        print(f"\nBatch re-detection complete:")
+        print(f"  Success: {success_count}/{len(ff_files)} files")
+        print(f"  Failed:  {failed_count}/{len(ff_files)} files")
+
+        if success_count > 0:
+            # Automatically enable override if detection succeeded
+            if not self.star_detection_override_enabled:
+                self.star_detection_override_enabled = True
+                self.tab.star_detection.use_override_checkbox.setChecked(True)
+
+            # Update platepar.gamma to reflect the gamma used for these stars
+            if self.platepar is not None:
+                self.platepar.gamma = self.override_gamma
+                print(f"Updated platepar.gamma to {self.override_gamma:.3f} to match re-detected stars")
+
+            # Update display to show current image's detection
+            self.updateCalstars()
+            self.updateAllCalstarsResiduals()
+
+            # Update status for current image
+            current_ff = self.img_handle.name()
+            if current_ff in self.star_detection_override_data:
+                star_count = len(self.star_detection_override_data[current_ff])
+                self.tab.star_detection.updateStatus(True, star_count)
+
+        # Show completion message
+        msg = QtWidgets.QMessageBox()
+        if failed_count == 0:
+            msg.setIcon(QtWidgets.QMessageBox.Information)
+            msg.setWindowTitle("Batch Re-detection Complete")
+            msg.setText(f"Successfully re-detected stars on all {success_count} FF files.")
+        else:
+            msg.setIcon(QtWidgets.QMessageBox.Warning)
+            msg.setWindowTitle("Batch Re-detection Complete")
+            msg.setText(f"Re-detected stars on {success_count}/{len(ff_files)} FF files.")
+            if failed_count > 0 and failed_count <= 5:
+                msg.setInformativeText(f"Failed files:\n" + "\n".join(failed_files))
+            elif failed_count > 5:
+                msg.setInformativeText(f"Failed files: {failed_count}\n(First 5: " + ", ".join(failed_files[:5]) + "...)")
+        msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
+        msg.exec_()
 
     def loadCalstars(self):
         """ Loads data from calstars file and updates self.calstars """

@@ -64,6 +64,7 @@ cython_modules = [
     Extension("RMS.Routines.Grouping3Dcy", ["RMS/Routines/Grouping3Dcy.pyx"], include_dirs=numpy_includes),
     Extension("RMS.Routines.MorphCy", ["RMS/Routines/MorphCy.pyx"], include_dirs=numpy_includes),
     Extension("RMS.CompressionCy", ["RMS/CompressionCy.pyx"], include_dirs=numpy_includes),
+    Extension("RMS.ExtractStarsCy", ["RMS/ExtractStarsCy.pyx"], include_dirs=numpy_includes),
     Extension("Utils.SaturationTools", ["Utils/SaturationTools.pyx"], include_dirs=numpy_includes),
 ]
 
