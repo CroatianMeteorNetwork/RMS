@@ -602,19 +602,20 @@ class Platepar(object):
             img_coords = np.column_stack([img_x, img_y])
             nn_distances, _ = tree.query(img_coords, k=1)
 
-            # Use sum of squared distances as cost
-            total_cost = np.sum(nn_distances ** 2)
+            # Use RMSE (root mean squared error) as cost
+            # This normalizes by number of stars and gives interpretable units (pixels)
+            rmse = np.sqrt(np.mean(nn_distances ** 2))
 
-            return total_cost
+            return rmse
 
         # Initial parameters - use pp_work.RA_d which has been adjusted for the new JD/Ho
         p0 = [pp_work.RA_d, self.dec_d, self.pos_angle_ref]
         if not fixed_scale:
             p0.append(abs(self.F_scale))
 
-        # Debug: compute initial cost
+        # Debug: compute initial cost (RMSE in pixels)
         initial_cost = _calcPointingNNCostPixel(p0, pp_work, jd, ra_catalog, dec_catalog, img_x, img_y, fixed_scale)
-        print("    fitPointingNN: BEFORE RA={:.2f} Dec={:.2f} Rot={:.2f} cost={:.1f}".format(
+        print("    fitPointingNN: BEFORE RA={:.2f} Dec={:.2f} Rot={:.2f} RMSE={:.2f} px".format(
             p0[0], p0[1], p0[2], initial_cost))
 
         # Fit using Nelder-Mead (robust for NN cost landscape)
@@ -626,8 +627,8 @@ class Platepar(object):
             options={'maxiter': 5000, 'adaptive': True},
         )
 
-        # Debug: show result
-        print("    fitPointingNN: AFTER  RA={:.2f} Dec={:.2f} Rot={:.2f} cost={:.1f} success={}".format(
+        # Debug: show result (RMSE in pixels)
+        print("    fitPointingNN: AFTER  RA={:.2f} Dec={:.2f} Rot={:.2f} RMSE={:.2f} px success={}".format(
             res.x[0], res.x[1], res.x[2], res.fun, res.success))
 
         # Update fitted parameters

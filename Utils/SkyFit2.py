@@ -6668,6 +6668,10 @@ class PlateTool(QtWidgets.QMainWindow):
                     catalog_x = catalog_x_ext[in_fov_xy]
                     catalog_y = catalog_y_ext[in_fov_xy]
                     catalog_mag = catalog_mag_ext[in_fov_xy]
+
+                    # Update GUI to show the balanced magnitude limit
+                    self.updateLeftLabels()
+                    self.tab.settings.updateLimMag()
                 else:
                     print("  Could not reach target range (max catalog stars: {:d} at mag_limit={:.1f})".format(
                         best_n_catalog, best_mag_limit))
