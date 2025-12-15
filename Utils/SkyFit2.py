@@ -6586,6 +6586,92 @@ class PlateTool(QtWidgets.QMainWindow):
 
         print("  Detected stars: {:d}".format(len(det_x)))
 
+        # Balance catalog stars vs detected stars for optimal NN matching
+        # Ideally want ~1.1x more catalog stars than detected stars
+        n_detected = len(det_x)
+        if n_detected > 0:
+            target_min = int(n_detected * 1.0)
+            target_max = int(n_detected * 1.2)
+            n_catalog = len(catalog_stars)
+
+            # Adjust magnitude limit if needed
+            current_mag_limit = self.config.catalog_mag_limit
+
+            if n_catalog < target_min or n_catalog > target_max:
+                print()
+                print("Balancing catalog stars ({:d}) to match detected stars ({:d})...".format(
+                    n_catalog, n_detected))
+                print("  Target range: {:d} - {:d} catalog stars".format(target_min, target_max))
+
+                # Binary search for optimal magnitude limit
+                mag_low, mag_high = 3.0, 12.0
+                best_mag_limit = current_mag_limit
+                best_n_catalog = n_catalog
+
+                for iteration in range(10):  # Max 10 iterations
+                    if n_catalog < target_min:
+                        # Need more catalog stars - increase mag limit
+                        mag_low = current_mag_limit
+                        current_mag_limit = (current_mag_limit + mag_high) / 2.0
+                    elif n_catalog > target_max:
+                        # Too many catalog stars - decrease mag limit
+                        mag_high = current_mag_limit
+                        current_mag_limit = (mag_low + current_mag_limit) / 2.0
+                    else:
+                        # In range, done
+                        break
+
+                    # Reload catalog with new limit
+                    # Temporarily update cat_lim_mag so filterCatalogStarsInsideFOV uses it
+                    old_cat_lim_mag = self.cat_lim_mag
+                    self.cat_lim_mag = current_mag_limit
+                    temp_catalog = self.loadCatalogStars(current_mag_limit)
+                    _, temp_catalog_fov = self.filterCatalogStarsInsideFOV(temp_catalog)
+                    self.cat_lim_mag = old_cat_lim_mag  # Restore
+
+                    # Project and filter to strict FOV
+                    temp_x, temp_y, _ = getCatalogStarsImagePositions(temp_catalog_fov, jd, self.platepar)
+                    in_fov = (temp_x >= 0) & (temp_x < self.platepar.X_res) & \
+                             (temp_y >= 0) & (temp_y < self.platepar.Y_res)
+                    n_catalog = np.sum(in_fov)
+
+                    print("    Iter {:d}: mag_limit={:.2f}, catalog_in_fov={:d}".format(
+                        iteration + 1, current_mag_limit, n_catalog))
+
+                    if target_min <= n_catalog <= target_max:
+                        best_mag_limit = current_mag_limit
+                        best_n_catalog = n_catalog
+                        print("    -> In target range, done")
+                        break
+
+                    # Track best result so far
+                    if abs(n_catalog - (target_min + target_max)/2) < abs(best_n_catalog - (target_min + target_max)/2):
+                        best_mag_limit = current_mag_limit
+                        best_n_catalog = n_catalog
+
+                # Apply best magnitude limit found
+                if best_mag_limit != self.config.catalog_mag_limit:
+                    print("  Adjusted catalog mag limit: {:.1f} -> {:.1f}".format(
+                        self.config.catalog_mag_limit, best_mag_limit))
+                    print("  Catalog stars: {:d} -> {:d}".format(len(catalog_stars), best_n_catalog))
+
+                    # Reload catalog with optimal limit
+                    # Update cat_lim_mag so filterCatalogStarsInsideFOV uses it
+                    self.cat_lim_mag = best_mag_limit
+                    catalog_temp = self.loadCatalogStars(best_mag_limit)
+                    _, catalog_stars_extended = self.filterCatalogStarsInsideFOV(catalog_temp)
+                    catalog_x_ext, catalog_y_ext, catalog_mag_ext = getCatalogStarsImagePositions(
+                        catalog_stars_extended, jd, self.platepar)
+                    in_fov_xy = (catalog_x_ext >= 0) & (catalog_x_ext < self.platepar.X_res) & \
+                                (catalog_y_ext >= 0) & (catalog_y_ext < self.platepar.Y_res)
+                    catalog_stars = catalog_stars_extended[in_fov_xy]
+                    catalog_x = catalog_x_ext[in_fov_xy]
+                    catalog_y = catalog_y_ext[in_fov_xy]
+                    catalog_mag = catalog_mag_ext[in_fov_xy]
+                else:
+                    print("  Could not reach target range (max catalog stars: {:d} at mag_limit={:.1f})".format(
+                        best_n_catalog, best_mag_limit))
+
         # First pass: Use NN cost function to refine pointing + distortion
         # This doesn't require explicit star matching - more robust for initial fit
         if len(det_x) >= 10 and len(catalog_stars) >= 10:
@@ -6596,11 +6682,11 @@ class PlateTool(QtWidgets.QMainWindow):
             img_stars_arr = np.column_stack([det_x, det_y, det_intens])
 
             # Use NN cost function to fit pointing + distortion
-            # Pass full catalog - RANSAC re-filters to strict FOV each iteration using pp_temp
+            # Pass balanced catalog for optimal NN matching ratio
             self.platepar.setDistortionType("radial5-odd", reset_params=True)
             try:
                 self.platepar.fitAstrometry(
-                    jd, img_stars_arr, self.catalog_stars,  # Full catalog, RANSAC filters each iter
+                    jd, img_stars_arr, catalog_stars,  # Balanced catalog from magnitude adjustment
                     first_platepar_fit=True,
                     use_nn_cost=True
                 )

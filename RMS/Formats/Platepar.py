@@ -37,6 +37,7 @@ import numpy as np
 import pyximport
 import RMS.Astrometry.ApplyAstrometry
 import scipy.optimize
+from scipy.spatial import cKDTree
 from RMS.Astrometry.Conversions import date2JD, jd2Date, trueRaDec2ApparentAltAz
 from RMS.Math import angularSeparation, sphericalPointFromHeadingAndDistance
 
@@ -595,14 +596,11 @@ class Platepar(object):
             if len(cat_x_valid) < 3:
                 return 1e10  # Return large cost if too few valid catalog stars
 
-            # Vectorized NN: compute NxM distance matrix in pixel space
-            # Shape: img_x[:, None] is (N, 1), cat_x_valid[None, :] is (1, M)
-            dx = img_x[:, np.newaxis] - cat_x_valid[np.newaxis, :]  # (N, M)
-            dy = img_y[:, np.newaxis] - cat_y_valid[np.newaxis, :]  # (N, M)
-            dist_matrix = np.sqrt(dx**2 + dy**2)  # (N, M)
-
-            # For each detected star, find nearest catalog star
-            nn_distances = np.min(dist_matrix, axis=1)
+            # Use KD-tree for fast nearest-neighbor search (O(N log M) vs O(N*M))
+            cat_coords = np.column_stack([cat_x_valid, cat_y_valid])
+            tree = cKDTree(cat_coords)
+            img_coords = np.column_stack([img_x, img_y])
+            nn_distances, _ = tree.query(img_coords, k=1)
 
             # Use sum of squared distances as cost
             total_cost = np.sum(nn_distances ** 2)
@@ -1052,6 +1050,8 @@ class Platepar(object):
 
                     # RANSAC outlier detection: radial3-odd then radial5-odd with warm start
                     # radial3-odd stabilizes quickly, then radial5-odd refines distortion
+                    print("    NN input: {:d} detected stars, {:d} catalog stars".format(
+                        len(img_stars), len(catalog_stars)))
                     print("    RANSAC outlier detection: 14 iterations")
                     print("    Radial-weighted threshold: 1.0x at center, 2.0x at corners")
                     print("    Iterations 1-7: radial3-odd, 8-14: radial5-odd (warm start)")
