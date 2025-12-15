@@ -74,7 +74,8 @@ from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
 from RMS.Routines.SatellitePositions import SatellitePredictor, loadTLEs, loadRobustTLEs, findClosestTLEFile, SKYFIELD_AVAILABLE
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
 from RMS.Astrometry.Conversions import datetime2JD
-from skyfield.api import load
+if SKYFIELD_AVAILABLE:
+    from skyfield.api import load
 import traceback
 
 
