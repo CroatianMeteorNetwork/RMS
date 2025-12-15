@@ -20,7 +20,7 @@ from RMS.Logger import LoggingManager, getLogger
 from RMS.Misc import RmsDateTime, UTCFromTimestamp
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 # Python 2 doesn't have the timestamp function, so make one
@@ -1159,7 +1159,7 @@ if __name__ == '__main__':
     # Initialize the logger
     log_manager = LoggingManager()
     log_manager.initLogging(config)
-    log = getLogger("logger")
+    log = getLogger("rmslogger")
 
     if not os.path.isdir(config.data_dir):
         log.info('Data Dir not found {}'.format(config.data_dir))

@@ -58,7 +58,7 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 
@@ -801,7 +801,8 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
             continue
 
         # Gamma correct the star segment
-        star_seg_crop_corr = Image.gammaCorrectionImage(star_seg_crop.astype(np.float32), gamma)
+        star_seg_crop_corr = Image.gammaCorrectionImage(star_seg_crop.astype(np.float32), gamma, 
+                                                        out_type=np.float32)
 
         # Correct the background for gamma
         bg_corrected = Image.gammaCorrectionScalar(offset, gamma)

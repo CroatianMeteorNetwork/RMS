@@ -56,26 +56,60 @@ fi
 source ~/vRMS/bin/activate
 cd ~/source/RMS
 
-# Init log file
-LOGPATH=~/RMS_data/logs/
-LOGDATE=$(date +"%Y%m%d_%H%M%S")
-LOGSUFFIX="_log.txt"
-LOGFILE=$LOGPATH$LOGDATE$LOGSUFFIX
+LOGDIR=~/RMS_data/logs
+mkdir -p "$LOGDIR"
+# LOGFILE="$LOGDIR/$(date +%F_%T)_startcap.log"
+LOGFILE="/dev/null"  # Disable duplicate logging - RMS already logs
 
-mkdir -p $LOGPATH
+configpath="/home/$(whoami)/source/Stations/$1/.config"
+echo "Using config from $configpath"
 
-# Log the output to a file (warning: this breaks Ctrl+C passing to StartCapture)
-#python -m RMS.StartCapture 2>&1 | tee $LOGFILE
+# ----- decide how we were launched ---------------------------------
+# real TTY (manual or .desktop launch)
+if [[ -t 1 ]]; then
+    # echo "Logging to $LOGFILE"  # Disabled since we're using /dev/null
+    
+    # duplicate output but shield tee from SIGINT
+    exec > >(bash -c 'trap "" INT TERM; tee -a "$1"' _ "$LOGFILE") 2>&1
 
-configpath=/home/$(whoami)/source/Stations/$1/.config
-echo Using config from $configpath
-echo $configpath
+    python -u -m RMS.StartCapture -c "$configpath" &
+    child=$!
 
+    # Handle signals: SIGINT (user Ctrl-C) shows message, SIGTERM (GRMSUpdater) doesn't
+    handle_signal() {
+        local sig=$1
+        
+        # Always forward SIGINT to Python (it handles this better than SIGTERM)
+        if [[ "$sig" == "TERM" ]]; then
+            kill -INT "$child" 2>/dev/null  # Forward SIGINT instead of SIGTERM
+        else
+            kill -"$sig" "$child" 2>/dev/null
+        fi
+        
+        wait "$child"
+        status=$?
+        
+        # Only show message for SIGINT (user Ctrl-C), not SIGTERM (automated)
+        if [[ "$sig" == "INT" ]]; then
+            read -n1 -r -p "Capture ended (exit $status) - press any key to close..."
+        fi
+        exit "$status"
+    }
+    
+    trap 'handle_signal INT' INT
+    trap 'handle_signal TERM' TERM
+    wait "$child"
+    status=$?
 
+    # keep the window open for inspection only when user-started (GRMS_AUTO is unset)
+    if [[ -z "${GRMS_AUTO:-}" ]]; then
+        read -n1 -r -p "Capture ended (exit $status) - press any key to close..."
+    fi
 
+    exit "$status"
 
-python -m RMS.StartCapture -c $configpath
-
-read -p "Press any key to continue... "
-
-$SHELL
+else
+    # no TTY (cron / GRMSUpdater / nohup etc.) - just append to the log file
+    { exec -a "StartCapture.sh $1" \
+        python -u -m RMS.StartCapture -c "$configpath"; } 2>&1 | tee -a "$LOGFILE"
+fi

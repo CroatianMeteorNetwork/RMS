@@ -26,7 +26,7 @@ from RMS.Formats.FFfile import validFFName, filenameToDatetime
 from RMS.Misc import mkdirP, RmsDateTime, tarWithProgress
 from RMS.Logger import getLogger
 
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 # --------------------------------------------------------------------
@@ -303,12 +303,64 @@ def _parse(fname):
     return station, dt
 
 
-def listImageBlocksBefore(cutoff, dir_path):
+def findLastNightFrameInWindow(dir_path, window_start, window_end):
+    """Find the timestamp of the last night-mode frame within a time window.
+
+    This is used to determine the correct cutoff for night timelapse generation.
+    After sunrise, there may be a few night frames captured during the inertia
+    period before the mode switch completes. We want to include those frames
+    in the night timelapse, but exclude any day frames that follow.
+
+    Arguments:
+        dir_path: [str] Root directory to search (walks sub-dirs recursively).
+        window_start: [datetime] Start of the search window (e.g., sunrise).
+        window_end: [datetime] End of the search window (e.g., sunrise + inertia).
+
+    Return:
+        last_n_timestamp: [datetime | None] Timestamp of the last _n frame in
+            the window, or None if no night frames were found.
+    """
+    last_n_frame = None
+    last_n_timestamp = None
+
+    for root, _, files in os.walk(dir_path):
+        for fname in files:
+            if not IMAGE_PATTERN.match(fname):
+                continue
+
+            # Check if it's a night frame
+            mode = _modeFromName(fname)
+            if mode != 'n':
+                continue
+
+            # Get the timestamp
+            try:
+                ts = _timestampFromName(fname)
+            except ValueError:
+                continue
+
+            # Check if it's within the window
+            if ts < window_start or ts >= window_end:
+                continue
+
+            # Track the latest night frame
+            if last_n_timestamp is None or ts > last_n_timestamp:
+                last_n_timestamp = ts
+                last_n_frame = fname
+
+    return last_n_timestamp
+
+
+def listImageBlocksBefore(cutoff, dir_path, max_gap_hours=2):
     """Group images into chronological, same-mode blocks before a cutoff.
 
     Arguments:
         cutoff: [datetime] Naive UTC timestamp; images >= cutoff are ignored.
         dir_path: [str] Root directory to search (walks sub-dirs recursively).
+
+    Keyword arguments:
+        max_gap_hours: [float] Maximum time gap in hours between consecutive
+            frames before starting a new block. 2 hours by default.
 
     Return:
         blocks: [list[list[str]]] Each sub-list is a consecutive sequence of
@@ -332,15 +384,34 @@ def listImageBlocksBefore(cutoff, dir_path):
     # 2. chronological sort -------------------------------------------------
     paths.sort(key=_timestampFromName)
 
-    # 3. first pass - break on mode changes ---------------------------------
+    # 3. first pass - break on mode changes AND time gaps ------------------
+    MAX_GAP = timedelta(hours=max_gap_hours)
     prelim_blocks, cur_block, cur_mode = [], [], None
+    prev_ts = None
+
     for path in paths:
         mode = _modeFromName(path)
-        if cur_block and mode != cur_mode:          # mode switch - new block
+        ts = _timestampFromName(path)
+
+        # Check if we should start a new block
+        should_split = False
+
+        if cur_block:
+            # Split on mode change
+            if mode != cur_mode:
+                should_split = True
+            # Split on significant time gap
+            elif prev_ts and (ts - prev_ts) > MAX_GAP:
+                should_split = True
+
+        if should_split:
             prelim_blocks.append(cur_block)
             cur_block = []
+
         cur_block.append(path)
         cur_mode = mode
+        prev_ts = ts
+
     if cur_block:
         prelim_blocks.append(cur_block)
 

@@ -39,6 +39,7 @@ from RMS.GeoidHeightEGM96 import mslToWGS84Height
 import pyximport
 import RMS.Astrometry.ApplyAstrometry
 import scipy.optimize
+from scipy.spatial import cKDTree
 from RMS.Astrometry.Conversions import date2JD, jd2Date, trueRaDec2ApparentAltAz
 from RMS.Math import angularSeparation, sphericalPointFromHeadingAndDistance
 from RMS.GeoidHeightEGM96 import mslToWGS84Height
@@ -147,7 +148,7 @@ def getPairedStarsSkyPositions(img_x, img_y, jd, platepar):
 
 
 class Platepar(object):
-    def __init__(self, distortion_type="poly3+radial"):
+    def __init__(self, distortion_type="radial5-odd"):
         """Astrometric and photometric calibration plate parameters. Several distortion types are supported.
 
         Arguments:
@@ -170,9 +171,13 @@ class Platepar(object):
 
         self.version = 2
 
-        # Set the distortion type
-        self.distortion_type = distortion_type
-        self.setDistortionType(self.distortion_type)
+        # Store distortion type for later initialization
+        self._init_distortion_type = distortion_type
+
+        # Initialize distortion-related attributes (needed by setDistortionType)
+        self.equal_aspect = True
+        self.force_distortion_centre = False
+        self.asymmetry_corr = False
 
         # Station coordinates
         self.lat = self.lon = self.elev = 0
@@ -211,14 +216,8 @@ class Platepar(object):
         #   itself compensates for the refraction (e.g. the polynomial model)
         self.measurement_apparent_to_true_refraction = False
 
-        # Equal aspect (X and Y scales are equal) - used ONLY for radial distortion
-        self.equal_aspect = True
-
-        # Force distortion centre to image centre
-        self.force_distortion_centre = False
-
-        # Asymmetry correction - used ONLY for radial distortion
-        self.asymmetry_corr = False
+        # Note: equal_aspect, force_distortion_centre, asymmetry_corr are initialized earlier
+        # (before setDistortionType is called)
 
         # Photometry calibration
         self.mag_0 = -2.5
@@ -241,8 +240,14 @@ class Platepar(object):
         # Flag to indicate that the platepar was successfully auto recalibrated on an individual FF files
         self.auto_recalibrated = False
 
-        # Init the distortion parameters
-        self.resetDistortionParameters()
+        # Initialize distortion type (must be done before resetDistortionParameters)
+        # First set a placeholder value so setDistortionType can compare against it
+        self.distortion_type = ""
+        self.poly_length = 0
+
+        # Now set the actual distortion type
+        self.setDistortionType(self._init_distortion_type, reset_params=True)
+        del self._init_distortion_type
 
     def resetDistortionParameters(self, preserve_centre=False):
         """Set the distortion parameters to zero.
@@ -258,9 +263,14 @@ class Platepar(object):
             # Preserve centre for the radial distortion
             if self.distortion_type.startswith("radial"):
 
-                # Note that the radial distortion parameters are kept in the X poly array
-                x_centre_fwd, y_centre_fwd = self.x_poly_fwd[0], self.x_poly_fwd[1]
-                x_centre_rev, y_centre_rev = self.x_poly_rev[0], self.x_poly_rev[1]
+                # If force_distortion_centre is True, there are no centre coefficients to preserve
+                if self.force_distortion_centre:
+                    x_centre_fwd, y_centre_fwd = 0.0, 0.0
+                    x_centre_rev, y_centre_rev = 0.0, 0.0
+                else:
+                    # Note that the radial distortion parameters are kept in the X poly array
+                    x_centre_fwd, y_centre_fwd = self.x_poly_fwd[0], self.x_poly_fwd[1]
+                    x_centre_rev, y_centre_rev = self.x_poly_rev[0], self.x_poly_rev[1]
 
             else:
 
@@ -516,6 +526,147 @@ class Platepar(object):
         # Update alt/az of pointing
         self.updateRefAltAz()
 
+    def fitPointingNN(self, jd, img_stars, catalog_stars, fixed_scale=True):
+        """Fit pointing parameters using nearest-neighbor cost function in pixel space.
+
+        Unlike fitPointing() which requires pre-matched star pairs, this method finds the
+        nearest catalog star for each detected star and optimizes to minimize the sum of
+        NN distances. This is more robust when the initial pointing is off.
+
+        Use this as a replacement for NNalign - it fits RA_d, dec_d, pos_angle_ref, and
+        optionally F_scale without requiring explicit star matching.
+
+        The cost function works in pixel space (like matchStarsResiduals) by projecting
+        catalog stars onto the image and computing pixel distances. This is more robust
+        than working in sky coordinates because it correctly handles distortion and timing.
+
+        Arguments:
+            jd: [float] Julian date of the image.
+            img_stars: [ndarray] Detected stars as Nx3 array (x, y, intensity).
+            catalog_stars: [ndarray] Catalog stars in FOV as Mx3 array (ra, dec, mag).
+
+        Keyword arguments:
+            fixed_scale: [bool] Keep scale fixed. True by default (for camera drift correction).
+
+        """
+
+        from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
+
+        # Create a single working copy of platepar to reuse in cost function
+        # This avoids expensive deepcopy on every optimizer iteration
+        pp_work = copy.deepcopy(self)
+
+        # CRITICAL: Update the platepar's reference time to match the observation time.
+        # The coordinate transformation uses (JD, Ho) as the reference frame. If we don't
+        # update these to match the observation JD, changing RA_d won't have the expected
+        # effect on the catalog star projections.
+        #
+        # When we change JD/Ho, we must also adjust RA_d to maintain the same pointing direction.
+        # The relationship is: new_RA_d = old_RA_d + delta_Ho (sidereal rotation)
+        old_Ho = pp_work.Ho
+
+        pp_work.JD = jd
+        T = (jd - 2451545.0) / 36525.0
+        new_Ho = (
+            280.46061837
+            + 360.98564736629 * (jd - 2451545.0)
+            + 0.000387933 * T ** 2
+            - T ** 3 / 38710000.0
+        ) % 360
+        pp_work.Ho = new_Ho
+
+        # Compute delta Ho and adjust RA_d to preserve pointing direction
+        delta_Ho = (new_Ho - old_Ho) % 360
+        pp_work.RA_d = (self.RA_d + delta_Ho) % 360
+
+        # Pre-extract catalog coordinates (constant across iterations)
+        ra_catalog, dec_catalog, _ = catalog_stars.T
+
+        # Pre-extract detected star positions (constant across iterations)
+        img_x, img_y, _ = img_stars.T
+
+        def _calcPointingNNCostPixel(params, pp_work, jd, ra_catalog, dec_catalog, img_x, img_y, fixed_scale):
+            """NN cost function in pixel space for pointing fit.
+
+            Projects catalog stars to image coordinates and computes pixel-space NN distances.
+            This is more robust than sky-space comparison because it correctly handles
+            distortion and timing through the standard coordinate transforms.
+
+            Uses a pre-allocated working platepar to avoid deepcopy overhead.
+            """
+
+            # Update working platepar with current parameters (no copy needed)
+            pp_work.RA_d, pp_work.dec_d, pp_work.pos_angle_ref = params[:3]
+            if not fixed_scale:
+                pp_work.F_scale = abs(params[3])
+
+            # Project catalog stars to image coordinates
+            cat_x, cat_y = raDecToXYPP(ra_catalog, dec_catalog, jd, pp_work)
+
+            # Filter out catalog stars that project outside the image
+            valid_mask = (cat_x >= 0) & (cat_x < pp_work.X_res) & (cat_y >= 0) & (cat_y < pp_work.Y_res)
+            cat_x_valid = cat_x[valid_mask]
+            cat_y_valid = cat_y[valid_mask]
+
+            if len(cat_x_valid) < 3:
+                return 1e10  # Return large cost if too few valid catalog stars
+
+            # Use KD-tree for fast nearest-neighbor search (O(N log M) vs O(N*M))
+            cat_coords = np.column_stack([cat_x_valid, cat_y_valid])
+            tree = cKDTree(cat_coords)
+            img_coords = np.column_stack([img_x, img_y])
+            nn_distances, _ = tree.query(img_coords, k=1)
+
+            # Use RMSE (root mean squared error) as cost
+            # This normalizes by number of stars and gives interpretable units (pixels)
+            rmse = np.sqrt(np.mean(nn_distances ** 2))
+
+            return rmse
+
+        # Initial parameters - use pp_work.RA_d which has been adjusted for the new JD/Ho
+        p0 = [pp_work.RA_d, self.dec_d, self.pos_angle_ref]
+        if not fixed_scale:
+            p0.append(abs(self.F_scale))
+
+        # Debug: compute initial cost (RMSE in pixels)
+        initial_cost = _calcPointingNNCostPixel(p0, pp_work, jd, ra_catalog, dec_catalog, img_x, img_y, fixed_scale)
+        print("    fitPointingNN: BEFORE RA={:.2f} Dec={:.2f} Rot={:.2f} RMSE={:.2f} px".format(
+            p0[0], p0[1], p0[2], initial_cost))
+
+        # Fit using Nelder-Mead (robust for NN cost landscape)
+        res = scipy.optimize.minimize(
+            _calcPointingNNCostPixel,
+            p0,
+            args=(pp_work, jd, ra_catalog, dec_catalog, img_x, img_y, fixed_scale),
+            method='Nelder-Mead',
+            options={'maxiter': 5000, 'adaptive': True},
+        )
+
+        # Debug: show result (RMSE in pixels)
+        print("    fitPointingNN: AFTER  RA={:.2f} Dec={:.2f} Rot={:.2f} RMSE={:.2f} px success={}".format(
+            res.x[0], res.x[1], res.x[2], res.fun, res.success))
+
+        # Update fitted parameters
+        self.RA_d, self.dec_d, self.pos_angle_ref = res.x[:3]
+        if not fixed_scale:
+            self.F_scale = abs(res.x[3])
+
+        # Update JD and Ho to match the observation time
+        # This ensures the fitted RA_d is consistent with the new reference time
+        self.JD = jd
+        T = (jd - 2451545.0) / 36525.0
+        self.Ho = (
+            280.46061837
+            + 360.98564736629 * (jd - 2451545.0)
+            + 0.000387933 * T ** 2
+            - T ** 3 / 38710000.0
+        ) % 360
+
+        # Update alt/az of pointing
+        self.updateRefAltAz()
+
+        return res.success
+
     def fitAstrometry(
         self,
         jd,
@@ -524,6 +675,7 @@ class Platepar(object):
         first_platepar_fit=False,
         fit_only_pointing=False,
         fixed_scale=False,
+        use_nn_cost=False,
     ):
         """Fit astrometric parameters to the list of star image and celestial catalog coordinates.
         At least 4 stars are needed to fit the rigid body parameters.
@@ -699,7 +851,7 @@ class Platepar(object):
             pp_copy.F_scale = abs(F_scale)
 
             # Assign distortion parameters
-            pp_copy.x_poly_fwd = params[4:]
+            pp_copy.x_poly_fwd = np.array(params[4:])
 
             img_x, img_y, _ = img_stars.T
 
@@ -721,6 +873,58 @@ class Platepar(object):
 
             return separation_sum
 
+        def _calcSkyResidualsAstroAndDistortionRadialNN(params, platepar, jd, catalog_stars, img_stars):
+            """Like _calcSkyResidualsAstroAndDistortionRadial but uses nearest-neighbor matching.
+
+            Instead of requiring pre-matched pairs, this finds the nearest catalog star for each
+            detected star and sums those distances. This eliminates the need for explicit matching.
+
+            Args:
+                params: [RA_d/360, dec_d/90, pos_angle_ref/360, F_scale, x_poly_fwd...]
+                platepar: Platepar object
+                jd: Julian date
+                catalog_stars: Pre-filtered catalog stars in FOV (Mx3 array [ra, dec, mag])
+                img_stars: detected image stars (Nx3 array [x, y, intensity])
+
+            Returns:
+                Sum of squared angular separations to nearest catalog star for each detected star
+            """
+            # Set distortion parameters
+            pp_copy = copy.deepcopy(platepar)
+
+            # Unpack pointing parameters and assign to the copy of platepar used for the fit
+            ra_ref, dec_ref, pos_angle_ref, F_scale = params[:4]
+
+            # Unnormalize the pointing parameters
+            pp_copy.RA_d = (360 * ra_ref) % (360)
+            pp_copy.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
+            pp_copy.pos_angle_ref = (360 * pos_angle_ref) % (360)
+            pp_copy.F_scale = abs(F_scale)
+
+            # Assign distortion parameters
+            pp_copy.x_poly_fwd = np.array(params[4:])
+
+            img_x, img_y, _ = img_stars.T
+
+            # Convert detected image positions to sky coordinates
+            ra_det, dec_det = getPairedStarsSkyPositions(img_x, img_y, jd, pp_copy)
+
+            # Catalog is pre-filtered to FOV by caller - no need to re-filter here
+            ra_catalog, dec_catalog, _ = catalog_stars.T
+
+            # Vectorized NN: compute NxM angular separation matrix, then take row-wise min
+            ra_det_rad = np.radians(ra_det)[:, np.newaxis]  # (N, 1)
+            dec_det_rad = np.radians(dec_det)[:, np.newaxis]  # (N, 1)
+            ra_cat_rad = np.radians(ra_catalog)[np.newaxis, :]  # (1, M)
+            dec_cat_rad = np.radians(dec_catalog)[np.newaxis, :]  # (1, M)
+
+            # angularSeparation broadcasts to (N, M) separation matrix
+            sep_matrix = angularSeparation(ra_det_rad, dec_det_rad, ra_cat_rad, dec_cat_rad)
+            nn_distances = np.min(sep_matrix, axis=1)  # (N,)
+            total_cost = np.sum(nn_distances ** 2)
+
+            return total_cost
+
         # print('ASTRO', _calcImageResidualsAstro([self.RA_d, self.dec_d,
         #     self.pos_angle_ref, self.F_scale],  catalog_stars, img_stars))
 
@@ -735,11 +939,12 @@ class Platepar(object):
         # Fit the pointing parameters (RA, Dec, rotation, scale)
         #   Only do the fit for the polynomial distortion model, or the first time if the radial distortion
         #   is used
+        #   Skip when using NN cost since pointing is included in the radial fit
         if (
             self.distortion_type.startswith("poly")
             or (not self.distortion_type.startswith("poly") and first_platepar_fit)
             or fit_only_pointing
-        ):
+        ) and not use_nn_cost:
 
             self.fitPointing(jd, img_stars, catalog_stars, fixed_scale=fixed_scale)
 
@@ -836,14 +1041,283 @@ class Platepar(object):
                 p0 = [self.RA_d / 360, self.dec_d / 90, self.pos_angle_ref / 360, abs(self.F_scale)]
                 p0 += self.x_poly_fwd.tolist()
 
+                # Choose cost function based on use_nn_cost flag
+                if use_nn_cost:
+                    # Use nearest-neighbor cost function - no explicit star matching needed
+                    cost_func = _calcSkyResidualsAstroAndDistortionRadialNN
+                else:
+                    # Use original matched-pair cost function
+                    cost_func = _calcSkyResidualsAstroAndDistortionRadial
+
                 # Fit the radial distortion - the X polynomial is used to store the fit parameters
-                res = scipy.optimize.minimize(
-                    _calcSkyResidualsAstroAndDistortionRadial,
-                    p0,
-                    args=(self, jd, catalog_stars, img_stars),
-                    method='Nelder-Mead',
-                    options={'maxiter': 10000, 'adaptive': True},
-                )
+                opt_options = {'maxiter': 10000, 'adaptive': True}
+
+                if use_nn_cost:
+                    # Two-stage RANSAC-style outlier detection with radial-weighted threshold
+                    # Stage 1: radial3-odd (stable, fewer params) - identifies outliers
+                    # Stage 2: radial5-odd (better final fit) - works only on Stage 1 inliers
+                    # Outliers can't hide because they don't influence the fit
+
+                    n_stars = len(img_stars)
+                    subset_fraction = 0.5  # Fit on 50% of stars
+                    all_indices = np.arange(n_stars)
+
+                    # Compute radial distance from image center for weighted threshold
+                    # Edge stars have larger errors due to lens distortion
+                    cx, cy = self.X_res / 2.0, self.Y_res / 2.0
+                    img_x_all, img_y_all, _ = img_stars.T
+                    r = np.sqrt((img_x_all - cx)**2 + (img_y_all - cy)**2)
+                    r_max = np.sqrt(cx**2 + cy**2)  # Corner distance
+                    # Scale threshold: allow 2x error at edges vs center
+                    radial_scale = 1.0 + (r / r_max)  # Range [1.0, 2.0]
+
+                    # Save original distortion type for final fit
+                    original_dist_type = self.distortion_type
+
+                    # Keep track of the best result across all stages
+                    best_res = None
+                    best_cost = float('inf')
+
+                    # RANSAC outlier detection: radial3-odd then radial5-odd with warm start
+                    # radial3-odd stabilizes quickly, then radial5-odd refines distortion
+                    print("    NN input: {:d} detected stars, {:d} catalog stars".format(
+                        len(img_stars), len(catalog_stars)))
+                    print("    RANSAC outlier detection: 14 iterations")
+                    print("    Radial-weighted threshold: 1.0x at center, 2.0x at corners")
+                    print("    Iterations 1-7: radial3-odd, 8-14: radial5-odd (warm start)")
+
+                    # ========== RANSAC - identify outliers ==========
+                    total_iters = 14  # 7 + 7 iterations
+                    switch_iter = 7   # Switch from radial3-odd to radial5-odd after iteration 7
+
+                    # Start with radial3-odd - convert coefficients intelligently
+                    # This preserves k1 when converting from e.g. radial7-odd to radial3-odd
+                    if self.distortion_type.startswith("radial") and self.distortion_type != "radial3-odd":
+                        # Convert coefficients before changing distortion type
+                        radial3_x, radial3_y = self.convertDistortionCoeffs("radial3-odd")
+                        self.setDistortionType("radial3-odd", reset_params=False)
+                        self.x_poly_fwd = radial3_x
+                        self.x_poly_rev = radial3_x.copy()
+                        self.y_poly_fwd = radial3_y
+                        self.y_poly_rev = radial3_y.copy()
+                    else:
+                        self.setDistortionType("radial3-odd", reset_params=False)
+
+                    p0_current = [
+                        self.RA_d / 360.0,
+                        self.dec_d / 90,
+                        self.pos_angle_ref / 360.0,
+                        self.F_scale,
+                    ] + self.x_poly_fwd.tolist()
+
+                    # Weighted outlier scoring: later iterations count more (fit is more refined)
+                    # Outliers get +weight, inliers get -weight (redemption)
+                    # Weighted scoring: radial3-odd iterations weight=1, radial5-odd weight=2
+                    # This gives more influence to the more accurate radial5-odd fit
+                    outlier_scores = np.zeros(n_stars, dtype=float)
+                    n_subset = max(10, int(n_stars * subset_fraction))
+
+                    # Track current iteration's outliers - exclude from next iteration's fit
+                    current_outlier_mask = np.zeros(n_stars, dtype=bool)
+
+                    for iteration in range(total_iters):
+                        # Compute weight for this iteration - radial5-odd counts more
+                        if iteration < switch_iter:
+                            weight = 1  # radial3-odd phase
+                        else:
+                            weight = 2  # radial5-odd phase - more accurate, counts more
+
+                        # Switch to radial5-odd after iteration 7 with warm start
+                        if iteration == switch_iter:
+                            # Save current best params from radial3-odd
+                            if best_res is not None:
+                                ra_ref, dec_ref, pos_angle_ref, F_scale = best_res.x[:4]
+                                self.RA_d = (360 * ra_ref) % (360)
+                                self.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
+                                self.pos_angle_ref = (360 * pos_angle_ref) % (360)
+                                self.F_scale = abs(F_scale)
+                                # Update x_poly_fwd with best radial3-odd coefficients
+                                self.x_poly_fwd = np.array(best_res.x[4:])
+                                self.x_poly_rev = self.x_poly_fwd.copy()
+
+                            # Convert coefficients from radial3-odd to radial5-odd intelligently
+                            # This preserves x0, y0, xy, a1, a2, k1 and adds k2=0
+                            radial5_x, radial5_y = self.convertDistortionCoeffs("radial5-odd")
+                            self.setDistortionType("radial5-odd", reset_params=False)
+                            self.x_poly_fwd = radial5_x
+                            self.x_poly_rev = radial5_x.copy()
+                            self.y_poly_fwd = radial5_y
+                            self.y_poly_rev = radial5_y.copy()
+
+                            p0_current = [
+                                self.RA_d / 360.0,
+                                self.dec_d / 90,
+                                self.pos_angle_ref / 360.0,
+                                self.F_scale,
+                            ] + self.x_poly_fwd.tolist()
+                            best_res = None  # Reset best result for new distortion type
+                            best_cost = float('inf')
+                            print("      --- Switching to radial5-odd (warm start with coefficient conversion) ---")
+
+                        # Exclude stars that were outliers in the previous iteration
+                        # This ensures outliers don't contaminate subsequent fits
+                        available_mask = ~current_outlier_mask
+                        available_indices = all_indices[available_mask]
+
+                        if len(available_indices) < n_subset:
+                            subset_indices = available_indices
+                        else:
+                            np.random.seed(42 + iteration)
+                            subset_indices = np.random.choice(available_indices, n_subset, replace=False)
+
+                        img_stars_subset = img_stars[subset_indices]
+
+                        start_params = best_res.x if best_res is not None else p0_current
+                        if len(start_params) != len(p0_current):
+                            start_params = p0_current
+
+                        # Pre-filter catalog to FOV using current pointing (from start_params)
+                        # This avoids re-filtering inside every optimizer function evaluation
+                        pp_filter = copy.deepcopy(self)
+                        pp_filter.RA_d = (360 * start_params[0]) % 360
+                        pp_filter.dec_d = -90 + (90 * start_params[1] + 90) % (180.000001)
+                        pp_filter.pos_angle_ref = (360 * start_params[2]) % 360
+                        pp_filter.F_scale = abs(start_params[3])
+                        ra_cat_all, dec_cat_all, _ = catalog_stars.T
+                        cat_x, cat_y = RMS.Astrometry.ApplyAstrometry.raDecToXYPP(
+                            ra_cat_all, dec_cat_all, jd, pp_filter
+                        )
+                        in_fov = (cat_x >= 0) & (cat_x < self.X_res) & \
+                                 (cat_y >= 0) & (cat_y < self.Y_res)
+                        catalog_stars_fov = catalog_stars[in_fov]
+
+                        res = scipy.optimize.minimize(
+                            cost_func, start_params,
+                            args=(self, jd, catalog_stars_fov, img_stars_subset),
+                            method='Nelder-Mead', options=opt_options,
+                        )
+
+                        # Score on ALL stars
+                        pp_temp = copy.deepcopy(self)
+                        ra_ref, dec_ref, pos_angle_ref, F_scale = res.x[:4]
+                        pp_temp.RA_d = (360 * ra_ref) % (360)
+                        pp_temp.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
+                        pp_temp.pos_angle_ref = (360 * pos_angle_ref) % (360)
+                        pp_temp.F_scale = abs(F_scale)
+                        pp_temp.x_poly_fwd = np.array(res.x[4:])
+
+                        img_x, img_y, _ = img_stars.T
+                        ra_det, dec_det = getPairedStarsSkyPositions(img_x, img_y, jd, pp_temp)
+
+                        # Re-filter catalog using current pp_temp (strict XY filter)
+                        # This allows edge stars to "appear" as distortion improves
+                        ra_cat_ext, dec_cat_ext, _ = catalog_stars.T
+                        cat_x, cat_y = RMS.Astrometry.ApplyAstrometry.raDecToXYPP(
+                            ra_cat_ext, dec_cat_ext, jd, pp_temp
+                        )
+                        in_fov_iter = (cat_x >= 0) & (cat_x < pp_temp.X_res) & \
+                                      (cat_y >= 0) & (cat_y < pp_temp.Y_res)
+                        catalog_stars_iter = catalog_stars[in_fov_iter]
+                        ra_catalog, dec_catalog, _ = catalog_stars_iter.T
+
+                        # Vectorized NN: compute NxM separation matrix
+                        ra_det_rad = np.radians(ra_det)[:, np.newaxis]  # (N, 1)
+                        dec_det_rad = np.radians(dec_det)[:, np.newaxis]  # (N, 1)
+                        ra_cat_rad = np.radians(ra_catalog)[np.newaxis, :]  # (1, M)
+                        dec_cat_rad = np.radians(dec_catalog)[np.newaxis, :]  # (1, M)
+                        sep_matrix = angularSeparation(ra_det_rad, dec_det_rad, ra_cat_rad, dec_cat_rad)
+                        nn_seps = np.min(sep_matrix, axis=1)  # (N,)
+
+                        median_sep = np.median(nn_seps)
+                        base_threshold = 3.0 * median_sep
+                        per_star_threshold = base_threshold * radial_scale
+                        iteration_outliers = nn_seps > per_star_threshold
+
+                        # Weighted scoring: outliers get +weight, inliers get -weight (redemption!)
+                        outlier_scores[iteration_outliers] += weight
+                        outlier_scores[~iteration_outliers] -= weight
+
+                        # Update current outlier mask for next iteration's exclusion
+                        current_outlier_mask = iteration_outliers
+
+                        total_cost = np.sum(nn_seps**2)
+                        if total_cost < best_cost:
+                            best_cost = total_cost
+                            best_res = res
+
+                        dist_label = "radial5-odd" if iteration >= switch_iter else "radial3-odd"
+                        # Debug: show RA/Dec at each iteration
+                        iter_ra = (360 * res.x[0]) % 360
+                        iter_dec = -90 + (90 * res.x[1] + 90) % 180.000001
+                        print("      Iter {}: {} (w={}) fit on {}, {} outliers, cost={:.6f}, RA={:.2f} Dec={:.2f}".format(
+                            iteration + 1, dist_label, weight, len(subset_indices),
+                            np.sum(iteration_outliers), total_cost, iter_ra, iter_dec))
+
+                    # Outlier mask: positive score = more outlier votes than inlier votes
+                    # Max possible score: 7*1 + 7*2 = 7+14 = 21 (all outlier)
+                    # Min possible score: -21 (all inlier)
+                    final_outlier_mask = outlier_scores > 0
+                    nn_inlier_mask = ~final_outlier_mask
+                    n_inliers = np.sum(nn_inlier_mask)
+                    n_outliers = np.sum(final_outlier_mask)
+
+                    print("    RANSAC result: {}/{} inliers (removed {} outliers with score > 0)".format(
+                        n_inliers, n_stars, n_outliers))
+
+                    # Apply best RANSAC params to platepar
+                    ra_ref, dec_ref, pos_angle_ref, F_scale = best_res.x[:4]
+                    self.RA_d = (360 * ra_ref) % (360)
+                    self.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
+                    self.pos_angle_ref = (360 * pos_angle_ref) % (360)
+                    self.F_scale = abs(F_scale)
+                    self.x_poly_fwd = np.array(best_res.x[4:])  # Ensure numpy array
+                    self.x_poly_rev = np.array(self.x_poly_fwd)  # Sync reverse with forward!
+                    self.updateRefAltAz()
+
+                    # Create matched pairs from NN assignments using RANSAC result
+                    img_stars_clean = img_stars[~final_outlier_mask]
+                    img_x, img_y, _ = img_stars_clean.T
+                    ra_det, dec_det = getPairedStarsSkyPositions(img_x, img_y, jd, self)
+
+                    # Re-filter catalog using final platepar (strict XY filter)
+                    ra_cat_ext, dec_cat_ext, _ = catalog_stars.T
+                    cat_x, cat_y = RMS.Astrometry.ApplyAstrometry.raDecToXYPP(
+                        ra_cat_ext, dec_cat_ext, jd, self
+                    )
+                    in_fov_final = (cat_x >= 0) & (cat_x < self.X_res) & \
+                                   (cat_y >= 0) & (cat_y < self.Y_res)
+                    catalog_stars_fov = catalog_stars[in_fov_final]
+                    ra_catalog, dec_catalog, _ = catalog_stars_fov.T
+
+                    # Vectorized NN matching: compute NxM separation matrix
+                    ra_det_rad = np.radians(ra_det)[:, np.newaxis]  # (N, 1)
+                    dec_det_rad = np.radians(dec_det)[:, np.newaxis]  # (N, 1)
+                    ra_cat_rad = np.radians(ra_catalog)[np.newaxis, :]  # (1, M)
+                    dec_cat_rad = np.radians(dec_catalog)[np.newaxis, :]  # (1, M)
+                    sep_matrix = angularSeparation(ra_det_rad, dec_det_rad, ra_cat_rad, dec_cat_rad)
+                    nearest_indices = np.argmin(sep_matrix, axis=1)  # (N,)
+                    matched_catalog = catalog_stars_fov[nearest_indices]
+
+                    # Restore original distortion type for final matched-pair fit
+                    self.setDistortionType(original_dist_type, reset_params=False)
+
+                    # Final fit: call fitAstrometry recursively with matched pairs
+                    # Use first_platepar_fit=True to ensure fitPointing runs and x_poly_rev syncs
+                    print("    Final fit on {} matched stars with {} (recursive call)...".format(
+                        len(img_stars_clean), original_dist_type))
+                    self.fitAstrometry(jd, img_stars_clean, matched_catalog,
+                                       first_platepar_fit=True, use_nn_cost=False)
+
+                    # Return early - recursive call already set all platepar params
+                    return
+                else:
+                    res = scipy.optimize.minimize(
+                        cost_func,
+                        p0,
+                        args=(self, jd, catalog_stars, img_stars),
+                        method='Nelder-Mead',
+                        options=opt_options,
+                    )
 
                 # Update fitted astrometric parameters (Unnormalize the pointing parameters)
                 ra_ref, dec_ref, pos_angle_ref, F_scale = res.x[:4]
@@ -856,7 +1330,7 @@ class Platepar(object):
 
                 # Extract distortion parameters, IMPORTANT NOTE - the X polynomial is used to store the
                 #   fit parameters
-                self.x_poly_fwd = res.x[4:]
+                self.x_poly_fwd = np.array(res.x[4:])
 
                 ### ###
 
@@ -865,44 +1339,46 @@ class Platepar(object):
                     self.x_poly_rev = np.array(self.x_poly_fwd)
 
                 ### REVERSE MAPPING FIT ###
+                # Skip reverse fit when using NN cost (no matched pairs available)
+                if not use_nn_cost:
 
-                # # Initial parameters for the pointing and distortion fit (normalize to the 0-1 range)
-                # p0  = [self.RA_d/360.0, self.dec_d/90.0, self.pos_angle_ref/360.0, abs(self.F_scale)]
-                # p0 += self.x_poly_rev.tolist()
+                    # # Initial parameters for the pointing and distortion fit (normalize to the 0-1 range)
+                    # p0  = [self.RA_d/360.0, self.dec_d/90.0, self.pos_angle_ref/360.0, abs(self.F_scale)]
+                    # p0 += self.x_poly_rev.tolist()
 
-                # # Fit the radial distortion - the X polynomial is used to store the fit parameters
-                # res = scipy.optimize.minimize(_calcImageResidualsAstroAndDistortionRadial, p0, \
-                #     args=(self, jd, catalog_stars, img_stars), method='Nelder-Mead', \
-                #     options={'maxiter': 10000, 'adaptive': True})
+                    # # Fit the radial distortion - the X polynomial is used to store the fit parameters
+                    # res = scipy.optimize.minimize(_calcImageResidualsAstroAndDistortionRadial, p0, \
+                    #     args=(self, jd, catalog_stars, img_stars), method='Nelder-Mead', \
+                    #     options={'maxiter': 10000, 'adaptive': True})
 
-                # # Update fitted astrometric parameters (Unnormalize the pointing parameters)
-                # ra_ref, dec_ref, pos_angle_ref, F_scale = res.x[:4]
-                # self.RA_d = (360*ra_ref)%(360)
-                # self.dec_d = -90 + (90*dec_ref + 90)%(180.000001)
-                # self.pos_angle_ref = (360*pos_angle_ref)%(360)
-                # self.F_scale = abs(F_scale)
+                    # # Update fitted astrometric parameters (Unnormalize the pointing parameters)
+                    # ra_ref, dec_ref, pos_angle_ref, F_scale = res.x[:4]
+                    # self.RA_d = (360*ra_ref)%(360)
+                    # self.dec_d = -90 + (90*dec_ref + 90)%(180.000001)
+                    # self.pos_angle_ref = (360*pos_angle_ref)%(360)
+                    # self.F_scale = abs(F_scale)
 
-                # # Compute reference Alt/Az to apparent coordinates, epoch of date
-                # self.updateRefAltAz()
+                    # # Compute reference Alt/Az to apparent coordinates, epoch of date
+                    # self.updateRefAltAz()
 
-                # # Extract distortion parameters, IMPORTANT NOTE - the X polynomial is used to store the
-                # #   fit parameters
-                # self.x_poly_rev = res.x[4:]
+                    # # Extract distortion parameters, IMPORTANT NOTE - the X polynomial is used to store the
+                    # #   fit parameters
+                    # self.x_poly_rev = res.x[4:]
 
-                ## Distortion-only fit below!
+                    ## Distortion-only fit below!
 
-                # Fit the radial distortion - the X polynomial is used to store the fit parameters
-                res = scipy.optimize.minimize(
-                    _calcImageResidualsDistortion,
-                    self.x_poly_rev,
-                    args=(self, jd, catalog_stars, img_stars, 'radial'),
-                    method='Nelder-Mead',
-                    options={'maxiter': 10000, 'adaptive': True},
-                )
+                    # Fit the radial distortion - the X polynomial is used to store the fit parameters
+                    res = scipy.optimize.minimize(
+                        _calcImageResidualsDistortion,
+                        self.x_poly_rev,
+                        args=(self, jd, catalog_stars, img_stars, 'radial'),
+                        method='Nelder-Mead',
+                        options={'maxiter': 10000, 'adaptive': True},
+                    )
 
-                # Extract distortion parameters, IMPORTANT NOTE - the X polynomial is used to store the
-                #   fit parameters
-                self.x_poly_rev = res.x
+                    # Extract distortion parameters, IMPORTANT NOTE - the X polynomial is used to store the
+                    #   fit parameters
+                    self.x_poly_rev = res.x
 
                 ### ###
 
@@ -911,6 +1387,7 @@ class Platepar(object):
                 print('Too few stars to fit the distortion, only the astrometric parameters where fitted!')
 
         # Set the list of stars used for the fit to the platepar
+        # Note: use_nn_cost=True returns early after RANSAC, so this only runs for matched-pair fits
         fit_star_list = []
         for img_coords, cat_coords in zip(img_stars, catalog_stars):
 
@@ -1327,6 +1804,218 @@ class Platepar(object):
             self.x_poly_rev = self.x_poly_rev[: self.poly_length]
             self.y_poly_fwd = self.y_poly_fwd[: self.poly_length]
             self.y_poly_rev = self.y_poly_rev[: self.poly_length]
+
+    def extractRadialCoeffs(self, x_poly=None):
+        """Extract logical radial distortion coefficients from the array.
+
+        The coefficient array structure depends on flags (force_distortion_centre, equal_aspect,
+        asymmetry_corr) and distortion type. This method extracts the logical values regardless
+        of array layout.
+
+        Arguments:
+            x_poly: [ndarray] Optional coefficient array to extract from. If None, uses self.x_poly_fwd.
+
+        Returns:
+            dict: Dictionary with keys 'x0', 'y0', 'xy', 'a1', 'a2', 'k1', 'k2', 'k3', 'k4'
+                  Values are 0.0 for coefficients not present in the current distortion type.
+        """
+        if x_poly is None:
+            x_poly = self.x_poly_fwd
+
+        # Only works for radial distortion types
+        if not self.distortion_type.startswith("radial"):
+            return None
+
+        # Compute index offset based on flags (same logic as CyFunctions.pyx)
+        index_offset = 0
+        if self.force_distortion_centre:
+            index_offset += 2
+        if self.equal_aspect:
+            index_offset += 1
+        if not self.asymmetry_corr:
+            index_offset += 2
+
+        result = {'x0': 0.0, 'y0': 0.0, 'xy': 0.0, 'a1': 0.0, 'a2': 0.0,
+                  'k1': 0.0, 'k2': 0.0, 'k3': 0.0, 'k4': 0.0}
+
+        # Extract coefficients based on current flags
+        idx = 0
+
+        # Distortion center
+        if not self.force_distortion_centre:
+            if idx < len(x_poly):
+                result['x0'] = x_poly[idx]
+            idx += 1
+            if idx < len(x_poly):
+                result['y0'] = x_poly[idx]
+            idx += 1
+
+        # Aspect ratio
+        if not self.equal_aspect:
+            if idx < len(x_poly):
+                result['xy'] = x_poly[idx]
+            idx += 1
+
+        # Asymmetry correction
+        if self.asymmetry_corr:
+            if idx < len(x_poly):
+                result['a1'] = x_poly[idx]
+            idx += 1
+            if idx < len(x_poly):
+                result['a2'] = x_poly[idx]
+            idx += 1
+
+        # Radial distortion coefficients (k1, k2, k3, k4)
+        # Number depends on distortion type: radial3-odd has k1, radial5-odd has k1,k2, etc.
+        if idx < len(x_poly):
+            result['k1'] = x_poly[idx]
+        idx += 1
+        if idx < len(x_poly):
+            result['k2'] = x_poly[idx]
+        idx += 1
+        if idx < len(x_poly):
+            result['k3'] = x_poly[idx]
+        idx += 1
+        if idx < len(x_poly):
+            result['k4'] = x_poly[idx]
+
+        return result
+
+    def buildRadialCoeffs(self, coeffs_dict, target_dist_type=None):
+        """Build a coefficient array from logical radial distortion coefficients.
+
+        Arguments:
+            coeffs_dict: [dict] Dictionary with keys 'x0', 'y0', 'xy', 'a1', 'a2', 'k1', 'k2', 'k3', 'k4'
+            target_dist_type: [str] Target distortion type. If None, uses current self.distortion_type.
+
+        Returns:
+            ndarray: Coefficient array for the target distortion type.
+        """
+        if target_dist_type is None:
+            target_dist_type = self.distortion_type
+
+        # Only works for radial distortion types
+        if not target_dist_type.startswith("radial"):
+            return None
+
+        result = []
+
+        # Distortion center
+        if not self.force_distortion_centre:
+            result.append(coeffs_dict.get('x0', 0.0))
+            result.append(coeffs_dict.get('y0', 0.0))
+
+        # Aspect ratio
+        if not self.equal_aspect:
+            result.append(coeffs_dict.get('xy', 0.0))
+
+        # Asymmetry correction
+        if self.asymmetry_corr:
+            result.append(coeffs_dict.get('a1', 0.0))
+            result.append(coeffs_dict.get('a2', 0.0))
+
+        # Radial distortion coefficients - number depends on target type
+        result.append(coeffs_dict.get('k1', 0.0))
+
+        if target_dist_type in ["radial5-odd", "radial7-odd", "radial9-odd",
+                                "radial4-all", "radial5-all"]:
+            result.append(coeffs_dict.get('k2', 0.0))
+
+        if target_dist_type in ["radial7-odd", "radial9-odd", "radial5-all"]:
+            result.append(coeffs_dict.get('k3', 0.0))
+
+        if target_dist_type in ["radial9-odd"]:
+            result.append(coeffs_dict.get('k4', 0.0))
+
+        return np.array(result)
+
+    def convertDistortionCoeffs(self, target_dist_type):
+        """Convert current distortion coefficients to a new distortion type.
+
+        This properly maps coefficients when switching between radial distortion types,
+        preserving k1 when going from e.g. radial7-odd to radial3-odd.
+
+        Arguments:
+            target_dist_type: [str] Target distortion type (e.g., "radial3-odd", "radial5-odd").
+
+        Returns:
+            tuple: (x_poly_new, y_poly_new) - New coefficient arrays for the target type.
+        """
+        # Only works for radial-to-radial conversions
+        if not self.distortion_type.startswith("radial") or not target_dist_type.startswith("radial"):
+            return self.x_poly_fwd.copy(), self.y_poly_fwd.copy()
+
+        # Extract logical coefficients from current arrays
+        x_coeffs = self.extractRadialCoeffs(self.x_poly_fwd)
+        y_coeffs = self.extractRadialCoeffs(self.y_poly_fwd)
+
+        # Build new arrays for target type
+        x_poly_new = self.buildRadialCoeffs(x_coeffs, target_dist_type)
+        y_poly_new = self.buildRadialCoeffs(y_coeffs, target_dist_type)
+
+        return x_poly_new, y_poly_new
+
+    def remapCoeffsForFlagChange(self, flag_name, new_value):
+        """Remap distortion coefficients when a flag changes.
+
+        This method properly remaps coefficients when toggling flags like
+        force_distortion_centre, equal_aspect, or asymmetry_corr. It extracts
+        the logical coefficient values BEFORE changing the flag, changes the flag,
+        then rebuilds the coefficient arrays with the new flag state.
+
+        Arguments:
+            flag_name: [str] Name of flag to change ('force_distortion_centre',
+                       'equal_aspect', or 'asymmetry_corr')
+            new_value: [bool] New value for the flag
+
+        Returns:
+            bool: True if remapping was performed, False if not applicable
+        """
+        # Only works for radial distortion types
+        if not self.distortion_type.startswith("radial"):
+            # Just set the flag directly for non-radial types
+            setattr(self, flag_name, new_value)
+            return False
+
+        # Get current flag value
+        old_value = getattr(self, flag_name)
+
+        # If flag isn't changing, nothing to do
+        if old_value == new_value:
+            return False
+
+        # Extract logical coefficients BEFORE changing the flag
+        x_coeffs_fwd = self.extractRadialCoeffs(self.x_poly_fwd)
+        x_coeffs_rev = self.extractRadialCoeffs(self.x_poly_rev)
+        y_coeffs_fwd = self.extractRadialCoeffs(self.y_poly_fwd)
+        y_coeffs_rev = self.extractRadialCoeffs(self.y_poly_rev)
+
+        if x_coeffs_fwd is None:
+            # Not radial, just set flag
+            setattr(self, flag_name, new_value)
+            return False
+
+        # Change the flag
+        setattr(self, flag_name, new_value)
+
+        # Update poly_length using setDistortionType (which recalculates it)
+        # but with reset_params=False to not zero out coefficients
+        self.setDistortionType(self.distortion_type, reset_params=False)
+
+        # Rebuild coefficient arrays with the new flag state
+        self.x_poly_fwd = self.buildRadialCoeffs(x_coeffs_fwd, self.distortion_type)
+        self.x_poly_rev = self.buildRadialCoeffs(x_coeffs_rev, self.distortion_type)
+        self.y_poly_fwd = self.buildRadialCoeffs(y_coeffs_fwd, self.distortion_type)
+        self.y_poly_rev = self.buildRadialCoeffs(y_coeffs_rev, self.distortion_type)
+
+        # Ensure proper length (in case of edge cases)
+        self.padDictParams()
+
+        # Update x_poly and y_poly references
+        self.x_poly = self.x_poly_fwd
+        self.y_poly = self.y_poly_fwd
+
+        return True
 
     def loadFromDict(self, platepar_dict, use_flat=None, egm96_file_path=None):
         """Load the platepar from a dictionary."""
@@ -1873,12 +2562,15 @@ class Platepar(object):
                 if self.equal_aspect:
                     asym_ang_index -= 1
 
-                x_poly_fwd_print[asym_ang_index] = np.degrees(
-                    (2 * np.pi * x_poly_fwd_print[asym_ang_index]) % (2 * np.pi)
-                )
-                x_poly_rev_print[asym_ang_index] = np.degrees(
-                    (2 * np.pi * x_poly_rev_print[asym_ang_index]) % (2 * np.pi)
-                )
+                # Only convert if the array actually has the asymmetry parameter
+                if asym_ang_index < len(x_poly_fwd_print):
+                    x_poly_fwd_print[asym_ang_index] = np.degrees(
+                        (2 * np.pi * x_poly_fwd_print[asym_ang_index]) % (2 * np.pi)
+                    )
+                if asym_ang_index < len(x_poly_rev_print):
+                    x_poly_rev_print[asym_ang_index] = np.degrees(
+                        (2 * np.pi * x_poly_rev_print[asym_ang_index]) % (2 * np.pi)
+                    )
 
         out_str += "img2sky {:s} = {:s}\n".format(
             dist_string,

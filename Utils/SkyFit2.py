@@ -11,16 +11,35 @@ import datetime
 import collections
 import glob
 import multiprocessing
+import sys
 
 import numpy as np
-import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import matplotlib.cm as cm
 import scipy.optimize
-import pyqtgraph as pg
+try:
+    import pyqtgraph as pg
+except Exception as exc:
+    message = [
+        "SkyFit requires PyQtGraph/PyQt5 for its GUI components, but the import failed.",
+        "The most common causes are missing GUI dependencies or Windows being unable to allocate enough",
+        "virtual memory (e.g. the paging file is too small).",
+        f"Original import error: {exc}",
+        "Fix the underlying issue and re-run SkyFit."
+    ]
+
+    # Provide an actionable tip if Windows reports an undersized paging file.
+    if isinstance(exc, ImportError) and "paging file" in str(exc).lower():
+        message.append(
+            "Windows reported that the paging file is too small. Increase the paging file size or free RAM and try again."
+        )
+
+    print("\n".join(message))
+    sys.exit(1)
 import random
 import cv2
+import copy
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, raDecToXYPP_iter, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
@@ -30,7 +49,7 @@ from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, raDec2AltAz, \
     apparentAltAz2TrueRADec, J2000_JD, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
 from RMS.Astrometry.AstrometryNet import astrometryNetSolve
-from RMS.Astrometry.FFTalign import alignPlatepar
+from RMS.Astrometry.NNalign import alignPlatepar
 import RMS.ConfigReader as cr
 from RMS.ExtractStars import extractStarsAndSave, extractStarsFF
 import RMS.Formats.CALSTARS as CALSTARS
@@ -50,10 +69,986 @@ from RMS.Routines.MaskImage import getMaskFile
 from RMS.Routines import RollingShutterCorrection
 from RMS.Routines.MaskImage import loadMask, MaskStructure, getMaskFile
 from RMS.Misc import maxDistBetweenPoints, getRmsRootDir
+from Utils.KalmanFilter import KalmanFilter
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
+
+try:
+    import html, re
+
+    from PyQt5.QtWidgets import (
+    QDialog, QLabel, QVBoxLayout, QHBoxLayout, QPushButton,
+    QLineEdit, QGroupBox, QFormLayout, QComboBox, QFileDialog,
+    QProgressBar, QTextEdit, QApplication, QWidget, QGridLayout
+    )
+    from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject
+    from PyQt5 import QtCore
+
+    from Utils.Astra import ASTRA
+
+    ASTRA_IMPORTED = True
+
+except Exception as e:
+    ASTRA_IMPORTED = False
+    print(f'ASTRA import error: {e}')
+
+
+
+##############################################################################################################
+# ASTRA GUI Code
+
+# Only initialize if ASTRA has been loaded
+if ASTRA_IMPORTED:
+    class AstraConfigDialog(QDialog):
+        """
+        A dialog window for configuring and running ASTRA (Astrometric Streak Tracking and Refinement Algorithm).
+        
+        This dialog provides a GUI for:
+        - Loading pick data from ECSV/TXT files
+        - Configuring PSO (Particle Swarm Optimization) parameters
+        - Setting ASTRA algorithm parameters
+        - Configuring Kalman filter settings
+        - Running ASTRA and Kalman filter processing
+        - Monitoring progress and status
+        
+        Args:
+            run_load_callback: Callback function for loading pick data
+            run_astra_callback: Callback function for running ASTRA
+            run_kalman_callback: Callback function for running Kalman filter
+            skyfit_instance: Instance of the main SkyFit application
+            parent: Parent widget
+        """
+
+        def __init__(self, run_load_callback=None, run_astra_callback=None, run_kalman_callback=None, 
+                    skyfit_instance=None, parent=None, on_close_callback=None):
+
+            super().__init__(parent)
+
+            # Allow ASTRA to be minimized
+            self.setWindowFlag(QtCore.Qt.Window, True)
+            self.setWindowFlag(QtCore.Qt.WindowSystemMenuHint, True)
+            self.setWindowFlag(QtCore.Qt.WindowMinimizeButtonHint, True)
+            self.setWindowFlag(QtCore.Qt.WindowMaximizeButtonHint, True)
+            self.setWindowFlag(QtCore.Qt.WindowCloseButtonHint, True)
+            self.setWindowFlags(
+                QtCore.Qt.Window
+                | QtCore.Qt.WindowSystemMenuHint
+                | QtCore.Qt.WindowMinimizeButtonHint
+                | QtCore.Qt.WindowMaximizeButtonHint
+                | QtCore.Qt.WindowCloseButtonHint
+            )
+            self.setWindowModality(QtCore.Qt.NonModal)
+
+            # Make ASTRAGUI close gracefully
+            self.on_close_callback = on_close_callback
+            self.thread = None
+            self.worker = None
+            self.kalman_worker = None
+
+            self.setWindowTitle("ASTRA Configuration")
+            self.setMinimumWidth(900)
+            self.config = {}
+            self.run_astra_callback = run_astra_callback
+            self.run_kalman_callback = run_kalman_callback
+            self.load_picks_callback = run_load_callback
+            self.skyfit_instance = skyfit_instance
+
+            main_layout = QVBoxLayout()
+
+            # === Kick-start method selection ===
+            pick_method_group = QGroupBox("INFO AND PICK LOADING")
+            pick_layout = QVBoxLayout()
+
+            intro_label = QLabel(
+                "<b>ASTRA: Astrometric Streak Tracking and Refinement Algorithm</b> <br> ASTRA is an algoritm for automating manual EMCCD picking/photometry, and can also be used to refine manual picks/photometry."
+            )
+            intro_label.setWordWrap(True)
+            intro_label.setAlignment(Qt.AlignCenter)
+            pick_layout.addWidget(intro_label)
+
+            info_label = QLabel(
+                "<b>ASTRA requires (at least) 3 frame-adjacent leading-edge picks at a good-SNR section AND 2 leading edge picks at the frames marking the start/end of the event. These can be loaded through ECSV/txt files, or done manually.</b> <br> Hover over parameters and READY/NOT READY icons for info."
+            )
+            info_label.setWordWrap(True)
+            info_label.setAlignment(Qt.AlignCenter)
+            pick_layout.addWidget(info_label)
+
+            # Create two rows: first for file picker, second for revert button
+            file_picker_layout = QHBoxLayout()
+            self.file_picker_button = QPushButton("SELECT ECSV/TXT FILE")
+            self.file_picker_button.clicked.connect(self.selectFile)
+            file_picker_layout.addWidget(self.file_picker_button)
+            pick_layout.addLayout(file_picker_layout)
+
+            self.selected_file_label = QLabel("No file selected")
+            pick_layout.addWidget(self.selected_file_label)
+
+            pick_method_group.setLayout(pick_layout)
+            main_layout.addWidget(pick_method_group)
+
+            # === LATEX CONVERSIONS ===
+            _GREEK = {
+            "alpha":"α","beta":"β","gamma":"γ","delta":"δ","epsilon":"ε","zeta":"ζ","eta":"η",
+            "theta":"θ","iota":"ι","kappa":"κ","lambda":"λ","mu":"μ","nu":"ν","xi":"ξ",
+            "pi":"π","rho":"ρ","sigma":"σ","tau":"τ","upsilon":"υ","phi":"φ","chi":"χ",
+            "psi":"ψ","omega":"ω",
+            }
+            
+            def toHTMLMath(s: str) -> str:
+                t = html.escape(s)
+
+                # 1) underscores → HTML subscript tags
+                def _subber(m):
+                    base = m.group(1)
+                    subs = m.group(2)
+                    for part in subs.split('_'):
+                        base += f'<sub>{part}</sub>'
+                    return base
+                t = re.sub(r'([A-Za-zΑ-Ωα-ω]+)_([A-Za-z0-9_]+)', _subber, t)
+
+                # 2) greek conversion inside and outside subscripts
+                for name, sym in _GREEK.items():
+                    # Replace in normal text
+                    t = re.sub(rf'\b{re.escape(name)}\b', sym, t)
+                    # Replace inside <sub>...</sub>
+                    t = re.sub(rf'(<sub>){re.escape(name)}(</sub>)', rf'\1{sym}\2', t)
+
+                # 3) superscripts
+                t = re.sub(r'\^([0-9]+)', r'<sup>\1</sup>', t)
+
+                # 4) cosmetic replace for (0-1)
+                t = t.replace('(0-1)', '[0, 1]')
+
+                return t
+
+            def addGridFields(field_dict, defaults, title, tooltips=None, on_change=False):
+                group = QGroupBox(title)
+                layout = QGridLayout()
+                tts = tooltips or {}
+
+                def _is_bool_like(val: str) -> bool:
+                    return isinstance(val, str) and val.strip().lower() in ("true", "false")
+
+                # helper to connect widget change -> on_change() if provided
+                def _wire_change(widget, kind="auto"):
+                    if not callable(on_change):
+                        return
+                    try:
+                        if isinstance(widget, QLineEdit):
+                            widget.textChanged.connect(lambda *_: on_change())
+                        elif isinstance(widget, QComboBox):
+                            # use currentTextChanged so we react to programmatic + user changes
+                            widget.currentTextChanged.connect(lambda *_: on_change())
+                        else:
+                            # fallback: try generic signals if needed
+                            if hasattr(widget, "editingFinished"):
+                                widget.editingFinished.connect(lambda *_: on_change())
+                    except Exception:
+                        pass
+
+                row = 0
+                col = 0
+
+                for key, default in defaults.items():
+                    key_html = toHTMLMath(key)
+                    label = QLabel(key_html.replace('</span></body></html>', ':</span></body></html>'))
+
+                    # tooltip
+                    tt_raw = tts.get(key, "")
+                    tt_html = toHTMLMath(tt_raw) if tt_raw else ""
+                    if tt_html:
+                        label.setToolTip(tt_html)
+
+                    # --- Special handling for pick_offset ---
+                    if key == "pick_offset":
+                        # Dropdown: center, leading-edge, custom
+                        combo = QComboBox()
+                        combo.addItems(["center", "leading-edge", "custom"])
+
+                        def _is_floatlike(s):
+                            try:
+                                float(str(s))
+                                return True
+                            except Exception:
+                                return False
+
+                        custom_edit = QLineEdit()
+                        custom_edit.setPlaceholderText("e.g. 0.25")
+
+                        if str(default) in ("center", "leading-edge"):
+                            combo.setCurrentText(str(default))
+                            custom_edit.setEnabled(False)
+                            custom_edit.setText("")
+                        elif _is_floatlike(default):
+                            combo.setCurrentText("custom")
+                            custom_edit.setEnabled(True)
+                            custom_edit.setText(str(default))
+                        else:
+                            combo.setCurrentText("leading-edge")
+                            custom_edit.setEnabled(False)
+                            custom_edit.setText("")
+
+                        if tt_html:
+                            combo.setToolTip(tt_html)
+                            custom_edit.setToolTip(tt_html)
+
+                        # Toggle custom field
+                        def _on_pick_offset_changed(text):
+                            custom_edit.setEnabled(text == "custom")
+                            # also notify about change
+                            if callable(on_change):
+                                on_change()
+
+                        combo.currentTextChanged.connect(_on_pick_offset_changed)
+
+                        # Place widgets
+                        layout.addWidget(label, row, col)
+                        h = QHBoxLayout()
+                        h.addWidget(combo, 1)
+                        h.addWidget(custom_edit, 1)
+                        container = QWidget()       
+                        container.setLayout(h)      
+                        layout.addWidget(container, row, col + 1)
+
+                        # Store references (two entries for later resolution)
+                        field_dict["pick_offset_mode"] = combo
+                        field_dict["pick_offset_custom"] = custom_edit
+
+                        # Wire change notifications
+                        _wire_change(combo)
+                        _wire_change(custom_edit)
+
+                    else:
+                        # --- default behavior for everything else ---
+                        if _is_bool_like(default):
+                            field = QComboBox()
+                            field.addItems(["True", "False"])
+                            field.setCurrentText("True" if str(default).strip().lower() == "true" else "False")
+                        else:
+                            field = QLineEdit(default)
+
+                        if tt_html:
+                            field.setToolTip(tt_html)
+
+                        layout.addWidget(label, row, col)
+                        layout.addWidget(field, row, col + 1)
+                        field_dict[key] = field
+
+                        # Wire change notifications
+                        _wire_change(field)
+
+                    # advance grid position (2 columns per row)
+                    if col == 0:
+                        col = 2
+                    else:
+                        col = 0
+                        row += 1
+
+                group.setLayout(layout)
+                return group  # Return the group widget directly
+
+            # === PSO Settings ===
+            self.pso_fields = {}
+            pso_defaults = {
+                "w (0-1)": "0.9", "c_1 (0-1)": "0.4", "c_2 (0-1)": "0.3",
+                "max itter": "100", "n_particles": "100", "V_c (0-1)": "0.3",
+                "ftol": "1e-4", "ftol_itter": "25", "expl_c": "3", "P_sigma": "3"
+            }
+
+            # === ASTRA General Settings ===
+            self.astra_fields = {}
+            astra_defaults = {
+                "star_thresh": "3", "min SNR": "5",
+                "P_crop": "1.5", "sigma_init (px)": "2", "sigma_max": "1.2",
+                "L_max": "1.5", "Verbose": "False", "photom_thresh" : "0.05", 
+                "Save Animation": "False", "pick_offset" : "leading-edge"
+            }
+
+            # === Kalman Filter Settings ===
+            self.kalman_fields = {}
+            kalman_defaults = {
+                "Monotonicity": "True", "sigma_xy (px)": "0.5", "sigma_vxy (%)": "100", "save results" : "False"
+            }
+
+            # === PARAMETER GUIDE ===
+            PSO_TT = {
+                "w (0-1)": "PSO particle inertia. Higher = more exploration.",
+                "c_1 (0-1)": "Cognitive weight (pull to particle's best).",
+                "c_2 (0-1)": "Social weight (pull to global best).",
+                "max itter": "Maximum PSO iterations.",
+                "n_particles": "Number of PSO particles.",
+                "V_c (0-1)": "Max velocity as fraction of parameter range.",
+                "ftol": "Stop when objective change % < ftol.",
+                "ftol_itter": "Minimum consecutive iters below ftol to stop.",
+                "expl_c": "Initial seeding spread coefficient. Higher = more exploration.",
+                "P_sigma": "Second-pass bound looseness for local fitting. Higher = looser bounds"
+            }
+
+            ASTRA_TT = {
+                "star_thresh": "Background mask threshold (σ above mean).",
+                "min SNR": "Minimum SNR to keep a pick.",
+                "P_crop": "Crop padding coefficient.",
+                "sigma_init (px)": "Initial Gaussian σ guess (px).",
+                "sigma_max": "Max σ multiplier (upper bound).",
+                "L_max": "Max length multiplier (upper bound).",
+                "photom_thresh": "Luminosity threshold for photometry pixels (fraction of peak).",
+                "Verbose": "Verbose console logging (True/False).",
+                "Save Animation" : "Save animation showing fit, crop, and residuals for each frame.",
+                "pick_offset" : "Pick position relative to the Gaussian center along the streak axis. Options: 'center', 'leading-edge', or a custom float (multiples of length STD)."
+            }   
+
+            KALMAN_TT = {
+                "Monotonicity": "Enforce monotonic motion along dominant axis (True/False).",
+                "sigma_xy (px)": "STD of position estimate errors (px).",
+                "sigma_vxy (%)": "STD of velocity estimate errors (in percent).",
+                "save results" : "Save the uncertainties from the kalman filter into a .csv file"
+            }
+
+            main_layout.addWidget(
+                addGridFields(self.pso_fields, pso_defaults, "PSO PARAMETER SETTINGS", PSO_TT, on_change=self.storeConfig)
+            )
+            main_layout.addWidget(
+                addGridFields(self.astra_fields, astra_defaults, "ASTRA PARAMETER SETTINGS", ASTRA_TT, on_change=self.storeConfig)
+            )
+            main_layout.addWidget(
+                addGridFields(self.kalman_fields, kalman_defaults, "KALMAN FILTER SETTINGS", KALMAN_TT, on_change=self.storeConfig)
+            )
+
+            # === Progress Bar ===
+            self.progress_bar = QProgressBar()
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(0)
+            # Progress label and ASTRA status indicator
+            progress_status_layout = QHBoxLayout()
+            progress_label = QLabel("Progress:")
+            progress_status_layout.addWidget(progress_label)
+
+            # ASTRA status label and dot
+            self.astra_status_label = QLabel("ASTRA:")
+            self.astra_status_dot = QLabel()
+
+            # Kalman status label and dot
+            self.kalman_status_label = QLabel("KALMAN:")
+            self.kalman_status_dot = QLabel()
+
+            # Place ASTRA and KALMAN status beside each other, right-aligned
+            progress_status_layout.addStretch()
+            progress_status_layout.addWidget(self.astra_status_label)
+            progress_status_layout.addWidget(self.astra_status_dot)
+            progress_status_layout.addSpacing(16)  # Optional: add space between ASTRA and KALMAN
+            progress_status_layout.addWidget(self.kalman_status_label)
+            progress_status_layout.addWidget(self.kalman_status_dot)
+
+            main_layout.addLayout(progress_status_layout)
+            main_layout.addWidget(self.progress_bar)
+
+            # === Control Buttons ===
+            btn_layout = QHBoxLayout()
+            self.run_astra_btn = QPushButton("RUN ASTRA")
+            self.run_kalman_btn = QPushButton("RUN KALMAN")
+            self.run_astra_btn.clicked.connect(self.startASTRAThread)
+            self.run_kalman_btn.clicked.connect(self.startKalmanThread)
+            btn_layout.addWidget(self.run_astra_btn)
+            btn_layout.addWidget(self.run_kalman_btn)
+            main_layout.addLayout(btn_layout)
+
+            # Move REVERT button below RUN ASTRA/KALMAN buttons as one row
+            revert_layout = QHBoxLayout()
+            self.set_prev_picks_button = QPushButton("REVERT ASTRA/KALMAN PICKS")
+            self.set_prev_picks_button.clicked.connect(self.setPreviousPicks)
+            revert_layout.addWidget(self.set_prev_picks_button)
+            main_layout.addLayout(revert_layout)
+
+            # Now that buttons exist, set initial status
+            self.setASTRAStatus(False)  # Default to not ready (red)
+            self.setKalmanStatus(False)  # Default to not ready (red)
+            self.setRevertStatus(False)  # Default to not ready (disabled)
+
+            self.setLayout(main_layout)
+
+        def setConfig(self, config):
+            """
+            Updates the configuration and sets all UI elements to match the new config values.
+            
+            Args:
+                config (dict): Configuration dictionary with pso, astra, and kalman settings
+            """
+            self.config = config
+            
+            # Update file path if provided
+            if "file_path" in config and config["file_path"]:
+                self.selected_file_label.setText(config["file_path"])
+            
+            # Update PSO fields
+            if "pso" in config:
+                for key, value in config["pso"].items():
+                    if key in self.pso_fields:
+                        if hasattr(self.pso_fields[key], "setCurrentText"):
+                            self.pso_fields[key].setCurrentText(str(value))
+                        else:
+                            self.pso_fields[key].setText(str(value))
+            
+            # Update ASTRA fields, handling pick_offset specially
+            if "astra" in config:
+                for key, value in config["astra"].items():
+                    # Skip special pick_offset handling for now
+                    if key == "pick_offset":
+                        continue
+                    
+                    if key in self.astra_fields:
+                        if hasattr(self.astra_fields[key], "setCurrentText"):
+                            self.astra_fields[key].setCurrentText(str(value))
+                        else:
+                            self.astra_fields[key].setText(str(value))
+                
+                # Special handling for pick_offset
+                if "pick_offset" in config["astra"]:
+                    pick_offset = config["astra"]["pick_offset"]
+                    
+                    # Check if we have the mode + custom fields
+                    if "pick_offset_mode" in self.astra_fields and "pick_offset_custom" in self.astra_fields:
+                        # If pick_offset is "center" or "leading-edge", set mode and clear custom
+                        if pick_offset in ["center", "leading-edge"]:
+                            self.astra_fields["pick_offset_mode"].setCurrentText(pick_offset)
+                            self.astra_fields["pick_offset_custom"].setText("")
+                            self.astra_fields["pick_offset_custom"].setEnabled(False)
+                        # Otherwise it's a custom value
+                        else:
+                            self.astra_fields["pick_offset_mode"].setCurrentText("custom")
+                            self.astra_fields["pick_offset_custom"].setText(str(pick_offset))
+                            self.astra_fields["pick_offset_custom"].setEnabled(True)
+                    # Fallback for backward compatibility
+                    elif "pick_offset" in self.astra_fields:
+                        if hasattr(self.astra_fields["pick_offset"], "setCurrentText"):
+                            self.astra_fields["pick_offset"].setCurrentText(str(pick_offset))
+                        else:
+                            self.astra_fields["pick_offset"].setText(str(pick_offset))
+            
+            # Update Kalman fields
+            if "kalman" in config:
+                for key, value in config["kalman"].items():
+                    if key in self.kalman_fields:
+                        if hasattr(self.kalman_fields[key], "setCurrentText"):
+                            self.kalman_fields[key].setCurrentText(str(value))
+                        else:
+                            self.kalman_fields[key].setText(str(value))
+            
+            # Refresh readiness indicators
+            if hasattr(self.skyfit_instance, "checkASTRACanRun"):
+                self.skyfit_instance.checkASTRACanRun()
+            if hasattr(self.skyfit_instance, "checkKalmanCanRun"):
+                self.skyfit_instance.checkKalmanCanRun()
+
+        def selectFile(self):
+            """Opens dialog to select ECSV/txt file"""
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Select the ECSV or TXT file",
+                "",
+                "ECSV or TXT files (*.ecsv *.txt);;All files (*)"
+            )
+            if file_path:
+                self.selected_file_label.setText(file_path)
+                self.storeConfig()
+                if self.load_picks_callback:
+                    self.load_picks_callback(self.config)
+
+        def _stopAstraWorker(self, hard_kill_timeout_ms=3000):
+            """Try to stop Astra worker gracefully; escalate if needed."""
+            if hasattr(self, "thread") and self.thread and self.thread.isRunning():
+                try:
+                    if hasattr(self, "worker") and self.worker:
+                        # cooperative stop request
+                        if hasattr(self.worker, "stop"):
+                            self.worker.stop()
+                    # ask the thread to finish its event loop
+                    self.thread.requestInterruption()
+                    self.thread.quit()
+                    if not self.thread.wait(hard_kill_timeout_ms):
+                        # last resort (unsafe): terminate
+                        self.thread.terminate()
+                        self.thread.wait(1000)
+                except Exception:
+                    pass  # don't block close on errors
+
+        def _stopKalmanWorker(self, hard_kill_timeout_ms=3000):
+            if hasattr(self, "kalman_worker") and self.kalman_worker and self.kalman_worker.isRunning():
+                try:
+                    # cooperative stop
+                    if hasattr(self.kalman_worker, "stop"):
+                        self.kalman_worker.stop()
+                    self.kalman_worker.requestInterruption()
+                    self.kalman_worker.quit()
+                    self.kalman_worker.wait(hard_kill_timeout_ms)
+                except Exception:
+                    pass
+
+        def _handleClose(self):
+            # Stop background work
+            self._stopKalmanWorker()
+            self._stopAstraWorker()
+
+            # Fire optional close callback
+            if callable(self.on_close_callback):
+                try:
+                    self.on_close_callback()
+                except Exception:
+                    pass
+
+        def closeEvent(self, event):
+            self._is_closing = True
+            # if you clear the handle on the parent, do it before finished signals run:
+            if self.skyfit_instance is not None and getattr(self.skyfit_instance, "astra_dialog", None) is self:
+                self.skyfit_instance.astra_dialog = None
+
+            print("Closed ASTRA GUI - Aborting all threaded processes")
+            # stop workers (your existing stop logic here)
+            self._stopKalmanWorker()
+            self._stopAstraWorker()
+            super().closeEvent(event)
+
+        def reject(self):
+            # Triggered by ESC / window manager close as well
+            self._handleClose()
+            super().reject()
+
+        def setRevertStatus(self, ready):
+            """
+            Sets the revert status button state.
+            """
+            self.set_prev_picks_button.setEnabled(ready)
+
+        def setASTRAStatus(self, ready, hover_text=""):
+            """
+            Sets the ASTRA status dot color: green if ready, red if not.
+            If ready == "WARN", sets color to yellow and text to READY.
+            Optionally sets a tooltip (hover text) to inform the user.
+            Disables the ASTRA button if not ready.
+            """
+            if ready == "WARN":
+                status_text = "READY"
+                color = "#FFC107"  # Yellow
+                enable_btn = True
+            elif ready == "PROCESSING":
+                status_text = "RUNNING"
+                color = "#2196F3"  # Blue
+                enable_btn = False
+            else:
+                status_text = "READY" if ready else "NOT READY"
+                color = "#4CAF50" if ready else "#F44336"  # Green or Red
+                enable_btn = bool(ready)
+            self.astra_status_dot.setText(status_text)
+            self.astra_status_dot.setAlignment(Qt.AlignCenter)
+            self.astra_status_dot.setStyleSheet(
+                f"background-color: {color}; color: white; border-radius: 6px; min-width: 80px; min-height: 20px;"
+                "max-height: 40px; font-weight: bold;"
+            )
+            self.astra_status_dot.setToolTip(hover_text or "")
+            self.run_astra_btn.setEnabled(enable_btn)
+
+        def setKalmanStatus(self, ready, hover_text=""):
+            """
+            Sets the Kalman status dot color: green if ready, red if not.
+            Optionally sets a tooltip (hover text) to inform the user.
+            Disables the KALMAN button if not ready.
+            """
+
+            if ready == "WARN":
+                status_text = "READY"
+                color = "#FFC107"  # Yellow
+                enable_btn = True
+            elif ready == "PROCESSING":
+                status_text = "RUNNING"
+                color = "#2196F3"  # Blue
+                enable_btn = False
+            else:
+                status_text = "READY" if ready else "NOT READY"
+                color = "#4CAF50" if ready else "#F44336"  # Green or Red
+                enable_btn = bool(ready)
+            self.kalman_status_dot.setText(status_text)
+            self.kalman_status_dot.setAlignment(Qt.AlignCenter)
+            self.kalman_status_dot.setStyleSheet(
+                f"background-color: {color}; color: white; border-radius: 6px; min-width: 80px; min-height: 20px;" 
+                "max-height: 40px; font-weight: bold;"
+            )
+            self.kalman_status_dot.setToolTip(hover_text or "")
+            self.run_kalman_btn.setEnabled(enable_btn)
+
+        def updateProgress(self, value):
+            """Sets the progress bar to a given value
+            args:
+                - value (int): The value to set the progress bar to (0-100).
+            """
+            self.progress_bar.setValue(value)
+        
+        def storeConfig(self):
+            """
+            Stores the current configuration from the UI elements.
+            """
+            def _value_of(w):
+                # QComboBox has currentText(); QLineEdit has text()
+                return w.currentText() if hasattr(w, "currentText") else w.text()
+
+            # PSO and Kalman straight-through
+            pso = {k: _value_of(v) for k, v in self.pso_fields.items()}
+            kalman = {k: _value_of(v) for k, v in self.kalman_fields.items()}
+
+            # ASTRA: handle pick_offset specially
+            astra = {}
+            for k, v in self.astra_fields.items():
+                if k not in ("pick_offset_mode", "pick_offset_custom"):
+                    astra[k] = _value_of(v)
+
+            # Resolve pick_offset final value
+            if "pick_offset_mode" in self.astra_fields and "pick_offset_custom" in self.astra_fields:
+                mode = self.astra_fields["pick_offset_mode"].currentText()
+                if mode == "custom":
+                    custom_val = self.astra_fields["pick_offset_custom"].text().strip()
+                    # Store the FLOAT STRING itself, NOT the word 'custom'
+                    astra["pick_offset"] = custom_val
+                else:
+                    astra["pick_offset"] = mode
+            else:
+                # Backward-compat fallback
+                astra["pick_offset"] = _value_of(self.astra_fields.get("pick_offset", QLineEdit("leading-edge")))
+
+            self.config = {
+                "file_path": self.selected_file_label.text(),
+                "pso":   pso,
+                "astra": astra,
+                "kalman": kalman,
+            }
+
+            # Store config in parent in case of close
+            self.skyfit_instance.astra_config_params = self.config
+
+
+        def getConfig(self):
+            """Returns the ASTRA config object."""
+            self.storeConfig()
+            return self.config
+        
+        def startASTRAThread(self):
+            """Creates and runs an ASTRA process on a seperate worker thread"""
+
+            self.storeConfig()
+            errors = self.checkConfig()
+            if errors != {}:
+                self.skyfit_instance.setMessageBox(title="ASTRA Configuration Error",
+                                                message="\n".join(errors.values()),
+                                                type='error')
+                return
+
+            config = self.getConfig()
+
+            self.thread = QThread()
+            self.worker = AstraWorker(config, self.skyfit_instance)
+            print('ASTRA Object Created! Processing beginning (30-80 seconds)...')
+            self.worker.moveToThread(self.thread)
+
+            self.run_astra_btn.setEnabled(False)
+            self.run_kalman_btn.setEnabled(False)
+            self.file_picker_button.setEnabled(False)
+            self.set_prev_picks_button.setEnabled(False)
+            self.setASTRAStatus("PROCESSING", "ASTRA is running...")
+
+            self.worker.progress.connect(self.updateProgress)
+
+            self.thread.started.connect(self.worker.run)
+
+            self.worker.results_ready.connect(
+                self.skyfit_instance.integrateASTRAResults, 
+                QtCore.Qt.QueuedConnection
+            )
+
+            # Clean up and re-enable UI
+            self.worker.finished.connect(self.thread.quit)
+            self.worker.finished.connect(self.worker.deleteLater)
+            self.thread.finished.connect(self.thread.deleteLater)
+            
+
+            # Restore interactivity
+            self.worker.finished.connect(lambda: (not getattr(self, "_is_closing", False)) and self.file_picker_button.setEnabled(True))
+
+            # Only call parent checks if THIS dialog is still the active one
+            self.worker.finished.connect(lambda:
+                (self.skyfit_instance is not None)
+                and (getattr(self.skyfit_instance, "astra_dialog", None) is self)
+                and self.skyfit_instance.checkASTRACanRun()
+            )
+            self.worker.finished.connect(lambda:
+                (self.skyfit_instance is not None)
+                and (getattr(self.skyfit_instance, "astra_dialog", None) is self)
+                and self.skyfit_instance.checkKalmanCanRun()
+            )
+            self.worker.finished.connect(lambda:
+                (self.skyfit_instance is not None)
+                and (getattr(self.skyfit_instance, "astra_dialog", None) is self)
+                and self.skyfit_instance.checkPickRevertCanRun()
+            )
+
+            self.thread.start()
+
+        def setPreviousPicks(self):
+            """Hits parent instance to revert picks to previous state"""
+            self.skyfit_instance.reverseASTRAPicks()
+        
+        def checkFloat(self, value):
+            """Checks if a value is castable to float"""
+            try:
+                float(value)
+                return True
+            except (ValueError, TypeError):
+                return False
+
+        def checkConfig(self):
+            """Checks the config only has valid values"""
+            config = self.getConfig()
+
+            pso_ranges_and_types = {
+                "w (0-1)": (0.0, 1.0, float),
+                "c_1 (0-1)": (0.0, 1.0, float),
+                "c_2 (0-1)": (0.0, 1.0, float),
+                "max itter": (1, None, int),
+                "n_particles": (1, None, int),
+                "V_c (0-1)": (0.0, 1.0, float),
+                "ftol": (0.0, 100.0, float),
+                "ftol_itter": (1, None, int),
+                "expl_c": (1.0, None, float),
+                "P_sigma": (0.0, None, float)
+            }
+
+            astra_ranges_and_types = {
+                "star_thresh": (0, None, float), "min SNR": (0, None, float),
+                "P_crop": (0, None, float), "sigma_init (px)": (0.1, None, float), "sigma_max": (1, None, float),
+                "L_max": (1, None, float), "Verbose": (True, False, bool), "photom_thresh": (0, 1, float),
+                "Save Animation": (True, False, bool),
+                # NOTE: only 'center' and 'leading-edge' are valid literals; 'custom' is resolved to a float string at store time
+                "pick_offset": (["center", "leading-edge"], None, str)
+            }
+            kalman_ranges_and_types = {
+                "Monotonicity": (True, False, bool), "sigma_xy (px)": (0, None, float), 
+                "sigma_vxy (%)": (0, None, float), "save results": (True, False, bool)
+            }
+
+            errors = {}
+
+            # Check PSO parameters
+            for param, (min_val, max_val, param_type) in pso_ranges_and_types.items():
+                value_str = config["pso"].get(param, "")
+                try:
+                    if param_type == bool:
+                        value = value_str.strip().lower() == "true"
+                        if value not in [True, False]:
+                            errors[f"pso.{param}"] = f"{param} must be True or False, got {value_str}"
+                    else:
+                        value = param_type(value_str)
+                        if min_val is not None and value < min_val:
+                            errors[f"pso.{param}"] = f"{param} must be >= {min_val}, got {value}"
+                        elif max_val is not None and value > max_val:
+                            errors[f"pso.{param}"] = f"{param} must be <= {max_val}, got {value}"
+                except (ValueError, TypeError):
+                    errors[f"pso.{param}"] = f"{param} must be {param_type.__name__}, got {value_str}"
+
+            # Check ASTRA parameters
+            for param, (min_val, max_val, param_type) in astra_ranges_and_types.items():
+                value_str = config["astra"].get(param, "")
+                try:
+                    if param == "pick_offset":
+                        value = value_str.strip()
+                        # Allow literals or a float
+                        if value not in ["center", "leading-edge"] and self.checkFloat(value) is False:
+                            errors[f"astra.{param}"] = (
+                                f"{param} must be 'center', 'leading-edge', or a float; got {value_str}"
+                            )
+                    elif param_type == bool:
+                        value = value_str.strip().lower() == "true"
+                        if value not in [True, False]:
+                            errors[f"astra.{param}"] = f"{param} must be True or False, got {value_str}"
+                    else:
+                        value = param_type(value_str)
+                        if min_val is not None and value < min_val:
+                            errors[f"astra.{param}"] = f"{param} must be >= {min_val}, got {value}"
+                        elif max_val is not None and value > max_val:
+                            errors[f"astra.{param}"] = f"{param} must be <= {max_val}, got {value}"
+                except (ValueError, TypeError):
+                    errors[f"astra.{param}"] = f"{param} must be {param_type.__name__}, got {value_str}"
+
+            # Check Kalman parameters
+            for param, (min_val, max_val, param_type) in kalman_ranges_and_types.items():
+                value_str = config["kalman"].get(param, "")
+                try:
+                    if param_type == bool:
+                        value = value_str.strip().lower() == "true"
+                        if value not in [True, False]:
+                            errors[f"kalman.{param}"] = f"{param} must be True or False, got {value_str}"
+                    else:
+                        value = param_type(value_str)
+                        if min_val is not None and value < min_val:
+                            errors[f"kalman.{param}"] = f"{param} must be >= {min_val}, got {value}"
+                        elif max_val is not None and value > max_val:
+                            errors[f"kalman.{param}"] = f"{param} must be <= {max_val}, got {value}"
+                except (ValueError, TypeError):
+                    errors[f"kalman.{param}"] = f"{param} must be {param_type.__name__}, got {value_str}"
+
+            return errors
+
+
+        def startKalmanThread(self):
+            """Creates and runs a Kalman process on a separate worker thread"""
+
+            self.storeConfig()
+            errors = self.checkConfig()
+            if errors != {}:
+                self.skyfit_instance.setMessageBox(title="ASTRA Configuration Error",
+                                                message="\n".join(errors.values()),
+                                                type='error')
+                return
+            self.config = self.getConfig()
+
+            self.run_kalman_btn.setEnabled(False)
+            self.run_astra_btn.setEnabled(False)
+            self.file_picker_button.setEnabled(False)
+            self.set_prev_picks_button.setEnabled(False)
+            self.setASTRAStatus("PROCESSING", "ASTRA is running...")
+
+            self.kalman_worker = KalmanWorker(self.skyfit_instance, self.config)
+            self.kalman_worker.progress.connect(self.updateProgress)
+            self.kalman_worker.results_ready.connect(
+                self.skyfit_instance.applyKalmanResults,
+                QtCore.Qt.QueuedConnection
+            )
+
+            # Restore interactivity
+            self.kalman_worker.finished.connect(lambda: (not getattr(self, "_is_closing", False)) and self.file_picker_button.setEnabled(True))
+
+            self.kalman_worker.finished.connect(lambda:
+                (self.skyfit_instance is not None)
+                and (getattr(self.skyfit_instance, "astra_dialog", None) is self)
+                and self.skyfit_instance.checkASTRACanRun()
+            )
+            self.kalman_worker.finished.connect(lambda:
+                (self.skyfit_instance is not None)
+                and (getattr(self.skyfit_instance, "astra_dialog", None) is self)
+                and self.skyfit_instance.checkKalmanCanRun()
+            )
+            self.kalman_worker.finished.connect(lambda:
+                (self.skyfit_instance is not None)
+                and (getattr(self.skyfit_instance, "astra_dialog", None) is self)
+                and self.skyfit_instance.checkPickRevertCanRun()
+            )
+
+            self.kalman_worker.finished.connect(lambda: (not getattr(self, "_is_closing", False)) and self.updateProgress(100))
+
+            self.kalman_worker.start()  
+
+    class KalmanWorker(QThread):
+        progress = pyqtSignal(int)
+        finished = pyqtSignal()
+        results_ready = pyqtSignal(object)
+
+        def __init__(self, skyfit_instance, config):
+            super().__init__()
+            self.skyfit_instance = skyfit_instance
+            self.config = config
+            self._stop = False
+
+        def stop(self):
+            self._stop = True
+
+        def _progress_guard(self, value):
+            if self._stop or self.isInterruptionRequested():
+                raise RuntimeError("Kalman aborted by user")
+            self.progress.emit(value)
+
+        def run(self):
+            try:
+                if self._stop or self.isInterruptionRequested():
+                    self.finished.emit()
+                    return
+                result = self.skyfit_instance.runKalmanFromConfig(
+                    self.config, progress_callback=self._progress_guard
+                )
+                if result is not None:
+                    self.results_ready.emit(result)
+            except Exception as e:
+                print(f'Error running Kalman: {e}')
+                pass
+            finally:
+                self.finished.emit()
+
+    class AstraWorker(QObject):
+        finished = pyqtSignal()
+        progress = pyqtSignal(int)
+        results_ready = pyqtSignal(object)
+
+        def __init__(self, config, skyfit_instance):
+            super().__init__()
+            self.config = config
+            self.skyfit_instance = skyfit_instance
+            self._stop = False
+
+        def stop(self):
+            self._stop = True
+
+        def _progress_guard(self, value):
+            # Called by ASTRA during processing
+            if self._stop:
+                raise RuntimeError("ASTRA aborted by user")
+            self.progress.emit(value)
+
+        def run(self):
+            # try:
+            # Optional early exit
+            if self._stop:
+                print('early exit')
+                self.finished.emit()
+                return
+
+            # Prepare data
+            data_dict = self.skyfit_instance.prepareASTRAData(self.config)
+            if data_dict is False or self._stop:
+                print('no data dict')
+                self.finished.emit()
+                return
+
+            # Run ASTRA; pass our guard so we can interrupt mid-flight
+            astra = ASTRA(**data_dict, progress_callback=self._progress_guard)
+            if self._stop:
+                print('interupted')
+                self.finished.emit()
+                return
+
+            astra.process()  # may call _progress_guard repeatedly
+
+            if not self._stop:
+                self.results_ready.emit(astra)
+            # except Exception as e:
+            #     # Swallow aborts; you could log 'e' if desired
+            #     print(f'Error running ASTRA: {e}')
+            #     pass
+            # finally:
+            #     self.finished.emit()
+
+    def launchASTRAGUI(run_astra_callback=None,
+                        run_kalman_callback=None,
+                        run_load_callback=None,
+                        parent=None,
+                        skyfit_instance=None,
+                        on_close_callback=None):
+        dialog = AstraConfigDialog(
+            run_astra_callback=run_astra_callback,
+            run_kalman_callback=run_kalman_callback,
+            run_load_callback=run_load_callback,
+            parent=parent,
+            skyfit_instance=skyfit_instance,
+            on_close_callback=on_close_callback
+        )
+        dialog.show()
+        return dialog
+
 
 
 def _extractStarsFFWorker(args):
@@ -690,7 +1685,7 @@ class MultiImagePairedStars(PairedStars):
 class PlateTool(QtWidgets.QMainWindow):
     def __init__(self, input_path, config, beginning_time=None, fps=None, gamma=None, use_fr_files=False,
         geo_points_input=None, startUI=True, mask=None, nobg=False, peribg=False, flipud=False,
-        flatbiassub=False):
+        flatbiassub=False, exposure_ratio=1.0):
         """ SkyFit interactive window.
 
         Arguments:
@@ -713,6 +1708,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 coloured mask instead of the avepixel. False by default.
             flipud: [bool] Flip the image upside down. False by default.
             flatbiassub: [bool] Subtract flat and bias frames. False by default.
+            exposure_ratio: [float] Exposure ratio between stars and meteors. Used for magnitude scaling of 
+                meteors observed on long exposure images with shutters. The correct exp. ratio is already 
+                automatically applied for DFN images. 1.0 by default.
         """
 
         super(PlateTool, self).__init__()
@@ -772,6 +1770,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Store the flat and bias subtraction flag
         self.flatbiassub = flatbiassub
+
+        # Store the exposure ratio
+        self.exposure_ratio = exposure_ratio
 
         # Extract the directory path if a file was given
         if os.path.isfile(self.dir_path):
@@ -872,6 +1873,20 @@ class PlateTool(QtWidgets.QMainWindow):
         self.photom_fit_stddev = None
         self.photom_fit_resids = None
 
+        # Compute the saturation threshold
+        self.saturation_threshold = int(round(0.98*(2**self.config.bit_depth - 1)))
+
+        # ASTRA class variables
+        if ASTRA_IMPORTED:
+
+            # List of large pick changes (import, ASTRA, kalman) to support reversion
+            self.previous_picks = []
+
+            # Initialize the ASTRA dialog reference
+            self.astra_dialog = None
+            self.astra_config_params = None
+
+    
         ###################################################################################################
 
 
@@ -926,7 +1941,6 @@ class PlateTool(QtWidgets.QMainWindow):
         # Load distortion type index
         self.dist_type_index = self.platepar.distortion_type_list.index(self.platepar.distortion_type)
 
-
         ###################################################################################################
 
         print()
@@ -934,6 +1948,35 @@ class PlateTool(QtWidgets.QMainWindow):
         # INIT WINDOW
         if startUI:
             self.setupUI()
+
+
+        ###################################################################################################
+
+        # Automatically load the flat and bias in UWO data mode
+        if self.usingUWOData():
+            _, self.flat_struct = self.loadFlat()
+            _, self.dark = self.loadDark()
+
+
+            # Set focus back on the SkyFit window
+            self.activateWindow()
+
+            # Apply the dark to the flat if the flatbiassub flag is set
+            if self.flatbiassub and (self.flat_struct is not None):
+
+                self.flat_struct.applyDark(self.dark)
+
+                self.img.flat_struct = self.flat_struct
+                self.img_zoom.flat_struct = self.flat_struct
+
+
+            self.img.dark = self.dark
+            self.img_zoom.dark = self.dark
+
+            self.img_zoom.flat_struct = self.flat_struct
+            self.img.flat_struct = self.flat_struct
+            self.img_zoom.reloadImage()
+            self.img.reloadImage()
 
 
     def closeEvent(self, event):
@@ -984,8 +2027,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.save_reduction_action = QtWidgets.QAction('Save state and reduction')
         self.save_reduction_action.setShortcut('Ctrl+S')
         self.save_reduction_action.triggered.connect(lambda: [self.saveState(),
-                                                              self.saveFTPdetectinfo(),
-                                                              self.saveECSV()])
+                                                              self.saveFTPdetectinfo(ECSV_saved=self.saveECSV())])
 
         self.save_current_frame_action = QtWidgets.QAction('Save current frame')
         self.save_current_frame_action.setShortcut('Ctrl+W')
@@ -1157,6 +2199,54 @@ class PlateTool(QtWidgets.QMainWindow):
         self.geo_markers2.setSymbol(Plus())
         self.geo_markers2.setZValue(4)
         self.zoom_window.addItem(self.geo_markers2)
+
+        # astrometry.net matched star markers (main window) - cyan color
+        # These show catalog star positions that matched to input stars
+        self.astrometry_matched_markers = pg.ScatterPlotItem()
+        self.astrometry_matched_markers.setPen('c', width=2)  # cyan
+        self.astrometry_matched_markers.setBrush((0, 0, 0, 0))
+        self.astrometry_matched_markers.setSize(15)
+        self.astrometry_matched_markers.setSymbol('o')  # circle
+        self.astrometry_matched_markers.setZValue(5)
+        self.img_frame.addItem(self.astrometry_matched_markers)
+
+        # astrometry.net matched star markers (zoom window)
+        self.astrometry_matched_markers2 = pg.ScatterPlotItem()
+        self.astrometry_matched_markers2.setPen('c', width=2)
+        self.astrometry_matched_markers2.setBrush((0, 0, 0, 0))
+        self.astrometry_matched_markers2.setSize(25)
+        self.astrometry_matched_markers2.setSymbol('o')
+        self.astrometry_matched_markers2.setZValue(5)
+        self.zoom_window.addItem(self.astrometry_matched_markers2)
+
+        # astrometry.net quad star markers (main window) - magenta color
+        # These are the specific catalog stars used for the initial quad pattern matching
+        self.astrometry_quad_markers = pg.ScatterPlotItem()
+        self.astrometry_quad_markers.setPen('m', width=2)  # magenta
+        self.astrometry_quad_markers.setBrush((0, 0, 0, 0))
+        self.astrometry_quad_markers.setSize(20)
+        self.astrometry_quad_markers.setSymbol('s')  # square
+        self.astrometry_quad_markers.setZValue(5)
+        self.img_frame.addItem(self.astrometry_quad_markers)
+
+        # astrometry.net quad star markers (zoom window)
+        self.astrometry_quad_markers2 = pg.ScatterPlotItem()
+        self.astrometry_quad_markers2.setPen('m', width=2)
+        self.astrometry_quad_markers2.setBrush((0, 0, 0, 0))
+        self.astrometry_quad_markers2.setSize(30)
+        self.astrometry_quad_markers2.setSymbol('s')
+        self.astrometry_quad_markers2.setZValue(5)
+        self.zoom_window.addItem(self.astrometry_quad_markers2)
+
+        # Store astrometry.net solution info (populated when astrometry.net is run)
+        self.astrometry_solution_info = None
+        self.astrometry_stars_visible = False
+
+        # Initially hide astrometry.net markers
+        self.astrometry_matched_markers.hide()
+        self.astrometry_matched_markers2.hide()
+        self.astrometry_quad_markers.hide()
+        self.astrometry_quad_markers2.hide()
 
         self.selected_stars_visible = True
         self.unsuitable_stars_visible = True
@@ -1407,6 +2497,11 @@ class PlateTool(QtWidgets.QMainWindow):
         self.region.setZValue(10)
         self.img_frame.addItem(self.region)
 
+        self.region_zoom = pg.ImageItem(lut=lut)
+        self.region_zoom.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)
+        self.region_zoom.setZValue(10)
+        self.zoom_window.addItem(self.region_zoom)
+
         self.tab = RightOptionsTab(self)
         self.tab.hist.setImageItem(self.img)
         self.tab.hist.setImages(self.img_zoom)
@@ -1436,6 +2531,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Connect astrometry & photometry buttons to functions
         self.tab.param_manager.sigFitPressed.connect(lambda: self.fitPickedStars())
         self.tab.param_manager.sigClearPicks.connect(self.clearAllPicks)  # Multi-image: Clear all picks
+        self.tab.param_manager.sigAutoFitPressed.connect(self.autoFitAstrometryNet)
         self.tab.param_manager.sigNextStarPressed.connect(lambda: self.jumpNextStar())
         self.tab.param_manager.sigPhotometryPressed.connect(lambda: self.photometry(show_plot=True))
         self.tab.param_manager.sigAstrometryPressed.connect(self.showAstrometryFitPlots)
@@ -1540,6 +2636,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.pick_marker2.hide()
             self.great_circle_line.hide()
             self.region.hide()
+            if hasattr(self, "region_zoom"):
+                self.region_zoom.hide()
             self.img_frame.setMouseEnabled(True, True)
             self.star_pick_mode = False
             self.cursor.hide()
@@ -1611,6 +2709,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.pick_marker2.show()
             self.great_circle_line.show()
             self.region.show()
+            if hasattr(self, "region_zoom"):
+                self.region_zoom.show()
 
             # Update the great circle
             self.updateGreatCircle()
@@ -1966,7 +3066,9 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'CTRL + F - Load flat\n'
             text_str += 'CTRL + P - Load platepar\n'
             text_str += 'CTRL + W - Save current frame\n'
-            text_str += 'CTRL + S - Save FTPdetectinfo'
+            text_str += 'CTRL + S - Save FTPdetectinfo\n'
+            text_str += '\n'
+            text_str += 'CTRL + K - Open ASTRA GUI'
 
         self.label2.setText(text_str)
         self.label2.setPos(self.img_frame.width() - self.label2.boundingRect().width(), \
@@ -2092,9 +3194,18 @@ class PlateTool(QtWidgets.QMainWindow):
 
             cat_stars_xy, self.catalog_stars_filtered = [], []
             for star_xy, star_radec in zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked):
-                
-                # Check if the star is inside the mask
-                if self.mask.img[int(star_xy[1]), int(star_xy[0])] != 0:
+
+                # Make sure that the dimensions of the mask match the image dimensions
+                if (self.mask.img.shape[0] == self.img.data.shape[0]) or \
+                   (self.mask.img.shape[1] == self.img.data.shape[1]):
+
+                    # Check if the star is inside the mask
+                    if self.mask.img[int(star_xy[1]), int(star_xy[0])] != 0:
+                        cat_stars_xy.append(star_xy)
+                        self.catalog_stars_filtered.append(star_radec)
+
+                # If the mask dimensions don't match the image dimensions, ignore the mask
+                else:
                     cat_stars_xy.append(star_xy)
                     self.catalog_stars_filtered.append(star_radec)
 
@@ -2253,7 +3364,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.pick_marker2.addPoints(pos=current, size=30, pen=current_pen)
         self.pick_marker2.addPoints(pos=data1, size=10, pen=pick_color)
         self.pick_marker2.addPoints(pos=data2, size=10, pen=gap_color)
-
 
     def updateFitResiduals(self):
         """ Draw fit residual lines. """
@@ -2677,7 +3787,6 @@ class PlateTool(QtWidgets.QMainWindow):
         snr_list = []
         saturation_list = []
 
-
         for paired_star in self.paired_stars.allCoords():
 
             # Handle both MultiImagePairedStars (4 values) and PairedStars (2 values)
@@ -2714,6 +3823,15 @@ class PlateTool(QtWidgets.QMainWindow):
             snr_list.append(snr)
             saturation_list.append(saturated)
             elevation_list.append(alt)
+
+
+        # Skip the photometry if there are no stars
+        if len(star_coords) == 0:
+            
+            self.photom_fit_stddev = None
+            self.photom_fit_resids = []
+
+            return
 
 
         self.residual_text.clear()
@@ -3084,6 +4202,11 @@ class PlateTool(QtWidgets.QMainWindow):
             # self.paired_stars = PairedStars()
             # self.unsuitable_stars = PairedStars()
             # self.residuals = None
+
+            # Clear residual overlay from previous image
+            self.updateFitResiduals()
+            self.residual_text.clear()
+
             self.drawPhotometryColoring()
 
             self.updateStars()
@@ -3508,6 +4631,21 @@ class PlateTool(QtWidgets.QMainWindow):
         if not hasattr(self, "flatbiassub"):
             self.flatbiassub = False
 
+        # Update the possibly missing exposure ratio variable
+        if not hasattr(self, "exposure_ratio"):
+            self.exposure_ratio = 1.0
+
+
+        # Add the possibily missing variables for ASTRA
+        if not hasattr(self, "astra_dialog"):
+            self.astra_dialog = None
+
+        if not hasattr(self, "astra_config_params"):
+            self.astra_config_params = None
+
+        if not hasattr(self, "saturation_threshold"):
+            self.saturation_threshold = int(round(0.98*(2**self.config.bit_depth - 1)))
+
         # If the paired stars are a list (old version), reset it to a new version where it's an object
         if isinstance(self.paired_stars, list):
 
@@ -3884,7 +5022,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Load the dark
         elif event.key() == QtCore.Qt.Key_D and (modifiers == QtCore.Qt.ControlModifier):
             
-            _, self.dark = self.loadDark()
+            _, self.dark = self.loadDark(force_dialog=True)
 
             # Set focus back on the SkyFit window
             self.activateWindow()
@@ -3914,7 +5052,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Load the flat
         elif event.key() == QtCore.Qt.Key_F and (modifiers == QtCore.Qt.ControlModifier):
             
-            _, self.flat_struct = self.loadFlat()
+            _, self.flat_struct = self.loadFlat(force_dialog=True)
 
             # Set focus back on the SkyFit window
             self.activateWindow()
@@ -4036,9 +5174,21 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.tab.param_manager.updatePlatepar()
 
         # Toggle showing the catalog stars
-        elif event.key() == QtCore.Qt.Key_H:
+        elif event.key() == QtCore.Qt.Key_H and not (modifiers == QtCore.Qt.ShiftModifier):
             self.toggleShowCatStars()
             self.tab.settings.updateShowCatStars()
+
+        # Toggle showing astrometry.net matched stars (Shift+H)
+        elif event.key() == QtCore.Qt.Key_H and (modifiers == QtCore.Qt.ShiftModifier):
+            self.toggleShowAstrometryNetStars()
+            if self.astrometry_solution_info is not None:
+                matched_count = len(self.astrometry_solution_info.get('matched_pairs', []))
+                quad_count = len(self.astrometry_solution_info.get('quad_stars', []))
+                status = "shown" if self.astrometry_stars_visible else "hidden"
+                print("Astrometry.net stars {:s}: {:d} matched (cyan), {:d} quad (magenta)".format(
+                    status, matched_count, quad_count))
+            else:
+                print("No astrometry.net solution available. Run 'CTRL+X' or 'CTRL+SHIFT+X' first.")
 
         # Toggle inverting colors
         elif (event.key() == QtCore.Qt.Key_I) and not (modifiers == QtCore.Qt.ControlModifier):
@@ -4430,7 +5580,9 @@ class PlateTool(QtWidgets.QMainWindow):
             # Force distortion centre to image centre
             elif event.key() == QtCore.Qt.Key_B:
                 if self.platepar is not None:
-                    self.platepar.force_distortion_centre = not self.platepar.force_distortion_centre
+                    # Use remapCoeffsForFlagChange to preserve distortion coefficients
+                    new_value = not self.platepar.force_distortion_centre
+                    self.platepar.remapCoeffsForFlagChange('force_distortion_centre', new_value)
 
                     self.tab.param_manager.updatePlatepar()
                     self.updateLeftLabels()
@@ -4443,9 +5595,9 @@ class PlateTool(QtWidgets.QMainWindow):
             elif event.key() == QtCore.Qt.Key_G:
 
                 if self.platepar is not None:
-
-                    self.platepar.equal_aspect = not self.platepar.equal_aspect
-                    self.platepar.resetDistortionParameters()
+                    # Use remapCoeffsForFlagChange to preserve distortion coefficients
+                    new_value = not self.platepar.equal_aspect
+                    self.platepar.remapCoeffsForFlagChange('equal_aspect', new_value)
 
                     self.tab.param_manager.updatePlatepar()
                     self.updateLeftLabels()
@@ -4458,9 +5610,9 @@ class PlateTool(QtWidgets.QMainWindow):
             elif event.key() == QtCore.Qt.Key_Y:
 
                 if self.platepar is not None:
-
-                    self.platepar.asymmetry_corr = not self.platepar.asymmetry_corr
-                    self.platepar.resetDistortionParameters()
+                    # Use remapCoeffsForFlagChange to preserve distortion coefficients
+                    new_value = not self.platepar.asymmetry_corr
+                    self.platepar.remapCoeffsForFlagChange('asymmetry_corr', new_value)
 
                     self.tab.param_manager.updatePlatepar()
                     self.updateLeftLabels()
@@ -4667,6 +5819,700 @@ class PlateTool(QtWidgets.QMainWindow):
                 if hasattr(self.img.img_handle, 'current_line'):
                     print('Current line: {}'.format(self.img.img_handle.current_line))
                     self.img.nextLine()
+
+            # Launch ASTRA GUI
+            elif (event.key() == QtCore.Qt.Key_K) and (modifiers == QtCore.Qt.ControlModifier):
+                
+                if ASTRA_IMPORTED:
+                    
+                    # If the ASTRA dialog does not exist, create it
+                    if not hasattr(self, "astra_dialog") or self.astra_dialog is None:
+                        
+                        self.openAstraGUI()
+                        self.astra_dialog.finished.connect(self.clearAstraDialogReference)
+                        
+                        if self.astra_config_params is not None:
+                            self.astra_dialog.setConfig(self.astra_config_params)
+                    
+                    # If the dialog already exists, close it
+                    else:
+                        self.astra_config_params = self.astra_dialog.getConfig()
+                        self.astra_dialog.close()
+                        self.clearAstraDialogReference()
+
+                else:
+                    qmessagebox(title="ASTRA is not available",
+                    message='ASTRA was not correctly imported, check pyswarms is installed.' '' \
+                    'Aborted open ASTRA GUI process.',
+                    message_type='error')
+
+    def clearAstraDialogReference(self):
+        """Clears the reference to the ASTRA GUI"""
+
+        self.astra_dialog = None
+
+    def clearAllPicks(self):
+        """Clears the pick_list, and updates the GUI."""
+
+        # Clear all picks
+        self.pick_list = {}
+
+        # Update GUI to remove drawn picks
+        self.updatePicks()
+
+    def openAstraGUI(self):
+        """Opens the ASTRA dialog box on another thread to ensure SkyFit2 responsiveness."""
+
+        # Launch the ASTRA Dialog on a seperate thread, with callbacks for buttons
+        self.astra_dialog = launchASTRAGUI(
+            run_astra_callback=None,
+            run_kalman_callback=self.runKalmanFromConfig,
+            run_load_callback=self.loadPicksFromFile,
+            skyfit_instance=self
+        )
+
+        if self.astra_config_params is not None:
+            self.astra_dialog.setConfig(self.astra_config_params)
+
+        self.checkASTRACanRun()
+        self.checkPickRevertCanRun()
+        self.checkKalmanCanRun()
+    
+    def loadPicksFromFile(self, config):
+        """Loads picks and associated values from either ECSV or DetApp txt file.
+        args: 
+            config (dict) : Config returned from the ASTRA GUI
+        """
+
+        # Unpack file path
+        file_path = config["file_path"]
+
+        # Check if the file path exists
+        if not os.path.exists(file_path):
+            print(f'ERROR: No Valid ECSV or .txt file selected')
+            return
+        
+        # DetApp picks in a ev*.txt files
+        if os.path.basename(file_path).startswith('ev') and os.path.basename(file_path).endswith('.txt'):
+            
+            # Create a temp pick_list
+            pick_list = {}
+
+            # Load all picks and indices from loadEvTxt
+            pick_list = self.loadEvTxt(file_path)
+
+        # Open ECSV file (even if it doesn't have an .ecsv extension)
+        else:
+
+            # Create a temp pick_list
+            pick_list = {}
+
+            # Load the picks and indices from loadECSV
+            try:
+                pick_list = self.loadECSV(file_path)
+
+            except Exception as e:
+                
+                print(f'ERROR: Failed to load ECSV file {file_path}: {e}')
+                qmessagebox(
+                    title='ECSV Load Error',
+                    message=f'Failed to load ECSV file {file_path}: {e}',
+                    message_type="error"
+                )
+                return
+
+
+        # Check if the returned values from load are None
+        if pick_list is None:
+            return # Warning was raised in loadEvTxt/loadECSV
+
+        # Check if the pick list is empty
+        if pick_list == {}:
+            qmessagebox(
+                title='Pick Load Error',
+                message=f'No picks loaded from {file_path}',
+                message_type="error"
+            )
+            return
+
+        # Add previous picks to list, if the pick is non-empty
+        if np.array(
+            sorted(
+            k for k in self.pick_list.keys()
+            if (
+                self.pick_list[k].get('x_centroid') is not None
+                or self.pick_list[k].get('y_centroid') is not None
+            )
+            ),
+            dtype=int
+        ).size > 0:
+            # Deep copy to avoid storing references to mutable objects
+            self.previous_picks.append(copy.deepcopy(self.pick_list))
+
+        # Update the main pick list & GUI
+        self.clearAllPicks()
+        self.pick_list = pick_list
+        self.updateGreatCircle()
+
+        # Print out added centroids
+        for k in pick_list.keys():
+            print(f'Added centroid at ({pick_list[k]["x_centroid"]},'
+                  f' {pick_list[k]["y_centroid"]}) on frame {k}')
+
+        # Finally update the GUI picks
+        self.updatePicks()
+
+        # Update Kalman/ASTRA Ready status if instance exists
+        if hasattr(self, 'astra_dialog') and self.astra_dialog is not None:
+            self.checkASTRACanRun()
+            self.checkKalmanCanRun()
+            self.checkPickRevertCanRun()
+
+        # Send console and GUI updates
+        print(f'Loaded {len(pick_list.keys())} picks from {file_path}!')
+
+    def checkKalmanCanRun(self):
+        """Checks if kalman filter can be run, updates astra GUI"""
+        
+        # Unpack picks with non-None values
+        keys = np.array(
+            sorted(
+            k for k in self.pick_list.keys()
+            if (
+                self.pick_list[k].get('x_centroid') is not None
+                or self.pick_list[k].get('y_centroid') is not None
+            )
+            ),
+            dtype=int
+        )
+
+        # Enough points for a good run
+        if keys.size >= 5:  
+            tt = 'Ready to run.'
+            self.astra_dialog.setKalmanStatus(True, tt)
+
+        # Minimum amount of points to run
+        elif keys.size >= 3:
+            tt = 'Ready to run. WARNING: Kalman should be generally run with at least 5 points.'
+            self.astra_dialog.setKalmanStatus("WARN", tt)
+
+        # Not enough points to run
+        else:
+            tt = 'Not ready. Kalman requires at least 3 points (generally >= 5 points).'
+            self.astra_dialog.setKalmanStatus(False, tt)
+
+    def reverseASTRAPicks(self):
+        """Reverts the ASTRA picks to the previous state of picks."""
+        
+        # Only revert if picks are non-empty
+        if not self.previous_picks == []:
+
+            # Pop newest pick off stack
+            old_picks = self.previous_picks.pop()
+
+            # Clear old picks
+            self.clearAllPicks()
+
+            # Restore old picks
+            for frame_num in old_picks.keys():
+                self.pick_list[frame_num] = old_picks[frame_num]
+
+            # Update picks in GUI
+            self.updateGreatCircle()
+            self.updatePicks()
+
+            # Print out reverted picks confirmation
+            print(f'Reverted picks to previous state with {len(old_picks.keys())} picks.')
+        
+        # Update if picks can be reverted again
+        self.checkASTRACanRun()
+        self.checkKalmanCanRun()
+        self.checkPickRevertCanRun()
+            
+    def checkPickRevertCanRun(self):
+        """Checks if reverseASTRAPicks() can be run, connected to ASTRA GUI"""
+
+        if self.previous_picks == []:
+            # If previous picks are empty, set revert status to False
+            self.astra_dialog.setRevertStatus(False)
+        else:
+            # If previous picks are not empty, set revert status to True
+            self.astra_dialog.setRevertStatus(True)
+
+    def checkASTRACanRun(self):
+        """Checks if ASTRA can be run, updates astra GUI"""
+
+        # Instantiate boolean vars
+        middle_points_bool = False
+        ending_points_bool = False
+        middle_includes_ends_bool = False
+        middle_includes_both_ends_bool = False
+
+        # Only include keys where x_centroid or y_centroid is not None
+        keys = np.array(
+            sorted(
+            k for k in self.pick_list.keys()
+            if (
+                self.pick_list[k].get('x_centroid') is not None
+                or self.pick_list[k].get('y_centroid') is not None
+            )
+            ),
+            dtype=int
+        )
+
+        if keys.size >= 3:
+
+            # True where [k[i], k[i+1], k[i+2]] are consecutive integers
+            triples = (keys[:-2] + 1 == keys[1:-1]) & (keys[:-2] + 2 == keys[2:])
+
+            # indices i that start a consecutive triple
+            i_triples = np.where(triples)[0]
+
+            # exclude triples that touch the first or last key in the whole list
+            # i == 0 uses the very first key; i+2 == len(keys)-1 uses the very last
+            inner = i_triples[(i_triples > 0) & (i_triples + 2 < len(keys) - 1)]
+
+            middle_points_bool = inner.size > 0
+
+            middle_includes_ends_bool = i_triples.size > 0
+
+            if keys.size == 3 and middle_includes_ends_bool:
+                middle_includes_both_ends_bool = True
+
+        else:
+            middle_points_bool = False
+            middle_includes_ends_bool = False
+
+        # True if there are ending points which are not part of any sequence of picks (distinct)
+        ending_points_bool = True if (len(keys) >= 2 and keys[0] + 1 != keys[-1]) else False
+
+        # If there are only three points
+        if middle_includes_both_ends_bool:
+            tt = "Ready to run. WARNING: Three middle picks includes both endpoints, " \
+            "ASTRA will only process the three points"
+            self.astra_dialog.setASTRAStatus('WARN', tt)
+
+        # If there are not enough consecutive points
+        elif middle_points_bool:
+            # Picks include three in middle, and two endpoints
+            tt = "Ready to run, there are at least three consecutive points and two endpoints"
+            self.astra_dialog.setASTRAStatus(True, tt)
+        
+        # If the three middle points includes one, but not both endpoints
+        elif middle_includes_ends_bool:
+            # Picks include three in the middle, which are part of the endpoints
+            tt = "Ready to run. WARNING: Three consecutive middle points includes end-points - " \
+            "ASTRA will stop at either beginning/end of middle points."
+            self.astra_dialog.setASTRAStatus('WARN', tt)
+        
+        else:
+            # If there are only distinct ending points selected, and no consequitive middle points
+            if ending_points_bool:
+                tt = "Not ready. End points selected, please pick three consecutive frames at high-SNR."
+                self.astra_dialog.setASTRAStatus(False, tt)
+            # If there are no picks, or no messages triggered (not ready)
+            else:
+                tt = "Not ready. Select three consecutive frames at high SNR, " \
+                "and the start/end frames of the streak"
+                self.astra_dialog.setASTRAStatus(False, tt)
+
+    def prepareASTRAData(self, astra_config):
+        """Prepares data from SkyFit2 class vars for ASTRA"""
+
+        print("Running ASTRA with:", astra_config)
+
+        # Sort pick list according to keys
+        self.pick_list = dict(sorted(self.pick_list.items()))
+
+        # Load the keys for picks which are not empty (not just photometry picks)
+        pick_frame_indices = np.array(
+            [key for key in self.pick_list.keys()
+             if self.pick_list[key]['x_centroid'] is not None 
+             and self.pick_list[key]['y_centroid'] is not None],
+            dtype=int
+        )
+
+        # Prepare pick_dict (keys -> frame indexes, values include x,y centroid)
+
+        pick_dict = {i : {
+            "x_centroid" : self.pick_list[i]['x_centroid'],
+            "y_centroid" : self.pick_list[i]['y_centroid']
+                } for i in pick_frame_indices}
+
+
+        # Prepare the flat to be passed to ASTRA
+        flat = None
+        if self.flat_struct is not None:
+            flat = copy.deepcopy(self.flat_struct)
+            flat.flat_img = flat.flat_img.T
+
+        # Prepare the dark to be passed to ASTRA
+        dark = None
+        if self.dark is not None:
+            dark = copy.deepcopy(self.dark)
+            dark = dark.T
+
+        # Package data for ASTRA - import later using dict comprehension
+        data_dict = {
+            "img_obj" : self.img_handle,
+            "pick_dict" : pick_dict,
+            "astra_config" : astra_config,
+            "data_path" : self.dir_path,
+            "config" : self.config,
+            "dark" : dark,
+            "flat" : flat
+        }
+
+        return data_dict
+
+
+    def integrateASTRAResults(self, astra):
+        """Integrates ASTRA results into the SkyFit2 instance."""
+
+        # Add previous picks to list
+        if np.array(
+            sorted(
+            k for k in self.pick_list.keys()
+            if (
+                self.pick_list[k].get('x_centroid') is not None
+                or self.pick_list[k].get('y_centroid') is not None
+            )
+            ),
+            dtype=int
+        ).size > 0:
+            # Deep copy to avoid storing references to mutable objects
+            self.previous_picks.append(copy.deepcopy(self.pick_list))
+
+        # Add ASTRA picks to the pick list
+        self.clearAllPicks()  # Clear previous picks
+
+        # Get and set pick_list from ASTRA
+        self.pick_list = astra.getResults(skyfit_format=True)
+
+        # Print added message
+        for pick_frame, pick in self.pick_list.items():
+            print(f'Added centroid at ({pick["x_centroid"]}, {pick["y_centroid"]}) '
+                  f'on frame {pick_frame}')
+
+        # Update picks on GUI and update greatCircle
+        self.updateGreatCircle()
+        self.updatePicks()
+
+        # Update Kalman/ASTRA Ready status if instance exists
+        if hasattr(self, 'astra_dialog') and self.astra_dialog is not None:
+            self.checkASTRACanRun()
+            self.checkKalmanCanRun()
+            self.checkPickRevertCanRun()
+
+        # Print message telling ASTRA has been run
+        print(f'Loaded {astra.getTotalPicks()} Picks from ASTRA! '
+              f'Minimum SNR of {astra.getMinSnr()}')
+
+    def setMessageBox(self, title, message, type):
+        """Target function for ASTRA_GUI to set message boxes."""
+        qmessagebox(title=title, message=message, message_type=type)
+
+    def runKalmanFromConfig(self, astra_config, progress_callback=None):
+        """Runs the Kalman filter with the given ASTRA configuration."""
+
+        print("Running Kalman with:", astra_config)
+
+        if progress_callback is not None:
+            progress_callback(0)
+
+        # Take only keys of non-empty picks (not just photometry), maintaining order
+        ordered_keys = [key for key, _ in sorted(self.pick_list.items())]
+        pick_frame_indices = [
+            key for key in ordered_keys
+            if self.pick_list[key]['x_centroid'] is not None
+            and self.pick_list[key]['y_centroid'] is not None
+        ]
+
+        # Prepare measurements and times for Kalman filter
+        measurements = [
+            (self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid'])
+            for key in pick_frame_indices
+        ]
+        times = [self.img_handle.currentFrameTime(key, dt_obj=True) for key in pick_frame_indices]
+
+        # Extract kalman settings from astra_config
+        sigma_xy = astra_config['kalman']['sigma_xy (px)']
+        perc_sigma_vxy = astra_config['kalman']['sigma_vxy (%)']
+        monotonicity = astra_config['kalman']['Monotonicity']
+        save_stats_results = astra_config['kalman']['save results']
+
+        # Run Kalman on the ASTRA instance, extract new picks
+        kalman = KalmanFilter(
+            sigma_xy=sigma_xy,
+            perc_sigma_vxy=perc_sigma_vxy,
+            measurements=measurements,
+            times=times,
+            monotonicity=monotonicity,
+            save_stats_results=save_stats_results,
+            save_path=self.dir_path
+        )
+
+        xypicks = kalman.getPicks()
+
+        if progress_callback is not None:
+            progress_callback(100)
+
+        return {
+            'frame_indices': pick_frame_indices,
+            'xypicks': xypicks.tolist(),
+            'save_results': save_stats_results,
+        }
+
+    def applyKalmanResults(self, kalman_result):
+        """Integrates Kalman smoothing results into the SkyFit2 instance."""
+
+        if not kalman_result:
+            return
+
+        frame_indices = kalman_result.get('frame_indices', [])
+        xypicks = kalman_result.get('xypicks', [])
+        save_results = kalman_result.get('save_results', 'false')
+
+        # Add previous picks to list
+        if np.array(
+            sorted(
+                k for k in self.pick_list.keys()
+                if (
+                    self.pick_list[k].get('x_centroid') is not None
+                    or self.pick_list[k].get('y_centroid') is not None
+                )
+            ),
+            dtype=int
+        ).size > 0:
+            # Deep copy to avoid storing references to mutable objects
+            self.previous_picks.append(copy.deepcopy(self.pick_list))
+
+        # Print message to show Kalman has been applied
+        print(f'Kalman filter applied to {len(xypicks)} picks!')
+
+        # Adjust all picks positions
+        for frame_number, pick in zip(frame_indices, xypicks):
+            frame_number = int(frame_number)
+            if frame_number in self.pick_list:
+                self.pick_list[frame_number]["x_centroid"] = pick[0]
+                self.pick_list[frame_number]["y_centroid"] = pick[1]
+
+                # Print adjustment message
+                print(f'Adjusted centroid at ({pick[0]}, {pick[1]}) on frame {frame_number}')
+
+        # Update picks on GUI and greatCircle
+        self.updateGreatCircle()
+        self.updatePicks()
+
+        # Update kalman/astra readiness if instance exists
+        if hasattr(self, 'astra_dialog') and self.astra_dialog is not None:
+            self.checkASTRACanRun()
+            self.checkKalmanCanRun()
+            self.checkPickRevertCanRun()
+
+        # Print message showing kalman finished
+        if str(save_results).lower() == 'true':
+            print(f'Saved to CSV & Loaded {len(frame_indices)} Picks from Kalman Smoothing.')
+        else:
+            print(f'Loaded {len(frame_indices)} Picks from Kalman Smoothing!')
+
+    def loadEvTxt(self, txt_file_path):
+        """
+        Loads the Ev*.txt file and adds the relevant info to pick_list
+        Args:
+            txt_file_path (str): Path to the Ev*.txt file to load
+        Returns:
+            picks (dict): (N : [8]) dict following same format as self.pick_list 
+        """
+
+        picks = [] # (N, x, y) array of picks
+        pick_frame_indices = [] # (N,) array of frame indices
+
+        # Temp bool to extract header line
+        first_bool = False
+
+        # Wrap in try except for uncaught errors
+        try:
+            # Opens and parses pick file
+            with open(txt_file_path, 'r') as file:
+                for i, line in enumerate(file):
+                    if line.strip() and not line.startswith('#'):
+
+                        # Clean the line
+                        line = [part.strip() for part in line.split() if part]
+
+                        # Unpack the header
+                        if first_bool == False:
+                            first_bool = True
+
+                            # Unpack header info
+                            column_names = [part.strip() for part in temp_line.split()[1:] if part]
+
+                            # Extract indices
+                            frame_number_idx = column_names.index('fr') if 'fr' in column_names else None
+                            x_centroid_idx = column_names.index('cx') if 'cx' in column_names else None
+                            y_centroid_idx = column_names.index('cy') if 'cy' in column_names else None
+
+                            # Raise error if not found in txt file
+                            if frame_number_idx is None or x_centroid_idx is None or y_centroid_idx is None:
+                                qmessagebox(title="TXT File Format Error", 
+                                            message="TXT file must contain 'fr', 'cx', and 'cy' columns.",
+                                            message_type="error")
+                                return None
+                        
+                        else:
+                            # Unpack the pick
+                            frame_number = int(line[frame_number_idx])
+                            cx, cy = float(line[x_centroid_idx]), float(line[y_centroid_idx])
+
+                            picks.append({
+                                'x_centroid': cx,
+                                'y_centroid': cy,
+                                'mode' : 1,
+                                'intensity_sum' : 1,
+                                'photometry_pixels' : None,
+                                'background_intensity' : 0,
+                                'snr' : 1,
+                                'saturated' : False,
+                            })
+                            pick_frame_indices.append(frame_number)
+
+                    # Store a temp line to hit previous for col names
+                    temp_line = line
+
+            # Pack picks in self.pick_list format
+            pick_list = {frame: pick for frame, pick in zip(pick_frame_indices, picks)}
+
+            return pick_list
+
+        # Raise error message
+        except Exception as e:
+            qmessagebox(title="File Read Error", 
+                        message=f"Unknown Error reading TXT file, check correct file loaded.: {str(e)}",
+                        message_type="error")
+            return None
+
+    def loadECSV(self, ECSV_file_path):
+        """
+        Loads the ECSV file and adds the relevant info to pick_list
+        Args:
+            ECSV_file_path (str): Path to the ECSV file to load
+        Returns:
+            picks (dict): (N : [8]) dict following same format as self.pick_list 
+        """
+
+        # Instantiate arrays to be populated
+        picks = []  # N x args_dict array for addCentroid
+        pick_frame_indices = []  # (N,) array of frame indices
+        pick_frame_times = []  # (N,) array of frame times
+
+        # wrap in try except to catch unknown errors
+        try:
+            # Opens and parses the ECSV file
+            with open(ECSV_file_path, 'r') as file:
+
+                # Read the file contents
+                contents = file.readlines()
+        
+                # Temp bool to get the column names
+                first_bool = False
+
+                # Process the contents
+                for line in contents:
+
+                    # Clean the line
+                    line = [part.strip() for part in line.split(',') if part]
+
+                    # Skip header lines
+                    if line[0].startswith('#'):
+                        continue
+
+                    if first_bool == False:
+                        # Set first bool to True so header is not unpacked twice
+                        first_bool = True
+
+                        # Unpack column names
+                        column_names = line
+
+                        # Map column names to their indices
+                        pick_frame_times_idx = column_names.index('datetime') if 'datetime' in column_names \
+                                                                                        else None
+                        x_ind = column_names.index('x_image') if 'x_image' in column_names \
+                                                                                        else None
+                        y_ind = column_names.index('y_image') if 'y_image' in column_names \
+                                                                                        else None
+                        background_ind = column_names.index('background_pixel_value') \
+                                                        if 'background_pixel_value' in column_names else None
+                        sat_ind = column_names.index('saturated_pixels') if 'saturated_pixels' in column_names \
+                                                                                        else None
+                        snr_ind = column_names.index('snr') if 'snr' in column_names else None
+
+                        # Ensure essential values are in the ECSV
+                        if x_ind is None or y_ind is None or pick_frame_times_idx is None:
+                            qmessagebox(title="ECSV File Format Error", 
+                                        message="ECSV file must contain 'x_image', 'y_image', "
+                                        "and 'datetime' columns.",
+                                        message_type="error")
+                            return None
+
+                        continue
+
+                    else:
+                        # Unpack line
+
+                        # Populate arrays
+                        cx, cy = float(line[x_ind]), float(line[y_ind])
+                        background = float(line[background_ind]) if background_ind is not None else 0
+                        saturated = bool(line[sat_ind]) if sat_ind is not None else False
+                        snr = float(line[snr_ind]) if snr_ind is not None else 1
+                        pick_frame_times.append(datetime.datetime.strptime(line[pick_frame_times_idx], 
+                                                                           '%Y-%m-%dT%H:%M:%S.%f'))
+
+                        # Load in pick parameters, use default for other values 
+                        picks.append({
+                            'x_centroid': cx,
+                            'y_centroid': cy,
+                            'mode': 1,
+                            'intensity_sum': 1,
+                            'photometry_pixels': None,
+                            'background_intensity': background,
+                            'snr': snr,
+                            'saturated': saturated,
+                        })
+
+            # Converts times into frame indices, accounting for floating-point errors
+            pick_frame_indices = []
+            frame_count = self.img_handle.total_frames
+            time_idx = 0
+            for i in range(frame_count):
+                frame_time = self.img_handle.currentFrameTime(frame_no=i, dt_obj=True)
+                time = pick_frame_times[time_idx]
+                if frame_time == time or \
+                    frame_time == time + datetime.timedelta(microseconds=1) or \
+                    frame_time == time - datetime.timedelta(microseconds=1):
+                    pick_frame_indices.append(i)
+                    time_idx += 1
+                if time_idx >= len(pick_frame_times):
+                    break
+
+            # if arrays are different dimensions raise error
+            if len(picks) != len(pick_frame_indices):
+                qmessagebox(title="Pick/Frame Index Mismatch",
+                            message="Mismatch between number of picks and frame indices. " \
+                            "Please check the ECSV file for frame-time mismatch errors.",
+                            message_type="error")
+                return None
+            pick_list = {frame: pick for frame, pick in zip(pick_frame_indices, picks)}
+
+            return pick_list
+        
+        # Raise error box
+        except Exception as e:
+            qmessagebox(title='File Read Error',
+                        message=f"Unknown Error reading ECSV file, check correct file loaded.: {str(e)}",
+                        message_type="error")
+            return None
+
 
     def keyReleaseEvent(self, event):
         
@@ -4885,6 +6731,54 @@ class PlateTool(QtWidgets.QMainWindow):
             self.calstar_markers_outer.hide()
             self.calstar_markers_outer2.hide()
 
+    def toggleShowAstrometryNetStars(self):
+        """ Toggle whether to show astrometry.net matched stars """
+        self.astrometry_stars_visible = not self.astrometry_stars_visible
+        if self.astrometry_stars_visible:
+            self.astrometry_matched_markers.show()
+            self.astrometry_matched_markers2.show()
+            self.astrometry_quad_markers.show()
+            self.astrometry_quad_markers2.show()
+            # Update the markers with current solution info
+            self.updateAstrometryNetStarMarkers()
+        else:
+            self.astrometry_matched_markers.hide()
+            self.astrometry_matched_markers2.hide()
+            self.astrometry_quad_markers.hide()
+            self.astrometry_quad_markers2.hide()
+
+    def updateAstrometryNetStarMarkers(self):
+        """ Update the astrometry.net star markers from stored solution info """
+        if self.astrometry_solution_info is None:
+            self.astrometry_matched_markers.setData(pos=[])
+            self.astrometry_matched_markers2.setData(pos=[])
+            self.astrometry_quad_markers.setData(pos=[])
+            self.astrometry_quad_markers2.setData(pos=[])
+            return
+
+        matched_pairs = self.astrometry_solution_info.get('matched_pairs', [])
+        quad_stars = self.astrometry_solution_info.get('quad_stars', [])
+
+        # Update matched star markers (catalog positions of matched stars)
+        if matched_pairs:
+            x_matched = [p['catalog_x'] for p in matched_pairs]
+            y_matched = [p['catalog_y'] for p in matched_pairs]
+            self.astrometry_matched_markers.setData(x=x_matched, y=y_matched)
+            self.astrometry_matched_markers2.setData(x=x_matched, y=y_matched)
+        else:
+            self.astrometry_matched_markers.setData(pos=[])
+            self.astrometry_matched_markers2.setData(pos=[])
+
+        # Update quad star markers
+        if quad_stars:
+            x_quad = [s['x_pix'] for s in quad_stars]
+            y_quad = [s['y_pix'] for s in quad_stars]
+            self.astrometry_quad_markers.setData(x=x_quad, y=y_quad)
+            self.astrometry_quad_markers2.setData(x=x_quad, y=y_quad)
+        else:
+            self.astrometry_quad_markers.setData(pos=[])
+            self.astrometry_quad_markers2.setData(pos=[])
+
     def toggleShowPicks(self):
         """ Toggle whether to show the picks for manualreduction """
 
@@ -4908,8 +6802,12 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Toggle whether to show the photometry region for manualreduction """
         if self.region.isVisible():
             self.region.hide()
+            if hasattr(self, "region_zoom"):
+                self.region_zoom.hide()
         else:
             self.region.show()
+            if hasattr(self, "region_zoom"):
+                self.region_zoom.show()
 
     def toggleDistortion(self):
         """ Toggle whether to show the distortion lines"""
@@ -5277,20 +7175,235 @@ class PlateTool(QtWidgets.QMainWindow):
         return filtered_indices, filtered_catalog_stars
 
 
+    def tryQuickAlignment(self):
+        """ Try to align platepar using existing pointing as starting point.
+
+        Uses alignPlatepar() to refine pointing, then checks if the fit is good enough
+        by counting matched stars. If successful, performs full NN-based astrometry fit.
+
+        Returns:
+            success: [bool] True if quick alignment succeeded and we can skip astrometry.net
+        """
+        print()
+        print("Trying quick alignment with existing platepar...")
+        self.status_bar.showMessage("Trying quick alignment...")
+        QtWidgets.QApplication.processEvents()
+
+        # Get current FF file name
+        ff_name_c = convertFRNameToFF(self.img_handle.name())
+
+        # Check if we have detected stars for the current frame
+        if ff_name_c not in self.calstars:
+            print("  No detected stars available - falling back to astrometry.net")
+            return False
+
+        detected_stars = np.array(self.calstars[ff_name_c])
+        if len(detected_stars) < 10:
+            print("  Less than 10 detected stars - falling back to astrometry.net")
+            return False
+
+        # Get detected star coordinates (note: calstars format is [y, x, ...])
+        det_y = detected_stars[:, 0]
+        det_x = detected_stars[:, 1]
+        det_intens = detected_stars[:, 3] if detected_stars.shape[1] > 3 else np.ones(len(det_x))
+
+        # Prepare calstars_coords for alignPlatepar (x, y format)
+        calstars_coords = np.column_stack([det_x, det_y])
+
+        # Get time for the current frame
+        calstars_time = list(self.img_handle.currentTime())
+
+        # Compute JD
+        jd = date2JD(*calstars_time)
+
+        # Try alignPlatepar to refine pointing
+        try:
+            pp_aligned = alignPlatepar(self.config, self.platepar, calstars_time, calstars_coords)
+        except Exception as e:
+            print("  alignPlatepar failed: {} - falling back to astrometry.net".format(str(e)))
+            return False
+
+        # Check if alignPlatepar improved the fit by counting matched stars
+        # Get catalog stars within FOV using the aligned platepar
+        _, catalog_stars_fov = self.filterCatalogStarsInsideFOV(self.catalog_stars)
+
+        if len(catalog_stars_fov) < 10:
+            print("  Not enough catalog stars in FOV - falling back to astrometry.net")
+            return False
+
+        # Project catalog stars to image coordinates
+        catalog_x, catalog_y, _ = getCatalogStarsImagePositions(catalog_stars_fov, jd, pp_aligned)
+
+        # Count matches: detected stars with a catalog star within match_radius pixels
+        match_radius = 10.0  # pixels
+        n_matched = 0
+        for i in range(len(det_x)):
+            dist = np.sqrt((catalog_x - det_x[i])**2 + (catalog_y - det_y[i])**2)
+            if np.min(dist) < match_radius:
+                n_matched += 1
+
+        match_fraction = n_matched / len(det_x) if len(det_x) > 0 else 0
+
+        print("  Quick alignment: {}/{} stars matched ({:.1f}%) within {}px".format(
+            n_matched, len(det_x), 100*match_fraction, match_radius))
+
+        # Require at least 10 matched stars and >50% match rate
+        min_matched_stars = 10
+        min_match_fraction = 0.5
+
+        if n_matched < min_matched_stars or match_fraction < min_match_fraction:
+            print("  Insufficient matches - falling back to astrometry.net")
+            return False
+
+        # Quick alignment succeeded - apply the aligned platepar and do full NN fit
+        print("  Quick alignment successful! Skipping astrometry.net")
+        self.platepar = pp_aligned
+
+        # Update JD and hour angle
+        self.platepar.JD = jd
+        self.platepar.Ho = JD2HourAngle(jd) % 360
+
+        # Save user's distortion settings for final fit
+        user_distortion_type = self.platepar.distortion_type
+        user_equal_aspect = self.platepar.equal_aspect
+        user_asymmetry_corr = self.platepar.asymmetry_corr
+        user_force_distortion_centre = self.platepar.force_distortion_centre
+        user_refraction = self.platepar.refraction
+        user_fit_only_pointing = self.fit_only_pointing
+        user_fixed_scale = self.fixed_scale
+
+        # Use standard fitting settings for NN fit, but KEEP existing distortion params
+        # The aligned platepar from alignPlatepar() has good pointing AND distortion coefficients
+        # Setting reset_params=True would zero out distortion and cause RANSAC to diverge
+        self.platepar.refraction = True
+        self.platepar.equal_aspect = True
+        self.platepar.asymmetry_corr = False
+        self.platepar.force_distortion_centre = False
+        self.platepar.setDistortionType("radial5-odd", reset_params=False)
+
+        # Prepare detected stars array for NN fit
+        img_stars_arr = np.column_stack([det_x, det_y, det_intens])
+
+        # Perform full NN-based fit
+        print()
+        print("NN-based fitting...")
+        print("  Starting from: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
+            self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
+        self.status_bar.showMessage("Fitting astrometry...")
+        QtWidgets.QApplication.processEvents()
+
+        try:
+            self.platepar.fitAstrometry(
+                jd, img_stars_arr, self.catalog_stars,
+                first_platepar_fit=True,
+                use_nn_cost=True
+            )
+            print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
+                self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
+        except Exception as e:
+            print("  NN fit failed: {} - falling back to astrometry.net".format(str(e)))
+            return False
+
+        # Populate paired_stars from NN matches for visualization
+        self.paired_stars = PairedStars()
+
+        # Re-project catalog stars with final platepar
+        _, catalog_stars_fov = self.filterCatalogStarsInsideFOV(self.catalog_stars)
+        catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(
+            catalog_stars_fov, jd, self.platepar)
+
+        # Match detected stars to catalog
+        for i in range(len(det_x)):
+            dist = np.sqrt((catalog_x - det_x[i])**2 + (catalog_y - det_y[i])**2)
+            min_idx = np.argmin(dist)
+            if dist[min_idx] < match_radius:
+                cat_star = catalog_stars_fov[min_idx]
+                sky_obj = CatalogStar(cat_star[0], cat_star[1], cat_star[2])
+                self.paired_stars.addPair(
+                    det_x[i], det_y[i],
+                    detected_stars[i, 2] if detected_stars.shape[1] > 2 else 2.5,  # FWHM
+                    det_intens[i],
+                    sky_obj
+                )
+
+        print("  Matched {} star pairs".format(len(self.paired_stars)))
+
+        # Restore user's distortion settings for final refinement fit
+        # Must restore flags BEFORE calling setDistortionType so poly_length is computed correctly
+        self.platepar.equal_aspect = user_equal_aspect
+        self.platepar.asymmetry_corr = user_asymmetry_corr
+        self.platepar.force_distortion_centre = user_force_distortion_centre
+        self.platepar.refraction = user_refraction
+        self.fit_only_pointing = user_fit_only_pointing
+        self.fixed_scale = user_fixed_scale
+        # Now set distortion type which will adjust poly_length and pad coefficients
+        # Use reset_params=False to preserve the fitted coefficients, just add zeros for new terms
+        self.platepar.setDistortionType(user_distortion_type, reset_params=False)
+
+        # Do a final fit with user's distortion settings
+        if len(self.paired_stars) >= 10:
+            print("Final refinement with user settings (distortion={})...".format(user_distortion_type))
+            self.fitPickedStars()
+
+        # Reset photometry fit residuals
+        self.photom_fit_resids = None
+
+        self.status_bar.showMessage("Quick alignment complete: {} stars".format(len(self.paired_stars)))
+
+        return True
+
+
+    def autoFitAstrometryNet(self):
+        """ Auto fit using astrometry.net. Called from Auto Fit button. """
+
+        # If there are existing matched star pairs, warn the user they will be replaced
+        if len(self.paired_stars) > 0:
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                "Replace Matched Stars?",
+                "You have {} matched star pair(s) that will be replaced by auto-fit.\n\n"
+                "Do you want to continue?".format(len(self.paired_stars)),
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No
+            )
+            if reply != QtWidgets.QMessageBox.Yes:
+                return
+
+        # First, try quick alignment with existing platepar (much faster than astrometry.net)
+        quick_fit_success = self.tryQuickAlignment()
+
+        if not quick_fit_success:
+            # Fall back to astrometry.net if quick alignment failed
+            self.getInitialParamsAstrometryNet(upload_image=False)
+
+        # Update the GUI
+        self.updateDistortion()
+        self.updateLeftLabels()
+        self.updateStars()
+        self.tab.param_manager.updatePlatepar()
+
+
     def getInitialParamsAstrometryNet(self, upload_image=True):
         """ Get the estimate of the initial astrometric parameters using astrometry.net. """
+
+        # Show status and process events so GUI updates
+        self.status_bar.showMessage("Solving with astrometry.net...")
+        QtWidgets.QApplication.processEvents()
 
         fail = False
         solution = None
 
-        # Construct FOV width estimate
-        fov_w_range = [0.5*self.config.fov_w, 2*self.config.fov_w]
+        # Construct FOV width estimate (0.75x to 1.5x range)
+        fov_w_range = [0.75*self.config.fov_w, 1.5*self.config.fov_w]
 
         # Handle using FR files too
         ff_name_c = convertFRNameToFF(self.img_handle.name())
 
         # Find and load a mask file is there is one
         mask = getMaskFile(self.dir_path, self.config)
+
+        # Compute JD for astrometry.net matching
+        jd = date2JD(*self.img_handle.currentTime())
 
         # Check if the given FF files is in the calstars list
         if (ff_name_c in self.calstars) and (not upload_image):
@@ -5309,10 +7422,18 @@ class PlateTool(QtWidgets.QMainWindow):
                 y_data = star_data[:, 0]
                 x_data = star_data[:, 1]
 
+                # Get star intensities for brightness-based matching (column 3 is 'level')
+                input_intensities = None
+                if star_data.shape[1] > 3:
+                    input_intensities = star_data[:, 3]
+
                 # Get astrometry.net solution, pass the FOV width estimate
-                solution = astrometryNetSolve(x_data=x_data, y_data=y_data, fov_w_range=fov_w_range, 
-                                              mask=mask, 
-                                              x_center=self.platepar.X_res/2, y_center=self.platepar.Y_res/2)
+                solution = astrometryNetSolve(x_data=x_data, y_data=y_data, fov_w_range=fov_w_range,
+                                              fov_w_hint=self.config.fov_w, mask=mask,
+                                              x_center=self.platepar.X_res/2, y_center=self.platepar.Y_res/2,
+                                              lat=self.platepar.lat, lon=self.platepar.lon, jd=jd,
+                                              input_intensities=input_intensities,
+                                              verbose=True)
 
         else:
             fail = True
@@ -5321,6 +7442,8 @@ class PlateTool(QtWidgets.QMainWindow):
         if fail or upload_image:
 
             print("Using the whole image in astrometry.net...")
+            self.status_bar.showMessage("Uploading image to astrometry.net...")
+            QtWidgets.QApplication.processEvents()
 
             # If the image is 16bit or larger, rescale and convert it to 8 bit
             if self.img.data.itemsize*8 > 8:
@@ -5335,9 +7458,12 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
                 img_data = self.img.data
 
-            solution = astrometryNetSolve(img=img_data.T, fov_w_range=fov_w_range, mask=mask)
+            solution = astrometryNetSolve(img=img_data.T, fov_w_range=fov_w_range,
+                                          fov_w_hint=self.config.fov_w, mask=mask,
+                                          lat=self.platepar.lat, lon=self.platepar.lon, jd=jd)
 
         if solution is None:
+            self.status_bar.showMessage("Astrometry.net failed to find a solution")
             qmessagebox(title='Astrometry.net error',
                         message='Astrometry.net failed to find a solution!',
                         message_type="error")
@@ -5345,14 +7471,40 @@ class PlateTool(QtWidgets.QMainWindow):
             return None
         
 
-        # Reset the lens distortion parameters
-        self.platepar.resetDistortionParameters()
+        # Update status: solution found
+        self.status_bar.showMessage("Astrometry.net solution found, processing...")
+        QtWidgets.QApplication.processEvents()
+
+        # Save user's settings for the final fit
+        user_distortion_type = self.platepar.distortion_type
+        user_equal_aspect = self.platepar.equal_aspect
+        user_asymmetry_corr = self.platepar.asymmetry_corr
+        user_force_distortion_centre = self.platepar.force_distortion_centre
+        user_refraction = self.platepar.refraction
+        user_fit_only_pointing = self.fit_only_pointing
+        user_fixed_scale = self.fixed_scale
+
+        # Set intermediate fitting parameters (simple, robust settings)
+        # Use simple settings for stability with few stars during initial passes
+        self.platepar.refraction = True
+        self.platepar.equal_aspect = True
+        self.platepar.asymmetry_corr = False
+        self.platepar.force_distortion_centre = False
+
+        # Start with radial5-odd for initial fitting, reset distortion params
+        self.platepar.setDistortionType("radial5-odd", reset_params=True)
 
 
         # Extract the parameters
-        ra, dec, rot_standard, scale, fov_w, fov_h, star_data = solution
+        ra, dec, rot_standard, scale, fov_w, fov_h, star_data, solution_info = solution
 
-        jd = date2JD(*self.img_handle.currentTime())
+        # Store solution info for potential visualization
+        self.astrometry_solution_info = solution_info
+
+        # Set the platepar reference JD and compute the reference hour angle
+        # (jd was computed earlier for the astrometry.net call)
+        self.platepar.JD = jd
+        self.platepar.Ho = JD2HourAngle(jd) % 360
 
         # Compute reference azimuth and altitude
         azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, self.platepar.lat, self.platepar.lon)
@@ -5380,37 +7532,266 @@ class PlateTool(QtWidgets.QMainWindow):
         print(' Scale = {:.3f} arcmin/px'.format(60/self.platepar.F_scale))
         print(' FOV = {:.2f} x {:.2f} deg'.format(fov_w, fov_h))
 
+        # Print solution info if available
+        if solution_info is not None:
+            quad_stars = solution_info.get('quad_stars', [])
+            logodds = solution_info.get('logodds')
+            input_count = solution_info.get('input_star_count', 0)
 
-        # If a list of detected stars is provided by the astrometry.net, use it to run FFT alignment
-        if star_data is not None:
+            if logodds is not None:
+                print(' Log odds = {:.2f}'.format(logodds))
+            print(' Input stars = {:d}'.format(input_count))
+            print(' Quad stars = {:d}'.format(len(quad_stars)))
 
+        # Update the GUI to show the astrometry.net solution before NN refinement
+        self.updateLeftLabels()
+        self.updateStars()
+        self.drawPhotometryColoring()
+        self.tab.setCurrentIndex(0)
+        QtWidgets.QApplication.processEvents()
+
+        # Ask user if they want to continue with NN refinement
+        reply = QtWidgets.QMessageBox.question(self, 'Astrometry.net Solution',
+            'Astrometry.net found a solution.\n\n'
+            'RA = {:.2f} deg, Dec = {:.2f} deg\n'
+            'Scale = {:.3f} arcmin/px\n\n'
+            'Continue with NN-based refinement?'.format(
+                self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale),
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.Yes)
+
+        if reply == QtWidgets.QMessageBox.No:
+            self.status_bar.showMessage("Astrometry.net solution applied (no refinement)")
+            return self.platepar
+
+        # Match detected stars to RMS catalog and fit distortion iteratively
+        # Use RMS's own catalog (better than astrometry.net's index stars)
+        # Iterative approach: start with bright stars + wide radius, fit, then tighten
+        print()
+        print("Iterative star matching with RMS catalog...")
+        self.status_bar.showMessage("Matching stars with catalog...")
+        QtWidgets.QApplication.processEvents()
+
+        # Use the same catalog filtering as the GUI display (proven to work correctly)
+        # self.catalog_stars is the full catalog, filterCatalogStarsInsideFOV does RA/Dec filtering
+        _, catalog_stars_extended = self.filterCatalogStarsInsideFOV(self.catalog_stars)
+        print("  Catalog stars within FOV (filterCatalogStarsInsideFOV): {:d}".format(len(catalog_stars_extended)))
+
+        # Strict XY filter: project to image and keep only those inside image bounds
+        catalog_x_ext, catalog_y_ext, catalog_mag_ext = getCatalogStarsImagePositions(
+            catalog_stars_extended, jd, self.platepar)
+        in_fov_xy = (catalog_x_ext >= 0) & (catalog_x_ext < self.platepar.X_res) & \
+                    (catalog_y_ext >= 0) & (catalog_y_ext < self.platepar.Y_res)
+
+        catalog_stars = catalog_stars_extended[in_fov_xy]
+        catalog_x = catalog_x_ext[in_fov_xy]
+        catalog_y = catalog_y_ext[in_fov_xy]
+        catalog_mag = catalog_mag_ext[in_fov_xy]
+
+        print("  Catalog stars in strict FOV: {:d}".format(len(catalog_stars)))
+
+        # Get detected stars from calstars
+        # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
+        if ff_name_c in self.calstars:
+            detected_stars = np.array(self.calstars[ff_name_c])
+            det_y = detected_stars[:, 0]
+            det_x = detected_stars[:, 1]
+            det_intens = detected_stars[:, 3] if detected_stars.shape[1] > 3 else np.ones(len(det_x))
+            det_fwhm = detected_stars[:, 4] if detected_stars.shape[1] > 4 else np.zeros(len(det_x))
+            det_snr = detected_stars[:, 6] if detected_stars.shape[1] > 6 else np.ones(len(det_x))
+            det_saturated = detected_stars[:, 7] if detected_stars.shape[1] > 7 else np.zeros(len(det_x))
+        else:
+            print("No detected stars available for matching")
+            det_x, det_y, det_intens = np.array([]), np.array([]), np.array([])
+            det_fwhm, det_snr, det_saturated = np.array([]), np.array([]), np.array([])
+
+        print("  Detected stars: {:d}".format(len(det_x)))
+
+        # Balance catalog stars vs detected stars for optimal NN matching
+        # Ideally want ~1.1x more catalog stars than detected stars
+        n_detected = len(det_x)
+        if n_detected > 0:
+            target_min = int(n_detected * 1.0)
+            target_max = int(n_detected * 1.2)
+            n_catalog = len(catalog_stars)
+
+            # Adjust magnitude limit if needed
+            current_mag_limit = self.config.catalog_mag_limit
+
+            if n_catalog < target_min or n_catalog > target_max:
+                print()
+                print("Balancing catalog stars ({:d}) to match detected stars ({:d})...".format(
+                    n_catalog, n_detected))
+                print("  Target range: {:d} - {:d} catalog stars".format(target_min, target_max))
+
+                # Binary search for optimal magnitude limit
+                mag_low, mag_high = 3.0, 12.0
+                best_mag_limit = current_mag_limit
+                best_n_catalog = n_catalog
+
+                for iteration in range(10):  # Max 10 iterations
+                    if n_catalog < target_min:
+                        # Need more catalog stars - increase mag limit
+                        mag_low = current_mag_limit
+                        current_mag_limit = (current_mag_limit + mag_high) / 2.0
+                    elif n_catalog > target_max:
+                        # Too many catalog stars - decrease mag limit
+                        mag_high = current_mag_limit
+                        current_mag_limit = (mag_low + current_mag_limit) / 2.0
+                    else:
+                        # In range, done
+                        break
+
+                    # Reload catalog with new limit
+                    # Temporarily update cat_lim_mag so filterCatalogStarsInsideFOV uses it
+                    old_cat_lim_mag = self.cat_lim_mag
+                    self.cat_lim_mag = current_mag_limit
+                    temp_catalog = self.loadCatalogStars(current_mag_limit)
+                    _, temp_catalog_fov = self.filterCatalogStarsInsideFOV(temp_catalog)
+                    self.cat_lim_mag = old_cat_lim_mag  # Restore
+
+                    # Project and filter to strict FOV
+                    temp_x, temp_y, _ = getCatalogStarsImagePositions(temp_catalog_fov, jd, self.platepar)
+                    in_fov = (temp_x >= 0) & (temp_x < self.platepar.X_res) & \
+                             (temp_y >= 0) & (temp_y < self.platepar.Y_res)
+                    n_catalog = np.sum(in_fov)
+
+                    print("    Iter {:d}: mag_limit={:.2f}, catalog_in_fov={:d}".format(
+                        iteration + 1, current_mag_limit, n_catalog))
+
+                    if target_min <= n_catalog <= target_max:
+                        best_mag_limit = current_mag_limit
+                        best_n_catalog = n_catalog
+                        print("    -> In target range, done")
+                        break
+
+                    # Track best result so far
+                    if abs(n_catalog - (target_min + target_max)/2) < abs(best_n_catalog - (target_min + target_max)/2):
+                        best_mag_limit = current_mag_limit
+                        best_n_catalog = n_catalog
+
+                # Apply best magnitude limit found
+                if best_mag_limit != self.config.catalog_mag_limit:
+                    print("  Adjusted catalog mag limit: {:.1f} -> {:.1f}".format(
+                        self.config.catalog_mag_limit, best_mag_limit))
+                    print("  Catalog stars: {:d} -> {:d}".format(len(catalog_stars), best_n_catalog))
+
+                    # Reload catalog with optimal limit
+                    # Update cat_lim_mag so filterCatalogStarsInsideFOV uses it
+                    self.cat_lim_mag = best_mag_limit
+                    catalog_temp = self.loadCatalogStars(best_mag_limit)
+                    _, catalog_stars_extended = self.filterCatalogStarsInsideFOV(catalog_temp)
+                    catalog_x_ext, catalog_y_ext, catalog_mag_ext = getCatalogStarsImagePositions(
+                        catalog_stars_extended, jd, self.platepar)
+                    in_fov_xy = (catalog_x_ext >= 0) & (catalog_x_ext < self.platepar.X_res) & \
+                                (catalog_y_ext >= 0) & (catalog_y_ext < self.platepar.Y_res)
+                    catalog_stars = catalog_stars_extended[in_fov_xy]
+                    catalog_x = catalog_x_ext[in_fov_xy]
+                    catalog_y = catalog_y_ext[in_fov_xy]
+                    catalog_mag = catalog_mag_ext[in_fov_xy]
+
+                    # Update GUI to show the balanced magnitude limit
+                    self.updateLeftLabels()
+                    self.tab.settings.updateLimMag()
+                else:
+                    print("  Could not reach target range (max catalog stars: {:d} at mag_limit={:.1f})".format(
+                        best_n_catalog, best_mag_limit))
+
+        # First pass: Use NN cost function to refine pointing + distortion
+        # This doesn't require explicit star matching - more robust for initial fit
+        if len(det_x) >= 10 and len(catalog_stars) >= 10:
             print()
-            print("Running FFT alignment...")
+            print("NN-based fitting (no explicit matching)...")
 
-            # Construct an array with star coordinates (x, y per row)
-            calstars_coords = np.array(star_data).T
+            # Prepare detected stars array [x, y, intensity]
+            img_stars_arr = np.column_stack([det_x, det_y, det_intens])
 
-            # Get the time of the image
-            calstars_time = self.img_handle.currentTime()
-
-            self.platepar = alignPlatepar(
-                self.config, self.platepar, 
-                calstars_time, calstars_coords, 
-                scale_update=True, show_plot=False
+            # Use NN cost function to fit pointing + distortion
+            # Pass balanced catalog for optimal NN matching ratio
+            self.platepar.setDistortionType("radial5-odd", reset_params=True)
+            try:
+                self.platepar.fitAstrometry(
+                    jd, img_stars_arr, catalog_stars,  # Balanced catalog from magnitude adjustment
+                    first_platepar_fit=True,
+                    use_nn_cost=True
                 )
-            
-            self.platepar.updateRefRADec(skip_rot_update=True)
-            
+                print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
+                    self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
+            except Exception as e:
+                print("  NN fit failed: {}".format(str(e)))
+
+            # Populate paired_stars from NN matches for visualization
+            self.paired_stars = PairedStars()
+            if self.platepar.star_list:
+                for entry in self.platepar.star_list:
+                    # star_list format: [jd, x, y, intensity, ra, dec, mag]
+                    _, x, y, intensity, ra, dec, mag = entry
+                    sky_obj = CatalogStar(ra, dec, mag)
+
+                    # Look up SNR, FWHM, and saturation from calstars by finding nearest detected star
+                    fwhm, snr, saturated = 0.0, 1.0, False
+                    if len(det_x) > 0:
+                        # Find the closest detected star to this matched star
+                        distances = np.sqrt((det_x - x)**2 + (det_y - y)**2)
+                        closest_idx = np.argmin(distances)
+                        if distances[closest_idx] < 3.0:  # Within 3 pixels
+                            fwhm = det_fwhm[closest_idx]
+                            snr = det_snr[closest_idx]
+                            saturated = det_saturated[closest_idx] > 0
+
+                    self.paired_stars.addPair(x, y, fwhm, intensity, sky_obj, snr=snr, saturated=saturated)
+                print("  Loaded {} matched pairs".format(len(self.platepar.star_list)))
+
+        # Finalize the fit with user's settings
+        if len(self.paired_stars) >= 10:
+            # Restore user's settings for the final fit
             print()
-            print('FFT aligned:')
-            print('------------------------')
-            print(' RA    = {:.2f} deg'.format(self.platepar.RA_d))
-            print(' Dec   = {:.2f} deg'.format(self.platepar.dec_d))
-            print(' Azim  = {:.2f} deg'.format(self.platepar.az_centre))
-            print(' Alt   = {:.2f} deg'.format(self.platepar.alt_centre))
-            print(' Rot horiz   = {:.2f} deg'.format(self.platepar.rotation_from_horiz))
-            print(' Pos angle   = {:.2f} deg'.format(self.platepar.pos_angle_ref))
-            print(' Scale = {:.3f} arcmin/px'.format(60/self.platepar.F_scale))
+            print("Restoring user settings: {:s}".format(user_distortion_type))
+            self.platepar.equal_aspect = user_equal_aspect
+            self.platepar.asymmetry_corr = user_asymmetry_corr
+            self.platepar.force_distortion_centre = user_force_distortion_centre
+            self.platepar.setDistortionType(user_distortion_type, reset_params=False)
+            self.platepar.refraction = user_refraction
+            self.fit_only_pointing = user_fit_only_pointing
+            self.fixed_scale = user_fixed_scale
+
+            # Do the final fit with user's settings
+            print()
+            print("Final fit with user settings...")
+            self.status_bar.showMessage("Fitting astrometry with {:d} stars...".format(len(self.paired_stars)))
+            QtWidgets.QApplication.processEvents()
+            self.first_platepar_fit = True
+            self.fitPickedStars()
+            self.fitPickedStars()  # Do twice like Ctrl+Z does for first fit
+
+            # Update the display
+            self.updateStars()
+            self.status_bar.showMessage("Auto-fit complete: {:d} stars matched".format(len(self.paired_stars)))
+        else:
+            # Restore user's settings even if fit failed
+            self.platepar.equal_aspect = user_equal_aspect
+            self.platepar.asymmetry_corr = user_asymmetry_corr
+            self.platepar.force_distortion_centre = user_force_distortion_centre
+            self.platepar.setDistortionType(user_distortion_type, reset_params=True)
+            self.platepar.refraction = user_refraction
+            self.fit_only_pointing = user_fit_only_pointing
+            self.fixed_scale = user_fixed_scale
+
+            print("  Not enough matched stars for fitting (need >= 10)")
+            self.updateStars()
+            self.status_bar.showMessage("Auto-fit: not enough star matches")
+
+        # Show astrometry.net quad stars if available
+        if self.astrometry_solution_info is not None:
+            quad_count = len(self.astrometry_solution_info.get('quad_stars', []))
+            if quad_count > 0:
+                self.astrometry_stars_visible = True
+                self.astrometry_quad_markers.show()
+                self.astrometry_quad_markers2.show()
+                self.updateAstrometryNetStarMarkers()
+                print()
+                print("Showing astrometry.net quad stars: {:d} (magenta)".format(quad_count))
+                print("  Magenta = catalog stars used for initial geometric match")
+                print("Press Shift+H to toggle visibility")
 
 
     def getFOVcentre(self):
@@ -5474,7 +7855,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         img_handle = None
 
-        # Load a data file
+        # Load a state file
         if os.path.isfile(self.input_path):
             img_handle = detectInputTypeFile(self.input_path, self.config, beginning_time=beginning_time, 
                                              flipud=self.flipud)
@@ -5503,7 +7884,6 @@ class PlateTool(QtWidgets.QMainWindow):
         if img_handle is None:
             img_handle = detectInputTypeFile(self.input_path, self.config, beginning_time=beginning_time, 
                                              flipud=self.flipud)
-
 
         self.img_handle = img_handle
 
@@ -6009,7 +8389,7 @@ class PlateTool(QtWidgets.QMainWindow):
         return catalog_stars
 
 
-    def loadPlatepar(self, update=False, platepar_file = None):
+    def loadPlatepar(self, update=False, platepar_file=None):
         """
         Open a file dialog and ask user to open the platepar file, changing self.platepar and self.platepar_file
 
@@ -6208,22 +8588,58 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateDistortion()
 
 
-    def loadFlat(self):
+    def usingUWOData(self):
+        """ Return True if using any UWO instrument data. """
+
+        if self.img_handle is None:
+            return False
+
+        if self.img_handle.input_type == 'images':
+            if self.img_handle.uwo_png_mode:
+                return True
+
+        elif self.img_handle.input_type == 'vid':
+                return True
+
+        return False
+
+
+    def loadFlat(self, force_dialog=False):
         """ Open a file dialog and ask user to load a flat field. """
 
-        # Check if flat exists in the folder, and set it as the default file name if it does
-        if self.config.flat_file in os.listdir(self.dir_path):
-            initial_file = os.path.join(self.dir_path, self.config.flat_file)
-        else:
-            initial_file = self.dir_path
+        file_names_to_check = [
+            self.config.flat_file
+            ]
+        
+        # If we're running in the UWO mode or using a .vid file, add the UWO flat file name
+        if self.usingUWOData():
+            file_names_to_check.append('flat.png')
 
-        flat_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the flat field file", initial_file,
-                                                      "Image files (*.png *.jpg *.bmp);;All files (*)")[0]
+        # Check if any of the flat files exist in the folder
+        initial_file = None
+        for file_name in file_names_to_check:
+            if file_name in os.listdir(self.dir_path):
+                initial_file = os.path.join(self.dir_path, file_name)
+                break
+
+
+        # If using UWO files, automatically load the flat file and skip the dialog
+        if not force_dialog and self.usingUWOData() and initial_file is not None:
+            flat_file = initial_file
+
+        else:
+
+            if initial_file is None:
+                initial_file = self.dir_path
+
+            # Open the file dialog to select the flat field file
+            flat_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the flat field file", initial_file,
+                                                    "Image files (*.png *.jpg *.bmp);;All files (*)")[0]
 
         if not flat_file:
             return False, None
 
-        print(flat_file)
+        print("Loading the flat file:", flat_file)
 
         try:
             # Load the flat, byteswap the flat if vid file is used or UWO png
@@ -6262,22 +8678,42 @@ class PlateTool(QtWidgets.QMainWindow):
         return flat_file, flat
 
 
-    def loadDark(self):
+    def loadDark(self, force_dialog=False):
         """ Open a file dialog and ask user to load a dark frame. """
 
-        # Check if dark exists in the folder, and set it as the default file name if it does
-        if self.config.dark_file in os.listdir(self.dir_path):
-            initial_file = os.path.join(self.dir_path, self.config.dark_file)
-        else:
-            initial_file = self.dir_path
+        file_names_to_check = [
+            self.config.dark_file
+            ]
 
-        dark_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the dark frame file", initial_file,
-                                                      "Image files (*.png *.jpg *.bmp *.nef *.cr2);;All files (*)")[0]
+        # If we're running in the UWO mode or using a .vid file, add the UWO dark file name
+        if self.usingUWOData():
+            file_names_to_check.append('bias.png')
+            file_names_to_check.append('dark.png')
+
+        # Locate the dark frame file in the folder
+        initial_file = None
+        for file_name in file_names_to_check:
+            if file_name in os.listdir(self.dir_path):
+                initial_file = os.path.join(self.dir_path, file_name)
+                break            
+
+        # If using UWO files, automatically load the dark file and skip the dialog
+        if not force_dialog and self.usingUWOData() and initial_file is not None:
+            dark_file = initial_file
+
+        else:
+            
+            if initial_file is None:
+                initial_file = self.dir_path
+
+            # Open the file dialog to select the dark frame file
+            dark_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the dark frame file", 
+                initial_file, "Image files (*.png *.jpg *.bmp *.nef *.cr2);;All files (*)")[0]
 
         if not dark_file:
             return False, None
 
-        print(dark_file)
+        print("Loading the dark frame file:", dark_file)
 
         try:
 
@@ -6361,6 +8797,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.updateGreatCircle()
 
+        # Update Kalman/ASTRA Ready status if instance exists
+        if hasattr(self, 'astra_dialog') and self.astra_dialog is not None:
+            self.checkASTRACanRun()
+            self.checkKalmanCanRun()
+
     def removeCentroid(self, frame):
         """
         Removes the pick from given frame if it is there
@@ -6379,6 +8820,12 @@ class PlateTool(QtWidgets.QMainWindow):
             self.pick_list[self.img.getFrame()]['y_centroid'] = None
             self.pick_list[self.img.getFrame()]['mode'] = None
             self.tab.debruijn.removeRow(frame)
+
+        # Update Kalman/ASTRA Ready status if instance exists
+        if hasattr(self, 'astra_dialog') and self.astra_dialog is not None:
+            self.checkASTRACanRun()
+            self.checkKalmanCanRun()
+
 
     def centroid(self, prev_x_cent=None, prev_y_cent=None):
         """ Find the centroid of the star clicked on the image. """
@@ -6421,7 +8868,8 @@ class PlateTool(QtWidgets.QMainWindow):
         img_crop_orig = self.img.data[x_min:x_max, y_min:y_max]
 
         # Perform gamma correction
-        img_crop = Image.gammaCorrectionImage(img_crop_orig, self.config.gamma)
+        img_crop = Image.gammaCorrectionImage(img_crop_orig, self.config.gamma, out_type=np.float32)
+
 
         ######################################################################################################
 
@@ -6464,14 +8912,11 @@ class PlateTool(QtWidgets.QMainWindow):
         ######################################################################################################
         # If 10 or more pixels are saturated (within 2% of the maximum value), mark the pick as saturated
 
-        # Compute the saturation threshold
-        saturation_threshold = int(round(0.98*(2**self.config.bit_depth - 1)))
-
         # Count the number of pixels above the saturation threshold (original non-gramma corrected image)
         # Apply the mask to only include the pixels within the star aperture radius
-        saturated_count = np.sum(img_crop_orig[aperture_mask == 1] > saturation_threshold)
+        saturated_count = np.sum(img_crop_orig[aperture_mask == 1] > self.saturation_threshold)
 
-        # print("Saturation threshold: {:.2f}, count: {:d}".format(saturation_threshold, saturated_count))
+        # print("Saturation threshold: {:.2f}, count: {:d}".format(self.saturation_threshold, saturated_count))
 
         # If 2 or more pixels are saturated, mark the pick as saturated
         min_saturated_px_count = 2
@@ -6620,8 +9065,6 @@ class PlateTool(QtWidgets.QMainWindow):
         # plt.show()
 
         # ######################################################################################################
-
-
 
 
         # Compute the SNR using the "CCD equation" (Howell et al., 1989)
@@ -6945,9 +9388,19 @@ class PlateTool(QtWidgets.QMainWindow):
         print(
             ' No,       Img X,       Img Y, RA cat (deg), Dec cat (deg),    Cat X,   Cat Y, RA img (deg), Dec img (deg), Err amin,  Err px, Direction,  FWHM,    Mag, -2.5*LSP, Mag err,    SNR, Saturated')
 
+        # Use zeros for photometry residuals if not available or has wrong length
+        # (e.g., after auto-fit before photometry fit, or after RANSAC removed stars)
+        if self.photom_fit_resids is not None and len(self.photom_fit_resids) == len(catalog_x):
+            photom_resids = self.photom_fit_resids
+        else:
+            photom_resids = [0.0]*len(catalog_x)
+
+        # Get all coordinates from paired stars
+        all_coords = self.paired_stars.allCoords()
+
         # Calculate the distance and the angle between each pair of image positions and catalog predictions
         for star_no, (cat_x, cat_y, cat_coords, paired_stars, mag_err) in enumerate(
-            zip(catalog_x, catalog_y, catalog_stars, self.paired_stars.allCoords(), self.photom_fit_resids)):
+            zip(catalog_x, catalog_y, catalog_stars, all_coords, photom_resids)):
 
             img_x, img_y, fwhm, sum_intens, snr, saturated = paired_stars[0]
             ra, dec, mag = cat_coords
@@ -7654,35 +10107,67 @@ class PlateTool(QtWidgets.QMainWindow):
         fig_a.show()
 
 
-    def computeIntensitySum(self):
+    def computeIntensitySum(self, star_mask_coeff=3):
         """ Compute the background subtracted sum of intensity of colored pixels. The background is estimated
             as the median of near pixels that are not colored.
+            args:
+                star_mask_coeff (float): Mask out parts of the image with stars by masking out a region 
+                    where star_mask_coeff x stddev > average.
         """
 
         # Find the pick done on the current frame
         pick = self.getCurrentPick()
 
         if pick:
+            photom_pixels_raw = pick.get('photometry_pixels')
+
             # If there are no photometry pixels, set the intensity to 0
-            if not pick['photometry_pixels']:
-                # print("No photometry selected, setting intensity sum to 1")
+            if photom_pixels_raw is None:
                 pick['intensity_sum'] = 1
                 return None
 
-            x_arr, y_arr = np.array(pick['photometry_pixels']).T
+            if isinstance(photom_pixels_raw, np.ndarray):
+                has_pixels = photom_pixels_raw.size > 0
+            else:
+                try:
+                    has_pixels = len(photom_pixels_raw) > 0
+                except TypeError:
+                    has_pixels = bool(photom_pixels_raw)
+
+            if not has_pixels:
+                pick['intensity_sum'] = 1
+                return None
+
+            photom_pixels = np.asarray(photom_pixels_raw, dtype=np.int64)
+            if photom_pixels.size == 0:
+                pick['intensity_sum'] = 1
+                return None
+
+            if photom_pixels.ndim != 2 or photom_pixels.shape[1] != 2:
+                try:
+                    photom_pixels = np.reshape(photom_pixels, (-1, 2))
+                except ValueError:
+                    pick['intensity_sum'] = 1
+                    return None
+
+            if photom_pixels.shape[0] == 0:
+                pick['intensity_sum'] = 1
+                return None
+
+            x_arr_global, y_arr_global = photom_pixels.T
 
             # Compute the centre of the colored pixels
-            x_centre = np.mean(x_arr)
-            y_centre = np.mean(y_arr)
+            x_centre = np.mean(x_arr_global)
+            y_centre = np.mean(y_arr_global)
 
             # Take a window twice the size of the colored pixels
-            x_color_size = np.max(x_arr) - np.min(x_arr)
-            y_color_size = np.max(y_arr) - np.min(y_arr)
+            x_color_size = np.max(x_arr_global) - np.min(x_arr_global)
+            y_color_size = np.max(y_arr_global) - np.min(y_arr_global)
 
-            x_min = int(x_centre - x_color_size)
-            x_max = int(x_centre + x_color_size)
-            y_min = int(y_centre - y_color_size)
-            y_max = int(y_centre + y_color_size)
+            x_min = int(np.floor(x_centre - x_color_size))
+            x_max = int(np.ceil(x_centre + x_color_size)) + 1
+            y_min = int(np.floor(y_centre - y_color_size))
+            y_max = int(np.ceil(y_centre + y_color_size)) + 1
 
             # Limit the size to be within the bounds
             if x_min < 0: x_min = 0
@@ -7690,25 +10175,57 @@ class PlateTool(QtWidgets.QMainWindow):
             if y_min < 0: y_min = 0
             if y_max > self.img.data.shape[1]: y_max = self.img.data.shape[1]
 
+            if x_max <= x_min:
+                x_max = min(self.img.data.shape[0], x_min + 1)
+            if y_max <= y_min:
+                y_max = min(self.img.data.shape[1], y_min + 1)
+
+            x_arr = (x_arr_global - x_min).astype(np.int64, copy=False)
+            y_arr = (y_arr_global - y_min).astype(np.int64, copy=False)
+
+            valid_mask = (
+                (x_arr >= 0) & (x_arr < (x_max - x_min)) &
+                (y_arr >= 0) & (y_arr < (y_max - y_min))
+            )
+
+            if not np.all(valid_mask):
+                x_arr = x_arr[valid_mask]
+                y_arr = y_arr[valid_mask]
+                x_arr_global = x_arr_global[valid_mask]
+                y_arr_global = y_arr_global[valid_mask]
+                if x_arr.size == 0:
+                    pick['intensity_sum'] = 1
+                    return None
+
+            pick['photometry_pixels'] = list(map(tuple, np.stack([x_arr_global, y_arr_global], axis=-1)))
+
             # Take only the colored part
-            mask_img = np.ones_like(self.img.data)
-            mask_img[x_arr, y_arr] = 0
+            mask_img = np.ones(self.img.data.shape, dtype=bool)
+            mask_img[x_arr_global, y_arr_global] = False
             masked_img = np.ma.masked_array(self.img.data, mask_img)
             crop_img = masked_img[x_min:x_max, y_min:y_max]
 
             # Perform gamma correction on the colored part
-            crop_img = Image.gammaCorrectionImage(crop_img, self.config.gamma, bp=0, wp=(2**self.config.bit_depth - 1))
+            crop_img = Image.gammaCorrectionImage(
+                crop_img, self.config.gamma, 
+                bp=0, wp=(2**self.config.bit_depth - 1), 
+                out_type=np.float32
+                )
 
             # Mask out the colored in pixels
-            mask_img_bg = np.zeros_like(self.img.data)
-            mask_img_bg[x_arr, y_arr] = 1
+            mask_img_bg = np.zeros(self.img.data.shape, dtype=bool)
+            mask_img_bg[x_arr_global, y_arr_global] = True
 
             # Take the image where the colored part is masked out and crop the surroundings
             masked_img_bg = np.ma.masked_array(self.img.data, mask_img_bg)
             crop_bg = masked_img_bg[x_min:x_max, y_min:y_max]
 
             # Perform gamma correction on the background
-            crop_bg = Image.gammaCorrectionImage(crop_bg, self.config.gamma, bp=0, wp=(2**self.config.bit_depth - 1))
+            crop_bg = Image.gammaCorrectionImage(
+                crop_bg, self.config.gamma, 
+                bp=0, wp=(2**self.config.bit_depth - 1),
+                out_type=np.float32
+                )
 
             # Compute the median background
             background_lvl = np.ma.median(crop_bg)
@@ -7742,8 +10259,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 # pixels
                 # (do as a float to avoid artificially pumping up the magnitude)
                 crop_img_nobg = crop_img.astype(float) - background_lvl
-                crop_img_nobg = np.clip(crop_img_nobg, 0, None)
                 intensity_sum = np.ma.sum(crop_img_nobg)
+                intensity_sum = np.abs(intensity_sum)
 
             # Subtract the background using the avepixel
             else:
@@ -7757,37 +10274,82 @@ class PlateTool(QtWidgets.QMainWindow):
                     avepixel = applyFlat(avepixel, self.flat_struct)
 
                 
-                # Mask out the colored in pixels
-                avepixel_masked = np.ma.masked_array(avepixel, mask_img)
+                ### Create star mask to remove bright stars from affecting the centroid and photometry ###
+                
+                # Don't allow the star mask if the FR file is being used as the bright fireball track can
+                # affect the avepixel significantly
+                # Also don't allow on static images and they have the bright fireball track
+                if ((self.img_handle.input_type == "ff") and self.img_handle.use_fr_files) \
+                    or (self.img_handle.input_type == "dfn") or (self.img_handle.input_type == "images"):
+
+                    star_mask = np.zeros_like(avepixel.copy(), dtype=bool)
+                    crop_star_mask = np.zeros((x_max - x_min, y_max - y_min), dtype=bool)
+                
+                else:
+
+                    # Create the star mask and mask out bright stars from the avepixel
+                    star_mask = np.zeros_like(avepixel.copy(), dtype=int)
+                    star_mask[avepixel > (np.median(avepixel) + star_mask_coeff*np.std(avepixel))] = 1
+                    crop_star_mask = star_mask[x_min:x_max, y_min:y_max]
+
+                ### ###
+                
+                # Add the star mask & mask_img to the avepixel mask
+                avepixel_masked = np.ma.masked_array(avepixel, mask_img | star_mask)
                 avepixel_crop = avepixel_masked[x_min:x_max, y_min:y_max]
 
                 # Perform gamma correction on the avepixel crop
-                avepixel_crop = Image.gammaCorrectionImage(avepixel_crop, self.config.gamma, bp=0, wp=(2**self.config.bit_depth - 1))
+                avepixel_crop = Image.gammaCorrectionImage(
+                    avepixel_crop, self.config.gamma, 
+                    bp=0, wp=(2**self.config.bit_depth - 1),
+                    out_type=np.float32
+                    )
 
                 background_lvl = np.ma.median(avepixel_crop)
 
-                # Subtract the avepixel crop from the data crop, clip the negative values to 0 and
-                #  sum up the intensity
+                # Correct the crop_img with star_mask
+                crop_mask_img = mask_img[x_min:x_max, y_min:y_max]
+                crop_img = np.ma.masked_array(crop_img, crop_mask_img | crop_star_mask)
+
+                # Replace photometry pixels that are masked by a star with the median value of the photom. area
+                photom_star_masked_indices = np.where((crop_mask_img == 0) & (crop_star_mask == 1))
+
+                # Apply correction only if the streak intersects a star
+                if len(photom_star_masked_indices[0]) > 0:
+
+                    # Calulate masked median
+                    masked_stars_streak_median = np.ma.median(crop_img)
+
+                    # Unmask those areas
+                    crop_img.mask[photom_star_masked_indices] = False
+
+                    # Replace with median
+                    crop_img[photom_star_masked_indices] = masked_stars_streak_median
+
+                # Correct the crop_bg with star_mask
+                crop_mask_img_bg = mask_img_bg[x_min:x_max, y_min:y_max]
+                crop_bg = np.ma.masked_array(crop_bg, crop_mask_img_bg | crop_star_mask)
+
+                # Subtract the avepixel crop from the data crop
                 crop_img_nobg = crop_img.astype(float) - avepixel_crop
-                crop_img_nobg = np.clip(crop_img_nobg, 0, None)
                 intensity_sum = np.ma.sum(crop_img_nobg)
+                intensity_sum = np.abs(intensity_sum)
 
             # Check if the result is masked
             if np.ma.is_masked(intensity_sum):
+
                 # If the result is masked (i.e. error reading pixels), set the intensity sum to 1
                 intensity_sum = 1
-            else:
+
+            # If the intensity sum is a numpy object, set it to int
+            elif isinstance(intensity_sum, np.ndarray):
                 intensity_sum = intensity_sum.astype(int)
+
+            else:
+                intensity_sum = int(intensity_sum)
 
             # Set the intensity sum to the pick
             pick['intensity_sum'] = intensity_sum
-
-            # # Plot the background subtracted crop
-            # plt.figure()
-            # plt.imshow(crop_img_nobg, cmap='gray', origin='lower')
-            # plt.colorbar()
-            # plt.title("Background subtracted crop")
-            # plt.show()
 
             ### Measure the SNR of the pick ###
 
@@ -7803,31 +10365,33 @@ class PlateTool(QtWidgets.QMainWindow):
             # Set the SNR to the pick
             pick['snr'] = snr
 
+            # Debug print
+            print("SNR update: intensity sum = {:8d}, source px count = {:5d}, background lvl = {:8.2f}, background stddev = {:6.2f}, SNR = {:.2f}".format(
+                intensity_sum, source_px_count, background_lvl, background_stddev, snr))
 
 
-            ### Debug print ###
-
-            time_data = [self.img_handle.currentFrameTime()]
-
-            # Compute measured RA/Dec from image coordinates
-            _, _, _, mag_data = xyToRaDecPP(time_data, [pick['x_centroid']],
-                [pick['y_centroid']], [pick['intensity_sum']], self.platepar, measurement=True)
-            
-            # print(self.platepar)
-
-            print("intens sum = {:8d}, px count = {:5d}, bg lvl = {:8.2f}, bg std = {:6.2f}, SNR = {:.2f}, Mag = {:.2f}".format(
-                intensity_sum, source_px_count, background_lvl, background_stddev, snr, mag_data[0]))
-
-            ### ###
-
+            # # Plot the image on which the intensity sum was computed: crop_img, avepixel_crop, and crop_img_nobg
+            # plt.figure("Intensity sum computation")
+            # plt.clf()
+            # plt.subplot(1, 3, 1)
+            # plt.imshow(crop_img, cmap='gray', origin='lower')
+            # plt.colorbar()
+            # plt.title("Crop used for intensity sum computation\nIntensity sum = {:d}, Background = {:.2f}, SNR = {:.2f}".format(
+            #     intensity_sum, background_lvl, snr))
+            # plt.subplot(1, 3, 2)
+            # plt.imshow(avepixel_crop, cmap='gray', origin='lower')
+            # plt.colorbar()
+            # plt.title("Average pixel crop")
+            # plt.subplot(1, 3, 3)
+            # plt.imshow(crop_img_nobg, cmap='gray', origin='lower')
+            # plt.colorbar()
+            # plt.title("Background subtracted crop")
+            # plt.show()
 
             ### Determine if there is any saturation in the measured photometric area
 
-            # Compute the saturation threshold
-            saturation_threshold = int(0.98*(2**self.config.bit_depth))
-
             # If at least 2 pixels are saturated in the photometric area, mark the pick as saturated
-            if np.sum(crop_img > saturation_threshold) >= 2:
+            if np.sum(crop_img > self.saturation_threshold) >= 2:
                 pick['saturated'] = True
             else:
                 pick['saturated'] = False
@@ -7845,6 +10409,15 @@ class PlateTool(QtWidgets.QMainWindow):
             # Make sure the intensity sum is never 0
             if pick['intensity_sum'] <= 0:
                 pick['intensity_sum'] = 1
+
+
+    def computeExposureRatioCorrection(self):
+        """ Compute the exposure ratio magnitude correction. """
+
+        if self.exposure_ratio <= 0:
+            return 0.0
+
+        return -2.5*np.log10(self.exposure_ratio)
 
 
     def showLightcurve(self):
@@ -7923,6 +10496,9 @@ class PlateTool(QtWidgets.QMainWindow):
             mag_err_random = 2.5*np.log10(1 + 1/snr)
             mag_err_total = np.sqrt(mag_err_random**2 + self.platepar.mag_lev_stddev**2)
 
+            # Apply exposure ratio correction
+            mag_data += self.computeExposureRatioCorrection()
+
             # Plot the magnitudes
             ax_p.errorbar(frames, mag_data, yerr=mag_err_total, capsize=5, color='k')
 
@@ -7937,7 +10513,16 @@ class PlateTool(QtWidgets.QMainWindow):
                 mag_str = 'GAIA G band'
 
             else:
-                mag_str = "{:.2f}B + {:.2f}V + {:.2f}R + {:.2f}I".format(*self.config.star_catalog_band_ratios)
+
+                # If there are only 4 band ratios, assume BVRI
+                if len(self.config.star_catalog_band_ratios) == 4:
+                    mag_str = "{:.2f}B + {:.2f}V + {:.2f}R + {:.2f}I".format(*self.config.star_catalog_band_ratios)
+
+                # If there are 7, assume BVRI + G + Bp + Rp. Only take non-zero coefficients
+                elif len(self.config.star_catalog_band_ratios) == 7:
+                    band_names = ['B', 'V', 'R', 'I', 'G', 'Bp', 'Rp']
+                    mag_str = " + ".join(["{:.2f}{}".format(ratio, band) for ratio, band in 
+                                          zip(self.config.star_catalog_band_ratios, band_names) if ratio > 0])
 
             ax_p.set_ylabel("Apparent magnitude ({:s})".format(mag_str))
 
@@ -7945,6 +10530,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Compute the instrumental magnitude
             inst_mag = -2.5*np.log10(intensities)
+
+            # Apply exposure ratio correction
+            inst_mag += self.computeExposureRatioCorrection()
 
             # Compute the SNR error
             mag_err_random = 2.5*np.log10(1 + 1/snr)
@@ -8075,21 +10663,64 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def drawPhotometryColoring(self):
         """ Updates image to have the colouring in the current frame """
+
+        def set_region_image(image):
+            self.region.setImage(image)
+            if hasattr(self, "region_zoom"):
+                self.region_zoom.setImage(image)
+
+        blank_mask = np.array([[0]], dtype=np.uint8)
         pick = self.getCurrentPick()
 
-        if pick and pick['photometry_pixels']:
-            # Create a coloring mask
-            x_mask, y_mask = np.array(pick['photometry_pixels']).T
+        if not pick:
+            set_region_image(blank_mask)
+            return
 
-            mask_img = np.zeros(self.img.data.shape)
-            mask_img[x_mask, y_mask] = 255
+        photom_pixels = pick.get('photometry_pixels')
+        if photom_pixels is None:
+            set_region_image(blank_mask)
+            return
 
-            self.region.setImage(mask_img)
-        else:
-            self.region.setImage(np.array([[0]]))
+        photom_pixels = np.asarray(photom_pixels)
+        if photom_pixels.size == 0:
+            set_region_image(blank_mask)
+            return
+
+        if photom_pixels.ndim != 2 or photom_pixels.shape[1] != 2:
+            try:
+                photom_pixels = np.reshape(photom_pixels, (-1, 2))
+            except ValueError:
+                set_region_image(blank_mask)
+                return
+
+        if photom_pixels.shape[0] == 0:
+            set_region_image(blank_mask)
+            return
+
+        photom_pixels = photom_pixels.astype(int, copy=False)
+
+        # Clip any out-of-bounds pixels to the image extent to avoid indexing errors when drawing
+        height, width = self.img.data.shape[:2]
+        valid_mask = (
+            (photom_pixels[:, 0] >= 0) & (photom_pixels[:, 0] < height) &
+            (photom_pixels[:, 1] >= 0) & (photom_pixels[:, 1] < width)
+        )
+
+        if not np.any(valid_mask):
+            set_region_image(blank_mask)
+            return
+
+        photom_pixels = photom_pixels[valid_mask]
+
+        # Create a coloring mask
+        mask_img = np.zeros(self.img.data.shape, dtype=np.uint8)
+        x_mask, y_mask = photom_pixels.T
+        mask_img[x_mask, y_mask] = 255
+
+        set_region_image(mask_img)
 
 
-    def saveFTPdetectinfo(self):
+    def saveFTPdetectinfo(self, ECSV_saved=True):
         """ Saves the picks to a FTPdetectinfo file in the same folder where the first given file is. """
 
         # Compute the intensity sum done on the previous frame
@@ -8147,11 +10778,25 @@ class PlateTool(QtWidgets.QMainWindow):
         # If there are no centroids, don't save anything
         if len(centroids) == 0:
             
-            qmessagebox(title='FTPdetectinfo saving error',
-                        message='No centroids to save!',
-                        message_type="info")
+            # If FTP not saved, ECSV was saved
+            if ECSV_saved:
+                qmessagebox(title='FTPdetectinfo saving error',
+                            message='No centroids to save! FTPdetectinfo saving aborted',
+                            message_type="info")
+                
+            # Neither saved
+            if not ECSV_saved:
+                qmessagebox(title='FTPdetectinfo/ECSV saving error',
+                            message='No centroids to save! ECSV & FTPdetectinfo saving aborted',
+                            message_type="info")
 
             return 1
+        
+        # FTP saved but ECSV not saved
+        elif not ECSV_saved:
+            qmessagebox(title='ECSV saving error',
+                        message='No centroids to save! ECSV saving aborted.',
+                        message_type="info")
 
         # Sort by frame number
         centroids = sorted(centroids, key=lambda x: x[0])
@@ -8182,7 +10827,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 pp_tmp.switchToGroundPicks()
 
             applyAstrometryFTPdetectinfo(self.dir_path, ftpdetectinfo_name, '', \
-                                         UT_corr=pp_tmp.UT_corr, platepar=pp_tmp)
+                                         UT_corr=pp_tmp.UT_corr, platepar=pp_tmp, 
+                                         exp_mag_corr=self.computeExposureRatioCorrection())
 
             print('Platepar applied to manual picks!')
 
@@ -8191,6 +10837,9 @@ class PlateTool(QtWidgets.QMainWindow):
     def saveECSV(self):
         """ Save the picks into the GDEF ECSV standard. """
 
+        # If no picks, save nothing and send no-picks to FTPDetectionInfo save
+        if [key for key, val in self.pick_list.items() if (val['x_centroid'] is not None)] == []:
+            return False
 
         isodate_format_file = "%Y-%m-%dT%H_%M_%S"
         isodate_format_entry = "%Y-%m-%dT%H:%M:%S.%f"
@@ -8303,7 +10952,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # If SNR is None, then set the random error to 0
                 mag_err_random = 0
-                pick['snr'] = 1.0
 
             else:
 
@@ -8328,6 +10976,9 @@ class PlateTool(QtWidgets.QMainWindow):
             ra = ra_data[0]
             dec = dec_data[0]
             mag = mag_data[0]
+
+            # Apply exposure ratio correction
+            mag += self.computeExposureRatioCorrection()
 
             # Compute alt/az (topocentric, i.e. without refraction)
             azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, pp_tmp.lat, pp_tmp.lon, refraction=False)
@@ -8390,6 +11041,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         print("ESCV file saved to:", ecsv_file_path)
+
+        return True
 
 
 
@@ -8623,7 +11276,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
 
-
 if __name__ == '__main__':
     ### COMMAND LINE ARGUMENTS
 
@@ -8676,6 +11328,12 @@ if __name__ == '__main__':
     
     arg_parser.add_argument('--flatbiassub', action="store_true", \
         help="Subtract the bias from the flat. False by default.")
+
+    arg_parser.add_argument('--expratio', metavar='EXPOSURE_RATIO', type=float, default=1.0,
+                            help="Exposure ratio between stars and meteor segments. Used for static images " 
+                            "where the stars are continuously exposed but the meteors/fireballs are chopped "
+                            "up by a shutter. For example, a 30 s exposure with meteor segments at 20 FPS "
+                            "results in a exposure ratio of 600.")
 
 
 
@@ -8777,7 +11435,7 @@ if __name__ == '__main__':
         plate_tool = PlateTool(input_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
             gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints,
             mask=mask, nobg=cml_args.nobg, peribg=cml_args.peribg, flipud=cml_args.flipud, 
-            flatbiassub=cml_args.flatbiassub)
+            flatbiassub=cml_args.flatbiassub, exposure_ratio=cml_args.expratio)
 
 
     # Run the GUI app

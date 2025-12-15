@@ -21,7 +21,7 @@ import scipy.optimize
 from RMS.Astrometry.ApplyAstrometry import (getFOVSelectionRadius, raDecToXYPP_iter,
                                             rotationWrtHorizon, xyToRaDecPP)
 from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
-from RMS.Astrometry.FFTalign import alignPlatepar
+from RMS.Astrometry.NNalign import alignPlatepar
 from RMS.Formats import CALSTARS, FFfile, Platepar, StarCatalog
 from RMS.Math import angularSeparation
 from RMS.Logger import LoggingManager, getLogger
@@ -31,7 +31,7 @@ from RMS.Astrometry.CyFunctions import matchStars, subsetCatalog
 
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 def computeMinimizationTolerances(config, platepar, star_dict_len):
@@ -427,17 +427,17 @@ def starListToDict(config, calstars_data, max_ffs=None):
 
 
 
-def autoCheckFit(config, platepar, calstars_data, _fft_refinement=False):
+def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
     """ Attempts to refine the astrometry fit with the given stars and and initial astrometry parameters.
     Arguments:
         config: [Config structure]
         platepar: [Platepar structure] Initial astrometry parameters.
-        calstars_list: [tuple] (list, int) 
+        calstars_list: [tuple] (list, int)
         - A list containing stars extracted from FF files.
         - An integer representing the number of frames in an FF file.
     Keyword arguments:
-        _fft_refinement: [bool] Internal flag indicating that autoCF is running the second time recursively
-            after FFT platepar adjustment.
+        _nn_refinement: [bool] Internal flag indicating that autoCF is running the second time recursively
+            after NN platepar adjustment.
 
     Return:
         (platepar, fit_status):
@@ -446,19 +446,19 @@ def autoCheckFit(config, platepar, calstars_data, _fft_refinement=False):
     """
 
 
-    def _handleFailure(config, platepar, calstars_data, catalog_stars, _fft_refinement):
-        """ Run FFT alignment before giving up on ACF. """
+    def _handleFailure(config, platepar, calstars_data, catalog_stars, _nn_refinement):
+        """ Run NN alignment before giving up on ACF. """
 
-        if not _fft_refinement:
+        if not _nn_refinement:
 
             log.info("")
             log.info("-------------------------------------------------------------------------------")
-            log.info('The initial platepar is bad, trying to refine it using FFT phase correlation...')
+            log.info('The initial platepar is bad, trying to refine it using NN alignment...')
             log.info("")
 
             calstars_list, ff_frames = calstars_data
 
-            # Prepare data for FFT image registration
+            # Prepare data for NN alignment
 
             calstars_dict = {ff_file: star_data for ff_file, star_data in calstars_list}
 
@@ -470,15 +470,15 @@ def autoCheckFit(config, platepar, calstars_data, _fft_refinement=False):
             calstars_coords[:, [0, 1]] = calstars_coords[:, [1, 0]]
 
             # Get the time of the FF file
-            calstars_time = FFfile.getMiddleTimeFF(max_len_ff, config.fps, ret_milliseconds=True, 
+            calstars_time = FFfile.getMiddleTimeFF(max_len_ff, config.fps, ret_milliseconds=True,
                                                    ff_frames=ff_frames)
 
 
-            # Try aligning the platepar using FFT image registration
+            # Try aligning the platepar using NN alignment
             platepar_refined = alignPlatepar(config, platepar, calstars_time, calstars_coords)
 
 
-            ### If there are still not enough stars matched, try FFT again ###
+            ### If there are still not enough stars matched, try NN again ###
             min_radius = 10
 
             # Prepare star dictionary to check the match
@@ -495,7 +495,7 @@ def autoCheckFit(config, platepar, calstars_data, _fft_refinement=False):
             if n_matched < config.min_matched_stars:
                 log.info('')
                 log.info("-------------------------------------------------------------------------------")
-                log.info('Doing a second FFT pass as the number of matched stars was too small...')
+                log.info('Doing a second NN pass as the number of matched stars was too small...')
                 log.info('')
                 platepar_refined = alignPlatepar(config, platepar_refined, calstars_time, calstars_coords)
                 log.info('')
@@ -504,15 +504,15 @@ def autoCheckFit(config, platepar, calstars_data, _fft_refinement=False):
 
 
             # Redo autoCF
-            return autoCheckFit(config, platepar_refined, calstars_data, _fft_refinement=True)
+            return autoCheckFit(config, platepar_refined, calstars_data, _nn_refinement=True)
 
         else:
             log.info('Auto Check Fit failed completely, please redo the plate manually!')
             return platepar, False
 
 
-    if _fft_refinement:
-        log.info('Second ACF run with an updated platepar via FFT phase correlation...')
+    if _nn_refinement:
+        log.info('Second ACF run with an updated platepar via NN alignment...')
 
     # Extract the star data and the number of frames in the FF files
     calstars_list, ff_frames = calstars_data
@@ -614,8 +614,8 @@ def autoCheckFit(config, platepar, calstars_data, _fft_refinement=False):
         if n_matched < config.calstars_files_N:
             log.info("The total number of initially matched stars is too small! Please manually redo the plate or make sure there are enough calibration stars.")
 
-            # Try to refine the platepar with FFT phase correlation and redo the ACF
-            return _handleFailure(config, platepar, calstars_data, catalog_stars, _fft_refinement)
+            # Try to refine the platepar with NN alignment and redo the ACF
+            return _handleFailure(config, platepar, calstars_data, catalog_stars, _nn_refinement)
 
 
         # Check if the platepar is good enough and do not estimate further parameters
@@ -641,8 +641,8 @@ def autoCheckFit(config, platepar, calstars_data, _fft_refinement=False):
         # If the fit was not successful, stop further fitting
         if not res.success:
 
-            # Try to refine the platepar with FFT phase correlation and redo the ACF
-            return _handleFailure(config, platepar, calstars_data, catalog_stars, _fft_refinement)
+            # Try to refine the platepar with NN alignment and redo the ACF
+            return _handleFailure(config, platepar, calstars_data, catalog_stars, _nn_refinement)
 
 
         else:
@@ -723,7 +723,7 @@ if __name__ == "__main__":
     log_manager.initLogging(config, 'checkfit_', safedir=dir_path)
 
     # Get the logger handle
-    log = getLogger("logger", level="INFO")
+    log = getLogger("rmslogger", level="INFO")
 
     # Get a list of files in the night folder
     file_list = os.listdir(dir_path)

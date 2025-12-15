@@ -14,6 +14,8 @@ import string
 import inspect
 import datetime
 import tarfile
+import threading
+import signal
 
 # tkinter import that works on both Python 2 and 3
 if sys.version_info[0] < 3:
@@ -40,7 +42,52 @@ if sys.version_info[0] < 3:
     FileNotFoundError = IOError
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
+
+
+def interruptibleWait(seconds):
+    """ Wait for the specified number of seconds, but allow interruption by Ctrl+C.
+
+    This replaces time.sleep() for long waits that should be interruptible.
+    Uses threading.Event to allow immediate response to SIGINT.
+
+    Arguments:
+        seconds: [float] Number of seconds to wait.
+
+    Returns:
+        bool: True if wait completed normally, False if interrupted by Ctrl+C.
+    """
+
+    # Create a local event for this wait
+    wait_event = threading.Event()
+
+    # Save the current SIGINT handler
+    original_handler = signal.signal(signal.SIGINT, signal.default_int_handler)
+
+    # Define a handler that sets the event
+    def interrupt_handler(signum, frame):
+        wait_event.set()
+
+    # Install our handler
+    signal.signal(signal.SIGINT, interrupt_handler)
+
+    try:
+        # Wait for the timeout or interruption
+        interrupted = wait_event.wait(timeout=seconds)
+
+        # Restore the original handler
+        signal.signal(signal.SIGINT, original_handler)
+
+        # If interrupted, raise KeyboardInterrupt to maintain compatibility
+        if interrupted:
+            raise KeyboardInterrupt()
+
+        return True
+
+    except Exception:
+        # Make sure we restore the handler even if something goes wrong
+        signal.signal(signal.SIGINT, original_handler)
+        raise
 
 
 def mkdirP(path):

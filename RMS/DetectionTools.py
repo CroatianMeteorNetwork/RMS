@@ -36,7 +36,7 @@ import RMS.Routines.MorphCy as morph
 
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):

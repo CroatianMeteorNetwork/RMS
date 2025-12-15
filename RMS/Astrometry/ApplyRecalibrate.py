@@ -30,7 +30,7 @@ from RMS.Astrometry.ApplyAstrometry import (
     rotationWrtHorizon,
 )
 from RMS.Astrometry.Conversions import date2JD, raDec2AltAz
-from RMS.Astrometry.FFTalign import alignPlatepar
+from RMS.Astrometry.NNalign import alignPlatepar
 from RMS.Formats import CALSTARS, FFfile, FTPdetectinfo, Platepar, StarCatalog
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, validDefaultFTPdetectinfo
 from RMS.Math import angularSeparation
@@ -42,7 +42,8 @@ from RMS.Misc import RmsDateTime
 RECALIBRATE_NEIGHBOURHOOD_SIZE = 3
 
 # Get the logger from the main module
-log = getLogger("logger", level="INFO")
+log = getLogger("rmslogger", level="INFO")
+
 
 def loadRecalibratedPlatepar(dir_path, config, file_list=None, type='meteor'):
     """
@@ -302,7 +303,7 @@ def recalibrateFF(
 
             else:
                 log.info(
-                    'Number of matched stars after the fit is smaller than necessary: {:d} < {:d}'.format(n_matched < config.min_matched_stars)
+                    'Number of matched stars after the fit is smaller than necessary: {:d} < {:d}'.format(n_matched, config.min_matched_stars)
                 )
 
             # Indicate that the recalibration failed
@@ -484,25 +485,25 @@ def recalibratePlateparsForFF(
                 ignore_max_stars=ignore_max_stars,
             )
 
-            # If the recalibration failed, try using FFT alignment
+            # If the recalibration failed, try using NN alignment
             if result is None:
 
-                log.info('Running FFT alignment...')
+                log.info('Running NN alignment...')
 
-                # Run FFT alignment
+                # Run NN alignment
                 calstars_coords = np.array(star_dict_ff[jd])[:, :2]
                 calstars_coords[:, [0, 1]] = calstars_coords[:, [1, 0]]
                 test_platepar = alignPlatepar(
                     config, prev_platepar, calstars_time, calstars_coords, show_plot=False
                 )
 
-                # Try to recalibrate after FFT alignment
+                # Try to recalibrate after NN alignment
                 result, _ = recalibrateFF(
-                    config, test_platepar, jd, star_dict_ff, catalog_stars, lim_mag=lim_mag, 
+                    config, test_platepar, jd, star_dict_ff, catalog_stars, lim_mag=lim_mag,
                     ignore_distance_threshold=True
                 )
 
-                # If the FFT alignment failed, align the previous platepar using the smallest radius that 
+                # If the NN alignment failed, align the previous platepar using the smallest radius that
                 # matched and force save the the platepar
                 if (result is None) and (min_match_radius is not None):
                     log.info(
@@ -533,7 +534,7 @@ def recalibratePlateparsForFF(
                 working_platepar = result
 
 
-            # If the working platepar keeps failing, try using the original platepar before any FFT alignment
+            # If the working platepar keeps failing, try using the original platepar before any NN alignment
             if result is None:
                 log.info('Recalibration failed, trying to use the original platepar...')
                 result, _ = recalibrateFF(
@@ -586,7 +587,7 @@ def recalibratePlateparsForFF(
 
 
 def recalibrateSelectedFF(dir_path, ff_file_names, calstars_data, config, lim_mag, \
-    pp_recalib_name, ignore_distance_threshold=False, ignore_max_stars=False):
+    pp_recalib_name, ignore_distance_threshold=False, ignore_max_stars=False, platepar=None):
     """Recalibrate FF files, ignoring whether there are detections.
 
     Arguments:
@@ -603,6 +604,7 @@ def recalibrateSelectedFF(dir_path, ff_file_names, calstars_data, config, lim_ma
         ignore_distance_threshold: [bool] Don't consider the recalib as failed if the median distance
             is larger than the threshold.
         ignore_max_stars: [bool] Ignore the maximum number of image stars for recalibration.
+        platepar: [Platepar instance] Optional platepar to use as a starting point. None by default.
 
     Return:
         recalibrated_platepars: [dict] A dictionary where the keys are FF file names and values are
@@ -642,8 +644,17 @@ def recalibrateSelectedFF(dir_path, ff_file_names, calstars_data, config, lim_ma
 
     catalog_stars, _, config.star_catalog_band_ratios = star_catalog_status
     # log.info(catalog_stars)
-    prev_platepar = Platepar.Platepar()
-    prev_platepar.read(os.path.join(dir_path, config.platepar_name), use_flat=config.use_flat)
+
+    # If the platepar was not given, try to find it
+    if platepar is None:
+        prev_platepar = Platepar.findBestPlatepar(config, dir_path)
+
+    else:
+        prev_platepar = copy.deepcopy(platepar)
+
+    if prev_platepar is None:
+        log.error("recalibrateSelectedFF: Could not find a platepar file! Recalibration aborted.")
+        return {}
 
     # Update the platepar coordinates from the config file
     prev_platepar.lat = config.latitude
@@ -1292,7 +1303,7 @@ if __name__ == "__main__":
     log_manager.initLogging(config, 'recalibrate_', safedir=dir_path)
 
     # Get the logger handle
-    log = getLogger("logger", level="INFO")
+    log = getLogger("rmslogger", level="INFO")
 
     # Run the recalibration and recomputation
     applyRecalibrate(ftpdetectinfo_path, config, load_all=cml_args.all, generate_ufoorbit=(not cml_args.skipuforbit))
