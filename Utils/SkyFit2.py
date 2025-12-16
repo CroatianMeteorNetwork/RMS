@@ -2742,7 +2742,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
         self.img_frame.autoRange(padding=0)
 
-        self.paired_stars = PairedStars()
+        self.paired_stars = MultiImagePairedStars()
         self.updatePairedStars()
         self.pick_list = {}
         self.residuals = None
@@ -3700,11 +3700,17 @@ class PlateTool(QtWidgets.QMainWindow):
                     pair_obj = CatalogStar(cat_ra, cat_dec, cat_mag)
 
                     # Add the pair to paired_stars
-                    self.paired_stars.addPair(
-                        star_x, star_y, fwhm, intensity, pair_obj,
-                        image_id=image_id, jd=jd,
-                        snr=snr, saturated=saturated
-                    )
+                    if isinstance(self.paired_stars, MultiImagePairedStars):
+                        self.paired_stars.addPair(
+                            star_x, star_y, fwhm, intensity, pair_obj,
+                            image_id=image_id, jd=jd,
+                            snr=snr, saturated=saturated
+                        )
+                    else:
+                        self.paired_stars.addPair(
+                            star_x, star_y, fwhm, intensity, pair_obj,
+                            snr=snr, saturated=saturated
+                        )
 
                     print(f"Auto-paired: ({star_x:.1f}, {star_y:.1f}) -> catalog RA={cat_ra:.4f}, Dec={cat_dec:.4f}, dist={distance:.2f}px")
                     pairs_created += 1
@@ -5741,10 +5747,15 @@ class PlateTool(QtWidgets.QMainWindow):
                             # Get Julian Date for multi-image tracking
                             jd = date2JD(*self.img_handle.currentTime())
 
-                            self.paired_stars.addPair(self.x_centroid, self.y_centroid, self.star_fwhm,
-                                    self.star_intensity, pair_obj,
-                                    image_id=image_id, jd=jd,
-                                    snr=self.star_snr, saturated=self.star_saturated)
+                            if isinstance(self.paired_stars, MultiImagePairedStars):
+                                self.paired_stars.addPair(self.x_centroid, self.y_centroid, self.star_fwhm,
+                                        self.star_intensity, pair_obj,
+                                        image_id=image_id, jd=jd,
+                                        snr=self.star_snr, saturated=self.star_saturated)
+                            else:
+                                self.paired_stars.addPair(self.x_centroid, self.y_centroid, self.star_fwhm,
+                                        self.star_intensity, pair_obj,
+                                        snr=self.star_snr, saturated=self.star_saturated)
 
                         # Switch back to centroiding mode
                         self.cursor.setMode(0)
@@ -7305,7 +7316,13 @@ class PlateTool(QtWidgets.QMainWindow):
             return False
 
         # Populate paired_stars from NN matches for visualization
-        self.paired_stars = PairedStars()
+        # In multi-image mode, preserve stars from other images
+        current_image_id = self.img_handle.name()
+        if isinstance(self.paired_stars, MultiImagePairedStars):
+            # Remove only stars from current image, keep others
+            self.paired_stars.removeStarsFromImage(current_image_id)
+        else:
+            self.paired_stars = MultiImagePairedStars()
 
         # Re-project catalog stars with final platepar
         _, catalog_stars_fov = self.filterCatalogStarsInsideFOV(self.catalog_stars)
@@ -7323,7 +7340,8 @@ class PlateTool(QtWidgets.QMainWindow):
                     det_x[i], det_y[i],
                     detected_stars[i, 2] if detected_stars.shape[1] > 2 else 2.5,  # FWHM
                     det_intens[i],
-                    sky_obj
+                    sky_obj,
+                    image_id=current_image_id, jd=jd
                 )
 
         print("  Matched {} star pairs".format(len(self.paired_stars)))
@@ -7357,12 +7375,20 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Auto fit using astrometry.net. Called from Auto Fit button. """
 
         # If there are existing matched star pairs, warn the user they will be replaced
-        if len(self.paired_stars) > 0:
+        # In multi-image mode, only count stars from the current image
+        if isinstance(self.paired_stars, MultiImagePairedStars):
+            current_image_id = self.img_handle.name()
+            current_image_stars = self.paired_stars.getStarsByImage(current_image_id)
+            stars_to_replace = len(current_image_stars)
+        else:
+            stars_to_replace = len(self.paired_stars)
+
+        if stars_to_replace > 0:
             reply = QtWidgets.QMessageBox.question(
                 self,
                 "Replace Matched Stars?",
                 "You have {} matched star pair(s) that will be replaced by auto-fit.\n\n"
-                "Do you want to continue?".format(len(self.paired_stars)),
+                "Do you want to continue?".format(stars_to_replace),
                 QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
                 QtWidgets.QMessageBox.No
             )
@@ -7547,7 +7573,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateLeftLabels()
         self.updateStars()
         self.drawPhotometryColoring()
-        self.tab.setCurrentIndex(0)
+        # Don't change the tab - preserve user's current view
         QtWidgets.QApplication.processEvents()
 
         # Ask user if they want to continue with NN refinement
@@ -7720,7 +7746,14 @@ class PlateTool(QtWidgets.QMainWindow):
                 print("  NN fit failed: {}".format(str(e)))
 
             # Populate paired_stars from NN matches for visualization
-            self.paired_stars = PairedStars()
+            # In multi-image mode, preserve stars from other images
+            current_image_id = self.img_handle.name()
+            if isinstance(self.paired_stars, MultiImagePairedStars):
+                # Remove only stars from current image, keep others
+                self.paired_stars.removeStarsFromImage(current_image_id)
+            else:
+                self.paired_stars = MultiImagePairedStars()
+
             if self.platepar.star_list:
                 for entry in self.platepar.star_list:
                     # star_list format: [jd, x, y, intensity, ra, dec, mag]
@@ -7738,7 +7771,9 @@ class PlateTool(QtWidgets.QMainWindow):
                             snr = det_snr[closest_idx]
                             saturated = det_saturated[closest_idx] > 0
 
-                    self.paired_stars.addPair(x, y, fwhm, intensity, sky_obj, snr=snr, saturated=saturated)
+                    self.paired_stars.addPair(x, y, fwhm, intensity, sky_obj,
+                                              image_id=current_image_id, jd=jd,
+                                              snr=snr, saturated=saturated)
                 print("  Loaded {} matched pairs".format(len(self.platepar.star_list)))
 
         # Finalize the fit with user's settings
@@ -8575,7 +8610,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.first_platepar_fit = True
 
         # Reset paired stars
-        self.paired_stars = PairedStars()
+        self.paired_stars = MultiImagePairedStars()
         self.residuals = None
 
         # Indicate that a new platepar is being made

@@ -133,10 +133,11 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
         # F_scale is in arcsec/pixel, so: angular_limit = translation_limit * F_scale / 3600
         pointing_limit_deg = (translation_limit * platepar.F_scale) / 3600.0
 
-        # Compute angular separation between original and fitted pointing
+        # Compute angular separation between original and fitted pointing using alt/az
+        # (not RA/Dec, which changes with Earth rotation for a fixed camera)
         pointing_drift_deg = np.degrees(angularSeparation(
-            np.radians(platepar.RA_d), np.radians(platepar.dec_d),
-            np.radians(platepar_aligned.RA_d), np.radians(platepar_aligned.dec_d)
+            np.radians(platepar.az_centre), np.radians(platepar.alt_centre),
+            np.radians(platepar_aligned.az_centre), np.radians(platepar_aligned.alt_centre)
         ))
 
         # Check rotation change
@@ -146,7 +147,7 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
 
         if pointing_drift_deg > pointing_limit_deg or rotation_change_deg > rotation_limit:
             log.warning("alignPlatepar: Drift exceeds limits, returning original platepar")
-            log.warning("    Pointing drift: {:.2f} deg, limit: {:.2f} deg".format(
+            log.warning("    Alt/Az drift: {:.2f} deg, limit: {:.2f} deg".format(
                 pointing_drift_deg, pointing_limit_deg))
             log.warning("    Rotation change: {:.2f} deg, limit: {:.2f} deg".format(
                 rotation_change_deg, rotation_limit))

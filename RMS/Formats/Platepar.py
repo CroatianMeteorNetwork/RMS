@@ -550,8 +550,6 @@ class Platepar(object):
 
         """
 
-        from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
-
         # Create a single working copy of platepar to reuse in cost function
         # This avoids expensive deepcopy on every optimizer iteration
         pp_work = copy.deepcopy(self)
@@ -601,7 +599,7 @@ class Platepar(object):
                 pp_work.F_scale = abs(params[3])
 
             # Project catalog stars to image coordinates
-            cat_x, cat_y = raDecToXYPP(ra_catalog, dec_catalog, jd, pp_work)
+            cat_x, cat_y = RMS.Astrometry.ApplyAstrometry.raDecToXYPP(ra_catalog, dec_catalog, jd, pp_work)
 
             # Filter out catalog stars that project outside the image
             valid_mask = (cat_x >= 0) & (cat_x < pp_work.X_res) & (cat_y >= 0) & (cat_y < pp_work.Y_res)
@@ -1240,18 +1238,23 @@ class Platepar(object):
                         # Update current outlier mask for next iteration's exclusion
                         current_outlier_mask = iteration_outliers
 
-                        total_cost = np.sum(nn_seps**2)
-                        if total_cost < best_cost:
-                            best_cost = total_cost
+                        # Compute cost and RMSE on inliers only (exclude outliers)
+                        inlier_seps = nn_seps[~iteration_outliers]
+                        inlier_cost = np.sum(inlier_seps**2)
+                        if inlier_cost < best_cost:
+                            best_cost = inlier_cost
                             best_res = res
+
+                        # RMSE in arcminutes for display (nn_seps are in radians)
+                        rmse_arcmin = np.sqrt(np.mean(inlier_seps**2)) * 3437.75  # rad to arcmin
 
                         dist_label = "radial5-odd" if iteration >= switch_iter else "radial3-odd"
                         # Debug: show RA/Dec at each iteration
                         iter_ra = (360 * res.x[0]) % 360
                         iter_dec = -90 + (90 * res.x[1] + 90) % 180.000001
-                        print("      Iter {}: {} (w={}) fit on {}, {} outliers, cost={:.6f}, RA={:.2f} Dec={:.2f}".format(
+                        print("      Iter {}: {} (w={}) fit on {}, {} outliers, RMSE={:.2f}', RA={:.2f} Dec={:.2f}".format(
                             iteration + 1, dist_label, weight, len(subset_indices),
-                            np.sum(iteration_outliers), total_cost, iter_ra, iter_dec))
+                            np.sum(iteration_outliers), rmse_arcmin, iter_ra, iter_dec))
 
                     # Outlier mask: positive score = more outlier votes than inlier votes
                     # Max possible score: 7*1 + 7*2 = 7+14 = 21 (all outlier)

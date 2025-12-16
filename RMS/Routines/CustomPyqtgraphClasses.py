@@ -1636,6 +1636,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
     sigAsymmetryCorrToggled = QtCore.pyqtSignal()
     sigForceDistortionToggled = QtCore.pyqtSignal()
     sigOnVignettingFixedToggled = QtCore.pyqtSignal()
+    sigMultiImageModeToggled = QtCore.pyqtSignal(bool)
 
     def __init__(self, gui):
         QtWidgets.QWidget.__init__(self)
@@ -1672,6 +1673,15 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.clear_picks_button = QtWidgets.QPushButton("Clear All Picks")
         self.clear_picks_button.clicked.connect(self.sigClearPicks.emit)
         box.addWidget(self.clear_picks_button)
+
+        # Multi-image mode checkbox
+        self.multi_image_mode = QtWidgets.QCheckBox('Multi-Image Mode')
+        self.multi_image_mode.setToolTip(
+            "When enabled, auto-fit only replaces stars from the current image.\n"
+            "This allows calibrating across multiple images.")
+        self.multi_image_mode.setChecked(True)  # Default to multi-image mode
+        self.multi_image_mode.toggled.connect(self.onMultiImageModeToggled)
+        box.addWidget(self.multi_image_mode)
 
         self.next_star_button = QtWidgets.QPushButton("Next Star")
         self.next_star_button.clicked.connect(self.sigNextStarPressed.emit)
@@ -1878,6 +1888,10 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.gui.fit_only_pointing = self.fit_only_pointing.isChecked()
         self.updatePairedStars(min_fit_stars=self.gui.getMinFitStars())
         self.sigFitOnlyPointingToggled.emit()
+
+    def onMultiImageModeToggled(self, checked):
+        """ Handle multi-image mode checkbox toggle. """
+        self.sigMultiImageModeToggled.emit(checked)
 
     def onFixScaleToggled(self):
         self.gui.fixed_scale = self.fixed_scale.isChecked()
