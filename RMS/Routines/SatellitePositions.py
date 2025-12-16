@@ -372,31 +372,20 @@ class SatellitePredictor:
                 inside = sphericalPolygonCheck(fov_polygon, test_points)
                 
                 if np.any(inside):
+                    # Filter points to only those truly inside the spherical FOV
+                    ra_degs = ra_degs[inside]
+                    dec_degs = dec_degs[inside]
+                    jds_utc_subset = jds_utc_subset[inside]
+
                     # Project RA/Dec to per-pixel XY
                     
-                    # We need the JD for the astrometry (time dependent? Only if alt/az is used or refraction?)
-                    # raDecToXYPP(ra, dec, jd, platepar)
-                    
-                    jds_utc = times.ut1
-                    
-                    x_all = []
-                    y_all = []
-                    ra_all = []
-                    dec_all = []
-                    
                     # Compute XY coordinates for all points
-                    for r, d, jd in zip(ra_degs, dec_degs, jds_utc_subset):
-                        x, y = raDecToXYPP(np.array([float(r)]), np.array([float(d)]), float(jd), platepar)
-                        x_all.append(x[0])
-                        y_all.append(y[0])
-                        ra_all.append(r)
-                        dec_all.append(d)
+                    # Use the first timestamp for all points as raDecToXYPP expects a scalar JD
+                    x_all, y_all = raDecToXYPP(ra_degs, dec_degs, float(jds_utc_subset[0]), platepar)
+                    ra_all = ra_degs
+                    dec_all = dec_degs
                     
-                    # Filter out ridiculous values (behind camera etc) if any
-                    x_all = np.array(x_all)
-                    y_all = np.array(y_all)
-                    ra_all = np.array(ra_all)
-                    dec_all = np.array(dec_all)
+
                     
                     # Check if at least 2 points are inside the image bounds
                     w = platepar.X_res
@@ -437,7 +426,7 @@ if __name__ == "__main__":
     parser.add_argument("--time_start", type=str, help="Start time (YYYYMMDD_HHMMSS or ISO). Defaults to now.")
     parser.add_argument("--duration", type=float, default=60.0, help="Duration in seconds (default 60).")
     parser.add_argument("--tle_cache", type=str, default=None, help="Directory for TLE cache.")
-    parser.add_argument("--tle_file", type=str, default=None, help="Path to a specific TLE file to use (skips download).")
+    parser.add_argument("--tle_file", type=str, default=None, help="Path to a specific TLE file (or directory containing TLE files) to use (skips download).")
     parser.add_argument("--show-plots", action="store_true", help="Display a plot of the satellite tracks.")
 
     args = parser.parse_args()
@@ -473,21 +462,35 @@ if __name__ == "__main__":
     print(f"Location: Lat={pp.lat:.4f}, Lon={pp.lon:.4f}, Elev={pp.elev:.1f}m")
 
     # Load TLEs
+    sats = []
+    tle_file_path = None
+
+    # If a TLE file/directory is specified, try to find the best file
     if args.tle_file:
-         if not os.path.exists(args.tle_file):
-              print(f"Error: TLE file not found: {args.tle_file}")
-              exit(1)
-         print(f"Loading TLEs from {args.tle_file}...")
-         try:
-             sats = load.tle_file(args.tle_file)
-         except Exception as e:
-             print(f"Error loading TLE file: {e}")
+         if os.path.isdir(args.tle_file):
+             print(f"Searching for closest TLE file in {args.tle_file}...")
+             tle_file_path = findClosestTLEFile(args.tle_file, t_start)
+         elif os.path.exists(args.tle_file):
+             tle_file_path = args.tle_file
+         else:
+             print(f"Error: TLE file not found: {args.tle_file}")
              exit(1)
-    else:
+
+    # If we found a file, load it
+    if tle_file_path:
+        print(f"Loading TLEs from {tle_file_path}...")
+        try:
+            sats = load.tle_file(tle_file_path)
+        except Exception as e:
+            print(f"Error loading TLE file: {e}")
+            exit(1)
+    
+    # If no file was specified or found (and we didn't exit), try loading/downloading from cache
+    if not sats:
         if args.tle_cache:
-             cache_dir = args.tle_cache
+                cache_dir = args.tle_cache
         else:
-             cache_dir = os.path.join(getRmsRootDir(), ".skyfield_cache")
+                cache_dir = os.path.join(getRmsRootDir(), ".skyfield_cache")
 
         os.makedirs(cache_dir, exist_ok=True)
         sats = loadTLEs(cache_dir, max_age_hours=24)
