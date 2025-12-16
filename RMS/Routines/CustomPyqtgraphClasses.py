@@ -2211,8 +2211,6 @@ class SettingsWidget(QtWidgets.QWidget):
         self.meas_ground_points.hide()
         vbox.addWidget(self.meas_ground_points)
 
-        vbox.addWidget(self.meas_ground_points)
-
         vbox.addWidget(QHSeparationLine())
 
         self.sat_tracks = QtWidgets.QCheckBox('Show Satellite Tracks')

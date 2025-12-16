@@ -6,8 +6,7 @@ from typing import List, Tuple, Optional
 
 import numpy as np
 try:
-    from skyfield.api import load, Topos, EarthSatellite, wgs84, Loader
-    from skyfield.sgp4lib import EarthSatellite
+    from skyfield.api import load, wgs84, Loader
     SKYFIELD_AVAILABLE = True
 except ImportError:
     SKYFIELD_AVAILABLE = False
@@ -104,6 +103,7 @@ def loadRobustTLEs(file_path):
     try:
         # Try loading normally first
         return load.tle_file(file_path)
+
     except ValueError as e:
         # Check if it's the specific int conversion error
         if "invalid literal for int()" not in str(e):
@@ -146,21 +146,23 @@ def loadRobustTLEs(file_path):
             sanitized_lines.append(line)
             
         # Write to temp file and load
-        with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp:
-            tmp.writelines(sanitized_lines)
-            tmp_path = tmp.name
-            
+        tmp_path = None
         try:
-             sats = load.tle_file(tmp_path)
-             # Restore names/original IDs? 
-             # The EarthSatellite object has .model.satnum (integer).
-             # The name is separate.
-             # We can't easily restore the textual string ID inside the object if it stores int.
-             # But functionality should be fine.
-             print(f"Successfully loaded {len(sats)} satellites after sanitization.")
-             return sats
+            with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp:
+                tmp.writelines(sanitized_lines)
+                tmp_path = tmp.name
+            
+            sats = load.tle_file(tmp_path)
+            # Restore names/original IDs? 
+            # The EarthSatellite object has .model.satnum (integer).
+            # The name is separate.
+            # We can't easily restore the textual string ID inside the object if it stores int.
+            # But functionality should be fine.
+            print(f"Successfully loaded {len(sats)} satellites after sanitization.")
+            return sats
+             
         finally:
-             if os.path.exists(tmp_path):
+             if tmp_path and os.path.exists(tmp_path):
                  os.remove(tmp_path)
 
 
@@ -318,9 +320,9 @@ class SatellitePredictor:
         # Loop through satellites and check if they are above the horizon at t_mid
         for sat in satellites:
             try:
-                # Quick check at mid time
-                orbit_quality = ((sat - self.observer).at(t_mid).altaz()[0].degrees > -5)
-                if orbit_quality:
+                # Check if the satellite is above the horizon (-5 deg to account for atmospheric refraction) at t_mid
+                above_horizon = ((sat - self.observer).at(t_mid).altaz()[0].degrees > -5)
+                if above_horizon:
                     valid_sats.append(sat)
             except Exception:
                 continue
@@ -442,6 +444,10 @@ if __name__ == "__main__":
     parser.add_argument("--show-plots", action="store_true", help="Display a plot of the satellite tracks.")
 
     args = parser.parse_args()
+
+    if not SKYFIELD_AVAILABLE:
+        print("Error: The 'skyfield' library is required to run this script. Please install it using 'pip install skyfield'.")
+        exit(1)
 
     # Load platepar
     if not os.path.exists(args.platepar_path):

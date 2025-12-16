@@ -1474,7 +1474,7 @@ class PlateTool(QtWidgets.QMainWindow):
             startUI: [bool] Start the GUI. True by default.
             mask: [str] Path to a mask file.
             nobg: [bool] Do not subtract the background for photometry. False by default.
-            peribg: [bool] Perform background subtraction using the average of the pixels adjuecent to the 
+            peribg: [bool] Perform background subtraction using the average of the pixels adjacent to the 
                 coloured mask instead of the avepixel. False by default.
             flipud: [bool] Flip the image upside down. False by default.
             flatbiassub: [bool] Subtract flat and bias frames. False by default.
@@ -1640,12 +1640,17 @@ class PlateTool(QtWidgets.QMainWindow):
         self.show_sattracks = show_sattracks
         self.tle_file = tle_file
         self.satellite_tracks = []
+        
+        # Cache for FOV polygon to avoid recomputation
+        self.fov_poly_cache = None
+        self.fov_poly_jd = None
+
         if self.show_sattracks:
              if SKYFIELD_AVAILABLE:
-                  print("Satellite tracks enabled.")
+                print("Satellite tracks enabled.")
              else:
-                  print("WARNING: --sattracks requested but skyfield not installed.")
-                  self.show_sattracks = False
+                print("WARNING: --sattracks requested but skyfield not installed.")
+                self.show_sattracks = False
 
 
     
@@ -2334,7 +2339,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Update TLE label
             tle_text = "latest downloaded"
             if self.tle_file:
-                 tle_text = os.path.basename(self.tle_file)
+                tle_text = os.path.basename(self.tle_file)
             self.tab.settings.updateTLELabel(tle_text)
 
             self.star_pick_info.setText(self.star_pick_info_text_str)
@@ -2672,6 +2677,8 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'M - Toggle maxpixel/avepixel\n'
             text_str += 'H - Hide/show catalog stars\n'
             text_str += 'C - Hide/show detected stars\n'
+            if self.show_sattracks:
+                text_str += 'CTRL + T - Toggle satellite tracks\n'
             text_str += 'CTRL + I - Show/hide distortion\n'
             text_str += 'U/J - Img Gamma\n'
             text_str += 'I - Invert colors\n'
@@ -8448,75 +8455,75 @@ class PlateTool(QtWidgets.QMainWindow):
         t_end = None
         
         try:
-             # Use manually provided start time if available
-             if hasattr(self, 'beginning_time') and self.beginning_time is not None:
-                  t_start = self.beginning_time
-                  if t_start.tzinfo is None:
-                      t_start = t_start.replace(tzinfo=datetime.timezone.utc)
+            # Use manually provided start time if available
+            if hasattr(self, 'beginning_time') and self.beginning_time is not None:
+                t_start = self.beginning_time
+                if t_start.tzinfo is None:
+                    t_start = t_start.replace(tzinfo=datetime.timezone.utc)
                   
-                  # Determine end time from total frames and FPS, or fallback
-                  if hasattr(self, 'img_handle') and hasattr(self.img_handle, 'total_frames') and hasattr(self.img_handle, 'fps') and self.img_handle.fps > 0:
-                       duration = self.img_handle.total_frames/self.img_handle.fps
-                       t_end = t_start + datetime.timedelta(seconds=duration)
-                  else:
-                       t_end = t_start + datetime.timedelta(seconds=60)
+                # Determine end time from total frames and FPS, or fallback
+                if hasattr(self, 'img_handle') and hasattr(self.img_handle, 'total_frames') and hasattr(self.img_handle, 'fps') and self.img_handle.fps > 0:
+                    duration = self.img_handle.total_frames/self.img_handle.fps
+                    t_end = t_start + datetime.timedelta(seconds=duration)
+                else:
+                    t_end = t_start + datetime.timedelta(seconds=60)
 
-             # Use current frame time as start
-             elif hasattr(self, 'img_handle'):
+            # Use current frame time as start
+            elif hasattr(self, 'img_handle'):
                   
-                  # Get the time of the first frame
-                  t_start = self.img_handle.currentFrameTime(frame_no=0, dt_obj=True)
+                # Get the time of the first frame
+                t_start = self.img_handle.currentFrameTime(frame_no=0, dt_obj=True)
                   
-                  # Ensure timezone is UTC
-                  if t_start.tzinfo is None:
-                      t_start = t_start.replace(tzinfo=datetime.timezone.utc)
+                # Ensure timezone is UTC
+                if t_start.tzinfo is None:
+                    t_start = t_start.replace(tzinfo=datetime.timezone.utc)
 
-                  # Determine end time from total frames and FPS
-                  if hasattr(self.img_handle, 'total_frames') and hasattr(self.img_handle, 'fps') and self.img_handle.fps > 0:
-                       duration = self.img_handle.total_frames/self.img_handle.fps
-                       t_end = t_start + datetime.timedelta(seconds=duration)
-                  else:
-                       # Fallback
-                       t_end = t_start + datetime.timedelta(seconds=60)
+                # Determine end time from total frames and FPS
+                if hasattr(self.img_handle, 'total_frames') and hasattr(self.img_handle, 'fps') and self.img_handle.fps > 0:
+                    duration = self.img_handle.total_frames/self.img_handle.fps
+                    t_end = t_start + datetime.timedelta(seconds=duration)
+                else:
+                    # Fallback
+                    t_end = t_start + datetime.timedelta(seconds=60)
 
-             elif hasattr(self, 'current_time'):
-                  t_start = self.current_time
-                  if t_start.tzinfo is None:
-                      t_start = t_start.replace(tzinfo=datetime.timezone.utc)
-                  t_end = t_start + datetime.timedelta(seconds=60)
+            elif hasattr(self, 'current_time'):
+                t_start = self.current_time
+                if t_start.tzinfo is None:
+                    t_start = t_start.replace(tzinfo=datetime.timezone.utc)
+                t_end = t_start + datetime.timedelta(seconds=60)
 
         except Exception as e:
-             print(f"Error determining time for satellites: {e}")
+            print(f"Error determining time for satellites: {e}")
 
         if t_start is None:
-             print("Could not determine start time for satellite tracks.")
-             return
+            print("Could not determine start time for satellite tracks.")
+            return
 
         if self.tle_file and os.path.exists(self.tle_file):
              
-             tle_path_to_load = self.tle_file
+            tle_path_to_load = self.tle_file
              
-             # If directory, find the best file
-             if os.path.isdir(self.tle_file):
-                 tle_path_to_load = findClosestTLEFile(self.tle_file, t_start)
+            # If directory, find the best file
+            if os.path.isdir(self.tle_file):
+                tle_path_to_load = findClosestTLEFile(self.tle_file, t_start)
              
-             if tle_path_to_load:
-                 print(f"Loading TLEs from file: {tle_path_to_load}")
-                 try:
-                     sats = loadRobustTLEs(tle_path_to_load)
-                 except Exception as e:
-                     print(f"Error loading TLE file: {e}")
-                     return
-             else:
-                 # If None returned or path was bad, fallback to standard download/cache
-                 cache_dir = os.path.join(getRmsRootDir(), ".skyfield_cache")
-                 sats = loadTLEs(cache_dir, max_age_hours=24)
+            if tle_path_to_load:
+                print(f"Loading TLEs from file: {tle_path_to_load}")
+                try:
+                    sats = loadRobustTLEs(tle_path_to_load)
+                except Exception as e:
+                    print(f"Error loading TLE file: {e}")
+                    return
+            else:
+                # If None returned or path was bad, fallback to standard download/cache
+                cache_dir = os.path.join(getRmsRootDir(), ".skyfield_cache")
+                sats = loadTLEs(cache_dir, max_age_hours=24)
         else:
-             cache_dir = os.path.join(getRmsRootDir(), ".skyfield_cache")
-             sats = loadTLEs(cache_dir, max_age_hours=24)
+            cache_dir = os.path.join(getRmsRootDir(), ".skyfield_cache")
+            sats = loadTLEs(cache_dir, max_age_hours=24)
         
         if not sats:
-             return
+            return
              
         predictor = SatellitePredictor(lat, lon, elev, t_start, t_end)
         
@@ -8530,32 +8537,47 @@ class PlateTool(QtWidgets.QMainWindow):
         w = self.platepar.X_res
         h = self.platepar.Y_res
         
-        # Define edges: (x1, y1) -> (x2, y2)
-        edges = [
-            ((0, 0), (w, 0)),   # Top
-            ((w, 0), (w, h)),   # Right
-            ((w, h), (0, h)),   # Bottom
-            ((0, h), (0, 0))    # Left
-        ]
-        
+        # Check if we can use cached FOV polygon
         fov_poly = []
-        samples_per_side = 10
-        
-        try:
-            for (x_start, y_start), (x_end, y_end) in edges:
-                xs = np.linspace(x_start, x_end, samples_per_side, endpoint=False)
-                ys = np.linspace(y_start, y_end, samples_per_side, endpoint=False)
+        if self.fov_poly_cache is not None and self.fov_poly_jd == jd:
+            fov_poly = self.fov_poly_cache
+            # print("Using cached FOV polygon.")
+        else:
+            # print("Computing FOV polygon...")
+            # Define edges: (x1, y1) -> (x2, y2)
+            edges = [
+                ((0, 0), (w, 0)),   # Top
+                ((w, 0), (w, h)),   # Right
+                ((w, h), (0, h)),   # Bottom
+                ((0, h), (0, 0))    # Left
+            ]
+            
+            samples_per_side = 10
+            
+            try:
+                for (x_start, y_start), (x_end, y_end) in edges:
+                    xs = np.linspace(x_start, x_end, samples_per_side, endpoint=False)
+                    ys = np.linspace(y_start, y_end, samples_per_side, endpoint=False)
+                    
+                    # Prepare inputs
+                    n = len(xs)
+                    jd_arr = [jd]*n
+                    level_arr = [1]*n
+                    
+                    _, r_arr, d_arr, _ = xyToRaDecPP(jd_arr, xs, ys, level_arr, self.platepar, jd_time=True, extinction_correction=False)
+                    
+                    for r, d in zip(r_arr, d_arr):
+                        fov_poly.append((r, d))
+                        
+                # Update cache
+                self.fov_poly_cache = fov_poly
+                self.fov_poly_jd = jd
                 
-                # Prepare inputs
-                n = len(xs)
-                jd_arr = [jd]*n
-                level_arr = [1]*n
-                
-                _, r_arr, d_arr, _ = xyToRaDecPP(jd_arr, xs, ys, level_arr, self.platepar, jd_time=True, extinction_correction=False)
-                
-                for r, d in zip(r_arr, d_arr):
-                    fov_poly.append((r, d))
+            except Exception as e:
+                print(f"Error computing FOV polygon: {e}")
+                return
 
+        try:
             self.satellite_tracks = predictor.getSatelliteTracks(self.platepar, fov_poly, sats)
             print(f"Computed {len(self.satellite_tracks)} satellite tracks.")
             
@@ -8599,13 +8621,13 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.updateShowSatTracks()
         
         if self.show_sattracks and not self.satellite_tracks:
-             if SKYFIELD_AVAILABLE:
-                 self.loadSatelliteTracks()
-             else:
-                 print("Cannot load satellite tracks: Skyfield not available.")
-                 self.show_sattracks = False
-                 self.tab.settings.updateShowSatTracks()
-                 return
+            if SKYFIELD_AVAILABLE:
+                self.loadSatelliteTracks()
+            else:
+                print("Cannot load satellite tracks: Skyfield not available.")
+                self.show_sattracks = False
+                self.tab.settings.updateShowSatTracks()
+                return
 
         self.drawSatelliteTracks()
 
@@ -8650,23 +8672,23 @@ class PlateTool(QtWidgets.QMainWindow):
         
         # Ensure tracks are enabled
         if not self.show_sattracks:
-             self.show_sattracks = True
-             self.tab.settings.updateShowSatTracks()
+            self.show_sattracks = True
+            self.tab.settings.updateShowSatTracks()
              
         if SKYFIELD_AVAILABLE:
             self.loadSatelliteTracks()
             self.drawSatelliteTracks()
         else:
-             print("Cannot load satellite tracks: Skyfield not available.")
+            print("Cannot load satellite tracks: Skyfield not available.")
 
     def redrawSatelliteTracks(self):
         """ Manually re-computes satellite tracks (prediction + projection). """
         if SKYFIELD_AVAILABLE:
-             print("Redrawing satellite tracks...")
-             self.loadSatelliteTracks()
-             self.drawSatelliteTracks()
+            print("Redrawing satellite tracks...")
+            self.loadSatelliteTracks()
+            self.drawSatelliteTracks()
         else:
-             print("Cannot load satellite tracks: Skyfield not available.")
+            print("Cannot load satellite tracks: Skyfield not available.")
 
     def drawSatelliteTracks(self):
         """ Draws satellite tracks on the image. """
@@ -8684,7 +8706,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         w = self.platepar.X_res
         h = self.platepar.Y_res
-        margin = 100 # pixels from edge
+
+        # Margin to prevent label placement too close to edge
+        margin = 100 # pixels
 
         # Define a list of high-contrast colors suitable for both dark and light backgrounds
         # (R, G, B)
@@ -8726,8 +8750,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 for i in range(len(x)):
                     xi, yi = x[i], y[i]
                     if margin < xi < (w - margin) and margin < yi < (h - margin):
-                         best_idx = i
-                         break
+                        best_idx = i
+                        break
                 
                 label_x = x[best_idx]
                 label_y = y[best_idx]
