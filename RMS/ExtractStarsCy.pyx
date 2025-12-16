@@ -16,6 +16,9 @@ import numpy as np
 cimport numpy as np
 cimport cython
 
+# Initialize NumPy C API (required for NumPy 2.0+)
+np.import_array()
+
 # Define numpy types
 FLOAT_TYPE = np.float64
 ctypedef np.float64_t FLOAT_TYPE_t

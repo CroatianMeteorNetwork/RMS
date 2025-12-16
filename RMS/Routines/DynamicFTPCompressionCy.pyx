@@ -6,6 +6,9 @@ import time
 cimport numpy as np
 cimport cython
 
+# Initialize NumPy C API (required for NumPy 2.0+)
+np.import_array()
+
 # Define numpy types
 INT16_TYPE = np.uint16
 ctypedef np.uint16_t INT16_TYPE_t

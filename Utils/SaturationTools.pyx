@@ -7,6 +7,9 @@ import numpy as np
 cimport numpy as np
 cimport cython
 
+# Initialize NumPy C API (required for NumPy 2.0+)
+np.import_array()
+
 from libc.math cimport floor, ceil, exp
 
 # Define numpy types

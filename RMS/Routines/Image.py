@@ -270,7 +270,7 @@ try:
         """
 
         height, width = img_avg_sub.shape
-        img_thresh = np.zeros((height, width), dtype=np.bool_)
+        img_thresh = np.zeros((height, width), dtype=bool)
 
         for i in range(height):
             for j in range(width):

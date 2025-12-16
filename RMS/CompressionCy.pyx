@@ -4,6 +4,9 @@ import numpy as np
 cimport numpy as np
 cimport cython
 
+# Initialize NumPy C API (required for NumPy 2.0+)
+np.import_array()
+
 # Define numpy types
 INT8_TYPE = np.uint8
 ctypedef np.uint8_t INT8_TYPE_t

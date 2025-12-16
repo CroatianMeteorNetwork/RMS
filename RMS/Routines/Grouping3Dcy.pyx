@@ -8,6 +8,9 @@ import numpy as np
 cimport numpy as np
 cimport cython
 
+# Initialize NumPy C API (required for NumPy 2.0+)
+np.import_array()
+
 
 # Define numpy types
 UINT16_TYPE = np.uint16
