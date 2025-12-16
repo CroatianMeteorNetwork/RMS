@@ -71,6 +71,13 @@ from Utils.KalmanFilter import KalmanFilter
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
+from RMS.Routines.SatellitePositions import SatellitePredictor, loadTLEs, loadRobustTLEs, findClosestTLEFile, SKYFIELD_AVAILABLE
+from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
+from RMS.Astrometry.Conversions import datetime2JD
+if SKYFIELD_AVAILABLE:
+    from skyfield.api import load
+import traceback
+
 
 try:
     import html, re
@@ -82,6 +89,7 @@ try:
     )
     from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject
     from PyQt5 import QtCore
+    from PyQt5.QtGui import QFont
 
     from Utils.Astra import ASTRA, PYSWARMS_AVAILABLE
 
@@ -612,7 +620,7 @@ if ASTRA_IMPORTED:
             super().closeEvent(event)
 
         def reject(self):
-            # Triggered by ESC / window manager close as well
+            # Triggered by ESC/window manager close as well
             self._handleClose()
             super().reject()
 
@@ -1446,7 +1454,7 @@ class PairedStars(object):
 class PlateTool(QtWidgets.QMainWindow):
     def __init__(self, input_path, config, beginning_time=None, fps=None, gamma=None, use_fr_files=False,
         geo_points_input=None, startUI=True, mask=None, nobg=False, peribg=False, flipud=False,
-        flatbiassub=False, exposure_ratio=1.0):
+        flatbiassub=False, exposure_ratio=1.0, show_sattracks=False, tle_file=None):
         """ SkyFit interactive window.
 
         Arguments:
@@ -1464,14 +1472,17 @@ class PlateTool(QtWidgets.QMainWindow):
             geo_points_input: [str] Path to a file with a list of geo coordinates which will be projected on
                 the image as seen from the perspective of the observer.
             startUI: [bool] Start the GUI. True by default.
+            mask: [str] Path to a mask file.
             nobg: [bool] Do not subtract the background for photometry. False by default.
-            peribg: [bool] Perform background subtraction using the average of the pixels adjuecent to the 
+            peribg: [bool] Perform background subtraction using the average of the pixels adjacent to the 
                 coloured mask instead of the avepixel. False by default.
             flipud: [bool] Flip the image upside down. False by default.
             flatbiassub: [bool] Subtract flat and bias frames. False by default.
             exposure_ratio: [float] Exposure ratio between stars and meteors. Used for magnitude scaling of 
                 meteors observed on long exposure images with shutters. The correct exp. ratio is already 
                 automatically applied for DFN images. 1.0 by default.
+            show_sattracks: [bool] Show satellite tracks. False by default.
+            tle_file: [str] Path to a TLE file for satellite tracks.
         """
 
         super(PlateTool, self).__init__()
@@ -1490,6 +1501,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         self.config = config
+
+        # Force the CV2 backend when SkyFit is being used
+        self.config.media_backend = 'cv2'
 
         # Store forced time of first frame
         self.beginning_time = beginning_time
@@ -1621,6 +1635,24 @@ class PlateTool(QtWidgets.QMainWindow):
             self.astra_dialog = None
             self.astra_config_params = None
 
+        
+        # Satellite tracks config
+        self.show_sattracks = show_sattracks
+        self.tle_file = tle_file
+        self.satellite_tracks = []
+        
+        # Cache for FOV polygon to avoid recomputation
+        self.fov_poly_cache = None
+        self.fov_poly_jd = None
+
+        if self.show_sattracks:
+             if SKYFIELD_AVAILABLE:
+                print("Satellite tracks enabled.")
+             else:
+                print("WARNING: --sattracks requested but skyfield not installed.")
+                self.show_sattracks = False
+
+
     
         ###################################################################################################
 
@@ -1711,6 +1743,10 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img_zoom.reloadImage()
             self.img.reloadImage()
 
+        # If the satellite tracks should be shown, load the TLE data and show the tracks
+        if show_sattracks:
+            self.loadSatelliteTracks()
+
 
     def setFPS(self):
         """ Update the FPS if it's forced. """
@@ -1778,7 +1814,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.toggle_info_action.triggered.connect(self.toggleInfo)
         self.toggle_info_action.setShortcut('F1')
 
-        self.toggle_zoom_window = QtWidgets.QAction("Toggle zoom window")
         self.toggle_zoom_window = QtWidgets.QAction("Toggle zoom window")
         self.toggle_zoom_window.triggered.connect(self.toggleZoomWindow)
         self.toggle_zoom_window.setShortcut('shift+Z')
@@ -1993,6 +2028,11 @@ class PlateTool(QtWidgets.QMainWindow):
         # calstar markers inner rings (bright green) - zoom window
         self.calstar_markers2 = pg.ScatterPlotItem()
         self.calstar_markers2.setPen(pg.mkPen((50, 255, 50, 255), width=1.1))
+
+        # Satellite tracks items
+        self.sat_track_curves = []
+        self.sat_track_labels = []
+
         self.calstar_markers2.setBrush((0, 0, 0, 0))
         self.calstar_markers2.setSize(20)
         self.calstar_markers2.setSymbol('o')
@@ -2205,6 +2245,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigInvertToggled.connect(self.toggleInvertColours)
         self.tab.settings.sigAutoPanToggled.connect(self.toggleAutoPan)
         self.tab.settings.sigSingleClickPhotometryToggled.connect(self.toggleSingleClickPhotometry)
+        self.tab.settings.sigSatTracksToggled.connect(self.toggleShowSatTracks)
+        self.tab.settings.sigLoadTLEPressed.connect(self.loadTLEFileDialog)
+        self.tab.settings.sigClearTLEPressed.connect(self.clearTLESelection)
+        self.tab.settings.sigRedrawSatTracksPressed.connect(self.redrawSatelliteTracks)
 
         layout.addWidget(self.tab, 0, 2)
 
@@ -2291,6 +2335,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.view_menu.addActions([self.toggle_info_action,
                                        self.toggle_zoom_window])
+
+            # Update TLE label
+            tle_text = "latest downloaded"
+            if self.tle_file:
+                tle_text = os.path.basename(self.tle_file)
+            self.tab.settings.updateTLELabel(tle_text)
 
             self.star_pick_info.setText(self.star_pick_info_text_str)
 
@@ -2506,7 +2556,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 status_str += ", Auto pan"
 
             if self.max_pixels_between_matched_stars != np.inf:
-                percentage_complete = min([100,100 * (len(self.paired_stars)+len(self.unsuitable_stars))/
+                percentage_complete = min([100,100*(len(self.paired_stars)+len(self.unsuitable_stars))/
                                                                 len(self.catalog_x_filtered)])
 
                 if self.max_pixels_between_matched_stars != 0:
@@ -2627,6 +2677,8 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'M - Toggle maxpixel/avepixel\n'
             text_str += 'H - Hide/show catalog stars\n'
             text_str += 'C - Hide/show detected stars\n'
+            if self.show_sattracks:
+                text_str += 'CTRL + T - Toggle satellite tracks\n'
             text_str += 'CTRL + I - Show/hide distortion\n'
             text_str += 'U/J - Img Gamma\n'
             text_str += 'I - Invert colors\n'
@@ -3631,6 +3683,12 @@ class PlateTool(QtWidgets.QMainWindow):
         for remove in to_remove:
             del dic[remove]
 
+        # Explicitly remove pyqtgraph items that might not have been caught
+        if 'sat_track_curves' in dic:
+            del dic['sat_track_curves']
+        if 'sat_track_labels' in dic:
+            del dic['sat_track_labels']
+
         # if os.path.isdir(self.input_path):
         #     real_input_path = os.path.join(self.input_path, img_name)
         #     dic['input_path'] = real_input_path
@@ -4271,8 +4329,13 @@ class PlateTool(QtWidgets.QMainWindow):
         # Jump to the next star
         elif event.key() == QtCore.Qt.Key_Space and (modifiers == QtCore.Qt.ShiftModifier):
 
-            plate_tool.jumpNextStar(miss_this_one=True)
+            self.jumpNextStar(miss_this_one=True)
             self.updateBottomLabel()
+
+
+        # Toggle satellite tracks
+        elif event.key() == QtCore.Qt.Key_T and (modifiers == QtCore.Qt.ControlModifier):
+             self.toggleSatelliteTracks()
 
 
 
@@ -5909,6 +5972,22 @@ class PlateTool(QtWidgets.QMainWindow):
             self.calstar_markers.hide()
             self.calstar_markers2.hide()
 
+    def toggleSatelliteTracks(self):
+        """ Toggle whether to show satellite tracks """
+
+        if not SKYFIELD_AVAILABLE:
+            print("Skyfield not available - cannot show satellite tracks.")
+            return
+             
+        self.show_sattracks = not self.show_sattracks
+        print(f"Satellite tracks: {self.show_sattracks}")
+        
+        if self.show_sattracks:
+            self.loadSatelliteTracks()
+        else:
+            # Will clear if self.show_sattracks is False
+            self.drawSatelliteTracks()
+
     def toggleShowPicks(self):
         """ Toggle whether to show the picks for manualreduction """
 
@@ -6436,11 +6515,14 @@ class PlateTool(QtWidgets.QMainWindow):
 
         if update:
             self.updateStars()
+            self.drawPhotometryColoring()
+
             self.tab.param_manager.updatePlatepar()
             self.updateLeftLabels()
 
     def savePlatepar(self):
         """  Save platepar to a file """
+
         # If the platepar is new, save it to the working directory
         if (not self.platepar_file) or (not os.path.isfile(self.platepar_file)):
             self.platepar_file = os.path.join(self.dir_path, self.config.platepar_name)
@@ -6940,8 +7022,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         for i in range(img_crop.shape[0]):
             for j in range(img_crop.shape[1]):
-                i_rel = i - img_crop.shape[0] / 2
-                j_rel = j - img_crop.shape[1] / 2
+                i_rel = i - img_crop.shape[0]/2
+                j_rel = j - img_crop.shape[1]/2
                 pix_dist = math.sqrt(i_rel**2 + j_rel**2)
 
                 if pix_dist <= self.star_aperture_radius:
@@ -6949,8 +7031,8 @@ class PlateTool(QtWidgets.QMainWindow):
                     if net_flux > 0:
                         dx = i - x_centroid_crop
                         dy = j - y_centroid_crop
-                        moment_x += net_flux * dx**2
-                        moment_y += net_flux * dy**2
+                        moment_x += net_flux*dx**2
+                        moment_y += net_flux*dy**2
                         total_flux += net_flux
 
         # Compute sigma and FWHM
@@ -6962,10 +7044,10 @@ class PlateTool(QtWidgets.QMainWindow):
             sigma_y = math.sqrt(moment_y/total_flux)
 
             # Compute the circular sigma
-            sigma = math.sqrt((moment_x + moment_y) / (2 * total_flux))
+            sigma = math.sqrt((moment_x + moment_y)/(2*total_flux))
 
             # Compute a circular FWHM
-            fwhm = 2.355 * sigma
+            fwhm = 2.355*sigma
 
         ######################################################################################################
 
@@ -8352,6 +8434,344 @@ class PlateTool(QtWidgets.QMainWindow):
             print('Platepar applied to manual picks!')
 
 
+    def loadSatelliteTracks(self):
+        """ Calculates satellite tracks for the current time and location. """
+        
+        if not self.show_sattracks or not SKYFIELD_AVAILABLE:
+            return
+
+        if self.platepar is None:
+            return
+
+        print("Loading satellite tracks...")
+        
+        # Get location from Platepar
+        lat = self.platepar.lat
+        lon = self.platepar.lon
+        elev = self.platepar.elev
+        
+        # Determine time range
+        t_start = None
+        t_end = None
+        
+        try:
+            # Use manually provided start time if available
+            if hasattr(self, 'beginning_time') and self.beginning_time is not None:
+                t_start = self.beginning_time
+                if t_start.tzinfo is None:
+                    t_start = t_start.replace(tzinfo=datetime.timezone.utc)
+                  
+                # Determine end time from total frames and FPS, or fallback
+                if hasattr(self, 'img_handle') and hasattr(self.img_handle, 'total_frames') and hasattr(self.img_handle, 'fps') and self.img_handle.fps > 0:
+                    duration = self.img_handle.total_frames/self.img_handle.fps
+                    t_end = t_start + datetime.timedelta(seconds=duration)
+                else:
+                    t_end = t_start + datetime.timedelta(seconds=60)
+
+            # Use current frame time as start
+            elif hasattr(self, 'img_handle'):
+                  
+                # Get the time of the first frame
+                t_start = self.img_handle.currentFrameTime(frame_no=0, dt_obj=True)
+                  
+                # Ensure timezone is UTC
+                if t_start.tzinfo is None:
+                    t_start = t_start.replace(tzinfo=datetime.timezone.utc)
+
+                # Determine end time from total frames and FPS
+                if hasattr(self.img_handle, 'total_frames') and hasattr(self.img_handle, 'fps') and self.img_handle.fps > 0:
+                    duration = self.img_handle.total_frames/self.img_handle.fps
+                    t_end = t_start + datetime.timedelta(seconds=duration)
+                else:
+                    # Fallback
+                    t_end = t_start + datetime.timedelta(seconds=60)
+
+            elif hasattr(self, 'current_time'):
+                t_start = self.current_time
+                if t_start.tzinfo is None:
+                    t_start = t_start.replace(tzinfo=datetime.timezone.utc)
+                t_end = t_start + datetime.timedelta(seconds=60)
+
+        except Exception as e:
+            print(f"Error determining time for satellites: {e}")
+
+        if t_start is None:
+            print("Could not determine start time for satellite tracks.")
+            return
+
+        if self.tle_file and os.path.exists(self.tle_file):
+             
+            tle_path_to_load = self.tle_file
+             
+            # If directory, find the best file
+            if os.path.isdir(self.tle_file):
+                tle_path_to_load = findClosestTLEFile(self.tle_file, t_start)
+             
+            if tle_path_to_load:
+                print(f"Loading TLEs from file: {tle_path_to_load}")
+                try:
+                    sats = loadRobustTLEs(tle_path_to_load)
+                except Exception as e:
+                    print(f"Error loading TLE file: {e}")
+                    return
+            else:
+                # If None returned or path was bad, fallback to standard download/cache
+                cache_dir = os.path.join(getRmsRootDir(), ".skyfield_cache")
+                sats = loadTLEs(cache_dir, max_age_hours=24)
+        else:
+            cache_dir = os.path.join(getRmsRootDir(), ".skyfield_cache")
+            sats = loadTLEs(cache_dir, max_age_hours=24)
+        
+        if not sats:
+            return
+             
+        predictor = SatellitePredictor(lat, lon, elev, t_start, t_end)
+        
+        # FOV Polygon
+        w = self.platepar.X_res
+        h = self.platepar.Y_res
+        
+        jd = datetime2JD(t_start)
+        
+        # Generate FOV polygon by sampling edges
+        w = self.platepar.X_res
+        h = self.platepar.Y_res
+        
+        # Check if we can use cached FOV polygon
+        fov_poly = []
+        if self.fov_poly_cache is not None and self.fov_poly_jd == jd:
+            fov_poly = self.fov_poly_cache
+            # print("Using cached FOV polygon.")
+        else:
+            # print("Computing FOV polygon...")
+            # Define edges: (x1, y1) -> (x2, y2)
+            edges = [
+                ((0, 0), (w, 0)),   # Top
+                ((w, 0), (w, h)),   # Right
+                ((w, h), (0, h)),   # Bottom
+                ((0, h), (0, 0))    # Left
+            ]
+            
+            samples_per_side = 10
+            
+            try:
+                for (x_start, y_start), (x_end, y_end) in edges:
+                    xs = np.linspace(x_start, x_end, samples_per_side, endpoint=False)
+                    ys = np.linspace(y_start, y_end, samples_per_side, endpoint=False)
+                    
+                    # Prepare inputs
+                    n = len(xs)
+                    jd_arr = [jd]*n
+                    level_arr = [1]*n
+                    
+                    _, r_arr, d_arr, _ = xyToRaDecPP(jd_arr, xs, ys, level_arr, self.platepar, jd_time=True, extinction_correction=False)
+                    
+                    for r, d in zip(r_arr, d_arr):
+                        fov_poly.append((r, d))
+                        
+                # Update cache
+                self.fov_poly_cache = fov_poly
+                self.fov_poly_jd = jd
+                
+            except Exception as e:
+                print(f"Error computing FOV polygon: {e}")
+                return
+
+        try:
+            self.satellite_tracks = predictor.getSatelliteTracks(self.platepar, fov_poly, sats)
+            print(f"Computed {len(self.satellite_tracks)} satellite tracks.")
+            
+            # Print details to console (matching CLI output)
+            print("-"*60)
+            print(f"Time Start (SkyFit2): {t_start}")
+            print(f"Location: Lat={self.platepar.lat:.4f}, Lon={self.platepar.lon:.4f}, Elev={self.platepar.elev:.1f}m")
+            print("-"*60)
+            
+            for track in self.satellite_tracks:
+                name = track['name']
+                x = track['x']
+                y = track['y']
+                ra = track['ra']
+                dec = track['dec']
+                
+                if len(x) > 0:
+                    x1, x2 = x[0], x[-1]
+                    y1, y2 = y[0], y[-1]
+                    r1, r2 = ra[0], ra[-1]
+                    d1, d2 = dec[0], dec[-1]
+                    
+                    print(f"{name}")
+                    print(f"      {'begin':>10}, {'end':>10}")
+                    print(f"ra    = {r1:10.4f}, {r2:10.4f}")
+                    print(f"dec   = {d1:10.4f}, {d2:10.4f}")
+                    print(f"x     = {x1:10.2f}, {x2:10.2f}")
+                    print(f"y     = {y1:10.2f}, {y2:10.2f}")
+                    print("-"*60)
+
+            self.drawSatelliteTracks()
+            
+        except Exception as e:
+            print(f"Error computing satellite tracks: {e}")
+            traceback.print_exc()
+
+    def toggleShowSatTracks(self):
+        """ Toggle whether to show satellite tracks. """
+
+        self.show_sattracks = not self.show_sattracks
+        self.tab.settings.updateShowSatTracks()
+        
+        if self.show_sattracks and not self.satellite_tracks:
+            if SKYFIELD_AVAILABLE:
+                self.loadSatelliteTracks()
+            else:
+                print("Cannot load satellite tracks: Skyfield not available.")
+                self.show_sattracks = False
+                self.tab.settings.updateShowSatTracks()
+                return
+
+        self.drawSatelliteTracks()
+
+    def loadTLEFileDialog(self):
+        """ Opens a file dialog to choose a TLE file and loads it. """
+        
+        # Use directory of current TLE file if available, else CWD
+        init_dir = os.getcwd()
+        if self.tle_file:
+            init_dir = os.path.dirname(self.tle_file)
+
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Select TLE File",
+            init_dir,
+            "Text Files (*.txt);;TLE Files (*.tle);;All Files (*)"
+        )
+
+        if file_path:
+            self.tle_file = file_path
+            
+            # Update label
+            self.tab.settings.updateTLELabel(os.path.basename(self.tle_file))
+            
+            # Force enable tracks if they were off
+            if not self.show_sattracks:
+                self.show_sattracks = True
+                self.tab.settings.updateShowSatTracks()
+            
+            # Reload tracks
+            if SKYFIELD_AVAILABLE:
+                self.loadSatelliteTracks()
+                self.drawSatelliteTracks()
+            else:
+                print("Cannot load satellite tracks: Skyfield not available.")
+
+
+    def clearTLESelection(self):
+        """ Clears the custom TLE file and reloads from default/downloaded. """
+        self.tle_file = None
+        self.tab.settings.updateTLELabel("latest downloaded")
+        
+        # Ensure tracks are enabled
+        if not self.show_sattracks:
+            self.show_sattracks = True
+            self.tab.settings.updateShowSatTracks()
+             
+        if SKYFIELD_AVAILABLE:
+            self.loadSatelliteTracks()
+            self.drawSatelliteTracks()
+        else:
+            print("Cannot load satellite tracks: Skyfield not available.")
+
+    def redrawSatelliteTracks(self):
+        """ Manually re-computes satellite tracks (prediction + projection). """
+        if SKYFIELD_AVAILABLE:
+            print("Redrawing satellite tracks...")
+            self.loadSatelliteTracks()
+            self.drawSatelliteTracks()
+        else:
+            print("Cannot load satellite tracks: Skyfield not available.")
+
+    def drawSatelliteTracks(self):
+        """ Draws satellite tracks on the image. """
+        
+        # Clear existing
+        for curve in self.sat_track_curves:
+            self.img_frame.removeItem(curve)
+        for label in self.sat_track_labels:
+            self.img_frame.removeItem(label)
+        self.sat_track_curves = []
+        self.sat_track_labels = []
+
+        if not self.show_sattracks:
+            return
+
+        w = self.platepar.X_res
+        h = self.platepar.Y_res
+
+        # Margin to prevent label placement too close to edge
+        margin = 100 # pixels
+
+        # Define a list of high-contrast colors suitable for both dark and light backgrounds
+        # (R, G, B)
+        colors = [
+            (255, 0, 0),      # Red
+            (0, 255, 0),      # Green
+            (60, 100, 255),   # Lighter Blue
+            (255, 255, 0),    # Yellow
+            (255, 0, 255),    # Magenta
+            (0, 255, 255),    # Cyan
+            (255, 128, 0),    # Orange
+            (128, 0, 255),    # Purple
+        ]
+
+        for i, track in enumerate(self.satellite_tracks):
+            # Cycle through colors
+            color = colors[i % len(colors)]
+            
+            # Draw curve
+            # Thicker line (width=8), alpha=0.125 (32)
+            # Use color with alpha
+            pen_color = color + (32,)
+            pen = pg.mkPen(pen_color, width=8)
+            
+            curve = pg.PlotCurveItem(track['x'], track['y'], pen=pen, clickable=False)
+            self.img_frame.addItem(curve)
+            self.sat_track_curves.append(curve)
+            
+            # Smart label placement
+            if len(track['x']) > 0:
+                x = track['x']
+                y = track['y']
+                
+                # Default to middle point if no better point found
+                best_idx = len(x)//2
+                
+                # Try to find a point well inside the image 
+                # (margin from edges)
+                for i in range(len(x)):
+                    xi, yi = x[i], y[i]
+                    if margin < xi < (w - margin) and margin < yi < (h - margin):
+                        best_idx = i
+                        break
+                
+                label_x = x[best_idx]
+                label_y = y[best_idx]
+                
+                text = pg.TextItem(track['name'], color=color, anchor=(0, 1))
+                
+                # Increase text size by 50% and make it bold
+                font = QFont()
+                font.setBold(True)
+                
+                # Set the font size
+                base_size = 8
+                font.setPointSizeF(base_size)
+                
+                text.setFont(font)
+                
+                text.setPos(label_x, label_y)
+                self.img_frame.addItem(text)
+                self.sat_track_labels.append(text)
+
 
     def saveECSV(self):
         """ Save the picks into the GDEF ECSV standard. """
@@ -8841,6 +9261,16 @@ if __name__ == '__main__':
     arg_parser.add_argument('--flipud', action="store_true", \
                             help="Flip the image upside down. Only applied to images and videos.")
 
+    arg_parser.add_argument('--sattracks', action="store_true", \
+                            help="Show satellite tracks overlaid on the image (requires internet to download TLEs).")
+
+    arg_parser.add_argument('--tle_file', type=str, default=None,
+                            help="Path to a specific TLE file to use for satellite tracks (skips download). "
+                            "Alternatively, a directory containing TLE files can be specified. The code will"
+                            " automatically select the TLE file closest to the beginning time of the video.")
+
+
+
 
     arg_parser.add_argument('-m', '--mask', metavar='MASK_PATH', type=str,
                             help="Path to a mask file which will be applied to the star catalog")
@@ -8916,6 +9346,15 @@ if __name__ == '__main__':
 
         plate_tool.loadState(dir_path, state_name, beginning_time=beginning_time, mask=mask)
 
+        # Initialize satellite track related attributes for loaded state
+        plate_tool.show_sattracks = cml_args.sattracks
+        plate_tool.tle_file = cml_args.tle_file
+        plate_tool.satellite_tracks = []
+        plate_tool.sat_track_curves = []
+        plate_tool.sat_track_labels = []
+        if plate_tool.show_sattracks:
+            plate_tool.loadSatelliteTracks()
+
     else:
 
         # Extract the data directory path
@@ -8952,9 +9391,11 @@ if __name__ == '__main__':
 
         # Init SkyFit
         plate_tool = PlateTool(input_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
-            gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints,
-            mask=mask, nobg=cml_args.nobg, peribg=cml_args.peribg, flipud=cml_args.flipud, 
-            flatbiassub=cml_args.flatbiassub, exposure_ratio=cml_args.expratio)
+            gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints, \
+            mask=mask, nobg=cml_args.nobg, peribg=cml_args.peribg, flipud=cml_args.flipud, \
+            flatbiassub=cml_args.flatbiassub, exposure_ratio=cml_args.expratio, show_sattracks=cml_args.sattracks, \
+            tle_file=cml_args.tle_file)
+
 
 
     # Run the GUI app
