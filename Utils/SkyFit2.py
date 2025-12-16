@@ -1502,6 +1502,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.config = config
 
+        # Force the CV2 backend when SkyFit is being used
+        self.config.media_backend = 'cv2'
+
         # Store forced time of first frame
         self.beginning_time = beginning_time
 

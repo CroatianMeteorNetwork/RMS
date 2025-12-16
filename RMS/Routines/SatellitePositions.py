@@ -219,6 +219,11 @@ def loadTLEs(cache_dir, cache_file_name="active.txt",
 
 
 class SatellitePredictor:
+    
+    # Cache for ephemeris and timescale to avoid reloading
+    _eph = None
+    _ts = None
+
     def __init__(self, lat: float, lon: float, elev: float, time_begin: datetime.datetime, time_end: datetime.datetime):
         """
         Args:
@@ -234,7 +239,11 @@ class SatellitePredictor:
         self.time_begin = time_begin
         self.time_end = time_end
         
-        self.ts = load.timescale()
+        # Load timescale if not already loaded
+        if SatellitePredictor._ts is None:
+             SatellitePredictor._ts = load.timescale()
+             
+        self.ts = SatellitePredictor._ts
         self.observer = wgs84.latlon(lat, lon, elevation_m=elev)
         self.t0 = self.ts.from_datetime(time_begin.replace(tzinfo=datetime.timezone.utc))
         self.t1 = self.ts.from_datetime(time_end.replace(tzinfo=datetime.timezone.utc))
@@ -328,7 +337,7 @@ class SatellitePredictor:
                 dec_degs = dec._degrees
                 
                 # Check for Earth shadow using the DE421 ephemeris
-                if not hasattr(self, 'eph'):
+                if SatellitePredictor._eph is None:
                     
                      # Use skyfield Loader to manage cache and downloads
                      cache_dir = os.path.join(getRmsRootDir(), ".skyfield_cache")
@@ -336,10 +345,13 @@ class SatellitePredictor:
                      loader = Loader(cache_dir)
                      
                      try:
-                        self.eph = loader('de421.bsp')
+                        SatellitePredictor._eph = loader('de421.bsp')
                      except Exception as e:
                         print(f"Could not load de421.bsp: {e}. Shadow check disabled.")
-                        self.eph = None
+                        # use False to indicate "tried and failed"
+                        SatellitePredictor._eph = False
+
+                self.eph = SatellitePredictor._eph
                 
                 sunlit = np.ones(len(ra_degs), dtype=bool)
                 if self.eph:
