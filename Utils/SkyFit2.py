@@ -86,12 +86,17 @@ try:
     from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject
     from PyQt5 import QtCore
 
-    from Utils.Astra import ASTRA
+    from Utils.Astra import ASTRA, PYSWARMS_AVAILABLE
+
+    if not PYSWARMS_AVAILABLE:
+        raise ImportError("pyswarms not installed in Utils.Astra")
 
     ASTRA_IMPORTED = True
 
 except Exception as e:
     ASTRA_IMPORTED = False
+    print("ASTRA is an automated tool for picking positions of meteors.")
+    print("If you don't plan to use it, you can ignore this error message.")
     print(f'ASTRA import error: {e}')
 
 
@@ -362,7 +367,7 @@ if ASTRA_IMPORTED:
             astra_defaults = {
                 "star_thresh": "3", "min SNR": "5",
                 "P_crop": "1.5", "sigma_init (px)": "2", "sigma_max": "1.2",
-                "L_max": "1.5", "Verbose": "False", "photom_thresh" : "0.05", 
+                "L_max": "1.5", "Verbose": "False", "photom_thresh" : "0.01", 
                 "Save Animation": "False", "pick_offset" : "leading-edge"
             }
 
