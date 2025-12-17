@@ -1648,6 +1648,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.sat_track_curves = []
         self.sat_track_labels = []
         self.sat_track_arrows = []
+        self.sat_markers = []
 
         if self.show_sattracks:
              if SKYFIELD_AVAILABLE:
@@ -2734,10 +2735,12 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img_frame.height() - self.label2.boundingRect().height())
 
 
-        # F1 info label which will be shown when labels 1 and 2 are hidden
         self.label_f1.setText("F1 - Show hotkeys")
         self.label_f1.setPos(self.img_frame.width() - self.label_f1.boundingRect().width(), \
             self.img_frame.height() - self.label_f1.boundingRect().height())
+
+        # Update satellite marker position
+        self.updateSatelliteMarker()
 
 
 
@@ -8704,9 +8707,12 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img_frame.removeItem(label)
         for arrow in self.sat_track_arrows:
             self.img_frame.removeItem(arrow)
+        for marker in self.sat_markers:
+            self.img_frame.removeItem(marker)
         self.sat_track_curves = []
         self.sat_track_labels = []
         self.sat_track_arrows = []
+        self.sat_markers = []
 
         if not self.show_sattracks:
             return
@@ -8743,6 +8749,15 @@ class PlateTool(QtWidgets.QMainWindow):
             curve = pg.PlotCurveItem(track['x'], track['y'], pen=pen, clickable=False)
             self.img_frame.addItem(curve)
             self.sat_track_curves.append(curve)
+
+            # Create marker for real-time satellite position
+            marker_pen = pg.mkPen(color + (90,), width=5)
+            marker = pg.ScatterPlotItem(size=30, pen=marker_pen, brush=None, symbol='o')
+
+            # Initialize with empty points to hide it
+            marker.setData([], [])
+            self.img_frame.addItem(marker)
+            self.sat_markers.append(marker)
             
             # Draw arrows at the beginning, middle, and end
             if len(track['x']) >= 2:
@@ -8815,6 +8830,54 @@ class PlateTool(QtWidgets.QMainWindow):
                 text.setPos(label_x, label_y)
                 self.img_frame.addItem(text)
                 self.sat_track_labels.append(text)
+                
+        # Update marker positions if in manual reduction mode
+        self.updateSatelliteMarker()
+
+
+    def updateSatelliteMarker(self):
+        """ Updates the satellite marker position based on the current frame time. """
+        
+        # Only show markers in manual reduction mode
+        if self.mode != 'manualreduction':
+            for marker in self.sat_markers:
+                marker.setData([], [])
+            return
+
+        # Get current frame JD
+        current_jd = date2JD(*self.img_handle.currentFrameTime())
+        
+        print("-" * 30)
+        print(f"Frame = {self.img.img_handle.current_frame}")
+
+        for i, track in enumerate(self.satellite_tracks):
+            if i >= len(self.sat_markers):
+                break
+                
+            marker = self.sat_markers[i]
+            
+            # Interpolate position
+            
+            # Try to read the time from the track
+            times = track.get('time')
+            if times is None or len(times) < 2:
+                marker.setData([], [])
+                continue
+                
+            # Interpolate the position of the satellite based on the time and position
+            # Make sure that the satellite is visible on the track segment we calculated
+            t_min = np.min(times)
+            t_max = np.max(times)
+            if t_min <= current_jd <= t_max:
+                
+                x = np.interp(current_jd, times, track['x'])
+                y = np.interp(current_jd, times, track['y'])
+                
+                marker.setData([x], [y])
+                print(f"{track['name']:<25}: X = {x:8.2f}, Y = {y:8.2f}")
+            else:
+                marker.setData([], [])
+
 
 
     def saveECSV(self):
