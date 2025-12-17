@@ -4565,14 +4565,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.platepar.resetDistortionParameters()
                     self.first_platepar_fit = True
 
-                # If the first platepar is being made, do the fit twice
-                if self.first_platepar_fit:
-                    self.fitPickedStars()
-                    self.fitPickedStars()
-
-                else:
-                    # Otherwise, only fit the once
-                    self.fitPickedStars()
+                self.fitPickedStars()
 
                 print('Plate fitted!')
 
@@ -6273,7 +6266,7 @@ class PlateTool(QtWidgets.QMainWindow):
         QtWidgets.QApplication.processEvents()
 
         try:
-            self.platepar.fitAstrometry(
+            ransac_result = self.platepar.fitAstrometry(
                 jd, img_stars_arr, self.catalog_stars,
                 first_platepar_fit=True,
                 use_nn_cost=True
@@ -6284,25 +6277,19 @@ class PlateTool(QtWidgets.QMainWindow):
             print("  NN fit failed: {} - falling back to astrometry.net".format(str(e)))
             return False
 
-        # Populate paired_stars from NN matches for visualization
+        # Populate paired_stars directly from RANSAC matched pairs
         self.paired_stars = PairedStars()
 
-        # Re-project catalog stars with final platepar
-        _, catalog_stars_fov = self.filterCatalogStarsInsideFOV(self.catalog_stars)
-        catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(
-            catalog_stars_fov, jd, self.platepar)
-
-        # Match detected stars to catalog
-        for i in range(len(det_x)):
-            dist = np.sqrt((catalog_x - det_x[i])**2 + (catalog_y - det_y[i])**2)
-            min_idx = np.argmin(dist)
-            if dist[min_idx] < match_radius:
-                cat_star = catalog_stars_fov[min_idx]
+        if ransac_result is not None:
+            img_stars_matched, catalog_matched = ransac_result
+            for i in range(len(img_stars_matched)):
+                img_x, img_y, img_intens = img_stars_matched[i]
+                cat_star = catalog_matched[i]
                 sky_obj = CatalogStar(cat_star[0], cat_star[1], cat_star[2])
                 self.paired_stars.addPair(
-                    det_x[i], det_y[i],
-                    detected_stars[i, 2] if detected_stars.shape[1] > 2 else 2.5,  # FWHM
-                    det_intens[i],
+                    img_x, img_y,
+                    2.5,  # Default FWHM
+                    img_intens,
                     sky_obj
                 )
 
@@ -6741,7 +6728,6 @@ class PlateTool(QtWidgets.QMainWindow):
             QtWidgets.QApplication.processEvents()
             self.first_platepar_fit = True
             self.fitPickedStars()
-            self.fitPickedStars()  # Do twice like Ctrl+Z does for first fit
 
             # Update the display
             self.updateStars()

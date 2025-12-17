@@ -1211,18 +1211,23 @@ class Platepar(object):
                         # Update current outlier mask for next iteration's exclusion
                         current_outlier_mask = iteration_outliers
 
-                        total_cost = np.sum(nn_seps**2)
-                        if total_cost < best_cost:
-                            best_cost = total_cost
+                        # RMSE in arcminutes on INLIERS only (nn_seps is in radians)
+                        inlier_seps = nn_seps[~iteration_outliers]
+                        if len(inlier_seps) > 0:
+                            rmse_arcmin = np.degrees(np.sqrt(np.mean(inlier_seps**2))) * 60
+                        else:
+                            rmse_arcmin = np.inf
+                        if rmse_arcmin < best_cost:
+                            best_cost = rmse_arcmin
                             best_res = res
 
                         dist_label = "radial5-odd" if iteration >= switch_iter else "radial3-odd"
                         # Debug: show RA/Dec at each iteration
                         iter_ra = (360 * res.x[0]) % 360
                         iter_dec = -90 + (90 * res.x[1] + 90) % 180.000001
-                        print("      Iter {}: {} (w={}) fit on {}, {} outliers, cost={:.6f}, RA={:.2f} Dec={:.2f}".format(
+                        print("      Iter {}: {} (w={}) fit on {}, {} outliers, RMSE={:.2f}', RA={:.2f} Dec={:.2f}".format(
                             iteration + 1, dist_label, weight, len(subset_indices),
-                            np.sum(iteration_outliers), total_cost, iter_ra, iter_dec))
+                            np.sum(iteration_outliers), rmse_arcmin, iter_ra, iter_dec))
 
                     # Outlier mask: positive score = more outlier votes than inlier votes
                     # Max possible score: 7*1 + 7*2 = 7+14 = 21 (all outlier)
@@ -1279,8 +1284,8 @@ class Platepar(object):
                     self.fitAstrometry(jd, img_stars_clean, matched_catalog,
                                        first_platepar_fit=True, use_nn_cost=False)
 
-                    # Return early - recursive call already set all platepar params
-                    return
+                    # Return the actual matched pairs from RANSAC
+                    return (img_stars_clean, matched_catalog)
                 else:
                     res = scipy.optimize.minimize(
                         cost_func,
