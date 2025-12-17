@@ -6514,7 +6514,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateLeftLabels()
         self.updateStars()
         self.drawPhotometryColoring()
-        self.tab.setCurrentIndex(0)
         QtWidgets.QApplication.processEvents()
 
         # Ask user if they want to continue with NN refinement
