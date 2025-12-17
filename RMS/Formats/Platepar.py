@@ -1021,7 +1021,10 @@ class Platepar(object):
                     cost_func = _calcSkyResidualsAstroAndDistortionRadial
 
                 # Fit the radial distortion - the X polynomial is used to store the fit parameters
-                opt_options = {'maxiter': 10000, 'adaptive': True}
+                # Tiered tolerances: RANSAC uses looser tolerances, final fit uses tighter
+                opt_options_final = {'maxiter': 5000, 'fatol': 1e-8, 'adaptive': True}
+                opt_options_ransac_r3 = {'maxiter': 700, 'fatol': 1e-5, 'adaptive': True}  # radial3-odd: rough
+                opt_options_ransac_r5 = {'maxiter': 1000, 'fatol': 1e-7, 'adaptive': True}  # radial5-odd
 
                 if use_nn_cost:
                     # Two-stage RANSAC-style outlier detection with radial-weighted threshold
@@ -1090,8 +1093,11 @@ class Platepar(object):
 
                     # Track current iteration's outliers - exclude from next iteration's fit
                     current_outlier_mask = np.zeros(n_stars, dtype=bool)
+                    prev_outlier_mask = None
+                    stable_count = 0  # Consecutive iterations with unchanged outlier mask
 
-                    for iteration in range(total_iters):
+                    iteration = 0
+                    while iteration < total_iters:
                         # Compute weight for this iteration - radial5-odd counts more
                         if iteration < switch_iter:
                             weight = 1  # radial3-odd phase
@@ -1162,11 +1168,18 @@ class Platepar(object):
                                  (cat_y >= 0) & (cat_y < self.Y_res)
                         catalog_stars_fov = catalog_stars[in_fov]
 
+                        # Use tiered tolerances: looser for radial3-odd, tighter for radial5-odd
+                        ransac_opts = opt_options_ransac_r5 if iteration >= switch_iter else opt_options_ransac_r3
                         res = scipy.optimize.minimize(
                             cost_func, start_params,
                             args=(self, jd, catalog_stars_fov, img_stars_subset),
-                            method='Nelder-Mead', options=opt_options,
+                            method='Nelder-Mead', options=ransac_opts,
                         )
+
+                        # Debug: show optimizer exit reason
+                        exit_reason = "maxiter" if res.nit >= ransac_opts['maxiter'] else "converged"
+                        print("        opt: {} iters, {} fev, {} (fatol={})".format(
+                            res.nit, res.nfev, exit_reason, ransac_opts['fatol']))
 
                         # Score on ALL stars
                         pp_temp = copy.deepcopy(self)
@@ -1228,6 +1241,26 @@ class Platepar(object):
                         print("      Iter {}: {} (w={}) fit on {}, {} outliers, RMSE={:.2f}', RA={:.2f} Dec={:.2f}".format(
                             iteration + 1, dist_label, weight, len(subset_indices),
                             np.sum(iteration_outliers), rmse_arcmin, iter_ra, iter_dec))
+
+                        # Early exit: if outlier mask unchanged for 2 consecutive iterations within phase
+                        if prev_outlier_mask is not None and np.array_equal(iteration_outliers, prev_outlier_mask):
+                            stable_count += 1
+                            if stable_count >= 2:
+                                if iteration < switch_iter:
+                                    # In radial3-odd phase: skip to radial5-odd phase
+                                    print("      -> Outliers stable for 2 iterations, skipping to radial5-odd")
+                                    iteration = switch_iter  # Jump to start of radial5-odd
+                                    stable_count = 0  # Reset for radial5-odd phase
+                                    prev_outlier_mask = None  # Reset to avoid false stability detection
+                                    continue
+                                else:
+                                    # In radial5-odd phase: exit entirely
+                                    print("      -> Outliers stable for 2 iterations, exiting RANSAC")
+                                    break
+                        else:
+                            stable_count = 0
+                        prev_outlier_mask = iteration_outliers.copy()
+                        iteration += 1
 
                     # Outlier mask: positive score = more outlier votes than inlier votes
                     # Max possible score: 7*1 + 7*2 = 7+14 = 21 (all outlier)
@@ -1292,7 +1325,7 @@ class Platepar(object):
                         p0,
                         args=(self, jd, catalog_stars, img_stars),
                         method='Nelder-Mead',
-                        options=opt_options,
+                        options=opt_options_final,
                     )
 
                 # Update fitted astrometric parameters (Unnormalize the pointing parameters)
