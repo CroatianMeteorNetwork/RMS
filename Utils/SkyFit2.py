@@ -8023,9 +8023,12 @@ class PlateTool(QtWidgets.QMainWindow):
     def showAstrometryFitPlots(self):
         """ Show window with astrometry fit details. """
 
-        # Extract paired catalog stars and image coordinates separately
-        img_stars = np.array(self.paired_stars.imageCoords())
-        catalog_stars = np.array(self.paired_stars.skyCoords())
+        # Extract paired catalog stars and image coordinates separately (with SNR and saturation)
+        all_coords = list(self.paired_stars.allCoords())
+        img_stars = np.array([img_c[:3] for img_c, _ in all_coords])  # x, y, fwhm
+        catalog_stars = np.array([sky_c for _, sky_c in all_coords])
+        snr_data = [img_c[4] for img_c, _ in all_coords]  # SNR is index 4
+        saturated_data = [img_c[5] for img_c, _ in all_coords]  # Saturated is index 5
 
         # Get the Julian date of the image that's being fit
         jd = date2JD(*self.img_handle.currentTime())
@@ -8048,6 +8051,10 @@ class PlateTool(QtWidgets.QMainWindow):
         y_residuals = []
         radius_residuals = []
         skyradius_residuals = []
+        snr_list = []
+        mag_list = []
+        saturated_list = []
+        total_error_px = []  # Total error in pixels for SNR/mag plots
 
         # Get image time and Julian date
         img_time = self.img_handle.currentTime()
@@ -8057,8 +8064,8 @@ class PlateTool(QtWidgets.QMainWindow):
         ra_centre, dec_centre = self.computeCentreRADec()
 
         # Calculate the distance and the angle between each pair of image positions and catalog predictions
-        for star_no, (cat_x, cat_y, cat_coords, img_c) in enumerate(zip(catalog_x, catalog_y, catalog_stars, \
-                                                                        img_stars)):
+        for star_no, (cat_x, cat_y, cat_coords, img_c, snr, saturated) in enumerate(zip(
+                catalog_x, catalog_y, catalog_stars, img_stars, snr_data, saturated_data)):
             # Compute image coordinates
             img_x, img_y, _ = img_c
             img_radius = np.hypot(img_x - self.platepar.X_res/2, img_y - self.platepar.Y_res/2)
@@ -8105,11 +8112,21 @@ class PlateTool(QtWidgets.QMainWindow):
             azim_residuals.append(((azim_cat - azim_img + 180)%360 - 180)*np.cos(np.radians(elev_cat)))
             elev_residuals.append(elev_cat - elev_img)
 
-        # Init astrometry fit window
+            # Collect SNR, magnitude, saturation data
+            snr_list.append(snr)
+            mag_list.append(cat_coords[2])  # Catalog magnitude
+            saturated_list.append(saturated)
+
+            # Compute total error in pixels (distance between catalog and image positions)
+            total_error_px.append(np.hypot(cat_x - img_x, cat_y - img_y))
+
+        # Init astrometry fit window (3 rows: angular, pixel, SNR/mag)
         fig_a, (
             (ax_azim, ax_elev, ax_skyradius),
-            (ax_x, ax_y, ax_radius)
-        ) = plt.subplots(ncols=3, nrows=2, facecolor=None, figsize=(12, 6))
+            (ax_x, ax_y, ax_radius),
+            (ax_snr, ax_mag, ax_empty)
+        ) = plt.subplots(ncols=3, nrows=3, facecolor=None, figsize=(12, 9))
+        ax_empty.axis('off')  # Hide the empty subplot
 
         # Set figure title
         try:
@@ -8200,16 +8217,45 @@ class PlateTool(QtWidgets.QMainWindow):
         ax_radius.set_ylabel("Radius error (px)")
         ax_radius.set_xlim([0, np.hypot(self.platepar.X_res/2, self.platepar.Y_res/2)])
 
+        # Plot error vs SNR
+        ax_snr.scatter(snr_list, total_error_px, s=2, c='k', zorder=3)
+
+        ax_snr.grid()
+        ax_snr.set_xlabel("S/N")
+        ax_snr.set_ylabel("Error (px)")
+        if len(snr_list) > 0:
+            ax_snr.set_xlim([0, max(snr_list) * 1.1])
+
+        # Plot error vs magnitude (saturated stars in red)
+        mag_arr = np.array(mag_list)
+        sat_arr = np.array(saturated_list)
+        err_arr = np.array(total_error_px)
+
+        # Plot non-saturated stars in black
+        if np.sum(~sat_arr) > 0:
+            ax_mag.scatter(mag_arr[~sat_arr], err_arr[~sat_arr], s=2, c='k', zorder=3, label='Normal')
+        # Plot saturated stars in red
+        if np.sum(sat_arr) > 0:
+            ax_mag.scatter(mag_arr[sat_arr], err_arr[sat_arr], s=2, c='r', zorder=4, label='Saturated')
+            ax_mag.legend(loc='upper right', fontsize=8, markerscale=3)
+
+        ax_mag.grid()
+        ax_mag.set_xlabel("Magnitude")
+        ax_mag.set_ylabel("Error (px)")
+
         # Equalize Y limits, make them integers, and set a minimum range of 1 px
         x_max_ylim = np.max(np.abs(ax_x.get_ylim()))
         y_max_ylim = np.max(np.abs(ax_y.get_ylim()))
         radius_max_ylim = np.max(np.abs(ax_radius.get_ylim()))
-        max_ylim = np.ceil(np.max([x_max_ylim, y_max_ylim, radius_max_ylim]))
-        if max_ylim < 1:
-            max_ylim = 1.0
-        ax_x.set_ylim([-max_ylim, max_ylim])
-        ax_y.set_ylim([-max_ylim, max_ylim])
-        ax_radius.set_ylim([-max_ylim, max_ylim])
+        snr_max_ylim = np.max(total_error_px) if len(total_error_px) > 0 else 1.0
+        max_ylim_px = np.ceil(np.max([x_max_ylim, y_max_ylim, radius_max_ylim, snr_max_ylim]))
+        if max_ylim_px < 1:
+            max_ylim_px = 1.0
+        ax_x.set_ylim([-max_ylim_px, max_ylim_px])
+        ax_y.set_ylim([-max_ylim_px, max_ylim_px])
+        ax_radius.set_ylim([-max_ylim_px, max_ylim_px])
+        ax_snr.set_ylim([0, max_ylim_px])
+        ax_mag.set_ylim([0, max_ylim_px])
 
         fig_a.tight_layout()
         fig_a.show()
