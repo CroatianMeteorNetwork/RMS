@@ -1645,6 +1645,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.fov_poly_cache = None
         self.fov_poly_jd = None
 
+        self.sat_track_curves = []
+        self.sat_track_labels = []
+        self.sat_track_arrows = []
+
         if self.show_sattracks:
              if SKYFIELD_AVAILABLE:
                 print("Satellite tracks enabled.")
@@ -8698,8 +8702,11 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img_frame.removeItem(curve)
         for label in self.sat_track_labels:
             self.img_frame.removeItem(label)
+        for arrow in self.sat_track_arrows:
+            self.img_frame.removeItem(arrow)
         self.sat_track_curves = []
         self.sat_track_labels = []
+        self.sat_track_arrows = []
 
         if not self.show_sattracks:
             return
@@ -8736,6 +8743,43 @@ class PlateTool(QtWidgets.QMainWindow):
             curve = pg.PlotCurveItem(track['x'], track['y'], pen=pen, clickable=False)
             self.img_frame.addItem(curve)
             self.sat_track_curves.append(curve)
+            
+            # Draw arrows at the beginning, middle, and end
+            if len(track['x']) >= 2:
+                
+                # Indices for arrows
+                arrow_indices = [0, len(track['x'])//2, -1]
+                
+                # Filter indices to ensure they are distinct?
+                # For very short tracks start/mid/end might overlap, but that's okay.
+                for idx in arrow_indices:
+                    
+                    # Normalize index
+                    if idx < 0:
+                        idx = len(track['x']) + idx
+
+                    # Calculate position
+                    x_pos = track['x'][idx]
+                    y_pos = track['y'][idx]
+                    
+                    # Calculate direction
+                    # If at end, look back to previous point
+                    if idx == len(track['x']) - 1:
+                        dx = track['x'][idx] - track['x'][idx-1]
+                        dy = track['y'][idx] - track['y'][idx-1]
+                    else:
+                        dx = track['x'][idx+1] - track['x'][idx]
+                        dy = track['y'][idx+1] - track['y'][idx]
+                        
+                    # Calculate angle
+                    angle_deg = np.degrees(np.arctan2(dy, dx)) + 180
+                    
+                    arrow = pg.ArrowItem(pos=(x_pos, y_pos), angle=angle_deg, headLen=40, tipAngle=40, tailLen=0, 
+                                         brush=pg.mkBrush(pen_color), pen=pg.mkPen(pen_color))
+                    
+                    self.img_frame.addItem(arrow)
+                    self.sat_track_arrows.append(arrow)
+
             
             # Smart label placement
             if len(track['x']) > 0:
