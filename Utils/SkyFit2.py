@@ -8828,6 +8828,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 text.setFont(font)
                 
                 text.setPos(label_x, label_y)
+                # Store original position for restoring later
+                text.orig_pos = (label_x, label_y)
+                
                 self.img_frame.addItem(text)
                 self.sat_track_labels.append(text)
                 
@@ -8877,6 +8880,30 @@ class PlateTool(QtWidgets.QMainWindow):
                 print(f"{track['name']:<25}: X = {x:8.2f}, Y = {y:8.2f}")
             else:
                 marker.setData([], [])
+
+            # Update label position so it follows the marker
+            if i < len(self.sat_track_labels):
+                label = self.sat_track_labels[i]
+                
+                # Check if marker is visible and inside the image
+                marker_visible = False
+                if t_min <= current_jd <= t_max:
+                    
+                    # Check if inside the image (with some margin?)
+                    # x, y are already computed above
+                    w = self.platepar.X_res
+                    h = self.platepar.Y_res
+                    
+                    if 0 <= x <= w and 0 <= y <= h:
+                        marker_visible = True
+                        
+                if marker_visible:
+                    # Move label to marker
+                    label.setPos(x, y)
+                else:
+                    # Restore original position
+                    if hasattr(label, 'orig_pos'):
+                        label.setPos(*label.orig_pos)
 
 
 
