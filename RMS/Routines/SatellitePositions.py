@@ -410,9 +410,9 @@ class SatellitePredictor:
                     
 
 
-                    # If at least 2 points are within the image
                     if np.sum(inside_mask) >= 2:
                         # Clip the track to only include points inside the FOV
+                        time_clipped = jds_utc_subset[inside_mask]
                         x_clipped = x_all[inside_mask]
                         y_clipped = y_all[inside_mask]
                         ra_clipped = ra_all[inside_mask]
@@ -420,10 +420,12 @@ class SatellitePredictor:
 
                         visible_tracks.append({
                             "name": sat.name,
+                            "time": time_clipped,
                             "x": x_clipped,
                             "y": y_clipped,
                             "ra": ra_clipped,
                             "dec": dec_clipped
+                            
                         })
                         
             except Exception as e:
