@@ -8242,6 +8242,7 @@ class PlateTool(QtWidgets.QMainWindow):
         ax_mag.grid()
         ax_mag.set_xlabel("Magnitude")
         ax_mag.set_ylabel("Error (px)")
+        ax_mag.invert_xaxis()  # Bright stars (low mag) on right, faint (high mag) on left
 
         # Equalize Y limits, make them integers, and set a minimum range of 1 px
         x_max_ylim = np.max(np.abs(ax_x.get_ylim()))
