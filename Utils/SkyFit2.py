@@ -3695,6 +3695,10 @@ class PlateTool(QtWidgets.QMainWindow):
             del dic['sat_track_curves']
         if 'sat_track_labels' in dic:
             del dic['sat_track_labels']
+        if 'sat_track_arrows' in dic:
+            del dic['sat_track_arrows']
+        if 'sat_markers' in dic:
+            del dic['sat_markers']
 
         # if os.path.isdir(self.input_path):
         #     real_input_path = os.path.join(self.input_path, img_name)
