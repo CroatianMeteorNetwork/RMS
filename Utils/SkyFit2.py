@@ -8223,8 +8223,9 @@ class PlateTool(QtWidgets.QMainWindow):
         ax_snr.grid()
         ax_snr.set_xlabel("S/N")
         ax_snr.set_ylabel("Error (px)")
-        if len(snr_list) > 0:
-            ax_snr.set_xlim([0, max(snr_list) * 1.1])
+        ax_snr.set_xscale('log')
+        if len(snr_list) > 0 and min(snr_list) > 0:
+            ax_snr.set_xlim([min(snr_list) * 0.8, max(snr_list) * 1.2])
 
         # Plot error vs magnitude (saturated stars in red)
         mag_arr = np.array(mag_list)
