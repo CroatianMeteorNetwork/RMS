@@ -168,11 +168,6 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
     # Get the list of files to archive
     file_list = selectFiles(config, captured_path, ff_detected)
 
-
-
-
-
-
     log.info('Generating thumbnails...')
 
     try:
