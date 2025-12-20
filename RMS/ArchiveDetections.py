@@ -291,7 +291,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
             log.info("          {}".format(f))
 
         # create a directory to hold the metadata
-        metadata_archived_path = archive_name + "_imgdata"
+        metadata_archived_path = archive_name + "_metadata"
         metadata_archive_name = archive_base + "_metadata"
         log.info("Create metadata archive in: {:s}".format(metadata_archived_path))
         log.info("bz2 name will be: {:s}".format(metadata_archive_name))
