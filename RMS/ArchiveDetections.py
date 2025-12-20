@@ -276,7 +276,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         imgdata_archive_name = archive_base + "_imgdata"
 
         log.info("Create imgdata archive in: {:s}".format(imgdata_archived_path))
-        log.info("bz2 name will be: {s}".format(imgdata_archive_name))
+        log.info("bz2 name will be: {:s}".format(imgdata_archive_name))
         imgdata_archive_name = archiveDir(captured_path, imgdata_set, imgdata_archived_path,
                                           imgdata_archive_name, extra_files=extra_files)
         log.info("Imgdata :")
