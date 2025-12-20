@@ -1511,7 +1511,7 @@ class EventMonitor(multiprocessing.Process):
             if len(platepar_file_list) > 0:
                 platepar_file = platepar_file_list[0]
             else:
-                platepar_file = os.path.join(self.syscon.rms_root_dir, self.syscon.platepar_name)
+                platepar_file = os.path.join(self.syscon.config_file_path, self.syscon.platepar_name)
                 pass
 
         return platepar_file
