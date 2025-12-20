@@ -265,6 +265,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         archive_name = archive_base + "_detected"
 
         # Archive the files
+        log.info("Create detected archive in: {:s} containing {} files".format(archived_path, len(file_list)))
         archive_name = archiveDir(captured_path, file_list, archived_path, archive_name, \
             extra_files=extra_files)
 
@@ -277,7 +278,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         imgdata_archived_path = archived_path + "_imgdata"
         imgdata_archive_name = archive_base + "_imgdata"
 
-        log.info("Create imgdata archive in: {:s}".format(imgdata_archived_path))
+        log.info("Create imgdata archive in: {:s} containing {} files".format(imgdata_archived_path, len(imgdata_set)))
         log.info("bz2 name will be: {:s}".format(imgdata_archive_name))
         imgdata_archive_name = archiveDir(captured_path, imgdata_set, imgdata_archived_path,
                                           imgdata_archive_name, extra_files=extra_files)
@@ -292,7 +293,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         log.info("Archived path {}".format(archived_path))
         metadata_archived_path = archived_path + "_metadata"
         metadata_archive_name = archive_base + "_metadata"
-        log.info("Create metadata archive in: {:s}".format(metadata_archived_path))
+        log.info("Create metadata archive in: {:s} containing {} files".format(metadata_archived_path, len(metadata_set)))
         log.info("bz2 name will be: {:s}".format(metadata_archive_name))
         metadata_archive_name = archiveDir(captured_path, metadata_set, metadata_archived_path,
                                            metadata_archive_name, extra_files=extra_files)
