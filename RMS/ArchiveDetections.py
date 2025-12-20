@@ -275,6 +275,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         imgdata_set = (set([item for item in file_list if item.startswith("FF") and item.endswith(".fits")]) |
                        set([item for item in file_list if item.startswith("FR") and item.endswith(".bin")]))
 
+        # create a directory to hold to the imgdata
         imgdata_archived_path = archive_name + "_imgdata"
         log.info("Create imgdata archive in: {:s}".format(imgdata_archive_path))
         imgdata_archive_name = archiveDir(captured_path, imgdata_set, imgdata_archived_path,
@@ -290,6 +291,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         for f in metadata_set:
             log.info("          {}".format(f))
 
+        # create a directory to hold the metadata
         metadata_archived_path = archive_name + "_imgdata"
         log.info("Create imgdata archive in: {:s}".format(metadata_archived_path))
         metadata_archive_name = archiveDir(captured_path, metadata_set, metadata_archived_path,
