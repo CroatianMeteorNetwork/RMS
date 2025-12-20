@@ -274,12 +274,8 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
                        set([item for item in file_list if item.startswith("FR") and item.endswith(".bin")]))
 
         # create a directory to hold the imgdata files
-        log.info("Archived path {}".format(archived_path))
         imgdata_archived_path = archived_path + "_imgdata"
         imgdata_archive_name = archive_base + "_imgdata"
-
-        log.info("Create imgdata archive in: {:s} containing {} files".format(imgdata_archived_path, len(imgdata_set)))
-        log.info("bz2 name will be: {:s}".format(imgdata_archive_name))
         imgdata_archive_name = archiveDir(captured_path, imgdata_set, imgdata_archived_path,
                                           imgdata_archive_name, extra_files=extra_files)
         shutil.rmtree(imgdata_archived_path)
@@ -290,11 +286,9 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
 
         # create a directory to hold the metadata
-        log.info("Archived path {}".format(archived_path))
         metadata_archived_path = archived_path + "_metadata"
         metadata_archive_name = archive_base + "_metadata"
-        log.info("Create metadata archive in: {:s} containing {} files".format(metadata_archived_path, len(metadata_set)))
-        log.info("bz2 name will be: {:s}".format(metadata_archive_name))
+
         metadata_archive_name = archiveDir(captured_path, metadata_set, metadata_archived_path,
                                            metadata_archive_name, extra_files=extra_files)
         shutil.rmtree(metadata_archived_path)
