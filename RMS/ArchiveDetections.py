@@ -277,10 +277,18 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
         imgdata_archive_name = archiveDir(captured_path, imgdata_set, archived_path, imgdata_archive_name,
             extra_files=extra_files)
+        log.info("Imgdata :")
+        for file in imgdata_set:
+            log.info("          {}".format(f))
 
 
         # create a set which is file_list excluding all contents of imgdata_set
         metadata_set = set([item for item in file_list if item not in imgdata_set])
+
+        log.info("Metadata {}".format(metadata_set))
+        for f in metadata_set:
+            log.info("          {}".format(f))
+
 
         metadata_archive_name = archiveDir(captured_path, metadata_set, archived_path, metadata_archive_name,
             extra_files=extra_files)
