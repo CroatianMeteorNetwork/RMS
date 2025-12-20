@@ -673,15 +673,16 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 detection_results = []
 
             # Save detection to disk and archive detection
-            night_archive_dir, archive_name, _ = processNight(night_data_dir, config, \
-                detection_results=detection_results, nodetect=nodetect)
+            night_archive_dir, archive_name, imgdata_archive_name, metadata_archive_name, _ =  \
+                processNight(night_data_dir, config, detection_results=detection_results, nodetect=nodetect)
 
+            files_to_add_list = [archive_name, imgdata_archive_name, metadata_archive_name]
 
             # Put the archive up for upload
             if upload_manager is not None:
-                log.info("Adding file to upload list: %s", archive_name)
-                upload_manager.addFiles([archive_name])
-                log.info("File added.")
+                log.info("Adding files to upload list: %s", files_to_add_list)
+                upload_manager.addFiles(files_to_add_list)
+                log.info("Files added.")
 
                 # optional delay (minutes in .config, converted to seconds)
                 upload_manager.delayNextUpload(delay=60*config.upload_delay)
@@ -816,12 +817,14 @@ def processIncompleteCaptures(config, upload_manager):
         try:
 
             # Reprocess the night
-            night_archive_dir, archive_name, detector = processNight(captured_dir_path, config)
+            night_archive_dir, archive_name, imgdata_archive_name, metadata_archive_name, detector = \
+                                                        processNight(captured_dir_path, config)
 
             # Upload the archive, if upload is enabled
             if upload_manager is not None:
-                log.info("Adding file to upload list: {:s}".format(archive_name))
-                upload_manager.addFiles([archive_name])
+                files_to_add_list = [archive_name, imgdata_archive_name, metadata_archive_name]
+                log.info("Adding files to upload list: {:s}".format(files_to_add_list))
+                upload_manager.addFiles(files_to_add_list)
                 log.info("File added...")
 
             # Delete detection backup files
