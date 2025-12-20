@@ -4836,7 +4836,7 @@ if __name__ == "__main__":
     if cml_args.config is None:
         syscon = cr.parse(os.path.join(os.getcwd(),".config"))
     else:
-        syscon = cr.parse(os.path.expanduser(cml_args.config[0]))
+        syscon = cr.parse(os.path.expanduser(cml_args.config))
     # Set the web page to monitor
 
     if testIndividuals():
