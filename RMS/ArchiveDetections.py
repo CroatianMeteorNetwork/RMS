@@ -280,6 +280,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         log.info("bz2 name will be: {:s}".format(imgdata_archive_name))
         imgdata_archive_name = archiveDir(captured_path, imgdata_set, imgdata_archived_path,
                                           imgdata_archive_name, extra_files=extra_files)
+        os.unlink(imgdata_archived_path)
         log.info("Imgdata :")
         for f in imgdata_set:
             log.info("          {}".format(f))
@@ -299,7 +300,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         log.info("bz2 name will be: {:s}".format(metadata_archive_name))
         metadata_archive_name = archiveDir(captured_path, metadata_set, metadata_archived_path,
                                            metadata_archive_name, extra_files=extra_files)
-
+        os.unlink(metadata_archived_path)
         log.info("Produced archives :")
         log.info("                          {}".format(archive_name))
         log.info("                          {}".format(imgdata_archive_name))
