@@ -3029,8 +3029,7 @@ def dictMagsRaDec(config, r, d, e_jd=0, l_jd=np.inf, max_number_of_images=300, w
     """
 
     full_path_to_archived = os.path.expanduser(os.path.join(str(config.data_dir), str(config.archived_dir)))
-    full_path_to_default_platepar = os.path.join(getRmsRootDir(), config.platepar_name)
-
+    full_path_to_default_platepar = os.path.join(config.config_file_path, config.platepar_name)
 
     directories_to_search = filterDirectoriesByJD(full_path_to_archived, e_jd, l_jd)
     observation_sequence_dict = {}
