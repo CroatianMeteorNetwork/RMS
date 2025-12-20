@@ -264,7 +264,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         archive_name = archiveDir(captured_path, file_list, archived_path, archive_name, \
             extra_files=extra_files)
 
-        # create a set which is the union of the sets of FF files and FR files
+        # create the imgdata set which is the union of the sets of FF files and FR files
         imgdata_set = (set([item for item in file_list if item.startswith("FF") and item.endswith(".fits")]) |
                        set([item for item in file_list if item.startswith("FR") and item.endswith(".bin")]))
 
@@ -276,7 +276,8 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
                                           imgdata_archive_name, extra_files=extra_files)
         shutil.rmtree(imgdata_archived_path)
 
-        # create a set which is file_list excluding all contents of imgdata_set
+        # create the metadata set which is the relative complement of file_list in imgdata_set
+        # or the set of files in file_list which are not in imgdata_set
         metadata_set = set([item for item in file_list if item not in imgdata_set])
 
 
