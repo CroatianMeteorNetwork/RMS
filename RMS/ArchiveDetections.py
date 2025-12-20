@@ -2,6 +2,7 @@
 
 
 import os
+import shutil
 import sys
 import traceback
 
@@ -271,7 +272,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         imgdata_set = (set([item for item in file_list if item.startswith("FF") and item.endswith(".fits")]) |
                        set([item for item in file_list if item.startswith("FR") and item.endswith(".bin")]))
 
-        # create a directory to hold to the imgdata
+        # create a directory to hold the imgdata files
         log.info("Archived path {}".format(archived_path))
         imgdata_archived_path = archived_path + "_imgdata"
         imgdata_archive_name = archive_base + "_imgdata"
@@ -280,7 +281,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         log.info("bz2 name will be: {:s}".format(imgdata_archive_name))
         imgdata_archive_name = archiveDir(captured_path, imgdata_set, imgdata_archived_path,
                                           imgdata_archive_name, extra_files=extra_files)
-        os.unlink(imgdata_archived_path)
+        shutil.rmtree(imgdata_archived_path)
 
         # create a set which is file_list excluding all contents of imgdata_set
         metadata_set = set([item for item in file_list if item not in imgdata_set])
@@ -295,7 +296,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         log.info("bz2 name will be: {:s}".format(metadata_archive_name))
         metadata_archive_name = archiveDir(captured_path, metadata_set, metadata_archived_path,
                                            metadata_archive_name, extra_files=extra_files)
-        os.unlink(metadata_archived_path)
+        shutil.rmtree(metadata_archived_path)
 
         return archive_name, imgdata_archive_name, metadata_archive_name
 
