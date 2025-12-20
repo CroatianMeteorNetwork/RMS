@@ -275,23 +275,25 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         imgdata_set = (set([item for item in file_list if item.startswith("FF") and item.endswith(".fits")]) |
                        set([item for item in file_list if item.startswith("FR") and item.endswith(".bin")]))
 
-        imgdata_archive_name = archiveDir(captured_path, imgdata_set, archived_path, imgdata_archive_name,
-            extra_files=extra_files)
+        imgdata_archived_path = archive_name + "_imgdata"
+        log.info("Create imgdata archive in: {:s}".format(imgdata_archive_path))
+        imgdata_archive_name = archiveDir(captured_path, imgdata_set, imgdata_archived_path,
+                                          imgdata_archive_name, extra_files=extra_files)
         log.info("Imgdata :")
         for f in imgdata_set:
             log.info("          {}".format(f))
 
-
         # create a set which is file_list excluding all contents of imgdata_set
         metadata_set = set([item for item in file_list if item not in imgdata_set])
 
-        log.info("Metadata {}".format(metadata_set))
+        log.info("Metadata:")
         for f in metadata_set:
             log.info("          {}".format(f))
 
-
-        metadata_archive_name = archiveDir(captured_path, metadata_set, archived_path, metadata_archive_name,
-            extra_files=extra_files)
+        metadata_archived_path = archive_name + "_imgdata"
+        log.info("Create imgdata archive in: {:s}".format(metadata_archived_path))
+        metadata_archive_name = archiveDir(captured_path, metadata_set, metadata_archived_path,
+                                           metadata_archive_name, extra_files=extra_files)
 
         log.info("Produced archives :")
         log.info("                          {}".format(archive_name))
