@@ -2,6 +2,7 @@
 
 
 import os
+import shutil
 import sys
 import traceback
 
@@ -167,7 +168,11 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
     # Get the list of files to archive
     file_list = selectFiles(config, captured_path, ff_detected)
 
-    
+
+
+
+
+
     log.info('Generating thumbnails...')
 
     try:
@@ -254,14 +259,41 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
     if file_list:
 
         # Create the archive ZIP in the parent directory of the archive directory
-        archive_name = os.path.join(os.path.abspath(os.path.join(archived_path, os.pardir)), 
-            os.path.basename(captured_path) + '_detected')
+        archive_base = os.path.join(os.path.abspath(os.path.join(archived_path, os.pardir)),
+            os.path.basename(captured_path))
+
+        archive_name = archive_base + "_detected"
 
         # Archive the files
+        log.info("Create detected archive in: {:s} containing {} files".format(archived_path, len(file_list)))
         archive_name = archiveDir(captured_path, file_list, archived_path, archive_name, \
             extra_files=extra_files)
 
-        return archive_name
+        # create a set which is the union of the sets of FF files and FR files
+        imgdata_set = (set([item for item in file_list if item.startswith("FF") and item.endswith(".fits")]) |
+                       set([item for item in file_list if item.startswith("FR") and item.endswith(".bin")]))
+
+        # create a directory to hold the imgdata files
+        imgdata_archived_path = archived_path + "_imgdata"
+        imgdata_archive_name = archive_base + "_imgdata"
+        imgdata_archive_name = archiveDir(captured_path, imgdata_set, imgdata_archived_path,
+                                          imgdata_archive_name, extra_files=extra_files)
+        shutil.rmtree(imgdata_archived_path)
+
+        # create a set which is file_list excluding all contents of imgdata_set
+        metadata_set = set([item for item in file_list if item not in imgdata_set])
+
+
+
+        # create a directory to hold the metadata
+        metadata_archived_path = archived_path + "_metadata"
+        metadata_archive_name = archive_base + "_metadata"
+
+        metadata_archive_name = archiveDir(captured_path, metadata_set, metadata_archived_path,
+                                           metadata_archive_name, extra_files=extra_files)
+        shutil.rmtree(metadata_archived_path)
+
+        return archive_name, imgdata_archive_name, metadata_archive_name
 
     return None
 
@@ -355,7 +387,7 @@ if __name__ == "__main__":
 
     ff_detected = ['FF_CA0001_20170905_094707_004_0000000.fits', 'FF_CA0001_20170905_094716_491_0000256.fits']
 
-    archive_name = archiveDetections(captured_path, archived_path, ff_detected, config)
+    archive_name, metadata_name, imgdata_name = archiveDetections(captured_path, archived_path, ff_detected, config)
 
-    print(archive_name)
+    print(archive_name, metadata_name, imgdata_name)
 
