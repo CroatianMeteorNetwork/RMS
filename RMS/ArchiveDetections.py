@@ -291,7 +291,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
         return archive_name, imgdata_archive_name, metadata_archive_name
 
-    return None
+    return None, None, None
 
 
 def archiveFrameTimelapse(frames_root,
