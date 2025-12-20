@@ -272,6 +272,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
                        set([item for item in file_list if item.startswith("FR") and item.endswith(".bin")]))
 
         # create a directory to hold to the imgdata
+        log.info("Archived path {}".format(archived_path))
         imgdata_archived_path = archived_path + "_imgdata"
         imgdata_archive_name = archive_base + "_imgdata"
 
@@ -291,7 +292,8 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
             log.info("          {}".format(f))
 
         # create a directory to hold the metadata
-        metadata_archived_path = archive_name + "_metadata"
+        log.info("Archived path {}".format(archived_path))
+        metadata_archived_path = archived_path + "_metadata"
         metadata_archive_name = archive_base + "_metadata"
         log.info("Create metadata archive in: {:s}".format(metadata_archived_path))
         log.info("bz2 name will be: {:s}".format(metadata_archive_name))
