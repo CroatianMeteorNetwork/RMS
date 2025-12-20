@@ -265,7 +265,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         archive_name = archive_base + "_detected"
 
         # Archive the files
-        log.info("Create detected archive in: {:s} containing {} files".format(archived_path, len(file_list)))
+        log.info("Generating archive file {:s}".format(archive_name))
         archive_name = archiveDir(captured_path, file_list, archived_path, archive_name, \
             extra_files=extra_files)
 
@@ -276,6 +276,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         # create a directory to hold the imgdata files
         imgdata_archived_path = archived_path + "_imgdata"
         imgdata_archive_name = archive_base + "_imgdata"
+        log.info("Generating archive file {:s}".format(imgdata_archive_name))
         imgdata_archive_name = archiveDir(captured_path, imgdata_set, imgdata_archived_path,
                                           imgdata_archive_name, extra_files=extra_files)
         shutil.rmtree(imgdata_archived_path)
@@ -288,7 +289,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         # create a directory to hold the metadata
         metadata_archived_path = archived_path + "_metadata"
         metadata_archive_name = archive_base + "_metadata"
-
+        log.info("Generating archive file {:s}".format(metadata_archive_name))
         metadata_archive_name = archiveDir(captured_path, metadata_set, metadata_archived_path,
                                            metadata_archive_name, extra_files=extra_files)
         shutil.rmtree(metadata_archived_path)
