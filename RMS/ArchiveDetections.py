@@ -277,7 +277,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
         # create a directory to hold to the imgdata
         imgdata_archived_path = archive_name + "_imgdata"
-        log.info("Create imgdata archive in: {:s}".format(imgdata_archive_path))
+        log.info("Create imgdata archive in: {:s}".format(imgdata_archived_path))
         imgdata_archive_name = archiveDir(captured_path, imgdata_set, imgdata_archived_path,
                                           imgdata_archive_name, extra_files=extra_files)
         log.info("Imgdata :")
