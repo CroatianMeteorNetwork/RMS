@@ -268,7 +268,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
 
         # Archive the files
-        archive_name = archiveDir(captured_path, imgdata_set, archived_path, archive_name, \
+        archive_name = archiveDir(captured_path, file_list, archived_path, archive_name, \
             extra_files=extra_files)
 
         # create a set which is the union of the sets of FF files and FR files
