@@ -282,7 +282,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         log.info("bz2 name will be: {:s}".format(imgdata_archive_name))
         imgdata_archive_name = archiveDir(captured_path, imgdata_set, imgdata_archived_path,
                                           imgdata_archive_name, extra_files=extra_files)
-        #shutil.rmtree(imgdata_archived_path)
+        shutil.rmtree(imgdata_archived_path)
 
         # create a set which is file_list excluding all contents of imgdata_set
         metadata_set = set([item for item in file_list if item not in imgdata_set])
@@ -297,7 +297,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         log.info("bz2 name will be: {:s}".format(metadata_archive_name))
         metadata_archive_name = archiveDir(captured_path, metadata_set, metadata_archived_path,
                                            metadata_archive_name, extra_files=extra_files)
-        #shutil.rmtree(metadata_archived_path)
+        shutil.rmtree(metadata_archived_path)
 
         return archive_name, imgdata_archive_name, metadata_archive_name
 
