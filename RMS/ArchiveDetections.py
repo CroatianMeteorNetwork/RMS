@@ -278,7 +278,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         imgdata_archive_name = archiveDir(captured_path, imgdata_set, archived_path, imgdata_archive_name,
             extra_files=extra_files)
         log.info("Imgdata :")
-        for file in imgdata_set:
+        for f in imgdata_set:
             log.info("          {}".format(f))
 
 
