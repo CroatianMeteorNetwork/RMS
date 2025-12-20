@@ -294,7 +294,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         metadata_archived_path = archive_name + "_imgdata"
         metadata_archive_name = archive_base + "_metadata"
         log.info("Create metadata archive in: {:s}".format(metadata_archived_path))
-        log.info("bz2 name will be: {s}".format(metadata_archive_name))
+        log.info("bz2 name will be: {:s}".format(metadata_archive_name))
         metadata_archive_name = archiveDir(captured_path, metadata_set, metadata_archived_path,
                                            metadata_archive_name, extra_files=extra_files)
 
