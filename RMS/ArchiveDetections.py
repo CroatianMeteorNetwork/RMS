@@ -148,7 +148,8 @@ def archiveFieldsums(dir_path):
 
 
 def archiveDetections(captured_path, archived_path, ff_detected, config, extra_files=None):
-    """ Create thumbnails and compress all files with detections and the accompanying files in one archive.
+    """ Create thumbnails and compress all files with detections and the accompanying files in one archive,
+        the fr*.bin and ff*.fits files in a second archive, and the balance in a third archive.
 
     Arguments:
         captured_path: [str] Path where the captured files are located.
@@ -162,6 +163,8 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
     Return:
         archive_name: [str] Name of the archive where the files were compressed to.
+        imgdata_archive_name: [str] Name of the archive where the images were compressed to.
+        metadata_archive_name: [str] Name of the archive where the metadata were compressed to.
 
     """
 
@@ -264,11 +267,11 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         archive_name = archiveDir(captured_path, file_list, archived_path, archive_name, \
             extra_files=extra_files)
 
-        # create the imgdata set which is the union of the sets of FF files and FR files
+        # Create the imgdata set which is the union of the sets of FF files and FR files
         imgdata_set = (set([item for item in file_list if item.startswith("FF") and item.endswith(".fits")]) |
                        set([item for item in file_list if item.startswith("FR") and item.endswith(".bin")]))
 
-        # create a directory to hold the imgdata files
+        # Create a directory to hold the imgdata files
         imgdata_archived_path = archived_path + "_imgdata"
         imgdata_archive_name = archive_base + "_imgdata"
         log.info("Generating archive file {:s}".format(imgdata_archive_name))
@@ -276,13 +279,11 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
                                           imgdata_archive_name, extra_files=extra_files)
         shutil.rmtree(imgdata_archived_path)
 
-        # create the metadata set which is the relative complement of file_list in imgdata_set
+        # Create the metadata set which is the relative complement of file_list in imgdata_set
         # or the set of files in file_list which are not in imgdata_set
         metadata_set = set([item for item in file_list if item not in imgdata_set])
 
-
-
-        # create a directory to hold the metadata
+        # Create a directory to hold the metadata
         metadata_archived_path = archived_path + "_metadata"
         metadata_archive_name = archive_base + "_metadata"
         log.info("Generating archive file {:s}".format(metadata_archive_name))
