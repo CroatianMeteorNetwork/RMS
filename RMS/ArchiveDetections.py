@@ -148,9 +148,9 @@ def archiveFieldsums(dir_path):
 
 
 def archiveDetections(captured_path, archived_path, ff_detected, config, extra_files=None):
-    """ Create thumbnails and compress all files with detections and the accompanying files in one archive,
-        only the fr*.bin, ff*.fits and extra_files in a second archive,
-        and everything apart from fr*.bin and ff*.fits in a third archive.
+    """ Create thumbnails and compress all files with detections and the accompanying files in one archive suffix _detected,
+        only the fr*.bin, ff*.fits and extra_files in a second archive, suffix _imgdata,
+        and everything apart from fr*.bin and ff*.fits in a third archive, suffix _metadata
 
     Arguments:
         captured_path: [str] Path where the captured files are located.
@@ -159,13 +159,13 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         config: [conf object] Configuration.
 
     Keyword arguments:
-        extra_files: [list] A list of extra files (with fill paths) which will be be saved to the night 
+        extra_files: [list] A list of extra files (with full paths) which will be saved to the night
             archive.
 
     Return:
         archive_name: [str] Name of the archive where the files were compressed to.
         imgdata_archive_name: [str] Name of the archive where the images were compressed to.
-        metadata_archive_name: [str] Name of the archive where the metadata were compressed to.
+        metadata_archive_name: [str] Name of the archive where the metadata was compressed to.
 
     """
 
