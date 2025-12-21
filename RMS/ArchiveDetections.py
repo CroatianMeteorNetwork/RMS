@@ -272,7 +272,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         imgdata_set = (set([item for item in file_list if item.startswith("FF") and item.endswith(".fits")]) |
                        set([item for item in file_list if item.startswith("FR") and item.endswith(".bin")]))
 
-        # Create a directory to hold the imgdata files
+        # Create a directory to hold the imgdata files, archive, then remove the directory
         imgdata_archived_path = archived_path + "_imgdata"
         imgdata_archive_name = archive_base + "_imgdata"
         log.info("Generating archive file {:s}".format(imgdata_archive_name))
@@ -284,7 +284,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         # or the set of files in file_list which are not in imgdata_set
         metadata_set = set([item for item in file_list if item not in imgdata_set])
 
-        # Create a directory to hold the metadata
+        # Create a directory to hold the metadata files, archive, then remove the directory
         metadata_archived_path = archived_path + "_metadata"
         metadata_archive_name = archive_base + "_metadata"
         log.info("Generating archive file {:s}".format(metadata_archive_name))
