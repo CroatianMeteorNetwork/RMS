@@ -823,7 +823,9 @@ def processIncompleteCaptures(config, upload_manager):
             # Upload the archive, if upload is enabled
             if upload_manager is not None:
                 files_to_add_list = [archive_name, imgdata_archive_name, metadata_archive_name]
-                log.info("Adding files to upload list: {:s}".format(files_to_add_list))
+                if files_to_add_list:
+                    for f in files_to_add_list:
+                        log.info("Adding file to upload list: {:s}".format(f))
                 upload_manager.addFiles(files_to_add_list)
                 log.info("File added...")
 
