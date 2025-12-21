@@ -4896,7 +4896,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 print("Solving with astrometry.net")
 
-                upload_image = True
+                upload_image = False #True
 
                 # If shift was pressed, only upload the detected stars
                 if modifiers == (QtCore.Qt.ControlModifier | QtCore.Qt.ShiftModifier):
