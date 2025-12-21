@@ -57,12 +57,12 @@ from RMS.ImgurUpload import imgurUpload
 API_KEY = "sybwjtfjbrpgomep"
 
 
-DEBUG = False
+DEBUG = True
 
 
 def printDebug(*args):
     if DEBUG:
-        printDebug(*args)
+        print(*args)
 
 
 def json2python(data):
@@ -105,54 +105,26 @@ class Client(object):
 
         # If we're sending a file, format a multipart/form-data
         if file_args is not None:
-            # Make a custom generator to format it the way we need.
-            from io import BytesIO
-            try:
-                # py3
-                from email.generator import BytesGenerator as TheGenerator
-            except ImportError:
-                # py2
-                from email.generator import Generator as TheGenerator
-
-            m1 = MIMEBase('text', 'plain')
-            m1.add_header('Content-disposition',
-                          'form-data; name="request-json"')
-            m1.set_payload(json)
-            m2 = MIMEApplication(file_args[1],'octet-stream',encode_noop)
-            m2.add_header('Content-disposition',
-                          'form-data; name="file"; filename="%s"'%file_args[0])
-            mp = MIMEMultipart('form-data', None, [m1, m2])
-
-            class MyGenerator(TheGenerator):
-                def __init__(self, fp, root=True):
-                    # don't try to use super() here; in py2 Generator is not a
-                    # new-style class.  Yuck.
-                    TheGenerator.__init__(self, fp, mangle_from_=False,
-                                          maxheaderlen=0)
-                    self.root = root
-                def _write_headers(self, msg):
-                    # We don't want to write the top-level headers;
-                    # they go into Request(headers) instead.
-                    if self.root:
-                        return
-                    # We need to use \r\n line-terminator, but Generator
-                    # doesn't provide the flexibility to override, so we
-                    # have to copy-n-paste-n-modify.
-                    for h, v in msg.items():
-                        self._fp.write(('%s: %s\r\n' % (h,v)).encode())
-                    # A blank line always separates headers from body
-                    self._fp.write('\r\n'.encode())
-
-                # The _write_multipart method calls "clone" for the
-                # subparts.  We hijack that, setting root=False
-                def clone(self, fp):
-                    return MyGenerator(fp, root=False)
-
-            fp = BytesIO()
-            g = MyGenerator(fp)
-            g.flatten(mp)
-            data = fp.getvalue()
-            headers = {'Content-type': mp.get('Content-type')}
+            import random
+            boundary_key = ''.join([random.choice('0123456789') for i in range(19)])
+            boundary = '===============%s==' % boundary_key
+            headers = {'Content-Type':
+                       'multipart/form-data; boundary="%s"' % boundary}
+            data_pre = (
+                '--' + boundary + '\n' +
+                'Content-Type: text/plain\r\n' +
+                'MIME-Version: 1.0\r\n' +
+                'Content-disposition: form-data; name="request-json"\r\n' +
+                '\r\n' +
+                json + '\n' +
+                '--' + boundary + '\n' +
+                'Content-Type: application/octet-stream\r\n' +
+                'MIME-Version: 1.0\r\n' +
+                'Content-disposition: form-data; name="file"; filename="%s"' % file_args[0] +
+                '\r\n' + '\r\n')
+            data_post = (
+                '\n' + '--' + boundary + '--\n')
+            data = data_pre.encode() + file_args[1] + data_post.encode()
 
         else:
             # Else send x-www-form-encoded
@@ -241,7 +213,7 @@ class Client(object):
         if fn is not None:
             try:
                 f = open(fn, 'rb')
-                file_args = (fn, f.read())
+                file_args = (os.path.basename(fn), f.read())
             except IOError:
                 printDebug('File %s does not exist' % fn)
                 raise
@@ -353,8 +325,13 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
         img_data = file_handle.getvalue()
 
         # Upload the image to imgur
-        image_url = imgurUpload('skyfit_image.jpg', image_data=img_data)
-
+        try:
+            image_url = imgurUpload('skyfit_image.jpg', image_data=img_data)
+            tmpimg = None
+        except:
+            image_url = None
+            tmpimg = os.path.join(os.getenv('TMP', default='/tmp'), 'skyfit_image.jpg')
+            pil_img.save(tmpimg)
 
 
     c = Client()
@@ -380,7 +357,10 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
 
     # Upload image or the list of stars
     if file_handle is not None:
-        upres = c.url_upload(image_url, **kwargs)
+        if image_url is not None:
+            upres = c.url_upload(image_url, **kwargs)
+        else:
+            upres = c.upload(fn=tmpimg)
 
     elif x_data is not None:
         upres = c.upload(x=x_data, y=y_data, **kwargs)
