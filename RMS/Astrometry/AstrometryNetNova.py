@@ -313,6 +313,7 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
         file_handle = None
 
 
+    tmpimg = None 
     # Convert an image to a file handle
     if img is not None:
 
