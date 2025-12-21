@@ -278,7 +278,10 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         log.info("Generating archive file {:s}".format(imgdata_archive_name))
         imgdata_archive_name = archiveDir(captured_path, imgdata_set, imgdata_archived_path,
                                           imgdata_archive_name, extra_files=extra_files)
-        shutil.rmtree(imgdata_archived_path)
+
+        if os.path.exists(imgdata_archived_path):
+            if os.path.isdir(imgdata_archived_path):
+                shutil.rmtree(imgdata_archived_path)
 
         # Create the metadata set which is the relative complement of file_list in imgdata_set
         # or the set of files in file_list which are not in imgdata_set
@@ -290,7 +293,12 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         log.info("Generating archive file {:s}".format(metadata_archive_name))
         metadata_archive_name = archiveDir(captured_path, metadata_set, metadata_archived_path,
                                            metadata_archive_name, extra_files=extra_files)
-        shutil.rmtree(metadata_archived_path)
+
+        if os.path.exists(metadata_archived_path):
+            if os.path.isdir(metadata_archived_path):
+                shutil.rmtree(metadata_archived_path)
+
+
 
         return archive_name, imgdata_archive_name, metadata_archive_name
 
