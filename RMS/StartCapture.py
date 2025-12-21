@@ -682,7 +682,11 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             if upload_manager is not None:
                 log.info("Adding files to upload list: %s", files_to_add_list)
                 upload_manager.addFiles(files_to_add_list)
-                log.info("Files added.")
+                if files_to_add_list:
+                    if len(files_to_add_list) < 2:
+                        log.info("File added.")
+                    else:
+                        log.info("Files added.")
 
                 # optional delay (minutes in .config, converted to seconds)
                 upload_manager.delayNextUpload(delay=60*config.upload_delay)
@@ -827,11 +831,11 @@ def processIncompleteCaptures(config, upload_manager):
                     for f in files_to_add_list:
                         log.info("Adding file to upload list: {:s}".format(f))
                 upload_manager.addFiles(files_to_add_list)
-
-                if len(files_to_add_list) < 2:
-                    log.info("File added...")
-                else:
-                    log.info("Files added...")
+                if files_to_add_list:
+                    if len(files_to_add_list) < 2:
+                        log.info("File added...")
+                    else:
+                        log.info("Files added...")
 
             # Delete detection backup files
             if detector is not None:
