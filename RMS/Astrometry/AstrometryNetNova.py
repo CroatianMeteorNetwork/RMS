@@ -366,6 +366,7 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
         upres = c.upload(x=x_data, y=y_data, **kwargs)
 
     else:
+        upres = None
         print('No input given to the funtion!')
 
 
