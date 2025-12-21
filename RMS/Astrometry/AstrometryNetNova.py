@@ -57,7 +57,7 @@ from RMS.ImgurUpload import imgurUpload
 API_KEY = "sybwjtfjbrpgomep"
 
 
-DEBUG = True
+DEBUG = False
 
 
 def printDebug(*args):
@@ -330,7 +330,7 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
             tmpimg = None
         except:
             image_url = None
-            tmpimg = os.path.join(os.getenv('TMP', default='/tmp'), 'skyfit_image.jpg')
+            tmpimg = os.path.join(os.getenv('TMP', default='/tmp'), 'skyfit_image.png')
             pil_img.save(tmpimg)
 
 
@@ -523,6 +523,13 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
     # Compute the FOV width and height
     fov_w = result['width_arcsec']/3600
     fov_h = result['height_arcsec']/3600
+
+    # clean up temp image
+    if tmpimg:
+        try:
+            os.remove(tmpimg)
+        except Exception:
+            pass
 
     return ra_mid, dec_mid, rot_eq_standard, scale, fov_w, fov_h, None, None
 
