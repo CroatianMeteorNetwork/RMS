@@ -16,6 +16,25 @@ from RMS.Logger import getLogger
 log = getLogger("rmslogger")
 
 
+def externalFunctionWrapper(func, captured_night_dir, archived_night_dir, config):
+    """ Wrapper for the external function that removes all log handlers in the external process if needed. """
+    
+    # Check if logging is loaded
+    if 'logging' in sys.modules:
+        import logging
+
+        # Remove all handlers from the root logger
+        root = logging.getLogger()
+        if root.handlers:
+            for handler in root.handlers[:]:
+                root.removeHandler(handler)
+                handler.close()
+
+    # Call the external function
+    func(captured_night_dir, archived_night_dir, config)
+
+
+
 def runExternalScript(captured_night_dir, archived_night_dir, config):
     """ Run the external script. It's results won't be returned to the main program, the script will just be run as a separate process.
     
@@ -57,34 +76,19 @@ def runExternalScript(captured_night_dir, archived_night_dir, config):
 
         # Call the external function in a separate process, protecting the main process from potential crashes
         
-        # If the logging is disabled, create a wrapper function which removes the logger from the external process
+        # If logging is disabled, create a wrapper function which removes all log handlers in the external process
         if not config.external_script_log:
-
-            def external_wrapper(captured_night_dir, archived_night_dir, config):
-                
-                # Check if logging is loaded
-                if 'logging' in sys.modules:
-                    import logging
-
-                    # Remove all handlers from the root logger
-                    root = logging.getLogger()
-                    if root.handlers:
-                        for handler in root.handlers[:]:
-                            root.removeHandler(handler)
-                            handler.close()
-
-                # Call the external function
-                externalFunction(captured_night_dir, archived_night_dir, config)
-
             # Use the wrapper function
-            target_function = external_wrapper
+            target_function = externalFunctionWrapper
+            args = (externalFunction, captured_night_dir, archived_night_dir, config)
 
         else:
             log.info('Starting function "{}" from external script "{}"'.format(externalFunction, module))
             target_function = externalFunction
+            args = (captured_night_dir, archived_night_dir, config)
 
 
-        p = multiprocessing.Process(target=target_function, args=(captured_night_dir, archived_night_dir, config))
+        p = multiprocessing.Process(target=target_function, args=args)
         p.start()
 
         if config.external_script_log:
