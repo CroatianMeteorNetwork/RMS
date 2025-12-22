@@ -149,8 +149,11 @@ def archiveFieldsums(dir_path):
 
 def archiveDetections(captured_path, archived_path, ff_detected, config, extra_files=None):
     """ Create thumbnails and compress all files with detections and the accompanying files in one archive suffix _detected,
-        only the fr*.bin, ff*.fits and extra_files in a second archive, suffix _imgdata,
-        and everything apart from fr*.bin and ff*.fits in a third archive, suffix _metadata
+
+        or
+
+        only the fr*.bin, ff*.fits and extra_files in one archive, suffix _imgdata,
+        and everything apart from fr*.bin and ff*.fits in another archive, suffix _metadata
 
     Arguments:
         captured_path: [str] Path where the captured files are located.
