@@ -290,8 +290,6 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
         else:
 
-            # Do the metadata first so that might be uploaded first, reducing observation -> processing time
-
             # Create a directory to hold the metadata files, archive, then remove the directory
             log.info(f"Generating archive file {metadata_archive_name}")
             metadata_archive_name = archiveDir(captured_path, metadata_set, metadata_archived_path,
