@@ -55,13 +55,40 @@ def runExternalScript(captured_night_dir, archived_night_dir, config):
         module = importlib.import_module(external_script_file.replace('.py', '').replace('.PY', ''))
         externalFunction = getattr(module, config.external_function_name)
 
-        log.info('Starting function "{}" from external script "{}"'.format(externalFunction, module))
-
         # Call the external function in a separate process, protecting the main process from potential crashes
-        p = multiprocessing.Process(target=externalFunction, args=(captured_night_dir, archived_night_dir, config))
+        
+        # If the logging is disabled, create a wrapper function which removes the logger from the external process
+        if not config.external_script_log:
+
+            def external_wrapper(captured_night_dir, archived_night_dir, config):
+                
+                # Check if logging is loaded
+                if 'logging' in sys.modules:
+                    import logging
+
+                    # Remove all handlers from the root logger
+                    root = logging.getLogger()
+                    if root.handlers:
+                        for handler in root.handlers[:]:
+                            root.removeHandler(handler)
+                            handler.close()
+
+                # Call the external function
+                externalFunction(captured_night_dir, archived_night_dir, config)
+
+            # Use the wrapper function
+            target_function = external_wrapper
+
+        else:
+            log.info('Starting function "{}" from external script "{}"'.format(externalFunction, module))
+            target_function = externalFunction
+
+
+        p = multiprocessing.Process(target=target_function, args=(captured_night_dir, archived_night_dir, config))
         p.start()
 
-        log.info('External script now running as a separate process')
+        if config.external_script_log:
+            log.info('External script now running as a separate process')
 
 
     except Exception as e:
