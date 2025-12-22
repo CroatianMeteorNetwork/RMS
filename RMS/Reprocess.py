@@ -375,7 +375,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     # Archive all fieldsums to one archive
     archiveFieldsums(night_data_dir)
 
-    # List for any extra files which will be copied to the night archive directory. Full paths have to be 
+    # List for any extra files which will be copied to the archive directories. Full paths have to be
     #   given
     extra_files = []
 
@@ -846,7 +846,7 @@ if __name__ == "__main__":
         upload_manager.start()
 
         # Add file for upload
-        log.info('Adding files to upload list: ' + files_to_add_list)
+        log.info(f'Adding files to upload list: {files_to_add_list}')
         upload_manager.addFiles(files_to_add_list)
 
         # Stop the upload manager

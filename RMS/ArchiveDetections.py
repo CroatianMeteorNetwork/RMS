@@ -261,10 +261,11 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         archive_base = os.path.join(os.path.abspath(os.path.join(archived_path, os.pardir)),
             os.path.basename(captured_path))
 
-        archive_name = archive_base + "_detected"
+        archive_name = f"{archive_base}_detected"
 
         # Archive the files
-        log.info("Generating archive file {:s}".format(archive_name))
+        log.info(f"Generating archive file {archive_name}")
+
         archive_name = archiveDir(captured_path, file_list, archived_path, archive_name, \
             extra_files=extra_files)
 
@@ -273,9 +274,9 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
                        set([item for item in file_list if item.startswith("FR") and item.endswith(".bin")]))
 
         # Create a directory to hold the imgdata files, archive, then remove the directory
-        imgdata_archived_path = archived_path + "_imgdata"
-        imgdata_archive_name = archive_base + "_imgdata"
-        log.info("Generating archive file {:s}".format(imgdata_archive_name))
+        imgdata_archived_path = f"{archived_path}_imgdata"
+        imgdata_archive_name = f"{archive_base}_imgdata"
+        log.info(f"Generating archive file {imgdata_archive_name}")
         imgdata_archive_name = archiveDir(captured_path, imgdata_set, imgdata_archived_path,
                                           imgdata_archive_name, extra_files=extra_files)
 
@@ -288,9 +289,9 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         metadata_set = set([item for item in file_list if item not in imgdata_set])
 
         # Create a directory to hold the metadata files, archive, then remove the directory
-        metadata_archived_path = archived_path + "_metadata"
-        metadata_archive_name = archive_base + "_metadata"
-        log.info("Generating archive file {:s}".format(metadata_archive_name))
+        metadata_archived_path = f"{archived_path}_metadata"
+        metadata_archive_name = f"{archive_base}_metadata"
+        log.info(f"Generating archive file {metadata_archive_name}")
         metadata_archive_name = archiveDir(captured_path, metadata_set, metadata_archived_path,
                                            metadata_archive_name, extra_files=extra_files)
 
