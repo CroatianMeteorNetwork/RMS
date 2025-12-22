@@ -257,23 +257,15 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
     if file_list:
 
-        # Initialise archive names
-        archive_name, imgdata_archive_name, metadata_archive_name = None, None, None
-
         # Create the archive ZIP in the parent directory of the archive directory
         archive_base = os.path.join(os.path.abspath(os.path.join(archived_path, os.pardir)),
             os.path.basename(captured_path))
-
-
-        # These sets will only be used in the upload_split code path, but keeps the conditional
-        # sections shorter
 
         # Create the imgdata set which is the union of the sets of FF files and FR files
         imgdata_set = (set([item for item in file_list if item.startswith("FF") and item.endswith(".fits")]) |
                        set([item for item in file_list if item.startswith("FR") and item.endswith(".bin")]))
 
         # Create the metadata set which is the relative complement of file_list in imgdata_set
-        # or the set of files in file_list which are not in imgdata_set
         metadata_set = set([item for item in file_list if item not in imgdata_set])
 
         # Create all the required archive names and paths
@@ -290,6 +282,8 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
             archive_name = archiveDir(captured_path, file_list, archived_path, archive_name, \
                 extra_files=extra_files)
+
+            imgdata_archive_name, metadata_archive_name = None, None
 
         else:
 
@@ -312,6 +306,8 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
             if os.path.exists(imgdata_archived_path):
                 if os.path.isdir(imgdata_archived_path):
                     shutil.rmtree(imgdata_archived_path)
+
+            archive_name = None
 
         return archive_name, imgdata_archive_name, metadata_archive_name
 
