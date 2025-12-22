@@ -829,7 +829,7 @@ def processIncompleteCaptures(config, upload_manager):
                 files_to_add_list = [archive_name, imgdata_archive_name, metadata_archive_name]
                 if files_to_add_list:
                     for f in files_to_add_list:
-                        log.info("Adding file to upload list: {:s}".format(f))
+                        log.info(f"Adding file to upload list: {f}")
                 upload_manager.addFiles(files_to_add_list)
                 if files_to_add_list:
                     if len(files_to_add_list) < 2:
