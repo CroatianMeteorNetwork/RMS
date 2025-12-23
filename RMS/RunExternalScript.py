@@ -36,7 +36,8 @@ def externalFunctionWrapper(func, captured_night_dir, archived_night_dir, config
 
 
 def runExternalScript(captured_night_dir, archived_night_dir, config):
-    """ Run the external script. It's results won't be returned to the main program, the script will just be run as a separate process.
+    """ Run the external script. Its results won't be returned to the main program, the script will just be 
+        run as a separate process.
     
     Arguments:
         captured_night_dir: [str] Path to the Captured night directory.
@@ -76,7 +77,8 @@ def runExternalScript(captured_night_dir, archived_night_dir, config):
 
         # Call the external function in a separate process, protecting the main process from potential crashes
         
-        # If logging is disabled, create a wrapper function which removes all log handlers in the external process
+        # If logging is disabled, create a wrapper function which removes all log handlers in the external 
+        # process
         if not config.external_script_log:
             # Use the wrapper function
             log.info('Starting function "{}" from external script "{}" with logging inhibited'.format(externalFunction, module))
