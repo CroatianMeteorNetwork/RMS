@@ -79,6 +79,7 @@ def runExternalScript(captured_night_dir, archived_night_dir, config):
         # If logging is disabled, create a wrapper function which removes all log handlers in the external process
         if not config.external_script_log:
             # Use the wrapper function
+            log.info('Starting function "{}" from external script "{}" with logging inhibited'.format(externalFunction, module))
             target_function = externalFunctionWrapper
             args = (externalFunction, captured_night_dir, archived_night_dir, config)
 
