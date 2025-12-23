@@ -1,4 +1,4 @@
-# Skeleton External Script
+# Skeleton external script for adaption
 # Copyright (C) 2025 David Rollinson, Kristen Felker
 #
 #
