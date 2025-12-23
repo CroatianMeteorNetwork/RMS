@@ -702,7 +702,7 @@ class UploadManager(multiprocessing.Process):
             # Save to disk only those entires which are not already there
             with open(self.upload_queue_file_path, 'a') as f:
                 for file_name in file_list:
-                    if file_name not in existing_list:
+                    if file_name not in existing_list and file_name is not None:
                         f.write(file_name + '\n')
 
 

@@ -676,7 +676,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             night_archive_dir, archive_name, imgdata_archive_name, metadata_archive_name, _ =  \
                 processNight(night_data_dir, config, detection_results=detection_results, nodetect=nodetect)
 
-            files_to_add_list = [archive_name, metadata_archive_name, imgdata_archive_name]
+            files_to_add_list_unfiltered = [archive_name, metadata_archive_name, imgdata_archive_name]
+            files_to_add_list = [f for f in files_to_add_list_unfiltered if f is not None]
 
             # Put the archive up for upload
             if upload_manager is not None:
@@ -826,7 +827,8 @@ def processIncompleteCaptures(config, upload_manager):
 
             # Upload the archive, if upload is enabled
             if upload_manager is not None:
-                files_to_add_list = [archive_name, metadata_archive_name, imgdata_archive_name]
+                files_to_add_list_unfiltered = [archive_name, metadata_archive_name, imgdata_archive_name]
+                files_to_add_list = [f for f in files_to_add_list_unfiltered if f is not None]
                 if files_to_add_list:
                     for f in files_to_add_list:
                         log.info(f"Adding file to upload list: {f}")

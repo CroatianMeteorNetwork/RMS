@@ -838,7 +838,8 @@ if __name__ == "__main__":
     if config.upload_enabled:
 
         # Add metadata archive first, so it might get uploaded first
-        files_to_add_list = [archive_name, metadata_archive_name, imgdata_archive_name]
+        files_to_add_list_unfiltered = [archive_name, metadata_archive_name, imgdata_archive_name]
+        files_to_add_list = [f for f in files_to_add_list_unfiltered if f is not None]
 
         # Init the upload manager
         log.info('Starting the upload manager...')
