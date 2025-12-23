@@ -57,7 +57,7 @@ def runExternalScript(captured_night_dir, archived_night_dir, config):
         return None
 
     # Check if the script path exists
-    if not os.path.isfile(config.external_script_path):
+    if not os.path.isfile(os.path.expanduser(config.external_script_path)):
         log.error('The script {:s} does not exist!'.format(config.external_script_path))
         return None
 
@@ -65,7 +65,7 @@ def runExternalScript(captured_night_dir, archived_night_dir, config):
     try:
 
         # Extract the name of the folder and the script
-        external_script_dir, external_script_file = os.path.split(config.external_script_path)
+        external_script_dir, external_script_file = os.path.split(os.path.expanduser(config.external_script_path))
 
         # Insert the path to the script
         sys.path.insert(0, external_script_dir)

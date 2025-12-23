@@ -930,6 +930,8 @@ def parseSystem(config, parser):
     if parser.has_option(section, "external_script_run"):
         config.external_script_run = parser.getboolean(section, "external_script_run")
 
+    if parser.has_option(section, "external_script_log"):
+        config.external_script_log = parser.getboolean(section, "external_script_log")
 
     if parser.has_option(section, "auto_reprocess_external_script_run"):
         config.auto_reprocess_external_script_run = parser.getboolean(section, \
