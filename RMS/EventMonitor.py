@@ -4813,7 +4813,7 @@ if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser(description="""Check a web page for trajectories, and upload relevant data. \
         """, formatter_class=argparse.RawTextHelpFormatter)
 
-    arg_parser.add_argument('-c', '--config', metavar='CONFIG_PATH', type=str,
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
                             help="Path to a config file which will be used instead of the default one.")
 
     arg_parser.add_argument('-o', '--oneshot', dest='one_shot', default=False, action="store_true",
@@ -4833,10 +4833,12 @@ if __name__ == "__main__":
 
     # Load the config file
     if cml_args.config is None:
-        syscon = cr.parse(os.path.join(os.getcwd(),".config"))
+        syscon = cr.loadConfigFromDirectory(".config", os.getcwd())
     else:
-        syscon = cr.parse(os.path.expanduser(cml_args.config))
+        syscon = cr.loadConfigFromDirectory(cml_args.config, os.getcwd())
     # Set the web page to monitor
+
+    print(f"Loaded config for {syscon.stationID}")
 
     if testIndividuals():
         log.info("Individual function test success")
