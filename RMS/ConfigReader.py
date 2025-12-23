@@ -276,7 +276,7 @@ class Config:
 
 
         self.external_script_run = False
-        self.external_script_log = False
+        self.external_script_log = True
         self.auto_reprocess_external_script_run = False
         self.external_script_path = None
         self.external_function_name = "rmsExternal"
