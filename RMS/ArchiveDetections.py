@@ -6,12 +6,14 @@ import sys
 import traceback
 
 
+
 from RMS.Formats.FFfile import validFFName
 from RMS.Logger import getLogger
 from RMS.Misc import archiveDir, tarWithProgress
 from RMS.Routines import MaskImage
 from Utils.GenerateThumbnails import generateThumbnails
 from Utils.StackFFs import stackFFs
+from Utils.LogArchiver import makeLogArchives
 
 
 # Get the logger from the main module
@@ -247,6 +249,19 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
     except Exception as e:
         log.error('Generating stack failed with error:' + repr(e))
+        log.error("".join(traceback.format_exception(*sys.exc_info())))
+
+    log.info("Generating an archive file of most recent logs...")
+
+    try:
+
+
+        log_path = makeLogArchives(config, captured_path)
+        log.info(f"Log archive saved to: {log_path}")
+
+
+    except Exception as e:
+        log.error('Generating log archives failed with error:' + repr(e))
         log.error("".join(traceback.format_exception(*sys.exc_info())))
 
 
