@@ -233,8 +233,7 @@ if __name__ == "__main__":
     ### COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description=""" Starting capture and compression.
-        """)
+    arg_parser = argparse.ArgumentParser(description=""" Generate an archive of log files """)
 
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
         help="Path to a config file which will be used instead of the default one.")
