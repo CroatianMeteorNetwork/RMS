@@ -93,11 +93,11 @@ def getEarliestDates(config):
     log_file_list_of_lists = getLogFileListOfLists(config)
     earliest_dates = []
     for log_file_list in log_file_list_of_lists:
-        earliest_dates.append(extractDateFromLogName(log_file_list[0]))
+        earliest_dates.append(extractDateFromLogName(config, log_file_list[0]))
     return earliest_dates
 
 
-def extractDateFromLogName(log_name):
+def extractDateFromLogName(config, log_name):
     """Extracts date and time from a log filename
 
     Arguments:
@@ -192,7 +192,7 @@ def makeLogArchives(config, dest_dir):
         log.info(f"Find all logs for type {log_file_type} later than and including {date_for_this_log_type}")
         pass
         for log_name in log_list:
-            date_for_this_log_file = datetime.datetime.fromisoformat(extractDateFromLogName(log_name))
+            date_for_this_log_file = datetime.datetime.fromisoformat(extractDateFromLogName(config, log_name))
             if  date_for_this_log_file < date_for_this_log_type:
                 continue
             else:
@@ -217,7 +217,7 @@ def makeLogArchives(config, dest_dir):
 
     log_file_type_list, last_log_file_timestamp_list = [], []
     for log_file_type, log_file_list in zip(log_type_list, log_list_of_lists):
-        last_log_file_timestamp = extractDateFromLogName(sorted(log_file_list, reverse=True)[0])
+        last_log_file_timestamp = extractDateFromLogName(config, sorted(log_file_list, reverse=True)[0])
         log_file_type_list.append(log_file_type)
         last_log_file_timestamp_list.append(last_log_file_timestamp)
 
@@ -236,12 +236,8 @@ if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser(description=""" Starting capture and compression.
         """)
 
-    # Add a mutually exclusive for the parser (the arguments in the group can't be given at the same)
-    arg_group = arg_parser.add_mutually_exclusive_group()
-
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
         help="Path to a config file which will be used instead of the default one.")
-
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -251,19 +247,14 @@ if __name__ == "__main__":
 
     # Get the logger handle
     log = getLogger("rmslogger")
-
     p = os.path.join(config.data_dir, config.captured_dir)
 
-
+    # Get the latest captured directory, this is only for testing purposes
     newest_dir = sorted([name for name in os.listdir(p) if os.path.isdir(os.path.join(p, name))], reverse=True)[0]
-
-
     latest_captured_directory_full_path = os.path.join(p, newest_dir)
 
-
-
+    # Run a test on making log Archives
     archive_file_name = makeLogArchives(config, latest_captured_directory_full_path)
     log.info(f"Logs archived at {archive_file_name}")
-    pass
 
 
