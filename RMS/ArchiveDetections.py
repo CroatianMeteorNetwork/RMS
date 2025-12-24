@@ -258,7 +258,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
         log_archive_path = makeLogArchives(config, captured_path)
         log.info(f"Log archive saved to: {log_archive_path}")
-        file_list.append(log_archive_path)
+        file_list.append(os.path.basename(log_archive_path))
 
     except Exception as e:
         log.error('Generating log archives failed with error:' + repr(e))
