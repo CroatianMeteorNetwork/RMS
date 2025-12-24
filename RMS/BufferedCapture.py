@@ -691,19 +691,17 @@ class BufferedCapture(Process):
                         time.sleep(10)
 
                         # Second verification probe
-                        sock2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        sock2.settimeout(timeout)
-                        result2 = sock2.connect_ex((host, port))
-                        sock2.close()
+                        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        sock.settimeout(timeout)
+                        result = sock.connect_ex((host, port))
+                        sock.close()
 
-                        if result2 == 0:
+                        if result == 0:
                             log.info("RTSP service ready after {} attempts (verified with 2 probes)".format(attempt + 1))
                             return True, RtspProbeResult.SUCCESS
-                        else:
-                            log.info("Second probe failed, continuing retry loop...")
-                            last_error = RtspProbeResult.CONNECTION_REFUSED
-                            # Don't sleep at end of loop - continue to next attempt immediately
-                    
+
+                        log.info("Second probe failed, continuing retry loop...")
+
                     # Analyze specific connection errors
                     if result in (errno.ENETUNREACH, errno.ENETDOWN):
                         last_error = RtspProbeResult.NETWORK_DOWN
