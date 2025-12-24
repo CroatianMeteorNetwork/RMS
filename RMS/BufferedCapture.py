@@ -1567,8 +1567,8 @@ class BufferedCapture(Process):
                     if hasattr(self.device, 'set_emit_signals'):
                         try:
                             self.device.set_emit_signals(False)
-                        except:
-                            pass
+                        except Exception as e:
+                            log.debug("set_emit_signals cleanup failed: %s", e)
 
                 else:                                                    # Fallback
                     log.debug("releaseResources: Unknown device type - just dropping ref")
