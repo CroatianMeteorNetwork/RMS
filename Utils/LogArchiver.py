@@ -27,6 +27,7 @@ from RMS.Logger import getLogger
 
 
 LATEST_LOG_UPLOADS_FILE_NAME = ".latestloguploads.json"
+log = getLogger("logger")
 
 
 def getLogTypes(config):
