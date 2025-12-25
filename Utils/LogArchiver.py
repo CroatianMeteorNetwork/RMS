@@ -135,7 +135,7 @@ def getLatestLogUploads(config):
     If the file does not exist, find the earliest logs of each type, create a dictionary,
     and save as a json
 
-    Args:
+    Arguments:
         config: [config] RMS config instance
 
     Return:
@@ -168,7 +168,7 @@ def makeLogArchives(config, dest_dir):
     in a separate directory, archive to bz2, and copy to a destination directory
 
 
-    Args:
+    Arguments:
         config: [config] RMS config instance
         dest_dir: [path] full path to the destination directory, normally the latest captured directory
 
