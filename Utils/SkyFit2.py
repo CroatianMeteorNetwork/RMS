@@ -1031,16 +1031,10 @@ if ASTRA_IMPORTED:
                 self.finished.emit()
                 return
 
-            astra.process()  # may call _progress_guard repeatedly
+            astra.process()
 
             if not self._stop:
                 self.results_ready.emit(astra)
-            # except Exception as e:
-            #     # Swallow aborts; you could log 'e' if desired
-            #     print(f'Error running ASTRA: {e}')
-            #     pass
-            # finally:
-            #     self.finished.emit()
 
     def launchASTRAGUI(run_astra_callback=None,
                         run_kalman_callback=None,
@@ -3699,10 +3693,6 @@ class PlateTool(QtWidgets.QMainWindow):
             del dic['sat_track_arrows']
         if 'sat_markers' in dic:
             del dic['sat_markers']
-
-        # if os.path.isdir(self.input_path):
-        #     real_input_path = os.path.join(self.input_path, img_name)
-        #     dic['input_path'] = real_input_path
 
         # Save the FF file name if the input type is FF
         if self.img_handle.input_type == 'ff':
@@ -6467,7 +6457,7 @@ class PlateTool(QtWidgets.QMainWindow):
             initial_file = self.dir_path
 
         # Open the file dialog no 'platepar_file' parameter was specified
-        if platepar_file == None:
+        if platepar_file is None:
             platepar_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the platepar file", 
                                                                   initial_file,
                                                                   "Platepar files (*.cal);;All files (*)")[0]

@@ -3336,7 +3336,7 @@ def rmsTimeExtractor(rms_time, asTuple = False, asJD = False, delimiter = None):
     # Initialise delim in case nothing is detected
     delim = "_"
     # find the delimiter, which is probably the first non alphanumeric character
-    if delimiter == None:
+    if delimiter is None:
         for c in rms_time:
             if c.isnumeric() or c.isalpha():
                 continue
@@ -3741,7 +3741,7 @@ def createThumbnails(config, r, d, earliest_jd=0, latest_jd=np.inf, max_thumbnai
     fits_len = len(path_coords_list)
     if write_log:
         if fits_len == 0:
-            log.info("Did not find ra, dec {:.2f},{:.2f}".format(r, d, fits_len))
+            log.info("Did not find ra, dec ({:.2f},{:.2f}) in {} fits files".format(r, d, fits_len))
         elif fits_len == 1:
             log.info("Found ra,dec ({:.2f},{:.2f}) degrees in {} fits file".format(r, d, fits_len))
         else:
