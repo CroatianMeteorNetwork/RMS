@@ -205,7 +205,11 @@ def makeLogArchives(config, dest_dir):
         for log_file_type, log_file_list in zip(log_type_list, logs_to_send_by_type):
             os.mkdir(os.path.join(temp_dir, "logs", log_file_type))
             for log_file in log_file_list:
-                shutil.copy(os.path.join(config.data_dir, config.log_dir, log_file), os.path.join(temp_dir, "logs", log_file_type))
+                source_file_path = os.path.join(config.data_dir, config.log_dir, log_file)
+                if os.path.exists(source_file_path):
+                    shutil.copy(os.path.join(source_file_path), os.path.join(temp_dir, "logs", log_file_type))
+                else:
+                    log.warning(f"Could not find log file in {source_file_path}")
                 pass
         log.info(f"Log directory structure created at {temp_dir}")
 
