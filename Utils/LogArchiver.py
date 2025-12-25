@@ -172,7 +172,7 @@ def makeLogArchives(config, dest_dir):
         config: [config] RMS config instance
         dest_dir: [path] full path to the destination directory, normally the latest captured directory
 
-    Returns:
+    Return:
         [path] : path to created archive
 
     """
