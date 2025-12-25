@@ -320,7 +320,6 @@ def findLastNightFrameInWindow(dir_path, window_start, window_end):
         last_n_timestamp: [datetime | None] Timestamp of the last _n frame in
             the window, or None if no night frames were found.
     """
-    last_n_frame = None
     last_n_timestamp = None
 
     for root, _, files in os.walk(dir_path):
@@ -346,7 +345,6 @@ def findLastNightFrameInWindow(dir_path, window_start, window_end):
             # Track the latest night frame
             if last_n_timestamp is None or ts > last_n_timestamp:
                 last_n_timestamp = ts
-                last_n_frame = fname
 
     return last_n_timestamp
 
