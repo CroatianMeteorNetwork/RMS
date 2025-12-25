@@ -1283,7 +1283,6 @@ if __name__ == "__main__":
 
     capture_directory = os.path.join(config.data_dir, config.captured_dir)
     start_time = datetime.datetime.strptime("2025-06-25 08:03:37", "%Y-%m-%d %H:%M:%S")
-    start_time, duration, end_time = getObservationDurationContinuous(config, start_time)
 
     dir_list = os.listdir(capture_directory)
     dir_list.sort(reverse=True)

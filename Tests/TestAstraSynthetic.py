@@ -23,7 +23,7 @@ class MockImageSequence:
         self.frames = frames
         self.current_frame = 0
         self.avepixel = np.mean(frames, axis=0) # Simple average
-        self.frame_dt_dict = {i: 0.04 * i for i in range(len(frames))} # Dummy timestamps
+        self.frame_dt_dict = {i: 0.04*i for i in range(len(frames))} # Dummy timestamps
 
     def setFrame(self, frame_num):
         if 0 <= frame_num < len(self.frames):
@@ -52,14 +52,14 @@ def meteorSimulate(img_w, img_h, frame_num, psf_sigma, speed=1):
     
     # Linear meteor motion
     slope = 0.5 # dy/dx
-    intercept = img_h / 4
+    intercept = img_h/ 4
     
-    start_x = img_w / 4
-    end_x = 3 * img_w / 4
+    start_x = img_w/ 4
+    end_x = 3*img_w/ 4
     
     # Ground truth trajectory
     traj_x = np.linspace(start_x, end_x, frame_num)
-    traj_y = slope * traj_x + intercept
+    traj_y = slope*traj_x + intercept
     
     x_indices, y_indices = np.meshgrid(np.arange(0, img_w), np.arange(0, img_h))
 
@@ -158,10 +158,10 @@ def test_astra_run():
     max_dev = 0
     for pt in astra.planned_trajectory:
         px, py = pt
-        expected_y = gt_slope * px + gt_params[1] # Approximate check using slope/intercept is tricky because x0/y0 form line equation
+        expected_y = gt_slope*px + gt_params[1] # Approximate check using slope/intercept is tricky because x0/y0 form line equation
         
         # Better: distance to GT line y = mx + c => mx - y + c = 0
-        dist = abs(gt_slope * px - py + gt_params[1]) / np.sqrt(gt_slope**2 + 1)
+        dist = abs(gt_slope*px - py + gt_params[1])/ np.sqrt(gt_slope**2 + 1)
         max_dev = max(max_dev, dist)
         
     print(f"Max deviation from GT line: {max_dev:.4f} pixels")

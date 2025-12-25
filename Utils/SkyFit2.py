@@ -8528,10 +8528,6 @@ class PlateTool(QtWidgets.QMainWindow):
              
         predictor = SatellitePredictor(lat, lon, elev, t_start, t_end)
         
-        # FOV Polygon
-        w = self.platepar.X_res
-        h = self.platepar.Y_res
-        
         jd = datetime2JD(t_start)
         
         # Generate FOV polygon by sampling edges

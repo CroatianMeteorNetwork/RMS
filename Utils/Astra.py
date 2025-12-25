@@ -1519,8 +1519,8 @@ class ASTRA:
         len_flat = params[:, 4]
 
         # Calculate offsets (vectorized)
-        x_offset = (len_flat/2) * np.abs(np.cos(omega)) * dx_dir
-        y_offset = (len_flat/2) * np.abs(np.sin(omega)) * dy_dir
+        x_offset = (len_flat/2)*np.abs(np.cos(omega))*dx_dir
+        y_offset = (len_flat/2)*np.abs(np.sin(omega))*dy_dir
 
         # Front point (P,) arrays
         front_x = x0_flat + x_offset
@@ -2031,7 +2031,7 @@ class ASTRA:
                                                       )
 
         # Sanity check on estimated parameters to prevent runaway extrapolation
-        # Clamp length and height to be within [0.5, 2.0] * median of previous params if available
+        # Clamp length and height to be within [0.5, 2.0]*median of previous params if available
         # Ideally we use the last valid param, but here we can just clamp to reasonable absolute limits if needed
         # OR just comparing to the last fitted value.
         
@@ -2046,8 +2046,8 @@ class ASTRA:
 
         # Clamp next height/length to be within 50% to 200% of the last fitted value
         # This prevents exponential explosion in the prediction
-        est_next_params['height'] = np.clip(est_next_params['height'], last_height * 0.5, last_height * 2.0)
-        est_next_params['length'] = np.clip(est_next_params['length'], last_length * 0.5, last_length * 2.0)
+        est_next_params['height'] = np.clip(est_next_params['height'], last_height*0.5, last_height*2.0)
+        est_next_params['length'] = np.clip(est_next_params['length'], last_length*0.5, last_length*2.0)
 
 
         # Append the planned center to the trajectory list
@@ -2438,7 +2438,6 @@ class ASTRA:
 
                 # Create a figure with a 3x2 grid - use Figure directly for thread safety
                 fig = Figure(figsize=(15, 10))
-                canvas = FigureCanvas(fig)
                 grid = fig.add_gridspec(3, 2, hspace=0.3, wspace=0.3)
 
                 # Create all needed axes
@@ -2464,12 +2463,11 @@ class ASTRA:
                 fig.colorbar(im2, ax=ax2, shrink=0.7)
 
                 # Show star mask
-                star_mask_viz = np.ones_like(cropped_star_mask)
-                im3 = ax3.imshow(cropped_star_mask, cmap='Reds', vmin=0, vmax=1)
+                ax3.imshow(cropped_star_mask, cmap='Reds', vmin=0, vmax=1)
                 ax3.set_title("cropped_star_mask")
 
                 # Show photometry mask (included and excluded)
-                im4 = ax4.imshow(cropped_mask_photom_excluded, cmap='Blues', vmin=0, vmax=1)
+                ax4.imshow(cropped_mask_photom_excluded, cmap='Blues', vmin=0, vmax=1)
                 ax4.set_title("cropped_mask_photom_excluded")
 
                 # Visualization for final photometry pixels 
@@ -2481,7 +2479,7 @@ class ASTRA:
                     if 0 <= px < phot_final.shape[1] and 0 <= py < phot_final.shape[0]:
                         phot_final[py, px] = 1
 
-                im5 = ax5.imshow(phot_final, cmap='viridis', vmin=0, vmax=1)
+                ax5.imshow(phot_final, cmap='viridis', vmin=0, vmax=1)
                 ax5.set_title("photometry_pixels")
 
                 # Combined visualization - frame with photometry overlay
@@ -2507,7 +2505,7 @@ class ASTRA:
                             combined[y, x, 1] = 0.3  # Green channel
                             combined[y, x, 2] = 1.0  # Blue channel
 
-                im6 = ax6.imshow(combined)
+                ax6.imshow(combined)
                 ax6.set_title("combined_visualization")
 
                 # Add summary stats as figure title
@@ -2575,7 +2573,7 @@ class ASTRA:
         # Use relative threshold on the fitted Gaussian model
         # photom_thresh is a fraction of the peak intensity
         peak_intensity = np.max(fit_img)
-        threshold = peak_intensity * float(self.astra_config['astra']['photom_thresh'])
+        threshold = peak_intensity*float(self.astra_config['astra']['photom_thresh'])
 
         # Create binary mask from the model
         # We select pixels where the model contributes significantly
@@ -2787,24 +2785,29 @@ class ASTRA:
         # Add the data (sort by frame)
         for frame, pick in sorted(self.pick_list.items(), key=lambda x: x[0]):
 
-            if pick.get('x_centroid') is None or pick.get('mode', 0) == 0:
+            # If there is no pick, skip the frame
+            if (pick.get('x_centroid') is None) or (pick.get('mode', 0) == 0):
+                continue
+            
+            # Skip the pick if there is no valid SNR
+            snr = pick.get('snr', 0.0)
+            if (snr is None) or (snr <= 0):
                 continue
 
-            snr = pick.get('snr', 0.0)
-            if snr is None or snr <= 0:
-                snr = 0.0
-                mag_err_random = 0.0
             else:
+
                 mag_err_random = 2.5*np.log10(1 + 1/snr)
 
                 mag_err_total = np.sqrt(mag_err_random**2 + self.platepar.mag_lev_stddev**2)
 
                 pp_tmp = copy.deepcopy(self.platepar)
                 
+                # Get the time data for the current frame
                 time_data = [self.img_obj.currentFrameTime(frame_no=frame)]
 
+                # Convert (x, y) to (ra, dec)
                 jd_data, ra_data, dec_data, mag_data = xyToRaDecPP(time_data, [pick['x_centroid']],
-                [pick['y_centroid']], [pick['intensity_sum']], pp_tmp, measurement=True)
+                    [pick['y_centroid']], [pick['intensity_sum']], pp_tmp, measurement=True)
 
                 jd, ra, dec, mag = jd_data[0], ra_data[0], dec_data[0], mag_data[0]
 
@@ -2812,16 +2815,17 @@ class ASTRA:
 
                 frame_dt = self.img_obj.currentFrameTime(frame_no=frame, dt_obj=True)
 
+                # Construct the entry for each measurement
                 entry = [
-                frame_dt.strftime(isodate_format_entry),
-                f"{ra:10.6f}", f"{dec:+10.6f}",
-                f"{azim:10.6f}", f"{alt:+10.6f}",
-                f"{pick['x_centroid']:9.3f}", f"{pick['y_centroid']:9.3f}",
-                f"{int(pick.get('intensity_sum', 0)):10d}",
-                f"{int(pick.get('background_intensity', 0)):10d}",
-                f"{str(pick.get('saturated', False)):5s}",
-                f"{mag:+7.2f}", f"{-mag_err_total:+6.2f}", f"{mag_err_total:+6.2f}",
-                f"{snr:10.2f}"
+                    frame_dt.strftime(isodate_format_entry),
+                    f"{ra:10.6f}", f"{dec:+10.6f}",
+                    f"{azim:10.6f}", f"{alt:+10.6f}",
+                    f"{pick['x_centroid']:9.3f}", f"{pick['y_centroid']:9.3f}",
+                    f"{int(pick.get('intensity_sum', 0)):10d}",
+                    f"{int(pick.get('background_intensity', 0)):10d}",
+                    f"{str(pick.get('saturated', False)):5s}",
+                    f"{mag:+7.2f}", f"{-mag_err_total:+6.2f}", f"{mag_err_total:+6.2f}",
+                    f"{snr:10.2f}"
                 ]
                 out_str += ",".join(entry) + "\n"
 
