@@ -4,8 +4,7 @@ import os
 import shutil
 import datetime
 import tempfile
-import numpy as np
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from RMS.Routines.SatellitePositions import loadTLEs, SatellitePredictor, SKYFIELD_AVAILABLE
 from RMS.Formats.Platepar import Platepar

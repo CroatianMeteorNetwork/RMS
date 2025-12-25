@@ -11,6 +11,9 @@ import datetime
 import collections
 import glob
 import sys
+import traceback
+import random
+import copy
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -34,8 +37,6 @@ except Exception as exc:
 
     print("\n".join(message))
     sys.exit(1)
-import random
-import copy
 
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
@@ -43,7 +44,7 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
     extinctionCorrectionTrueToApparent, applyAstrometryFTPdetectinfo, getFOVSelectionRadius
 from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
-from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, raDec2AltAz, \
+from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, \
     apparentAltAz2TrueRADec, J2000_JD, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
 from RMS.Astrometry.AstrometryNet import astrometryNetSolve
 from RMS.Astrometry.FFTalign import alignPlatepar
@@ -56,15 +57,15 @@ from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFil
 from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
 from RMS.Formats import StarCatalog
 from RMS.Pickling import loadPickle, savePickle
-from RMS.Math import angularSeparation, RMSD, vectNorm, cartesianToPolar, isAngleBetween
+from RMS.Math import angularSeparation, RMSD, vectNorm
 from RMS.Misc import decimalDegreesToSexHours
 from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
 from RMS.Routines.CustomPyqtgraphClasses import *
-from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle, greatCirclePhase
+from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle
 from RMS.Routines.Image import signalToNoise, applyDark, applyFlat
 from RMS.Routines.MaskImage import getMaskFile
 from RMS.Routines import RollingShutterCorrection
-from RMS.Routines.MaskImage import loadMask, MaskStructure, getMaskFile
+from RMS.Routines.MaskImage import getMaskFile
 from RMS.Misc import maxDistBetweenPoints, getRmsRootDir
 from Utils.KalmanFilter import KalmanFilter
 
@@ -74,18 +75,14 @@ from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
 from RMS.Routines.SatellitePositions import SatellitePredictor, loadTLEs, loadRobustTLEs, findClosestTLEFile, SKYFIELD_AVAILABLE
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
 from RMS.Astrometry.Conversions import datetime2JD
-if SKYFIELD_AVAILABLE:
-    from skyfield.api import load
-import traceback
 
-
+# Load the ASTRA module
 try:
     import html, re
 
     from PyQt5.QtWidgets import (
-    QDialog, QLabel, QVBoxLayout, QHBoxLayout, QPushButton,
-    QLineEdit, QGroupBox, QFormLayout, QComboBox, QFileDialog,
-    QProgressBar, QTextEdit, QApplication, QWidget, QGridLayout
+        QDialog, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit, QGroupBox, QComboBox, QFileDialog,
+        QProgressBar, QWidget, QGridLayout
     )
     from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject
     from PyQt5 import QtCore
@@ -975,17 +972,21 @@ if ASTRA_IMPORTED:
 
         def run(self):
             try:
+
                 if self._stop or self.isInterruptionRequested():
                     self.finished.emit()
                     return
+                
                 result = self.skyfit_instance.runKalmanFromConfig(
                     self.config, progress_callback=self._progress_guard
                 )
+
                 if result is not None:
                     self.results_ready.emit(result)
+
             except Exception as e:
                 print(f'Error running Kalman: {e}')
-                pass
+
             finally:
                 self.finished.emit()
 
@@ -6893,7 +6894,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Check if the mouse was pressed outside the FOV
         if mouse_x is None:
-            return None, None, None
+            return None, None, None, None, None, None
 
         ### Extract part of image around the mouse cursor ###
         ######################################################################################################
@@ -8796,10 +8797,10 @@ class PlateTool(QtWidgets.QMainWindow):
                 
                 # Try to find a point well inside the image 
                 # (margin from edges)
-                for i in range(len(x)):
-                    xi, yi = x[i], y[i]
+                for test_pt in range(len(x)):
+                    xi, yi = x[test_pt], y[test_pt]
                     if margin < xi < (w - margin) and margin < yi < (h - margin):
-                        best_idx = i
+                        best_idx = test_pt
                         break
                 
                 label_x = x[best_idx]

@@ -1,7 +1,6 @@
 import os
 import csv
 import datetime
-from datetime import datetime as dt
 import shutil
 
 import numpy as np
@@ -123,7 +122,7 @@ class KalmanFilter():
         avrg_velocity = np.hypot(x_fit[0], y_fit[0])  # Geometric mean of x and y velocities
 
         # Instantiate process noise covariance
-        sigma_vxy = perc_sigma_vxy/100 * avrg_velocity
+        sigma_vxy = perc_sigma_vxy/100*avrg_velocity
 
         Q_base = np.array([
             [sigma_xy**2, 0 ,0 ,0 ,0 ,0],
@@ -204,23 +203,23 @@ class KalmanFilter():
 
         # --- INITIAL STATE ESTIMATION ---
         if N >= 3:
-            dt_est = (times[2] - times[0]) / 2
-            vx0 = (measurements[2, 0] - measurements[0, 0]) / (2 * dt_est)
-            vy0 = (measurements[2, 1] - measurements[0, 1]) / (2 * dt_est)
-            ax0 = (measurements[2, 0] - 2 * measurements[1, 0] + measurements[0, 0]) / (dt_est ** 2)
-            ay0 = (measurements[2, 1] - 2 * measurements[1, 1] + measurements[0, 1]) / (dt_est ** 2)
+            dt_est = (times[2] - times[0])/2
+            vx0 = (measurements[2, 0] - measurements[0, 0])/(2*dt_est)
+            vy0 = (measurements[2, 1] - measurements[0, 1])/(2*dt_est)
+            ax0 = (measurements[2, 0] - 2*measurements[1, 0] + measurements[0, 0])/(dt_est ** 2)
+            ay0 = (measurements[2, 1] - 2*measurements[1, 1] + measurements[0, 1])/(dt_est ** 2)
         else:
             dt_est = times[1] - times[0]
-            vx0 = (measurements[1, 0] - measurements[0, 0]) / dt_est
-            vy0 = (measurements[1, 1] - measurements[0, 1]) / dt_est
+            vx0 = (measurements[1, 0] - measurements[0, 0])/dt_est
+            vy0 = (measurements[1, 1] - measurements[0, 1])/dt_est
             ax0 = 0.0
             ay0 = 0.0
 
         x0 = np.array([measurements[0, 0], measurements[0, 1], vx0, vy0, ax0, ay0])
         P0 = np.zeros((6, 6))
         P0[0:2, 0:2] = R
-        P0[2:4, 2:4] = (2 * R) / (dt_est ** 2)
-        P0[4:6, 4:6] = (6 * R) / (dt_est ** 4)
+        P0[2:4, 2:4] = (2*R)/(dt_est ** 2)
+        P0[4:6, 4:6] = (6*R)/(dt_est ** 4)
 
         x_est = x0.copy()
         P_est = P0.copy()
@@ -234,8 +233,8 @@ class KalmanFilter():
             dt = times[k] - times[k - 1]
             if use_accel:
                 A = np.array([
-                    [1, 0, dt, 0, 0.5 * dt ** 2, 0],
-                    [0, 1, 0, dt, 0, 0.5 * dt ** 2],
+                    [1, 0, dt, 0, 0.5*dt ** 2, 0],
+                    [0, 1, 0, dt, 0, 0.5*dt ** 2],
                     [0, 0, 1, 0, dt, 0],
                     [0, 0, 0, 1, 0, dt],
                     [0, 0, 0, 0, 1, 0],
@@ -251,7 +250,7 @@ class KalmanFilter():
                     [0, 0, 0, 0, 0, 0]
                 ])
 
-            Q = Q_base * dt
+            Q = Q_base*dt
             x_pred[k] = A @ x_est
             P_pred[k] = A @ P_est @ A.T + Q
             z = measurements[k]
@@ -272,8 +271,8 @@ class KalmanFilter():
         for k in range(N - 2, -1, -1):
             dt = times[k + 1] - times[k]
             A = np.array([
-                [1, 0, dt, 0, 0.5 * dt ** 2, 0],
-                [0, 1, 0, dt, 0, 0.5 * dt ** 2],
+                [1, 0, dt, 0, 0.5*dt ** 2, 0],
+                [0, 1, 0, dt, 0, 0.5*dt ** 2],
                 [0, 0, 1, 0, dt, 0],
                 [0, 0, 0, 1, 0, dt],
                 [0, 0, 0, 0, 1, 0],

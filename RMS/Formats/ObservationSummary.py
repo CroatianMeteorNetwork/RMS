@@ -144,7 +144,7 @@ def getObservationDurationContinuous(config, start_time):
 
     if DEBUG_PRINT:
         print("start_time_ephem {}".format(start_time_ephem))
-        print("duration_ephem {:.1f} hours".format(duration_ephem / 3600))
+        print("duration_ephem {:.1f} hours".format(duration_ephem/3600))
         print("end_time_ephem {}".format(end_time_ephem))
 
     return start_time_ephem, duration_ephem, end_time_ephem
@@ -408,7 +408,7 @@ def timestampFromNTP(addr='time.cloudflare.com'):
     if data:
 
         # For NTP the fractional seconds is a 32 bit counter
-        fractional_second_factor = ( 1 / 2 ** 32)
+        fractional_second_factor = ( 1/2 ** 32)
 
         # Unpack data
         remote_clock_time_receive_timestamp_seconds = struct.unpack('!12I', data)[8] - REF_TIME_1970
@@ -433,7 +433,7 @@ def timestampFromNTP(addr='time.cloudflare.com'):
         # Now calculate estimated clock offsets
         clock_offset_out_leg = remote_clock_time_receive_timestamp - local_clock_transmit_timestamp
         clock_offset_return_leg = remote_clock_time_transmit_timestamp - local_clock_receive_timestamp
-        estimated_offset = (clock_offset_out_leg + clock_offset_return_leg) / 2
+        estimated_offset = (clock_offset_out_leg + clock_offset_return_leg)/2
         adjusted_time = remote_clock_time_transmit_timestamp + estimated_offset
         return adjusted_time, estimated_network_delay
     else:
@@ -620,14 +620,15 @@ def getNextStartTime(conn, time_point, tz_naive=True):
     # print(sql_statement)
     result_list = conn.cursor().execute(sql_statement).fetchall()
     # print(result_list)
+    
     if len(result_list) > 2:
         result = result_list[1]
         return result[0]
+    
     else:
+
         result = datetime.datetime.now(tz=datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         return result
-
-    return result
 
 def gatherCameraInformation(config, attempts=6, delay=10, sock_timeout=3):
     """ Gather information about the sensor in use.
@@ -713,12 +714,12 @@ def nightSummaryData(config, night_data_dir):
                                                 ephemeris computed duration
     """
 
-    duration_one_fits_file = 256 / config.fps
+    duration_one_fits_file = 256/config.fps
     fits_files_list = glob.glob(os.path.join(night_data_dir, "*.fits"))
     fits_files_list.sort()
     fits_count = len(fits_files_list)
     if fits_count < 1:
-        return 0,0,0,0,0,0,0,0,0,0,0
+        return 0,0,0,0,0,0,0,0,0,0,0,0,0
 
     time_first_fits_file = datetime.datetime.strptime(filenameToDatetimeStr(os.path.basename(fits_files_list[0])),
                                                       "%Y-%m-%d %H:%M:%S.%f")
@@ -727,7 +728,7 @@ def nightSummaryData(config, night_data_dir):
 
     # Compute key values using the first and last fits files to mark the start and end of observations
     capture_duration_from_fits = (time_last_fits_file - time_first_fits_file).total_seconds() + duration_one_fits_file
-    total_expected_fits = round(capture_duration_from_fits / duration_one_fits_file)
+    total_expected_fits = round(capture_duration_from_fits/duration_one_fits_file)
     fits_file_shortfall = total_expected_fits - fits_count
     fits_file_shortfall = 0 if fits_file_shortfall < 1 else fits_file_shortfall
     fits_file_shortfall_as_time = str(datetime.timedelta(seconds=fits_file_shortfall * duration_one_fits_file))
@@ -735,7 +736,7 @@ def nightSummaryData(config, night_data_dir):
     # Compute key values from the ephemeris values
 
     start_ephem, duration_ephem, end_ephem = getObservationDuration(config, time_first_fits_file)
-    total_expected_fits_ephemeris = round(duration_ephem / duration_one_fits_file)
+    total_expected_fits_ephemeris = round(duration_ephem/duration_one_fits_file)
     fits_file_shortfall_ephemeris = total_expected_fits_ephemeris - fits_count
     fits_file_shortfall_ephemeris = 0 if fits_file_shortfall_ephemeris < 1 else fits_file_shortfall_ephemeris
     fits_file_shortfall_as_time_ephemeris = str(datetime.timedelta(seconds=fits_file_shortfall_ephemeris * duration_one_fits_file))
@@ -931,7 +932,7 @@ def daysBehind():
     remote_branch_of_commit = getRemoteBranchNameForCommit(commit_repo_directory, latest_local_commit)
     if not remote_branch_of_commit is None:
         latest_remote_date = getDateOfCommit(commit_repo_directory, remote_branch_of_commit)
-        days_behind = (latest_remote_date - latest_local_date).total_seconds() / (60 * 60 * 24)
+        days_behind = (latest_remote_date - latest_local_date).total_seconds()/(60 * 60 * 24)
         target_directory_obj.cleanup()
         return days_behind, remote_branch_of_commit
     else:
@@ -1070,7 +1071,6 @@ def serialize(config, format_nicely=True, as_json=False, night_directory = None)
                     output += "{}:{:s} \n".format(key, value_as_time)
                     # if it didn't work, then handle as a string
                 except:
-                    pass
                     try:
                         output += "{}:{:s} \n".format(key, value)
                     except:

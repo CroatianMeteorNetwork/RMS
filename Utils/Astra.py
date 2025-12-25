@@ -21,7 +21,7 @@ from RMS.Astrometry.ApplyAstrometry import computeFOVSize, xyToRaDecPP, rotation
 from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz
 from RMS.Formats.Platepar import Platepar
 from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFile
-from RMS.Routines.Image import signalToNoise, loadDark, loadFlat
+from RMS.Routines.Image import signalToNoise
 from RMS.Routines import Image
 
 try:
@@ -1943,13 +1943,16 @@ class ASTRA:
                 cx, cy, xmin, xmax, ymin, ymax = crop_vars
                 frame = frame[ymin:ymax, xmin:xmax]
 
-            if include_raw is False and include_non_subtracted is False:
+            if (include_raw is False) and (include_non_subtracted is False):
                 return np.array(frame)
-            elif include_raw is True and include_non_subtracted is False:
+            
+            elif (include_raw is True) and (include_non_subtracted is False):
                 return np.array(frame), np.array(raw_frame)
-            elif include_raw is False and include_non_subtracted is True:
+            
+            elif (include_raw is False) and (include_non_subtracted is True):
                 return np.array(frame), np.array(non_sub_frame)
-            elif include_raw is True and include_non_subtracted is True:
+            
+            elif (include_raw is True) and (include_non_subtracted is True):
                 return np.array(frame), np.array(raw_frame), np.array(non_sub_frame)
 
 

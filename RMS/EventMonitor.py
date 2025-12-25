@@ -31,7 +31,6 @@ import copy
 import uuid
 import random
 import string
-import ephem
 
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, correctVignetting, extinctionCorrectionApparentToTrue
@@ -68,7 +67,7 @@ from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range,
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
 from RMS.Logger import getLogger
 from RMS.Math import angularSeparationVect, angularSeparationDeg
-from RMS.Formats.FFfile import convertFRNameToFF, getMiddleTimeFF
+from RMS.Formats.FFfile import convertFRNameToFF
 from RMS.Formats.Platepar import Platepar
 from RMS.UploadManager import uploadSFTP
 from Utils.StackFFs import stackFFs
@@ -1840,9 +1839,8 @@ class EventMonitor(multiprocessing.Process):
                     log.error("convertFRNameToFF {}".format(ff_file))
                     log.error("fr_file {}".format(fr_file))
 
-        if True:
-            batchFFtoImage(os.path.join(this_event_directory), "jpg", add_timestamp=True,
-                           ff_component='maxpixel')
+        batchFFtoImage(os.path.join(this_event_directory), "jpg", add_timestamp=True,
+                        ff_component='maxpixel')
 
         with open(os.path.join(this_event_directory, "event_report.txt"), "w") as info:
             info.write(event.eventToString())
@@ -3219,10 +3217,7 @@ def calstarRaDecToDict(data_dir_path, config, pp, pp_recal_json, r_target, d_tar
 
 
             path_to_ff = os.path.join(data_dir_path, fits_file)
-            if os.path.exists(path_to_ff):
-                path_to_ff = path_to_ff
-
-            else:
+            if not os.path.exists(path_to_ff):
                 fits_time_jd = rmsTimeExtractor(path_to_ff, asJD=True)
                 path_to_ff = getFitsPaths(captured_directory_path, fits_time_jd)
                 if len(path_to_ff):
