@@ -41,11 +41,8 @@ def getLogTypes(config):
         [list] list of log file types
     """
     log_dir = os.path.join(config.data_dir, config.log_dir)
-
-    log.info(f"Scanning logs in {log_dir}")
     log_file_list, log_types_list = os.listdir(log_dir), []
     unique_log_type_set  = {item.split("_")[0] for item in log_file_list if item.endswith(".log")}
-    log.info(f"Found {len(unique_log_type_set)} unique log types")
     for log_type in unique_log_type_set:
         log.info(f"                 : {log_type}")
 
@@ -64,7 +61,6 @@ def getLogFileListOfLists(config, reverse=False):
 
     Return:
         [[list]] list of lists of log file paths
-
     """
 
     log_types_list = getLogTypes(config)
@@ -189,12 +185,11 @@ def makeLogArchives(config, dest_dir):
     for log_file_type, log_list in zip(log_type_list, log_list_of_lists):
         logs_to_send = []
         date_for_this_log_type = datetime.datetime.fromisoformat(latest_log_uploads_dict[log_file_type])
-        log.info(f"Find all logs for type {log_file_type} later than and including {date_for_this_log_type}")
+
         pass
         for log_name in log_list:
             date_for_this_log_file = datetime.datetime.fromisoformat(extractDateFromLogName(config, log_name))
             if  date_for_this_log_file < date_for_this_log_type:
-                log.info(f"Skipping {log_name} as it has already been uploaded")
                 continue
             else:
                 log.info(f"Adding {log_name} as it has not yet been uploaded")
