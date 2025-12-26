@@ -42,6 +42,7 @@ def getTimeOfLastLogEntry(config, log_file):
 
     log_file_path = os.path.join(config.data_dir, config.log_dir, log_file)
 
+    # It is quicker to open the whole file using readlines, and pick the last line; but this uses less memory
     with open(log_file_path, "r") as f:
         line = ""
         for line in f:
