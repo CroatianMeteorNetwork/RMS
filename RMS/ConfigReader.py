@@ -778,7 +778,16 @@ def removeInlineComments(cfgparser, delimiter):
         [cfgparser.set(section, item[0], item[1].split(delimiter)[0].strip()) for item in cfgparser.items(section)]
 
 
-def getDefaultValue(section_key, attribute_key):
+def getDefaultValue(attribute_key):
+    """
+    Get default value for an attribute from the configuration file containing default values.
+
+    Arguments:
+        attribute_key: Key for the configuration item to be substituted
+
+    Returns:
+        value to be substituted
+    """
 
     default_configuration_path = os.path.join(os.getcwd(),"RMS","ConfigurationDefaults",".config")
     if os.path.exists(default_configuration_path):
@@ -801,7 +810,7 @@ def parse(path, strict=True, allow_substitutions=True):
         strict: [bool]
 
     Keyword Arugments:
-        allow_substitutions: [bool] When parsing the configuration file containing defaults, refuse any substitutions
+        allow_substitutions: [bool] Permit substitutions, default True, set False to avoid recursion
 
     Returns:
         config: [Config]
@@ -832,8 +841,7 @@ def parse(path, strict=True, allow_substitutions=True):
             for attribute_key in sections_dict[section_key]:
                 attribute = sections_dict[section_key][attribute_key]
                 if attribute == "default":
-                    sections_dict[section_key][attribute_key] = getDefaultValue(section_key, attribute_key)
-
+                    sections_dict[section_key][attribute_key] = getDefaultValue(attribute_key)
 
     config = Config()
 
@@ -851,7 +859,6 @@ def parse(path, strict=True, allow_substitutions=True):
 
     else:
         raise RuntimeError('Unknown config file name: {}'.format(os.path.basename(path)))
-
 
     # Disable upload if the default station name is used
     if config.stationID == "XX0001":
