@@ -69,7 +69,10 @@ cython_modules = [
 
 # Runtime requirements
 with open("requirements.txt") as fh:
-    requirements = [line.strip() for line in fh if line and not line.startswith("git+")]
+    requirements = [
+        stripped for line in fh
+        if (stripped := line.strip()) and not stripped.startswith("#") and not stripped.startswith("git+")
+    ]
 
 # Data files
 base = Path(__file__).resolve().parent
