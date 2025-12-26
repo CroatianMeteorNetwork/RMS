@@ -185,7 +185,7 @@ def getLatestLogUploads(config):
 
     return latest_log_uploads_dict
 
-def makeLogArchives(config, dest_dir):
+def makeLogArchives(config, dest_dir, update_tracker=True):
     """Given a config file and a destination directory, get the logs later
     than the logs last uploaded, package into a bz2 file, with each log type
     in a separate directory, archive to bz2, and copy to a destination directory
@@ -195,12 +195,17 @@ def makeLogArchives(config, dest_dir):
         config: [config] RMS config instance
         dest_dir: [path] full path to the destination directory, normally the latest captured directory
 
+    Keyword Arguments:
+        update_tracker: [bool] Whether or not to update the tracker (default: {True})
+
+
     Return:
         [path] : path to created archive
 
     """
 
-
+    if not update_tracker:
+        log.info("Running without updating tracker file")
     latest_log_uploads_dict = getLatestLogUploads(config)
     for log_type, latest_date in latest_log_uploads_dict.items():
         log.info(f"Log type {log_type} latest info uploaded was {latest_date}")
@@ -273,6 +278,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
         help="Path to a config file which will be used instead of the default one.")
 
+    arg_parser.add_argument('-t', '--tracker', action="store_true", help="""Update upload tracker file, 
+     default false when run from console""")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -288,7 +296,7 @@ if __name__ == "__main__":
     latest_captured_directory_full_path = os.path.join(p, newest_dir)
 
     # Run a test on making log Archives
-    archive_file_name = makeLogArchives(config, latest_captured_directory_full_path)
+    archive_file_name = makeLogArchives(config, latest_captured_directory_full_path, update_tracker=cml_args.tracker)
     log.info(f"Logs archived at {archive_file_name}")
 
 
