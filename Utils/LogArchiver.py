@@ -192,7 +192,7 @@ def makeLogArchives(config, dest_dir):
             if  date_for_this_log_file < date_for_this_log_type:
                 continue
             else:
-                log.info(f"Adding {log_name} as it has not yet been uploaded")
+                log.info(f"Adding {log_name} to log upload archive")
                 logs_to_send.append(log_name)
         logs_to_send_by_type.append(logs_to_send)
 
