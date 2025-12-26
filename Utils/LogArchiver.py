@@ -189,10 +189,13 @@ def makeLogArchives(config, dest_dir):
         pass
         for log_name in log_list:
             date_for_this_log_file = datetime.datetime.fromisoformat(extractDateFromLogName(config, log_name))
-            if  date_for_this_log_file < date_for_this_log_type:
+            if date_for_this_log_file < date_for_this_log_type:
                 continue
             else:
-                log.info(f"Adding {log_name} to log upload archive")
+                if date_for_this_log_file == date_for_this_log_type:
+                    log.info(f"Adding {log_name} to log upload archive to ensure overlap with last uplaod")
+                else:
+                    log.info(f"Adding {log_name} to log upload archive as it is newer than last upload")
                 logs_to_send.append(log_name)
         logs_to_send_by_type.append(logs_to_send)
 
