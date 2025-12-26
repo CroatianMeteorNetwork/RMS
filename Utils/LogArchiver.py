@@ -191,7 +191,7 @@ def makeLogArchives(config, dest_dir):
         date_for_this_log_type = datetime.datetime.fromisoformat(latest_log_uploads_dict[log_file_type])
         log.info(f"Find all logs for type {log_file_type} later than and including {date_for_this_log_type}")
         pass
-        for log_name in sorted(log_list):
+        for log_name in log_list:
             date_for_this_log_file = datetime.datetime.fromisoformat(extractDateFromLogName(config, log_name))
             if  date_for_this_log_file < date_for_this_log_type:
                 log.info(f"Skipping {log_name} as it has already been uploaded")
