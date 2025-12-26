@@ -262,8 +262,9 @@ def makeLogArchives(config, dest_dir, update_tracker=True):
         last_log_file_timestamp_list.append(last_log_file_timestamp)
 
     latest_log_uploads_dict = dict(zip(log_file_type_list, last_log_file_timestamp_list))
-    with open(latest_log_uploads_file_full_path, "w") as f:
-        json.dump(latest_log_uploads_dict, f, indent=4, sort_keys=True)
+    if update_tracker:
+        with open(latest_log_uploads_file_full_path, "w") as f:
+            json.dump(latest_log_uploads_dict, f, indent=4, sort_keys=True)
 
     return archive_filename
 
