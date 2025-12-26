@@ -194,8 +194,10 @@ def makeLogArchives(config, dest_dir):
         for log_name in log_list:
             date_for_this_log_file = datetime.datetime.fromisoformat(extractDateFromLogName(config, log_name))
             if  date_for_this_log_file < date_for_this_log_type:
+                log.info(f"Skipping {log_name} as it has already been uploaded")
                 continue
             else:
+                log.info(f"Adding {log_name} as it has not yet been uploaded")
                 logs_to_send.append(log_name)
         logs_to_send_by_type.append(logs_to_send)
 
