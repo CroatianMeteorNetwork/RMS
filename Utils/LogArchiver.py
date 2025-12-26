@@ -169,11 +169,10 @@ def getLatestLogUploads(config):
     """
     latest_log_uploads_file_full_path = os.path.join(config.data_dir, config.log_dir, LATEST_LOG_UPLOADS_FILE_NAME)
 
-    log.info(f"Looking for latest log upload tracker file at {latest_log_uploads_file_full_path}")
+
 
     if os.path.exists(latest_log_uploads_file_full_path):
         if os.path.isfile(latest_log_uploads_file_full_path):
-            log.info(f"Found latest log uploads file at {latest_log_uploads_file_full_path}")
             with open(latest_log_uploads_file_full_path, "r") as f:
                 try:
                     latest_log_uploads_dict = json.load(f)
