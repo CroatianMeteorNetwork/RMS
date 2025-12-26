@@ -169,8 +169,6 @@ def getLatestLogUploads(config):
     """
     latest_log_uploads_file_full_path = os.path.join(config.data_dir, config.log_dir, LATEST_LOG_UPLOADS_FILE_NAME)
 
-
-
     if os.path.exists(latest_log_uploads_file_full_path):
         if os.path.isfile(latest_log_uploads_file_full_path):
             with open(latest_log_uploads_file_full_path, "r") as f:
