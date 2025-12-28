@@ -485,6 +485,9 @@ class Config:
         # Flag determining if uploading is enabled or not
         self.upload_enabled = True
 
+        # Flag determining if uploading splitting is enabled or not
+        self.upload_split = True
+
         # Delay upload after files are added to the queue by the given number of minutes
         self.upload_delay = 0
 
@@ -1329,6 +1332,10 @@ def parseUpload(config, parser):
     # Enable/disable upload
     if parser.has_option(section, "upload_enabled"):
         config.upload_enabled = parser.getboolean(section, "upload_enabled")
+
+    # Enable  uploading images in one archive and data derived from images in another
+    if parser.has_option(section, "upload_split"):
+        config.upload_split = parser.getboolean(section, "upload_split")
 
     # Address of the upload server
     if parser.has_option(section, "hostname"):

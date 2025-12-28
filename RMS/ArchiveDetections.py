@@ -2,6 +2,7 @@
 
 
 import os
+import shutil
 import sys
 import traceback
 
@@ -147,7 +148,12 @@ def archiveFieldsums(dir_path):
 
 
 def archiveDetections(captured_path, archived_path, ff_detected, config, extra_files=None):
-    """ Create thumbnails and compress all files with detections and the accompanying files in one archive.
+    """ Create thumbnails and compress all files with detections and the accompanying files in one archive suffix _detected,
+
+        or
+
+        only the fr*.bin, ff*.fits and extra_files in one archive, suffix _imgdata,
+        and everything apart from fr*.bin and ff*.fits in another archive, suffix _metadata
 
     Arguments:
         captured_path: [str] Path where the captured files are located.
@@ -156,18 +162,19 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         config: [conf object] Configuration.
 
     Keyword arguments:
-        extra_files: [list] A list of extra files (with fill paths) which will be be saved to the night 
+        extra_files: [list] A list of extra files (with full paths) which will be saved to the night
             archive.
 
     Return:
         archive_name: [str] Name of the archive where the files were compressed to.
+        imgdata_archive_name: [str] Name of the archive where the images were compressed to.
+        metadata_archive_name: [str] Name of the archive where the metadata was compressed to.
 
     """
 
     # Get the list of files to archive
     file_list = selectFiles(config, captured_path, ff_detected)
 
-    
     log.info('Generating thumbnails...')
 
     try:
@@ -254,16 +261,58 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
     if file_list:
 
         # Create the archive ZIP in the parent directory of the archive directory
-        archive_name = os.path.join(os.path.abspath(os.path.join(archived_path, os.pardir)), 
-            os.path.basename(captured_path) + '_detected')
+        archive_base = os.path.join(os.path.abspath(os.path.join(archived_path, os.pardir)),
+            os.path.basename(captured_path))
 
-        # Archive the files
-        archive_name = archiveDir(captured_path, file_list, archived_path, archive_name, \
-            extra_files=extra_files)
+        # Create the imgdata set which is the union of the sets of FF files and FR files
+        imgdata_set = (set([item for item in file_list if item.startswith("FF") and item.endswith(".fits")]) |
+                       set([item for item in file_list if item.startswith("FR") and item.endswith(".bin")]))
 
-        return archive_name
+        # Create the metadata set which is the relative complement of file_list in imgdata_set
+        metadata_set = set([item for item in file_list if item not in imgdata_set])
 
-    return None
+        # Create all the required archive names and paths
+        archive_name = f"{archive_base}_detected"
+        metadata_archived_path = f"{archived_path}_metadata"
+        metadata_archive_name = f"{archive_base}_metadata"
+        imgdata_archived_path = f"{archived_path}_imgdata"
+        imgdata_archive_name = f"{archive_base}_imgdata"
+
+        if not config.upload_split:
+
+            # Archive the files
+            log.info(f"Generating archive file {archive_name}")
+
+            archive_name = archiveDir(captured_path, file_list, archived_path, archive_name, \
+                extra_files=extra_files)
+
+            imgdata_archive_name, metadata_archive_name = None, None
+
+        else:
+
+            # Create a directory to hold the metadata files, archive, then remove the directory
+            log.info(f"Generating archive file {metadata_archive_name}")
+            metadata_archive_name = archiveDir(captured_path, metadata_set, metadata_archived_path,
+                                               metadata_archive_name, extra_files=extra_files)
+
+            if os.path.exists(metadata_archived_path):
+                if os.path.isdir(metadata_archived_path):
+                    shutil.rmtree(metadata_archived_path)
+
+            # Create a directory to hold the imgdata files, archive, then remove the directory
+            log.info(f"Generating archive file {imgdata_archive_name}")
+            imgdata_archive_name = archiveDir(captured_path, imgdata_set, imgdata_archived_path,
+                                              imgdata_archive_name, extra_files=extra_files)
+
+            if os.path.exists(imgdata_archived_path):
+                if os.path.isdir(imgdata_archived_path):
+                    shutil.rmtree(imgdata_archived_path)
+
+            archive_name = None
+
+        return archive_name, imgdata_archive_name, metadata_archive_name
+
+    return None, None, None
 
 
 def archiveFrameTimelapse(frames_root,
@@ -355,7 +404,7 @@ if __name__ == "__main__":
 
     ff_detected = ['FF_CA0001_20170905_094707_004_0000000.fits', 'FF_CA0001_20170905_094716_491_0000256.fits']
 
-    archive_name = archiveDetections(captured_path, archived_path, ff_detected, config)
+    archive_name, metadata_name, imgdata_name = archiveDetections(captured_path, archived_path, ff_detected, config)
 
-    print(archive_name)
+    print(archive_name, metadata_name, imgdata_name)
 
