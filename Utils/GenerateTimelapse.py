@@ -151,8 +151,8 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
 
     # now make the timelapse
     temp_img_path = os.path.join(os.path.basename(dir_tmp_path), "temp_%04d.jpg")
-    com = [ffmpeg_path, '-nostdin', '-y',
-#            '-v', 'quiet',
+    com = [ffmpeg_path, '-nostdin', '-y', '-hide_banner',
+            '-loglevel','error',
             '-r', str(fps),
             '-i', temp_img_path,
             '-vcodec', 'libx264',
@@ -710,7 +710,8 @@ def generateTimelapseFromFrames(image_files,
     else:
         maxrate, bufsize = "4M", "8M"
 
-    ffmpeg_cmd = [ffmpeg_path, "-y", "-nostdin",
+    ffmpeg_cmd = [ffmpeg_path, "-y", "-nostdin", '-hide_banner', 
+                  '-loglevel', 'error',
                   "-f", "rawvideo", 
                   "-vcodec", "rawvideo",
                   "-s", "{}x{}".format(width, height),
@@ -959,10 +960,11 @@ def main():
     
     args = parser.parse_args()
     
+    input_dir = os.path.abspath(args.input_dir)
     # Set default output path if not specified
     if not args.output:
-        input_dir_name = os.path.basename(os.path.normpath(args.input_dir))
-        args.output = os.path.join(os.path.dirname(args.input_dir), "{}_timelapse.mp4".format(input_dir_name))
+        input_dir_name = os.path.basename(os.path.normpath(input_dir))
+        args.output = os.path.join(os.path.dirname(input_dir), "{}_timelapse.mp4".format(input_dir_name))
     
     # Print configuration
     print("Timelapse Generator Configuration:")
@@ -988,7 +990,7 @@ def main():
         try:
             keep_images = True if args.cleanup == 'keep-jpg' else False
 
-            generateTimelapse(dir_path=args.input_dir,
+            generateTimelapse(dir_path=input_dir,
                               keep_images=keep_images,
                               fps=args.fps,
                               output_file=args.output,
@@ -1002,8 +1004,8 @@ def main():
     else:
 
         try:
-            video_path, json_path = generateTimelapseFromDir(
-                dir_path=args.input_dir,
+            video_path, _ = generateTimelapseFromDir(
+                dir_path=input_dir,
                 video_path=args.output,
                 fps=args.fps,
                 base_crf=args.crf,
