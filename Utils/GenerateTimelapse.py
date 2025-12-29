@@ -87,7 +87,13 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
     dir_tmp_path = os.path.join(dir_path, "temp_img_dir")
 
     if os.path.exists(dir_tmp_path):
-        shutil.rmtree(dir_tmp_path)
+        try:
+            shutil.rmtree(dir_tmp_path)
+        except Exception:
+            flist = os.listdir(dir_tmp_path)
+            for fl in flist:
+                os.remove(os.path.join(dir_tmp_path, fl))
+
         log.info("Directory removal complete: {}".format(dir_tmp_path))
 
     mkdirP(dir_tmp_path)
@@ -171,7 +177,14 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
 
     #Delete temporary directory and files inside
     if os.path.exists(dir_tmp_path) and not keep_images:
-        shutil.rmtree(dir_tmp_path)
+        try:
+            shutil.rmtree(dir_tmp_path)
+        except Exception:
+            # may occasionally fail due to ffmpeg thread still terminating
+            # so catch this and just empty the folder instead
+            flist = os.listdir(dir_tmp_path)
+            for fl in flist:
+                os.remove(os.path.join(dir_tmp_path, fl))
         log.info("Directory removal complete: {}".format(dir_tmp_path))
 
     log.info("Total time: %s", RmsDateTime.utcnow() - t1)

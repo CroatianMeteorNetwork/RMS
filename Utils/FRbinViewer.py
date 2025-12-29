@@ -516,7 +516,7 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
             mp4_path = os.path.join(dir_path, fr_path.replace('.bin', '') + '_line_{:02d}.mp4'.format(video_num))
 
             # Construct the ecommand for ffmpeg           
-            com = ffmpeg_path + " -y -v quiet -f image2 -pattern_type sequence -framerate " + str(config.fps) + " -start_number " + str(0) + " -i " + img_patt +" -pix_fmt yuv420p " + mp4_path
+            com = ffmpeg_path + " -y -hide_banner -loglevel error -v quiet -f image2 -pattern_type sequence -framerate " + str(config.fps) + " -start_number " + str(0) + " -i " + img_patt +" -pix_fmt yuv420p " + mp4_path
             
             # Print the command
             print("Command:")
