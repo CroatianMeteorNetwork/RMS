@@ -167,13 +167,14 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
             '-crf', str(crf),
             '-g','15',
             '-movflags', 'faststart',
-            '-vf', 'hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)',
+            '-vf', '"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)"',
             mp4_path]
 
+    log.info("")
     log.info('Creating timelapse using...')
     log.info(' '.join(com))
 
-    subprocess.call(com, shell=True, cwd=dir_path)
+    subprocess.call(' '.join(com), shell=True, cwd=dir_path)
 
     #Delete temporary directory and files inside
     if os.path.exists(dir_tmp_path) and not keep_images:
