@@ -346,7 +346,7 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
     ffmpeg_path = config.ffmpeg_binary
     if extract_format == 'mp4':
         if not ffmpeg_path:
-            print('ffmpeg not available, cant create video')
+            print('ffmpeg not available, unable to create video')
             return 
         makevideo = True
         extract_format = 'png'
