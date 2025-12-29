@@ -1510,7 +1510,7 @@ class EventMonitor(multiprocessing.Process):
             if len(platepar_file_list) > 0:
                 platepar_file = platepar_file_list[0]
             else:
-                platepar_file = os.path.join(self.syscon.rms_root_dir, self.syscon.platepar_name)
+                platepar_file = os.path.join(self.syscon.config_file_path, self.syscon.platepar_name)
                 pass
 
         return platepar_file
@@ -3023,8 +3023,7 @@ def dictMagsRaDec(config, r, d, e_jd=0, l_jd=np.inf, max_number_of_images=300, w
     """
 
     full_path_to_archived = os.path.expanduser(os.path.join(str(config.data_dir), str(config.archived_dir)))
-    full_path_to_default_platepar = os.path.join(getRmsRootDir(), config.platepar_name)
-
+    full_path_to_default_platepar = os.path.join(config.config_file_path, config.platepar_name)
 
     directories_to_search = filterDirectoriesByJD(full_path_to_archived, e_jd, l_jd)
     observation_sequence_dict = {}
@@ -4806,7 +4805,7 @@ if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser(description="""Check a web page for trajectories, and upload relevant data. \
         """, formatter_class=argparse.RawTextHelpFormatter)
 
-    arg_parser.add_argument('-c', '--config', metavar='CONFIG_PATH', type=str,
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
                             help="Path to a config file which will be used instead of the default one.")
 
     arg_parser.add_argument('-o', '--oneshot', dest='one_shot', default=False, action="store_true",
@@ -4826,10 +4825,12 @@ if __name__ == "__main__":
 
     # Load the config file
     if cml_args.config is None:
-        syscon = cr.parse(os.path.join(os.getcwd(),".config"))
+        syscon = cr.loadConfigFromDirectory(".config", os.getcwd())
     else:
-        syscon = cr.parse(os.path.expanduser(cml_args.config[0]))
+        syscon = cr.loadConfigFromDirectory(cml_args.config, os.getcwd())
     # Set the web page to monitor
+
+    print(f"Loaded config for {syscon.stationID}")
 
     if testIndividuals():
         log.info("Individual function test success")
