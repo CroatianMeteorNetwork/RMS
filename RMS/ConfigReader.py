@@ -429,6 +429,9 @@ class Config:
         # Enable/disable saving a live.jpg file in the data directory with the latest image
         self.live_jpg = False
 
+        # location of ffmpeg if available - default is to assume it is in the path
+        self.ffmpeg_binary = 'ffmpeg'
+
         # Toggle saving of frame time files (FT files) to times_dir
         self.save_frame_times = True
 
@@ -1239,13 +1242,16 @@ def parseCapture(config, parser):
     if parser.has_option(section, "save_frame_times"):
         config.save_frame_times = parser.getboolean(section, "save_frame_times")
     
+    # obtain the path to a working ffmpeg, if available
+    config.ffmpeg_binary = isFfmpegWorking()
+
     # Enable/disable saving video frames - automatically off if FFmpeg is missing
-    ffmpeg_ok = isFfmpegWorking()
     if parser.has_option(section, "save_frames"):
         save_requested = parser.getboolean(section, "save_frames")
-        config.save_frames = save_requested and ffmpeg_ok
-        if save_requested and not ffmpeg_ok:
+        if save_requested and not config.ffmpeg_binary:
             print("save_frames requested but FFmpeg not available - disabling.")
+        else:
+            config.save_frames = save_requested
     else:
         config.save_frames = False
 
