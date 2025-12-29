@@ -798,7 +798,11 @@ def generateTimelapseFromFrames(image_files,
             skipped_count += 1
     
     # Create a temporary timestamp JSON file
-    timestamp_path = video_path.replace(MP4_SUFFIX, TS_JSON_SUFFIX)
+    # note that if an output video filename was provided, then it may not contain MP4_SUFFIX
+    if MP4_SUFFIX in video_path:
+        timestamp_path = video_path.replace(MP4_SUFFIX, TS_JSON_SUFFIX)
+    else: 
+        timestamp_path = video_path.replace('.mp4', '_' + TS_JSON_SUFFIX)
     temp_timestamp_path = os.path.join(output_dir, "{}_temp_timestamps.json".format(output_name))
     
     try:
