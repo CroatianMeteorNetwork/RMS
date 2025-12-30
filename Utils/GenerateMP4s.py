@@ -160,7 +160,7 @@ def generateMP4s(dir_path, ftpfile_name, shower_code=None, min_mag=None, config=
         mp4_path = ffbasename + ".mp4"
         temp_img_path = os.path.abspath(os.path.join(dir_tmp_path, ffbasename+"_%03d.jpg"))
 
-        # Construct the ecommand for ffmpeg           
+        # Construct the command for ffmpeg           
         com = ffmpeg_path + " -hide_banner -loglevel error -pix_fmt yuv420p  -y -f image2 -pattern_type sequence -start_number " + str(first_frame) + " -i " + temp_img_path +" " + mp4_path
         print("Creating timelapse using ffmpeg...")
         print(com)
