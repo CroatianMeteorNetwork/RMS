@@ -1,0 +1,67 @@
+{
+  "init": [
+    ["SetOSD", "off"],
+    ["SetColor", "100,50,50,50,0,0"],
+    ["SetAutoReboot", "Everyday,15"],
+    ["CameraTime", "set"],
+    ["CloudConnection", "off"],
+    ["SetParam", "Network", "TransferPlan", "Fluency"],
+    ["SetParam", "General", "VideoFormat", "PAL"],
+    
+    ["SetParam", "Encode", "Video", "Compression", "H.264"],
+    ["SetParam", "Encode", "Video", "Resolution", "720P"],
+    ["SetParam", "Encode", "Video", "BitRateControl", "VBR"],
+    ["SetParam", "Encode", "Video", "BitRate", "4096"],
+    ["SetParam", "Encode", "Video", "GOP", "2"],
+    ["SetParam", "Encode", "Video", "FPS", "25"],
+    ["SetParam", "Encode", "Video", "Quality", "6"],
+    ["SetParam", "Encode", "AudioEnable", "0"],
+    ["SetParam", "Encode", "VideoEnable", "1"],
+    ["SetParam", "Encode", "SecondStream", "0"],
+
+    ["SetParam", "Camera", "ClearFog", "enable", "0"],
+    ["SetParam", "Camera", "ClearFog", "level", "30"],
+    ["SetParam", "Camera", "Style", "type1"],
+    ["SetParam", "Camera", "AeSensitivity", "1"],
+    ["SetParam", "Camera", "ApertureMode", "0"],
+    ["SetParam", "Camera", "BLCMode", "0"],
+    ["SetParam", "Camera", "DayNightColor", "2"],
+    ["SetParam", "Camera", "Day_nfLevel", "0"],
+    ["SetParam", "Camera", "DncThr", "50"],
+    ["SetParam", "Camera", "ElecLevel", "60"],
+    ["SetParam", "Camera", "EsShutter", "0"],
+    ["SetParam", "Camera", "ExposureParam", "LeastTime", "40000"],
+    ["SetParam", "Camera", "ExposureParam", "Level", "0"],
+    ["SetParam", "Camera", "ExposureParam", "MostTime", "40000"],
+    ["SetParam", "Camera", "GainParam", "AutoGain", "1"],
+    ["SetParam", "Camera", "GainParam", "Gain", "60"],
+    ["SetParam", "Camera", "BroadTrends", "AutoGain", "0"],
+    ["SetParam", "Camera", "BroadTrends", "Gain", "50"],
+    ["SetParam", "Camera", "IRCUTMode", "0"],
+    ["SetParam", "Camera", "IrcutSwap", "0"],
+    ["SetParam", "Camera", "Night_nfLevel", "0"],
+    ["SetParam", "Camera", "RejectFlicker", "0"],
+    ["SetParam", "Camera", "WhiteBalance", "2"],
+    ["SetParam", "Camera", "PictureFlip", "0"],
+    ["SetParam", "Camera", "PictureMirror", "0"]
+  ],
+
+  "day": [
+    ["CameraTime", "set"],
+    ["SetParam", "Camera", "DayNightColor", "1"],
+    ["SetParam", "Camera", "ElecLevel", "50"],
+    ["SetParam", "Camera", "BroadTrends", "AutoGain", "1"],
+    ["SetParam", "Camera", "ClearFog", "enable", "1"],
+    ["SetParam", "Camera", "ClearFog", "level", "30"],
+    ["reboot"]
+  ],
+
+  "night": [
+    ["CameraTime", "set"],
+    ["SetParam", "Camera", "DayNightColor", "2"],
+    ["SetParam", "Camera", "ElecLevel", "60"],
+    ["SetParam", "Camera", "BroadTrends", "AutoGain", "0"],
+    ["SetParam", "Camera", "ClearFog", "enable", "0"],
+    ["reboot"]
+  ]
+}

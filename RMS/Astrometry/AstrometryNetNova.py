@@ -18,6 +18,10 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.application  import MIMEApplication
 from email.encoders import encode_noop
 
+import numpy as np
+from astropy.wcs import WCS
+from astropy.io import fits
+
 try:
     # Python 2
     import StringIO
@@ -251,29 +255,6 @@ class Client(object):
         result = self.send_request('submission_images', {'subid':subid})
         return result.get('image_ids')
 
-    def overlay_plot(self, service, outfn, wcsfn, wcsext=0):
-        from astrometry.util import util as anutil
-        wcs = anutil.Tan(wcsfn, wcsext)
-        params = dict(crval1 = wcs.crval[0], crval2 = wcs.crval[1],
-                      crpix1 = wcs.crpix[0], crpix2 = wcs.crpix[1],
-                      cd11 = wcs.cd[0], cd12 = wcs.cd[1],
-                      cd21 = wcs.cd[2], cd22 = wcs.cd[3],
-                      imagew = wcs.imagew, imageh = wcs.imageh)
-        result = self.send_request(service, {'wcs':params})
-        printDebug('Result status:', result['status'])
-        plotdata = result['plot']
-        plotdata = base64.b64decode(plotdata)
-        open(outfn, 'wb').write(plotdata)
-        printDebug('Wrote', outfn)
-
-    def sdss_plot(self, outfn, wcsfn, wcsext=0):
-        return self.overlay_plot('sdss_image_for_wcs', outfn,
-                                 wcsfn, wcsext)
-
-    def galex_plot(self, outfn, wcsfn, wcsext=0):
-        return self.overlay_plot('galex_image_for_wcs', outfn,
-                                 wcsfn, wcsext)
-
     def myjobs(self):
         result = self.send_request('myjobs/')
         return result['jobs']
@@ -299,14 +280,6 @@ class Client(object):
 
         return stat
 
-    def annotate_data(self,job_id):
-        """
-        :param job_id: id of job
-        :return: return data for annotations
-        """
-        result = self.send_request('jobs/%s/annotations' % job_id)
-        return result
-
     def sub_status(self, sub_id, justdict=False):
         result = self.send_request('submissions/%s' % sub_id)
         if justdict:
@@ -324,7 +297,7 @@ class Client(object):
 
 
 def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None, fov_w_range=None,
-    api_key=None):
+    api_key=None, x_center=None, y_center=None):
     """ Find an astrometric solution of X, Y image coordinates of stars detected on an image using the 
         nova.astrometry.net service.
 
@@ -337,6 +310,8 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
             width of the FOV in degrees.
         api_key: [str] nova.astrometry.net user API key. None by default, in which case the default API
             key will be used.
+        x_center: [float] X coordinate of the image center. If not given, the image center will be used.
+        y_center: [float] Y coordinate of the image center. If not given, the image center will be used.
 
     Return:
         (ra, dec, orientation, scale, fov_w, fov_h, star_data): [tuple of floats] All in degrees, 
@@ -371,7 +346,7 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
 
         # Save the avepixel as a memory file
         file_handle = BytesIO()
-        pil_img = Image.fromarray(img.T)
+        pil_img = Image.fromarray(img)
 
         # Save image to memory as JPG
         pil_img.save(file_handle, format='JPEG')
@@ -464,6 +439,10 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
 
     first_status = copy.deepcopy(stat)
 
+    # Print the link to the web page
+    print("Astrometry.net link:")
+    _printWebLink(stat, first_status=first_status)
+
     # Get results
     get_results_tries = 10
     get_solution_tries = 30
@@ -514,24 +493,58 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
             results_tries += 1
 
 
+    print()
+    # Extract the job ID
+    print('Job ID:', solved_id)
+
+    # Download the wcs.fits file
+    print("Downloading the WCS file...")
+    wcs_fits_link = "https://nova.astrometry.net/wcs_file/{:d}".format(solved_id)
+    wcs_fits = urlopen(wcs_fits_link).read()
+
+    # Load the WCS file
+    wcs_obj = WCS(fits.Header.fromstring(wcs_fits))
+
+    # Print the WCS fields
+    print("WCS fields:")
+    print(wcs_obj)
+
+    print("Astrometry.net link:")
+    _printWebLink(stat, first_status=first_status)
     print("Astrometry.net solution:")
     print(result)
 
-    # RA/Dec of centre
-    ra = result['ra']
-    dec = result['dec']
+    # Use image dimensions if available; otherwise, fallback on median star positions
+    if (x_center is None) or (y_center is None):
+        
+        if img is not None:
+            x_center = img.shape[1]/2.0
+            y_center = img.shape[0]/2.0
+        else:
+            x_center = np.median(x_data)
+            y_center = np.median(y_data)
 
-    # Orientation +E of N
-    orientation = result['orientation']
 
-    # Image scale in px/deg
+    # Use the WCS file to compute the center and orientation
+    ra_mid, dec_mid = wcs_obj.all_pix2world(x_center, y_center, 1)
+
+    # Image coordinate slightly right of the centre
+    x_right = x_center + 10
+    y_right = y_center
+    ra_right, dec_right = wcs_obj.all_pix2world(x_right, y_right, 1)
+
+    # Compute the equatorial orientation
+    rot_eq_standard = np.degrees(np.arctan2(np.radians(dec_mid) - np.radians(dec_right), \
+            np.radians(ra_mid) - np.radians(ra_right)))%360
+    
+    # Compute the scale
     scale = 3600/result['pixscale']
 
-    # FOV in deg
+    # Compute the FOV width and height
     fov_w = result['width_arcsec']/3600
     fov_h = result['height_arcsec']/3600
 
-    return ra, dec, orientation, scale, fov_w, fov_h, None
+    return ra_mid, dec_mid, rot_eq_standard, scale, fov_w, fov_h, None
 
 
 if __name__ == '__main__':

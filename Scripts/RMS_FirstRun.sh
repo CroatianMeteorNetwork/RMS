@@ -3,7 +3,7 @@
 echo "Waiting 10 seconds to init the Pi..."
 echo ""
 echo "IMPORTANT: RMS will first update itself."
-echo "Do not touch any file during the update and do not close this window until RMS starts."
+echo "Do not touch any file during the update and do not close this window."
 sleep 12
 
 # Google DNS server IP
@@ -205,7 +205,7 @@ fi
 
 echo ""
 echo "Updating to the latest version of RMS..."
-bash $RMSUPDATESCRIPT 1
+bash $RMSUPDATESCRIPT
 
 echo ""
 echo "4) Editing the configuration file"

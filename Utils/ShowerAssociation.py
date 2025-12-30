@@ -502,7 +502,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
         # Infill the meteor structure
         for entry in meteor_meas:
             
-            calib_status, frame_n, x, y, ra, dec, azim, elev, inten, mag = entry
+            calib_status, frame_n, x, y, ra, dec, azim, elev, inten, mag, _, _, _ = entry
 
             # Compute the Julian data of every point
             jd = datetime2JD(filenameToDatetime(ff_name) + datetime.timedelta(seconds=float(frame_n)/fps))

@@ -1,0 +1,2 @@
+# System packages installed by RMS_Update.sh if missing
+# (File can be empty if no additional packages are needed)

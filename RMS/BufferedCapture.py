@@ -18,28 +18,47 @@ from __future__ import print_function, division, absolute_import
 
 import os
 import sys
+import ctypes
 import traceback
-import RMS.Reprocess
-
-# Set GStreamer debug level. Use '2' for warnings in production environments.
-os.environ['GST_DEBUG'] = '3'
 
 import re
 import time
-import logging
 import datetime
+import copy
 import os.path
-from multiprocessing import Process, Event, Value
+from multiprocessing import Process, Event, Value, Array
+import threading
+from collections import deque
+import os
+import signal
 
 import cv2
 import numpy as np
+import socket
+import errno
+import json
 
-from RMS.Misc import ping
-from RMS.Routines.GstreamerCapture import GstVideoFile
+
+from RMS.Misc import obfuscatePassword
+from RMS.Routines.GstreamerCapture import GstVideoFile, getStructureValue
 from RMS.Formats.ObservationSummary import getObsDBConn, addObsParam
+from RMS.RawFrameSave import RawFrameSaver
+from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp
+from RMS.Formats import FTfile, FTStruct
+from RMS.Logger import LoggingManager, getLogger, gstDebugLogger
+from RMS.CaptureModeSwitcher import switchCameraMode
+import Utils.CameraControl as cc
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = getLogger("rmslogger")
+
+if sys.version_info[0] < 3:
+    # py2
+    from urlparse import urlparse
+else:
+    # py3
+    from urllib.parse import urlparse
+
 
 GST_IMPORTED = False
 try:
@@ -55,60 +74,117 @@ except ValueError as e:
     log.info('Could not import Gst: {}. Using OpenCV.'.format(e))
 
 
+# Define probe result constants
+class RtspProbeResult:
+    """
+    Constants representing possible RTSP probe results.
+    
+    SUCCESS: Connection successful
+    NETWORK_DOWN: Local network interface is down or unreachable
+    HOST_UNREACHABLE: Network up but target host cannot be reached
+    CONNECTION_REFUSED: Host is up but actively refusing RTSP connections
+    TIMEOUT: Connection attempt exceeded specified timeout
+    DNS_ERROR: Unable to resolve hostname to IP address
+    UNKNOWN_ERROR: Other unspecified connection errors
+    """
+    SUCCESS = "SUCCESS"
+    NETWORK_DOWN = "NETWORK_DOWN"          # No network connectivity
+    HOST_UNREACHABLE = "HOST_UNREACHABLE"  # Can't reach the host  
+    CONNECTION_REFUSED = "CONNECTION_REFUSED" # Host reachable but RTSP port closed
+    TIMEOUT = "TIMEOUT"                    # Connection attempt timed out
+    DNS_ERROR = "DNS_ERROR"                # Can't resolve hostname
+    UNKNOWN_ERROR = "UNKNOWN_ERROR"        # Other connection errors
+
+
 class BufferedCapture(Process):
     """ Capture from device to buffer in memory.
     """
     
     running = False
     
-    def __init__(self, array1, startTime1, array2, startTime2, config, video_file=None, night_data_dir=None):
+    def __init__(self, array1, start_time1, array2, start_time2, config, video_file=None, night_data_dir=None,
+                 saved_frames_dir=None, daytime_mode=None, camera_mode_switch_trigger=None):
         """ Populate arrays with (startTime, frames) after startCapture is called.
         
         Arguments:
             array1: numpy array in shared memory that is going to be filled with frames
-            startTime1: float in shared memory that holds time of first frame in array1
+            start_time1: float in shared memory that holds time of first frame in array1
             array2: second numpy array in shared memory
-            startTime2: float in shared memory that holds time of first frame in array2
+            start_time2: float in shared memory that holds time of first frame in array2
 
         Keyword arguments:
             video_file: [str] Path to the video file, if it was given as the video source. None by default.
             night_data_dir: [str] Path to the directory where night data is stored. None by default.
-
+            saved_frames_dir: [str] Path to the directory where saved frames are stored. None by default.
+            daytime_mode: [multiprocessing.Value] Shared boolean variable to communicate camera mode switch
+                direction (daytime or nighttime).
+            camera_mode_switch_trigger: [multiprocessing.Value] Shared boolean variable to trigger camera 
+                mode switch at the right time.
         """
         
         super(BufferedCapture, self).__init__()
-        self.array1 = array1
-        self.startTime1 = startTime1
-        self.array2 = array2
-        self.startTime2 = startTime2
         
-        self.startTime1.value = 0
-        self.startTime2.value = 0
-        
+        # Store configuration and paths (immutable data is safe to pass to child process)
         self.config = config
-        self.media_backend_override = False
-        self.video_device_type = "cv2"
-
         self.video_file = video_file
-
         self.night_data_dir = night_data_dir
+        self.saved_frames_dir = saved_frames_dir
 
-        # A frame will be considered dropped if it was late more then half a frame
-        self.time_for_drop = 1.5*(1.0/config.fps)
+        # make sure the flags are always real shared Values
+        if daytime_mode is None:
+            self.daytime_mode = Value(ctypes.c_bool, False)       # default: "night"
+        else:
+            self.daytime_mode = daytime_mode
 
-        # Initialize Smoothing variables
-        self.startup_flag = True
-        self.last_calculated_fps = 0
-        self.last_calculated_fps_n = 0
-        self.expected_m = 1e9/self.config.fps
-        self.reset_count = -1
+        if camera_mode_switch_trigger is None:
+            self.camera_mode_switch_trigger = Value(ctypes.c_bool, False)
+        else:
+            self.camera_mode_switch_trigger = camera_mode_switch_trigger
 
+        # Store shared memory arrays and values for compressor (these are designed for multiprocessing)
+        self.array1 = array1
+        self.start_time1 = start_time1
+        self.array2 = array2
+        self.start_time2 = start_time2
+        self.start_time1.value = 0
+        self.start_time2.value = 0
+
+        # Initialize shared values for raw frame saving (these are designed for multiprocessing)
+
+        # Raw-frame infrastructure: always create, even if save_frames=False
+        self.raw_frame_saver = None    # avoids AttributeError in releaseRawArrays
+        self.shared_raw_array = None   # primary raw-frame buffer
+        self.shared_raw_array2 = None  # secondary raw-frame buffer
+
+        if self.config.save_frames:
+
+            # Frame saving block size - these many raw frames are written to buffer before saving to disk
+            self.num_raw_frames = 10
+
+            self.start_raw_time1 = Value('d', 0.0)
+            self.start_raw_time2 = Value('d', 0.0)
+            self.shared_timestamps_base = Array(ctypes.c_double, self.num_raw_frames)
+            self.shared_timestamps_base2 = Array(ctypes.c_double, self.num_raw_frames)
+
+        # Initialize shared counter for dropped frames
         self.dropped_frames = Value('i', 0)
-        self.device = None
-        self.pipeline = None
-        self.start_timestamp = 0
-        self.frame_shape = None
-        self.convert_to_gray = False
+        self.last_daytime_mode = None  # Track day/night transitions
+        self.dropped_frames_timestamps = deque()  # Track when frames were dropped for 10-min window
+
+        # Flag for process control
+        self.exit = Event()
+
+        # Initialize sync tick
+        self.last_sync_tick = -1
+        self.sync_tick_reference = 0  # reference epoch for sync ticks
+
+        # Timestamp correction between smoothed PTS and pipeline running time
+        self.last_pts_correction_ns = 0
+        self.last_running_time_ns = None
+
+        # handle for the Gst bus-poller thread
+        self._bus_should_exit = False
+        self._bus_thread = None
 
 
     def startCapture(self, cameraID=0):
@@ -121,6 +197,7 @@ class BufferedCapture(Process):
         
         self.cameraID = cameraID
         self.exit = Event()
+
         self.start()
     
 
@@ -135,24 +212,55 @@ class BufferedCapture(Process):
         log.info("Joining capture...")
 
         # Wait for the capture to join for 60 seconds, then terminate
-        for i in range(60):
+        waiting_to_join = 60
+        log.info("Waiting up to {} seconds for capture to join...".format(waiting_to_join))
+        
+        # Track how many seconds we actually waited
+        seconds_waited = 0
+        
+        for i in range(waiting_to_join):
+            seconds_waited = i + 1
             if self.is_alive():
                 time.sleep(1)
             else:
                 break
-
-        if self.is_alive():
-            log.info('Terminating capture...')
-            self.terminate()
         
-        # Free shared memory after the compressor is done
-        try:
-            log.debug('Freeing frame buffers in BufferedCapture...')
-            del self.array1
-            del self.array2
-        except Exception as e:
-            log.debug('Freeing frame buffers failed with error:' + repr(e))
-            log.debug(repr(traceback.format_exception(*sys.exc_info())))
+        # Log the outcome based on final state
+        if not self.is_alive():
+            log.info("Capture joined successfully after {} seconds".format(seconds_waited))
+        else:
+            log.info("Timed out after waiting {} seconds, capture thread still alive".format(seconds_waited))
+            log.info("Sending interrupt signal for graceful shutdown...")
+            
+            try:
+                # Send SIGINT to allow child process to clean up gracefully
+                if self.pid:
+                    os.kill(self.pid, signal.SIGINT)
+                
+                # Wait a few seconds for graceful shutdown
+                self.join(5)
+                
+                if self.is_alive():
+                    log.warning("Process still alive after interrupt, forcing termination")
+                    self.terminate()
+                else:
+                    log.info("Process exited gracefully after interrupt")
+                    
+            except ProcessLookupError:
+                log.info("Process already terminated")
+            except Exception as e:
+                log.error("Error during graceful shutdown: {}".format(e))
+                log.info("Falling back to terminate()")
+                self.terminate()
+            
+            # Always join to reap zombie (returns instantly if already dead)
+            self.join()
+            
+            # Note: RTSP connections are cleaned up by releaseResources() in the child process
+            
+            # Clean up raw frame arrays after process termination
+            if hasattr(self, 'raw_frame_saver') and self.raw_frame_saver:
+                self.releaseRawArrays()
 
         return self.dropped_frames.value
 
@@ -261,7 +369,7 @@ class BufferedCapture(Process):
                         self.b = y - m*x
                         self.m_jump_error = 0
 
-                        log.info("Check config FPS! Startup sequence exited early probably due to inaccurate FPS value. "
+                        log.debug("Check config FPS! Startup sequence exited early probably due to inaccurate FPS value. "
                                  "Startup is disabled for the remainder of the run")
 
                     # On normal exit, calculate residual error for smooth transition to calculate m
@@ -270,7 +378,7 @@ class BufferedCapture(Process):
                         # calculate the jump error
                         self.m_jump_error = x*(m - self.expected_m) # ns
 
-                    log.info("Exiting startup logic at {:.1f}% of startup sequence, Expected fps: {:.6f}, "
+                    log.debug("Exiting startup logic at {:.1f}% of startup sequence, Expected fps: {:.6f}, "
                              "calculated fps at this point: {:.6f}, residual m error: {:.1f} ns, sample interval: {}"
                              .format(100*x/self.startup_frames, 1e9/self.expected_m, 1e9/m, m_err, sample_interval))
 
@@ -397,6 +505,9 @@ class BufferedCapture(Process):
     def read(self):
         """ Retrieve frames and timestamp.
 
+        Arguments:
+            check_color: [bool] whether to check if frame contains color information
+
         Return:
         (tuple): (ret, frame, timestamp) where ret is a boolean indicating success,
                  frame is the captured frame, and timestamp is the frame timestamp.
@@ -415,8 +526,8 @@ class BufferedCapture(Process):
             # GStreamer
             if GST_IMPORTED and (self.config.media_backend == 'gst') and (not self.media_backend_override):
 
-                # Pull a frame from the GStreamer pipeline
-                sample = self.device.emit("pull-sample")
+                # Pull a frame from the GStreamer pipeline with a .5 sec timeout
+                sample = self.device.emit("try-pull-sample", 500 * Gst.MSECOND)
                 if not sample:
                     log.info("GStreamer pipeline did not emit a sample.")
                     return False, None, None
@@ -440,14 +551,39 @@ class BufferedCapture(Process):
                     log.info("GStreamer Buffer did not contain a frame.")
                     return False, None, None
 
-                # Handling for grayscale conversion
-                frame = self.handleGrayscaleConversion(map_info)
+                try:
+                    # Convert to np.ndarray
+                    frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
 
-                # Smooth raw pts and calculate actual timestamp
-                smoothed_pts = self.smoothPTS(gst_timestamp_ns)
-                timestamp = self.start_timestamp + (smoothed_pts/1e9)
+                    # Smooth raw pts and calculate actual timestamp
+                    smoothed_pts = self.smoothPTS(gst_timestamp_ns)
+                    running_time_ns = None
 
-                buffer.unmap(map_info)
+                    if self.pipeline is not None:
+                        try:
+                            clock = self.pipeline.get_clock()
+                            base_time = self.pipeline.get_base_time()
+
+                            if clock is not None and base_time != Gst.CLOCK_TIME_NONE:
+                                clock_time = clock.get_time()
+                                if clock_time != Gst.CLOCK_TIME_NONE and clock_time >= base_time:
+                                    running_time_ns = clock_time - base_time
+                        except Exception as clock_exc:
+                            log.debug("Failed to query pipeline clock/base time: %s", clock_exc)
+
+                    if running_time_ns is not None:
+                        self.last_running_time_ns = running_time_ns
+                        self.last_pts_correction_ns = smoothed_pts - running_time_ns
+                        corrected_running_time_ns = running_time_ns + self.last_pts_correction_ns
+                        timestamp = self.start_timestamp + (corrected_running_time_ns/1e9)
+                    else:
+                        self.last_running_time_ns = None
+                        self.last_pts_correction_ns = 0
+                        timestamp = self.start_timestamp + (smoothed_pts/1e9)
+
+                finally:
+                    # Always unmap buffer to prevent memory leaks
+                    buffer.unmap(map_info)
 
             # OpenCV
             else:
@@ -480,47 +616,423 @@ class BufferedCapture(Process):
 
             return rtsp_url
 
-        # If no match is found, return None or handle as appropriate        
+        # If no match is found, return None or handle as appropriate
         else:
             log.error("No RTSP URL found in the input string: {}".format(input_string))
             raise ValueError("No RTSP URL found in the input string: {}".format(input_string))
-            
+    
 
-    def isGrayscale(self, frame):
+    def probeRtspService(self, max_attempts=720, probe_interval=10, timeout=1):
         """
-        Return True if all color channels contain identical data.
-        """
-
-        # If the frame is one-dimensional, it is grayscale
-        if len(frame.shape) == 2:
-            return True
-
-        # Check if the R, G, and B channels are equal
-        b, g, r = cv2.split(frame)
-        if np.array_equal(r, g) and np.array_equal(g, b):
-            return True
+        Test RTSP service availability by attempting TCP connection to the service port.
+        Uses TCP connection only - does not validate RTSP protocol
         
+        Performs a thorough connection test by:
+        1. Resolving hostname via DNS
+        2. Creating a TCP socket connection to the RTSP port
+        3. Analyzing any connection failures
+        4. Retrying with backoff if connection fails
+        
+        Args:
+            max_attempts (int, optional): Maximum number of connection attempts before giving up.
+                Defaults to 720.
+            probe_interval (int, optional): Time in seconds between connection attempts.
+                Defaults to 10 seconds.
+            timeout (int, optional): Socket connection timeout in seconds.
+                Defaults to 1 second.
+        
+        Returns:
+            tuple: A pair (success, status) where:
+                - success (bool): True if connection was successful, False otherwise
+                - status (str): One of the RtspProbeResult status strings:
+                    - SUCCESS: Connection successful
+                    - NETWORK_DOWN: Local network interface is down
+                    - HOST_UNREACHABLE: Cannot reach the target host
+                    - CONNECTION_REFUSED: Host up but RTSP port is closed
+                    - TIMEOUT: Connection attempt timed out
+                    - DNS_ERROR: Cannot resolve hostname
+                    - UNKNOWN_ERROR: Other connection failures
+                
+        """
+        try:
+            # Parse RTSP URL to get host and port
+            device_url = self.extractRtspUrl(self.config.deviceID)
+            parsed = urlparse(device_url)
+            host = parsed.hostname
+            port = parsed.port or 554
+
+            last_error = None
+            stop_event = getattr(self, "exit", None)
+            
+            for attempt in range(max_attempts):
+
+                if stop_event is not None and stop_event.is_set():
+                    log.info("RTSP probe aborted - shutdown requested")
+                    return False, RtspProbeResult.UNKNOWN_ERROR
+                try:
+                    # Try to resolve hostname first
+                    try:
+                        socket.gethostbyname(host)
+                    except socket.gaierror:
+                        last_error = RtspProbeResult.DNS_ERROR
+                        raise
+
+                    # Create socket with timeout
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(timeout)
+                    
+                    # Try to connect
+                    result = sock.connect_ex((host, port))
+                    sock.close()
+
+                    if result == 0:
+                        # First probe succeeded, wait 10s and verify with second probe
+                        log.info("First probe successful, waiting 10s for verification probe...")
+                        time.sleep(10)
+
+                        # Second verification probe
+                        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        sock.settimeout(timeout)
+                        result = sock.connect_ex((host, port))
+                        sock.close()
+
+                        if result == 0:
+                            log.info("RTSP service ready after {} attempts (verified with 2 probes)".format(attempt + 1))
+                            return True, RtspProbeResult.SUCCESS
+
+                        log.info("Second probe failed, continuing retry loop...")
+
+                    # Analyze specific connection errors
+                    if result in (errno.ENETUNREACH, errno.ENETDOWN):
+                        last_error = RtspProbeResult.NETWORK_DOWN
+                    elif result in (errno.EHOSTUNREACH, errno.EHOSTDOWN):
+                        last_error = RtspProbeResult.HOST_UNREACHABLE
+                    elif result == errno.ECONNREFUSED:
+                        last_error = RtspProbeResult.CONNECTION_REFUSED
+                    elif result == errno.ETIMEDOUT:
+                        last_error = RtspProbeResult.TIMEOUT
+                    else:
+                        last_error = RtspProbeResult.UNKNOWN_ERROR
+                        
+                except socket.gaierror:
+                    last_error = RtspProbeResult.DNS_ERROR
+                except socket.timeout:
+                    last_error = RtspProbeResult.TIMEOUT
+                except socket.error as e:
+                    if e.errno in (errno.ENETUNREACH, errno.ENETDOWN):
+                        last_error = RtspProbeResult.NETWORK_DOWN
+                    elif e.errno in (errno.EHOSTUNREACH, errno.EHOSTDOWN):
+                        last_error = RtspProbeResult.HOST_UNREACHABLE
+                    else:
+                        last_error = RtspProbeResult.UNKNOWN_ERROR
+                    log.debug("RTSP probe attempt {} failed: {}".format(attempt + 1, e))
+                
+                error_messages = {
+                    RtspProbeResult.NETWORK_DOWN: "Network appears to be down",
+                    RtspProbeResult.HOST_UNREACHABLE: "Camera is unreachable",
+                    RtspProbeResult.CONNECTION_REFUSED: "RTSP service not accepting connections",
+                    RtspProbeResult.TIMEOUT: "Connection attempt timed out",
+                    RtspProbeResult.DNS_ERROR: "Cannot resolve camera hostname",
+                    RtspProbeResult.UNKNOWN_ERROR: "Unknown connection error"
+                }
+                
+                print('Trying to connect to camera RTSP service... (attempt {}) - {}'.format(
+                    attempt + 1, error_messages[last_error]))
+                time.sleep(probe_interval)
+                
+            log.error("RTSP service not responding after all attempts. Last error: {}".format(
+                error_messages[last_error]))
+            return False, last_error
+            
+        except Exception as e:
+            log.error("Error probing RTSP service: {}".format(e))
+            return False, RtspProbeResult.UNKNOWN_ERROR
+                
+
+    def isGrayscale(self, frame, stride=64):
+        """
+        Quickly check if a frame is grayscale by sampling pixels along the diagonal.
+        If all three channels match on those diagonal samples, return True.
+        If an IndexError is raised (i.e., frame is single-channel), also return True.
+        This trades completeness for speed, as only the diagonal is checked.
+
+        Args:
+            frame (numpy.ndarray): The image frame to check (usually BGR or GRAY).
+            stride (int): Spacing for diagonal sampling, skipping many pixels for efficiency.
+
+        Returns:
+            bool: True if all sampled channels match (or frame is single-channel), otherwise False.
+        """
+        if frame is None:
+            raise ValueError("isGrayscale() called with frame=None")
+        
+        # We don't explicitly check frame.shape first; instead we rely on an IndexError
+        # if 'frame' is single-channel (which is inherently grayscale).
+        # This is faster than an extra dimension check for most BGR GMN stations 
+
+        try:
+            # If diagonal samples are not identical, frame is color
+            sampled = frame[::stride, ::stride]
+            is_gray = np.all(sampled[..., 0] == sampled[..., 1]) and \
+                    np.all(sampled[..., 1] == sampled[..., 2])
+            
+        except IndexError:
+             # If IndexError, frame is grayscale
+            is_gray = True
+
+        return is_gray
+
+
+    def handleGrayscaleConversion(self, frame):
+        """Handle conversion of frame to grayscale if necessary.
+
+            Camera outputs BGR (3 channels) even in night mode. For efficiency, we save raw frames in:
+            - Grayscale (1 channel) when all channels are identical
+            - Full BGR (3 channels) when they differ
+
+            Note: While raw frames are saved in color when available, frames are converted
+            to grayscale before compression in the processing pipeline
+
+        Args:
+            frame: a numpy.ndarray frame
+
+        Returns:
+            numpy.ndarray: Frame data either as grayscale (2D) or BGR (3D) array
+        """
+
+        # First check if frame is None to prevent NoneType subscript error
+        if frame is None:
+            return None
+
+        # We don't explicitly check frame.shape first; instead we rely on an IndexError
+        # if 'frame' is single-channel (which is inherently grayscale).
+        # This is faster than an extra dimension check for most BGR GMN stations 
+
+        try:
+            # If frame channels are not identical (color), return all 3 channels
+            if not self.convert_to_gray:
+                return frame
+
+            try:
+                # If frame channels are identical (gray), extract green channel for grayscale
+                return frame[:, :, 1]
+        
+            except IndexError:
+                # If IndexError occurs, frame is already grayscale (single-channel)
+                return frame
+            
+        except Exception as e:
+            log.error('Error in grayscale conversion: {}'.format(e))
+            log.debug('Frame shape: {}'.format(frame.shape if frame is not None else None))
+            return None
+
+
+    def moveSegment(self, splitmuxsink, fragment_id, first_sample=None):
+        """
+        Custom callback for splitmuxsink's format-location signal to name and move each segment as its
+        created. Generates a timestamp-based folder structure: Year/Day-Of-Year/Hour/ per video segment.
+
+        Arguments:
+          splitmuxsink [GstElement]: The splitmuxsink object itself, included in arguments as GStreamer expects it.
+          fragment_id [int]: Fragment / segment number of the new clip
+          first_sample [GstSample]: First sample in the fragment when connected to the
+              ``format-location-full`` signal. Optional.
+
+        Returns:
+          full_path [str]: Full path to save this new video segment to
+        """
+
+        segment_timestamp = None
+        corrected_running_time_ns = None
+
+        if first_sample is not None:
+            try:
+                buffer = first_sample.get_buffer()
+                segment = first_sample.get_segment()
+                running_time_ns = None
+
+                if buffer is not None:
+                    buffer_pts = buffer.pts
+                    if buffer_pts != Gst.CLOCK_TIME_NONE:
+                        running_time_ns = buffer_pts
+
+                        if segment is not None:
+                            converted = segment.to_running_time(Gst.Format.TIME, buffer_pts)
+                            if converted != Gst.CLOCK_TIME_NONE:
+                                running_time_ns = converted
+
+                if running_time_ns is not None:
+                    corrected_running_time_ns = running_time_ns + self.last_pts_correction_ns
+                    segment_timestamp = self.start_timestamp + (corrected_running_time_ns / 1e9)
+
+            except Exception as sample_exc:
+                log.debug("Failed to derive running time from splitmux sample: %s", sample_exc)
+
+        if segment_timestamp is None and corrected_running_time_ns is None and self.last_running_time_ns is not None:
+            corrected_running_time_ns = self.last_running_time_ns + self.last_pts_correction_ns
+            segment_timestamp = self.start_timestamp + (corrected_running_time_ns / 1e9)
+
+        if segment_timestamp is not None:
+            segment_time = UTCFromTimestamp.utcfromtimestamp(segment_timestamp)
+            self.last_segment_savetime = segment_timestamp
+        else:
+            # Fallback to previous behaviour using wall-clock time
+            segment_time = UTCFromTimestamp.utcfromtimestamp(self.last_segment_savetime)
+            self.last_segment_savetime = time.time()
+
+        segment_filename = segment_time.strftime("{}_%Y%m%d_%H%M%S_%f_video.mkv".format(self.config.stationID))
+        segment_subpath = os.path.join(self.config.data_dir, self.config.video_dir, segment_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
+
+        # Create full path for the segment
+        mkdirP(segment_subpath)
+        segment_full_path = os.path.join(segment_subpath, segment_filename)
+        log.info("Created new video segment #{} at: {}".format(fragment_id, segment_full_path))
+
+        # Return full path to splitmux's callback
+        return segment_full_path
+
+      
+    def handleStateChange(self, pipeline, target_state, timeout=60):
+        """Handle GStreamer pipeline state changes with proper synchronization.
+        
+        Transitions pipeline through state sequence (NULL->READY->PAUSED->PLAYING),
+        ensuring each state change is complete before proceeding. Uses explicit synchronization
+        to prevent race conditions.
+
+        For live sources like RTSP, accepts both SUCCESS and NO_PREROLL as valid state changes.
+
+        Args:
+            pipeline: The GStreamer pipeline to change state
+            target_state: The target state to reach (usually Gst.State.PLAYING)
+            timeout: Maximum seconds to wait for each state change (default 60)
+
+        tuple: (success, start_time) where:
+            - success (bool): True if state change succeeded, False if any step failed
+            - start_time (float or None): Timestamp when PAUSED state was initiated, or None if not reached
+        """
+
+        try:
+            # Initialize start time
+            start_time = None
+
+            # Get current pipeline state
+            ret, current, pending = pipeline.get_state(0)
+            log.debug("Current pipeline state: {}, pending: {}".format(current.value_nick, pending.value_nick))
+
+            # Define the sequence of states we need to go through
+            target_sequence = [Gst.State.READY, Gst.State.PAUSED, Gst.State.PLAYING]
+
+            # Find where we are in the sequence (-1 if current state isn't in sequence)
+            current_index = target_sequence.index(current) if current in target_sequence else -1
+            target_index = target_sequence.index(target_state)
+            
+            # Step through each state change needed to reach target
+            for state in target_sequence[current_index + 1:target_index + 1]:
+                log.debug("Transitioning to {} state...".format(state.value_nick))
+                
+                # Force synchronization before state change to prevent race conditions
+                if not pipeline.sync_children_states():
+                    log.warning("Sync failed before {}".format(state.value_nick))
+
+                # Capture time just before camera starts capture
+                if state == Gst.State.PAUSED:
+                    start_time = time.time()
+
+                # Request state change and wait for completion
+                ret = pipeline.set_state(state)
+                ret, new_state, pending = pipeline.get_state(Gst.SECOND * timeout)
+                
+                # Both SUCCESS and NO_PREROLL are valid (NO_PREROLL happens with live sources)
+                if ret not in (Gst.StateChangeReturn.SUCCESS, Gst.StateChangeReturn.NO_PREROLL):
+                    log.error("Failed to change to state {}".format(state.value_nick))
+                    return False, None
+                
+                # Force synchronization after state change
+                if not pipeline.sync_children_states():
+                    log.warning("Sync failed after {}".format(state.value_nick))
+                
+                log.debug("Successfully transitioned to {} state".format(state.value_nick))
+                    
+            return True, start_time
+            
+        except Exception as e:
+            log.error("State change error: {}".format(str(e)))
+            import traceback
+            log.debug(traceback.format_exc())
+            return False, None
+
+
+    def shouldSaveFrame(self, ts):
+        """
+        Return True for the first frame that lies within half a frame of
+        each universal sync tick (ref + k·dt).
+
+        Arguments:
+            ts : [float]  epoch timestamp of current frame (seconds)
+        """
+        dt   = self.config.frame_save_aligned_interval  # seconds
+        ref  = self.sync_tick_reference                 # epoch offset
+        tol  = 0.5 / self.config.fps                    # half-frame
+
+        tick = int((ts - ref) / dt + 0.5)
+        tick_time = ref + tick * dt
+
+        if abs(ts - tick_time) <= tol and tick != self.last_sync_tick:
+            self.last_sync_tick = tick
+            return True
         return False
 
-    
-    def handleGrayscaleConversion(self, map_info):
-        """Handle conversion of frame to grayscale if necessary."""
 
-        # If the frame is already grayscale, return it as is
-        if len(self.frame_shape) == 2:
-            return np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
+    def _busPoller(self):
+        """Poll the GStreamer bus and drain queued messages.
 
-        if not self.convert_to_gray:
-            return np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
+        Runs in a background daemon thread:
+                - Wakes every 5 s via ``bus.timed_pop_filtered``.
+                - Logs any ``ERROR`` or ``WARNING`` message for visibility.
+                - Silently discards all other message types to keep the queue small.
 
-        # Convert to grayscale by selecting a specific channel
-        bgr_frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
-        gray_frame = bgr_frame[:, :, 0]  # Assuming the blue channel for grayscale
-        return gray_frame
+        The loop exits when ``self.pipeline`` becomes ``None`` inside ``releaseResources``.
+
+        Arguments:
+            None
+
+        Return:
+            None
+
+        """
+        if not GST_IMPORTED:
+            return
+
+        try:
+            bus = self.pipeline.get_bus()
+            mask = Gst.MessageType.ANY
+
+            while not self._bus_should_exit and self.pipeline is not None:
+                msg = bus.timed_pop_filtered(5 * Gst.SECOND, mask)
+                if not msg:
+                    # Check if pipeline still exists
+                    if self.pipeline is None:
+                        break
+                    continue
+
+                if msg.type == Gst.MessageType.ERROR:
+                    err, dbg = msg.parse_error()
+                    log.error("GST ERROR from %s: %s", msg.src.get_name(), err)
+                elif msg.type == Gst.MessageType.WARNING:
+                    warn, dbg = msg.parse_warning()
+                    log.warning("GST WARN  from %s: %s", msg.src.get_name(), warn)
+                elif msg.type == Gst.MessageType.EOS:
+                    log.debug("_busPoller: Received EOS, exiting")
+                    break
+                    
+        except Exception as e:
+            log.debug("_busPoller: Exception occurred: %s", str(e))
+        finally:
+            log.debug("_busPoller: Thread exiting")
 
 
     def createGstreamDevice(self, video_format, gst_decoder='decodebin', 
-                            video_file_dir=None, segment_duration_sec=30, max_retries=5, retry_interval=1):
+                            video_file_dir=None, segment_duration_sec=30, max_retries=5, retry_interval=5):
         """
         Creates a GStreamer pipeline for capturing video from an RTSP source and 
         initializes playback with specific configurations.
@@ -547,24 +1059,25 @@ class BufferedCapture(Process):
 
         device_url = self.extractRtspUrl(self.config.deviceID)
 
+        # Common timeout settings for both UDP and TCP
+        # All streams need tcp-timeout since RTSP control always uses TCP
+        common_timeouts = "retry=5 timeout=5000000 tcp-timeout=5000000 teardown-timeout=3000000"
+        
         if self.config.protocol == 'udp':
-            protocol_str = "protocols=udp retry=5"
-            # rtspsrc_params = ("rtspsrc buffer-mode=1 protocols=udp retry=5")
-
+            protocol_str = f"protocols=udp {common_timeouts}"
         else:
-            # Default to TCP
-            protocol_str = "protocols=tcp tcp-timeout=5000000 retry=5"
+            protocol_str = f"protocols=tcp {common_timeouts}"
 
         # Define the source up to the point where we want to branch off
         source_to_tee = (
-            "rtspsrc buffer-mode=1 {:s} "
+            "rtspsrc name=src buffer-mode=1 {:s} "
             "location=\"{:s}\" ! "
-            "rtph264depay ! tee name=t"
+            "rtph264depay ! h264parse ! tee name=t"
             ).format(protocol_str, device_url)
 
         # Branch for processing
         processing_branch = (
-            "t. ! queue ! h264parse ! {:s} ! "
+            "t. ! queue ! {:s} ! "
             "queue leaky=downstream max-size-buffers=100 max-size-bytes=0 max-size-time=0 ! "
             "videoconvert ! video/x-raw,format={:s} ! "
             "queue max-size-buffers=100 max-size-bytes=0 max-size-time=0 ! "
@@ -573,12 +1086,17 @@ class BufferedCapture(Process):
         
          # Branch for storage - if video_file_dir is not None, save the raw stream to a file
         if video_file_dir is not None:
-
-            video_location = os.path.join(video_file_dir, "video_%05d.mkv")
+            
+            # The video will be split into segments of segment_duration_sec seconds
+            # The splitmuxsink will save the segments to video_file_dir
+            # The splitmuxsink will use the matroskamux muxer
+            # The splitmuxsink will use the format-location-full signal to name and move each segment
+            # queue2 smooths out the writes, but doesn't wait until the buffers fill up for writing
             storage_branch = (
-                "t. ! queue max-size-buffers=0 max-size-bytes=0 max-size-time=0 ! h264parse ! "
-                "splitmuxsink location={:s} max-size-time={:d} muxer-factory=matroskamux"
-                ).format(video_location, int(segment_duration_sec*1e9))
+                "t. ! queue2 max-size-buffers=150 max-size-bytes=2097152 max-size-time=5000000000 ! "
+                "h264parse ! "
+                "splitmuxsink name=splitmuxsink0 async-finalize=true max-size-time={:d} muxer-factory=matroskamux"
+                ).format(int(segment_duration_sec*1e9))
 
         # Otherwise, skip saving the raw stream to disk
         else:
@@ -587,63 +1105,80 @@ class BufferedCapture(Process):
          # Combine all parts of the pipeline
         pipeline_str = "{:s} {:s} {:s}".format(source_to_tee, processing_branch, storage_branch)
 
-        log.debug("GStreamer pipeline string: {:s}".format(pipeline_str))
+        # Obfuscate the password in the pipeline string before logging
+        obfuscated_pipeline_str = obfuscatePassword(pipeline_str)
+
+        log.info("GStreamer pipeline string: {:s}".format(obfuscated_pipeline_str))
 
         # Set the pipeline to PLAYING state with retries
         for attempt in range(max_retries):
+            try:
+                log.info("Attempt {}: transitioning Pipeline to PLAYING state.".format(attempt + 1))
+                
+                # Make sure any previous pipeline is cleaned up
+                if hasattr(self, 'pipeline') and self.pipeline:
+                    self.releaseResources()
 
-            log.info("Attempt {}: transitioning Pipeline to PLAYING state.".format(attempt + 1))
+                # Parse and create the pipeline
+                self._bus_should_exit = False
+                self.pipeline = Gst.parse_launch(pipeline_str)
+                if not self.pipeline:
+                    raise ValueError("Could not create pipeline")
+                
+                # Start a daemon thread that drains the GstBus so it never fills
+                self._bus_thread = threading.Thread(target=self._busPoller, daemon=True)
+                self._bus_thread.start()
+                
+                # If raw video saving is enabled, connect the "format-location-full" signal to the
+                # moveSegment function
+                if video_file_dir is not None:
+                    
+                    splitmuxsink = self.pipeline.get_by_name("splitmuxsink0")
+                    splitmuxsink.connect("format-location-full", self.moveSegment)
 
-            # Reset pipeline if one already exists
-            if self.pipeline:
-                self.pipeline.set_state(Gst.State.NULL)
+                # Transition through states
+                log.info("Starting pipeline state transitions...")
 
-                # Waiting to ensure the pipeline is fully cleaned up
-                time.sleep(retry_interval)
+                success, start_time = self.handleStateChange(self.pipeline, Gst.State.PLAYING)
+                if not success:
+                    raise ValueError("Failed to transition pipeline to PLAYING state")
 
-                # Clear the pipeline reference to avoid using a stale or invalid pipeline object
-                self.pipeline = None
-
-            # Parse and create the pipeline
-            self.pipeline = Gst.parse_launch(pipeline_str)
-
-            # Set the pipeline to PLAYING state
-            self.pipeline.set_state(Gst.State.PLAYING)
-
-            # Capture time
-            start_time = time.time()
-
-            # Wait for the state change to complete, with an increasing timeout for each attempt
-            max_timeout = Gst.SECOND * 60
-            current_timeout = min(Gst.SECOND * 5 * (attempt + 1), max_timeout)
-            state_change_return, current_state, _ = self.pipeline.get_state(current_timeout)
-
-            # Check if the state change was successful
-            if state_change_return != Gst.StateChangeReturn.FAILURE and current_state == Gst.State.PLAYING:
-                log.info("Pipeline is in PLAYING state.")
-
-                # Calculate camera latency from config parameters
-                total_latency = self.config.camera_buffer/self.config.fps + self.config.camera_latency
-
-                # Calculate stream start time
-                self.start_timestamp = start_time - total_latency
+                # Calculate start timestamp
+                if start_time is not None:
+                    self.start_timestamp = start_time - (self.config.camera_buffer/self.config.fps + self.config.camera_latency)
 
                 # Log start time
-                start_time_str = (datetime.datetime.fromtimestamp(self.start_timestamp)
-                                  .strftime('%Y-%m-%d %H:%M:%S.%f'))
+                start_time_str = (UTCFromTimestamp.utcfromtimestamp(self.start_timestamp)
+                                    .strftime('%Y-%m-%d %H:%M:%S.%f'))
 
                 log.info("Start time is {:s}".format(start_time_str))
 
-                return self.pipeline.get_by_name("appsink")
-
-            # Log the failure and retry if attempts are left
-            log.error("Attempt {}: Pipeline did not transition to PLAYING state, current state is {}. \
-                      Retrying in {} seconds."
-                      .format(attempt + 1, current_state, retry_interval))
-
-            time.sleep(retry_interval)
-
-        log.error("Failed to set pipeline to PLAYING state after {} attempts.".format(max_retries))
+                # Get appsink for frame retrieval
+                appsink = self.pipeline.get_by_name("appsink")
+                if not appsink:
+                    raise ValueError("Could not get appsink from pipeline")
+                
+                log.info("Pipeline successfully created and started")
+                return appsink
+            
+            except Exception as e:
+                log.error("Attempt {} failed: {}".format(attempt + 1, str(e)))
+                # Clean up any partial pipeline that was created
+                if hasattr(self, 'pipeline') and self.pipeline:
+                    try:
+                        self.pipeline.set_state(Gst.State.NULL)
+                        self.pipeline = None
+                    except Exception as cleanup_e:
+                        log.error("Error cleaning up failed pipeline: {}".format(cleanup_e))
+                        
+                if attempt < max_retries - 1:
+                    log.info("Waiting {} seconds before next attempt...".format(retry_interval))
+                    time.sleep(retry_interval)
+                    continue
+                else:
+                    log.error("All attempts to create pipeline failed")
+                    self.releaseResources()
+                    return False
         return False
 
 
@@ -669,48 +1204,88 @@ class BufferedCapture(Process):
         # Use a device as the video source
         else:
 
-            # If an analog camera is used, skip the ping
-            ip_cam = False
+            reprobe = False
+
+            # If an analog camera is used, skip the probe
             if "rtsp" in str(self.config.deviceID):
-                ip_cam = True
-
-
-            if ip_cam:
-
-                ### If the IP camera is used, check first if it can be pinged
-
-                # Extract the IP address
-                ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", self.config.deviceID)
-
-                # Check if the IP address was found
-                if ip:
-                    ip = ip[0]
-
-                    # Try pinging 500 times
-                    ping_success = False
-
-                    for i in range(500):
-
-                        print('Trying to ping the IP camera...')
-                        ping_success = ping(ip)
-
-                        if ping_success:
-                            log.info("Camera IP ping successful! Waiting 5 seconds. ")
-
-                            # Wait for camera to finish booting up
-                            time.sleep(5)
-                            break
-
-                        time.sleep(1)
-
-                    if not ping_success:
-                        log.error("Can't ping the camera IP!")
-                        return False
-
-                else:
-                    log.error("Can't find the camera IP!")
+                success, probe_result = self.probeRtspService()
+                if not success:
+                    error_messages = {
+                        RtspProbeResult.NETWORK_DOWN: 
+                            "Cannot connect to camera - Please check your network connection",
+                        RtspProbeResult.HOST_UNREACHABLE: 
+                            "Cannot reach camera - Please check if camera is powered on and connected to network",
+                        RtspProbeResult.CONNECTION_REFUSED: 
+                            "Camera is reachable but RTSP service is not responding - Camera might still be booting",
+                        RtspProbeResult.TIMEOUT: 
+                            "Connection timeout - Network might be slow or unstable",
+                        RtspProbeResult.DNS_ERROR: 
+                            "Cannot resolve camera hostname - Please check network DNS settings",
+                        RtspProbeResult.UNKNOWN_ERROR: 
+                            "Unknown connection error - Please check logs for details"
+                    }
+                    log.error("Camera connection failed: {}".format(error_messages[probe_result]))
                     return False
+                else:
+                    # After camera connection is established, if necessary inititliaze camera settings
+                    # and/or perform camera mode change
 
+                    # initialize flag to indicate if camera should be reprobed after mode change
+                    reprobe = False
+
+                    # ------------------------------------------------------------------
+                    # One-time camera initialization with flag file in rms_root_dir
+                    # ------------------------------------------------------------------
+                    root_dir  = self.config.rms_root_dir
+
+                    # e.g.  "XX0001.camera_init.done"
+                    flag_file = os.path.join(root_dir, "{}.camera_init.done".format(self.config.stationID))
+
+                    if self.config.initialize_camera and not os.path.exists(flag_file):
+                        log.info("Running camera init sequence ...")
+                        reprobe = True
+                        try:
+                            mode_name = "init"
+                            mode_path = self.config.camera_settings_path
+
+                            if not os.path.exists(mode_path):
+                                raise FileNotFoundError("Mode file {} not found.".format(mode_path))
+
+                            with open(mode_path, 'r') as f:
+                                modes = json.load(f)
+
+                            if mode_name not in modes:
+                                raise KeyError("Mode '{}' not defined in {}.".format(mode_name, mode_path))
+
+                            try:
+                                cc.cameraControlV2(self.config, "SwitchMode", mode_name)
+
+                                # create empty sentinel file
+                                open(flag_file, "a").close()
+                                log.info("Init complete - flag written to %s", flag_file)
+
+                            except Exception as e:
+                                raise RuntimeError("Failed to switch camera mode: {}".format(e))
+
+                        except Exception as e:
+                            log.warning("Camera switch to %s mode failed: %s. Will retry later.", mode_name, e)
+
+                    # -------------------------------------------
+                    # Day/night switching
+                    # -------------------------------------------
+                    if self.config.continuous_capture and self.config.switch_camera_modes:
+                        if self.camera_mode_switch_trigger.value:
+                            reprobe = True
+                            switchCameraMode(self.config, self.daytime_mode, self.camera_mode_switch_trigger)
+
+            if reprobe:
+                # Wait 5 seconds for the camera to register all commands after mode switching / reboot
+                log.info("Waiting for camera to register all commands...")
+                time.sleep(5)
+                success, probe_result = self.probeRtspService()
+                if not success:
+                    log.error("Camera connection failed after switching modes: {}".format(probe_result))
+                    return False
 
             # Init the video device
             log.info("Initializing the video device...")
@@ -721,7 +1296,7 @@ class BufferedCapture(Process):
                 log.info("GStreamer is not available. Switching to alternative.")
                 self.media_backend_override = True
 
-            if (self.config.media_backend == 'gst') and GST_IMPORTED:
+            if (self.config.media_backend == 'gst') and GST_IMPORTED and (self.media_backend_override == False):
                 
                 log.info("Initialize GStreamer Standalone Device.")
                 
@@ -738,28 +1313,31 @@ class BufferedCapture(Process):
                 self.m_jump_error = 0
                 self.last_m_err = float('inf')
                 self.last_m_err_n = 0
+                self.last_pts_correction_ns = 0
+                self.last_running_time_ns = None
 
 
-                try: 
+                try:
 
-                    # Initialize GStreamer
-                    Gst.init(None)
+                    # Initialize GStreamer (only if not already initialized)
+                    if not Gst.is_initialized():
+                        Gst.init(None)
 
                     # Determine if which directory to save the raw video, if any
-                    raw_video_dir = None
-                    if self.config.raw_video_dir_night:
-                        raw_video_dir = self.night_data_dir
-
+                    if self.config.raw_video_save:
+                        raw_video_dir = os.path.join(self.config.data_dir, self.config.video_dir)
                     else:
-                        raw_video_dir = self.config.raw_video_dir
+                        raw_video_dir = None
 
                     # Create and start a GStreamer pipeline
                     log.info("Creating GStreamer pipeline...")
                     self.device = self.createGstreamDevice(
                         self.config.gst_colorspace, gst_decoder=self.config.gst_decoder,
-                        video_file_dir=raw_video_dir, segment_duration_sec=self.config.raw_video_duration,
-                        max_retries=5, retry_interval=1
+                        video_file_dir=raw_video_dir, segment_duration_sec=self.config.raw_video_duration
                         )
+
+                    if not self.device:
+                        raise ValueError("Could not create GStreamer pipeline.")
                     
                     log.info("GStreamer pipeline created!")   
                     
@@ -767,7 +1345,7 @@ class BufferedCapture(Process):
                     self.pts_buffer = []
 
                     # Attempt to get a sample and determine the frame shape
-                    sample = self.device.emit("pull-sample")
+                    sample = self.device.emit("try-pull-sample", 500 * Gst.MSECOND)
                     if not sample:
                         raise ValueError("Could not obtain sample.")
 
@@ -786,8 +1364,8 @@ class BufferedCapture(Process):
                         raise ValueError("Could not determine frame shape.")
                     
                     # Extract width, height, and format, and create frame
-                    width = structure.get_value('width')
-                    height = structure.get_value('height')
+                    width = getStructureValue(structure, 'width')
+                    height = getStructureValue(structure, 'height')
 
                     if self.config.gst_colorspace == 'GRAY8':
                         self.frame_shape = (height, width)
@@ -808,8 +1386,10 @@ class BufferedCapture(Process):
                     self.video_device_type = "gst"
 
                     conn = getObsDBConn(self.config)
-                    addObsParam(conn, "media_backend", self.video_device_type)
-                    conn.close()
+                    try:
+                        addObsParam(conn, "media_backend", self.video_device_type)
+                    finally:
+                        conn.close()
 
                     return True
 
@@ -819,8 +1399,10 @@ class BufferedCapture(Process):
                     self.releaseResources()
 
                     conn = getObsDBConn(self.config)
-                    addObsParam(conn, "media_backend", self.video_device_type)
-                    conn.close()
+                    try:
+                        addObsParam(conn, "media_backend", self.video_device_type)
+                    finally:
+                        conn.close()
 
             if self.config.media_backend == 'v4l2':
                 try:
@@ -852,104 +1434,362 @@ class BufferedCapture(Process):
 
 
     def releaseResources(self):
-        """Releases resources for GStreamer and OpenCV devices."""
+        """Tear everything down in the right order so no FD survives."""
+        
+        # Prevent multiple simultaneous calls
+        if hasattr(self, '_releasing_resources') and self._releasing_resources:
+            log.debug("releaseResources: Already in progress, skipping duplicate call")
+            return
+        self._releasing_resources = True
 
+        log.debug("releaseResources: Starting")
+
+        # Reset timestamp correction whenever resources are released
+        self.last_pts_correction_ns = 0
+        self.last_running_time_ns = None
+
+        def _timedCall(fn, timeout_s=2):
+            """Run *fn()* in a daemon thread and wait *timeout_s*.
+            Returns True if the call finished in time."""
+            th = threading.Thread(target=fn, daemon=True)
+            th.start()
+            th.join(timeout_s)
+            return not th.is_alive()
+
+        # stop frame-saver children
+        log.debug("releaseResources: Calling releaseRawArrays()")
+        self.releaseRawArrays()
+        log.debug("releaseResources: releaseRawArrays() completed")
+
+        # gracefully drain & stop the pipeline
         if self.pipeline:
-
-            try:
-                self.pipeline.set_state(Gst.State.NULL)
-
-                if abs(self.last_calculated_fps - self.config.fps) > 0.0005 and self.last_calculated_fps_n > 25*60*60:
-                    log.info('Config file fps appears to be inaccurate. Consider updating the config file!')
-                log.info("Last calculated FPS: {:.6f} at frame {}, config FPS: {}, resets: {}, startup status: {}"
-                         .format(self.last_calculated_fps, self.last_calculated_fps_n, self.config.fps, self.reset_count, self.startup_flag))
-
-                time.sleep(5)
-                log.info('GStreamer Video device released!')
-                conn = getObsDBConn(self.config)
-                addObsParam(conn, "media_backend", self.video_device_type)
-                conn.close()
-            except Exception as e:
-                log.error('Error releasing GStreamer pipeline: {}'.format(e))
-                conn = getObsDBConn(self.config)
-                addObsParam(conn, "media_backend", "gst not successfully released")
-                conn.close()
-
-        if self.device:
-
-            try:
-
-                if self.video_device_type == "cv2":
-                    self.device.release()
-                    log.info('OpenCV Video device released!')
-
-            except Exception as e:
-                log.error('Error releasing OpenCV device: {}'.format(e))
-                conn = getObsDBConn(self.config)
-                addObsParam(conn, "media_backend", "OpenCV not successfully released")
-                conn.close()
-            finally:
-                self.device = None  # Reset device to None after releasing
-
-
-        # Release the video device if running Gstreamer
-        if self.video_file is not None:
-
-            if GST_IMPORTED and (self.config.media_backend == 'gst'):
-
-                try:
-                    self.device.release()
-                    log.info('GStreamer Video device released!')
-
-                except Exception as e:
-                    log.error('Error releasing GStreamer device: {}'.format(e))
-
-                finally:
-                    self.device = None
+            log.debug("releaseResources: Pipeline exists, starting shutdown")
             
+            # Disconnect any signal handlers first
+            try:
+                splitmuxsink = self.pipeline.get_by_name("splitmuxsink0")
+                if splitmuxsink:
+                    log.debug("releaseResources: Disconnecting splitmuxsink signals")
+                    splitmuxsink.disconnect_by_func(self.moveSegment)
+            except Exception as e:
+                log.debug("releaseResources: Error disconnecting signals: %s", e)
+            
+            bus = self.pipeline.get_bus()
+            
+            # Try graceful shutdown first
+            log.debug("releaseResources: Attempting graceful shutdown")
+            try:
+                log.debug("releaseResources: Sending EOS event")
+                self.pipeline.send_event(Gst.Event.new_eos())
+                
+                log.debug("releaseResources: Waiting for EOS/ERROR (2 second timeout)")
+                msg = bus.timed_pop_filtered(2*Gst.SECOND,
+                                    Gst.MessageType.EOS | Gst.MessageType.ERROR)
+                log.debug(f"releaseResources: timed_pop_filtered returned: {msg}")
+
+                log.debug("releaseResources: Setting pipeline to NULL state")
+                ret = self.pipeline.set_state(Gst.State.NULL)
+                log.debug(f"releaseResources: set_state returned: {ret}")
+                
+                log.debug("releaseResources: Getting pipeline state (2 second timeout)")
+                ret, state, pending = self.pipeline.get_state(2*Gst.SECOND)
+                log.debug(f"releaseResources: get_state returned: ret={ret}, state={state}, pending={pending}")
+                
+                # Check if we actually reached NULL state
+                if state != Gst.State.NULL:
+                    log.warning("releaseResources: Graceful shutdown failed, pipeline stuck in state %s", state)
+                    raise Exception("Pipeline stuck, forcing shutdown")
+                    
+                log.debug("releaseResources: Graceful shutdown successful")
+                
+            except Exception as e:
+                log.warning("releaseResources: Graceful shutdown failed (%s), forcing pipeline shutdown", e)
+                
+                # Force shutdown - just set to NULL without waiting
+                log.debug("releaseResources: Force setting pipeline to NULL state")
+                self.pipeline.set_state(Gst.State.NULL)
+                # Don't wait for state change - just proceed with cleanup
+
+            # wake poller
+            if bus:
+                log.debug("releaseResources: Posting EOS to wake poller")
+                bus.post(Gst.Message.new_eos(None))
+
+            pipe = self.pipeline
+        else:
+            log.debug("releaseResources: No pipeline to shutdown")
+            pipe = None
+
+        # shut down the poller
+        if self._bus_thread and self._bus_thread.is_alive():
+            log.debug(f"releaseResources: Bus thread is alive (thread={self._bus_thread})")
+            self._bus_should_exit = True
+            
+            log.debug("releaseResources: Joining bus thread (6 second timeout)")
+            self._bus_thread.join(timeout=6)
+            
+            if self._bus_thread.is_alive():
+                log.debug("releaseResources: WARNING - Bus thread still alive after timeout!")
+            else:
+                log.debug("releaseResources: Bus thread joined successfully")
+        self._bus_thread = None
+
+        # only now drop the last reference
+        if pipe:
+            log.debug("releaseResources: Unreffing pipeline")
+            # Use a timed call as final safety net (should not be needed with teardown-timeout)
+            if not _timedCall(pipe.unref, timeout_s=10):
+                log.warning("releaseResources: pipeline.unref() timed out after 10 seconds - this indicates a GStreamer bug")
+            else:
+                log.debug("releaseResources: Pipeline unreffed successfully")
+        self.pipeline = None
+
+        # device section
+        if self.device:
+            log.debug("releaseResources: Releasing %s", type(self.device).__name__)
+
+            try:
+                if hasattr(self.device, "release"):                      # OpenCV branch
+                    if not _timedCall(self.device.release):
+                        log.warning("releaseResources: cap.release() hung - fd dropped")
+
+                elif hasattr(self.device, "set_state"):                  # GStreamer branch
+                    try:
+                        self.device.set_state(Gst.State.NULL)
+                    except Exception as exc:
+                        log.warning("releaseResources: Gst set_state(NULL) failed: %s", exc)
+                
+                elif self.video_device_type == "gst" and GST_IMPORTED:
+                    # This is likely a GstAppSink - ensure it's properly cleaned
+                    log.debug("releaseResources: Releasing GStreamer AppSink")
+                    # AppSink cleanup happens when pipeline is unreffed
+                    # Just ensure we're not holding extra references
+                    if hasattr(self.device, 'set_emit_signals'):
+                        try:
+                            self.device.set_emit_signals(False)
+                        except Exception as e:
+                            log.debug("set_emit_signals cleanup failed: %s", e)
+
+                else:                                                    # Fallback
+                    log.debug("releaseResources: Unknown device type - just dropping ref")
+
+            finally:
+                self.device = None
+
+        log.debug("releaseResources: Completed")
+        
+        # Reset the flag so future calls can proceed
+        self._releasing_resources = False
+
+
+    def releaseRawArrays(self):
+        """Clean up raw frame arrays and saver."""
+        if self.raw_frame_saver:
+            try:
+                self.raw_frame_saver.stop()
+                self.raw_frame_saver.join(5)
+                if self.raw_frame_saver.is_alive():
+                    log.warning("RawFrameSaver still busy. Sending interrupt signal...")
+                    try:
+                        if self.raw_frame_saver.pid:
+                            os.kill(self.raw_frame_saver.pid, signal.SIGINT)
+                        
+                        # Wait for graceful shutdown
+                        self.raw_frame_saver.join(3)
+                        
+                        if self.raw_frame_saver.is_alive():
+                            log.warning("RawFrameSaver still alive after interrupt, forcing termination")
+                            self.raw_frame_saver.terminate()
+                            self.raw_frame_saver.join()
+                        else:
+                            log.info("RawFrameSaver exited gracefully after interrupt")
+                            
+                    except ProcessLookupError:
+                        log.info("RawFrameSaver already terminated")
+                    except Exception as e:
+                        log.error("Error during graceful RawFrameSaver shutdown: {}".format(e))
+                        self.raw_frame_saver.terminate()
+                        self.raw_frame_saver.join()
+            finally:
+                self.raw_frame_saver = None
+
+        # Clean up array resources
+        self.current_raw_frame_shape = None
+        self.shared_raw_array = None
+        
+        # Safely delete shared memory arrays
+        for name in ("shared_raw_array_base", "shared_raw_array", "shared_raw_array_base2", "shared_raw_array2"):
+            if hasattr(self, name):
+                delattr(self, name)
+
+
+    def initRawFrameArrays(self, frame_shape):
+        """Initialize raw frame arrays based on current frame shape.
+        
+        Arguments:
+            frame_shape: tuple of frame dimensions
+        """
+        try:
+            # Clean up any existing arrays first
+            self.releaseRawArrays()
+
+            # Calculate buffer size based on actual dimensions
+            if len(frame_shape) == 3:
+                buffer_size = self.num_raw_frames * frame_shape[0] * frame_shape[1] * frame_shape[2]
+                array_shape = (self.num_raw_frames, frame_shape[0], frame_shape[1], frame_shape[2])
+            else:
+                buffer_size = self.num_raw_frames * frame_shape[0] * frame_shape[1]
+                array_shape = (self.num_raw_frames, frame_shape[0], frame_shape[1])
+
+            log.debug("Creating shared arrays with shape: {}".format(array_shape))
+
+            # Initialize shared memory arrays
+            self.shared_raw_array_base = Array(ctypes.c_uint8, buffer_size)
+            self.shared_raw_array = np.ctypeslib.as_array(self.shared_raw_array_base.get_obj())
+            self.shared_raw_array = self.shared_raw_array.reshape(array_shape)
+
+            self.shared_raw_array_base2 = Array(ctypes.c_uint8, buffer_size)
+            self.shared_raw_array2 = np.ctypeslib.as_array(self.shared_raw_array_base2.get_obj())
+            self.shared_raw_array2 = self.shared_raw_array2.reshape(array_shape)
+
+            # Store current array configuration
+            self.current_raw_frame_shape = frame_shape
+            self.current_mode = self.daytime_mode.value if self.daytime_mode is not None else False
+            
+            return True
+
+        except Exception as e:
+            log.error("Failed to initialize raw frame arrays: {}".format(e))
+            log.debug(repr(traceback.format_exception(*sys.exc_info())))
+            return False
+
 
     def run(self):
-        """ Capture frames.
+        """ Main process function - initializes all process-specific resources and runs capture loop.
         """
-        
-        # Init the video device
-        while not self.exit.is_set() and not self.initVideoDevice():
-            log.info('Waiting for the video device to be connect...')
-            time.sleep(5)
+        try:
+            log.debug("Initializing process-specific resources...")
 
-        if self.device is None:
+            # GStreamer debug setup
+            if GST_IMPORTED:
+                try:
+                    # Activate debug system
+                    Gst.debug_set_active(True)
 
-            log.info('The video source could not be opened!')
+                    # Set debug level from environment or default given value
+                    # The Gst debug level is set in Logger.py
+                    debug_env = os.environ.get("GST_DEBUG", "2")
+                    Gst.debug_set_default_threshold(int(debug_env))
+
+                    # Comment out if higher than logging level 3 is needed
+                    Gst.debug_add_log_function(gstDebugLogger, None)
+
+                    log.info("GStreamer logging initialized at level: {}".format(debug_env))
+
+                except Exception as e:
+                    log.error("Failed to initialize GStreamer logging: {}".format(e))
+
+            # Initialize process-specific variables
+            self.media_backend_override = False
+            self.video_device_type = "cv2"
+            self.time_for_drop = 1.5*(1.0/self.config.fps)
+            self.device = None
+            self.pipeline = None
+            self.start_timestamp = 0
+            self.frame_shape = None
+            self.convert_to_gray = False
+            self.last_pts_correction_ns = 0
+            self.last_running_time_ns = None
+
+            # Initialize smoothing variables
+            self.startup_flag = True
+            self.last_calculated_fps = 0
+            self.last_calculated_fps_n = 0
+            self.expected_m = 1e9/self.config.fps
+            self.reset_count = -1
+            self.n = 0
+            self.sum_x = 0
+            self.sum_y = 0
+            self.sum_xx = 0
+            self.sum_xy = 0
+            self.startup_frames = 25*60*10  # 10 minutes
+            self.b = 0
+            self.b_error_debt = 0
+            self.m_jump_error = 0
+            self.last_m_err = float('inf')
+            self.last_m_err_n = 0
+            self.current_raw_frame_shape = None
+            self.current_mode = None
+
+            # Initialize raw frame handling if enabled
+            if self.config.save_frames:
+                self.raw_frame_count = 0
+                
+                # Convert shared timestamp arrays to numpy arrays
+                self.sharedTimestamps = np.ctypeslib.as_array(self.shared_timestamps_base.get_obj())
+                self.sharedTimestamps2 = np.ctypeslib.as_array(self.shared_timestamps_base2.get_obj())
+
+                # Raw frame arrays will be initialized after we know the frame shape
+                self.shared_raw_array_base = None
+                self.shared_raw_array = None
+                self.shared_raw_array_base2 = None
+                self.shared_raw_array2 = None
+                self.raw_frame_saver = None
+
+            # Initialize timestamp array for ft file buffer
+            if self.config.save_frame_times:
+                self.timestamp_buffer = []
+                # For testing ft files
+                # self.ft_test_time = time.time()
+
+            # Initialize segment saving time for raw video saving
+            if self.config.raw_video_save:
+                self.last_segment_savetime = time.time()
+
+            log.debug("Process-specific initialization complete")
+
+            # Main capture loop
+            while not self.exit.is_set() and not self.initVideoDevice():
+                log.info('Waiting for the video device to be connected...')
+                time.sleep(5)
+
+            if self.device is None:
+                log.info('The video source could not be opened!')
+                self.exit.set()
+                return False
+
+            # Continue with main capture loop
+            self.captureFrames()
+
+        except KeyboardInterrupt:
+            log.info("Capture process received interrupt signal. Shutting down gracefully...")
             self.exit.set()
-            return False
-
-        # Wait until the device is opened
-        device_opened = False
-        for i in range(20):
-            time.sleep(1)
-            if self.deviceIsOpened():
-                device_opened = True
-                break
-
-        # If the device could not be opened, stop capturing
-        if not device_opened:
-            log.info('The video source could not be opened!')
+        except Exception as e:
+            log.error("Error in capture process: {}".format(e))
+            log.debug(repr(traceback.format_exception(*sys.exc_info())))
             self.exit.set()
-            return False
+        finally:
+            self.releaseResources()
 
-        else:
-            log.info('Video device opened!')
 
+
+    def captureFrames(self):
+        """ Main frame capture loop - moved from run() for clarity """
 
         # Keep track of the total number of frames
         total_frames = 0
+
+        # Timestamp of the very first good frame - becomes the run's origin
+        run_start_ts = None
 
         # For video devices only (not files), throw away the first 10 frames
         if (self.video_file is None) and (self.video_device_type == "cv2"):
 
             first_skipped_frames = 10
             for i in range(first_skipped_frames):
-                self.read()
+                _, _, ts = self.read()
+                if run_start_ts is None:
+                    run_start_ts = ts  
 
             total_frames = first_skipped_frames
 
@@ -971,7 +1811,13 @@ class BufferedCapture(Process):
         wait_for_reconnect = False
 
         last_frame_timestamp = False
-        
+
+        # Setup additional timing variables for memory share with RawFrameSaver
+        if self.config.save_frames:
+            raw_buffer_one = True
+            first_raw_frame_timestamp = False
+
+
         # Run until stopped from the outside
         while not self.exit.is_set():
 
@@ -981,10 +1827,10 @@ class BufferedCapture(Process):
                 wait_for_compression = False
 
                 if buffer_one:
-                    if self.startTime1.value == -1:
+                    if self.start_time1.value == -1:
                         wait_for_compression = True
                 else:
-                    if self.startTime2.value == -1:
+                    if self.start_time2.value == -1:
                         wait_for_compression = True
 
                 if wait_for_compression:
@@ -994,9 +1840,9 @@ class BufferedCapture(Process):
 
             
             if buffer_one:
-                self.startTime1.value = 0
+                self.start_time1.value = 0
             else:
-                self.startTime2.value = 0
+                self.start_time2.value = 0
             
 
             # If the video device was disconnected, wait 5s for reconnection
@@ -1020,12 +1866,13 @@ class BufferedCapture(Process):
 
                     # Read the frame
                     log.info("Reading frame...")
-                    ret, _, _ = self.read()
+                    ret, frame, _ = self.read()
                     log.info("Frame read!")
 
                     # If the connection was made and the frame was retrieved, continue with the capture
                     if ret:
                         log.info('Video device reconnected successfully!')
+                        self.convert_to_gray = self.isGrayscale(frame)
                         wait_for_reconnect = False
                         break
 
@@ -1039,28 +1886,54 @@ class BufferedCapture(Process):
             t_block = time.time()
             max_frame_interval_normalized = 0.0
             max_frame_age_seconds = 0.0
+            first_frame_timestamp = None
 
+            # running totals for mean calculations
+            sum_frame_interval_norm = 0.0
+            sum_frame_age_seconds   = 0.0
 
             # Capture a block of 256 frames
             block_frames = 256
 
+            # Check if camera needs switching
+            if self.config.continuous_capture and self.config.switch_camera_modes:
+
+                # Check that the camera mode switch is triggered
+                if self.camera_mode_switch_trigger.value:
+                    
+                    # If the camera mode switch trigger is set, switch the camera mode
+                    switchCameraMode(self.config, self.daytime_mode, self.camera_mode_switch_trigger)
+
+
             log.info('Grabbing a new block of {:d} frames...'.format(block_frames))
             for i in range(block_frames):
 
-
-                # Read the frame (keep track how long it took to grab it)
+                # Read the frame (keep track how long it took to grab it), and check for color if saving raw frame
                 t1_frame = time.time()
                 ret, frame, frame_timestamp = self.read()
                 t_frame = time.time() - t1_frame
 
-
                 # If the video device was disconnected, wait for reconnection
                 if (self.video_file is None) and (not ret):
-
                     log.info('Frame grabbing failed, video device is probably disconnected!')
                     self.releaseResources()
+                    # Note: releaseResources() includes proper RTSP cleanup with fallback force close
                     wait_for_reconnect = True
                     break
+
+                # Set flag to save a raw frame
+                save_this_frame = (self.config.save_frames and
+                                   self.video_file is None and
+                                   self.shouldSaveFrame(frame_timestamp)
+                                   )
+
+                # Check if frame contains color information
+                if save_this_frame:
+                    self.convert_to_gray = self.isGrayscale(frame)
+
+                # Handling for grayscale conversion
+                frame = self.handleGrayscaleConversion(frame)
+
 
 
                 # If a video file is used, compute the time using the time from the file timestamp
@@ -1080,6 +1953,93 @@ class BufferedCapture(Process):
                     
                     # Always set first frame timestamp in the beginning of the block
                     first_frame_timestamp = frame_timestamp
+
+                # Append current timestamp to ft file buffer
+                if self.config.save_frame_times:
+                    self.timestamp_buffer.append((total_frames, frame_timestamp))
+
+                # If save_frames is set and a video device is used, save a frame every nth frames
+                if save_this_frame:
+
+                    # Check if frame shape (color or grayscale) or capture mode changed (day or night)
+                    if (frame.shape != self.current_raw_frame_shape) or \
+                        (self.current_mode != (self.daytime_mode.value if self.daytime_mode is not None else False)) or \
+                        (self.shared_raw_array is None):
+
+                        log.info("Frame shape/mode changed, reinitializing arrays...")
+
+                        # First signal the raw frame saver to finish saving current block
+                        if raw_buffer_one:
+                            self.start_raw_time1.value = first_raw_frame_timestamp
+                        else:
+                            self.start_raw_time2.value = first_raw_frame_timestamp
+
+                        # Clean up existing frame saver before creating a new one
+                        if hasattr(self, 'raw_frame_saver') and self.raw_frame_saver:
+                            log.info("Cleaning up existing raw frame saver before mode change")
+                            self.releaseRawArrays()
+
+                        if not self.initRawFrameArrays(frame.shape):
+                            log.error("Failed to reinitialize arrays after mode change")
+
+                        else:
+                            # Initialize new frame saver
+                            self.raw_frame_saver = RawFrameSaver(
+                                self.saved_frames_dir,
+                                self.shared_raw_array, self.start_raw_time1,
+                                self.shared_raw_array2, self.start_raw_time2,
+                                self.sharedTimestamps, self.sharedTimestamps2,
+                                self.daytime_mode.value,
+                                self.config
+                            )
+                            self.raw_frame_saver.start()
+                            self.raw_frame_count = 0
+                            log.info("Successfully reinitialized raw frame handling")
+
+
+                    # reset start time values everytime the buffers are switched
+                    if self.raw_frame_count == 0:
+
+                        if raw_buffer_one:
+                            self.start_raw_time1.value = 0
+                        else:
+                            self.start_raw_time2.value = 0
+
+                        # Always set first raw frame timestamp in the beginning of the block
+                        first_raw_frame_timestamp = frame_timestamp 
+
+
+                    # Write raw frame and timestamp to one of the two corresponding buffers
+                    # Use appropriate indexing based on frame dimensions
+                    if len(frame.shape) == 3:
+                        # Color frame - use 4D indexing
+                        if raw_buffer_one:
+                            self.shared_raw_array[self.raw_frame_count, :, :, :] = frame
+                            self.sharedTimestamps[self.raw_frame_count] = frame_timestamp
+                        else:
+                            self.shared_raw_array2[self.raw_frame_count, :, :, :] = frame
+                            self.sharedTimestamps2[self.raw_frame_count] = frame_timestamp
+                    else:
+                        # Grayscale frame - use 3D indexing
+                        if raw_buffer_one:
+                            self.shared_raw_array[self.raw_frame_count, :, :] = frame
+                            self.sharedTimestamps[self.raw_frame_count] = frame_timestamp
+                        else:
+                            self.shared_raw_array2[self.raw_frame_count, :, :] = frame
+                            self.sharedTimestamps2[self.raw_frame_count] = frame_timestamp
+
+                    self.raw_frame_count += 1
+
+                    # switch buffers arrays every (self.num_raw_frames) frames
+                    if self.raw_frame_count == self.num_raw_frames:
+
+                        if raw_buffer_one:
+                            self.start_raw_time1.value = first_raw_frame_timestamp
+                        else:
+                            self.start_raw_time2.value = first_raw_frame_timestamp
+                        
+                        self.raw_frame_count = 0
+                        raw_buffer_one = not raw_buffer_one
 
 
                 # If the end of the video file was reached, stop the capture
@@ -1103,6 +2063,23 @@ class BufferedCapture(Process):
                     n_dropped = int((frame_timestamp - last_frame_timestamp)*self.config.fps)
 
                     self.dropped_frames.value += n_dropped
+                    
+                    # Record timestamp for 10-minute window tracking
+                    current_time = time.time()
+                    # Add n_dropped timestamps efficiently
+                    self.dropped_frames_timestamps.extend([current_time] * n_dropped)
+                    
+                    # Clean up old timestamps efficiently (remove from left)
+                    ten_min_ago = current_time - 600
+                    while self.dropped_frames_timestamps and self.dropped_frames_timestamps[0] <= ten_min_ago:
+                        self.dropped_frames_timestamps.popleft()
+                    
+                    # Safety limit to prevent unbounded memory growth
+                    if len(self.dropped_frames_timestamps) > 20000:
+                        log.warning("Dropped frames timestamp queue exceeded safety limit, trimming to recent 10000 entries")
+                        # Keep only most recent half
+                        recent_timestamps = list(self.dropped_frames_timestamps)[-10000:]
+                        self.dropped_frames_timestamps = deque(recent_timestamps)
 
                     if self.config.report_dropped_frames:
                         log.info("{}/{} frames dropped or late! Time for frame: {:.3f}, convert: {:.3f}, assignment: {:.3f}".format(
@@ -1110,11 +2087,12 @@ class BufferedCapture(Process):
 
 
                 # If cv2:
-                if (self.config.media_backend != 'gst') and not self.media_backend_override:
+                if (self.config.media_backend != 'gst') and not self.media_backend_override and last_frame_timestamp is not False:
                     # Calculate the normalized frame interval between the current and last frame read, normalized by frames per second (fps)
-                    frame_interval_normalized = (frame_timestamp - last_frame_timestamp)/(1/self.config.fps)
+                    frame_interval_normalized = (frame_timestamp - last_frame_timestamp)*self.config.fps
                     # Update max_frame_interval_normalized for this cycle
                     max_frame_interval_normalized = max(max_frame_interval_normalized, frame_interval_normalized)
+                    sum_frame_interval_norm += frame_interval_normalized
 
                 # If GStreamer:
                 else:
@@ -1122,71 +2100,122 @@ class BufferedCapture(Process):
                     frame_age_seconds = time.time() - frame_timestamp
                     # Update max_frame_age_seconds for this cycles
                     max_frame_age_seconds = max(max_frame_age_seconds, frame_age_seconds)
+                    sum_frame_age_seconds += frame_age_seconds
 
                 # On the last loop, report late or dropped frames
                 if i == block_frames - 1:
 
                     # For cv2, show elapsed time since frame read to assess loop performance
                     if self.config.media_backend != 'gst' and not self.media_backend_override:
-                        log.info("Block's max frame interval: {:.3f} (normalized). Run's late frames: {}"
-                                 .format(max_frame_interval_normalized, self.dropped_frames.value))
+                        mean_interval_norm = sum_frame_interval_norm/block_frames
+
+                        # running late-frame total since the start of capture
+                        if run_start_ts is not None:
+                            elapsed_run = last_frame_timestamp - run_start_ts
+                            expected_run = int(round(elapsed_run*self.config.fps))
+                            run_late_frames = max(0, expected_run - total_frames)
+                        else:
+                            run_start_ts = last_frame_timestamp
+                            run_late_frames = 0
+
+                        log.info("Block interval: mean %.3f, max %.3f (normalized). Dropped frames: %d",
+                                 mean_interval_norm, max_frame_interval_normalized, run_late_frames)
                     
                     # For GStreamer, show elapsed time since frame capture to assess sink fill level
                     else:
-                        log.info("Block's max frame age: {:.3f} seconds. Run's dropped frames: {}"
-                                 .format(max_frame_age_seconds, self.dropped_frames.value))
+                        # Check for any day/night mode transition to reset counters
+                        current_daytime = self.daytime_mode.value if self.daytime_mode is not None else False
+                        if self.last_daytime_mode is not None and self.last_daytime_mode != current_daytime:
+                            # Transition detected (either day→night or night→day)
+                            transition_type = "Day→Night" if not current_daytime else "Night→Day"
+                            log.info(f"{transition_type} transition detected, resetting counters and media backend")
+
+                            # Update last_daytime_mode BEFORE breaking to prevent detecting same transition again
+                            self.last_daytime_mode = current_daytime
+
+                            # Reset dropped frames counter for new session
+                            self.dropped_frames.value = 0
+                            self.dropped_frames_timestamps.clear()
+
+                            # Reset PTS smoothing reset counter for new session
+                            self.reset_count = -1
+
+                            # Reset media backend override to allow GStreamer retry
+                            self.media_backend_override = False
+
+                            # Force device re-initialization by releasing and reconnecting
+                            log.info("Releasing resources to re-initialize video device with GStreamer")
+                            self.releaseResources()
+                            wait_for_reconnect = True
+                            break
+
+                        self.last_daytime_mode = current_daytime
+
+                        # Calculate buffer fill percentage based on max frame age
+                        # The appsink has max-buffers=100, so at fps rate, max capacity is ~100/fps seconds
+                        max_buffer_time = 100.0 / self.config.fps  # Theoretical max buffer time in seconds
+                        buffer_fill_percent = min(100, (max_frame_age_seconds / max_buffer_time) * 100)
+
+                        # Calculate dropped frames in last 10 minutes
+                        current_time = time.time()
+                        ten_min_ago = current_time - 600  # 10 minutes in seconds
+                        recent_dropped = len([t for t in self.dropped_frames_timestamps if t > ten_min_ago])
+
+                        log.info(f"Buffer fill: {buffer_fill_percent:.1f}%. Dropped frames: {recent_dropped} (last 10 min), {self.dropped_frames.value} this session")
 
                 last_frame_timestamp = frame_timestamp
                 
 
-                ### Convert the frame to grayscale ###
+                ### Convert the frame to grayscale ###  (Not to be done in case of daytime mode)
+                if not self.daytime_mode.value:
 
-                t1_convert = time.time()
+                    t1_convert = time.time()
 
-                # Convert the frame to grayscale
-                #gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    # Convert the frame to grayscale
+                    #gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-                # Convert the frame to grayscale
-                if len(frame.shape) == 3:
+                    # Convert the frame to grayscale
+                    if len(frame.shape) == 3:
 
-                    # If a color image is given, take the green channel
-                    if frame.shape[2] == 3:
+                        # If a color image is given, take the green channel
+                        if frame.shape[2] == 3:
 
-                        gray = frame[:, :, 1]
+                            gray = frame[:, :, 1]
 
-                    # If UYVY image given, take luma (Y) channel
-                    elif self.config.uyvy_pixelformat and (frame.shape[2] == 2):
-                        gray = frame[:, :, 1]
+                        # If UYVY image given, take luma (Y) channel
+                        elif self.config.uyvy_pixelformat and (frame.shape[2] == 2):
+                            gray = frame[:, :, 1]
 
-                    # Otherwise, take the first available channel
+                        # Otherwise, take the first available channel
+                        else:
+                            gray = frame[:, :, 0]
+
                     else:
-                        gray = frame[:, :, 0]
-
-                else:
-                    gray = frame
+                        gray = frame
 
 
-                # Cut the frame to the region of interest (ROI)
-                gray = gray[self.config.roi_up:self.config.roi_down, \
-                    self.config.roi_left:self.config.roi_right]
+                    # Cut the frame to the region of interest (ROI)
+                    gray = gray[self.config.roi_up:self.config.roi_down, \
+                        self.config.roi_left:self.config.roi_right]
 
-                # Track time for frame conversion
-                t_convert = time.time() - t1_convert
+                    # Track time for frame conversion
+                    t_convert = time.time() - t1_convert
 
 
-                ### ###
+                    ### ###
 
 
 
 
-                # Assign the frame to shared memory (track time to do so)
-                t1_assign = time.time()
-                if buffer_one:
-                    self.array1[i, :gray.shape[0], :gray.shape[1]] = gray
-                else:
-                    self.array2[i, :gray.shape[0], :gray.shape[1]] = gray
+                    # Assign the frame to shared memory (track time to do so)
+  
+                    t1_assign = time.time()
+                    if buffer_one:
+                        self.array1[i, :gray.shape[0], :gray.shape[1]] = gray
+                    else:
+                        self.array2[i, :gray.shape[0], :gray.shape[1]] = gray
 
-                t_assignment = time.time() - t1_assign
+                    t_assignment = time.time() - t1_assign
 
 
 
@@ -1197,20 +2226,27 @@ class BufferedCapture(Process):
             if self.exit.is_set():
                 wait_for_reconnect = False
                 log.info('Capture exited!')
+
+                # Don't signal RawFrameSaver here - let releaseRawArrays() handle final flush
+                # to avoid double flushing. The RawFrameSaver.stop() method will flush any
+                # remaining frames automatically.
+
                 break
 
 
-            if not wait_for_reconnect:
+            if (not wait_for_reconnect
+                and not self.daytime_mode.value
+                and first_frame_timestamp is not None):
 
                 # Set the starting value of the frame block, which indicates to the compression that the
                 # block is ready for processing
                 if buffer_one:
-                    self.startTime1.value = first_frame_timestamp
+                    self.start_time1.value = first_frame_timestamp
 
                 else:
-                    self.startTime2.value = first_frame_timestamp
+                    self.start_time2.value = first_frame_timestamp
 
-                log.info('New block of raw frames available for compression with starting time: {:s}'
+                log.debug('New block of raw frames available for compression with starting time: {:s}'
                          .format(str(first_frame_timestamp)))
 
             
@@ -1219,6 +2255,39 @@ class BufferedCapture(Process):
             if self.config.report_dropped_frames:
                 log.info('Estimated FPS: {:.3f}'.format(block_frames/(time.time() - t_block)))
         
+
+            # Save current timestamp buffer to ft file
+            # Construct FTStruct, record timestamps, and reset the timestamp array in memory
+            if (self.config.save_frame_times and first_frame_timestamp is not None):
+                ft = FTStruct.FTStruct()
+                ft.timestamps = copy.copy(self.timestamp_buffer)
+
+                # Clear the timestamp buffer list                
+                del self.timestamp_buffer[:]
+
+                base_time = UTCFromTimestamp.utcfromtimestamp(first_frame_timestamp)
+                ft_filename = base_time.strftime("FT_{}_%Y%m%d_%H%M%S.bin".format(self.config.stationID))
+                ft_subpath = os.path.join(self.config.data_dir, self.config.times_dir, base_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
+
+                mkdirP(ft_subpath)
+                FTfile.write(ft, ft_subpath, ft_filename)
+                log.debug("Created FT file {} for block starting at {}".format(os.path.join(ft_subpath, ft_filename), first_frame_timestamp))
+
+                # For Testing: 
+                # Print first and last 10 timestamps, array length, average time difference and time difference from last block
+                # Enable self.ft_test_time in __init__
+                
+                # print("\n\n --- FT file data --- \nFirst 10 timestamps: {}\n\nLast 10 timestamps: {}\n\nArray length: {}\n\n".format(
+                #       ft.timestamps[:11], 
+                #       ft.timestamps[-10:],
+                #       len(ft.timestamps),
+                # ),
+                #       "Average per-frame time difference: {}\n\nLast segment time difference: {}\n\n ---------------- \n\n".format(
+                #       sum(ft.timestamps[i+1][1] - ft.timestamps[i][1] for i in range(len(ft.timestamps) - 1)) / (len(ft.timestamps) - 1),
+                #       ft.timestamps[0][1] - self.ft_test_time
+                # ), end='')
+                # self.ft_test_time = ft.timestamps[-1][1]
+
 
         log.info('Releasing video device...')
         self.releaseResources()
@@ -1232,7 +2301,6 @@ if __name__ == "__main__":
     import multiprocessing
 
     import RMS.ConfigReader as cr
-    from RMS.Logger import initLogging
 
     ###
 
@@ -1254,10 +2322,11 @@ if __name__ == "__main__":
     config = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath('.'))
 
     # Initialize the logger
-    initLogging(config)
+    log_manager = LoggingManager()
+    log_manager.initLogging(config)
 
     # Get the logger handle
-    log = logging.getLogger("logger")
+    log = getLogger("rmslogger")
 
     # Print the kind of media backend
     print("Station code: {}".format(config.stationID))
@@ -1325,8 +2394,8 @@ if __name__ == "__main__":
         print('Structure obtained!')
 
         print('Extracting width and height...', end=' ')
-        width = structure.get_value('width')
-        height = structure.get_value('height')
+        width = getStructureValue(structure, 'width')
+        height = getStructureValue(structure, 'height')
         print('Width and height extracted!')
 
         print('Creating frame...', end=' ')

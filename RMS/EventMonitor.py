@@ -1,5 +1,5 @@
 # RPi Meteor Station
-# Copyright (C) 2023
+# Copyright (C) 2025
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -20,19 +20,23 @@ from __future__ import print_function, division, absolute_import
 import os
 import sys
 import shutil
-
+import tempfile
 import datetime
 import time
 import dateutil
 import glob
 import sqlite3
 import multiprocessing
-import logging
 import copy
 import uuid
 import random
 import string
 
+
+from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, correctVignetting, extinctionCorrectionApparentToTrue
+from matplotlib import pyplot as plt
+from RMS.Routines.MaskImage import loadMask
+from Utils.FOVSkyMap import plotFOVSkyMap
 
 if sys.version_info[0] < 3:
 
@@ -55,10 +59,14 @@ else:
 import numpy as np
 
 import RMS.ConfigReader as cr
+import json
 
-from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector
-from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt
-from RMS.Math import angularSeparationVect
+from RMS.Formats.CALSTARS import readCALSTARS
+from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector, raDec2AltAz
+from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt, jd2Date
+from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
+from RMS.Logger import getLogger
+from RMS.Math import angularSeparationVect, angularSeparationDeg
 from RMS.Formats.FFfile import convertFRNameToFF
 from RMS.Formats.Platepar import Platepar
 from RMS.UploadManager import uploadSFTP
@@ -66,15 +74,16 @@ from Utils.StackFFs import stackFFs
 from Utils.FRbinViewer import view
 from Utils.BatchFFtoImage import batchFFtoImage
 from RMS.CaptureDuration import captureDuration
-from RMS.Misc import sanitise, RmsDateTime
-
+from RMS.Misc import sanitise, RmsDateTime, getRmsRootDir, mkdirP
+from RMS.Formats.FFfile import read
+from matplotlib.dates import DateFormatter
 
 # Import Cython functions
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz
 
-log = logging.getLogger("logger")
+log = getLogger("rmslogger")
 EM_RAISE = False
 
 """
@@ -82,6 +91,9 @@ EM_RAISE = False
 # Reference event
 
 # Required
+
+# Either
+
 EventTime                : 20230821_110845	#Time as YYYYMMDD_HHMMSS
 TimeTolerance (s)        : 20			    #Width of time to take
 EventLat (deg +N)        : -33			    #Event start latitude
@@ -98,6 +110,15 @@ EventHt2 (km)            : 90			    #Event height standard deviation
 #Or
 EventAzim                : 45			    #Azimuth from North +E from point of view of object
 EventElev		         : 20			    #Elevation as perceived by observer on ground, hence always +ve
+
+#Or
+
+# Atria 
+Ra			            : 252.17
+Dec		                : -69.07
+JDStart			        : 2454424.25
+JDEnd			        : 2453771.29
+END
 
 #Optional
 EventCartStd		     : 10000		    #Event start cartesian standard deviation (m)
@@ -136,6 +157,10 @@ class EventContainer(object):
         self.stations_required = ""
         self.respond_to = ""
 
+        # For radec
+        self.jd_start, self.jd_end = 0, 0
+        self.ra, self.dec = 0, 0
+
         # These are internal control properties
         self.uuid = ""
         self.event_spec_type = 0
@@ -149,12 +174,11 @@ class EventContainer(object):
         self.suffix = "event"
 
     def setValue(self, variable_name, value):
-
-        """ Receive a name and value pair, and put them into this event
+        """ Receive a name and value pair, and put them into this event.
 
         Arguments:
-            variable_name: Name of the variable
-            value        : Value to be assigned
+            variable_name: Name of the variable.
+            value        : Value to be assigned.
 
         Return:
             Nothing
@@ -194,6 +218,14 @@ class EventContainer(object):
         self.ht2_std = float(value) if "EventHt2Std" == variable_name else self.ht2_std
         self.cart2_std = float(value) if "EventCart2Std" == variable_name else self.cart2_std
 
+        # Radec and tle events
+        if value is not None:
+            self.jd_start = float(value) if "JDStart" == variable_name else self.jd_start
+            self.jd_end = float(value) if "JDEnd" == variable_name else self.jd_end
+            self.ra = float(value) if "Ra" == variable_name else self.ra
+            self.dec = float(value) if "Dec" == variable_name else self.dec
+
+
         # Optional parameters for defining trajectory by a start point, and a direction
         if "EventAzim" == variable_name:
             self.azim = 0 if value is None else float(value)
@@ -219,12 +251,12 @@ class EventContainer(object):
 
     def eventToString(self):
 
-        """ Turn an event into a string
+        """ Turn an event into a string.
 
         Arguments:
 
         Return:
-            String representation of an event
+            String representation of an event.
         """
 
         output = "# Required \n"
@@ -261,10 +293,16 @@ class EventContainer(object):
         output += ("uuid                     : {}\n".format(self.uuid))
         output += ("RespondTo                : {}\n".format(self.respond_to))
         output += "# Trajectory information     \n"
-        output += ("Start Distance (km)      : {:3.2f}\n".format(self.start_distance / 1000))
+        output += ("Start Distance (km)      : {:3.2f}\n".format(self.start_distance/1000))
         output += ("Start Angle              : {:3.2f}\n".format(self.start_angle))
-        output += ("End Distance (km)        : {:3.2f}\n".format(self.end_distance / 1000))
+        output += ("End Distance (km)        : {:3.2f}\n".format(self.end_distance/1000))
         output += ("End Angle                : {:3.2f}\n".format(self.end_angle))
+        output += "# RaDEC events     \n"
+        output += ("JD_Start                 : {:3.2f}\n".format(self.jd_start))
+        output += ("JD_End                   : {:3.2f}\n".format(self.jd_end))
+        output += ("RA                       : {:3.2f}\n".format(self.ra))
+        output += ("Dec                      : {:3.2f}\n".format(self.dec))
+
         output += "# Station information        \n"
         output += ("Field of view RA         : {:3.2f}\n".format(self.fovra))
         output += ("Field of view Dec        : {:3.2f}\n".format(self.fovdec))
@@ -276,8 +314,7 @@ class EventContainer(object):
 
     def isReasonable(self):
 
-        """ Check if self is reasonable, and optionally try to fix it up
-            Crucially, this function prevents any excessive requests being made that may compromise capture
+        """ Check if self is reasonable.
 
         Arguments:
 
@@ -286,21 +323,24 @@ class EventContainer(object):
         """
 
         reasonable = True
-        reasonable = False if self.lat == "" else reasonable
-        reasonable = False if self.lat is None else reasonable
-        reasonable = False if self.lon == "" else reasonable
-        reasonable = False if self.lon is None else reasonable
-        reasonable = False if 0 < float(self.time_tolerance) > 300 else reasonable
-        reasonable = False if self.close_radius > self.far_radius else reasonable
+        if self.jd_start == 0 and self.jd_end == 0:
+            reasonable = False if self.lat == "" else reasonable
+            reasonable = False if self.lat is None else reasonable
+            reasonable = False if self.lon == "" else reasonable
+            reasonable = False if self.lon is None else reasonable
+            reasonable = False if 0 < float(self.time_tolerance) > 300 else reasonable
+            reasonable = False if self.close_radius > self.far_radius else reasonable
+        else:
+            reasonable = False if self.jd_end < self.jd_start else reasonable
 
         return reasonable
 
     def hasCartSD(self):
 
         """
-        Event contains any non-zero cartesian deviation parameters
+        True if event contains any non-zero cartesian deviation parameters
 
-        returns:
+        Return:
             [bool]
 
         """
@@ -312,7 +352,7 @@ class EventContainer(object):
         """
         Event contains any non-zero polar deviation parameters
 
-        returns:
+        Return:
             [bool]
 
         """
@@ -332,13 +372,13 @@ class EventContainer(object):
     def appendPopulation(self, population, population_size):
 
         """
-        Append to a population identical copies of self event
+        Append to a population identical copies of self event.
 
         arguments:
-            population: [list] population of events
+            population: [list] population of events.
 
         return:
-            population [list] population of events
+            population [list] population of events.
 
         """
 
@@ -349,14 +389,14 @@ class EventContainer(object):
     def eventToECEFVector(self):
 
         """
-        Return ECEF vector (meters) representation of search trajectory
+        Return ECEF vector (meters) representation of search trajectory.
 
         return:
-            [vector] ECEF vector
+            [vector] ECEF vector.
         """
 
-        v1 = latLonAlt2ECEFDeg(self.lat, self.lon, self.ht * 1000)
-        v2 = latLonAlt2ECEFDeg(self.lat2, self.lon2, self.ht2 * 1000)
+        v1 = latLonAlt2ECEFDeg(self.lat, self.lon, self.ht*1000)
+        v2 = latLonAlt2ECEFDeg(self.lat2, self.lon2, self.ht2*1000)
 
         return [v1, v2]
 
@@ -367,8 +407,8 @@ class EventContainer(object):
         If this fails, just return the point.
 
         arguments:
-            pt: [vector] vector
-            std: [float] sigma to apply
+            pt: [vector] vector.
+            std: [float] sigma to apply.
 
         """
 
@@ -381,13 +421,13 @@ class EventContainer(object):
 
         """
         Apply standard deviation to the Cartesian coordinate of a population of trajectories
-        Take the absolute value, in case a negative value was passed
+        Take the absolute value, in case a negative value was passed.
 
         arguments:
-            population: [list] population of events
+            population: [list] population of events.
 
-        returns:
-            population: [list] population of events
+        Return:
+            population: [list] population of events.
 
         """
 
@@ -408,14 +448,14 @@ class EventContainer(object):
 
         """
         Apply standard deviation to the Polar coordinates of a population of trajectories
-        This function can handle negative standard deviations
+        This function can handle negative standard deviations.
 
         arguments:
-            population: [list] of events
-            seed: optional, set the seed for the standard deviation generation
+            population: [list] of events.
+            seed: optional, set the seed for the standard deviation generation.
 
-        returns:
-            population: [list] of events
+        Return:
+            population: [list] of events.
 
         """
 
@@ -423,14 +463,14 @@ class EventContainer(object):
             np.random.seed(seed)
 
         for tr in population:
-            tr.lat = tr.lat + np.random.normal(scale=1) * self.lat_std
-            tr.lon = tr.lon + np.random.normal(scale=1) * self.lon_std
-            tr.ht = tr.ht + np.random.normal(scale=1) * self.ht_std
-            tr.lat2 = tr.lat2 + np.random.normal(scale=1) * self.lat2_std
-            tr.lon2 = tr.lon2 + np.random.normal(scale=1) * self.lon2_std
-            tr.ht2 = tr.ht2 + np.random.normal(scale=1) * self.ht2_std
-            tr.azim = tr.azim + np.random.normal(scale=1) * self.azim_std
-            tr.elev = tr.elev + np.random.normal(scale=1) * self.elev_std
+            tr.lat = tr.lat + np.random.normal(scale=1)*self.lat_std
+            tr.lon = tr.lon + np.random.normal(scale=1)*self.lon_std
+            tr.ht = tr.ht + np.random.normal(scale=1)*self.ht_std
+            tr.lat2 = tr.lat2 + np.random.normal(scale=1)*self.lat2_std
+            tr.lon2 = tr.lon2 + np.random.normal(scale=1)*self.lon2_std
+            tr.ht2 = tr.ht2 + np.random.normal(scale=1)*self.ht2_std
+            tr.azim = tr.azim + np.random.normal(scale=1)*self.azim_std
+            tr.elev = tr.elev + np.random.normal(scale=1)*self.elev_std
 
         return population
 
@@ -441,8 +481,8 @@ class EventContainer(object):
 
         Arguments:
 
-        Returns: [bool]
-            True if end point latitudes or longitudes or heights are not zero
+        Return: [bool]
+            True if end point latitudes or longitudes or heights are not zero.
 
         """
 
@@ -456,16 +496,16 @@ class EventContainer(object):
     def limitAzEl(self, min_elev_hard, min_elev, prob_elev, max_elev):
 
         """
-        Acts on self to correct any strange elevations
+        Acts on self to correct any strange elevations.
 
         Arguments
-            min_elev_hard: [float] minimum elevation considered reasonable
-            min_elev: [float] minimum elevation considered correct
-            prob_elev: [float] set any unreasonable elevations
-            max_elev: [float] maximum elevation considered reasonable
+            min_elev_hard: [float] minimum elevation considered reasonable.
+            min_elev: [float] minimum elevation considered correct.
+            prob_elev: [float] set any unreasonable elevations.
+            max_elev: [float] maximum elevation considered reasonable.
 
-        Returns:
-            Nothing
+        Return:
+            Nothing.
 
         """
 
@@ -483,15 +523,15 @@ class EventContainer(object):
 
         """
         Adjust default illuminated flight heights to match event specification. Leave a gap
-        between the observation and the limit to allow accurate angles to be calculated
+        between the observation and the limit to allow accurate angles to be calculated.
 
         Arguments
-            observd_ht: [float] height of observation
-            min_lum_flt_ht: [float] minimum expected illuminated flight
-            max_lum_flt_ht: [float] maximum expected illuminated flight
-            gap : [float] minimum gap between the observed_bt and either of the limits
+            observd_ht: [float] height of observation.
+            min_lum_flt_ht: [float] minimum expected illuminated flight.
+            max_lum_flt_ht: [float] maximum expected illuminated flight.
+            gap : [float] minimum gap between the observed_bt and either of the limits.
 
-            All must be specified with the same unit multiplier
+            All must be specified with the same unit multiplier.
 
         """
 
@@ -504,20 +544,18 @@ class EventContainer(object):
 
         """
         For an event containing a trajectory specified with two lat,lon, heights, calculate the range from
-        the observed point to the maximum luminous flight height, and to the minimum luminous flight height
+        the observed point to the maximum luminous flight height, and to the minimum luminous flight height.
 
         arguments:
-            obsvd_lat : [float] latitude (degrees) of observed point
-            obsvd_lon : [float] longitude (degrees) of observed point
-            obsvd_ht : [float] height (meters) of observed point
-            min_lum_flt_ht: [float] height (meters) of minimum luminous flight
-            max_lum_flt_ht: [float] height (meters) of maximum luminous flight
+            obsvd_lat : [float] latitude (degrees) of observed point.
+            obsvd_lon : [float] longitude (degrees) of observed point.
+            obsvd_ht : [float] height (meters) of observed point.
+            min_lum_flt_ht: [float] height (meters) of minimum luminous flight.
+            max_lum_flt_ht: [float] height (meters) of maximum luminous flight.
 
-        returns:
-            bwd_range : [float] range (meters) from observed point to maximum luminous height
-            fwd_range : [float] range (meters) from observed point to minimum luminous height
-
-
+        Return:
+            bwd_range : [float] range (meters) from observed point to maximum luminous height.
+            fwd_range : [float] range (meters) from observed point to minimum luminous height.
         """
 
         # Find range to maximum heights in reverse trajectory direction
@@ -532,8 +570,8 @@ class EventContainer(object):
         for n in range(100):
             self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, obs_lat, obs_lon, obs_ht)
             # Use trigonometry to estimate the error - vertical error is the opposite side to the elevation
-            # so vertical error / sin(elev) gives the hypotenuse, which is the trajectory error
-            traj_error = (ht2_m - min_lum_flt_ht) / np.sin(np.radians(self.elev))
+            # so vertical error/sin(elev) gives the hypotenuse, which is the trajectory error
+            traj_error = (ht2_m - min_lum_flt_ht)/np.sin(np.radians(self.elev))
             fwd_range = fwd_range + traj_error
             if traj_error < 1e-8:
                 break
@@ -543,21 +581,20 @@ class EventContainer(object):
     def addElevationRange(self, population, ob_ev, min_elevation):
 
         """
-        Take a single observed point on a trajectory, and a minimum elevation
+        Take a single observed point on a trajectory, and a minimum elevation.
         Create a population of trajectories from the min_elevation through to observed elevation
         in steps of 1 degree.
 
         The trajectories pivot around the observed lat, lon and height, and this function checks that
-        this point is close to all the produced trajectories
+        this point is close to all the produced trajectories.
 
         arguments:
-            population: [list] list of trajectories to be appended to
-            ob_ev: An observed event, specified as a lat (degrees), lon (degrees), ht (km) and elevation (degrees)
-            min_elevation: [degrees] observed elevation, which will always be the minimum
+            population: [list] list of trajectories to append to.
+            ob_ev: An observed event, specified as a lat (degrees), lon (degrees), ht (km) and elevation (degrees).
+            min_elevation: [degrees] observed elevation, which will always be the minimum.
 
-        returns:
-            population: [list] list of trajectories
-
+        Return:
+            population: [list] list of trajectories.
         """
 
 
@@ -568,9 +605,9 @@ class EventContainer(object):
             s.latLonAzElToLatLonLatLon(force=True)
             population.append(s)
             ch_az, ch_el = s.latLonlatLonToLatLonAzEl()
-            start, end, closest = calculateClosestPoint(s.lat, s.lon, s.ht * 1000, s.lat2, s.lon2, s.ht2 * 1000,
-                                                        ob_ev.lat, ob_ev.lon, ob_ev.ht * 1000)
-            start, end, closest = start / 1000, end / 1000, closest / 1000
+            start, end, closest = calculateClosestPoint(s.lat, s.lon, s.ht*1000, s.lat2, s.lon2, s.ht2*1000,
+                                                        ob_ev.lat, ob_ev.lon, ob_ev.ht*1000)
+            start, end, closest = start/1000, end/1000, closest/1000
 
             if start > 1000 or end > 1000 or closest > 0.2:
                 log.error("Original             Az, El {:.3f},{:.3f} degrees".format(ob_ev.azim, ob_ev.elev))
@@ -594,15 +631,15 @@ class EventContainer(object):
         azimuth and elevation. One application for this function could be to extend a trajectory to the expected
         limits of illuminated flight.
 
-        arguments:
-            bwd_range: [float] range (meters) to extend a trajectory backwards - in line with the trajectory
-            fwd_range: [float] range (meters) to extend a trajectory forwards - in line with the trajectory
-            obsvd_lat: [float] observed latitude (degrees) of reference point
-            obsvd_lon: [float] observed longitude (degrees) of reference point
-            obsvd_ht: [float] observed height (metres) of reference point
+        Arguments:
+            bwd_range: [float] range (meters) to extend a trajectory backwards - in line with the trajectory.
+            fwd_range: [float] range (meters) to extend a trajectory forwards - in line with the trajectory.
+            obs_lat: [float] observed latitude (degrees) of reference point.
+            obs_lon: [float] observed longitude (degrees) of reference point.
+            obs_ht: [float] observed height (metres) of reference point.
 
-        reurns:
-            nothing
+        Return:
+            Nothjing
 
         """
 
@@ -612,7 +649,7 @@ class EventContainer(object):
         self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, obs_lat, obs_lon, obs_ht)
 
         # Convert to km and store in event
-        self.ht, self.ht2 = ht_m / 1000, ht2_m / 1000
+        self.ht, self.ht2 = ht_m/1000, ht2_m/1000
 
     def latLonAzElToLatLonLatLon(self, force=False):
 
@@ -634,7 +671,7 @@ class EventContainer(object):
             return
 
         # Copy observed lat, lon and height local variables for ease of comprehension and convert to meters
-        obs_lat, obs_lon, obs_ht = self.lat, self.lon, self.ht * 1000
+        obs_lat, obs_lon, obs_ht = self.lat, self.lon, self.ht*1000
 
         # For this routine elevation must always be within 10 - 90 degrees
         min_elev_hard, min_elev, prob_elev, max_elev = 0, 10, 45, 90
@@ -652,8 +689,8 @@ class EventContainer(object):
 
         # Post calculation checks - not required for operation
         # Convert to ECEF
-        x1, y1, z1 = latLonAlt2ECEFDeg(self.lat, self.lon, self.ht * 1000)
-        x2, y2, z2 = latLonAlt2ECEFDeg(self.lat2, self.lon2, self.ht2 * 1000)
+        x1, y1, z1 = latLonAlt2ECEFDeg(self.lat, self.lon, self.ht*1000)
+        x2, y2, z2 = latLonAlt2ECEFDeg(self.lat2, self.lon2, self.ht2*1000)
         x_obs, y_obs, z_obs = latLonAlt2ECEFDeg(obs_lat, obs_lon, obs_ht)
 
         # Calculate vectors of three points on trajectory
@@ -674,8 +711,8 @@ class EventContainer(object):
             log.error("Observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(obs_lat, obs_lon, obs_ht))
             log.error("Propagate fwds, bwds {:.0f},{:.0f} metres".format(fwd_range, bwd_range))
             log.error("At az, az_rev, el {:.4f} ,{:.4f} , {:.4f}".format(self.azim, revAz(self.azim) , self.elev))
-            log.error("Start lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat, self.lon, self.ht * 1000))
-            log.error("End   lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat2, self.lon2, self.ht2 * 1000))
+            log.error("Start lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat, self.lon, self.ht*1000))
+            log.error("End   lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat2, self.lon2, self.ht2*1000))
             log.error("Minimum height to Observed height az,el {},{}".format(min_obs_az, min_obs_el))
             log.error("Minimum height to Maximum height az,el {},{}".format(min_max_az, min_max_el))
             log.error("Observed height to Maximum height az,el {},{}".format(obs_max_az, obs_max_el))
@@ -687,8 +724,8 @@ class EventContainer(object):
             log.error("Traj from observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(obs_lat, obs_lon, obs_ht))
             log.error("Propagate fwds, bwds {:.0f},{:.0f} metres".format(fwd_range, bwd_range))
             log.error("At az, az_rev, el {:.4f} ,{:.4f} , {:.4f}".format(self.azim, revAz(self.azim), self.elev))
-            log.error("Start lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat, self.lon, self.ht * 1000))
-            log.error("End   lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat2, self.lon2, self.ht2 * 1000))
+            log.error("Start lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat, self.lon, self.ht*1000))
+            log.error("End   lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat2, self.lon2, self.ht2*1000))
             log.error("Minimum height to Observed height az,el {},{}".format(min_obs_az, min_obs_el))
             log.error("Minimum height to Maximum height az,el {},{}".format(min_max_az, min_max_el))
             log.error("Observed height to Maximum height az,el {},{}".format(obs_max_az, obs_max_el))
@@ -706,8 +743,8 @@ class EventContainer(object):
             azimuth(degrees), elevation(degrees)
         """
 
-        x1, y1, z1 = latLonAlt2ECEFDeg(self.lat, self.lon, self.ht * 1000)
-        x2, y2, z2 = latLonAlt2ECEFDeg(self.lat2, self.lon2, self.ht2 * 1000)
+        x1, y1, z1 = latLonAlt2ECEFDeg(self.lat, self.lon, self.ht*1000)
+        x2, y2, z2 = latLonAlt2ECEFDeg(self.lat2, self.lon2, self.ht2*1000)
         start_pt, end_pt = np.array([x1, y1, z1]), np.array([x2, y2, z2])
         end_start_az, end_start_el = ECEF2AltAz(end_pt, start_pt)
         return revAz(end_start_az), end_start_el
@@ -769,14 +806,15 @@ class EventMonitor(multiprocessing.Process):
 
         arguments:
 
-        returns:
+        Return:
             conn: [connection] connection to database if success else None
 
         """
 
         # Create the EventMonitor database
         if test_mode:
-            self.event_monitor_db_path = os.path.expanduser(os.path.join(self.syscon.data_dir, self.syscon.event_monitor_db_name))
+            self.event_monitor_db_path = os.path.expanduser(os.path.join(
+                str(self.syscon.data_dir), str(self.syscon.event_monitor_db_name)))
             if os.path.exists(self.event_monitor_db_path):
                 os.unlink(self.event_monitor_db_path)
 
@@ -792,7 +830,7 @@ class EventMonitor(multiprocessing.Process):
             log.error("Failed to create event_monitor database")
             return None
 
-        # Returns true if the table event_monitor exists in the database
+        # Return true if the table event_monitor exists in the database
         try:
             tables = conn.cursor().execute(
                 """SELECT name FROM sqlite_master WHERE type = 'table' and name = 'event_monitor';""").fetchall()
@@ -898,13 +936,21 @@ class EventMonitor(multiprocessing.Process):
         Args:
             conn: Connection to the EventMonitor database
 
-        Returns: Nothing
+        Return: Nothing
 
         """
 
         if not self.checkDBcol(conn,"Suffix"):
             log.info("Missing db column Suffix")
             self.addDBcol("Suffix","TEXT")
+
+        if not self.checkDBcol(conn,"JDStart"):
+            log.info("Missing db column JDStart")
+            self.addDBcol("JDStart","REAL")
+
+        if not self.checkDBcol(conn,"JDEnd"):
+            log.info("Missing db column JDEnd")
+            self.addDBcol("JDEnd","REAL")
 
         if not self.checkDBcol(conn,"Ra"):
             log.info("Missing db column Ra")
@@ -913,7 +959,6 @@ class EventMonitor(multiprocessing.Process):
         if not self.checkDBcol(conn,"Dec"):
             log.info("Missing db column Dec")
             self.addDBcol("Dec","REAL")
-
 
         if not self.checkDBcol(conn,"RequireFR"):
             log.info("Missing db column RequireFR")
@@ -1027,7 +1072,10 @@ class EventMonitor(multiprocessing.Process):
         """
         Returns True if an event is already in the database. Checks most of the parameters.
 
-        returns:
+        Arguments:
+            event: [object] Event instance
+
+        Return:
             exists: [bool]
 
         """
@@ -1052,6 +1100,11 @@ class EventMonitor(multiprocessing.Process):
         sql_statement += "CloseRadius = '{}'            AND \n".format(event.close_radius)
         sql_statement += "TimeTolerance = '{}'          AND \n".format(event.time_tolerance)
         sql_statement += "StationsRequired = '{}'       AND \n".format(event.stations_required)
+        sql_statement += "JDStart = '{}'                AND \n".format(event.jd_start)
+        sql_statement += "JDEnd = '{}'                  AND \n".format(event.jd_end)
+        sql_statement += "Ra = '{}'                     AND \n".format(event.ra)
+        sql_statement += "Dec = '{}'                    AND \n".format(event.dec)
+
         sql_statement += "RespondTo = '{}'                  \n".format(event.respond_to)
 
         # does a similar event exist
@@ -1120,8 +1173,9 @@ class EventMonitor(multiprocessing.Process):
             sql_statement += "CloseRadius, FarRadius,                     \n"
             sql_statement += "EventLat2, EventLat2Std, EventLon2, EventLon2Std,EventHt2, EventHt2Std, EventCart2Std,    \n"
             sql_statement += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax,    \n"
-            sql_statement += "processedstatus, uploadedstatus, uuid, RespondTo, StationsRequired, RequireFR, timeadded \n"
-            sql_statement += ")                                           \n"
+            sql_statement += "processedstatus, uploadedstatus, uuid, RespondTo, StationsRequired, RequireFR, \n"
+            sql_statement += "Ra, Dec, JDStart, JDEnd, \n"
+            sql_statement += "timeadded)                                           \n"
 
             sql_statement += "VALUES "
             sql_statement += "(                            \n"
@@ -1135,6 +1189,7 @@ class EventMonitor(multiprocessing.Process):
                                                                       event.elev_std,
                                                                       qry_elev_is_max)
             sql_statement += "{},  {}, '{}', '{}', '{}' , '{}', \n".format(0, 0,uuid.uuid4(), event.respond_to, event.stations_required, event.require_FR)
+            sql_statement += "{}, {}, '{}', '{}', \n".format(event.ra, event.dec, event.jd_start, event.jd_end)
             sql_statement += "CURRENT_TIMESTAMP ) \n"
 
             try:
@@ -1149,7 +1204,10 @@ class EventMonitor(multiprocessing.Process):
                 log.info("Add event failed")
                 self.recoverFromDatabaseError()
                 return False
-            log.info("Added event at {} to the database".format(event.dt))
+            if event.dt != 0:
+                log.info("Added event at {} to the database".format(event.dt))
+            elif event.jd_start != 0 and event.jd_end != 0:
+                log.info("Added event between JD:{} and JD:{} to the database".format(event.jd_start, event.jd_end))
             return True
         else:
             return False
@@ -1353,7 +1411,7 @@ class EventMonitor(multiprocessing.Process):
 
         return events
 
-    def getUnprocessedEventsfromDB(self):
+    def getUnprocessedEventsfromDB(self, reprocess=False):
 
         """ Get the unprocessed events from the database
 
@@ -1372,11 +1430,13 @@ class EventMonitor(multiprocessing.Process):
         sql_query_cols += "FarRadius,CloseRadius, uuid,"
         sql_query_cols += "EventLat2, EventLat2Std, EventLon2, EventLon2Std,EventHt2, EventHt2Std, "
         sql_query_cols += "EventAzim, EventAzimStd, EventElev, EventElevStd, EventElevIsMax, RespondTo, StationsRequired,"
-        sql_query_cols += "EventCartStd, EventCart2Std, RequireFR"
+        sql_query_cols += "EventCartStd, EventCart2Std, RequireFR,"
+        sql_query_cols += "JDStart, JDEnd, Ra, Dec"
         sql_statement += sql_query_cols
         sql_statement += " \n"
         sql_statement += "FROM event_monitor "
-        sql_statement += "WHERE processedstatus = 0"
+        if not reprocess:
+            sql_statement += "WHERE processedstatus = 0"
 
         try:
             cursor = self.db_conn.cursor().execute(sql_statement)
@@ -1450,7 +1510,7 @@ class EventMonitor(multiprocessing.Process):
             if len(platepar_file_list) > 0:
                 platepar_file = platepar_file_list[0]
             else:
-                platepar_file = os.path.join(self.syscon.rms_root_dir, self.syscon.platepar_name)
+                platepar_file = os.path.join(self.syscon.config_file_path, self.syscon.platepar_name)
                 pass
 
         return platepar_file
@@ -1472,7 +1532,8 @@ class EventMonitor(multiprocessing.Process):
         # iterate across the folders in CapturedFiles and convert the directory time to posix time
         if os.path.exists(os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir)):
             for night_directory in os.listdir(
-                    os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir)):
+                    os.path.join(os.path.expanduser(str(self.config.data_dir)),
+                                 str(self.config.captured_dir))):
                 # Skip over any directory which does not start with the stationID and warn
                 if night_directory[0:len(self.config.stationID)] != self.config.stationID:
                     continue
@@ -1482,7 +1543,7 @@ class EventMonitor(multiprocessing.Process):
                 directory_POSIX_time = convertGMNTimeToPOSIX(night_directory[7:22])
                 # if the POSIX time representation is before the event, and within 16 hours add to the list of directories
                 # most unlikely that a single event could be split across two directories, unless there was large time uncertainty
-                if directory_POSIX_time < event_time and (event_time - directory_POSIX_time).total_seconds() < 16 * 3600:
+                if directory_POSIX_time < event_time and (event_time - directory_POSIX_time).total_seconds() < 16*3600:
                     directory_list.append(
                         os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir,
                                      night_directory))
@@ -1569,8 +1630,8 @@ class EventMonitor(multiprocessing.Process):
         file_list = []
 
         file_list += self.findEventFiles(event, self.getDirectoryList(event), [".fits", ".bin"])
-        #have to use system .config file_name here because we have not yet identified the files for the event
-        #log.info("Using {} as .config file name".format(self.syscon.config_file_name))
+
+        # Have to use system .config file_name here because we have not yet identified the files for the event
         if len(self.getDirectoryList(event)) > 0:
             file_list += self.getFile(os.path.basename(self.syscon.config_file_name), self.getDirectoryList(event)[0])
             file_list += [self.getPlateparFilePath(event)]
@@ -1587,7 +1648,7 @@ class EventMonitor(multiprocessing.Process):
             rp: [platepar] reference platepar
             event: [event] event of interest
 
-        Returns:
+        Return:
             points_in_fov: [integer] the number of points out of 100 in the field of view
             start_distance: [float] the distance in metres from the station to the trajectory start
             start_angle: [float] the angle between the vector from the station to start of the trajectory
@@ -1600,22 +1661,22 @@ class EventMonitor(multiprocessing.Process):
 
         """
         # Calculate diagonal FoV of camera
-        diagonal_fov = np.sqrt(rp.fov_v ** 2 + rp.fov_h ** 2)
+        diagonal_fov = np.sqrt(rp.fov_v**2 + rp.fov_h**2)
 
         # Calculation origin will be the ECI of the station taken from the platepar
         jul_date = datetime2JD(convertGMNTimeToPOSIX(event.dt))
         origin = np.array(geo2Cartesian(rp.lat, rp.lon, rp.elev, jul_date))
 
         # Convert trajectory start and end point coordinates to cartesian ECI at JD of event
-        traj_sta_pt = np.array(geo2Cartesian(event.lat, event.lon, event.ht * 1000, jul_date))
-        traj_end_pt = np.array(geo2Cartesian(event.lat2, event.lon2, event.ht2 * 1000, jul_date))
+        traj_sta_pt = np.array(geo2Cartesian(event.lat, event.lon, event.ht*1000, jul_date))
+        traj_end_pt = np.array(geo2Cartesian(event.lat2, event.lon2, event.ht2*1000, jul_date))
 
         # Make relative (_rel) to station coordinates
         stapt_rel, endpt_rel = traj_sta_pt - origin, traj_end_pt - origin
 
         # trajectory vector, and vector for traverse
         traj_vec = traj_end_pt - traj_sta_pt
-        traj_inc = traj_vec / 100
+        traj_inc = traj_vec/100
 
         # the az_centre, alt_centre of the camera
         az_centre, alt_centre = platepar2AltAz(rp)
@@ -1628,15 +1689,15 @@ class EventMonitor(multiprocessing.Process):
         # iterate along the trajectory counting points in the field of view
         points_in_fov = 0
         for i in range(0, 100):
-            point = (stapt_rel + i * traj_inc)
+            point = (stapt_rel + i*traj_inc)
             point_fov = angularSeparationVectDeg(vectNorm(point), vectNorm(fov_vec))
-            if point_fov < diagonal_fov / 2:
+            if point_fov < diagonal_fov/2:
                 points_in_fov += 1
 
         # calculate some additional information for confidence
-        start_distance = (np.sqrt(np.sum(stapt_rel ** 2)))
+        start_distance = (np.sqrt(np.sum(stapt_rel**2)))
         start_angle = angularSeparationVectDeg(vectNorm(stapt_rel), vectNorm(fov_vec))
-        end_distance = (np.sqrt(np.sum(endpt_rel ** 2)))
+        end_distance = (np.sqrt(np.sum(endpt_rel**2)))
         end_angle = angularSeparationVectDeg(vectNorm(endpt_rel), vectNorm(fov_vec))
 
         return points_in_fov, start_distance, start_angle, end_distance, end_angle, fov_ra, fov_dec
@@ -1650,7 +1711,7 @@ class EventMonitor(multiprocessing.Process):
         Args:
             event: [event] Calculate if the trajectory of this event passed through the field of view
 
-        Returns:
+        Return:
             pts_in_FOV: [integer] Number of points of the trajectory split into 100 parts
                                    apparently in the FOV of the camera
             sta_dist: [float] Distance from station to the start of the trajectory
@@ -1669,7 +1730,7 @@ class EventMonitor(multiprocessing.Process):
         pts_in_FOV, sta_dist, sta_ang, end_dist, end_ang, fov_RA, fov_DEC = self.trajectoryVisible(rp, event)
         return pts_in_FOV, sta_dist, sta_ang, end_dist, end_ang, fov_RA, fov_DEC
 
-    def doUpload(self, event, evcon, file_list, keep_files=False, no_upload=False, test_mode=False):
+    def doUpload(self, event, evcon, file_list, keep_files=False, no_upload=False, test_mode=False, write_log=False):
 
         """Move all the files to a single directory. Make MP4s, stacks and jpgs
            Archive into a bz2 file and upload, using paramiko. Delete all working folders.
@@ -1682,7 +1743,7 @@ class EventMonitor(multiprocessing.Process):
             no_upload: [bool] if True do everything apart from uploading
             test_mode: [bool] if True prevents upload
 
-        Returns:
+        Return:
             uploadstatus: [bool] status of upload
 
         """
@@ -1709,7 +1770,8 @@ class EventMonitor(multiprocessing.Process):
                                 .format(sanitise(evcon.network_name),sanitise(evcon.camera_group_name), this_event_directory))
         else:
             this_event_directory = os.path.join(event_monitor_directory, upload_filename, sanitise(evcon.stationID))
-            log.info("Network and group not defined so creating {}".format(this_event_directory))
+            if write_log:
+                log.info("Network and group not defined so creating {}".format(this_event_directory))
 
         # get rid of the eventdirectory, should never be needed
         if not keep_files:
@@ -1724,41 +1786,61 @@ class EventMonitor(multiprocessing.Process):
         # put all the files from the filelist into the event directory
         pack_size = 0
         for file in file_list:
-            pack_size += os.path.getsize(file)
-        log.info("File pack ({:.0f}MB) assembly started".format(pack_size/1024/1024))
+            if file is None:
+                log.info("File name None passed")
+            else:
+                if os.path.exists(file):
+                    pack_size += os.path.getsize(file)
+                else:
+                    log.info("File {} was not found, not adding to size.".format(file))
+        if write_log:
+            log.info("File pack ({:.0f}MB) assembly started".format(pack_size/1024/1024))
 
         # Don't upload things which are too large
         if pack_size > 1000*1024*1024:
-            log.error("File pack too large")
+            log.warning("File pack too large")
             return False
 
         for file in file_list:
-            shutil.copy(file, this_event_directory)
-        log.info("File pack assembled")
+            if file is None:
+                if write_log:
+                    log.info("None file passed - ignoring")
+            else:
+                if os.path.exists(file):
+                    if write_log:
+                        log.info("Adding {} to payload at {}".format(os.path.basename(file), os.path.basename(this_event_directory)))
+                    shutil.copy(file, this_event_directory)
+                else:
+                    if write_log:
+                        log.info("Not adding {} to payload as file not found".format(file))
+        if write_log:
+            log.info("File pack assembled")
 
         stackFFs(this_event_directory, "jpg", captured_stack=True, print_progress=False)
 
         # convert bins to MP4
         for file in file_list:
             #Guard against FS files getting into binViewer
+            if file is None:
+                continue
             if file.endswith(".bin") and sys.version_info[0] >= 3 and os.path.basename(file)[0:2] != "FS":
                 fr_file = os.path.basename(file)
                 ff_file = convertFRNameToFF(fr_file)
 
                 try:
-                    log.info("this_event_directory {}".format(this_event_directory))
-                    log.info("ff_file {}, fr_file {}".format(ff_file, fr_file))
+                    if write_log:
+                        log.info("this_event_directory {}".format(this_event_directory))
+                        log.info("ff_file {}, fr_file {}".format(ff_file, fr_file))
                     view(this_event_directory, ff_file, fr_file, self.syscon, hide=True, add_timestamp=True, extract_format="mp4")
                 except:
+
                     log.error("Converting {} to mp4 failed".format(file))
                     log.error("this_event_directory {}".format(this_event_directory))
                     log.error("convertFRNameToFF {}".format(ff_file))
                     log.error("fr_file {}".format(fr_file))
 
-        if True:
-            image_note = event.suffix
-            batchFFtoImage(os.path.join(this_event_directory), "jpg", add_timestamp=True,
-                           ff_component='maxpixel')
+        batchFFtoImage(os.path.join(this_event_directory), "jpg", add_timestamp=True,
+                        ff_component='maxpixel')
 
         with open(os.path.join(this_event_directory, "event_report.txt"), "w") as info:
             info.write(event.eventToString())
@@ -1770,12 +1852,13 @@ class EventMonitor(multiprocessing.Process):
 
         if not test_mode:
             if os.path.isdir(event_monitor_directory) and upload_filename != "":
-             log.info("Making archive of {}".format(os.path.join(event_monitor_directory, upload_filename)))
-             base_name = os.path.join(event_monitor_directory,upload_filename)
-             root_dir = os.path.join(event_monitor_directory,upload_filename)
-             archive_name = shutil.make_archive(base_name, 'bztar', root_dir, logger=log)
+                if write_log:
+                    log.info("Making archive of {}".format(os.path.join(event_monitor_directory, upload_filename)))
+                base_name = os.path.join(event_monitor_directory,upload_filename)
+                root_dir = os.path.join(event_monitor_directory,upload_filename)
+                archive_name = shutil.make_archive(base_name, 'bztar', root_dir, logger=log)
             else:
-             log.info("Not making an archive of {}, not sensible.".format(os.path.join(event_monitor_directory)))
+                log.info("Not making an archive of {}, not sensible.".format(os.path.join(event_monitor_directory)))
 
         # Remove the directory where the files were assembled
         if not keep_files:
@@ -1790,7 +1873,8 @@ class EventMonitor(multiprocessing.Process):
             # Progressively lengthen the delay time, with some random element
             # Return the status of the upload
             # Don't include a delay before uploading
-            log.info("Upload of {} - first attempt".format(event_monitor_directory))
+            if write_log:
+                log.info("Upload of {} - first attempt".format(event_monitor_directory))
             for retry in range(1,30):
                 archives = glob.glob(os.path.join(event_monitor_directory,"*.bz2"))
 
@@ -1813,7 +1897,7 @@ class EventMonitor(multiprocessing.Process):
                     # Exit loop if upload was successful
                     break
                 else:
-                    retry_delay = (retry * 180 * (1+ random.random()))
+                    retry_delay = (retry*180*(1 + random.random()))
                     log.error("Upload failed on attempt {}. Retry after {:.1f} seconds.".format(retry, retry_delay))
                     time.sleep(retry_delay)
                     log.info("Retrying upload of {}. This is retry {}".format(event_monitor_directory, retry))
@@ -1834,188 +1918,371 @@ class EventMonitor(multiprocessing.Process):
 
         return found
 
+    def handleFutureEvents(self, observed_event, future_events):
+
+        if convertGMNTimeToPOSIX(observed_event.dt) + \
+                datetime.timedelta(seconds=int(observed_event.time_tolerance)) > RmsDateTime.utcnow():
+            time_until_event_end_seconds = (convertGMNTimeToPOSIX(observed_event.dt) -
+                                            RmsDateTime.utcnow() +
+                                            datetime.timedelta(
+                                                seconds=int(observed_event.time_tolerance))).total_seconds()
+            future_events += 1
+            in_future = True
+            log.info("The end of event at {} is in the future by {:.1f} minutes"
+                     .format(observed_event.dt, time_until_event_end_seconds/60))
+            if time_until_event_end_seconds < float(self.check_interval)*60:
+                log.info(
+                    "Check interval is set to {:.1f} minutes, however end of future event is only {:.1f} minutes away"
+                    .format(float(self.check_interval), time_until_event_end_seconds/60))
+                # set the check_interval to the time until the end of the event
+                self.check_interval = float(time_until_event_end_seconds)/60
+                # random time offset to reduce congestion
+                self.check_interval += random.randint(20, 60)/60
+                log.info("Check interval set to {:.1f} minutes, so that future event is reported quickly"
+                         .format(float(self.check_interval)))
+            else:
+                log.info(
+                    "Check interval is set to {:.1f} minutes, end of future event {:.1f} minutes away, no action required"
+                    .format(float(self.check_interval), time_until_event_end_seconds/60))
+
+        else:
+            in_future = False
+
+        return future_events, in_future
+
+
+    def processLatLonEvent(self, observed_event, future_events, ev_con, check_time_start, test_mode=False, write_log=False):
+
+        # check to see if the end of this event is in the future, if it is then do not process
+        # if the end of the event is before the next scheduled execution of event monitor loop,
+        # then set the loop to execute after the event ends
+        future_events, in_future = self.handleFutureEvents(observed_event, future_events)
+        if in_future:
+            return future_events, in_future
+
+        log.info("Checks on trajectories for event at {}".format(observed_event.dt))
+
+        # Iterate through the work
+        # Events can be specified in different ways, make sure converted to LatLon
+        observed_event.latLonAzElToLatLonLatLon()
+        # Get the files
+        file_list = self.getFileList(observed_event)
+
+        # If there are no files based on time, then mark as processed and continue
+        if (len(file_list) == 0 or file_list == [None]) and not test_mode:
+            log.info("No files for event - marking {} as processed".format(observed_event.dt))
+            self.markEventAsProcessed(observed_event)
+            # This moves to next observed_event
+            return future_events, in_future
+
+        # move to the next event if we required an FR file but do not have one
+
+        if observed_event.require_FR == 1:
+            log.info("Event at {} requires FR file".format(observed_event.dt))
+            if not self.frFileInList(file_list):
+                log.info("Event at {} skipped - FR required and none found".format(observed_event.dt))
+                self.markEventAsProcessed(observed_event)
+                return future_events, in_future
+            else:
+                if write_log:
+                    log.info("Event at {} required FR file and file was found".format(observed_event.dt))
+        else:
+            if write_log:
+                log.info("FR file not required for event at {}".format(observed_event.dt))
+
+        # If there is a .config file then parse it as evcon - not the station config
+        for file in file_list:
+            if file.endswith(".config"):
+                ev_con = cr.parse(file)
+
+        # Look for the station code in the stations_required string
+        if observed_event.stations_required.find(ev_con.stationID) != -1:
+            if self.doUpload(observed_event, ev_con, file_list, test_mode):
+                log.info("In Stations_Required - marking {} as processed".format(observed_event.dt))
+                self.markEventAsProcessed(observed_event)
+                if len(file_list) > 0:
+                    self.markEventAsUploaded(observed_event, file_list)
+            else:
+                log.error(
+                    "Upload failed for event at {}. Event retained in database for retry.".format(observed_event.dt))
+            return future_events, in_future
+
+        # Initialise the population of trajectories
+        event_population = []
+        # If we have any standard deviation definitions then create a population of 1000, else create a population of 1
+        if observed_event.hasCartSD() or observed_event.hasPolarSD():
+            if write_log:
+                log.info("Working with standard deviations")
+            event_population = observed_event.appendPopulation(event_population, 1000)
+        else:
+            if write_log:
+                log.info("Working without standard deviations")
+            event_population = observed_event.appendPopulation(event_population, 1)
+
+        # Apply SD to the population
+        if observed_event.hasCartSD():
+            log.info("Applying cartesian standard deviations")
+            event_population = observed_event.applyCartesianSD(event_population)
+        if observed_event.hasPolarSD():
+            log.info("Applying polar standard deviations")
+            event_population = observed_event.applyPolarSD(event_population)
+
+        # Add trajectories with elevations from observed value to 15 deg
+        if observed_event.elev_is_max:
+            if write_log:
+                log.info("Rotating trajectory around observed point")
+            event_population = observed_event.addElevationRange(event_population, observed_event, 15)
+
+        # Start testing trajectories from the population
+        for event in event_population:
+            # check if this has already been handled
+            if self.eventProcessed(observed_event.uuid):
+                break  # do no more work on any version of this trajectory - break exits loop
+            # From the infinitely extended trajectory, work out the closest point to the camera
+            # ev_con.elevation is the height above sea level of the station in metres, no conversion required
+            start_dist, end_dist, atmos_dist = calculateClosestPoint(event.lat, event.lon, event.ht*1000,
+                                                                     event.lat2, event.lon2, event.ht2*1000,
+                                                                     ev_con.latitude, ev_con.longitude,
+                                                                     ev_con.elevation)
+            min_dist = min([start_dist, end_dist, atmos_dist])
+
+            # If this version of the trajectory outside the farradius, continue
+            if min_dist > event.far_radius*1000 and not test_mode:
+                # Do no more work on this version of the trajectory
+                continue
+
+            # If trajectory inside the closeradius, then do the upload and mark as processed
+            if min_dist < event.close_radius*1000 and not test_mode:
+                # this is just for info
+                log.info("Event at {} was {:.0f}km away, inside {:.0f}km so is uploaded with no further checks.".format(
+                    event.dt, min_dist/1000, event.close_radius))
+                check_time_end = RmsDateTime.utcnow()
+                check_time_seconds = (check_time_end - check_time_start).total_seconds()
+                log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
+                count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
+                    event)
+                # If doUpload returned True mark the event as processed and uploaded
+                if self.doUpload(event, ev_con, file_list, test_mode):
+                    log.info("Inside close radius - marking {} as processed".format(observed_event.dt))
+                    self.markEventAsProcessed(observed_event)
+                    if len(file_list) > 0:
+                        self.markEventAsUploaded(observed_event, file_list)
+                    break  # Do no more work on any version of this trajectory - break exits loop
+                else:
+                    log.error("Upload failed for event at {}. Event retained in database for retry.".format(event.dt))
+
+            # If trajectory inside the farradius, then check if the trajectory went through the FoV
+            # The returned count is the number of 100th parts of the trajectory observed through the FoV
+            if min_dist < event.far_radius*1000 or test_mode:
+                # log.info("Event at {} was {:4.1f}km away, inside {:4.1f}km, consider FOV.".format(event.dt, min_dist/1000, event.far_radius))
+                count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
+                    event)
+                if count != 0:
+                    log.info(
+                        "Event at {} had {} points out of 100 in the trajectory in the FOV. Uploading.".format(event.dt,
+                                                                                                               count))
+                    check_time_end = RmsDateTime.utcnow()
+                    check_time_seconds = (check_time_end - check_time_start).total_seconds()
+                    log.info("Check of trajectories took {:2f} seconds".format(check_time_seconds))
+                    if self.doUpload(observed_event, ev_con, file_list, test_mode=test_mode):
+                        self.markEventAsUploaded(observed_event, file_list)
+                        if not test_mode:
+                            log.info(
+                                "Trajectory passed through FoV - marking {} as processed".format(observed_event.dt))
+                            self.markEventAsProcessed(observed_event)
+                        break  # Do no more work on any version of this trajectory
+                    else:
+                        log.error(
+                            "Upload failed for event at {}. Event retained in database for retry.".format(event.dt))
+                    if test_mode:
+                        rp = Platepar()
+                        rp.read(self.getPlateparFilePath(event))
+                        with open(os.path.expanduser(os.path.join(self.syscon.data_dir, "testlog")), 'at') as logfile:
+                            logfile.write(
+                                "{} LOC {} Az:{:3.1f} El:{:3.1f} sta_lat:{:3.4f} sta_lon:{:3.4f} sta_dist:{:3.0f} end_dist:{:3.0f} fov_h:{:3.1f} fov_v:{:3.1f} sa:{:3.1f} ea::{:3.1f} \n".format(
+                                    convertGMNTimeToPOSIX(event.dt), ev_con.stationID, rp.az_centre, rp.alt_centre,
+                                    rp.lat, rp.lon, event.start_distance/1000, event.end_distance/1000, rp.fov_h,
+                                    rp.fov_v, event.start_angle, event.end_angle))
+                else:
+
+                    if not test_mode:
+                        pass
+
+                # Continue with other trajectories from this population
+                continue
+
+        return future_events, in_future
+
+    def processRaDecEvent(self, e, future_events, sys_con, check_time_start, test_mode=False):
+        """
+
+        Arguments:
+            e:[object] Event specification
+            future_events: Number of future events found so far
+            sys_con: [config] RMS event instance for the system
+            check_time_start: [datetime] Start time of the check
+            test_mode:
+        Keyword Arguments:
+
+        Return:
+            future_events; [int] number of future events found
+        """
+
+        e.dt = jd2RMSStyle(e.jd_end)
+        future_events, in_future = self.handleFutureEvents(e, future_events)
+        e.dt = jd2RMSStyle(e.jd_start)
+        if in_future:
+            return future_events, in_future
+
+        log.info("Starting work on a RaDec specified event")
+        log.info("JD_start  :   {} or {}".format(e.jd_start, jd2Date(e.jd_start, dt_obj=True)))
+        log.info("JD_end    :   {} or {}".format(e.jd_end, jd2Date(e.jd_end, dt_obj=True)))
+        log.info("Ra        :   {}".format(e.ra))
+        log.info("Dec       :   {}".format(e.dec))
+
+        e.suffix = "JD_start_{}_JD_end_{}_Ra_{:.0f}_Dec_{:.0f}".format(round(e.jd_start*100), round(e.jd_end*100), round(e.ra*100), round(e.dec*100))
+        generic_file_name = "{}_{}.png".format(sys_con.stationID, e.suffix)
+        thumbnail_file_name = "thumbnail_{}".format(generic_file_name)
+        calstar_assisted_thumbnail_file_name = "calstar_assisted_thumbnail_{}".format(generic_file_name)
+        magnitudes_time_chart_file_name = "magnitudes_time_{}".format(generic_file_name)
+        magnitudes_elevation_chart_file_name = "magnitudes_elevation_{}".format(generic_file_name)
+        magnitudes_azimuth_chart_file_name = "magnitudes_azimuth_{}".format(generic_file_name)
+        magnitudes_azimuth_elevation_chart_file_name = "magnitudes_azimuth_elevation_{}".format(generic_file_name)
+        magnitudes_histogram_chart_file_name = "magnitudes_histogram_{}".format(generic_file_name)
+
+        with tempfile.TemporaryDirectory() as radec_event_dir:
+            thumbnail_file_path = os.path.join(radec_event_dir, thumbnail_file_name)
+            magnitudes_chart_file_path = os.path.join(radec_event_dir, magnitudes_time_chart_file_name)
+            magnitudes_elevation_chart_file_path = os.path.join(radec_event_dir, magnitudes_elevation_chart_file_name)
+            magnitudes_azimuth_chart_file_path = os.path.join(radec_event_dir, magnitudes_azimuth_chart_file_name)
+            magnitudes_azimuth_elevation_chart_file_path = os.path.join(radec_event_dir, magnitudes_azimuth_elevation_chart_file_name)
+            magnitudes_histogram_chart_file_path = os.path.join(radec_event_dir, magnitudes_histogram_chart_file_name)
+
+            file_list = []
+            file_path = os.path.join(radec_event_dir, thumbnail_file_name)
+            e.suffix = "" if e.suffix == "event" else e.suffix
+
+
+            thumbnail_file_path = saveThumbnailsRaDec(e.ra, e.dec, e.jd_start, e.jd_end, config=sys_con, file_path=thumbnail_file_path)
+            if thumbnail_file_path is None:
+                return future_events, in_future
+
+            else:
+                file_list.append(thumbnail_file_path)
+
+            json_name = os.path.join(radec_event_dir, "{}.{}".format(e.suffix,"json"))
+            mags_radec_dict = dictMagsRaDec(sys_con, e.ra, e.dec, e.jd_start, e.jd_end, write_log=False)
+
+            if thumbnail_file_path is not None:
+
+
+                # Produce a skymap
+                pp_dict, config_dict, mask_dict = {}, {}, {}
+                pp = Platepar()
+                pp.read(os.path.join(os.path.expanduser(sys_con.config_file_path), sys_con.platepar_name))
+                mask = loadMask(os.path.join(os.path.expanduser(sys_con.config_file_path), sys_con.mask_file))
+                config_dict[sys_con.stationID], pp_dict[sys_con.stationID], mask_dict[sys_con.stationID] = sys_con, pp, mask
+                fov_file_name = "FOV_{}_Ra_{:.0f}_Dec_{:.0f}.png".format(sys_con.stationID, e.ra *100, e.dec*100)
+                fov_file_path = os.path.join(radec_event_dir, fov_file_name)
+                plotFOVSkyMap(pp_dict, config_dict, None,
+                                                 output_file_name=fov_file_path,
+                                                 masks=mask_dict, north_up=True, show_radec=True,
+                                                 radec_list=[[e.ra, e.dec]],
+                                                 radec_name_list=["({},{})".format(e.ra, e.dec)])
+                if os.path.exists(fov_file_path):
+                    file_list.append(fov_file_path)
+
+                with open(json_name, 'w') as f:
+                    json.dump(mags_radec_dict, f)
+                file_list.append(json_name)
+                magnitudes_chart_file_path = dictToMagnitudeTimePlot(sys_con, mags_radec_dict, e, file_path=magnitudes_chart_file_path)
+
+                if magnitudes_chart_file_path is not None:
+                    file_list.append(magnitudes_chart_file_path)
+
+                magnitudes_elevation_chart_file_path = dictToMagnitudeElevationPlot(sys_con, pp, mags_radec_dict, e, file_path=magnitudes_elevation_chart_file_path)
+
+                if magnitudes_elevation_chart_file_path is not None:
+                    file_list.append(magnitudes_elevation_chart_file_path)
+
+
+                magnitudes_azimuth_chart_file_path = dictToMagnitudeAzimuthPlot(sys_con, pp, mags_radec_dict, e,
+                                                                                    file_path=magnitudes_azimuth_chart_file_path)
+
+                if magnitudes_azimuth_chart_file_path is not None:
+                    file_list.append(magnitudes_azimuth_chart_file_path)
+
+
+
+                magnitudes_azimuth_elevation_chart_file_path = dictToMagnitudeAzimuthElevationPlot(sys_con, pp, mags_radec_dict, e,
+                                                                                    file_path=magnitudes_azimuth_elevation_chart_file_path)
+
+                if magnitudes_azimuth_elevation_chart_file_path is not None:
+                    file_list.append(magnitudes_azimuth_elevation_chart_file_path)
+
+                magnitudes_histogram_chart_file_path = dictToMagnitudeHistogram(sys_con, mags_radec_dict, e,
+                                                                                    file_path=magnitudes_histogram_chart_file_path)
+
+                if magnitudes_histogram_chart_file_path is not None:
+                    file_list.append(magnitudes_histogram_chart_file_path)
+
+                calstar_assisted_thumbnails_path = os.path.join(radec_event_dir, calstar_assisted_thumbnail_file_name)
+                file_list.append(dictToThumbnails(sys_con, mags_radec_dict, e, calstar_assisted_thumbnails_path))
+
+
+
+            filtered_file_list = []
+            for file in file_list:
+                if file is not None:
+                    if os.path.exists(file):
+                        filtered_file_list.append(file)
+            file_list = filtered_file_list
+
+            if file_list is None or not len(file_list):
+                log.info("Nothing to upload")
+            else:
+                log.info("{} files to upload".format(len(file_list)))
+                if self.doUpload(e, sys_con, file_list):
+                    self.markEventAsUploaded(e, file_list)
+                    self.markEventAsProcessed(e)
+
+                if os.path.exists(file_path) and os.path.isfile(file_path):
+                    os.remove(file_path)
+
+        return future_events, in_future
+
+
+
+
     def checkEvents(self, ev_con, test_mode = False):
 
         """
-        argunments:
+        Arguments:
             ev_con: configuration object at the time of this event
 
-        returns:
+        Return:
             Nothing
         """
 
         # Get the work to be done
 
-        unprocessed = self.getUnprocessedEventsfromDB()
+        unprocessed = self.getUnprocessedEventsfromDB(reprocess=False)
 
         future_events = 0
         for observed_event in unprocessed:
 
-            # check to see if the end of this event is in the future, if it is then do not process
-            # if the end of the event is before the next scheduled execution of event monitor loop,
-            # then set the loop to execute after the event ends
-            if convertGMNTimeToPOSIX(observed_event.dt) + \
-                    datetime.timedelta(seconds=int(observed_event.time_tolerance)) > RmsDateTime.utcnow():
-                time_until_event_end_seconds = (convertGMNTimeToPOSIX(observed_event.dt) -
-                                                    RmsDateTime.utcnow() +
-                                                    datetime.timedelta(seconds=int(observed_event.time_tolerance))).total_seconds()
-                future_events += 1
-                log.info("The end of event at {} is in the future by {:.1f} minutes"
-                         .format(observed_event.dt, time_until_event_end_seconds / 60))
-                if time_until_event_end_seconds < float(self.check_interval) * 60:
-                    log.info("Check interval is set to {:.1f} minutes, however end of future event is only {:.1f} minutes away"
-                             .format(float(self.check_interval),time_until_event_end_seconds / 60))
-                    # set the check_interval to the time until the end of the event
-                    self.check_interval = float(time_until_event_end_seconds) / 60
-                    # random time offset to reduce congestion
-                    self.check_interval += random.randint(20, 60) / 60
-                    log.info("Check interval set to {:.1f} minutes, so that future event is reported quickly"
-                             .format(float(self.check_interval)))
-                else:
-                    log.info("Check interval is set to {:.1f} minutes, end of future event {:.1f} minutes away, no action required"
-                             .format(float(self.check_interval),time_until_event_end_seconds / 60 ))
-                continue
-
-
-            log.info("Checks on trajectories for event at {}".format(observed_event.dt))
             check_time_start = RmsDateTime.utcnow()
-            # Iterate through the work
-            # Events can be specified in different ways, make sure converted to LatLon
-            observed_event.latLonAzElToLatLonLatLon()
-            # Get the files
-            file_list = self.getFileList(observed_event)
 
-            # If there are no files based on time, then mark as processed and continue
-            if (len(file_list) == 0 or file_list == [None]) and not test_mode:
-                log.info("No files for event - marking {} as processed".format(observed_event.dt))
-                self.markEventAsProcessed(observed_event)
-                # This moves to next observed_event
-                continue
-
-            # move to the next event if we required an FR file but do not have one
-
-            if observed_event.require_FR == 1:
-                log.info("Event at {} requires FR file".format(observed_event.dt))
-                if not self.frFileInList(file_list):
-                    log.info("Event at {} skipped - FR required and none found".format(observed_event.dt))
-                    self.markEventAsProcessed(observed_event)
+            if observed_event.lat != 0 and observed_event.lon !=0:
+                log.info("Working on a lat, lon style event")
+                future_events, in_future = self.processLatLonEvent(observed_event, future_events, ev_con, check_time_start, test_mode)
+                if in_future:
                     continue
-                else:
-                    log.info("Event at {} required FR file and file was found".format(observed_event.dt))
-            else:
-                log.info("FR file not required for event at {}".format(observed_event.dt))
-
-            # If there is a .config file then parse it as evcon - not the station config
-            for file in file_list:
-                if file.endswith(".config"):
-                    ev_con = cr.parse(file)
-
-            # Look for the station code in the stations_required string
-            if observed_event.stations_required.find(ev_con.stationID) != -1:
-                if self.doUpload(observed_event, ev_con, file_list, test_mode):
-                    log.info("In Stations_Required - marking {} as processed".format(observed_event.dt))
-                    self.markEventAsProcessed(observed_event)
-                    if len(file_list) > 0:
-                        self.markEventAsUploaded(observed_event, file_list)
-                else:
-                    log.error("Upload failed for event at {}. Event retained in database for retry.".format(observed_event.dt))
-                continue
-
-            # Initialise the population of trajectories
-            event_population = []
-            # If we have any standard deviation definitions then create a population of 1000, else create a population of 1
-            if observed_event.hasCartSD() or observed_event.hasPolarSD():
-                log.info("Working with standard deviations")
-                event_population = observed_event.appendPopulation(event_population,1000)
-            else:
-                log.info("Working without standard deviations")
-                event_population = observed_event.appendPopulation(event_population,1)
-
-
-
-            # Apply SD to the population
-            if observed_event.hasCartSD():
-                log.info("Applying cartesian standard deviations")
-                event_population = observed_event.applyCartesianSD(event_population)
-            if observed_event.hasPolarSD():
-                log.info("Applying polar standard deviations")
-                event_population = observed_event.applyPolarSD(event_population)
-
-            # Add trajectories with elevations from observed value to 15 deg
-            if observed_event.elev_is_max:
-                log.info("Rotating trajectory around observed point")
-                event_population = observed_event.addElevationRange(event_population, observed_event, 15)
-
-            # Start testing trajectories from the population
-            for event in event_population:
-                # check if this has already been handled
-                if self.eventProcessed(observed_event.uuid):
-                    break # do no more work on any version of this trajectory - break exits loop
-                # From the infinitely extended trajectory, work out the closest point to the camera
-                # ev_con.elevation is the height above sea level of the station in metres, no conversion required
-                start_dist, end_dist, atmos_dist = calculateClosestPoint(event.lat, event.lon, event.ht * 1000,
-                                                                              event.lat2, event.lon2, event.ht2 * 1000,
-                                                                              ev_con.latitude, ev_con.longitude, ev_con.elevation)
-                min_dist = min([start_dist, end_dist, atmos_dist])
-
-                # If this version of the trajectory outside the farradius, continue
-                if min_dist > event.far_radius * 1000 and not test_mode:
-                    # Do no more work on this version of the trajectory
-                    continue
-
-            # If trajectory inside the closeradius, then do the upload and mark as processed
-                if min_dist < event.close_radius * 1000 and not test_mode:
-                    # this is just for info
-                    log.info("Event at {} was {:.0f}km away, inside {:.0f}km so is uploaded with no further checks.".format(event.dt, min_dist / 1000, event.close_radius))
-                    check_time_end = RmsDateTime.utcnow()
-                    check_time_seconds = (check_time_end- check_time_start).total_seconds()
-                    log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
-                    count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
-                        event)
-                    # If doUpload returned True mark the event as processed and uploaded
-                    if self.doUpload(event, ev_con, file_list, test_mode):
-                        log.info("Inside close radius - marking {} as processed".format(observed_event.dt))
-                        self.markEventAsProcessed(observed_event)
-                        if len(file_list) > 0:
-                            self.markEventAsUploaded(observed_event, file_list)
-                        break # Do no more work on any version of this trajectory - break exits loop
-                    else:
-                        log.error("Upload failed for event at {}. Event retained in database for retry.".format(event.dt))
-
-            # If trajectory inside the farradius, then check if the trajectory went through the FoV
-            # The returned count is the number of 100th parts of the trajectory observed through the FoV
-                if min_dist < event.far_radius * 1000 or test_mode:
-                    #log.info("Event at {} was {:4.1f}km away, inside {:4.1f}km, consider FOV.".format(event.dt, min_dist / 1000, event.far_radius))
-                    count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(event)
-                    if count != 0:
-                        log.info("Event at {} had {} points out of 100 in the trajectory in the FOV. Uploading.".format(event.dt, count))
-                        check_time_end = RmsDateTime.utcnow()
-                        check_time_seconds = (check_time_end - check_time_start).total_seconds()
-                        log.info("Check of trajectories took {:2f} seconds".format(check_time_seconds))
-                        if self.doUpload(observed_event, ev_con, file_list, test_mode=test_mode):
-                            self.markEventAsUploaded(observed_event, file_list)
-                            if not test_mode:
-                                log.info("Trajectory passed through FoV - marking {} as processed".format(observed_event.dt))
-                                self.markEventAsProcessed(observed_event)
-                            break # Do no more work on any version of this trajectory
-                        else:
-                            log.error("Upload failed for event at {}. Event retained in database for retry.".format(event.dt))
-                        if test_mode:
-                            rp = Platepar()
-                            rp.read(self.getPlateparFilePath(event))
-                            with open(os.path.expanduser(os.path.join(self.syscon.data_dir, "testlog")), 'at') as logfile:
-                                logfile.write(
-                                    "{} LOC {} Az:{:3.1f} El:{:3.1f} sta_lat:{:3.4f} sta_lon:{:3.4f} sta_dist:{:3.0f} end_dist:{:3.0f} fov_h:{:3.1f} fov_v:{:3.1f} sa:{:3.1f} ea::{:3.1f} \n".format(
-                                    convertGMNTimeToPOSIX(event.dt), ev_con.stationID, rp.az_centre, rp.alt_centre,
-                                    rp.lat, rp.lon, event.start_distance / 1000, event.end_distance / 1000, rp.fov_h,
-                                    rp.fov_v, event.start_angle, event.end_angle))
-                    else:
-
-                        if not test_mode:
-                            pass
-
-                    # Continue with other trajectories from this population
-                    continue
+            elif observed_event.jd_start != 0 and observed_event.jd_end !=0:
+                if observed_event.ra != 0 and observed_event.dec !=0:
+                    future_events, in_future = self.processRaDecEvent(observed_event, future_events, ev_con, check_time_start, test_mode)
+                    if in_future:
+                        continue
 
             # End of the processing loop for this event
             if self.eventProcessed(observed_event.uuid):
@@ -2081,7 +2348,7 @@ class EventMonitor(multiprocessing.Process):
 
         return True
 
-    def getEventsAndCheck(self, start_time, end_time, testmode=False):
+    def getEventsAndCheck(self, start_time=None, end_time=None, testmode=False):
         """
         Gets event(s) from the webpage, or a local file.
         Calls self.addevent to add them to the database
@@ -2092,7 +2359,7 @@ class EventMonitor(multiprocessing.Process):
             end_time: time to start checking to
             testmode: [bool] if set true looks for a local file, rather than a web address
 
-        Returns:
+        Return:
             Nothing
         """
 
@@ -2138,23 +2405,1596 @@ class EventMonitor(multiprocessing.Process):
 
                 time_left_before_start = (start_time - RmsDateTime.utcnow())
                 time_left_before_start = time_left_before_start - datetime.timedelta(microseconds=time_left_before_start.microseconds)
-                time_left_before_start_minutes = int(time_left_before_start.total_seconds() / 60)
+                time_left_before_start_minutes = int(time_left_before_start.total_seconds()/60)
                 next_check_start_time = (RmsDateTime.utcnow() + datetime.timedelta(minutes=self.check_interval))
                 next_check_start_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
                 log.info('Next EventMonitor run : {} UTC; {:3.1f} minutes from now'.format(next_check_start_time_str, int(self.check_interval)))
                 if time_left_before_start_minutes < 120:
-                    log.info('Next Capture start    : {} UTC; {:3.1f} minutes from now'.format(str(start_time.strftime('%H:%M:%S')),time_left_before_start_minutes))
+                    log.debug('Next Capture start    : {} UTC; {:3.1f} minutes from now'.format(str(start_time.strftime('%H:%M:%S')),time_left_before_start_minutes))
                 else:
-                    log.info('Next Capture start    : {} UTC'.format(str(start_time.strftime('%H:%M:%S'))))
+                    log.debug('Next Capture start    : {} UTC'.format(str(start_time.strftime('%H:%M:%S'))))
             else:
                 next_check_start_time = (RmsDateTime.utcnow() + datetime.timedelta(minutes=self.check_interval))
                 next_check_start_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
                 log.info('Next EventMonitor run : {} UTC {:3.1f} minutes from now'.format(next_check_start_time_str, self.check_interval))
             # Wait for the next check
-            self.exit.wait(60 * self.check_interval)
+            self.exit.wait(60*self.check_interval)
             # Increase the check interval
             if self.check_interval < self.syscon.event_monitor_check_interval:
-                self.check_interval = self.check_interval * 1.1
+                self.check_interval = self.check_interval*1.1
+
+
+def dictToThumbnails(config, observations_dict, event, file_path=None):
+    """
+    Given a dictionary of observation information, return path to an image of thumbnails.
+
+    Arguments:
+        config: [config] RMS config instance.
+        observations_dict: [dict] A dictionary of observation data.
+        event: [object] Eventmonitor event specification.
+
+    Keyword arguments:
+        file_path: [str] File path where the image should be stored, optional default None.
+
+    Return:
+        file_path: [str] File path where the image was stored.
+    """
+
+    thumbnail_list = []
+    if not len(observations_dict):
+        return None
+    r, d = event.ra, event.dec
+    calstar_observation_count = 0
+    for j in observations_dict:
+        observations = observations_dict.get(j)
+        if 'pixels' in observations:
+            thumbnail_list.append([observations['fits'], observations['pixels']])
+            r = observations['coords']['equatorial']['ra']
+            d = observations['coords']['equatorial']['dec']
+            calstar_observation_count += 1
+    if not len(thumbnail_list):
+        log.info("No calstar calibrated thumbnails generated for radec:({:1f},{:1f})".format(r,d))
+        return None
+
+
+    contact_sheet, headings_list, position_list = assembleContactSheet(thumbnail_list)
+    plt, fn = renderContactSheet(config, event.jd_start, event.jd_end, contact_sheet, headings_list, position_list, r=r, d=d)
+    if plt is None:
+        log.info("No transits found - cannot plot")
+        return
+    else:
+        file_path = fn if file_path is None else file_path
+        plt.savefig(file_path)
+        log.info("CALSTAR calibrated thumbnails saved at {}".format(file_path))
+    return file_path
+
+
+def dictToMagnitudeAzimuthElevationPlot(config, pp, observations_dict, event, file_path=None):
+    """
+    Given a config file, an observations dict, and an event specification return the path to a plot.
+
+    Arguments:
+        config: [object] RMS config instance.
+        observations_dict: [dict] Dictionary of observations.
+        event: [object] Event specification instance.
+
+    Keyword Arguments:
+        file_path: [str] Path to the location where the plot should be saved.
+
+    Return:
+        file_path: [str] Path to the location where the file was actually saved.
+    """
+
+
+    magnitude_list, azimuth_list, elevation_list = [], [], []
+    if not len(observations_dict):
+        return None
+
+    # Initialise variables
+    r, d, plt = 0,0, None
+
+    for j in observations_dict:
+        observations = observations_dict.get(j)
+        magnitude_list.append(observations['photometry']['mag'])
+        azimuth_list.append(observations['coords']['horizontal']['az'])
+        elevation_list.append(observations['coords']['horizontal']['el'])
+        r = observations['coords']['equatorial']['ra']
+        d = observations['coords']['equatorial']['dec']
+    plt, fn = renderMagnitudeAzElPlot(config, pp, magnitude_list, azimuth_list, elevation_list, event.jd_start, event.jd_end, round(r, 2), round(d, 2))
+
+    if plt is None:
+        return
+    else:
+        file_path = fn if file_path is None else file_path
+        plt.savefig(file_path)
+    return file_path
+
+
+def renderMagnitudeAzElPlot(config, pp, magnitude_list, az_list, el_list , e_jd, l_jd, r, d, plot_format=".png"):
+    """
+    Given a config file, magnitude list, elevation list render a plot showing magnitude variation against time.
+
+    Arguments:
+        config: [config] RMS Config instance.
+        magnitude_list: [list] List of magnitudes.
+        el_list: [list] List of elevations relative to local horizon.
+        e_jd: [float] Earliest time in julian date, only used for title.
+        l_jd: [float] Latest time in julian date, only used for title.
+        r: [float] Right ascension, only used for title.
+        d: [float] Declination, only user for title.
+
+    Keyword arguments:
+        plot_format: [str] Optional, default png.
+
+    Return:
+        plt: [object] Matplot plot instance.
+        plot_filename: [str] Filename where the plot was saved.
+    """
+
+    if len(magnitude_list):
+        x_vals, y_vals, jd_vals = [], [], []
+        plot_filename = "{}_r_{}_d_{}_jd_{}_{}_magnitude_azimuth_elevation.{}".format(config.stationID, r, d, e_jd, l_jd, plot_format)
+
+        for elevation in el_list:
+            y_vals.append(elevation - pp.alt_centre)
+
+        for azimuth in az_list:
+            x_vals.append((((azimuth - pp.az_centre) -180 ) % 360) - 180 )
+
+        title = "{} plot of magnitudes against azimuth and elevation at RA {} Dec {} between jd {:2f} and {:2f}".format(config.stationID,r, d, e_jd, l_jd)
+        log.info(title)
+        plt.figure(figsize=(areaToGoldenRatioXY(16*12, rotate=True)))
+
+        plt.plot(marker='o', edgecolor='k', label='Magnitude', s=100, c='none', zorder=3)
+        plt.scatter(x_vals, y_vals, c=magnitude_list, zorder=3)
+        plt.colorbar(label="Magnitude")
+        plt.xlabel("Azimuth normalised to camera pointing of {:.1f} degrees +ve from North".format(pp.az_centre))
+        plt.ylabel("Elevation normalised to camera pointing of {:.1f} degrees above horizon".format(pp.alt_centre))
+
+        plt.title(title)
+        return plt, plot_filename
+
+    else:
+
+        return None, None
+
+
+def renderMagnitudeElevationPlot(config, pp, magnitude_list, elevation_list, e_jd, l_jd, r, d, plot_format=".png"):
+    """
+    Given a config file, magnitude list, elevation list render a plot showing magnitude variation against time.
+
+    Arguments:
+        config: [config] RMS Config instance.
+        magnitude_list: [list] List of magnitudes.
+        elevation_list: [list] List of elevations relative to local horizon.
+        e_jd: [float] Earliest time in julian date, only used for title.
+        l_jd: [float] Latest time in julian date, only used for title.
+        r: [float] Right ascension, only used for title.
+        d: [float] Declination, only user for title.
+
+    Keyword arguments:
+        plot_format: [str] Optional, default png.
+
+    Return:
+        plt: [object] Matplot plot instance.
+        plot_filename: [str] Filename where the plot was saved.
+    """
+
+
+    if len(magnitude_list):
+        x_vals, y_vals, jd_vals = [], [], []
+        plot_filename = "{}_r_{}_d_{}_jd_{}_{}_magnitude_elevation.{}".format(config.stationID, r, d, e_jd, l_jd, plot_format)
+        for jd, mag in magnitude_list:
+            jd_vals.append(jd)
+            y_vals.append(mag)
+
+        median_jd =  (min(jd_vals) + max(jd_vals)) /2
+
+        jd_vals_norm = []
+        for jd in jd_vals:
+            jd_vals_norm.append(jd - median_jd)
+
+
+
+        for elevation in elevation_list:
+            x_vals.append(elevation - pp.alt_centre)
+
+
+        title = "{} plot of magnitudes against elevation at RA {} Dec {}".format(config.stationID,r, d)
+        plt.figure(figsize=(areaToGoldenRatioXY(16*12, rotate=True)))
+
+        plt.plot(marker='o', edgecolor='k', label='Elevation', s=100, c='none', zorder=3)
+        plt.scatter(x_vals, y_vals, c=jd_vals_norm,  zorder=3)
+        plt.colorbar(label="Time (jd) - normalise on {:.2f}".format(median_jd))
+        plt.ylabel("Magnitude")
+        plt.xlabel("Elevation normalised to camera pointing of {:.1f} degrees above horizon".format(pp.alt_centre))
+
+        plt.title(title)
+
+        return plt, plot_filename
+
+    else:
+        return None, None
+
+
+def renderMagnitudeAzimuthPlot(config, pp, magnitude_list, azimuth_list, e_jd, l_jd, r, d, plot_format=".png"):
+    """
+    Given a config file, magnitude list, elevation list render a plot showing magnitude variation against time.
+
+    Arguments:
+        config: [config] RMS Config instance.
+        magnitude_list: [list] List of magnitudes.
+        azimuth_list: [list] List of azimuth relative to local horizon.
+        e_jd: [float] Earliest time in julian date, only used for title.
+        l_jd: [float] Latest time in julian date, only used for title.
+        r: [float] Right ascension, only used for title.
+        d: [float] Declination, only user for title.
+
+    Keyword arguments:
+        plot_format: [str] Optional, default png.
+
+    Return:
+        plt: [object] Matplot plot instance.
+        plot_filename: [str] Filename where the plot was saved.
+    """
+
+
+    if len(magnitude_list):
+        x_vals, y_vals, jd_vals = [], [], []
+        plot_filename = "{}_r_{}_d_{}_jd_{}_{}_magnitude_azimuth.{}".format(config.stationID, r, d, e_jd, l_jd, plot_format)
+        for jd, mag in magnitude_list:
+            jd_vals.append(jd)
+            y_vals.append(mag)
+
+        median_jd =  (min(jd_vals) + max(jd_vals)) /2
+
+        jd_vals_norm = []
+        for jd in jd_vals:
+            jd_vals_norm.append(jd - median_jd)
+
+
+
+        for azimuth in azimuth_list:
+            x_vals.append((((azimuth - pp.az_centre) - 180 ) % 360 ) - 180)
+
+
+        title = "{} plot of magnitudes against azimuth at RA {} Dec {}".format(config.stationID,r, d)
+        plt.figure(figsize=(areaToGoldenRatioXY(16*12, rotate=True)))
+
+        plt.plot(marker='o', edgecolor='k', label='Azimuth', s=100, c='none', zorder=3)
+        plt.scatter(x_vals, y_vals, c=jd_vals_norm,  zorder=3)
+        plt.colorbar(label="Time (jd) - normalise on {:.2f}".format(median_jd))
+        plt.ylabel("Magnitude")
+        plt.xlabel("Azimuth normalised to camera pointing of {:.1f} clockwise degrees from North".format(pp.alt_centre))
+
+        plt.title(title)
+
+        return plt, plot_filename
+
+    else:
+        return None, None
+
+
+def renderMagnitudeTimePlot(config, magnitude_list, elevation_list, e_jd, l_jd, r, d, plot_format=".png"):
+    """
+    Given a config file, magnitude list, elevation list render a plot showing magnitude variation against time.
+
+    Arguments:
+        config: [config] RMS Config instance.
+        magnitude_list: [list] List of magnitudes.
+        elevation_list: [list] List of elevations relative to local horizon.
+        e_jd: [float] Earliest time in julian date, only used for title.
+        l_jd: [float] Latest time in julian date, only used for title.
+        r: [float] Right ascension, only used for title.
+        d: [float] Declination, only user for title.
+
+    Keyword arguments:
+        plot_format: [str] Optional, default png.
+
+    Return:
+        plt: [object] Matplot plot instance.
+        plot_filename: [str] Filename where the plot was saved.
+    """
+    if len(magnitude_list):
+        x_vals, y_vals = [], []
+        plot_filename = "{}_r_{}_d_{}_jd_{}_{}_magnitude.{}".format(config.stationID, r, d, e_jd, l_jd, plot_format)
+        for jd, mag in magnitude_list:
+            x_vals.append(jd2Date(float(jd), dt_obj=True))
+            y_vals.append(mag)
+
+        start_time, end_time = min(x_vals).strftime("%Y-%m-%d %H:%M:%S"), max(x_vals).strftime("%Y-%m-%d %H:%M:%S")
+        title = "{} plot of magnitudes against time at RA {} Dec {} from {} to {}".format(config.stationID, r, d, start_time, end_time)
+        plt.figure(figsize=(areaToGoldenRatioXY(16*12, rotate=True)))
+
+        plt.plot(marker='o', edgecolor='k', label='Elevation', s=100, c='none', zorder=3)
+        plt.scatter(x_vals, y_vals, c=elevation_list, zorder=3)
+        plt.gca().invert_yaxis()
+        plt.colorbar(label="Elevation from Horizontal (degrees)")
+        seconds_of_observation = (max(x_vals) - min(x_vals)).total_seconds()
+        seconds_of_observation = max(1,seconds_of_observation)
+        interval_between_ticks = seconds_of_observation/6
+        tick_offsets = np.arange(0, seconds_of_observation, interval_between_ticks)
+        x_tick_list = []
+        date_form = DateFormatter("%Y-%m-%d %H:%M:%S")
+        plt.gca().xaxis.set_major_formatter(date_form)
+        for offset in tick_offsets:
+            x_tick_list.append((min(x_vals) + datetime.timedelta(seconds=offset)).strftime("%Y-%m-%d %H:%M:%S"))
+        plt.gca().set_xticks(x_tick_list)
+        plt.gca().set_xticklabels(x_tick_list, color='black', fontweight='normal', fontsize='10',
+                                  horizontalalignment='center')
+        plt.xlabel("Time (UTC)")
+        plt.ylabel("Magnitude")
+
+        plt.title(title)
+
+        return plt, plot_filename
+
+    else:
+        return None, None
+
+def renderMagnitudeHistogram(config, magnitude_list, e_jd, l_jd, r, d, plot_format=".png"):
+    """
+    Given a config file, magnitude list, elevation list render a plot showing magnitude variation against time.
+
+    Arguments:
+        config: [config] RMS Config instance.
+        magnitude_list: [list] List of magnitudes.
+        e_jd: [float] Earliest time in julian date, only used for title.
+        l_jd: [float] Latest time in julian date, only used for title.
+                r: [float] Right ascension, only used for title.
+        d: [float] Declination, only user for title.
+
+    Keyword arguments:
+        plot_format: [str] Optional, default png.
+
+    Return:
+        plt: [object] Matplot plot instance.
+        plot_filename: [str] Filename where the plot was saved.
+    """
+    if len(magnitude_list):
+        x_vals, y_vals = [], []
+        plot_filename = "{}_r_{}_d_{}_jd_{}_{}_magnitude_histogram.{}".format(config.stationID, r, d, e_jd, l_jd, plot_format)
+        for jd, mag in magnitude_list:
+            x_vals.append(jd2Date(float(jd), dt_obj=True))
+            y_vals.append(mag)
+
+        start_time, end_time = min(x_vals).strftime("%Y-%m-%d %H:%M:%S"), max(x_vals).strftime("%Y-%m-%d %H:%M:%S")
+        title = "{} Histogram of magnitudes at RA {} Dec {} from JD {} to {}".format(config.stationID, r, d,
+                                                                                          start_time, end_time)
+        plt.figure(figsize=(areaToGoldenRatioXY(16*12, rotate=True)))
+
+        plt.hist(y_vals, bins=30, edgecolor='k', label='Magnitude')
+        plt.xlabel("Magnitude")
+        plt.ylabel("Frequency")
+
+        plt.title(title)
+
+        return plt, plot_filename
+
+    else:
+        return None, None
+
+
+def dictToMagnitudeElevationPlot(config, pp, observations_dict, event, file_path=None):
+    """
+    Given a config file, an observations dict, and an event specification return the path to a plot.
+
+    Arguments:
+        config: [object] RMS config instance.
+        observations_dict: [dict] Dictionary of observations.
+        event: [object] Event specification instance.
+
+    Keyword Arguments:
+        file_path: [str] Path to the location where the plot should be saved.
+
+    Return:
+        file_path: [str] Path to the location where the file was actually saved.
+    """
+
+    magnitude_list, elevation_list = [], []
+    if not len(observations_dict):
+        return None
+
+    # Initialise variables
+    r, d, plt = 0,0, None
+
+    for j in observations_dict:
+        observations = observations_dict.get(j)
+        magnitude_list.append([j, observations['photometry']['mag']])
+        elevation_list.append(observations['coords']['horizontal']['el'])
+        r = observations['coords']['equatorial']['ra']
+        d = observations['coords']['equatorial']['dec']
+
+    plt, fn = renderMagnitudeElevationPlot(config, pp, magnitude_list, elevation_list, event.jd_start, event.jd_end, round(r, 2), round(d, 2))
+
+    if plt is None:
+        return
+    else:
+        file_path = fn if file_path is None else file_path
+        plt.savefig(file_path)
+    return file_path
+
+
+def dictToMagnitudeAzimuthPlot(config, pp, observations_dict, event, file_path=None):
+    """
+    Given a config file, an observations dict, and an event specification return the path to a plot.
+
+    Arguments:
+        config: [object] RMS config instance.
+        observations_dict: [dict] Dictionary of observations.
+        event: [object] Event specification instance.
+
+    Keyword Arguments:
+        file_path: [str] Path to the location where the plot should be saved.
+
+    Return:
+        file_path: [str] Path to the location where the file was actually saved.
+    """
+
+    magnitude_list, azimuth_list = [], []
+    if not len(observations_dict):
+        return None
+
+    # Initialise variables
+    r, d, plt = 0,0, None
+
+    for j in observations_dict:
+        observations = observations_dict.get(j)
+        magnitude_list.append([j, observations['photometry']['mag']])
+        azimuth_list.append(observations['coords']['horizontal']['az'])
+        r = observations['coords']['equatorial']['ra']
+        d = observations['coords']['equatorial']['dec']
+
+    plt, fn = renderMagnitudeAzimuthPlot(config, pp, magnitude_list, azimuth_list, event.jd_start, event.jd_end, round(r, 2), round(d, 2))
+
+    if plt is None:
+
+        return None
+    else:
+        file_path = fn if file_path is None else file_path
+        plt.savefig(file_path)
+
+    return file_path
+
+def dictToMagnitudeTimePlot(config, observations_dict, event, file_path=None):
+    """
+    Given a config file, an observations dict, and an event specification return the path to a plot.
+
+    Arguments:
+        config: [object] RMS config instance.
+        observations_dict: [dict] Dictionary of observations.
+        event: [object] Event specification instance.
+
+    Keyword Arguments:
+        file_path: [str] Path to the location where the plot should be saved.
+
+    Return:
+        file_path: [str] Path to the location where the file was actually saved.
+    """
+
+    magnitude_list, elevation_list = [], []
+    if not len(observations_dict):
+        return None
+
+    # Initialise variables
+    r, d, plt = 0,0, None
+
+    for j in observations_dict:
+        observations = observations_dict.get(j)
+        magnitude_list.append([j, observations['photometry']['mag']])
+        elevation_list.append(observations['coords']['horizontal']['el'])
+        r = observations['coords']['equatorial']['ra']
+        d = observations['coords']['equatorial']['dec']
+
+    plt, fn = renderMagnitudeTimePlot(config, magnitude_list, elevation_list, event.jd_start, event.jd_end, round(r, 2), round(d, 2))
+
+    if plt is None:
+
+        return
+    else:
+        file_path = fn if file_path is None else file_path
+        plt.savefig(file_path)
+
+    return file_path
+
+def dictToMagnitudeHistogram(config, observations_dict, event, file_path=None):
+    """
+    Given a config file, an observations dict, and an event specification return the path to a plot.
+
+    Arguments:
+        config: [object] RMS config instance.
+        observations_dict: [dict] Dictionary of observations.
+        event: [object] Event specification instance.
+
+    Keyword Arguments:
+        file_path: [str] Path to the location where the plot should be saved.
+
+    Return:
+        file_path: [str] Path to the location where the file was actually saved.
+    """
+
+    magnitude_list, elevation_list = [], []
+    if not len(observations_dict):
+        return None
+
+    # Initialise variables
+    r, d, plt = 0,0, None
+
+    for j in observations_dict:
+        observations = observations_dict.get(j)
+        magnitude_list.append([j, observations['photometry']['mag']])
+        r = observations['coords']['equatorial']['ra']
+        d = observations['coords']['equatorial']['dec']
+
+    plt, fn = renderMagnitudeHistogram(config, magnitude_list, event.jd_start, event.jd_end, round(r,2), round(d,2))
+
+    if plt is None:
+
+        return
+    else:
+        file_path = fn if file_path is None else file_path
+        plt.savefig(file_path)
+
+    return file_path
+
+
+
+def filterCalstarByJD(calstar, config, e_jd, l_jd):
+    """
+    Given a CALSTAR, config file and a jd range, return the fits files, sorted ascending, within that range.
+
+    Arguments:
+        calstar: [struct] CALSTAR structure.
+        config: [config] RMS config instance.
+        e_jd: [float] Earliest julian date.
+        l_jd: [float] Latest julian date.
+
+    Return:
+        fits_paths: [list] List of full paths to the fits files within jd range.
+    """
+
+    filtered_fits = []
+    for fits_file, star_list in calstar[0]:
+
+        # Get date_time jd of this file
+        date_time, jd = rmsTimeExtractor(fits_file, asTuple=True)
+
+        # Skip anything which is not in the time window
+        if not (e_jd < jd < l_jd):
+            continue
+
+        # If too few stars on this specific observation, then ignore
+        if len(star_list) < config.min_matched_stars:
+            continue
+        filtered_fits.append([fits_file, star_list])
+
+    return sorted(filtered_fits)
+
+def getFitsPaths(path_to_search, jd_start, jd_end=None, prefix="FF", extension="fits"):
+    """
+    Given a list of directories, find the FF files within the jd_range
+    Arguments:
+        path_to_search: [str] Path to search
+        jd_start: [float] Julian start date.
+        jd_end: [float] Julian end date.
+
+    Keyword arguments:
+        prefix: [str] Optional default FF
+        extension: [str] Optional default fits
+
+    Return:
+        fits_paths: [list] A list of all the fits files between the JD range
+    """
+    directories_to_search = filterDirectoriesByJD(path_to_search, jd_start, jd_end)
+    jd_end = jd_start if jd_end is None else jd_start
+
+    fits_paths = []
+    for directory in directories_to_search:
+        directory_list = os.listdir(directory)
+        directory_list.sort()
+        station_id = os.path.basename(directory).split("_")[0].upper()
+        for file_name in directory_list:
+            if file_name.startswith("{}_{}".format(prefix, station_id))  \
+                                and file_name.endswith(".{}".format(extension)):
+                file_jd = rmsTimeExtractor(file_name, asJD=True)
+                if file_jd is not None:
+                    if jd_start <= file_jd <= jd_end:
+                        fits_paths.append(os.path.join(path_to_search, directory, file_name))
+
+    return fits_paths
+
+
+def dictMagsRaDec(config, r, d, e_jd=0, l_jd=np.inf, max_number_of_images=300, write_log=False):
+    """
+    Given a config, radec and an optional JD range, return a dictionary of observation information.
+
+    Arguments:
+        config: [config] RMS config instance.
+        r: [float] Right ascension, degrees.
+        d: [float] Declination, degrees.
+
+    Keyword arguments:
+        e_jd: [float] Earliest Julian date, optional default 0.
+        l_jd: [float] Latest Julian date, optional default infinity.
+        write_log: [bool] Optional, default falsem, write to logs
+
+    Return:
+        observation_sequence_dict: [dict] JD is key, contains information about observations.
+    """
+
+    full_path_to_archived = os.path.expanduser(os.path.join(str(config.data_dir), str(config.archived_dir)))
+    full_path_to_default_platepar = os.path.join(config.config_file_path, config.platepar_name)
+
+    directories_to_search = filterDirectoriesByJD(full_path_to_archived, e_jd, l_jd)
+    observation_sequence_dict = {}
+    number_of_directories_to_search, directories_searched = len(directories_to_search), 0
+    for search_dir in directories_to_search:
+        image_count = 0
+        keys_of_images_list = []
+        for j in observation_sequence_dict:
+            if 'pixels' in observation_sequence_dict[j]:
+                image_count += 1
+                keys_of_images_list.append(j)
+
+        if image_count > max_number_of_images:
+            if write_log:
+                log.info("Sequence dict contains {} images, deleting {} images, selected at random to reach {}"
+                     .format(image_count, image_count - max_number_of_images, max_number_of_images))
+
+            while image_count > max_number_of_images:
+                random_image_key = random.choice(keys_of_images_list)
+                image_count -= 1
+                value = observation_sequence_dict.pop(random_image_key)
+                index_from_image_list = keys_of_images_list.index(random_image_key)
+                keys_of_images_list.pop(index_from_image_list)
+                del random_image_key, value
+
+        else:
+            if write_log:
+                log.info("Sequence dict has {} images".format(image_count))
+
+        dir_jd = rmsTimeExtractor(search_dir, asJD=True)
+        directories_searched += 1
+
+
+        full_path = os.path.join(full_path_to_archived, search_dir)
+        full_path_to_session_platepar = os.path.join(full_path, config.platepar_name)
+        platepars_all_recalibrated_path = os.path.join(full_path, config.platepars_recalibrated_name)
+
+
+        pp = Platepar()
+        if os.path.exists(platepars_all_recalibrated_path):
+            pp_mid_recal = Platepar()
+            with open(platepars_all_recalibrated_path, 'r') as fh:
+                pp_recal_json = json.load(fh)
+                if len(pp_recal_json):
+                    midpoint = int(len(pp_recal_json)/2)
+                    for fits, i in zip(pp_recal_json, range(0,midpoint)):
+                        pass
+                    pp_mid_recal.loadFromDict(pp_recal_json[fits])
+                    recalibrated_platepar_loaded = True
+                else:
+                    recalibrated_platepar_loaded = False
+        else:
+            pp_mid_recal = None
+            recalibrated_platepar_loaded = False
+            pp_recal_json = None
+
+        # Read in a platepar in the following preference order
+        # session platepar, default platepar, the middle recalibrated platepar
+        # if no success with any of these, then continue to the next directory
+        if os.path.exists(full_path_to_session_platepar):
+            pp.read(full_path_to_session_platepar)
+        elif os.path.exists(full_path_to_default_platepar):
+            os.path.exists(full_path_to_default_platepar)
+            pp.read(full_path_to_default_platepar)
+        elif recalibrated_platepar_loaded:
+            pp = pp_mid_recal
+        else:
+            continue
+
+        if write_log:
+            log.info("Searching directory {} jd={:.2f}, {} of {} for radec:({:.1f},{:.1f}) degrees, camera az,el:({:.1f},{:.1f}) degrees"
+                 .format(os.path.basename(search_dir), dir_jd, directories_searched, number_of_directories_to_search, r,
+                         d, pp.az_centre, pp.alt_centre))
+
+        # Read in the CALSTARS file
+
+        search_dir_split = os.path.basename(search_dir).split("_")
+        session_date, session_time, session_microseconds = search_dir_split[1], search_dir_split[2], search_dir_split[3]
+        calstar_name = "CALSTARS_{}_{}_{}_{}.txt".format(config.stationID,session_date, session_time, session_microseconds)
+        full_path_calstar = os.path.join(search_dir, calstar_name)
+        if os.path.exists(full_path_calstar):
+            calstars_path, calstars_name = os.path.dirname(full_path_calstar), os.path.basename(full_path_calstar)
+            calstar = readCALSTARS(calstars_path, calstars_name)
+
+        else:
+            if write_log:
+                log.warnings("Did not find {:s} in {:s}".format(calstar_name, search_dir))
+            continue
+
+        dict_from_calstar = calstarRaDecToDict(full_path, config, pp, pp_recal_json, r, d, e_jd, l_jd, calstar)
+
+
+        if dict_from_calstar is not None:
+            observation_sequence_dict.update(dict_from_calstar)
+
+    return observation_sequence_dict
+
+
+
+def calstarRaDecToDict(data_dir_path, config, pp, pp_recal_json, r_target, d_target, e_jd, l_jd, calstar,
+                       search_sky_radius_degrees=1, centre_on_calstar_coords=True, write_log=False):
+    """
+    Return a dictionary of information about observations drawn from radec files, and excised images from fits files.
+
+    Arguments:
+        data_dir_path: [str] Path to the directory containing the mask file.
+        config: [config] RMS config instance.
+        pp: [platepar] Platepar instance.
+        pp_recal_json: [str] JSON string of recalibrated platepars.
+        r_target: [float] Right ascension, degrees, of target.
+        d_target: [float] Declination, degrees, of target.
+        e_jd: [float] Earliest Julian date to consider.
+        l_jd: [float] Latest Julian date to consider
+        calstar: [struct] CALSTAR structure.
+
+    Keyword arguments:
+        search_sky_radius_degrees: [float] Optional, default 1, radius around radec to find CALSTAR reference.
+        centre_on_calstar_coords: [bool] Optional, default True, take the CALSTAR coordinates for the centre of image to excise.
+
+    Return:
+        sequence_dict: [dict] Key JD of observation information from this station.
+    """
+
+    if write_log:
+        log.info("Search CALSTARS file for ra,dec:({:.2f},{:.2f})".format(r_target, d_target))
+    observations_with_image_count, observations_without_image_count, total_observations = 0, 0, 0
+    captured_directory_path = os.path.join(config.data_dir, config.captured_dir)
+    candidate_fits = filterCalstarByJD(calstar, config, e_jd, l_jd)
+
+    if write_log:
+        log.info("Processing {} candidate fits files".format(len(candidate_fits)))
+    sequence_dict = dict()
+    iteration_counter, step = 0, round(len(candidate_fits)/5)
+    for fits_file, star_list in candidate_fits:
+        iteration_counter += 1
+        if iteration_counter % step == 0:
+            if write_log:
+                log.info("Working on fits {} of {}".format(iteration_counter, len(candidate_fits)))
+        date_time, jd = rmsTimeExtractor(fits_file, asTuple=True)
+        if pp_recal_json is not None:
+            if fits_file in pp_recal_json:
+                # If we have a platepar in pp_recal then use it, else just use the last platepar
+                pp.loadFromDict(pp_recal_json[fits_file])
+
+        containsRaDec, _, _ = plateparFitsContainsRaDec(r_target, d_target, pp, fits_file, data_dir_path, check_mask=False)
+        if not containsRaDec:
+            continue
+        # Overwrite vignetting coefficient with platepar value
+
+        jd_list, y_list, x_list, intens_sum_list, bg_lvl_list, amp_list, FWHM_list, snr_list, NSatPx_list = (
+            [], [], [], [], [], [], [], [], [])
+
+        # Build up lists of data for this image
+        for y, x, intens_sum, amplitude, FWHM, bg_lvl, snr, NSatPx in star_list:
+            jd_list.append(jd)
+            x_list.append(x)
+            y_list.append(y)
+            intens_sum_list.append(intens_sum)
+            bg_lvl_list.append(bg_lvl)
+            amp_list.append(amplitude)
+            FWHM_list.append(FWHM)
+            snr_list.append(snr)
+            NSatPx_list.append(NSatPx)
+
+        # Convert to arrays
+        jd_arr, x_data, y_data, level_data = np.array(jd_list), np.array(x_list), np.array(y_list), np.array(intens_sum_list)
+
+        # Process data into RaDec and apply magnitude corrections
+        jd, ra, dec, mag_arr = xyToRaDecPP(jd_arr, x_data, y_data, level_data, pp,
+                                       jd_time=True, extinction_correction=True, measurement=True)
+
+        for j, x, y, intens_sum, r, d, bg, amp, FWHM, mag, x_cs, y_cs, snr, NSatPX in zip(jd, x_list, y_list,
+                                                                intens_sum_list, ra, dec, bg_lvl_list,
+                                                                 amp_list, FWHM_list, mag_arr, x_list,
+                                                                 y_list, snr_list, NSatPx_list):
+            az, el = raDec2AltAz(r, d, j, pp.lat, pp.lon)
+            radius = np.hypot(y - pp.Y_res/2, x - pp.X_res/2)
+            actual_deviation_degrees = angularSeparationDeg(r_target, d_target, r, d)
+            vignetting, offset = pp.vignetting_coeff, pp.mag_lev
+            if correctVignetting(intens_sum, radius, vignetting) > 0.00001:
+                mag_recalc = 0 - 2.5*np.log10(correctVignetting(intens_sum, radius, vignetting)) + offset
+                mag_recalc = extinctionCorrectionApparentToTrue([mag_recalc], [x], [y], j, pp)[0]
+            else:
+                mag_recalc = 0
+
+            if mag == np.inf or actual_deviation_degrees >= search_sky_radius_degrees:
+                continue
+
+
+
+
+            path_to_ff = os.path.join(data_dir_path, fits_file)
+            if not os.path.exists(path_to_ff):
+                fits_time_jd = rmsTimeExtractor(path_to_ff, asJD=True)
+                path_to_ff = getFitsPaths(captured_directory_path, fits_time_jd)
+                if len(path_to_ff):
+                    path_to_ff = path_to_ff[0]
+                else:
+                    path_to_ff = None
+
+
+            x_from_radec_arr, y_from_radec_arr = raDecToXYPP(np.array([r]), np.array([d]), np.array([j]), pp)
+            x_from_radec, y_from_radec = x_from_radec_arr[0], y_from_radec_arr[0]
+            if centre_on_calstar_coords:
+                x_centre, y_centre = round(x), round(y)
+            else:
+
+                x_centre, y_centre = round(x_from_radec), round(y_from_radec)
+
+
+
+            if path_to_ff is not None:
+                observation_dict = {"fits": fits_file,
+                                    "coords": {
+                                        "image_coords_from_calstar": {"x": x, "y": y},
+                                        "image_coords_from_radec": {"x": x_from_radec, "y": y_from_radec},
+                                        "horizontal": {"az": az, "el": el},
+                                        "equatorial": {"ra": r, "dec": d}},
+                                    "radius": radius,
+                                    "photometry": {"bg": bg,
+                                                   "amp": amp,
+                                                   "FWHM": FWHM,
+                                                   "mag": mag,
+                                                   "mag_recalc": mag_recalc,
+                                                   "p_offset": offset,
+                                                   "p_vig": vignetting,
+                                                   "snr": snr,
+                                                   "nsatpx": NSatPX},
+                                    "deviation_from_expected_centre_degrees": actual_deviation_degrees,
+                                    "pixels": readCroppedFF(path_to_ff, x_centre, y_centre).tolist()}
+
+                # This has an image, so overwrite something without an image
+                if j in sequence_dict:
+                    if 'pixels' not in sequence_dict[j]:
+                        sequence_dict[j] = observation_dict
+                        observations_with_image_count += 1
+                        observations_without_image_count -= 1
+                else:
+                    sequence_dict[j] = observation_dict
+                    total_observations += 1
+
+            else:
+                observation_dict = {"fits": fits_file,
+                                    "coords": {
+                                        "image_coords_from_calstar": {"x": x, "y": y},
+                                        "image_coords_from_radec": {"x": x_from_radec, "y": y_from_radec},
+                                        "horizontal": {"az": az, "el": el},
+                                        "equatorial": {"ra": r, "dec": d}},
+                                    "radius": radius,
+                                    "photometry":   {"bg": bg,
+                                                    "amp": amp,
+                                                    "FWHM": FWHM,
+                                                    "mag": mag,
+                                                    "mag_recalc": mag_recalc,
+                                                    "p_offset": offset,
+                                                    "p_vig": vignetting,
+                                                    "snr": snr,
+                                                    "nsatpx": NSatPX},
+                                    "deviation_from_expected_centre_degrees": actual_deviation_degrees}
+                # Only add if this j is not already in the dict
+                if j not in sequence_dict:
+                    sequence_dict[j] = observation_dict
+                    observations_without_image_count += 1
+                    total_observations += 1
+
+
+    if write_log:
+        log.info("From this directory:")
+        log.info("  Observations with images    {}".format(observations_with_image_count))
+        log.info("  Observations without images {}".format(observations_without_image_count))
+        log.info("  Total observations:         {}".format(total_observations))
+
+    return sequence_dict
+
+
+def rmsTimeExtractor(rms_time, asTuple = False, asJD = False, delimiter = None):
+    """
+    General purpose function to convert *20240819*010235*{123 | 123456} into a datetime object or JD.
+
+    Arguments:
+        rms_time: [str] RMS time string, can include a full path, in which case only basename evalued
+
+    Keyword arguments
+        asTuple: [bool] Optional, default False, return as a tuple of dt, and JD
+        asJD: [bool] Optional, default False, return as a Julian Date
+        delimiter: [str] Optional, default None, delimiter to use. If not given, will guess based on first non alpha numeric
+
+    Return:
+        time: [various] Time extracted from string
+    """
+
+    # Initialise variables
+    year, month, day, hour, minute, second = None, None, None, None, None, None
+
+    dt = None
+    rms_time = os.path.basename(rms_time)
+    # remove any dots, might be filename extension
+    rms_time = rms_time.split(".")[0] if "." in rms_time else rms_time
+
+    # Initialise delim in case nothing is detected
+    delim = "_"
+    # find the delimiter, which is probably the first non alphanumeric character
+    if delimiter is None:
+        for c in rms_time:
+            if c.isnumeric() or c.isalpha():
+                continue
+            else:
+                delim = c
+                break
+    if delim not in rms_time:
+        return None
+
+    field_list = rms_time.split(delim)
+    field_count = len(field_list)
+
+    consecutive_time_date_fields = 0
+
+    # Parse rms filename, datestring into a date time object
+    for field, field_no in zip(field_list, range (0, field_count)):
+        field = field.split(".")[0] if "." in field else field
+        if field.isnumeric():
+            consecutive_time_date_fields += 1
+
+        # Handle year month day
+        if consecutive_time_date_fields == 1:
+            if len(field) == 8 or len(field) == 6:
+
+                # This looks like a date field so process the date field
+                str_date = field_list[field_no]
+                if len(str_date) == 8:
+                    year, month, day = int(str_date[:4]), int(str_date[4:6]), int(str_date[6:8])
+                    dt = datetime.datetime(year=int(year), month=int(month), day=int(day))
+
+                # Handle 2 digit year format
+                if len(str_date) == 6:
+                    year, month, day = 2000 + int(str_date[:2]), int(str_date[2:4]), int(str_date[4:6])
+                    dt = datetime.datetime(year=int(year), month=month, day=day)
+            else:
+                dt = 0
+
+        # Handle hour minute second
+        if consecutive_time_date_fields == 2:
+            if len(field) == 6:
+                # Found two consecutive numeric fields followed by a non numeric
+                # These are date and time
+                str_time = field_list[field_no]
+                hour, minute, second = int(str_time[:2]), int(str_time[2:4]), int(str_time[4:6])
+                dt = datetime.datetime(year, month , day, hour, minute, second)
+            elif len(field) == 4:
+                str_time = field_list[field_no]
+                hour, minute, second = int(str_time[:2]), int(str_time[2:4]), 0
+                dt = datetime.datetime(year, month, day, hour, minute, second)
+            else:
+                # if the second field is not of length 6 then reset the counter
+                consecutive_time_date_fields = 0
+
+        # Handle fractional seconds
+        if consecutive_time_date_fields == 3:
+            if field.isnumeric():
+                # Convert any arbitrary length next field to microseconds
+                us = int(field)*(10**(6 - len(field)))
+                dt = datetime.datetime(year, month, day, hour, minute, second, microsecond=int(us))
+                # Stop looping in all cases
+                break
+            else:
+                # Stop looping in call cases
+                break
+
+    if dt is None:
+        return dt
+
+    if asTuple:
+        return dt, datetime2JD(dt)
+
+    if asJD:
+        return datetime2JD(dt)
+    else:
+        return dt
+
+def checkMaskxy(x, y, mask_path, mask=None):
+
+    """
+    True if Point x,y is clear of the mask. If no mask is found at mask_path, returns True
+
+    Arguments:
+        x: [int] x coordinate on image.
+        y: [int] y coordinate on image.
+        mask_path: [str] Path to a mask, not used if a mask is passed.
+
+    Keyword Arguments:
+        mask: [struct] Mask structure, optional, default none. Saves time.
+
+    Return:
+        [bool]: True if visible, else False.
+    """
+
+    if mask is None:
+        if os.path.exists(mask_path):
+            if os.path.splitext(mask_path) == "bmp":
+                m = loadMask(mask_path)
+            else:
+                path_name = os.path.join(mask_path, "mask.bmp")
+                default_mask = os.path.join(getRmsRootDir(), "mask.bmp")
+                if os.path.exists(path_name):
+                    m = loadMask(os.path.join(mask_path, "mask.bmp"))
+                elif os.path.exists(default_mask):
+                    m = loadMask(os.path.join(default_mask))
+                else:
+                    return True
+        else:
+            return True
+    else:
+        m = mask
+
+    if m.img[y, x] == 255:
+        return True
+    else:
+        return False
+
+def plateparFitsContainsRaDec(r, d, source_pp, file_name, mask_dir, check_mask=True, mask=None):
+
+    """
+    Does a fits file, with a given platepar, contain given radec coordinates?
+
+    Arguments:
+        r: [float] right_ascension degrees.
+        d: [float] declination degrees.
+        source_pp: [object] platepar.
+        file_name: [str] file name of the fits file.
+        mask_dir: [path] directory holding the mask file.
+
+    Keyword arguments:
+        check_mask: [bool] Optional, default true, check if mask is obstructing view of object.
+        mask: [struct] mask object, passing the mask in saves time if the same mask will be used lots of times.
+
+    Return:
+        [bool] True if contains radec, unobstructed by the mask if check_mask selected.
+        x: [float] x coordinate on image.
+        y: [float] y coordinate on image.
+    """
+
+    # Get the image time from the file_name
+    source_JD = rmsTimeExtractor(file_name, asJD=True)
+
+    # Convert r,d to source image coordinates
+    r_array = np.array([r])
+    d_array = np.array([d])
+    jd_arr = np.array([rmsTimeExtractor(file_name, asJD=True)])
+    x_arr = np.array([source_pp.X_res/2])
+    y_arr = np.array([source_pp.Y_res/2])
+    level_arr = np.array([1])
+    _, r_centre_pp, dec_centre_pp, _ = xyToRaDecPP(jd_arr, x_arr, y_arr, level_arr, source_pp, jd_time=True)
+
+    # Check the angle, to prevent false positives for objects behind the camera
+    angle_from_centre = angularSeparationDeg(r, d, r_centre_pp, dec_centre_pp)[0]
+
+    # this prevents spurious coordinates being generated for r, d outside fov
+    if angle_from_centre > max(source_pp.fov_h, source_pp.fov_v)/2:
+        return False, 0, 0
+
+    source_x, source_y = raDecToXYPP(r_array, d_array, source_JD, source_pp)
+    source_x, source_y = round(source_x[0]), round(source_y[0])
+
+    if 0 < source_x < source_pp.X_res and 0 < source_y < source_pp.Y_res:
+        if check_mask:
+            if checkMaskxy(source_x,source_y, mask_dir, mask=mask):
+
+                return True, source_x, source_y
+            else:
+                return False, 0, 0
+        else:
+            return True, source_x, source_y
+    else:
+        return False, 0, 0
+
+def renderContactSheet(config, e_jd, l_jd, contact_sheet_array, headings_list, position_list, r=None, d=None, plot_format='png'):
+
+    """
+    Given an array, render a contact sheet.
+
+    Arguments:
+        config: [config] config for the system.
+        e_jd: [float] earliest jd for the event.
+        l_jd: [float] latest jd for the event.
+        contact_sheet_array: [array] array of the image.
+        headings_list: [list] list of headings, usually time for each column.
+        position_list: [list] list of the positions.
+
+    Keyword arguments:
+        r: [float] right ascension of the object being plotted.
+        d: [float] declination of the object being plotted.
+        plot_format: [str] format to write out - any format supported by matplotlib.
+
+    Return:
+        plt: [object] matplotlib plot.
+        plot_filename: [string] path to saved plot.
+    """
+
+
+    if r is None or d is None:
+        return None, ""
+    r, d = round(r, 2), round(d, 2)
+    if len(contact_sheet_array) and len(headings_list) and len(position_list):
+        plt.figure(figsize=(16, 12))
+        axes = plt.gca()
+
+        plot_filename = "{}_r_{}_d_{}_jd_{}_{}_contact_sheet.{}".format(config.stationID,
+                                                                        r, d, e_jd, l_jd, plot_format)
+        axes.imshow(contact_sheet_array, cmap='gray')
+        start_time = rmsTimeExtractor(headings_list[0]).strftime("%Y-%m-%d %H:%M:%S")
+        end_time = rmsTimeExtractor(headings_list[-1]).strftime("%Y-%m-%d %H:%M:%S")
+        axes.set_title("{} RA {}, Dec {} from {} to {}".format(config.stationID, r, d, start_time, end_time))
+        axes.title.set_size(20)
+        plt.xticks(position_list, headings_list, color='black', fontweight='normal', fontsize='10',
+                   horizontalalignment='center',  rotation=90)
+        return plt, plot_filename
+    else:
+        return None, ""
+
+def assembleContactSheet(thumbnail_list, x_across=None, border = 1):
+
+    """
+    Give a list of thumbnails, assemble into a "contact sheet".
+
+    Arguments:
+        thumbnail_list: [list] list of image data.
+
+    Keyword arguments:
+        x_across: [int] horizontal width of the plot, default None calculates golden ratio.
+        border: [int] separation between thumbnails.
+
+    Return:
+        contact_sheet_array: [array] array of the image.
+        headings_list: [list] list of the date of the fits file for the image at the top of each column.
+        position_list: [list] list of the plot coordinates for the headings.
+    """
+
+    contact_sheet_array, headings_list, position_list  = None, [], []
+    thumbnail_count = len(thumbnail_list)
+    if thumbnail_count < 1:
+        return [], [], []
+
+    fits, thumbnail = thumbnail_list[0]
+
+    y_res, x_res = len(thumbnail) + border*2, len(thumbnail[0]) + border*2
+    pixels = y_res*x_res*thumbnail_count
+    if x_across is None:
+        # We are free to calculate our own dimensions, so use golden ratio
+        across, down = areaToGoldenRatioXY(pixels)
+        across = int(np.ceil(across/x_res)*x_res)
+        down = int(np.ceil(down/y_res)*y_res)
+
+        #create an array of zeros
+        contact_sheet_array = np.zeros((across, down))
+
+        tn = 0
+
+        for y in range(0, down, y_res):
+            if tn == thumbnail_count:
+                break
+            fits, _ = thumbnail_list[tn]
+            headings_list.append(rmsTimeExtractor(fits).strftime("%Y%m%d_%H%M%S"))
+            position_list.append(y)
+            for x in range(0, across, x_res):
+                if tn == thumbnail_count:
+                    break
+
+                fits, thumbnail = thumbnail_list[tn]
+                contact_sheet_array[x + border:x + x_res - border, y + border:y + y_res - border] = thumbnail
+                tn += 1
+
+
+    return contact_sheet_array, headings_list, position_list
+
+def jd2RMSStyle(jd):
+    """
+    Given a Julian date, return an RMS style date string
+
+    Arguments:
+        jd: [float] Julian date
+
+    Return:
+        rms_style_date:[str]
+    """
+
+    year,month,day,hour,minute,second,microsecond = jd2Date(jd)
+    rms_style_date = "{:04d}{:02d}{:02d}_{:02d}{:02d}{:02d}".format(year,month,day,hour,minute,second)
+    return rms_style_date
+
+def areaToGoldenRatioXY(count, rotate=False):
+    """
+    Given a number of squares, compute the sides of a golden ratio rectangle to contain those squares.
+
+    Arguments:
+
+        count:[float] number of squares
+    Keyword arguments:
+        rotate:[bool] Optional, default false, rotate the sides
+
+    Return:
+        across:[int] Number of squares across
+        down:[int] Number of squares down
+    """
+
+    gr = (1 + 5**0.5)/2
+    down = np.ceil((count*gr)**0.5)
+
+    if down < 1:
+        return 0, 0
+
+    across = np.ceil(count/down)
+
+    if rotate:
+        return int(down), int(across)
+    else:
+        return int(across), int(down)
+
+def getFitsPathsAndCoordsRadec(config, earliest_jd, latest_jd, r=None, d=None):
+    """
+    Arguments:
+        config: [config] RMS config instance for the event.
+        earliest_jd: [float] Earliest JD considered.
+        latest_jd: [float] Latest JD to be considered.
+    Keyword arguments
+        r: [float] Optional, default None - right ascension, degrees, of object of interest
+        d: [float] Optional, default None - declination, degrees, of object of interest
+
+    Return:
+        fits_paths_and_coordinates:[list] of [fits_path, x, y] where x and y are the coordinates of radec on image
+    """
+
+
+    full_path_to_captured = os.path.expanduser(os.path.join(config.data_dir, config.captured_dir))
+    directories_to_search = filterDirectoriesByJD(full_path_to_captured, earliest_jd, latest_jd)
+
+    stationID = config.stationID
+
+
+    fits_paths_and_coordinates, mask = [], None
+    for directory in directories_to_search:
+        mask_path = os.path.join(directory, config.mask_file)
+        default_mask_path = os.path.join(getRmsRootDir(), config.mask_file)
+        if os.path.exists(mask_path):
+            mask = loadMask(mask_path)
+        elif os.path.exists(default_mask_path):
+            mask = loadMask(default_mask_path)
+
+        pp_path = os.path.join(directory, config.platepar_name)
+        pp = None
+        if os.path.exists(pp_path):
+            pp = Platepar()
+            pp.read(pp_path)
+        elif os.path.exists(os.path.join(getRmsRootDir(), config.platepar_name)):
+            pp = Platepar()
+            pp.read(os.path.join(getRmsRootDir(), config.platepar_name))
+        elif pp is None:
+            continue
+
+        directory_list = os.listdir(directory)
+        directory_list.sort()
+
+        for file_name in directory_list:
+            if file_name.startswith('FF') and file_name.endswith('.fits') and len(file_name.split('_')) == 6:
+                if not earliest_jd < rmsTimeExtractor(file_name, asJD=True) < latest_jd:
+                    continue
+
+                if file_name.split('_')[1] == stationID:
+                    if r is None and d is None:
+                        contains_radec, x, y = True, 0, 0
+                    else:
+
+                        contains_radec, x, y = plateparFitsContainsRaDec(r, d, pp, file_name,
+                                                                         config.mask_file, check_mask=True, mask=mask)
+                    if contains_radec:
+                        fits_paths_and_coordinates.append([os.path.join(directory,file_name), x, y])
+
+    return fits_paths_and_coordinates
+
+def createThumbnails(config, r, d, earliest_jd=0, latest_jd=np.inf, max_thumbnails=200, write_log=False):
+    """
+    Create thumbnails of an object excised from fits files between earliest and latest JD.
+
+    Arguments:
+        config: [config] RMS config instance for the event.
+        r: [float] right ascension of object in degrees.
+        d: [float] declination of object in degrees.
+        earliest_jd: [float] earliest jd considered.
+        latest_jd: [float] latest jd considered.
+
+    Keyword arguments:
+        max_thumbnails: [int] Optional, default 100
+        write_log: [bool] Optional, default False, write to logger
+
+    Return:
+        thumbnail_list: [list] list of thumbnails.
+    """
+
+    # get the paths to all the fits files in the jd window
+    if write_log:
+        log.info("Looking for fits files between {} and {} at {},{}".format(jd2Date(earliest_jd, dt_obj=True), jd2Date(latest_jd, dt_obj=True), r, d))
+    path_coords_list = getFitsPathsAndCoordsRadec(config, earliest_jd, latest_jd, r, d)
+    if write_log:
+        log.info("Got a list of length {}".format(len(path_coords_list)))
+    # initialise a list to hold the cropped image data
+    thumbnail_list = []
+    fits_len = len(path_coords_list)
+    if write_log:
+        if fits_len == 0:
+            log.info("Did not find ra, dec ({:.2f},{:.2f}) in {} fits files".format(r, d, fits_len))
+        elif fits_len == 1:
+            log.info("Found ra,dec ({:.2f},{:.2f}) degrees in {} fits file".format(r, d, fits_len))
+        else:
+            log.info("Found ra,dec ({:.2f},{:.2f}) degrees in {} fits files".format(r, d, fits_len))
+
+
+    path_coords_list = shortenList(path_coords_list, max_thumbnails)
+    fits_len = len(path_coords_list)
+    processed, increment = 0, int(fits_len/4)
+    increment = max(increment,1)
+
+    for fits_path, x, y in path_coords_list:
+        if processed % increment == 0:
+            if write_log:
+                log.info("Processed {} out of {} thumbnails".format(processed, fits_len))
+        thumbnail_list.append([fits_path, readCroppedFF(fits_path, x, y)])
+        processed += 1
+
+    return thumbnail_list
+
+
+def shortenList(input_list, length):
+    """
+    Given a list and a target length return a list which is of that length by picking
+    values from the list at appropriate points. It will not extend a list.
+
+    Arguments:
+        input_list: [list] List to be changed
+        length: [int] desired length
+
+    Return:
+        [list] list of items
+    """
+
+    output_list = []
+    list_len = len(input_list)
+    # Guard against divide by 0
+    if length == 0:
+        return output_list
+    elif list_len > length:
+        step_size_float = list_len/length
+        next_item_count_float, item_count_int = 0, 0
+        for p in input_list:
+            if next_item_count_float <= item_count_int:
+                output_list.append(p)
+                next_item_count_float += step_size_float
+            item_count_int += 1
+
+
+    else:
+        output_list = input_list
+    return output_list
+
+
+def saveThumbnailsRaDec(r, d, e_jd=0, l_jd=np.inf, config=None, file_path=None, max_thumbnails=1000):
+    """
+    Given a right ascension and declination in degrees, plot thumbnails excised from fits files.
+
+    Arguments:
+        r: [float] right ascension, degrees, of object.
+        d: [float] declination, degrees, of object.
+
+    Keyword arguments:
+
+        e_jd: [float] optional, default 0, earliest JD of interest.
+        l_jd: [float] optional, default infinity, latest JD interest.
+        config: [config] optional, RMS config instance for the event.
+        file_path: [string] optional, file path to be written.
+        max_thumbnails: [int] optional, default 100, maximum number of thumbnails
+
+    Return:
+        filename: [string] location where thumbnails have been saved.
+    """
+
+    target_dir = os.path.dirname(file_path)
+    if not os.path.exists(target_dir):
+        mkdirP(target_dir)
+
+    thumbnail_list = createThumbnails(config, r, d, earliest_jd=e_jd, latest_jd=l_jd, max_thumbnails=max_thumbnails)
+    contact_sheet, headings_list, position_list = assembleContactSheet(thumbnail_list)
+    plt, fn = renderContactSheet(config, e_jd, l_jd, contact_sheet, headings_list, position_list, r, d)
+    if plt is None:
+        return None
+    else:
+        filename = fn if file_path is None else file_path
+        plt.savefig(filename)
+        return filename
+
+def exciseFromFF(ff, x_centre, y_centre, width = 50, height = 50, allow_drift_in=False):
+    """
+    Given a fits structure, and coordinates in that structure, excise a part of that image.
+
+    Arguments:
+        ff: [struct] FITS data.
+        x_centre: [int] x centre of image to be excised.
+        y_centre: [int] y centre of image to be excised.
+
+    Keyword arguments:
+        width: [int] Optional, default 50 - width of image to be excised.
+        height: [int] Optional, default 50 - height of image to be excised.
+        allow_drift_in: [bool] Optional, default false. If True move excised image away from edge to avoid.
+
+    Return:
+        ff_excised: [img] Array of intensities, width x height excised from ff.
+    """
+
+    # Get resolution
+    x_res, y_res = ff.ncols, ff.nrows
+
+    if allow_drift_in:
+        # This allows an object to drift into the field of view
+        # Establish where we can safely place the centre
+        x_centre = max(0.5*width, x_centre)
+        x_centre = min(x_res - 0.5*width, x_centre)
+        y_centre = max(0.5*height, y_centre)
+        y_centre = min(y_res - 0.5*height, y_centre)
+
+        # Compute crop bounds
+        x_min, y_min = round(x_centre - 0.5*width), round(y_centre - 0.5*height)
+        x_max, y_max = x_min + width, y_min + height
+
+        # Crop into a new array
+        print("Cropping from {},{} to {},{}".format(x_min, x_max, y_min, y_max))
+        ff_excised = ff.maxpixel[y_min:y_max, x_min:x_max]
+
+    else:
+        # This always keeps the centre of the target in the centre of thumbnail
+        # This allows an object to drift into the field of view
+        # Establish where we can safely place the centre
+
+
+        x_min, y_min = round(x_centre - 0.5*width), round(y_centre - 0.5*height)
+        x_max, y_max = x_min + width, y_min + height
+
+        if 0 < x_min and x_max < x_res and  0 < y_min and y_max < y_res:
+            # This is the simple case, the cropped section is fully contained within the source
+            ff_excised = ff.maxpixel[y_min:y_max, x_min:x_max]
+        else:
+            # Create a new array of zero
+            ff_excised = np.zeros((height, width))
+            for y_source in range (y_min, y_max):
+                for x_source in range (x_min, x_max):
+                    if 0 < y_source and y_source < y_res and 0 < x_source and x_source < x_res:
+                        x_dest, y_dest = x_source - x_min, y_source - y_min
+                        ff_excised[y_dest, x_dest] = ff.maxpixel[y_source, x_source]
+
+    return ff_excised
+
+def readCroppedFF(path, x, y, width=20, height=20, allow_drift_in = False):
+    """
+    Given a path to a fits file, and coordinates in that image, excise a part of that image.
+
+    Arguments:
+        path [string]: full path to the ff file to be read
+        x [int]: x coordinates of the centre of the cropped region
+        y [int]: y coordinates of the centre of the cropped region
+        width [int]: optional, default 50, width of crop
+        height [int]: optional, default 50, height of crop
+    Return:
+        [array] : 2D array of pixel intensities
+    """
+
+    ff = read(os.path.dirname(path), os.path.basename(path), memmap=False)
+
+    if ff is None:
+        return ff
+
+    return exciseFromFF(ff, x, y, width, height, allow_drift_in)
+
+def filterDirByJD(directory_path, config, e_jd, l_jd):
+    """
+    Passed a directory path, filter the contents only for files which end in .fits,
+    start with FF_XX0001, where XX0001 is the station code, and are within the jd window.
+
+    Arguments:
+        directory_path: [str] Path to the directory to be filtered.
+        config: [config] RMS config instance.
+        e_jd: [float] the earliest JD to be considered.
+        l_jd: [float] the latest JD to be considered.
+
+    Return:
+        filtered_fits: [list] list of the filenames of the fits files which are within the window.
+    """
+
+    filtered_fits = []
+    directory_list = os.listdir(directory_path)
+    station_code = config.stationID
+    for fits_file in directory_list:
+        # Get date_time jd of this file
+        if fits_file.startswith("FF_{}".format(station_code)) and fits_file.endswith(".fits"):
+            date_time, jd = rmsTimeExtractor(fits_file, asTuple=True)
+            # Skip anything which is not in the time window
+            if not (e_jd < jd < l_jd):
+                continue
+            filtered_fits.append(fits_file)
+
+    filtered_fits.sort()
+
+    return filtered_fits
+
+def filterDirectoriesByJD(path, earliest_jd, latest_jd = None, write_log=False):
+
+    """
+    Returns a list of directories inclusive of the earliest and latest jd
+    The earliest directory returned will be the first directory dated
+    before the earliest jd.
+    The latest directory returned will be the last directory dated before
+    the latest jd
+
+    Arguments:
+        path [string]: path to directory to be filtered.
+        earliest_jd [float]: earliest jd to include.
+
+    Keyword arugments:
+        latest_jd: [float] latest jd to include, if none then only the directory containing earliest is returned
+        write_logs: [bool] optional, default False, write logs
+
+    Return:
+        filtered list of directories
+    """
+    latest_jd = earliest_jd if latest_jd is None else latest_jd
+    directory_list = []
+    path = os.path.expanduser(path)
+    if not os.path.exists(path):
+        return directory_list
+    for obj in os.listdir(os.path.expanduser(path)):
+        if os.path.isdir(os.path.join(path, obj)):
+            directory_list.append(os.path.join(path, obj))
+
+    directory_list.sort(reverse=True)
+
+    filtered_by_jd = []
+    for directory in directory_list:
+
+        # Get the jd of this directory, if it can't be parsed then continue
+        jd_dir = rmsTimeExtractor(directory, asJD=True)
+
+        if jd_dir is None:
+            continue
+
+        # If the start time of this directory is less than the latest_target append to the list
+        if jd_dir < latest_jd:
+            if write_log:
+                log.info("Object {} has a jd of {}, adding.".format(directory, jd_dir))
+            filtered_by_jd.append(directory)
+
+        # As soon as a directory has been added which is before the earliest_jd
+        # stop appending break the loop; everything else has already been processed
+        if rmsTimeExtractor(directory, asJD=True) < earliest_jd:
+            break
+
+
+    # Sort the list so that the oldest is at the top.
+    filtered_by_jd.sort()
+    if write_log:
+        log.info("Searched for directories between jd {:.2f}, {:.2f}".format(earliest_jd, latest_jd))
+    for directory in filtered_by_jd:
+        jd_dir = rmsTimeExtractor(directory, asJD=True)
+        if write_log:
+            log.info("Directory {} has a jd of {:.2f}, between {:.2f} and {:.2f} added".format(os.path.basename(directory), jd_dir, earliest_jd, latest_jd))
+
+    return filtered_by_jd
 
 def latLonAlt2ECEFDeg(lat, lon, h):
     """ Convert geographical coordinates to Earth centered - Earth fixed coordinates.
@@ -2198,7 +4038,7 @@ def calculateClosestPoint(beg_lat, beg_lon, beg_ele, end_lat, end_lon, end_ele, 
             ref_lon: [float] Station longitude
             ref_ele: [float] Station height
 
-        Returns:
+        Return:
             start_dis: Distance from station to start of trajectory
             end_dist: Distance from station to end of trajectory
             closest_dist: Distance at the closest point (possibly outside the start and end)
@@ -2212,17 +4052,17 @@ def calculateClosestPoint(beg_lat, beg_lon, beg_ele, end_lat, end_lon, end_ele, 
 
         traj_vec = vectNorm(end_ecef - beg_ecef)
         start_vec, end_vec = (ref_ecef - beg_ecef), (ref_ecef - end_ecef)
-        start_dist, end_dist = (np.sqrt((np.sum(start_vec ** 2)))), (np.sqrt((np.sum(end_vec ** 2))))
+        start_dist, end_dist = (np.sqrt((np.sum(start_vec**2)))), (np.sqrt((np.sum(end_vec**2))))
 
         # Consider whether vector is zero length by looking at start and end
         if [beg_lat, beg_lon, beg_ele] != [end_lat, end_lon, end_ele]:
 
             # Vector start and end points are different, calculate the projection of the ref vect onto the traj vector
-            proj_vec = beg_ecef + np.dot(start_vec, traj_vec) * traj_vec
+            proj_vec = beg_ecef + np.dot(start_vec, traj_vec)*traj_vec
 
             # Hence, calculate the vector at the nearest point, and the closest distance
             closest_vec = ref_ecef - proj_vec
-            closest_dist = (np.sqrt(np.sum(closest_vec ** 2)))
+            closest_dist = (np.sqrt(np.sum(closest_vec**2)))
 
         else:
 
@@ -2238,7 +4078,7 @@ def revAz(azim):
 
         arguments:
             azim: [float] azimuth in degrees
-        returns:
+        return:
             azim_rev: [float] azimuth in the reverse direction in degrees
 
         """
@@ -2253,12 +4093,12 @@ def ecefV2LatLonAlt(ecef_vect):
 
         arguments: ecef_vector
 
-        returns: lat,lon,ht
+        return: lat,lon,ht
 
         """
 
     lat, lon, ht = ecef2LatLonAlt(ecef_vect[0], ecef_vect[1], ecef_vect[2])
-    return np.degrees(lat), np.degrees(lon), ht / 1000
+    return np.degrees(lat), np.degrees(lon), ht/1000
 
 def randomword(length):
 
@@ -2280,7 +4120,7 @@ def platepar2AltAz(rp):
     arguments:
         rp: Platepar
 
-    returns:
+    Return:
         Ra_d : [degrees] Ra of the platepar at its creation date
         dec_d : [degrees] Dec of the platepar at its creation date
         JD : [float] JD of the platepar creation
@@ -2323,9 +4163,15 @@ def convertGMNTimeToPOSIX(timestring):
     arguments:
         timestring: [string] time represented as a string e.g. 20230527_032115
 
-    returns:
+    Return:
         posix compatible time
     """
+
+
+    # remove any trailing decimal part of timestring
+    if "." in timestring:
+        timestring, _, _ = timestring.partition(".")
+
     try:
         dt_object = datetime.datetime.strptime(timestring.strip(), "%Y%m%d_%H%M%S")
     except:
@@ -2342,7 +4188,7 @@ def createATestEvent07():
 
     arguments:
 
-    returns:
+    Return:
         event: [event]
 
     """
@@ -2378,7 +4224,7 @@ def createATestEvent08():
 
     arguments:
 
-    returns:
+    Return:
         event: [event]
 
     """
@@ -2424,7 +4270,7 @@ def gcDistDeg(lat1, lon1, lat2, lon2):
         lat2: [float] latitude of point 2 (degrees)
         lon2: [float] latitude of point 2 (degrees)
 
-    returns:
+    ReturnReturn:
         [float] great circle distance (km)
 
 
@@ -2434,13 +4280,13 @@ def gcDistDeg(lat1, lon1, lat2, lon2):
     lat2, lon2 = np.radians(lat2), np.radians(lon2)
     delta_lat, delta_lon = (lat2 - lat1)/2 , (lon2 - lon1)/2
 
-    t1 = np.sin(delta_lat) ** 2
-    t2 = np.sin(delta_lon) ** 2 * np.cos(lat1) * np.cos(lat2)
+    t1 = np.sin(delta_lat)**2
+    t2 = np.sin(delta_lon)**2*np.cos(lat1)*np.cos(lat2)
 
     if (abs(t1) - abs(t2)) < 1e-10:
         return 0
     else:
-        return 2 * np.arcsin((t1 + t2) ** 0.5) * 6371.009
+        return 2*np.arcsin((t1 + t2)**0.5)*6371.009
 
 def testRevAz():
 
@@ -2584,7 +4430,7 @@ def testEventToECEFVector():
         v1,v2 = t.eventToECEFVector()
         lat,lon,ht = ecef2LatLonAlt(v1[0],v1[1],v1[2])
         lat2, lon2, ht2 = ecef2LatLonAlt(v2[0], v2[1], v2[2])
-        ht, ht2 = ht / 1000, ht2 / 1000
+        ht, ht2 = ht/1000, ht2/1000
         lat, lon, lat2, lon2 = np.degrees(lat), np.degrees(lon), np.degrees(lat2), np.degrees(lon2)
 
         success = success if gcDistDeg(iLat, iLon, lat, lon) < 0.1  else False
@@ -2720,8 +4566,8 @@ def testApplyCartesianSD():
     e = event
     for e in event_population:
 
-        x1, y1, z1 = latLonAlt2ECEFDeg(e.lat, e.lon, e.ht * 1000)
-        x2, y2, z2 = latLonAlt2ECEFDeg(e.lat2, e.lon2, e.ht2 * 1000)
+        x1, y1, z1 = latLonAlt2ECEFDeg(e.lat, e.lon, e.ht*1000)
+        x2, y2, z2 = latLonAlt2ECEFDeg(e.lat2, e.lon2, e.ht2*1000)
         x1l.append(x1)
         y1l.append(y1)
         z1l.append(z1)
@@ -2834,6 +4680,18 @@ def testsanitise():
 
     return success
 
+
+def testTimeObjectCreator():
+
+    success = True
+    if convertGMNTimeToPOSIX("20250319_181910.0") == convertGMNTimeToPOSIX("20250319_181910"):
+        success = success
+    else:
+        success = False
+
+
+    return success
+
 def testIndividuals(logging = True):
 
 
@@ -2850,11 +4708,17 @@ def testIndividuals(logging = True):
 
     individuals_success = True
 
-
+    if testTimeObjectCreator():
+        individuals_success = individuals_success
+        if logging:
+            log.info("TimeObjectCreator passed tests")
+    else:
+        individuals_success = False
+        log.error("TimeObjectCreator failed tests")
 
     if testsanitise():
         if logging:
-            log.info("santise passed tests")
+            log.info("sanitise passed tests")
     else:
         log.error("sanitise failed tests")
         individuals_success = False
@@ -2895,8 +4759,6 @@ def testIndividuals(logging = True):
     else:
         log.error("GC Dist failed test")
         individuals_success = False
-
-
 
     if testEventToECEFVector():
         if logging:
@@ -2962,9 +4824,13 @@ if __name__ == "__main__":
     cml_args = arg_parser.parse_args()
 
     # Load the config file
-    syscon = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath('.'))
-
+    if cml_args.config is None:
+        syscon = cr.loadConfigFromDirectory(".config", os.getcwd())
+    else:
+        syscon = cr.loadConfigFromDirectory(cml_args.config, os.getcwd())
     # Set the web page to monitor
+
+    print(f"Loaded config for {syscon.stationID}")
 
     if testIndividuals():
         log.info("Individual function test success")
@@ -2988,8 +4854,9 @@ if __name__ == "__main__":
 
         log.info("Nothing found at {}".format(syscon.event_monitor_webpage))
 
-    if cml_args.delete_db and os.path.isfile(syscon.event_monitor_db_path):
-        os.unlink(syscon.event_monitor_db_path)
+    event_monitor_db_path = os.path.join(os.path.expanduser(syscon.data_dir), syscon.event_monitor_db_name)
+    if cml_args.delete_db and os.path.isfile(event_monitor_db_path):
+        os.unlink(event_monitor_db_path)
 
     em = EventMonitor(syscon)
 
