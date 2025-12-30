@@ -29,10 +29,10 @@ def findFitsFiles(directory):
     """Recursively find all FITS files in a directory and its subdirectories.
 
     Arguments:
-        directory: [str] The path to the folder containing the files to convert.
+        directory: [str] The path to the directory to search.
 
     Return:
-        None
+        [list] List of paths to FITS files found.
 
     """
     fits_files = []
