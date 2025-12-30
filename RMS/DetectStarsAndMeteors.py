@@ -359,10 +359,6 @@ def saveDetections(detection_results, ff_dir, config, output_suffix=''):
     if not os.path.exists(ff_dir):
         os.makedirs(ff_dir)
 
-    # Create the ff_dir if it does not exist
-    if not os.path.isdir(ff_dir):
-        os.makedirs(ff_dir)
-
     # Write detected stars to the CALSTARS file
     CALSTARS.writeCALSTARS(star_list, ff_dir, calstars_name, config.stationID, config.height, 
         config.width)
