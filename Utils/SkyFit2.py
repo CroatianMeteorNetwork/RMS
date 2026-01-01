@@ -3958,6 +3958,32 @@ class PlateTool(QtWidgets.QMainWindow):
         if not hasattr(self, "saturation_threshold"):
             self.saturation_threshold = int(round(0.98*(2**self.config.bit_depth - 1)))
 
+        if not hasattr(self, "snr_centroid"):
+            self.snr_centroid = 1.0
+
+        if not hasattr(self, "saturated_centroid"):
+            self.saturated_centroid = False
+
+        # Add the missing satellite overlay variables
+        if not hasattr(self, "show_sattracks"):
+            self.show_sattracks = False
+        if not hasattr(self, "tle_file"):
+            self.tle_file = None
+        if not hasattr(self, "satellite_tracks"):
+            self.satellite_tracks = []
+        if not hasattr(self, "fov_poly_cache"):
+            self.fov_poly_cache = None
+        if not hasattr(self, "fov_poly_jd"):
+            self.fov_poly_jd = None
+        if not hasattr(self, "sat_track_curves"):
+            self.sat_track_curves = []
+        if not hasattr(self, "sat_track_labels"):
+            self.sat_track_labels = []
+        if not hasattr(self, "sat_track_arrows"):
+            self.sat_track_arrows = []
+        if not hasattr(self, "sat_markers"):
+            self.sat_markers = []
+
         # If the paired stars are a list (old version), reset it to a new version where it's an object
         if isinstance(self.paired_stars, list):
 
