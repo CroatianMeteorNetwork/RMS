@@ -6178,7 +6178,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # Get detected star coordinates (note: calstars format is [y, x, ...])
         det_y = detected_stars[:, 0]
         det_x = detected_stars[:, 1]
-        det_intens = detected_stars[:, 3] if detected_stars.shape[1] > 3 else np.ones(len(det_x))
+        # Use index 2 (IntensSum/integrated intensity) not index 3 (Ampltd/peak amplitude)
+        det_intens = detected_stars[:, 2] if detected_stars.shape[1] > 2 else np.ones(len(det_x))
 
         # Prepare calstars_coords for alignPlatepar (x, y format)
         calstars_coords = np.column_stack([det_x, det_y])
@@ -6389,10 +6390,10 @@ class PlateTool(QtWidgets.QMainWindow):
                 y_data = star_data[:, 0]
                 x_data = star_data[:, 1]
 
-                # Get star intensities for brightness-based matching (column 3 is 'level')
+                # Get star intensities for brightness-based matching (column 2 is IntensSum)
                 input_intensities = None
-                if star_data.shape[1] > 3:
-                    input_intensities = star_data[:, 3]
+                if star_data.shape[1] > 2:
+                    input_intensities = star_data[:, 2]
 
                 # Get astrometry.net solution, pass the FOV width estimate
                 solution = astrometryNetSolve(x_data=x_data, y_data=y_data, fov_w_range=fov_w_range,
@@ -6561,7 +6562,8 @@ class PlateTool(QtWidgets.QMainWindow):
             detected_stars = np.array(self.calstars[ff_name_c])
             det_y = detected_stars[:, 0]
             det_x = detected_stars[:, 1]
-            det_intens = detected_stars[:, 3] if detected_stars.shape[1] > 3 else np.ones(len(det_x))
+            # Use index 2 (IntensSum/integrated intensity) not index 3 (Ampltd/peak amplitude)
+            det_intens = detected_stars[:, 2] if detected_stars.shape[1] > 2 else np.ones(len(det_x))
             det_fwhm = detected_stars[:, 4] if detected_stars.shape[1] > 4 else np.zeros(len(det_x))
             det_snr = detected_stars[:, 6] if detected_stars.shape[1] > 6 else np.ones(len(det_x))
             det_saturated = detected_stars[:, 7] if detected_stars.shape[1] > 7 else np.zeros(len(det_x))
