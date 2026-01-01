@@ -7413,8 +7413,20 @@ class PlateTool(QtWidgets.QMainWindow):
         if y_max > self.platepar.Y_res - 1:
             y_max = self.platepar.Y_res - 1
 
-        # Crop the image
-        img_crop_orig = self.img.data[x_min:x_max, y_min:y_max]
+        # Crop the image - always use avepixel for intensity calculation to match calstars extraction
+        # This ensures consistency regardless of whether maxpixel or avepixel is being displayed
+        if hasattr(self.img_handle, 'ff') and self.img_handle.ff is not None:
+            # For FF files, always use avepixel (same as calstars extraction)
+            avepixel_data = self.img_handle.ff.avepixel.T
+            # Apply dark and flat if available (same processing as displayed image)
+            if self.dark is not None:
+                avepixel_data = Image.applyDark(avepixel_data, self.dark)
+            if self.flat_struct is not None:
+                avepixel_data = Image.applyFlat(avepixel_data, self.flat_struct)
+            img_crop_orig = avepixel_data[x_min:x_max, y_min:y_max]
+        else:
+            # For other input types (videos, images), use the current displayed image
+            img_crop_orig = self.img.data[x_min:x_max, y_min:y_max]
 
         # Perform gamma correction
         img_crop = Image.gammaCorrectionImage(img_crop_orig, self.config.gamma, out_type=np.float32)
