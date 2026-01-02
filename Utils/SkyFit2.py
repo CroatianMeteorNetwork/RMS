@@ -15,6 +15,11 @@ import traceback
 import random
 import copy
 
+# Fix Qt platform plugin "xcb" error
+from PyQt5.QtCore import QLibraryInfo
+import cv2
+os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = QLibraryInfo.location(QLibraryInfo.PluginsPath)
+
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
