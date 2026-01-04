@@ -8351,17 +8351,29 @@ class PlateTool(QtWidgets.QMainWindow):
         # Plot error vs SNR
         ax_snr.scatter(snr_list, total_error_px, s=2, c='k', zorder=3)
 
-        ax_snr.grid(which='both', alpha=0.3)
+        ax_snr.grid(alpha=0.3)
         ax_snr.set_xlabel("S/N")
         ax_snr.set_ylabel("Error (px)")
-        ax_snr.set_xscale('log')
         if len(snr_list) > 0 and min(snr_list) > 0:
             snr_min, snr_max = min(snr_list), max(snr_list)
-            ax_snr.set_xlim([snr_min * 0.8, snr_max * 1.2])
-            # Show ticks at 1, 2, 3, 5, 7 of each decade for better coverage on narrow ranges
-            ax_snr.xaxis.set_major_locator(ticker.LogLocator(base=10, subs=(1.0, 2.0, 3.0, 5.0, 7.0), numticks=15))
+            snr_range = snr_max - snr_min
+            # Find nice tick spacing closest to 6 ticks using x2, x5 sequence
+            nice_spacings = [0.1 * (10 ** p) * m for p in range(-1, 5) for m in [1, 2, 5]]
+            target_ticks = 6
+            best_spacing = nice_spacings[0]
+            best_diff = float('inf')
+            for spacing in nice_spacings:
+                num_ticks = snr_range / spacing
+                if abs(num_ticks - target_ticks) < best_diff:
+                    best_diff = abs(num_ticks - target_ticks)
+                    best_spacing = spacing
+            # Generate tick positions
+            tick_start = np.floor(snr_min / best_spacing) * best_spacing
+            tick_end = np.ceil(snr_max / best_spacing) * best_spacing
+            ticks = np.arange(tick_start, tick_end + best_spacing/2, best_spacing)
+            ax_snr.set_xticks(ticks)
             ax_snr.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f'{x:g}'))
-            ax_snr.xaxis.set_minor_locator(ticker.NullLocator())
+            ax_snr.set_xlim([snr_min * 0.9, snr_max * 1.1])
 
         # Plot error vs magnitude (saturated stars in red)
         mag_arr = np.array(mag_list)
