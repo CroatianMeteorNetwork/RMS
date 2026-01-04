@@ -8236,17 +8236,17 @@ class PlateTool(QtWidgets.QMainWindow):
         # Plot error vs SNR
         ax_snr.scatter(snr_list, total_error_px, s=2, c='k', zorder=3)
 
-        ax_snr.grid()
+        ax_snr.grid(which='both', alpha=0.3)
         ax_snr.set_xlabel("S/N")
         ax_snr.set_ylabel("Error (px)")
         ax_snr.set_xscale('log')
         if len(snr_list) > 0 and min(snr_list) > 0:
-            ax_snr.set_xlim([min(snr_list) * 0.8, max(snr_list) * 1.2])
-            # Use cleaner tick formatting for log scale - show plain numbers, limit tick count
-            ax_snr.xaxis.set_major_locator(ticker.LogLocator(base=10, numticks=6))
-            ax_snr.xaxis.set_major_formatter(ticker.ScalarFormatter())
-            ax_snr.xaxis.set_minor_locator(ticker.NullLocator())  # Hide minor ticks
-            ax_snr.ticklabel_format(axis='x', style='plain')
+            snr_min, snr_max = min(snr_list), max(snr_list)
+            ax_snr.set_xlim([snr_min * 0.8, snr_max * 1.2])
+            # Show ticks at 1, 2, 3, 5, 7 of each decade for better coverage on narrow ranges
+            ax_snr.xaxis.set_major_locator(ticker.LogLocator(base=10, subs=(1.0, 2.0, 3.0, 5.0, 7.0), numticks=15))
+            ax_snr.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f'{x:g}'))
+            ax_snr.xaxis.set_minor_locator(ticker.NullLocator())
 
         # Plot error vs magnitude (saturated stars in red)
         mag_arr = np.array(mag_list)
