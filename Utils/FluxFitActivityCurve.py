@@ -6,8 +6,7 @@ import datetime
 import calendar
 from collections import OrderedDict
 
-
-from astropy.table import Table
+from astropy.io import ascii
 import numpy as np
 import scipy.optimize
 import matplotlib.pyplot as plt
@@ -1228,7 +1227,6 @@ def loadFluxCSV(file_path):
     # Read data
     # We pass the list of lines starting from data_start_line
     # and provide column names manually
-    from astropy.io import ascii
     table = ascii.read(lines[data_start_line:], format='csv', names=col_names)
     
     # Assign metadata
