@@ -133,7 +133,7 @@ def getPairedStarsSkyPositions(img_x, img_y, jd, platepar):
 
 
 class Platepar(object):
-    def __init__(self, distortion_type="radial5-odd"):
+    def __init__(self, distortion_type="radial7-odd"):
         """Astrometric and photometric calibration plate parameters. Several distortion types are supported.
 
         Arguments:
@@ -162,7 +162,7 @@ class Platepar(object):
         # Initialize distortion-related attributes (needed by setDistortionType)
         self.equal_aspect = True
         self.force_distortion_centre = False
-        self.asymmetry_corr = False
+        self.asymmetry_corr = True
 
         # Station coordinates
         self.lat = self.lon = self.elev = 0
@@ -210,7 +210,7 @@ class Platepar(object):
         self.mag_lev_stddev = 0.0
         self.gamma = 1.0
         self.vignetting_coeff = 0.001
-        self.vignetting_fixed = True
+        self.vignetting_fixed = False
 
         # Extinction correction scaling
         self.extinction_scale = 0.6

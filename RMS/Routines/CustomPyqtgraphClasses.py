@@ -1633,6 +1633,18 @@ class PlateparParameterManager(QtWidgets.QWidget):
     sigAsymmetryCorrToggled = QtCore.pyqtSignal()
     sigForceDistortionToggled = QtCore.pyqtSignal()
     sigOnVignettingFixedToggled = QtCore.pyqtSignal()
+    sigRestoreDefaultsPressed = QtCore.pyqtSignal()
+
+    # Default settings for SkyFit2 Fit Parameters tab
+    DEFAULT_FIT_ONLY_POINTING = False
+    DEFAULT_FIXED_SCALE = False
+    DEFAULT_REFRACTION = True
+    DEFAULT_EQUAL_ASPECT = True
+    DEFAULT_ASYMMETRY_CORR = True
+    DEFAULT_FORCE_DISTORTION_CENTRE = False
+    DEFAULT_DISTORTION_TYPE = "radial7-odd"
+    DEFAULT_EXTINCTION_SCALE = 0.6
+    DEFAULT_VIGNETTING_FIXED = False
 
     def __init__(self, gui):
         QtWidgets.QWidget.__init__(self)
@@ -1692,6 +1704,11 @@ class PlateparParameterManager(QtWidgets.QWidget):
         hline = QHSeparationLine()
         full_layout.addWidget(hline)
         full_layout.addWidget(QtWidgets.QLabel("Astrometry parameters"))
+
+        # Restore defaults button at top of section
+        self.restore_defaults_button = QtWidgets.QPushButton("Restore Defaults")
+        self.restore_defaults_button.clicked.connect(self.onRestoreDefaults)
+        full_layout.addWidget(self.restore_defaults_button)
 
         # check boxes
         self.fit_only_pointing = QtWidgets.QCheckBox('Only fit pointing')
@@ -1864,11 +1881,13 @@ class PlateparParameterManager(QtWidgets.QWidget):
         form.addRow(self.vignetting_fixed)
 
         self.updatePlatepar()
+        self.updateRestoreDefaultsButton()
 
 
     def onFitOnlyPointingToggled(self):
         self.gui.fit_only_pointing = self.fit_only_pointing.isChecked()
         self.updatePairedStars(min_fit_stars=self.gui.getMinFitStars())
+        self.updateRestoreDefaultsButton()
         self.sigFitOnlyPointingToggled.emit()
 
     def onFixScaleToggled(self):
@@ -1881,8 +1900,11 @@ class PlateparParameterManager(QtWidgets.QWidget):
         else:
             self.F_scale.setDisabled(False)
 
+        self.updateRestoreDefaultsButton()
+
     def onRefractionToggled(self):
         self.gui.platepar.refraction = self.refraction.isChecked()
+        self.updateRestoreDefaultsButton()
         self.sigRefractionToggled.emit()
 
     def _stashCurrentCoeffs(self):
@@ -2012,6 +2034,9 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.fit_parameters.changeNumberShown(self.gui.platepar.poly_length)
         self.fit_parameters.updateValues()
 
+        # Update restore defaults button state
+        self.updateRestoreDefaultsButton()
+
         # Emit signal to trigger display updates (connected to onFitParametersChanged)
         self.sigEqAspectToggled.emit()
 
@@ -2024,6 +2049,9 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.fit_parameters.changeNumberShown(self.gui.platepar.poly_length)
         self.fit_parameters.updateValues()
 
+        # Update restore defaults button state
+        self.updateRestoreDefaultsButton()
+
         # Emit signal to trigger display updates (connected to onFitParametersChanged)
         self.sigAsymmetryCorrToggled.emit()
 
@@ -2035,6 +2063,9 @@ class PlateparParameterManager(QtWidgets.QWidget):
         # Update GUI to reflect new poly_length and coefficient values
         self.fit_parameters.changeNumberShown(self.gui.platepar.poly_length)
         self.fit_parameters.updateValues()
+
+        # Update restore defaults button state
+        self.updateRestoreDefaultsButton()
 
         # Emit signal to trigger display updates (connected to onFitParametersChanged)
         self.sigForceDistortionToggled.emit()
@@ -2069,6 +2100,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
 
     def onExtinctionChanged(self):
         self.gui.platepar.extinction_scale = self.extinction_scale.value()
+        self.updateRestoreDefaultsButton()
         self.sigExtinctionChanged.emit()
 
     def onVignettingChanged(self):
@@ -2081,6 +2113,9 @@ class PlateparParameterManager(QtWidgets.QWidget):
 
         # If the vignetting is fixed, allow setting manual values
         self.vignetting_coeff.setDisabled(not self.gui.platepar.vignetting_fixed)
+
+        # Update restore defaults button state
+        self.updateRestoreDefaultsButton()
 
     def onFitParametersChanged(self):
         # fit parameter object updates platepar by itself
@@ -2104,6 +2139,9 @@ class PlateparParameterManager(QtWidgets.QWidget):
             self.eqAspect.hide()
             self.asymmetryCorr.hide()
             self.fdistortion.hide()
+
+        # Update restore defaults button state
+        self.updateRestoreDefaultsButton()
 
         self.sigFitParametersChanged.emit()
 
@@ -2143,6 +2181,114 @@ class PlateparParameterManager(QtWidgets.QWidget):
             self.eqAspect.hide()
             self.asymmetryCorr.hide()
             self.fdistortion.hide()
+
+        # Update restore defaults button state
+        self.updateRestoreDefaultsButton()
+
+    def isAtDefaults(self):
+        """Check if current settings match the defaults."""
+        pp = self.gui.platepar
+        gui = self.gui
+        return (gui.fit_only_pointing == self.DEFAULT_FIT_ONLY_POINTING and
+                gui.fixed_scale == self.DEFAULT_FIXED_SCALE and
+                pp.refraction == self.DEFAULT_REFRACTION and
+                pp.equal_aspect == self.DEFAULT_EQUAL_ASPECT and
+                pp.asymmetry_corr == self.DEFAULT_ASYMMETRY_CORR and
+                pp.force_distortion_centre == self.DEFAULT_FORCE_DISTORTION_CENTRE and
+                pp.distortion_type == self.DEFAULT_DISTORTION_TYPE and
+                pp.extinction_scale == self.DEFAULT_EXTINCTION_SCALE and
+                pp.vignetting_fixed == self.DEFAULT_VIGNETTING_FIXED)
+
+    def updateRestoreDefaultsButton(self):
+        """Update restore defaults button color based on current settings.
+
+        Green when at defaults, amber when not at defaults.
+        """
+        at_defaults = self.isAtDefaults()
+        if at_defaults:
+            # Green background when at defaults
+            self.restore_defaults_button.setStyleSheet(
+                "QPushButton { background-color: #4CAF50; color: white; }"
+                "QPushButton:hover { background-color: #45a049; }"
+            )
+        else:
+            # Amber/orange background when not at defaults
+            self.restore_defaults_button.setStyleSheet(
+                "QPushButton { background-color: #FF9800; color: white; }"
+                "QPushButton:hover { background-color: #F57C00; }"
+            )
+        self.restore_defaults_button.setEnabled(not at_defaults)
+
+    def onRestoreDefaults(self):
+        """Restore all default settings for the Fit Parameters tab."""
+        pp = self.gui.platepar
+        gui = self.gui
+
+        # Restore fit only pointing
+        if gui.fit_only_pointing != self.DEFAULT_FIT_ONLY_POINTING:
+            gui.fit_only_pointing = self.DEFAULT_FIT_ONLY_POINTING
+            self.fit_only_pointing.setChecked(self.DEFAULT_FIT_ONLY_POINTING)
+
+        # Restore fixed scale
+        if gui.fixed_scale != self.DEFAULT_FIXED_SCALE:
+            gui.fixed_scale = self.DEFAULT_FIXED_SCALE
+            self.fixed_scale.setChecked(self.DEFAULT_FIXED_SCALE)
+            self.F_scale.setDisabled(self.DEFAULT_FIXED_SCALE)
+
+        # Restore refraction
+        if pp.refraction != self.DEFAULT_REFRACTION:
+            pp.refraction = self.DEFAULT_REFRACTION
+            self.refraction.setChecked(self.DEFAULT_REFRACTION)
+
+        # Restore equal aspect
+        if pp.equal_aspect != self.DEFAULT_EQUAL_ASPECT:
+            self._remapCoeffsWithStash('equal_aspect', self.DEFAULT_EQUAL_ASPECT)
+            self.eqAspect.setChecked(self.DEFAULT_EQUAL_ASPECT)
+
+        # Restore asymmetry correction
+        if pp.asymmetry_corr != self.DEFAULT_ASYMMETRY_CORR:
+            self._remapCoeffsWithStash('asymmetry_corr', self.DEFAULT_ASYMMETRY_CORR)
+            self.asymmetryCorr.setChecked(self.DEFAULT_ASYMMETRY_CORR)
+
+        # Restore force distortion centre
+        if pp.force_distortion_centre != self.DEFAULT_FORCE_DISTORTION_CENTRE:
+            self._remapCoeffsWithStash('force_distortion_centre', self.DEFAULT_FORCE_DISTORTION_CENTRE)
+            self.fdistortion.setChecked(self.DEFAULT_FORCE_DISTORTION_CENTRE)
+
+        # Restore distortion type
+        if pp.distortion_type != self.DEFAULT_DISTORTION_TYPE:
+            self._changeDistortionTypeWithStash(self.DEFAULT_DISTORTION_TYPE)
+            self.distortion_type.setCurrentIndex(
+                pp.distortion_type_list.index(self.DEFAULT_DISTORTION_TYPE))
+            self.fit_parameters.changeNumberShown(pp.poly_length)
+            self.fit_parameters.updateValues()
+
+        # Restore extinction scale
+        if pp.extinction_scale != self.DEFAULT_EXTINCTION_SCALE:
+            pp.extinction_scale = self.DEFAULT_EXTINCTION_SCALE
+            self.extinction_scale.setValue(self.DEFAULT_EXTINCTION_SCALE)
+
+        # Restore vignetting fixed
+        if pp.vignetting_fixed != self.DEFAULT_VIGNETTING_FIXED:
+            pp.vignetting_fixed = self.DEFAULT_VIGNETTING_FIXED
+            self.vignetting_fixed.setChecked(self.DEFAULT_VIGNETTING_FIXED)
+            self.vignetting_coeff.setDisabled(not self.DEFAULT_VIGNETTING_FIXED)
+
+        # Show/hide radial-specific options
+        if pp.distortion_type.startswith('radial'):
+            self.eqAspect.show()
+            self.asymmetryCorr.show()
+            self.fdistortion.show()
+        else:
+            self.eqAspect.hide()
+            self.asymmetryCorr.hide()
+            self.fdistortion.hide()
+
+        # Update button state
+        self.updateRestoreDefaultsButton()
+
+        # Emit signal to update the GUI
+        self.sigRestoreDefaultsPressed.emit()
 
     def updatePairedStars(self, min_fit_stars=4):
         """
