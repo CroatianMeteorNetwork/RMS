@@ -31,21 +31,22 @@ sudo apt-get -y upgrade
 # Install all required packages
 sudo apt-get install -y \
     git wget zip openssh-server \
-    python3 python3-dev python3-pip python3-tk python3-pil python3-gi python3-gst-1.0 \
-    cmake mplayer \
-    libblas-dev libatlas-base-dev liblapack-dev \
-    libopencv-dev libffi-dev libssl-dev \
-    libxml2-dev libxslt1-dev \
-    libgirepository1.0-dev libcairo2-dev \
-    at-spi2-core gir1.2-gstreamer-1.0 \
+    python3 python3-dev python3-pip python3-tk python3-pil \
+    mplayer \
     socat chrony \
     imagemagick ffmpeg \
-    qt5-qmake lxterminal \
-    python3-virtualenv \
-    gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
-    libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-    gobject-introspection \
-    gstreamer1.0-libav
+    lxterminal \
+    python3-venv \
+    python3-gi python3-gi-cairo \
+    gir1.2-gstreamer-1.0 \
+    gstreamer1.0-tools \
+    gstreamer1.0-plugins-base \
+    gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-bad \
+    gstreamer1.0-plugins-ugly \
+    gstreamer1.0-libav \
+    python3-opencv \
+    python3-pyqt5
 
 # Install gstreamer python plugin loader if available (not present on all platforms)
 sudo apt-get install -y gstreamer1.0-python3-plugin-loader 2>/dev/null || true
@@ -62,28 +63,18 @@ sudo systemctl enable ssh
 git clone https://github.com/CroatianMeteorNetwork/RMS.git
 git clone https://github.com/CroatianMeteorNetwork/cmn_binviewer.git
 
-# Set up Python virtual environment
+# Set up Python virtual environment with access to system packages
 cd ~
-virtualenv vRMS
+python3 -m venv --system-site-packages vRMS
 source ~/vRMS/bin/activate
 
 # Install Python packages
-pip3 install --upgrade pip setuptools wheel
-pip3 install -r ~/source/RMS/requirements.txt
-
-# Install PyQt5 - use system package on ARM (pip wheels not available), pip on x86
-if [[ $(uname -m) == "x86_64" ]]; then
-    pip3 install PyQt5
-else
-    sudo apt-get install -y python3-pyqt5
-fi
-
-# Build and install OpenCV
-cd ~/source/RMS
-~/source/RMS/Scripts/RMS_OpenCV_Install.sh ~/vRMS
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -r ~/source/RMS/requirements.txt
 
 # Install RMS
-python setup.py install
+cd ~/source/RMS
+python -m pip install -e . --no-deps --no-build-isolation
 
 # Create desktop shortcuts if running in desktop environment
 if [ -d "$HOME/Desktop" ]; then

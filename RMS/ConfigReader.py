@@ -198,8 +198,8 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
         if cml_args_config[0] == '.':
 
             # Locate all files in the data directory that end with '.config'
-            config_files = [file_name for file_name in os.listdir(dir_path) \
-                if (file_name.endswith('.config') or file_name.endswith('dfnstation.cfg')) \
+            config_files = [file_name for file_name in os.listdir(dir_path) 
+                if (file_name.endswith('.config') or file_name.endswith('dfnstation.cfg')) 
                 and not (file_name == 'bak.config')]
 
             # If there is exactly one config file, use it
@@ -218,9 +218,7 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
 
         if config_file is None:
             raise FileNotFoundError("A config file could not be found in directory: {:s}, {:s}".format(
-                dir_path, cml_args_config
-                )
-            )
+                dir_path, cml_args_config))
 
         print('Loading config file:', config_file)
 
@@ -429,6 +427,9 @@ class Config:
         # Enable/disable saving a live.jpg file in the data directory with the latest image
         self.live_jpg = False
 
+        # location of ffmpeg if available - default is to assume it is in the path
+        self.ffmpeg_binary = 'ffmpeg'
+
         # Toggle saving of frame time files (FT files) to times_dir
         self.save_frame_times = True
 
@@ -593,7 +594,7 @@ class Config:
 
         # Centroid filtering parameters
         self.centroids_max_deviation = 2 # maximum deviation of a centroid point from a LSQ fitted line (if above max, it will be rejected)
-        self.centroids_max_distance =  30 # maximum distance in pixels between centroids (used for filtering spurious centroids)
+        self.centroids_max_distance = 30 # maximum distance in pixels between centroids (used for filtering spurious centroids)
 
         # Angular velocity filtering parameter - detections slower or faster than these angular velocities
         # will be rejected (deg/s)
@@ -680,8 +681,8 @@ class Config:
         self.recalibration_max_stars = 200
 
         ##### Thumbnails
-        self.thumb_bin =  4
-        self.thumb_stack   =  5
+        self.thumb_bin = 4
+        self.thumb_stack = 5
         self.thumb_n_width = 10
 
         ##### Stack
@@ -932,7 +933,7 @@ def parseSystem(config, parser):
 
 
     if parser.has_option(section, "auto_reprocess_external_script_run"):
-        config.auto_reprocess_external_script_run = parser.getboolean(section, \
+        config.auto_reprocess_external_script_run = parser.getboolean(section, 
             "auto_reprocess_external_script_run")
 
     if parser.has_option(section, "external_script_path"):
@@ -991,7 +992,7 @@ def parseCapture(config, parser):
     if parser.has_option(section, "logdays_to_keep"):
         config.logdays_to_keep = int(parser.get(section, "logdays_to_keep"))
 
-    log_level_mapping = { 0: 'CRITICAL',1: 'ERROR',2: 'WARNING',3: 'INFO',4: 'DEBUG'}
+    log_level_mapping = {0: 'CRITICAL',1: 'ERROR',2: 'WARNING',3: 'INFO',4: 'DEBUG'}
     
     if parser.has_option(section, "console_log_level"):
         config.console_log_level = parser.getint(section, "console_log_level")
@@ -1239,13 +1240,16 @@ def parseCapture(config, parser):
     if parser.has_option(section, "save_frame_times"):
         config.save_frame_times = parser.getboolean(section, "save_frame_times")
     
+    # obtain the path to a working ffmpeg, if available
+    config.ffmpeg_binary = isFfmpegWorking()
+
     # Enable/disable saving video frames - automatically off if FFmpeg is missing
-    ffmpeg_ok = isFfmpegWorking()
     if parser.has_option(section, "save_frames"):
         save_requested = parser.getboolean(section, "save_frames")
-        config.save_frames = save_requested and ffmpeg_ok
-        if save_requested and not ffmpeg_ok:
+        if save_requested and not config.ffmpeg_binary:
             print("save_frames requested but FFmpeg not available - disabling.")
+        else:
+            config.save_frames = save_requested
     else:
         config.save_frames = False
 
@@ -1319,6 +1323,7 @@ def parseCapture(config, parser):
     # Load option to switch camera settings between day/night modes, for when continuous_capture is enabled
     if parser.has_option(section, "switch_camera_modes"):
         config.switch_camera_modes = parser.getboolean(section, "switch_camera_modes")
+
 
 def parseUpload(config, parser):
     section = "Upload"
@@ -1565,11 +1570,11 @@ def parseMeteorDetection(config, parser):
     # If the distance is > 20 (in old configs before the scaling fix), rescale using the old function
     if config.distance_threshold_det > 20**2:
 
-        config.distance_threshold_det = normalizeParameter(config.distance_threshold_det, config, \
+        config.distance_threshold_det = normalizeParameter(config.distance_threshold_det, config, 
             binning=config.detection_binning_factor)
     else:
 
-        config.distance_threshold_det = normalizeParameterMeteor(config.distance_threshold_det, config, \
+        config.distance_threshold_det = normalizeParameterMeteor(config.distance_threshold_det, config, 
             binning=config.detection_binning_factor)
 
 
@@ -1580,11 +1585,11 @@ def parseMeteorDetection(config, parser):
     # If the gap is > 100px (in old configs before the scaling fix), rescale using the old function
     if config.gap_threshold > 100**2:
 
-        config.gap_threshold_det = normalizeParameter(config.gap_threshold_det, config, \
+        config.gap_threshold_det = normalizeParameter(config.gap_threshold_det, config, 
             binning=config.detection_binning_factor)
 
     else:
-        config.gap_threshold_det = normalizeParameterMeteor(config.gap_threshold_det, config, \
+        config.gap_threshold_det = normalizeParameterMeteor(config.gap_threshold_det, config, 
             binning=config.detection_binning_factor)
 
 
@@ -1620,7 +1625,7 @@ def parseMeteorDetection(config, parser):
     if parser.has_option(section, "kht_binary_extension"):
         config.kht_binary_extension = parser.get(section, "kht_binary_extension")
 
-    config.kht_lib_path = findBinaryPath(config, config.kht_build_dir, config.kht_binary_name, \
+    config.kht_lib_path = findBinaryPath(config, config.kht_build_dir, config.kht_binary_name, 
         config.kht_binary_extension)
 
 

@@ -21,7 +21,6 @@ import sys
 import traceback
 import time
 import multiprocessing
-import signal
 from math import floor
 
 import cv2

@@ -8,7 +8,6 @@ from __future__ import print_function, division, absolute_import
 
 import glob
 import os
-import platform
 import argparse
 import subprocess
 import shutil
@@ -18,6 +17,7 @@ import Utils.FFtoFrames as f2f
 from Utils.ShowerAssociation import showerAssociation
 import RMS.ConfigReader as cr
 from RMS.Formats.FTPdetectinfo import validDefaultFTPdetectinfo
+from Utils.GenerateTimelapse import isFfmpegWorking
 
 from RMS.Formats import FTPdetectinfo
 
@@ -42,6 +42,11 @@ def generateMP4s(dir_path, ftpfile_name, shower_code=None, min_mag=None, config=
     else:
         min_mag = None
     print('min_mag is {}'.format(min_mag))
+
+    ffmpeg_path = config.ffmpeg_binary if config else isFfmpegWorking()
+    if not ffmpeg_path: 
+        print('ffmpeg not available, aborting')
+        return 
 
     if shower_code is not None and config is not None:
         associations, _ = showerAssociation(config, [os.path.join(dir_path, ftpfile_name)])
@@ -107,8 +112,14 @@ def generateMP4s(dir_path, ftpfile_name, shower_code=None, min_mag=None, config=
         dir_tmp_path = os.path.join(dir_path, "temp_img_dir")
 
         if os.path.exists(dir_tmp_path):
-            shutil.rmtree(dir_tmp_path)
-            print("Deleted directory : " + dir_tmp_path)
+            try:
+                shutil.rmtree(dir_tmp_path)
+                print("Deleted directory : " + dir_tmp_path)
+            except Exception:
+                flist = os.listdir(dir_tmp_path)
+                for fl in flist:
+                    os.remove(os.path.join(dir_tmp_path, fl))
+                print("Deleted directory : " + dir_tmp_path)
             
         mkdirP(dir_tmp_path)
         print("Created directory : " + dir_tmp_path)
@@ -149,43 +160,23 @@ def generateMP4s(dir_path, ftpfile_name, shower_code=None, min_mag=None, config=
         mp4_path = ffbasename + ".mp4"
         temp_img_path = os.path.abspath(os.path.join(dir_tmp_path, ffbasename+"_%03d.jpg"))
 
-        # If running on Windows, use ffmpeg.exe
-        if platform.system() == 'Windows':
-
-            # ffmpeg.exe path
-            root = os.path.dirname(__file__)
-            ffmpeg_path = os.path.join(root, "ffmpeg.exe")
-            # Construct the ecommand for ffmpeg           
-            com = ffmpeg_path + " -hide_banner -loglevel error -pix_fmt yuv420p  -y -f image2 -pattern_type sequence -start_number " + str(first_frame) + " -i " + temp_img_path +" " + mp4_path
-            print("Creating timelapse using ffmpeg...")
-        else:
-            # If avconv is not found, try using ffmpeg
-            software_name = "avconv"
-            print("Checking if avconv is available...")
-            if os.system(software_name + " --help > /dev/null"):
-                software_name = "ffmpeg"
-                # Construct the ecommand for ffmpeg           
-                com = software_name + " -hide_banner -loglevel error -pix_fmt yuv420p  -y -f image2 -pattern_type sequence -start_number " + str(first_frame) + " -i " + temp_img_path +" " + mp4_path
-                print("Creating timelapse using ffmpeg...")
-            else:
-                print("Creating timelapse using avconv...")
-                com = "cd " + dir_path + ";" \
-                    + software_name + " -v quiet -r 30 -y -start_number " + str(first_frame) + " -i " + temp_img_path \
-                    + " -vcodec libx264 -pix_fmt yuv420p -crf 25 -movflags faststart -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.97)\" " \
-                    + mp4_path
-
-        #print(com)
+        # Construct the command for ffmpeg           
+        com = ffmpeg_path + " -hide_banner -loglevel error -pix_fmt yuv420p  -y -f image2 -pattern_type sequence -start_number " + str(first_frame) + " -i " + temp_img_path +" " + mp4_path
+        print("Creating timelapse using ffmpeg...")
+        print(com)
         subprocess.call(com, shell=True, cwd=dir_path)
         
         #Delete temporary directory and files inside
         if os.path.exists(dir_tmp_path):
             try:
                 shutil.rmtree(dir_tmp_path)
-            except:
+            except Exception:
                 # may occasionally fail due to ffmpeg thread still terminating
-                # so catch this and wait a bit
+                # so catch this and just empty the folder instead
                 time.sleep(2)
-                shutil.rmtree(dir_tmp_path)
+                flist = os.listdir(dir_tmp_path)
+                for fl in flist:
+                    os.remove(os.path.join(dir_tmp_path, fl))
 
             print("Deleted temporary directory : " + dir_tmp_path)
 
@@ -202,13 +193,13 @@ if __name__ == "__main__":
     arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str,
         help='Path to directory with FF files.')
 
-    arg_parser.add_argument('-s', '--shower', metavar='SHOWER', type=str, \
+    arg_parser.add_argument('-s', '--shower', metavar='SHOWER', type=str, 
         help="Process just this single shower given its code (e.g. PER, ORI, ETA).")
 
-    arg_parser.add_argument('-m', '--minmag', metavar='MINMAG', type=float, \
+    arg_parser.add_argument('-m', '--minmag', metavar='MINMAG', type=float, 
         help="Process only detections brighter than this")
 
-    arg_parser.add_argument('-c', '--config', metavar='CONFIG', type=str, \
+    arg_parser.add_argument('-c', '--config', metavar='CONFIG', type=str, 
         help="full path to config file. Only required if filtering by shower and no config file in the target folder")
 
     # Parse the command line arguments
