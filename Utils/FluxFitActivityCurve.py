@@ -6,7 +6,7 @@ import datetime
 import calendar
 from collections import OrderedDict
 
-import pandas as pd
+from astropy.io import ascii
 import numpy as np
 import scipy.optimize
 import matplotlib.pyplot as plt
@@ -18,7 +18,7 @@ from RMS.Formats.Showers import FluxShowers
 from RMS.Misc import formatScientific, RmsDateTime
 from RMS.Math import lineFunc
 from RMS.Routines.SolarLongitude import jd2SolLonSteyaert, solLon2jdSteyaert
-from Utils.Flux import calculateZHR
+from Utils.Flux import calculateZHR, massVerniani
 
 def showerActivity(sol, sol_peak, background_flux, peak_flux, bp, bm):
     """ Shower activity model described with a double exponential. 
@@ -1177,6 +1177,64 @@ def loadFluxActivity(config):
     return shower_models
 
 
+def loadFluxCSV(file_path):
+    # Parse metadata manually from comments
+    meta = {}
+    header_line = None
+    data_start_line = 0
+    
+    with open(file_path, 'r') as f:
+        lines = f.readlines()
+        
+    for i, line in enumerate(lines):
+        if line.strip().startswith('#'):
+            # Check if this is the header line
+            if "Sol bin start" in line:
+                header_line = line.strip().lstrip('#').strip()
+                # If the header is comma separated, split by comma
+                if ',' in header_line:
+                    raw_col_names = [c.strip() for c in header_line.split(',')]
+                    col_names = []
+                    counts = {}
+                    for name in raw_col_names:
+                        if name in counts:
+                            counts[name] += 1
+                            col_names.append(f"{name}_{counts[name]}")
+                        else:
+                            counts[name] = 0
+                            col_names.append(name)
+                else:
+                    col_names = line.strip().lstrip('#').split()
+            else:
+                # Try to parse 'key = value'
+                parts = line.lstrip('#').split('=')
+                if len(parts) == 2:
+                    key = parts[0].strip()
+                    val = parts[1].strip().split()[0] # Take first word (remove units)
+                    try:
+                        meta[key] = float(val)
+                    except ValueError:
+                        meta[key] = val
+        else:
+            # First non-comment line is data
+            if line.strip():
+                data_start_line = i
+                break
+                
+    if header_line is None:
+        raise ValueError("Could not find header line starting with '# Sol bin start'")
+
+    # Read data
+    # We pass the list of lines starting from data_start_line
+    # and provide column names manually
+    table = ascii.read(lines[data_start_line:], format='csv', names=col_names)
+    
+    # Assign metadata
+    table.meta = meta
+    
+    return table
+
+
 def plotYearlyZHR(config, plot_path, sporadic_zhr=25, dt_ref=None, plot_current_time=True):
     """ Load the flux activity file and plot the variation of the ZHR throughout the year. 
     
@@ -1530,11 +1588,10 @@ if __name__ == "__main__":
 
 
     # Column names in the CSV files that will be extracted
-    sol_column = ' Mean Sol (deg)'
-    flux_column = ' Flux@+6.5M (met / 1000 km^2 h)'
-    flux_ci_low_column = ' Flux CI low'
-    flux_ci_high_column = ' Flux CI high'
-    zhr_column = ' ZHR'
+    sol_column = 'Sol bin start (deg)'
+    flux_column = 'Flux@+6.5M (met / 1000 km^2 h)'
+    flux_ci_low_column = 'Flux CI low'
+    flux_ci_high_column = 'Flux CI high'
 
 
 
@@ -1837,7 +1894,7 @@ if __name__ == "__main__":
 
     # Load files in the CSV directory
     csv_files = [os.path.join(os.path.abspath(csv_path), file_name) 
-        for file_name in sorted(os.listdir(csv_path)) if file_name.lower().endswith('.csv')]
+        for file_name in sorted(os.listdir(csv_path)) if (file_name.lower().endswith('.ecsv') or file_name.lower().endswith('.csv'))]
 
 
     # Go through all shower codes
@@ -1863,46 +1920,49 @@ if __name__ == "__main__":
             csv_file = csv_candidates[0]
 
             # Read the CSV file
-            with open(csv_file) as f:
-                csv_contents = f.readlines()
+            # Read the CSV file (was ECSV)
+            data = loadFluxCSV(csv_file)
 
             # Read metadata
-            for line in csv_contents:
+            population_index = 2.0
+            if 'population_index' in data.meta:
+                population_index = float(data.meta['population_index'])
 
-                # Read the mass limit
-                if "m_lim @ +6.5M" in line:
-                    line = line.split('=')
-                    m_lim_6_5m = float(line[-1].strip().replace("kg", "").strip())
-                    
-                # Read the population index
-                if " r     " in line:
-                    line = line.split('=')
-                    population_index = float(line[-1].strip())
+            # Calculate m_lim_6_5m
+            m_lim_6_5m = 0.0
+            if 'shower_velocity' in data.meta:
+                v_inf = data.meta['shower_velocity']
+                if hasattr(v_inf, 'value'):
+                    v_inf = v_inf.value
+                m_lim_6_5m = massVerniani(6.5, v_inf)
 
-            # Load the CSV info pandas
-            data = pd.read_csv(csv_file, delimiter=',', skiprows=13, escapechar='#')
-
-            # Prune the last line (only the sol bin edge)
-            data = data[:-1]
-
-            # Pune the first and the last point (some points are outliers)
-            data = data[1:-1]
-
-            # print(data)
-            # print(data.columns)
-
+            # Prune the first and the last point (some points are outliers)
+            if len(data) > 2:
+                data = data[1:-1]
 
             # Extract sol, flux, and ZHR data
-            sol_data = data[sol_column].to_numpy()
-            flux_data = data[flux_column].to_numpy()
-            zhr_data = data[zhr_column].to_numpy()
+            # We use .value to strip units (as Utils/Flux.py saves them as Quantities)
+            # Check for required columns
+            required_cols = [sol_column, flux_column, flux_ci_low_column, flux_ci_high_column]
+            missing_cols = [col for col in required_cols if col not in data.colnames]
+            if missing_cols:
+                print(f"Skipping {csv_file}, missing columns: {missing_cols}")
+                continue
+
+            # Extract sol, flux, and ZHR data
+            # We use .value to strip units (as Utils/Flux.py saves them as Quantities)
+            sol_data = data[sol_column].value if hasattr(data[sol_column], 'value') else data[sol_column]
+            flux_data = data[flux_column].value if hasattr(data[flux_column], 'value') else data[flux_column]
+            
+            # Calculate ZHR
+            zhr_data = calculateZHR(flux_data, population_index)
 
 
             ### Compute the fit weights ###
 
             # Extract the flux confidence interval
-            flux_ci_low = data[flux_ci_low_column].to_numpy()
-            flux_ci_high = data[flux_ci_high_column].to_numpy()
+            flux_ci_low = data[flux_ci_low_column].value if hasattr(data[flux_ci_low_column], 'value') else data[flux_ci_low_column]
+            flux_ci_high = data[flux_ci_high_column].value if hasattr(data[flux_ci_high_column], 'value') else data[flux_ci_high_column]
 
             # Compute the weights (smaller range = higher weight), handle zero values
             flux_ci_diff = np.abs(flux_ci_high - flux_ci_low)
