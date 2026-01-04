@@ -1924,9 +1924,12 @@ if __name__ == "__main__":
             data = loadFluxCSV(csv_file)
 
             # Read metadata
+            # Note: FluxBatch.py exports population index under key 'r' (e.g., "# r = 2.1")
             population_index = 2.0
             if 'population_index' in data.meta:
                 population_index = float(data.meta['population_index'])
+            elif 'r' in data.meta:
+                population_index = float(data.meta['r'])
 
             # Calculate m_lim_6_5m
             m_lim_6_5m = 0.0
