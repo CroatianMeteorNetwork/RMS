@@ -6688,11 +6688,11 @@ class PlateTool(QtWidgets.QMainWindow):
         print("  Detected stars: {:d}".format(len(det_x)))
 
         # Balance catalog stars vs detected stars for optimal NN matching
-        # Ideally want ~1.1x more catalog stars than detected stars
+        # Ideally want ~2x more catalog stars than detected stars
         n_detected = len(det_x)
         if n_detected > 0:
-            target_min = int(n_detected * 1.0)
-            target_max = int(n_detected * 1.2)
+            target_min = int(n_detected * 1.5)
+            target_max = int(n_detected * 2.5)
             n_catalog = len(catalog_stars)
 
             # Adjust magnitude limit if needed
