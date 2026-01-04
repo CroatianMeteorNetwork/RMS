@@ -1178,6 +1178,65 @@ def loadFluxActivity(config):
     return shower_models
 
 
+def loadFluxCSV(file_path):
+    # Parse metadata manually from comments
+    meta = {}
+    header_line = None
+    data_start_line = 0
+    
+    with open(file_path, 'r') as f:
+        lines = f.readlines()
+        
+    for i, line in enumerate(lines):
+        if line.strip().startswith('#'):
+            # Check if this is the header line
+            if "Sol bin start" in line:
+                header_line = line.strip().lstrip('#').strip()
+                # If the header is comma separated, split by comma
+                if ',' in header_line:
+                    raw_col_names = [c.strip() for c in header_line.split(',')]
+                    col_names = []
+                    counts = {}
+                    for name in raw_col_names:
+                        if name in counts:
+                            counts[name] += 1
+                            col_names.append(f"{name}_{counts[name]}")
+                        else:
+                            counts[name] = 0
+                            col_names.append(name)
+                else:
+                    col_names = line.strip().lstrip('#').split()
+            else:
+                # Try to parse 'key = value'
+                parts = line.lstrip('#').split('=')
+                if len(parts) == 2:
+                    key = parts[0].strip()
+                    val = parts[1].strip().split()[0] # Take first word (remove units)
+                    try:
+                        meta[key] = float(val)
+                    except ValueError:
+                        meta[key] = val
+        else:
+            # First non-comment line is data
+            if line.strip():
+                data_start_line = i
+                break
+                
+    if header_line is None:
+        raise ValueError("Could not find header line starting with '# Sol bin start'")
+
+    # Read data
+    # We pass the list of lines starting from data_start_line
+    # and provide column names manually
+    from astropy.io import ascii
+    table = ascii.read(lines[data_start_line:], format='csv', names=col_names)
+    
+    # Assign metadata
+    table.meta = meta
+    
+    return table
+
+
 def plotYearlyZHR(config, plot_path, sporadic_zhr=25, dt_ref=None, plot_current_time=True):
     """ Load the flux activity file and plot the variation of the ZHR throughout the year. 
     
@@ -1531,10 +1590,10 @@ if __name__ == "__main__":
 
 
     # Column names in the CSV files that will be extracted
-    sol_column = 'sol'
-    flux_column = 'flux_6_5_lm'
-    flux_ci_low_column = 'flux_6_5_lm_ci_lower'
-    flux_ci_high_column = 'flux_6_5_lm_ci_upper'
+    sol_column = 'Sol bin start (deg)'
+    flux_column = 'Flux@+6.5M (met / 1000 km^2 h)'
+    flux_ci_low_column = 'Flux CI low'
+    flux_ci_high_column = 'Flux CI high'
 
 
 
@@ -1837,7 +1896,7 @@ if __name__ == "__main__":
 
     # Load files in the CSV directory
     csv_files = [os.path.join(os.path.abspath(csv_path), file_name) 
-        for file_name in sorted(os.listdir(csv_path)) if file_name.lower().endswith('.ecsv')]
+        for file_name in sorted(os.listdir(csv_path)) if (file_name.lower().endswith('.ecsv') or file_name.lower().endswith('.csv'))]
 
 
     # Go through all shower codes
@@ -1862,8 +1921,9 @@ if __name__ == "__main__":
 
             csv_file = csv_candidates[0]
 
-            # Read the ECSV file
-            data = Table.read(csv_file, format='ascii.ecsv')
+            # Read the CSV file
+            # Read the CSV file (was ECSV)
+            data = loadFluxCSV(csv_file)
 
             # Read metadata
             population_index = 2.0
