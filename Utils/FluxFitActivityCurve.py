@@ -6,7 +6,7 @@ import datetime
 import calendar
 from collections import OrderedDict
 
-import astropy.units as u
+
 from astropy.table import Table
 import numpy as np
 import scipy.optimize
@@ -1862,15 +1862,16 @@ if __name__ == "__main__":
 
             csv_file = csv_candidates[0]
 
-            # Read the CSV file
             # Read the ECSV file
             data = Table.read(csv_file, format='ascii.ecsv')
 
             # Read metadata
+            population_index = 2.0
             if 'population_index' in data.meta:
                 population_index = float(data.meta['population_index'])
-            
+
             # Calculate m_lim_6_5m
+            m_lim_6_5m = 0.0
             if 'shower_velocity' in data.meta:
                 v_inf = data.meta['shower_velocity']
                 if hasattr(v_inf, 'value'):
@@ -1878,12 +1879,22 @@ if __name__ == "__main__":
                 m_lim_6_5m = massVerniani(6.5, v_inf)
 
             # Prune the first and the last point (some points are outliers)
-            data = data[1:-1]
+            if len(data) > 2:
+                data = data[1:-1]
 
             # Extract sol, flux, and ZHR data
             # We use .value to strip units (as Utils/Flux.py saves them as Quantities)
-            sol_data = data[sol_column].value
-            flux_data = data[flux_column].value
+            # Check for required columns
+            required_cols = [sol_column, flux_column, flux_ci_low_column, flux_ci_high_column]
+            missing_cols = [col for col in required_cols if col not in data.colnames]
+            if missing_cols:
+                print(f"Skipping {csv_file}, missing columns: {missing_cols}")
+                continue
+
+            # Extract sol, flux, and ZHR data
+            # We use .value to strip units (as Utils/Flux.py saves them as Quantities)
+            sol_data = data[sol_column].value if hasattr(data[sol_column], 'value') else data[sol_column]
+            flux_data = data[flux_column].value if hasattr(data[flux_column], 'value') else data[flux_column]
             
             # Calculate ZHR
             zhr_data = calculateZHR(flux_data, population_index)
@@ -1892,8 +1903,8 @@ if __name__ == "__main__":
             ### Compute the fit weights ###
 
             # Extract the flux confidence interval
-            flux_ci_low = data[flux_ci_low_column].value
-            flux_ci_high = data[flux_ci_high_column].value
+            flux_ci_low = data[flux_ci_low_column].value if hasattr(data[flux_ci_low_column], 'value') else data[flux_ci_low_column]
+            flux_ci_high = data[flux_ci_high_column].value if hasattr(data[flux_ci_high_column], 'value') else data[flux_ci_high_column]
 
             # Compute the weights (smaller range = higher weight), handle zero values
             flux_ci_diff = np.abs(flux_ci_high - flux_ci_low)

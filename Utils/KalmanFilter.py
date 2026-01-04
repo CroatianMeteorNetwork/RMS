@@ -511,13 +511,24 @@ def loadECSV(ECSV_file_path):
         picks = np.column_stack((table['x_image'].data, table['y_image'].data))
         
         # Handle datetime column
-        if isinstance(table['datetime'][0], str):
-             pick_frame_times = [datetime.datetime.strptime(t, '%Y-%m-%dT%H:%M:%S.%f') for t in table['datetime']]
-        elif isinstance(table['datetime'][0], Time):
-             pick_frame_times = table['datetime'].to_datetime()
+        if len(table) == 0:
+            pick_frame_times = np.array([])
         else:
-             # Assume it's already datetime objects or compatible
-             pick_frame_times = table['datetime'].data
+            first_val = table['datetime'][0]
+            if isinstance(first_val, str):
+                pick_frame_times = []
+                for t in table['datetime']:
+                    try:
+                        # First, try parsing with microseconds
+                        pick_frame_times.append(datetime.datetime.strptime(t, '%Y-%m-%dT%H:%M:%S.%f'))
+                    except ValueError:
+                        # Fallback: parse without microseconds
+                        pick_frame_times.append(datetime.datetime.strptime(t, '%Y-%m-%dT%H:%M:%S'))
+            elif isinstance(first_val, Time):
+                pick_frame_times = table['datetime'].to_datetime()
+            else:
+                # Assume it's already datetime objects or compatible
+                pick_frame_times = table['datetime'].data
 
         return np.array(picks), np.array(pick_frame_times)
         
@@ -544,9 +555,9 @@ def saveECSV(picks, times, platepar, save_path, orig_path):
     # Read the ECSV file using Astropy
     table = Table.read(file_path, format='ascii.ecsv')
 
-    # Ensure the table length matches the new data
+    # Ensure the table length matches the recalculated RA/DEC data
     if len(table) != len(ra):
-        raise ValueError(f"new_data has {len(ra)} rows, but file has {len(table)}")
+        raise ValueError(f"Data length mismatch: expected {len(ra)} rows but file has {len(table)}")
 
     # Update columns
     table['ra'] = ra
