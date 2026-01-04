@@ -1,11 +1,11 @@
 import os
 import csv
 import datetime
-from datetime import datetime as dt
 import shutil
 
 import numpy as np
-import pandas as pd
+from astropy.table import Table
+from astropy.time import Time
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
 from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz
@@ -123,7 +123,7 @@ class KalmanFilter():
         avrg_velocity = np.hypot(x_fit[0], y_fit[0])  # Geometric mean of x and y velocities
 
         # Instantiate process noise covariance
-        sigma_vxy = perc_sigma_vxy/100 * avrg_velocity
+        sigma_vxy = perc_sigma_vxy/100*avrg_velocity
 
         Q_base = np.array([
             [sigma_xy**2, 0 ,0 ,0 ,0 ,0],
@@ -204,23 +204,23 @@ class KalmanFilter():
 
         # --- INITIAL STATE ESTIMATION ---
         if N >= 3:
-            dt_est = (times[2] - times[0]) / 2
-            vx0 = (measurements[2, 0] - measurements[0, 0]) / (2 * dt_est)
-            vy0 = (measurements[2, 1] - measurements[0, 1]) / (2 * dt_est)
-            ax0 = (measurements[2, 0] - 2 * measurements[1, 0] + measurements[0, 0]) / (dt_est ** 2)
-            ay0 = (measurements[2, 1] - 2 * measurements[1, 1] + measurements[0, 1]) / (dt_est ** 2)
+            dt_est = (times[2] - times[0])/2
+            vx0 = (measurements[2, 0] - measurements[0, 0])/(2*dt_est)
+            vy0 = (measurements[2, 1] - measurements[0, 1])/(2*dt_est)
+            ax0 = (measurements[2, 0] - 2*measurements[1, 0] + measurements[0, 0])/(dt_est ** 2)
+            ay0 = (measurements[2, 1] - 2*measurements[1, 1] + measurements[0, 1])/(dt_est ** 2)
         else:
             dt_est = times[1] - times[0]
-            vx0 = (measurements[1, 0] - measurements[0, 0]) / dt_est
-            vy0 = (measurements[1, 1] - measurements[0, 1]) / dt_est
+            vx0 = (measurements[1, 0] - measurements[0, 0])/dt_est
+            vy0 = (measurements[1, 1] - measurements[0, 1])/dt_est
             ax0 = 0.0
             ay0 = 0.0
 
         x0 = np.array([measurements[0, 0], measurements[0, 1], vx0, vy0, ax0, ay0])
         P0 = np.zeros((6, 6))
         P0[0:2, 0:2] = R
-        P0[2:4, 2:4] = (2 * R) / (dt_est ** 2)
-        P0[4:6, 4:6] = (6 * R) / (dt_est ** 4)
+        P0[2:4, 2:4] = (2*R)/(dt_est ** 2)
+        P0[4:6, 4:6] = (6*R)/(dt_est ** 4)
 
         x_est = x0.copy()
         P_est = P0.copy()
@@ -234,8 +234,8 @@ class KalmanFilter():
             dt = times[k] - times[k - 1]
             if use_accel:
                 A = np.array([
-                    [1, 0, dt, 0, 0.5 * dt ** 2, 0],
-                    [0, 1, 0, dt, 0, 0.5 * dt ** 2],
+                    [1, 0, dt, 0, 0.5*dt ** 2, 0],
+                    [0, 1, 0, dt, 0, 0.5*dt ** 2],
                     [0, 0, 1, 0, dt, 0],
                     [0, 0, 0, 1, 0, dt],
                     [0, 0, 0, 0, 1, 0],
@@ -251,7 +251,7 @@ class KalmanFilter():
                     [0, 0, 0, 0, 0, 0]
                 ])
 
-            Q = Q_base * dt
+            Q = Q_base*dt
             x_pred[k] = A @ x_est
             P_pred[k] = A @ P_est @ A.T + Q
             z = measurements[k]
@@ -272,8 +272,8 @@ class KalmanFilter():
         for k in range(N - 2, -1, -1):
             dt = times[k + 1] - times[k]
             A = np.array([
-                [1, 0, dt, 0, 0.5 * dt ** 2, 0],
-                [0, 1, 0, dt, 0, 0.5 * dt ** 2],
+                [1, 0, dt, 0, 0.5*dt ** 2, 0],
+                [0, 1, 0, dt, 0, 0.5*dt ** 2],
                 [0, 0, 1, 0, dt, 0],
                 [0, 0, 0, 1, 0, dt],
                 [0, 0, 0, 0, 1, 0],
@@ -500,56 +500,35 @@ def loadECSV(ECSV_file_path):
     # wrap in try except to catch unknown errors
     try:
         # Opens and parses the ECSV file
-        with open(ECSV_file_path, 'r') as file:
+        table = Table.read(ECSV_file_path, format='ascii.ecsv')
 
-            # Read the file contents
-            contents = file.readlines()
-    
-            # Temp bool to get the column names
-            first_bool = False
+        # Ensure essential values are in the ECSV
+        if 'x_image' not in table.colnames or 'y_image' not in table.colnames or 'datetime' not in table.colnames:
+            raise ValueError("ECSV file must contain 'x_image', 'y_image', "
+                            "and 'datetime' columns.")
 
-            # Process the contents
-            for line in contents:
-
-                # Clean the line
-                line = [part.strip() for part in line.split(',') if part]
-
-                # Skip header lines
-                if line[0].startswith('#'):
-                    continue
-
-                if first_bool == False:
-                    # Set first bool to True so header is not unpacked twice
-                    first_bool = True
-
-                    # Unpack column names
-                    column_names = line
-
-                    # Map column names to their indices
-                    pick_frame_times_idx = column_names.index('datetime') if 'datetime' in column_names \
-                                                                                    else None
-                    x_ind = column_names.index('x_image') if 'x_image' in column_names \
-                                                                                    else None
-                    y_ind = column_names.index('y_image') if 'y_image' in column_names \
-                                                                                    else None
-
-                    # Ensure essential values are in the ECSV
-                    if x_ind is None or y_ind is None or pick_frame_times_idx is None:
-                        raise ValueError("ECSV file must contain 'x_image', 'y_image', "
-                                        "and 'datetime' columns.")
-
-                    continue
-
-                else:
-                    # Unpack line
-
-                    # Populate arrays
-                    cx, cy = float(line[x_ind]), float(line[y_ind])
-                    pick_frame_times.append(datetime.datetime.strptime(line[pick_frame_times_idx], 
-                                                                        '%Y-%m-%dT%H:%M:%S.%f'))
-
-                    # Load in pick parameters, use default for other values
-                    picks.append([cx, cy])
+        # Populate arrays
+        picks = np.column_stack((table['x_image'].data, table['y_image'].data))
+        
+        # Handle datetime column
+        if len(table) == 0:
+            pick_frame_times = np.array([])
+        else:
+            first_val = table['datetime'][0]
+            if isinstance(first_val, str):
+                pick_frame_times = []
+                for t in table['datetime']:
+                    try:
+                        # First, try parsing with microseconds
+                        pick_frame_times.append(datetime.datetime.strptime(t, '%Y-%m-%dT%H:%M:%S.%f'))
+                    except ValueError:
+                        # Fallback: parse without microseconds
+                        pick_frame_times.append(datetime.datetime.strptime(t, '%Y-%m-%dT%H:%M:%S'))
+            elif isinstance(first_val, Time):
+                pick_frame_times = table['datetime'].to_datetime()
+            else:
+                # Assume it's already datetime objects or compatible
+                pick_frame_times = table['datetime'].data
 
         return np.array(picks), np.array(pick_frame_times)
         
@@ -559,7 +538,8 @@ def loadECSV(ECSV_file_path):
             
 def saveECSV(picks, times, platepar, save_path, orig_path):
     # Copy the original ecsv to the save location
-    shutil.copy(orig_path, os.path.join(save_path, os.path.basename(orig_path) + '_kalman.ecsv'))
+    file_path = os.path.join(save_path, os.path.basename(orig_path) + '_kalman.ecsv')
+    shutil.copy(orig_path, file_path)
 
     # Recompute ra dec, alt az
 
@@ -572,40 +552,23 @@ def saveECSV(picks, times, platepar, save_path, orig_path):
 
     az, alt = trueRaDec2ApparentAltAz(ra, dec ,jd, platepar.lat, platepar.lon, refraction=False)
 
-    new_data = list(zip(ra, dec, az, alt, picks[:, 0], picks[:, 1]))
-    file_path = os.path.join(save_path, os.path.basename(orig_path) + '_kalman.ecsv')
+    # Read the ECSV file using Astropy
+    table = Table.read(file_path, format='ascii.ecsv')
 
-    # Read file, keeping comments (astropy-ecsv header) untouched
-    with open(file_path, "r") as f:
-        lines = f.readlines()
+    # Ensure the table length matches the recalculated RA/DEC data
+    if len(table) != len(ra):
+        raise ValueError(f"Data length mismatch: expected {len(ra)} rows but file has {len(table)}")
 
-    # Find where the CSV table starts (first non-# line with "datetime,ra,...")
-    for i, line in enumerate(lines):
-        if line.startswith("datetime,"):
-            header_index = i
-            break
-    header = lines[:header_index+1]   # everything before and including header
-    data_lines = lines[header_index+1:]
+    # Update columns
+    table['ra'] = ra
+    table['dec'] = dec
+    table['azimuth'] = az
+    table['altitude'] = alt
+    table['x_image'] = picks[:, 0]
+    table['y_image'] = picks[:, 1]
 
-    # Load table part into pandas
-    from io import StringIO
-    df = pd.read_csv(StringIO("".join([lines[header_index], *data_lines])))
-
-    if len(df) != len(new_data):
-        raise ValueError(f"new_data has {len(new_data)} rows, but file has {len(df)}")
-
-    # Unpack and assign replacements
-    df.loc[:, "ra"]       = [row[0] for row in new_data]
-    df.loc[:, "dec"]      = [row[1] for row in new_data]
-    df.loc[:, "azimuth"]  = [row[2] for row in new_data]
-    df.loc[:, "altitude"] = [row[3] for row in new_data]
-    df.loc[:, "x_image"]  = [row[4] for row in new_data]
-    df.loc[:, "y_image"]  = [row[5] for row in new_data]
-
-    # Write back out: preserve header, overwrite data
-    with open(file_path, "w") as f:
-        f.writelines(header)
-        df.to_csv(f, index=False, header=False)
+    # Write back out: preserve header (metadata), overwrite data
+    table.write(file_path, format='ascii.ecsv', overwrite=True, delimiter=',')
 
 if __name__ == "__main__":
     import argparse

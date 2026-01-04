@@ -287,7 +287,7 @@ def objectsToDelete(object_path, stationID, quota_gb=0, bz2=False):
         list of full paths to file system objects for deletion
     """
 
-    if quota_gb == 0 or quota_gb == None:
+    if (quota_gb == 0) or (quota_gb is None):
         log.info("Disc quota system disabled for {:s}".format(object_path))
         return []
 

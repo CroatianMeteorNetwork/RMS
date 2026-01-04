@@ -88,7 +88,7 @@ conda install -y -c conda-forge numba
 conda install -y pyqt==5.15.10
 conda install -y -c conda-forge Pillow pyqtgraph==0.12.3
 conda install -y -c conda-forge ephem
-conda install -y -c conda-forge imageio pandas
+conda install -y -c conda-forge imageio
 conda install -y -c conda-forge pygobject
 conda install -y -c conda-forge opencv
 conda install -y -c astropy astropy

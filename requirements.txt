@@ -16,14 +16,24 @@ python-dvr>=0.0.1 ; python_version >='3.6'
 pyqtgraph>=0.12,<0.13 ; python_version >='3.6'
 pyyaml; python_version>='3.6'
 tflite-runtime; python_version >= '3.6' and python_version < '3.12' and sys_platform != 'darwin'
-ai-edge-litert>=1.3 ; python_version >= '3.12' and platform_machine != "armv6l" and platform_machine != "armv7l"
+ai-edge-litert>=1.3,<2.0 ; python_version >= '3.12' and python_version < '3.13' and platform_machine != "armv6l" and platform_machine != "armv7l"
+ai-edge-litert==2.1.0rc1 ; python_version >= '3.13' and platform_machine != "armv6l" and platform_machine != "armv7l"
 astrometry; python_version >= "3.8" and sys_platform != 'win32'
 astrometry==3.0.0; python_version >= "3.5" and python_version < "3.8" and sys_platform != 'win32'
 pyclean>=2.7.6; python_version >= "3.5"
 wheel>=0.30.0
 setuptools>=40.0.0
 ifaddr; sys_platform =="win32"
-PyGObject<=3.50; python_version >= '3.6'
+# PyGObject installed via system package (python3-gi) on Linux
+PyGObject; python_version >= '3.6' and sys_platform != 'linux'
 rawpy; sys_platform == "win32"
 rawpy; sys_platform == "darwin"
 rawpy; sys_platform == "linux" and platform_machine == "x86_64"
+# Install pyswarms everywhere except for armv6l and armv7l (Raspberry Pi)
+pyswarms; sys_platform == "win32"
+pyswarms; sys_platform == "darwin"
+pyswarms; sys_platform == "linux" and platform_machine == "x86_64"
+# Install skyfield everywhere except for armv6l and armv7l (Raspberry Pi)
+skyfield; sys_platform == "win32"
+skyfield; sys_platform == "darwin"
+skyfield; sys_platform == "linux" and platform_machine == "x86_64"

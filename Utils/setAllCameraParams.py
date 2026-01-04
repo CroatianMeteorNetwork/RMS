@@ -324,7 +324,7 @@ if __name__ == '__main__':
         params[0]['ExtraFormat']['AudioEnable']=0
         cam.set_info("Simplify.Encode", params)
 
-        setCameraParam(cam, ['','Style','type2'])
+        setCameraParam(cam, ['','Style','type1'])
         setCameraParam(cam, ['','AeSensitivity','1'])
         setCameraParam(cam, ['','ApertureMode','0'])
         setCameraParam(cam, ['','BLCMode','0'])
