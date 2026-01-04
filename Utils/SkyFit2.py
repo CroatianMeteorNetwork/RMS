@@ -15,6 +15,7 @@ import sys
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+import matplotlib.ticker as ticker
 try:
     import pyqtgraph as pg
 except Exception as exc:
@@ -8068,7 +8069,8 @@ class PlateTool(QtWidgets.QMainWindow):
         snr_list = []
         mag_list = []
         saturated_list = []
-        total_error_px = []  # Total error in pixels for SNR/mag plots
+        fwhm_list = []
+        total_error_px = []  # Total error in pixels for SNR/mag/FWHM plots
 
         # Get image time and Julian date
         img_time = self.img_handle.currentTime()
@@ -8081,7 +8083,7 @@ class PlateTool(QtWidgets.QMainWindow):
         for star_no, (cat_x, cat_y, cat_coords, img_c, snr, saturated) in enumerate(zip(
                 catalog_x, catalog_y, catalog_stars, img_stars, snr_data, saturated_data)):
             # Compute image coordinates
-            img_x, img_y, _ = img_c
+            img_x, img_y, img_fwhm = img_c
             img_radius = np.hypot(img_x - self.platepar.X_res/2, img_y - self.platepar.Y_res/2)
 
             # Compute sky coordinates
@@ -8126,21 +8128,21 @@ class PlateTool(QtWidgets.QMainWindow):
             azim_residuals.append(((azim_cat - azim_img + 180)%360 - 180)*np.cos(np.radians(elev_cat)))
             elev_residuals.append(elev_cat - elev_img)
 
-            # Collect SNR, magnitude, saturation data
+            # Collect SNR, magnitude, saturation, FWHM data
             snr_list.append(snr)
             mag_list.append(cat_coords[2])  # Catalog magnitude
             saturated_list.append(saturated)
+            fwhm_list.append(img_fwhm)
 
             # Compute total error in pixels (distance between catalog and image positions)
             total_error_px.append(np.hypot(cat_x - img_x, cat_y - img_y))
 
-        # Init astrometry fit window (3 rows: angular, pixel, SNR/mag)
+        # Init astrometry fit window (3 rows: angular, pixel, SNR/mag/FWHM)
         fig_a, (
             (ax_azim, ax_elev, ax_skyradius),
             (ax_x, ax_y, ax_radius),
-            (ax_snr, ax_mag, ax_empty)
+            (ax_snr, ax_mag, ax_fwhm)
         ) = plt.subplots(ncols=3, nrows=3, facecolor=None, figsize=(12, 9))
-        ax_empty.axis('off')  # Hide the empty subplot
 
         # Set figure title
         try:
@@ -8240,6 +8242,11 @@ class PlateTool(QtWidgets.QMainWindow):
         ax_snr.set_xscale('log')
         if len(snr_list) > 0 and min(snr_list) > 0:
             ax_snr.set_xlim([min(snr_list) * 0.8, max(snr_list) * 1.2])
+            # Use cleaner tick formatting for log scale - show plain numbers, limit tick count
+            ax_snr.xaxis.set_major_locator(ticker.LogLocator(base=10, numticks=6))
+            ax_snr.xaxis.set_major_formatter(ticker.ScalarFormatter())
+            ax_snr.xaxis.set_minor_locator(ticker.NullLocator())  # Hide minor ticks
+            ax_snr.ticklabel_format(axis='x', style='plain')
 
         # Plot error vs magnitude (saturated stars in red)
         mag_arr = np.array(mag_list)
@@ -8259,6 +8266,18 @@ class PlateTool(QtWidgets.QMainWindow):
         ax_mag.set_ylabel("Error (px)")
         ax_mag.invert_xaxis()  # Bright stars (low mag) on right, faint (high mag) on left
 
+        # Plot error vs FWHM
+        fwhm_arr = np.array(fwhm_list)
+        valid_fwhm = fwhm_arr > 0  # Filter out invalid FWHM values
+        if np.sum(valid_fwhm) > 0:
+            ax_fwhm.scatter(fwhm_arr[valid_fwhm], err_arr[valid_fwhm], s=2, c='k', zorder=3)
+
+        ax_fwhm.grid()
+        ax_fwhm.set_xlabel("FWHM (px)")
+        ax_fwhm.set_ylabel("Error (px)")
+        if np.sum(valid_fwhm) > 0:
+            ax_fwhm.set_xlim([0, np.max(fwhm_arr[valid_fwhm]) * 1.1])
+
         # Equalize Y limits, make them integers, and set a minimum range of 1 px
         x_max_ylim = np.max(np.abs(ax_x.get_ylim()))
         y_max_ylim = np.max(np.abs(ax_y.get_ylim()))
@@ -8272,6 +8291,7 @@ class PlateTool(QtWidgets.QMainWindow):
         ax_radius.set_ylim([-max_ylim_px, max_ylim_px])
         ax_snr.set_ylim([0, max_ylim_px])
         ax_mag.set_ylim([0, max_ylim_px])
+        ax_fwhm.set_ylim([0, max_ylim_px])
 
         fig_a.tight_layout()
         fig_a.show()
