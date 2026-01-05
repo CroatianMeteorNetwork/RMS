@@ -14,7 +14,13 @@ log = getLogger("rmslogger")
 
 # Sun altitude (in degrees) that defines the switch point.
 # Negative numbers mean the Sun is below the horizon.
-SWITCH_HORIZON_DEG = "-9"
+SWITCH_HORIZON_DEG = "-9"  # Used for continuous capture mode switching
+CAPTURE_HORIZON_DEG = "-5:26"  # Used for standard capture start/stop (matches CaptureDuration.py)
+
+# Buffer time (seconds) to account for capture pipeline shutdown inertia.
+# Capture continues briefly after the calculated end time while the pipeline shuts down.
+# This is added to the timelapse cutoff to ensure all captured frames are included.
+SHUTDOWN_INERTIA_SECONDS = 300  # 5 minutes - generous buffer since mode-based splitting prevents mixing
 
 
 def switchCameraMode(config, daytime_mode, camera_mode_switch_trigger):
@@ -208,7 +214,7 @@ def lastNightToDaySwitch(config, whenUtc=None):
 
     Arguments:
         config: [Config] RMS configuration object; must expose latitude,
-            longitude and elevation attributes.
+            longitude, elevation, and continuous_capture attributes.
 
     Keyword arguments:
         whenUtc: [datetime] Naive UTC time used as the upper bound of the
@@ -216,32 +222,41 @@ def lastNightToDaySwitch(config, whenUtc=None):
             ``RmsDateTime.utcnow()`` is used.
 
     Return:
-        last_switch: [datetime] UTC time at which the Sun last rose above
-            ``SWITCH_HORIZON_DEG`` before *whenUtc* (or *whenUtc* itself
-            if the Sun is always up/down at that location).
+        (sunrise, max_cutoff): [tuple[datetime, datetime]] Tuple of:
+            - sunrise: The actual sunrise time (sun crossing horizon threshold)
+            - max_cutoff: sunrise + inertia delay (maximum possible cutoff)
+        For polar regions where sun doesn't rise/set, returns (whenUtc, whenUtc).
     """
     if whenUtc is None:
         whenUtc = RmsDateTime.utcnow()
+
+    # Use different horizon based on capture mode:
+    # - Continuous capture: mode switches at -9 degrees
+    # - Standard capture: capture ends at -5:26 degrees
+    if config.continuous_capture:
+        horizon = SWITCH_HORIZON_DEG
+    else:
+        horizon = CAPTURE_HORIZON_DEG
 
     obs = ephem.Observer()
     obs.lat = str(config.latitude)
     obs.long = str(config.longitude)
     obs.elevation = config.elevation
-    obs.horizon = SWITCH_HORIZON_DEG
+    obs.horizon = horizon
     obs.date = ephem.Date(whenUtc)
 
     sun = ephem.Sun()
     try:
-        # Account for programmed delay in mode switching
-        wait = timedelta(seconds=config.capture_wait_seconds)
+        # Account for programmed delay in mode switching and capture pipeline shutdown inertia
+        wait = timedelta(seconds=config.capture_wait_seconds + SHUTDOWN_INERTIA_SECONDS)
         previous_sunrise = obs.previous_rising(sun).datetime()
-        return previous_sunrise + wait
-    
+        return previous_sunrise, previous_sunrise + wait
+
     except (ephem.AlwaysUpError, ephem.NeverUpError):
         # Fallback for polar regions: use current time as cutoff
         # This ensures the entire just-completed capture session is processed
         # immediately, rather than being split across UTC day boundaries
-        return whenUtc
+        return whenUtc, whenUtc
 
 
     ### For testing switching only ###

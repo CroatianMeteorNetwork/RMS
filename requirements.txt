@@ -1,10 +1,9 @@
 gitpython>=2.1.8
 # Use versions 2.4.0 due to compatibility issues with OpenSSL on Pi3/Jessie
-paramiko==2.4.0; python_version=='2.7'
 paramiko>=2.9.0; python_version>='3.6'
-numpy>=1.13.3,<1.22.0 ; python_version=='2.7'
-numpy>=1.21.0,<1.24.0 ; python_version>='3.6' and python_version<='3.9.2'
-numpy>=1.26.0,<2.0.0 ; python_version>'3.9.2'
+numpy>=1.19.0,<1.21.0 ; python_version=='3.6'
+numpy>=1.21.0,<1.24.0 ; python_version>='3.7' and python_version<'3.10'
+numpy>=1.26.0,<2.0.0 ; python_version>='3.10'
 matplotlib>=2.1.1
 pyephem>=3.7.6.0
 cython>=0.27.3
@@ -15,7 +14,6 @@ imreg_dft @ git+https://github.com/matejak/imreg_dft@master#egg=imreg_dft>'2.0.0
 configparser==4.0.2
 imageio==2.6.1
 python-dvr>=0.0.1 ; python_version >='3.6'
-pyqtgraph @ git+https://github.com/pyqtgraph/pyqtgraph@develop#egg=pyqtgraph ; python_version=='2.7'
 pyqtgraph>=0.12,<0.13 ; python_version >='3.6'
 pyyaml; python_version>='3.6'
 tflite-runtime; python_version >= '3.6' and python_version < '3.12' and sys_platform != 'darwin'
@@ -26,7 +24,16 @@ pyclean>=2.7.6; python_version >= "3.5"
 wheel>=0.30.0
 setuptools>=40.0.0
 ifaddr; sys_platform =="win32"
-PyGObject<=3.50; python_version >= '3.6'
+# PyGObject installed via system package (python3-gi) on Linux
+PyGObject; python_version >= '3.6' and sys_platform != 'linux'
 rawpy; sys_platform == "win32"
 rawpy; sys_platform == "darwin"
 rawpy; sys_platform == "linux" and platform_machine == "x86_64"
+# Install pyswarms everywhere except for armv6l and armv7l (Raspberry Pi)
+pyswarms; sys_platform == "win32"
+pyswarms; sys_platform == "darwin"
+pyswarms; sys_platform == "linux" and platform_machine == "x86_64"
+# Install skyfield everywhere except for armv6l and armv7l (Raspberry Pi)
+skyfield; sys_platform == "win32"
+skyfield; sys_platform == "darwin"
+skyfield; sys_platform == "linux" and platform_machine == "x86_64"

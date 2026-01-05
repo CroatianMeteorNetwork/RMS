@@ -34,7 +34,7 @@ mkdir ~/source
 cd ~/source
 sudo apt-get install -y git
 git clone https://github.com/CroatianMeteorNetwork/RMS.git
-source ~/source/RMS/Scripts/MultiCamLinux/RMSInstaller.sh
+source ~/source/RMS/Scripts/RMS_Installer.sh
 ln -s ~/source/RMS/Scripts/MultiCamLinux/icon.png ~/source/cmn_binviewer
 echo -e "\n\n\nDo you wish to configure some stations?\n"
 read -p  "Y/N: " Ans

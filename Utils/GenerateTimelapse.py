@@ -6,14 +6,11 @@ from __future__ import print_function, division, absolute_import
 
 import sys
 import re
-import platform
 import subprocess
 import shutil
 import traceback
 import argparse
 import os
-
-from logging import exception
 
 import cv2
 import json
@@ -23,7 +20,7 @@ from PIL import ImageFont
 
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName, filenameToDatetime
-from RMS.Misc import mkdirP, RmsDateTime, tarWithProgress
+from RMS.Misc import mkdirP, RmsDateTime, tarWithProgress, getRmsRootDir
 from RMS.Logger import getLogger
 
 log = getLogger("rmslogger")
@@ -74,6 +71,12 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
 
     t1 = RmsDateTime.utcnow()
 
+    # check if we can use ffmpeg
+    ffmpeg_path = isFfmpegWorking()
+    if not ffmpeg_path:
+        print('No video convertor available - tried ffmpeg')
+        return 
+
     # Load the font for labeling
     try:
         font = ImageFont.truetype("/usr/share/fonts/dejavu/DejaVuSans.ttf", 18)
@@ -84,9 +87,15 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
     dir_tmp_path = os.path.join(dir_path, "temp_img_dir")
 
     if os.path.exists(dir_tmp_path):
-        shutil.rmtree(dir_tmp_path)
+        try:
+            shutil.rmtree(dir_tmp_path)
+        except Exception:
+            flist = os.listdir(dir_tmp_path)
+            for fl in flist:
+                os.remove(os.path.join(dir_tmp_path, fl))
+
         log.info("Directory removal complete: {}".format(dir_tmp_path))
-		
+
     mkdirP(dir_tmp_path)
     log.info("Created directory : {}".format(dir_tmp_path))
     
@@ -107,7 +116,7 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
 
         # Get the timestamp from the FF name
         timestamp = filenameToDatetime(file_name).strftime("%Y-%m-%d %H:%M:%S")
-		
+
         # Get id cam from the file name
         # e.g.  FF499_20170626_020520_353_0005120.bin
         # or FF_CA0001_20170626_020520_353_0005120.fits
@@ -142,62 +151,43 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
 
         # Print elapsed time
         if c % 30 == 0:
-            print("{:>5d}/{:>5d}, Elapsed: {:s}".format(c, len(ff_list), \
+            print("{:>5d}/{:>5d}, Elapsed: {:s}".format(c, len(ff_list), 
                 str(RmsDateTime.utcnow() - t1)), end="\r")
             sys.stdout.flush()
 
+    # now make the timelapse
+    temp_img_path = os.path.join(os.path.basename(dir_tmp_path), "temp_%04d.jpg")
+    com = [ffmpeg_path, '-nostdin', '-y', '-hide_banner',
+            '-loglevel','error',
+            '-r', str(fps),
+            '-i', temp_img_path,
+            '-vcodec', 'libx264',
+            '-pix_fmt', 'yuv420p',
+            '-an', 
+            '-crf', str(crf),
+            '-g','15',
+            '-movflags', 'faststart',
+            '-vf', '"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)"',
+            mp4_path]
 
-    # If running on Linux, use avconv if available
-    if platform.system() == 'Linux':
+    log.info("")
+    log.info('Creating timelapse using...')
+    log.info(' '.join(com))
 
-        # If avconv is not found, try using ffmpeg. In case of using ffmpeg,
-        # use parameter -nostdin to avoid it being stuck waiting for user input
-        software_name = "avconv"
-        nostdin = ""
-        log.info("Checking if avconv is available...")
-        if os.system(software_name + " --help > /dev/null"):
-            software_name = "ffmpeg"
-            nostdin =  " -nostdin "
-        
-        # Construct the command for avconv            
-        temp_img_path = os.path.basename(dir_tmp_path) + os.sep + "temp_%04d.jpg"
-        com = "cd " + dir_path + ";" \
-            + software_name + nostdin + " -v quiet -r "+ str(fps) +" -y -i " + temp_img_path \
-            + " -vcodec libx264 -pix_fmt yuv420p -crf " + str(crf) \
-            + " -movflags faststart -threads 2 -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)\" " \
-            + mp4_path
-
-        log.info("Creating timelapse using {}...".format(software_name))
-        log.info(com)
-        subprocess.call([com], shell=True)
-
-
-    # If running on Windows, use ffmpeg.exe
-    elif platform.system() == 'Windows':
-	
-        # ffmpeg.exe path
-        root = os.path.dirname(__file__)
-        ffmpeg_path = os.path.join(root, "ffmpeg.exe")
-	
-        # Construct the ecommand for ffmpeg
-        temp_img_path = os.path.join(os.path.basename(dir_tmp_path), "temp_%04d.jpg")
-        com = ffmpeg_path + " -v quiet -r " + str(fps) + " -i " + temp_img_path \
-            + " -c:v libx264 -pix_fmt yuv420p -an -crf " + str(crf) \
-            + " -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)\" -movflags faststart -y " \
-            + mp4_path
-		
-        log.info("Creating timelapse using ffmpeg...")
-        log.info(com)
-        subprocess.call(com, shell=True, cwd=dir_path)
-		
-    else :
-        log.warning("generateTimelapse only works on Linux or Windows the video could not be encoded")
+    subprocess.call(' '.join(com), shell=True, cwd=dir_path)
 
     #Delete temporary directory and files inside
     if os.path.exists(dir_tmp_path) and not keep_images:
-        shutil.rmtree(dir_tmp_path)
+        try:
+            shutil.rmtree(dir_tmp_path)
+        except Exception:
+            # may occasionally fail due to ffmpeg thread still terminating
+            # so catch this and just empty the folder instead
+            flist = os.listdir(dir_tmp_path)
+            for fl in flist:
+                os.remove(os.path.join(dir_tmp_path, fl))
         log.info("Directory removal complete: {}".format(dir_tmp_path))
-		
+
     log.info("Total time: %s", RmsDateTime.utcnow() - t1)
 
 
@@ -301,6 +291,52 @@ def _parse(fname):
     dt = datetime.strptime(m.group("date") + m.group("time"),
                            "%Y%m%d%H%M%S")
     return station, dt
+
+
+def findLastNightFrameInWindow(dir_path, window_start, window_end):
+    """Find the timestamp of the last night-mode frame within a time window.
+
+    This is used to determine the correct cutoff for night timelapse generation.
+    After sunrise, there may be a few night frames captured during the inertia
+    period before the mode switch completes. We want to include those frames
+    in the night timelapse, but exclude any day frames that follow.
+
+    Arguments:
+        dir_path: [str] Root directory to search (walks sub-dirs recursively).
+        window_start: [datetime] Start of the search window (e.g., sunrise).
+        window_end: [datetime] End of the search window (e.g., sunrise + inertia).
+
+    Return:
+        last_n_timestamp: [datetime | None] Timestamp of the last _n frame in
+            the window, or None if no night frames were found.
+    """
+    last_n_timestamp = None
+
+    for root, _, files in os.walk(dir_path):
+        for fname in files:
+            if not IMAGE_PATTERN.match(fname):
+                continue
+
+            # Check if it's a night frame
+            mode = _modeFromName(fname)
+            if mode != 'n':
+                continue
+
+            # Get the timestamp
+            try:
+                ts = _timestampFromName(fname)
+            except ValueError:
+                continue
+
+            # Check if it's within the window
+            if ts < window_start or ts >= window_end:
+                continue
+
+            # Track the latest night frame
+            if last_n_timestamp is None or ts > last_n_timestamp:
+                last_n_timestamp = ts
+
+    return last_n_timestamp
 
 
 def listImageBlocksBefore(cutoff, dir_path, max_gap_hours=2):
@@ -483,11 +519,11 @@ def generateTimelapseFromFrameBlocks(frame_blocks,
         first_img, last_img = block[0], block[-1]
 
         station, t0 = _parse(first_img)
-        _,       t1 = _parse(last_img)
+        _, t1 = _parse(last_img)
 
         video_name = _buildName(station, t0, t1, MP4_SUFFIX)
 
-        mp4_path_in =  os.path.join(frames_root, video_name)
+        mp4_path_in = os.path.join(frames_root, video_name)
 
         log.info("Generating timelapse for %s (%d frames)", video_name, len(block))
 
@@ -549,7 +585,7 @@ def generateTimelapseFromDir(dir_path,
 
     # 2 - build output paths ------------------------------------------------
     station, t0 = _parse(img_paths[0])
-    _,       t1 = _parse(img_paths[-1])
+    _, t1 = _parse(img_paths[-1])
 
     if video_path is None:
         video_name = _buildName(station, t0, t1, MP4_SUFFIX)
@@ -567,16 +603,18 @@ def generateTimelapseFromDir(dir_path,
         use_color=use_color,
     )
 
-def isFfmpegWorking(ffmpeg_path="ffmpeg"):
-    """ Check if ffmpeg is available and working. """
 
-    try:
-        subprocess.check_call([ffmpeg_path, "-version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        return True
-    
-    except Exception:
-        log.warning("ffmpeg is not available or not working.")
-        return False
+def isFfmpegWorking(ffmpeg_path='ffmpeg', rms_root=getRmsRootDir()):
+    """ Check if ffmpeg is available and working. """
+    for ffmpeg in [os.path.join(rms_root, 'Utils', 'ffmpeg'), ffmpeg_path, 'ffmpeg']:
+        try:
+            subprocess.check_call([ffmpeg, "-version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            return ffmpeg
+        except Exception:
+            pass
+        # if we get this far, we cant find ffmpeg
+    log.warning("ffmpeg is not available or not working.")
+    return False
 
 
 def generateTimelapseFromFrames(image_files,
@@ -655,24 +693,10 @@ def generateTimelapseFromFrames(image_files,
         log.error("Error: Could not find any valid images to determine dimensions.")
         return None, None
     
-    # Set up ffmpeg command based on color mode
-    if platform.system() in ['Linux', 'Darwin']:
-        ffmpeg_path = "ffmpeg"
-        
-        # Check if ffmpeg is available and working
-        if not isFfmpegWorking(ffmpeg_path):
-            log.warning("ffmpeg is not available or not working.")
-            return None, None
-
-    elif platform.system() == 'Windows':
-        ffmpeg_path = os.path.join(os.path.dirname(__file__), "ffmpeg.exe")
-
-        if not os.path.exists(ffmpeg_path):
-            log.warning("ffmpeg.exe not found in the expected location: {}".format(ffmpeg_path))
-            return None, None
-
-    else:
-        log.warning("Unsupported platform.")
+    # Set up ffmpeg command 
+    ffmpeg_path = isFfmpegWorking()
+    if not ffmpeg_path:
+        log.warning("ffmpeg not available on this installation.")
         return None, None
 
     # Configure ffmpeg command based on color mode
@@ -700,7 +724,8 @@ def generateTimelapseFromFrames(image_files,
     else:
         maxrate, bufsize = "4M", "8M"
 
-    ffmpeg_cmd = [ffmpeg_path, "-y", "-nostdin",
+    ffmpeg_cmd = [ffmpeg_path, "-y", "-nostdin", '-hide_banner', 
+                  '-loglevel', 'error',
                   "-f", "rawvideo", 
                   "-vcodec", "rawvideo",
                   "-s", "{}x{}".format(width, height),
@@ -788,7 +813,11 @@ def generateTimelapseFromFrames(image_files,
             skipped_count += 1
     
     # Create a temporary timestamp JSON file
-    timestamp_path = video_path.replace(MP4_SUFFIX, TS_JSON_SUFFIX)
+    # note that if an output video filename was provided, then it may not contain MP4_SUFFIX
+    if MP4_SUFFIX in video_path:
+        timestamp_path = video_path.replace(MP4_SUFFIX, TS_JSON_SUFFIX)
+    else: 
+        timestamp_path = video_path.replace('.mp4', '_' + TS_JSON_SUFFIX)
     temp_timestamp_path = os.path.join(output_dir, "{}_temp_timestamps.json".format(output_name))
     
     try:
@@ -945,10 +974,11 @@ def main():
     
     args = parser.parse_args()
     
+    input_dir = os.path.abspath(args.input_dir)
     # Set default output path if not specified
     if not args.output:
-        input_dir_name = os.path.basename(os.path.normpath(args.input_dir))
-        args.output = os.path.join(os.path.dirname(args.input_dir), "{}_timelapse.mp4".format(input_dir_name))
+        input_dir_name = os.path.basename(os.path.normpath(input_dir))
+        args.output = os.path.join(os.path.dirname(input_dir), "{}_timelapse.mp4".format(input_dir_name))
     
     # Print configuration
     print("Timelapse Generator Configuration:")
@@ -974,12 +1004,11 @@ def main():
         try:
             keep_images = True if args.cleanup == 'keep-jpg' else False
 
-            generateTimelapse(dir_path=args.input_dir,
+            generateTimelapse(dir_path=input_dir,
                               keep_images=keep_images,
                               fps=args.fps,
                               output_file=args.output,
-                              hires=args.hires
-            )
+                              hires=args.hires)
 
         except Exception as e:
             print("Error generating timelapse: {}".format(e))
@@ -989,8 +1018,8 @@ def main():
     else:
 
         try:
-            video_path, json_path = generateTimelapseFromDir(
-                dir_path=args.input_dir,
+            video_path, _ = generateTimelapseFromDir(
+                dir_path=input_dir,
                 video_path=args.output,
                 fps=args.fps,
                 base_crf=args.crf,
@@ -1027,6 +1056,7 @@ def main():
             return 1
     
     return 0
+
 
 if __name__ == "__main__":
     

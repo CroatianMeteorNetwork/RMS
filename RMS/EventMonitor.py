@@ -31,7 +31,6 @@ import copy
 import uuid
 import random
 import string
-import ephem
 
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, correctVignetting, extinctionCorrectionApparentToTrue
@@ -68,7 +67,7 @@ from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range,
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
 from RMS.Logger import getLogger
 from RMS.Math import angularSeparationVect, angularSeparationDeg
-from RMS.Formats.FFfile import convertFRNameToFF, getMiddleTimeFF
+from RMS.Formats.FFfile import convertFRNameToFF
 from RMS.Formats.Platepar import Platepar
 from RMS.UploadManager import uploadSFTP
 from Utils.StackFFs import stackFFs
@@ -294,9 +293,9 @@ class EventContainer(object):
         output += ("uuid                     : {}\n".format(self.uuid))
         output += ("RespondTo                : {}\n".format(self.respond_to))
         output += "# Trajectory information     \n"
-        output += ("Start Distance (km)      : {:3.2f}\n".format(self.start_distance / 1000))
+        output += ("Start Distance (km)      : {:3.2f}\n".format(self.start_distance/1000))
         output += ("Start Angle              : {:3.2f}\n".format(self.start_angle))
-        output += ("End Distance (km)        : {:3.2f}\n".format(self.end_distance / 1000))
+        output += ("End Distance (km)        : {:3.2f}\n".format(self.end_distance/1000))
         output += ("End Angle                : {:3.2f}\n".format(self.end_angle))
         output += "# RaDEC events     \n"
         output += ("JD_Start                 : {:3.2f}\n".format(self.jd_start))
@@ -396,8 +395,8 @@ class EventContainer(object):
             [vector] ECEF vector.
         """
 
-        v1 = latLonAlt2ECEFDeg(self.lat, self.lon, self.ht * 1000)
-        v2 = latLonAlt2ECEFDeg(self.lat2, self.lon2, self.ht2 * 1000)
+        v1 = latLonAlt2ECEFDeg(self.lat, self.lon, self.ht*1000)
+        v2 = latLonAlt2ECEFDeg(self.lat2, self.lon2, self.ht2*1000)
 
         return [v1, v2]
 
@@ -464,14 +463,14 @@ class EventContainer(object):
             np.random.seed(seed)
 
         for tr in population:
-            tr.lat = tr.lat + np.random.normal(scale=1) * self.lat_std
-            tr.lon = tr.lon + np.random.normal(scale=1) * self.lon_std
-            tr.ht = tr.ht + np.random.normal(scale=1) * self.ht_std
-            tr.lat2 = tr.lat2 + np.random.normal(scale=1) * self.lat2_std
-            tr.lon2 = tr.lon2 + np.random.normal(scale=1) * self.lon2_std
-            tr.ht2 = tr.ht2 + np.random.normal(scale=1) * self.ht2_std
-            tr.azim = tr.azim + np.random.normal(scale=1) * self.azim_std
-            tr.elev = tr.elev + np.random.normal(scale=1) * self.elev_std
+            tr.lat = tr.lat + np.random.normal(scale=1)*self.lat_std
+            tr.lon = tr.lon + np.random.normal(scale=1)*self.lon_std
+            tr.ht = tr.ht + np.random.normal(scale=1)*self.ht_std
+            tr.lat2 = tr.lat2 + np.random.normal(scale=1)*self.lat2_std
+            tr.lon2 = tr.lon2 + np.random.normal(scale=1)*self.lon2_std
+            tr.ht2 = tr.ht2 + np.random.normal(scale=1)*self.ht2_std
+            tr.azim = tr.azim + np.random.normal(scale=1)*self.azim_std
+            tr.elev = tr.elev + np.random.normal(scale=1)*self.elev_std
 
         return population
 
@@ -571,8 +570,8 @@ class EventContainer(object):
         for n in range(100):
             self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, obs_lat, obs_lon, obs_ht)
             # Use trigonometry to estimate the error - vertical error is the opposite side to the elevation
-            # so vertical error / sin(elev) gives the hypotenuse, which is the trajectory error
-            traj_error = (ht2_m - min_lum_flt_ht) / np.sin(np.radians(self.elev))
+            # so vertical error/sin(elev) gives the hypotenuse, which is the trajectory error
+            traj_error = (ht2_m - min_lum_flt_ht)/np.sin(np.radians(self.elev))
             fwd_range = fwd_range + traj_error
             if traj_error < 1e-8:
                 break
@@ -606,9 +605,9 @@ class EventContainer(object):
             s.latLonAzElToLatLonLatLon(force=True)
             population.append(s)
             ch_az, ch_el = s.latLonlatLonToLatLonAzEl()
-            start, end, closest = calculateClosestPoint(s.lat, s.lon, s.ht * 1000, s.lat2, s.lon2, s.ht2 * 1000,
-                                                        ob_ev.lat, ob_ev.lon, ob_ev.ht * 1000)
-            start, end, closest = start / 1000, end / 1000, closest / 1000
+            start, end, closest = calculateClosestPoint(s.lat, s.lon, s.ht*1000, s.lat2, s.lon2, s.ht2*1000,
+                                                        ob_ev.lat, ob_ev.lon, ob_ev.ht*1000)
+            start, end, closest = start/1000, end/1000, closest/1000
 
             if start > 1000 or end > 1000 or closest > 0.2:
                 log.error("Original             Az, El {:.3f},{:.3f} degrees".format(ob_ev.azim, ob_ev.elev))
@@ -650,7 +649,7 @@ class EventContainer(object):
         self.lat2, self.lon2, ht2_m = AER2LatLonAlt(self.azim, 0 - self.elev, fwd_range, obs_lat, obs_lon, obs_ht)
 
         # Convert to km and store in event
-        self.ht, self.ht2 = ht_m / 1000, ht2_m / 1000
+        self.ht, self.ht2 = ht_m/1000, ht2_m/1000
 
     def latLonAzElToLatLonLatLon(self, force=False):
 
@@ -672,7 +671,7 @@ class EventContainer(object):
             return
 
         # Copy observed lat, lon and height local variables for ease of comprehension and convert to meters
-        obs_lat, obs_lon, obs_ht = self.lat, self.lon, self.ht * 1000
+        obs_lat, obs_lon, obs_ht = self.lat, self.lon, self.ht*1000
 
         # For this routine elevation must always be within 10 - 90 degrees
         min_elev_hard, min_elev, prob_elev, max_elev = 0, 10, 45, 90
@@ -690,8 +689,8 @@ class EventContainer(object):
 
         # Post calculation checks - not required for operation
         # Convert to ECEF
-        x1, y1, z1 = latLonAlt2ECEFDeg(self.lat, self.lon, self.ht * 1000)
-        x2, y2, z2 = latLonAlt2ECEFDeg(self.lat2, self.lon2, self.ht2 * 1000)
+        x1, y1, z1 = latLonAlt2ECEFDeg(self.lat, self.lon, self.ht*1000)
+        x2, y2, z2 = latLonAlt2ECEFDeg(self.lat2, self.lon2, self.ht2*1000)
         x_obs, y_obs, z_obs = latLonAlt2ECEFDeg(obs_lat, obs_lon, obs_ht)
 
         # Calculate vectors of three points on trajectory
@@ -712,8 +711,8 @@ class EventContainer(object):
             log.error("Observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(obs_lat, obs_lon, obs_ht))
             log.error("Propagate fwds, bwds {:.0f},{:.0f} metres".format(fwd_range, bwd_range))
             log.error("At az, az_rev, el {:.4f} ,{:.4f} , {:.4f}".format(self.azim, revAz(self.azim) , self.elev))
-            log.error("Start lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat, self.lon, self.ht * 1000))
-            log.error("End   lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat2, self.lon2, self.ht2 * 1000))
+            log.error("Start lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat, self.lon, self.ht*1000))
+            log.error("End   lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat2, self.lon2, self.ht2*1000))
             log.error("Minimum height to Observed height az,el {},{}".format(min_obs_az, min_obs_el))
             log.error("Minimum height to Maximum height az,el {},{}".format(min_max_az, min_max_el))
             log.error("Observed height to Maximum height az,el {},{}".format(obs_max_az, obs_max_el))
@@ -725,8 +724,8 @@ class EventContainer(object):
             log.error("Traj from observation at lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(obs_lat, obs_lon, obs_ht))
             log.error("Propagate fwds, bwds {:.0f},{:.0f} metres".format(fwd_range, bwd_range))
             log.error("At az, az_rev, el {:.4f} ,{:.4f} , {:.4f}".format(self.azim, revAz(self.azim), self.elev))
-            log.error("Start lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat, self.lon, self.ht * 1000))
-            log.error("End   lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat2, self.lon2, self.ht2 * 1000))
+            log.error("Start lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat, self.lon, self.ht*1000))
+            log.error("End   lat,lon,ht {:3.5f},{:3.5f},{:.0f}".format(self.lat2, self.lon2, self.ht2*1000))
             log.error("Minimum height to Observed height az,el {},{}".format(min_obs_az, min_obs_el))
             log.error("Minimum height to Maximum height az,el {},{}".format(min_max_az, min_max_el))
             log.error("Observed height to Maximum height az,el {},{}".format(obs_max_az, obs_max_el))
@@ -744,8 +743,8 @@ class EventContainer(object):
             azimuth(degrees), elevation(degrees)
         """
 
-        x1, y1, z1 = latLonAlt2ECEFDeg(self.lat, self.lon, self.ht * 1000)
-        x2, y2, z2 = latLonAlt2ECEFDeg(self.lat2, self.lon2, self.ht2 * 1000)
+        x1, y1, z1 = latLonAlt2ECEFDeg(self.lat, self.lon, self.ht*1000)
+        x2, y2, z2 = latLonAlt2ECEFDeg(self.lat2, self.lon2, self.ht2*1000)
         start_pt, end_pt = np.array([x1, y1, z1]), np.array([x2, y2, z2])
         end_start_az, end_start_el = ECEF2AltAz(end_pt, start_pt)
         return revAz(end_start_az), end_start_el
@@ -1511,7 +1510,7 @@ class EventMonitor(multiprocessing.Process):
             if len(platepar_file_list) > 0:
                 platepar_file = platepar_file_list[0]
             else:
-                platepar_file = os.path.join(self.syscon.rms_root_dir, self.syscon.platepar_name)
+                platepar_file = os.path.join(self.syscon.config_file_path, self.syscon.platepar_name)
                 pass
 
         return platepar_file
@@ -1544,7 +1543,7 @@ class EventMonitor(multiprocessing.Process):
                 directory_POSIX_time = convertGMNTimeToPOSIX(night_directory[7:22])
                 # if the POSIX time representation is before the event, and within 16 hours add to the list of directories
                 # most unlikely that a single event could be split across two directories, unless there was large time uncertainty
-                if directory_POSIX_time < event_time and (event_time - directory_POSIX_time).total_seconds() < 16 * 3600:
+                if directory_POSIX_time < event_time and (event_time - directory_POSIX_time).total_seconds() < 16*3600:
                     directory_list.append(
                         os.path.join(os.path.expanduser(self.config.data_dir), self.config.captured_dir,
                                      night_directory))
@@ -1662,22 +1661,22 @@ class EventMonitor(multiprocessing.Process):
 
         """
         # Calculate diagonal FoV of camera
-        diagonal_fov = np.sqrt(rp.fov_v ** 2 + rp.fov_h ** 2)
+        diagonal_fov = np.sqrt(rp.fov_v**2 + rp.fov_h**2)
 
         # Calculation origin will be the ECI of the station taken from the platepar
         jul_date = datetime2JD(convertGMNTimeToPOSIX(event.dt))
         origin = np.array(geo2Cartesian(rp.lat, rp.lon, rp.elev, jul_date))
 
         # Convert trajectory start and end point coordinates to cartesian ECI at JD of event
-        traj_sta_pt = np.array(geo2Cartesian(event.lat, event.lon, event.ht * 1000, jul_date))
-        traj_end_pt = np.array(geo2Cartesian(event.lat2, event.lon2, event.ht2 * 1000, jul_date))
+        traj_sta_pt = np.array(geo2Cartesian(event.lat, event.lon, event.ht*1000, jul_date))
+        traj_end_pt = np.array(geo2Cartesian(event.lat2, event.lon2, event.ht2*1000, jul_date))
 
         # Make relative (_rel) to station coordinates
         stapt_rel, endpt_rel = traj_sta_pt - origin, traj_end_pt - origin
 
         # trajectory vector, and vector for traverse
         traj_vec = traj_end_pt - traj_sta_pt
-        traj_inc = traj_vec / 100
+        traj_inc = traj_vec/100
 
         # the az_centre, alt_centre of the camera
         az_centre, alt_centre = platepar2AltAz(rp)
@@ -1690,15 +1689,15 @@ class EventMonitor(multiprocessing.Process):
         # iterate along the trajectory counting points in the field of view
         points_in_fov = 0
         for i in range(0, 100):
-            point = (stapt_rel + i * traj_inc)
+            point = (stapt_rel + i*traj_inc)
             point_fov = angularSeparationVectDeg(vectNorm(point), vectNorm(fov_vec))
-            if point_fov < diagonal_fov / 2:
+            if point_fov < diagonal_fov/2:
                 points_in_fov += 1
 
         # calculate some additional information for confidence
-        start_distance = (np.sqrt(np.sum(stapt_rel ** 2)))
+        start_distance = (np.sqrt(np.sum(stapt_rel**2)))
         start_angle = angularSeparationVectDeg(vectNorm(stapt_rel), vectNorm(fov_vec))
-        end_distance = (np.sqrt(np.sum(endpt_rel ** 2)))
+        end_distance = (np.sqrt(np.sum(endpt_rel**2)))
         end_angle = angularSeparationVectDeg(vectNorm(endpt_rel), vectNorm(fov_vec))
 
         return points_in_fov, start_distance, start_angle, end_distance, end_angle, fov_ra, fov_dec
@@ -1840,9 +1839,8 @@ class EventMonitor(multiprocessing.Process):
                     log.error("convertFRNameToFF {}".format(ff_file))
                     log.error("fr_file {}".format(fr_file))
 
-        if True:
-            batchFFtoImage(os.path.join(this_event_directory), "jpg", add_timestamp=True,
-                           ff_component='maxpixel')
+        batchFFtoImage(os.path.join(this_event_directory), "jpg", add_timestamp=True,
+                        ff_component='maxpixel')
 
         with open(os.path.join(this_event_directory, "event_report.txt"), "w") as info:
             info.write(event.eventToString())
@@ -1899,7 +1897,7 @@ class EventMonitor(multiprocessing.Process):
                     # Exit loop if upload was successful
                     break
                 else:
-                    retry_delay = (retry * 180 * (1 + random.random()))
+                    retry_delay = (retry*180*(1 + random.random()))
                     log.error("Upload failed on attempt {}. Retry after {:.1f} seconds.".format(retry, retry_delay))
                     time.sleep(retry_delay)
                     log.info("Retrying upload of {}. This is retry {}".format(event_monitor_directory, retry))
@@ -1931,21 +1929,21 @@ class EventMonitor(multiprocessing.Process):
             future_events += 1
             in_future = True
             log.info("The end of event at {} is in the future by {:.1f} minutes"
-                     .format(observed_event.dt, time_until_event_end_seconds / 60))
-            if time_until_event_end_seconds < float(self.check_interval) * 60:
+                     .format(observed_event.dt, time_until_event_end_seconds/60))
+            if time_until_event_end_seconds < float(self.check_interval)*60:
                 log.info(
                     "Check interval is set to {:.1f} minutes, however end of future event is only {:.1f} minutes away"
-                    .format(float(self.check_interval), time_until_event_end_seconds / 60))
+                    .format(float(self.check_interval), time_until_event_end_seconds/60))
                 # set the check_interval to the time until the end of the event
-                self.check_interval = float(time_until_event_end_seconds) / 60
+                self.check_interval = float(time_until_event_end_seconds)/60
                 # random time offset to reduce congestion
-                self.check_interval += random.randint(20, 60) / 60
+                self.check_interval += random.randint(20, 60)/60
                 log.info("Check interval set to {:.1f} minutes, so that future event is reported quickly"
                          .format(float(self.check_interval)))
             else:
                 log.info(
                     "Check interval is set to {:.1f} minutes, end of future event {:.1f} minutes away, no action required"
-                    .format(float(self.check_interval), time_until_event_end_seconds / 60))
+                    .format(float(self.check_interval), time_until_event_end_seconds/60))
 
         else:
             in_future = False
@@ -2042,22 +2040,22 @@ class EventMonitor(multiprocessing.Process):
                 break  # do no more work on any version of this trajectory - break exits loop
             # From the infinitely extended trajectory, work out the closest point to the camera
             # ev_con.elevation is the height above sea level of the station in metres, no conversion required
-            start_dist, end_dist, atmos_dist = calculateClosestPoint(event.lat, event.lon, event.ht * 1000,
-                                                                     event.lat2, event.lon2, event.ht2 * 1000,
+            start_dist, end_dist, atmos_dist = calculateClosestPoint(event.lat, event.lon, event.ht*1000,
+                                                                     event.lat2, event.lon2, event.ht2*1000,
                                                                      ev_con.latitude, ev_con.longitude,
                                                                      ev_con.elevation)
             min_dist = min([start_dist, end_dist, atmos_dist])
 
             # If this version of the trajectory outside the farradius, continue
-            if min_dist > event.far_radius * 1000 and not test_mode:
+            if min_dist > event.far_radius*1000 and not test_mode:
                 # Do no more work on this version of the trajectory
                 continue
 
             # If trajectory inside the closeradius, then do the upload and mark as processed
-            if min_dist < event.close_radius * 1000 and not test_mode:
+            if min_dist < event.close_radius*1000 and not test_mode:
                 # this is just for info
                 log.info("Event at {} was {:.0f}km away, inside {:.0f}km so is uploaded with no further checks.".format(
-                    event.dt, min_dist / 1000, event.close_radius))
+                    event.dt, min_dist/1000, event.close_radius))
                 check_time_end = RmsDateTime.utcnow()
                 check_time_seconds = (check_time_end - check_time_start).total_seconds()
                 log.info("Check of trajectories time elapsed {:.2f} seconds".format(check_time_seconds))
@@ -2075,8 +2073,8 @@ class EventMonitor(multiprocessing.Process):
 
             # If trajectory inside the farradius, then check if the trajectory went through the FoV
             # The returned count is the number of 100th parts of the trajectory observed through the FoV
-            if min_dist < event.far_radius * 1000 or test_mode:
-                # log.info("Event at {} was {:4.1f}km away, inside {:4.1f}km, consider FOV.".format(event.dt, min_dist / 1000, event.far_radius))
+            if min_dist < event.far_radius*1000 or test_mode:
+                # log.info("Event at {} was {:4.1f}km away, inside {:4.1f}km, consider FOV.".format(event.dt, min_dist/1000, event.far_radius))
                 count, event.start_distance, event.start_angle, event.end_distance, event.end_angle, event.fovra, event.fovdec = self.trajectoryThroughFOV(
                     event)
                 if count != 0:
@@ -2103,7 +2101,7 @@ class EventMonitor(multiprocessing.Process):
                             logfile.write(
                                 "{} LOC {} Az:{:3.1f} El:{:3.1f} sta_lat:{:3.4f} sta_lon:{:3.4f} sta_dist:{:3.0f} end_dist:{:3.0f} fov_h:{:3.1f} fov_v:{:3.1f} sa:{:3.1f} ea::{:3.1f} \n".format(
                                     convertGMNTimeToPOSIX(event.dt), ev_con.stationID, rp.az_centre, rp.alt_centre,
-                                    rp.lat, rp.lon, event.start_distance / 1000, event.end_distance / 1000, rp.fov_h,
+                                    rp.lat, rp.lon, event.start_distance/1000, event.end_distance/1000, rp.fov_h,
                                     rp.fov_v, event.start_angle, event.end_angle))
                 else:
 
@@ -2142,7 +2140,7 @@ class EventMonitor(multiprocessing.Process):
         log.info("Ra        :   {}".format(e.ra))
         log.info("Dec       :   {}".format(e.dec))
 
-        e.suffix = "JD_start_{}_JD_end_{}_Ra_{:.0f}_Dec_{:.0f}".format(round(e.jd_start * 100), round(e.jd_end * 100), round(e.ra * 100), round(e.dec * 100))
+        e.suffix = "JD_start_{}_JD_end_{}_Ra_{:.0f}_Dec_{:.0f}".format(round(e.jd_start*100), round(e.jd_end*100), round(e.ra*100), round(e.dec*100))
         generic_file_name = "{}_{}.png".format(sys_con.stationID, e.suffix)
         thumbnail_file_name = "thumbnail_{}".format(generic_file_name)
         calstar_assisted_thumbnail_file_name = "calstar_assisted_thumbnail_{}".format(generic_file_name)
@@ -2184,7 +2182,7 @@ class EventMonitor(multiprocessing.Process):
                 pp.read(os.path.join(os.path.expanduser(sys_con.config_file_path), sys_con.platepar_name))
                 mask = loadMask(os.path.join(os.path.expanduser(sys_con.config_file_path), sys_con.mask_file))
                 config_dict[sys_con.stationID], pp_dict[sys_con.stationID], mask_dict[sys_con.stationID] = sys_con, pp, mask
-                fov_file_name = "FOV_{}_Ra_{:.0f}_Dec_{:.0f}.png".format(sys_con.stationID, e.ra *100, e.dec * 100)
+                fov_file_name = "FOV_{}_Ra_{:.0f}_Dec_{:.0f}.png".format(sys_con.stationID, e.ra *100, e.dec*100)
                 fov_file_path = os.path.join(radec_event_dir, fov_file_name)
                 plotFOVSkyMap(pp_dict, config_dict, None,
                                                  output_file_name=fov_file_path,
@@ -2407,7 +2405,7 @@ class EventMonitor(multiprocessing.Process):
 
                 time_left_before_start = (start_time - RmsDateTime.utcnow())
                 time_left_before_start = time_left_before_start - datetime.timedelta(microseconds=time_left_before_start.microseconds)
-                time_left_before_start_minutes = int(time_left_before_start.total_seconds() / 60)
+                time_left_before_start_minutes = int(time_left_before_start.total_seconds()/60)
                 next_check_start_time = (RmsDateTime.utcnow() + datetime.timedelta(minutes=self.check_interval))
                 next_check_start_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
                 log.info('Next EventMonitor run : {} UTC; {:3.1f} minutes from now'.format(next_check_start_time_str, int(self.check_interval)))
@@ -2420,10 +2418,10 @@ class EventMonitor(multiprocessing.Process):
                 next_check_start_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
                 log.info('Next EventMonitor run : {} UTC {:3.1f} minutes from now'.format(next_check_start_time_str, self.check_interval))
             # Wait for the next check
-            self.exit.wait(60 * self.check_interval)
+            self.exit.wait(60*self.check_interval)
             # Increase the check interval
             if self.check_interval < self.syscon.event_monitor_check_interval:
-                self.check_interval = self.check_interval * 1.1
+                self.check_interval = self.check_interval*1.1
 
 
 def dictToThumbnails(config, observations_dict, event, file_path=None):
@@ -2545,10 +2543,9 @@ def renderMagnitudeAzElPlot(config, pp, magnitude_list, az_list, el_list , e_jd,
 
         title = "{} plot of magnitudes against azimuth and elevation at RA {} Dec {} between jd {:2f} and {:2f}".format(config.stationID,r, d, e_jd, l_jd)
         log.info(title)
-        plt.figure(figsize=(areaToGoldenRatioXY(16 * 12, rotate=True)))
+        plt.figure(figsize=(areaToGoldenRatioXY(16*12, rotate=True)))
 
         plt.plot(marker='o', edgecolor='k', label='Magnitude', s=100, c='none', zorder=3)
-        ax = plt.gca()
         plt.scatter(x_vals, y_vals, c=magnitude_list, zorder=3)
         plt.colorbar(label="Magnitude")
         plt.xlabel("Azimuth normalised to camera pointing of {:.1f} degrees +ve from North".format(pp.az_centre))
@@ -2604,10 +2601,9 @@ def renderMagnitudeElevationPlot(config, pp, magnitude_list, elevation_list, e_j
 
 
         title = "{} plot of magnitudes against elevation at RA {} Dec {}".format(config.stationID,r, d)
-        plt.figure(figsize=(areaToGoldenRatioXY(16 * 12, rotate=True)))
+        plt.figure(figsize=(areaToGoldenRatioXY(16*12, rotate=True)))
 
         plt.plot(marker='o', edgecolor='k', label='Elevation', s=100, c='none', zorder=3)
-        ax = plt.gca()
         plt.scatter(x_vals, y_vals, c=jd_vals_norm,  zorder=3)
         plt.colorbar(label="Time (jd) - normalise on {:.2f}".format(median_jd))
         plt.ylabel("Magnitude")
@@ -2663,10 +2659,9 @@ def renderMagnitudeAzimuthPlot(config, pp, magnitude_list, azimuth_list, e_jd, l
 
 
         title = "{} plot of magnitudes against azimuth at RA {} Dec {}".format(config.stationID,r, d)
-        plt.figure(figsize=(areaToGoldenRatioXY(16 * 12, rotate=True)))
+        plt.figure(figsize=(areaToGoldenRatioXY(16*12, rotate=True)))
 
         plt.plot(marker='o', edgecolor='k', label='Azimuth', s=100, c='none', zorder=3)
-        ax = plt.gca()
         plt.scatter(x_vals, y_vals, c=jd_vals_norm,  zorder=3)
         plt.colorbar(label="Time (jd) - normalise on {:.2f}".format(median_jd))
         plt.ylabel("Magnitude")
@@ -2709,20 +2704,19 @@ def renderMagnitudeTimePlot(config, magnitude_list, elevation_list, e_jd, l_jd, 
 
         start_time, end_time = min(x_vals).strftime("%Y-%m-%d %H:%M:%S"), max(x_vals).strftime("%Y-%m-%d %H:%M:%S")
         title = "{} plot of magnitudes against time at RA {} Dec {} from {} to {}".format(config.stationID, r, d, start_time, end_time)
-        plt.figure(figsize=(areaToGoldenRatioXY(16 * 12, rotate=True)))
+        plt.figure(figsize=(areaToGoldenRatioXY(16*12, rotate=True)))
 
         plt.plot(marker='o', edgecolor='k', label='Elevation', s=100, c='none', zorder=3)
-        ax = plt.gca()
         plt.scatter(x_vals, y_vals, c=elevation_list, zorder=3)
         plt.gca().invert_yaxis()
         plt.colorbar(label="Elevation from Horizontal (degrees)")
         seconds_of_observation = (max(x_vals) - min(x_vals)).total_seconds()
         seconds_of_observation = max(1,seconds_of_observation)
-        interval_between_ticks = seconds_of_observation / 6
+        interval_between_ticks = seconds_of_observation/6
         tick_offsets = np.arange(0, seconds_of_observation, interval_between_ticks)
         x_tick_list = []
         date_form = DateFormatter("%Y-%m-%d %H:%M:%S")
-        ax.xaxis.set_major_formatter(date_form)
+        plt.gca().xaxis.set_major_formatter(date_form)
         for offset in tick_offsets:
             x_tick_list.append((min(x_vals) + datetime.timedelta(seconds=offset)).strftime("%Y-%m-%d %H:%M:%S"))
         plt.gca().set_xticks(x_tick_list)
@@ -2767,7 +2761,7 @@ def renderMagnitudeHistogram(config, magnitude_list, e_jd, l_jd, r, d, plot_form
         start_time, end_time = min(x_vals).strftime("%Y-%m-%d %H:%M:%S"), max(x_vals).strftime("%Y-%m-%d %H:%M:%S")
         title = "{} Histogram of magnitudes at RA {} Dec {} from JD {} to {}".format(config.stationID, r, d,
                                                                                           start_time, end_time)
-        plt.figure(figsize=(areaToGoldenRatioXY(16 * 12, rotate=True)))
+        plt.figure(figsize=(areaToGoldenRatioXY(16*12, rotate=True)))
 
         plt.hist(y_vals, bins=30, edgecolor='k', label='Magnitude')
         plt.xlabel("Magnitude")
@@ -3029,8 +3023,7 @@ def dictMagsRaDec(config, r, d, e_jd=0, l_jd=np.inf, max_number_of_images=300, w
     """
 
     full_path_to_archived = os.path.expanduser(os.path.join(str(config.data_dir), str(config.archived_dir)))
-    full_path_to_default_platepar = os.path.join(getRmsRootDir(), config.platepar_name)
-
+    full_path_to_default_platepar = os.path.join(config.config_file_path, config.platepar_name)
 
     directories_to_search = filterDirectoriesByJD(full_path_to_archived, e_jd, l_jd)
     observation_sequence_dict = {}
@@ -3075,7 +3068,7 @@ def dictMagsRaDec(config, r, d, e_jd=0, l_jd=np.inf, max_number_of_images=300, w
             with open(platepars_all_recalibrated_path, 'r') as fh:
                 pp_recal_json = json.load(fh)
                 if len(pp_recal_json):
-                    midpoint = int(len(pp_recal_json) / 2)
+                    midpoint = int(len(pp_recal_json)/2)
                     for fits, i in zip(pp_recal_json, range(0,midpoint)):
                         pass
                     pp_mid_recal.loadFromDict(pp_recal_json[fits])
@@ -3163,7 +3156,7 @@ def calstarRaDecToDict(data_dir_path, config, pp, pp_recal_json, r_target, d_tar
     if write_log:
         log.info("Processing {} candidate fits files".format(len(candidate_fits)))
     sequence_dict = dict()
-    iteration_counter, step = 0, round(len(candidate_fits) / 5)
+    iteration_counter, step = 0, round(len(candidate_fits)/5)
     for fits_file, star_list in candidate_fits:
         iteration_counter += 1
         if iteration_counter % step == 0:
@@ -3207,11 +3200,11 @@ def calstarRaDecToDict(data_dir_path, config, pp, pp_recal_json, r_target, d_tar
                                                                  amp_list, FWHM_list, mag_arr, x_list,
                                                                  y_list, snr_list, NSatPx_list):
             az, el = raDec2AltAz(r, d, j, pp.lat, pp.lon)
-            radius = np.hypot(y - pp.Y_res / 2, x - pp.X_res / 2)
+            radius = np.hypot(y - pp.Y_res/2, x - pp.X_res/2)
             actual_deviation_degrees = angularSeparationDeg(r_target, d_target, r, d)
             vignetting, offset = pp.vignetting_coeff, pp.mag_lev
             if correctVignetting(intens_sum, radius, vignetting) > 0.00001:
-                mag_recalc = 0 - 2.5 * np.log10(correctVignetting(intens_sum, radius, vignetting)) + offset
+                mag_recalc = 0 - 2.5*np.log10(correctVignetting(intens_sum, radius, vignetting)) + offset
                 mag_recalc = extinctionCorrectionApparentToTrue([mag_recalc], [x], [y], j, pp)[0]
             else:
                 mag_recalc = 0
@@ -3223,10 +3216,7 @@ def calstarRaDecToDict(data_dir_path, config, pp, pp_recal_json, r_target, d_tar
 
 
             path_to_ff = os.path.join(data_dir_path, fits_file)
-            if os.path.exists(path_to_ff):
-                path_to_ff = path_to_ff
-
-            else:
+            if not os.path.exists(path_to_ff):
                 fits_time_jd = rmsTimeExtractor(path_to_ff, asJD=True)
                 path_to_ff = getFitsPaths(captured_directory_path, fits_time_jd)
                 if len(path_to_ff):
@@ -3336,7 +3326,7 @@ def rmsTimeExtractor(rms_time, asTuple = False, asJD = False, delimiter = None):
     # Initialise delim in case nothing is detected
     delim = "_"
     # find the delimiter, which is probably the first non alphanumeric character
-    if delimiter == None:
+    if delimiter is None:
         for c in rms_time:
             if c.isnumeric() or c.isalpha():
                 continue
@@ -3348,7 +3338,6 @@ def rmsTimeExtractor(rms_time, asTuple = False, asJD = False, delimiter = None):
 
     field_list = rms_time.split(delim)
     field_count = len(field_list)
-    str_us = "0"
 
     consecutive_time_date_fields = 0
 
@@ -3361,11 +3350,13 @@ def rmsTimeExtractor(rms_time, asTuple = False, asJD = False, delimiter = None):
         # Handle year month day
         if consecutive_time_date_fields == 1:
             if len(field) == 8 or len(field) == 6:
+
                 # This looks like a date field so process the date field
                 str_date = field_list[field_no]
                 if len(str_date) == 8:
                     year, month, day = int(str_date[:4]), int(str_date[4:6]), int(str_date[6:8])
                     dt = datetime.datetime(year=int(year), month=int(month), day=int(day))
+
                 # Handle 2 digit year format
                 if len(str_date) == 6:
                     year, month, day = 2000 + int(str_date[:2]), int(str_date[2:4]), int(str_date[4:6])
@@ -3393,7 +3384,7 @@ def rmsTimeExtractor(rms_time, asTuple = False, asJD = False, delimiter = None):
         if consecutive_time_date_fields == 3:
             if field.isnumeric():
                 # Convert any arbitrary length next field to microseconds
-                us = int(field) * (10 ** (6 - len(field)))
+                us = int(field)*(10**(6 - len(field)))
                 dt = datetime.datetime(year, month, day, hour, minute, second, microsecond=int(us))
                 # Stop looping in all cases
                 break
@@ -3481,8 +3472,8 @@ def plateparFitsContainsRaDec(r, d, source_pp, file_name, mask_dir, check_mask=T
     r_array = np.array([r])
     d_array = np.array([d])
     jd_arr = np.array([rmsTimeExtractor(file_name, asJD=True)])
-    x_arr = np.array([source_pp.X_res / 2])
-    y_arr = np.array([source_pp.Y_res / 2])
+    x_arr = np.array([source_pp.X_res/2])
+    y_arr = np.array([source_pp.Y_res/2])
     level_arr = np.array([1])
     _, r_centre_pp, dec_centre_pp, _ = xyToRaDecPP(jd_arr, x_arr, y_arr, level_arr, source_pp, jd_time=True)
 
@@ -3490,7 +3481,7 @@ def plateparFitsContainsRaDec(r, d, source_pp, file_name, mask_dir, check_mask=T
     angle_from_centre = angularSeparationDeg(r, d, r_centre_pp, dec_centre_pp)[0]
 
     # this prevents spurious coordinates being generated for r, d outside fov
-    if angle_from_centre > max(source_pp.fov_h, source_pp.fov_v) / 2:
+    if angle_from_centre > max(source_pp.fov_h, source_pp.fov_v)/2:
         return False, 0, 0
 
     source_x, source_y = raDecToXYPP(r_array, d_array, source_JD, source_pp)
@@ -3577,13 +3568,13 @@ def assembleContactSheet(thumbnail_list, x_across=None, border = 1):
 
     fits, thumbnail = thumbnail_list[0]
 
-    y_res, x_res = len(thumbnail) + border * 2, len(thumbnail[0]) + border * 2
-    pixels = y_res * x_res * thumbnail_count
+    y_res, x_res = len(thumbnail) + border*2, len(thumbnail[0]) + border*2
+    pixels = y_res*x_res*thumbnail_count
     if x_across is None:
         # We are free to calculate our own dimensions, so use golden ratio
         across, down = areaToGoldenRatioXY(pixels)
-        across = int(np.ceil(across / x_res) * x_res)
-        down = int(np.ceil(down / y_res) * y_res)
+        across = int(np.ceil(across/x_res)*x_res)
+        down = int(np.ceil(down/y_res)*y_res)
 
         #create an array of zeros
         contact_sheet_array = np.zeros((across, down))
@@ -3637,13 +3628,13 @@ def areaToGoldenRatioXY(count, rotate=False):
         down:[int] Number of squares down
     """
 
-    gr = (1 + 5 ** 0.5) / 2
-    down = np.ceil((count * gr) ** 0.5)
+    gr = (1 + 5**0.5)/2
+    down = np.ceil((count*gr)**0.5)
 
     if down < 1:
         return 0, 0
 
-    across = np.ceil(count / down)
+    across = np.ceil(count/down)
 
     if rotate:
         return int(down), int(across)
@@ -3741,7 +3732,7 @@ def createThumbnails(config, r, d, earliest_jd=0, latest_jd=np.inf, max_thumbnai
     fits_len = len(path_coords_list)
     if write_log:
         if fits_len == 0:
-            log.info("Did not find ra, dec {:.2f},{:.2f}".format(r, d, fits_len))
+            log.info("Did not find ra, dec ({:.2f},{:.2f}) in {} fits files".format(r, d, fits_len))
         elif fits_len == 1:
             log.info("Found ra,dec ({:.2f},{:.2f}) degrees in {} fits file".format(r, d, fits_len))
         else:
@@ -3750,7 +3741,7 @@ def createThumbnails(config, r, d, earliest_jd=0, latest_jd=np.inf, max_thumbnai
 
     path_coords_list = shortenList(path_coords_list, max_thumbnails)
     fits_len = len(path_coords_list)
-    processed, increment = 0, int(fits_len / 4)
+    processed, increment = 0, int(fits_len/4)
     increment = max(increment,1)
 
     for fits_path, x, y in path_coords_list:
@@ -3782,7 +3773,7 @@ def shortenList(input_list, length):
     if length == 0:
         return output_list
     elif list_len > length:
-        step_size_float = list_len / length
+        step_size_float = list_len/length
         next_item_count_float, item_count_int = 0, 0
         for p in input_list:
             if next_item_count_float <= item_count_int:
@@ -3854,13 +3845,13 @@ def exciseFromFF(ff, x_centre, y_centre, width = 50, height = 50, allow_drift_in
     if allow_drift_in:
         # This allows an object to drift into the field of view
         # Establish where we can safely place the centre
-        x_centre = max(0.5 * width, x_centre)
-        x_centre = min(x_res - 0.5 * width, x_centre)
-        y_centre = max(0.5 * height, y_centre)
-        y_centre = min(y_res - 0.5 * height, y_centre)
+        x_centre = max(0.5*width, x_centre)
+        x_centre = min(x_res - 0.5*width, x_centre)
+        y_centre = max(0.5*height, y_centre)
+        y_centre = min(y_res - 0.5*height, y_centre)
 
         # Compute crop bounds
-        x_min, y_min = round(x_centre - 0.5 * width), round(y_centre - 0.5 * height)
+        x_min, y_min = round(x_centre - 0.5*width), round(y_centre - 0.5*height)
         x_max, y_max = x_min + width, y_min + height
 
         # Crop into a new array
@@ -3873,7 +3864,7 @@ def exciseFromFF(ff, x_centre, y_centre, width = 50, height = 50, allow_drift_in
         # Establish where we can safely place the centre
 
 
-        x_min, y_min = round(x_centre - 0.5 * width), round(y_centre - 0.5 * height)
+        x_min, y_min = round(x_centre - 0.5*width), round(y_centre - 0.5*height)
         x_max, y_max = x_min + width, y_min + height
 
         if 0 < x_min and x_max < x_res and  0 < y_min and y_max < y_res:
@@ -4061,17 +4052,17 @@ def calculateClosestPoint(beg_lat, beg_lon, beg_ele, end_lat, end_lon, end_ele, 
 
         traj_vec = vectNorm(end_ecef - beg_ecef)
         start_vec, end_vec = (ref_ecef - beg_ecef), (ref_ecef - end_ecef)
-        start_dist, end_dist = (np.sqrt((np.sum(start_vec ** 2)))), (np.sqrt((np.sum(end_vec ** 2))))
+        start_dist, end_dist = (np.sqrt((np.sum(start_vec**2)))), (np.sqrt((np.sum(end_vec**2))))
 
         # Consider whether vector is zero length by looking at start and end
         if [beg_lat, beg_lon, beg_ele] != [end_lat, end_lon, end_ele]:
 
             # Vector start and end points are different, calculate the projection of the ref vect onto the traj vector
-            proj_vec = beg_ecef + np.dot(start_vec, traj_vec) * traj_vec
+            proj_vec = beg_ecef + np.dot(start_vec, traj_vec)*traj_vec
 
             # Hence, calculate the vector at the nearest point, and the closest distance
             closest_vec = ref_ecef - proj_vec
-            closest_dist = (np.sqrt(np.sum(closest_vec ** 2)))
+            closest_dist = (np.sqrt(np.sum(closest_vec**2)))
 
         else:
 
@@ -4107,7 +4098,7 @@ def ecefV2LatLonAlt(ecef_vect):
         """
 
     lat, lon, ht = ecef2LatLonAlt(ecef_vect[0], ecef_vect[1], ecef_vect[2])
-    return np.degrees(lat), np.degrees(lon), ht / 1000
+    return np.degrees(lat), np.degrees(lon), ht/1000
 
 def randomword(length):
 
@@ -4289,13 +4280,13 @@ def gcDistDeg(lat1, lon1, lat2, lon2):
     lat2, lon2 = np.radians(lat2), np.radians(lon2)
     delta_lat, delta_lon = (lat2 - lat1)/2 , (lon2 - lon1)/2
 
-    t1 = np.sin(delta_lat) ** 2
-    t2 = np.sin(delta_lon) ** 2 * np.cos(lat1) * np.cos(lat2)
+    t1 = np.sin(delta_lat)**2
+    t2 = np.sin(delta_lon)**2*np.cos(lat1)*np.cos(lat2)
 
     if (abs(t1) - abs(t2)) < 1e-10:
         return 0
     else:
-        return 2 * np.arcsin((t1 + t2) ** 0.5) * 6371.009
+        return 2*np.arcsin((t1 + t2)**0.5)*6371.009
 
 def testRevAz():
 
@@ -4439,7 +4430,7 @@ def testEventToECEFVector():
         v1,v2 = t.eventToECEFVector()
         lat,lon,ht = ecef2LatLonAlt(v1[0],v1[1],v1[2])
         lat2, lon2, ht2 = ecef2LatLonAlt(v2[0], v2[1], v2[2])
-        ht, ht2 = ht / 1000, ht2 / 1000
+        ht, ht2 = ht/1000, ht2/1000
         lat, lon, lat2, lon2 = np.degrees(lat), np.degrees(lon), np.degrees(lat2), np.degrees(lon2)
 
         success = success if gcDistDeg(iLat, iLon, lat, lon) < 0.1  else False
@@ -4575,8 +4566,8 @@ def testApplyCartesianSD():
     e = event
     for e in event_population:
 
-        x1, y1, z1 = latLonAlt2ECEFDeg(e.lat, e.lon, e.ht * 1000)
-        x2, y2, z2 = latLonAlt2ECEFDeg(e.lat2, e.lon2, e.ht2 * 1000)
+        x1, y1, z1 = latLonAlt2ECEFDeg(e.lat, e.lon, e.ht*1000)
+        x2, y2, z2 = latLonAlt2ECEFDeg(e.lat2, e.lon2, e.ht2*1000)
         x1l.append(x1)
         y1l.append(y1)
         z1l.append(z1)
@@ -4814,7 +4805,7 @@ if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser(description="""Check a web page for trajectories, and upload relevant data. \
         """, formatter_class=argparse.RawTextHelpFormatter)
 
-    arg_parser.add_argument('-c', '--config', metavar='CONFIG_PATH', type=str,
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
                             help="Path to a config file which will be used instead of the default one.")
 
     arg_parser.add_argument('-o', '--oneshot', dest='one_shot', default=False, action="store_true",
@@ -4834,10 +4825,12 @@ if __name__ == "__main__":
 
     # Load the config file
     if cml_args.config is None:
-        syscon = cr.parse(os.path.join(os.getcwd(),".config"))
+        syscon = cr.loadConfigFromDirectory(".config", os.getcwd())
     else:
-        syscon = cr.parse(os.path.expanduser(cml_args.config[0]))
+        syscon = cr.loadConfigFromDirectory(cml_args.config, os.getcwd())
     # Set the web page to monitor
+
+    print(f"Loaded config for {syscon.stationID}")
 
     if testIndividuals():
         log.info("Individual function test success")

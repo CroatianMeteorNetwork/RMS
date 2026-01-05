@@ -40,7 +40,7 @@ import json
 
 
 from RMS.Misc import obfuscatePassword
-from RMS.Routines.GstreamerCapture import GstVideoFile
+from RMS.Routines.GstreamerCapture import GstVideoFile, getStructureValue
 from RMS.Formats.ObservationSummary import getObsDBConn, addObsParam
 from RMS.RawFrameSave import RawFrameSaver
 from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp
@@ -662,8 +662,13 @@ class BufferedCapture(Process):
             port = parsed.port or 554
 
             last_error = None
+            stop_event = getattr(self, "exit", None)
             
             for attempt in range(max_attempts):
+
+                if stop_event is not None and stop_event.is_set():
+                    log.info("RTSP probe aborted - shutdown requested")
+                    return False, RtspProbeResult.UNKNOWN_ERROR
                 try:
                     # Try to resolve hostname first
                     try:
@@ -686,19 +691,17 @@ class BufferedCapture(Process):
                         time.sleep(10)
 
                         # Second verification probe
-                        sock2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        sock2.settimeout(timeout)
-                        result2 = sock2.connect_ex((host, port))
-                        sock2.close()
+                        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        sock.settimeout(timeout)
+                        result = sock.connect_ex((host, port))
+                        sock.close()
 
-                        if result2 == 0:
+                        if result == 0:
                             log.info("RTSP service ready after {} attempts (verified with 2 probes)".format(attempt + 1))
                             return True, RtspProbeResult.SUCCESS
-                        else:
-                            log.info("Second probe failed, continuing retry loop...")
-                            last_error = RtspProbeResult.CONNECTION_REFUSED
-                            # Don't sleep at end of loop - continue to next attempt immediately
-                    
+
+                        log.info("Second probe failed, continuing retry loop...")
+
                     # Analyze specific connection errors
                     if result in (errno.ENETUNREACH, errno.ENETDOWN):
                         last_error = RtspProbeResult.NETWORK_DOWN
@@ -1342,7 +1345,7 @@ class BufferedCapture(Process):
                     self.pts_buffer = []
 
                     # Attempt to get a sample and determine the frame shape
-                    sample = self.device.emit("pull-sample")
+                    sample = self.device.emit("try-pull-sample", 500 * Gst.MSECOND)
                     if not sample:
                         raise ValueError("Could not obtain sample.")
 
@@ -1361,8 +1364,8 @@ class BufferedCapture(Process):
                         raise ValueError("Could not determine frame shape.")
                     
                     # Extract width, height, and format, and create frame
-                    width = structure.get_value('width')
-                    height = structure.get_value('height')
+                    width = getStructureValue(structure, 'width')
+                    height = getStructureValue(structure, 'height')
 
                     if self.config.gst_colorspace == 'GRAY8':
                         self.frame_shape = (height, width)
@@ -1564,8 +1567,8 @@ class BufferedCapture(Process):
                     if hasattr(self.device, 'set_emit_signals'):
                         try:
                             self.device.set_emit_signals(False)
-                        except:
-                            pass
+                        except Exception as e:
+                            log.debug("set_emit_signals cleanup failed: %s", e)
 
                 else:                                                    # Fallback
                     log.debug("releaseResources: Unknown device type - just dropping ref")
@@ -2391,8 +2394,8 @@ if __name__ == "__main__":
         print('Structure obtained!')
 
         print('Extracting width and height...', end=' ')
-        width = structure.get_value('width')
-        height = structure.get_value('height')
+        width = getStructureValue(structure, 'width')
+        height = getStructureValue(structure, 'height')
         print('Width and height extracted!')
 
         print('Creating frame...', end=' ')

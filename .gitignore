@@ -89,6 +89,7 @@ target/
 
 #VS Code files
 .vscode
+.env
 
 #Jetbrains code files
 .idea
@@ -106,3 +107,7 @@ Utils/SaturationTools.c
 
 # Large GMN catalog that's too big for GitHub
 Catalogs/GMN_StarCatalog_LM12.0.bin
+
+# RMS SatellitePositions.py cache
+*.bsp
+.skyfield_cache

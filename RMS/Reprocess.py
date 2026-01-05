@@ -10,6 +10,7 @@ import traceback
 import argparse
 import random
 import shutil
+from datetime import timedelta
 
 from RMS.ArchiveDetections import archiveDetections, archiveFieldsums, archiveFrameTimelapse
 # from RMS.Astrometry.ApplyAstrometry import applyAstrometryFTPdetectinfo
@@ -31,7 +32,7 @@ from RMS.Routines.MaskImage import loadMask
 from Utils.CalibrationReport import generateCalibrationReport
 from Utils.Flux import prepareFluxFiles
 from Utils.FOVKML import fovKML
-from Utils.GenerateTimelapse import generateTimelapse, generateTimelapseFromFrameBlocks, listImageBlocksBefore
+from Utils.GenerateTimelapse import generateTimelapse, generateTimelapseFromFrameBlocks, listImageBlocksBefore, findLastNightFrameInWindow
 from RMS.CaptureModeSwitcher import lastNightToDaySwitch
 from Utils.MakeFlat import makeFlat
 from Utils.PlotFieldsums import plotFieldsums
@@ -741,7 +742,20 @@ def processFramesFiles(config):
     log.info("Generating timelapse(s) from saved frames...")
 
     try:
-        cutoff_utc = lastNightToDaySwitch(config)
+        # Get sunrise time and maximum possible cutoff (sunrise + inertia)
+        sunrise_utc, max_cutoff_utc = lastNightToDaySwitch(config)
+
+        # Find the actual last night frame in the inertia window
+        # This prevents day frames captured during inertia from being included
+        last_night_frame_ts = findLastNightFrameInWindow(frame_dir, sunrise_utc, max_cutoff_utc)
+
+        # Use the last night frame timestamp (+ 1 second to include it) as cutoff,
+        # or fall back to sunrise if no night frames were found in the window
+        if last_night_frame_ts is not None:
+            cutoff_utc = last_night_frame_ts + timedelta(seconds=1)
+        else:
+            cutoff_utc = sunrise_utc
+
         image_blocks = listImageBlocksBefore(cutoff_utc, frame_dir)
 
         timelapse_results = generateTimelapseFromFrameBlocks(
