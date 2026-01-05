@@ -35,21 +35,27 @@ TFLITE_AVAILABLE = False
 
 # Used to determine detection parameters which will change in ML filtering is available
 try:
-    from tflite_runtime.interpreter import Interpreter
+    from ai_edge_litert.interpreter import Interpreter       # 1 – new LiteRT
     TFLITE_AVAILABLE = True
 except ImportError:
     try:
-        from tensorflow.lite.python.interpreter import Interpreter
+        from tflite_runtime.interpreter import Interpreter    # 2 – legacy wheel
         TFLITE_AVAILABLE = True
     except ImportError:
-        TFLITE_AVAILABLE = False
+        try:
+            from tensorflow.lite.python.interpreter import Interpreter  # 3 – full TF
+            TFLITE_AVAILABLE = True
+        except ImportError:
+            pass
 
 
 def choosePlatform(win_conf, rpi_conf, linux_pc_conf):
     """ Choose the setting depending on if this is running on the RPi or a Linux PC. """
 
-    # Check if running on Windows
-    if 'win' in sys.platform:
+    # Check if running on Windows.
+    # ``startswith`` ensures the platform string actually begins with ``"win"``
+    # instead of matching other identifiers that merely contain that substring.
+    if sys.platform.startswith('win'):
         return win_conf
 
     else:
@@ -192,8 +198,8 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
         if cml_args_config[0] == '.':
 
             # Locate all files in the data directory that end with '.config'
-            config_files = [file_name for file_name in os.listdir(dir_path) \
-                if (file_name.endswith('.config') or file_name.endswith('dfnstation.cfg')) \
+            config_files = [file_name for file_name in os.listdir(dir_path) 
+                if (file_name.endswith('.config') or file_name.endswith('dfnstation.cfg')) 
                 and not (file_name == 'bak.config')]
 
             # If there is exactly one config file, use it
@@ -212,9 +218,7 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
 
         if config_file is None:
             raise FileNotFoundError("A config file could not be found in directory: {:s}, {:s}".format(
-                dir_path, cml_args_config
-                )
-            )
+                dir_path, cml_args_config))
 
         print('Loading config file:', config_file)
 
@@ -423,6 +427,9 @@ class Config:
         # Enable/disable saving a live.jpg file in the data directory with the latest image
         self.live_jpg = False
 
+        # location of ffmpeg if available - default is to assume it is in the path
+        self.ffmpeg_binary = 'ffmpeg'
+
         # Toggle saving of frame time files (FT files) to times_dir
         self.save_frame_times = True
 
@@ -438,11 +445,8 @@ class Config:
         # Set PNG compression for the saved frames for png file type
         self.png_compression = 3
 
-        # Set the time interval for saving video frames (s)
-        self.frame_save_interval = 5
-
-        # Set the frame count interval for saving video frames (calculated from the time interval)
-        self.frame_save_interval_count = 256
+        # Set the time interval for saving video frames (s) aligned on reference epoch (not exposed in .config)
+        self.frame_save_aligned_interval = 5.0
 
         # Set whether to delete, archive, or leave saved frames after making timelapse ('delete', 'tar', 'none')
         self.frame_cleanup = 'delete'
@@ -590,7 +594,7 @@ class Config:
 
         # Centroid filtering parameters
         self.centroids_max_deviation = 2 # maximum deviation of a centroid point from a LSQ fitted line (if above max, it will be rejected)
-        self.centroids_max_distance =  30 # maximum distance in pixels between centroids (used for filtering spurious centroids)
+        self.centroids_max_distance = 30 # maximum distance in pixels between centroids (used for filtering spurious centroids)
 
         # Angular velocity filtering parameter - detections slower or faster than these angular velocities
         # will be rejected (deg/s)
@@ -601,10 +605,10 @@ class Config:
         self.min_patch_intensity_multiplier = 0.0
 
         # Filtering by machine learning
-        self.ml_filter = 0.85
+        self.ml_filter = 0.5
 
         # Path to the ML model
-        self.ml_model_path = os.path.join(self.rms_root_dir, "share", "meteorml32.tflite")
+        self.ml_model_path = os.path.join(self.rms_root_dir, "share", "hyper_model.tflite")
 
         # Detection border (in pixels) - detections too close to the border of the mask will be rejected
         self.detection_border = 5
@@ -677,8 +681,8 @@ class Config:
         self.recalibration_max_stars = 200
 
         ##### Thumbnails
-        self.thumb_bin =  4
-        self.thumb_stack   =  5
+        self.thumb_bin = 4
+        self.thumb_stack = 5
         self.thumb_n_width = 10
 
         ##### Stack
@@ -877,7 +881,7 @@ def parseDFNStation(config, parser):
     config.catalog_mag_limit = 4.5
 
     config.star_catalog_path = 'Catalogs'
-    config.star_catalog_file = 'BSC5'
+    config.star_catalog_file = 'GMN_StarCatalog'
     config.platepar_name = 'platepar_cmn2010.cal'
     config.deinterlace_order = -2
 
@@ -929,7 +933,7 @@ def parseSystem(config, parser):
 
 
     if parser.has_option(section, "auto_reprocess_external_script_run"):
-        config.auto_reprocess_external_script_run = parser.getboolean(section, \
+        config.auto_reprocess_external_script_run = parser.getboolean(section, 
             "auto_reprocess_external_script_run")
 
     if parser.has_option(section, "external_script_path"):
@@ -988,7 +992,7 @@ def parseCapture(config, parser):
     if parser.has_option(section, "logdays_to_keep"):
         config.logdays_to_keep = int(parser.get(section, "logdays_to_keep"))
 
-    log_level_mapping = { 0: 'CRITICAL',1: 'ERROR',2: 'WARNING',3: 'INFO',4: 'DEBUG'}
+    log_level_mapping = {0: 'CRITICAL',1: 'ERROR',2: 'WARNING',3: 'INFO',4: 'DEBUG'}
     
     if parser.has_option(section, "console_log_level"):
         config.console_log_level = parser.getint(section, "console_log_level")
@@ -1236,15 +1240,18 @@ def parseCapture(config, parser):
     if parser.has_option(section, "save_frame_times"):
         config.save_frame_times = parser.getboolean(section, "save_frame_times")
     
+    # obtain the path to a working ffmpeg, if available
+    config.ffmpeg_binary = isFfmpegWorking()
+
     # Enable/disable saving video frames - automatically off if FFmpeg is missing
-    ffmpeg_ok = isFfmpegWorking()
     if parser.has_option(section, "save_frames"):
         save_requested = parser.getboolean(section, "save_frames")
-        config.save_frames = save_requested and ffmpeg_ok
-        if save_requested and not ffmpeg_ok:
+        if save_requested and not config.ffmpeg_binary:
             print("save_frames requested but FFmpeg not available - disabling.")
+        else:
+            config.save_frames = save_requested
     else:
-        config.save_frames = ffmpeg_ok
+        config.save_frames = False
 
     if parser.has_option(section, "frame_file_type"):
         config.frame_file_type = parser.get(section, "frame_file_type")
@@ -1271,17 +1278,8 @@ def parseCapture(config, parser):
 
 
     # Load the interval for saving video frame
-    if parser.has_option(section, "frame_save_interval"):
-        config.frame_save_interval = parser.getint(section, "frame_save_interval")
-
-        # Calculate the interval frame count
-        config.frame_save_interval_count = int(round(float(config.frame_save_interval)*float(config.fps)))
-
-        # Must be greater than 5
-        if config.frame_save_interval_count < 5:
-            config.frame_save_interval_count = 256
-            print()
-            print("WARNING! The frame_save_interval must result in more than 5 frames interval. It has been reset to 256 frames!")
+    if parser.has_option(section, "frame_save_aligned_interval"):
+        config.frame_save_aligned_interval = parser.getfloat(section, "frame_save_aligned_interval")
 
     # Set whether to delete, archive, or leave saved frames after making timelapse ('delete', 'tar', 'none')
     if parser.has_option(section, "frame_cleanup"):
@@ -1325,6 +1323,7 @@ def parseCapture(config, parser):
     # Load option to switch camera settings between day/night modes, for when continuous_capture is enabled
     if parser.has_option(section, "switch_camera_modes"):
         config.switch_camera_modes = parser.getboolean(section, "switch_camera_modes")
+
 
 def parseUpload(config, parser):
     section = "Upload"
@@ -1571,11 +1570,11 @@ def parseMeteorDetection(config, parser):
     # If the distance is > 20 (in old configs before the scaling fix), rescale using the old function
     if config.distance_threshold_det > 20**2:
 
-        config.distance_threshold_det = normalizeParameter(config.distance_threshold_det, config, \
+        config.distance_threshold_det = normalizeParameter(config.distance_threshold_det, config, 
             binning=config.detection_binning_factor)
     else:
 
-        config.distance_threshold_det = normalizeParameterMeteor(config.distance_threshold_det, config, \
+        config.distance_threshold_det = normalizeParameterMeteor(config.distance_threshold_det, config, 
             binning=config.detection_binning_factor)
 
 
@@ -1586,11 +1585,11 @@ def parseMeteorDetection(config, parser):
     # If the gap is > 100px (in old configs before the scaling fix), rescale using the old function
     if config.gap_threshold > 100**2:
 
-        config.gap_threshold_det = normalizeParameter(config.gap_threshold_det, config, \
+        config.gap_threshold_det = normalizeParameter(config.gap_threshold_det, config, 
             binning=config.detection_binning_factor)
 
     else:
-        config.gap_threshold_det = normalizeParameterMeteor(config.gap_threshold_det, config, \
+        config.gap_threshold_det = normalizeParameterMeteor(config.gap_threshold_det, config, 
             binning=config.detection_binning_factor)
 
 
@@ -1626,7 +1625,7 @@ def parseMeteorDetection(config, parser):
     if parser.has_option(section, "kht_binary_extension"):
         config.kht_binary_extension = parser.get(section, "kht_binary_extension")
 
-    config.kht_lib_path = findBinaryPath(config, config.kht_build_dir, config.kht_binary_name, \
+    config.kht_lib_path = findBinaryPath(config, config.kht_build_dir, config.kht_binary_name, 
         config.kht_binary_extension)
 
 
@@ -1658,7 +1657,9 @@ def parseMeteorDetection(config, parser):
         config.min_patch_intensity_multiplier = parser.getfloat(section, "min_patch_intensity_multiplier")
 
     if parser.has_option(section, "ml_filter"):
-        config.ml_filter = parser.getfloat(section, "ml_filter")
+        # since most of the old configs have threshold 0.85, and the current model is calibrated to 0.5,
+        # we need to rescale the value here
+        config.ml_filter = parser.getfloat(section, "ml_filter") * 0.5/0.85
 
         # Disable the min_patch_intensity filter if the ML filter is used and the ML library is available
         if TFLITE_AVAILABLE and (config.ml_filter > 0):

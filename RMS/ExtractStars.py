@@ -47,7 +47,7 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 
@@ -136,8 +136,9 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
     y_init, x_init = np.hsplit(xy, 2)
 
     # Compensate for half-pixel shift caused by the 2x2 mean filter
-    x_init = [x + 0.5 for x in x_init]
-    y_init = [y + 0.5 for y in y_init]
+    # Flatten to get scalars - hsplit returns (n,1) column arrays
+    x_init = x_init.flatten() + 0.5
+    y_init = y_init.flatten() + 0.5
 
     # # Plot stars before the PSF fit
     # plotStars(ff, x, y)
@@ -345,7 +346,7 @@ def extractStarsFF(
     x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count = status
 
 
-    log.info('extracted ' + str(len(x_arr)) + ' stars from ' + ff_name)
+    log.debug('extracted ' + str(len(x_arr)) + ' stars from ' + ff_name)
     return ff_name, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count
 
 
@@ -547,13 +548,13 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
         x_max = x + segment_radius
 
         if y_min < 0:
-            y_min = np.array([0])
+            y_min = 0
         if y_max > nrows:
-            y_max = np.array([nrows])
+            y_max = nrows
         if x_min < 0:
-            x_min = np.array([0])
+            x_min = 0
         if x_max > ncols:
-            x_max = np.array([ncols])
+            x_max = ncols
 
         # Check if any of these values is NaN and skip the star
         if np.any(np.isnan([x_min, x_max, y_min, y_max])):
@@ -636,7 +637,8 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
             continue
 
         # Gamma correct the star segment
-        star_seg_crop_corr = Image.gammaCorrectionImage(star_seg_crop.astype(np.float32), gamma)
+        star_seg_crop_corr = Image.gammaCorrectionImage(star_seg_crop.astype(np.float32), gamma, 
+                                                        out_type=np.float32)
 
         # Correct the background for gamma
         bg_corrected = Image.gammaCorrectionScalar(offset, gamma)

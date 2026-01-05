@@ -13,7 +13,7 @@ import RMS.ConfigReader as cr
 from RMS.Logger import getLogger
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 def runExternalScript(captured_night_dir, archived_night_dir, config):
@@ -33,6 +33,9 @@ def runExternalScript(captured_night_dir, archived_night_dir, config):
     if not config.external_script_run:
         return None
 
+    if (config.external_script_path is None) or (config.external_function_name is None):
+        log.error('To run an external script, both the path to the script and the name of the function to run must be defined in the config file!')
+        return None
 
     # Check if the script path exists
     if not os.path.isfile(config.external_script_path):
@@ -92,7 +95,7 @@ if __name__ == "__main__":
 
     ######
     # Start log to stdout
-    log = getLogger("logger", stdout=True)
+    log = getLogger("rmslogger", stdout=True)
 
     # Load config file
     if cml_args.config is None:

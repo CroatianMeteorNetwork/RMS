@@ -404,8 +404,19 @@ def gammaCorrectionScalar(intensity, gamma, bp=0, wp=255):
     return out
 
 
-def gammaCorrectionImage(intensity, gamma, bp=0, wp=255):
+def gammaCorrectionImage(intensity, gamma, bp=0, wp=255, out_type=None):
     """ Correct the given image for gamma on numpy arrays (faster than the single pixel function).
+
+    Arguments:
+        intensity: [ndarray] Image array.
+        gamma: [float] Gamma.
+
+    Keyword arguments:
+        bp: [int] Black point.
+        wp: [int] White point.
+        out_type: [data-type] If given, the output image will be converted to this type. None by default,
+            which means the output type will be the same as the input type.
+
     """
 
     # If the intensity is a numpy array, save the original type
@@ -416,11 +427,10 @@ def gammaCorrectionImage(intensity, gamma, bp=0, wp=255):
         # Convert the intensity to float if it's not already
         intensity = intensity.astype(np.float32)
 
-    
     # Clip intensities < 0 to 0
     intensity[intensity < 0] = 0
 
-    # Apply the gamma correction
+    # Scale the intensity to 0-1 range
     x = (intensity - bp)/(wp - bp)
 
     # Scale the gamma to the given range
@@ -429,7 +439,7 @@ def gammaCorrectionImage(intensity, gamma, bp=0, wp=255):
 
 
     # If the intensity was a numpy array, convert it back to the original type
-    if orig_type is not None:
+    if (orig_type is not None) and (out_type is None):
 
         # Clip the range to the range of the original type if the type is integer (leave float as is)
         if np.issubdtype(orig_type, np.integer):
@@ -437,6 +447,9 @@ def gammaCorrectionImage(intensity, gamma, bp=0, wp=255):
         
         # Convert the intensity back to the original type
         out = out.astype(orig_type)
+
+    elif out_type is not None:
+        out = out.astype(out_type)
 
     return out
 
@@ -719,8 +732,13 @@ def applyFlat(img, flat_struct):
     img = flat_struct.flat_avg*img.astype(np.float64)/flat_struct.flat_img
 
     # Limit the image values to image type range
-    dtype_info = np.iinfo(input_type)
-    img = np.clip(img, dtype_info.min, dtype_info.max)
+    if np.issubdtype(input_type, np.integer):
+        info = np.iinfo(input_type)
+    elif np.issubdtype(input_type, np.floating):
+        info = np.finfo(input_type)
+    else:
+        raise TypeError(f"Unsupported dtype: {input_type}")
+    img = np.clip(img, info.min, info.max)
 
     # Make sure the output array is the same as the input type
     img = img.astype(input_type)

@@ -16,7 +16,7 @@ from RMS.Decorators import memoizeSingle
 
 
 #@memoizeSingle
-def read(directory, filename, fmt=None, array=False, full_filename=False, verbose=True):
+def read(directory, filename, fmt=None, array=False, full_filename=False, verbose=True, memmap=True):
     """ Read FF file from the specified directory and choose the proper format for reading.
     
     Arguments:
@@ -75,7 +75,7 @@ def read(directory, filename, fmt=None, array=False, full_filename=False, verbos
 
         try:
             # Read the file as FITS
-            ff = readFFfits(directory, filename, array=array, full_filename=full_filename)
+            ff = readFFfits(directory, filename, array=array, full_filename=full_filename, memmap=memmap)
 
         except IOError:
             if verbose:

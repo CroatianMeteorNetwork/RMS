@@ -38,7 +38,7 @@ import numpy as np
 from Utils.LiveViewer import LiveViewer
 
 import RMS.ConfigReader as cr
-from RMS.Logger import initLogging, getLogger
+from RMS.Logger import LoggingManager, getLogger
 from RMS.BufferedCapture import BufferedCapture
 from RMS.CaptureDuration import captureDuration
 from RMS.CaptureModeSwitcher import captureModeSwitcher
@@ -277,6 +277,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     print("- Rajko Susanj (d. 2023)")
     print("- Zoran Dragic (d. 2025)")
     print("- Romke Schievink (d. 2025)")
+    print("- Seppe Canonaco (d. 2025)")
     print()
     print("Memento mori")
     print("Each of us, a fleeting flame")
@@ -791,27 +792,12 @@ def processIncompleteCaptures(config, upload_manager):
         #   processed
         FTPdetectinfo_files = glob.glob('{:s}/FTPdetectinfo_*.txt'.format(captured_dir_path))
         any_ftpdetectinfo_files = False
-        newest_FTPfile_older_than_platepar = False
         if len(FTPdetectinfo_files) > 0:
             any_ftpdetectinfo_files = True
-
-            # Is the platepar in the captured_dir_path newer than latest FTP file?
-            # i.e. has the operator replaced the platepar because of bad calibration?
-            newest_FTPfile_older_than_platepar = True
-            for FTPfile in FTPdetectinfo_files:
-                capture_platepar = os.path.join(captured_dir_path,config.platepar_name)
-                if os.path.exists(capture_platepar):
-                    # Any FTPfile newer than platepar - no need to reprocess
-                    if os.path.getmtime(FTPfile) > os.path.getmtime(capture_platepar):
-                        newest_FTPfile_older_than_platepar = False
-                else:
-                    # if there is no platepar in the captured_dir_path
-                    newest_FTPfile_older_than_platepar = False
 
         # Auto reprocess criteria:
         #   - Any backup pickle files
         #   - No pickle and no FTPdetectinfo files
-        #   - Newest FTP file older than platepar in capture directory
 
         run_reprocess = False
         if any_pickle_files:
@@ -819,9 +805,6 @@ def processIncompleteCaptures(config, upload_manager):
         else:
             if not any_ftpdetectinfo_files:
                 run_reprocess = True
-        if newest_FTPfile_older_than_platepar:
-                run_reprocess = True
-                log.info("Reprocessing because newest FTPDetect file older than platepar file")
 
         # Skip the folder if it doesn't need to be reprocessed
         if not run_reprocess:
@@ -916,10 +899,11 @@ if __name__ == "__main__":
 
 
     # Initialize the logger
-    initLogging(config)
+    log_manager = LoggingManager()
+    log_manager.initLogging(config)
 
     # Get the logger handle
-    log = getLogger("logger")
+    log = getLogger("rmslogger")
 
 
     log.info("Program start")
@@ -1134,12 +1118,10 @@ if __name__ == "__main__":
 
             log.debug('Less than 15 minutes left to record, waiting for a new recording session tonight...')
 
-            # Reset the Ctrl+C to KeyboardInterrupt
-            resetSIGINT()
-
             try:
-                # Wait for 30 mins before checking again
-                time.sleep(30*60)
+                # Wait for 30 mins before checking again (interruptible)
+                from RMS.Misc import interruptibleWait
+                interruptibleWait(30*60)
 
             except KeyboardInterrupt:
 
@@ -1238,15 +1220,13 @@ if __name__ == "__main__":
                 log.info('Waiting {:s} to start recording for {:.3f} hrs'.format(str(waiting_time), \
                     duration/60/60))
 
-                # Reset the Ctrl+C to KeyboardInterrupt
-                resetSIGINT()
-
                 try:
 
-                    # Wait until sunset
+                    # Wait until sunset (interruptible)
                     waiting_time_seconds = int(waiting_time.total_seconds())
                     if waiting_time_seconds > 0:
-                        time.sleep(waiting_time_seconds)
+                        from RMS.Misc import interruptibleWait
+                        interruptibleWait(waiting_time_seconds)
 
                 except KeyboardInterrupt:
 

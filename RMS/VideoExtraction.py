@@ -30,7 +30,7 @@ from RMS.Formats import FRbin
 
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 class Extractor(Process):
@@ -286,7 +286,7 @@ class Extractor(Process):
         
         # Skip the event if not points where found
         if len(event_points) == 0:
-            log.debug("[" + self.filename + "] nothing found, not extracting anything 1")
+            log.info("Nothing found, not extracting anything from {}".format(self.filename))
             return
         
         t = time.time()
