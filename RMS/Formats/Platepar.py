@@ -1025,11 +1025,13 @@ class Platepar(object):
                 opt_options_final = {'maxiter': 5000, 'fatol': 1e-8, 'adaptive': True}
                 opt_options_ransac_r3 = {'maxiter': 700, 'fatol': 1e-5, 'adaptive': True}  # radial3-odd: rough
                 opt_options_ransac_r5 = {'maxiter': 1000, 'fatol': 1e-7, 'adaptive': True}  # radial5-odd
+                opt_options_ransac_r7 = {'maxiter': 1200, 'fatol': 1e-7, 'adaptive': True}  # radial7-odd
 
                 if use_nn_cost:
-                    # Two-stage RANSAC-style outlier detection with radial-weighted threshold
+                    # Three-stage RANSAC-style outlier detection with radial-weighted threshold
                     # Stage 1: radial3-odd (stable, fewer params) - identifies outliers
-                    # Stage 2: radial5-odd (better final fit) - works only on Stage 1 inliers
+                    # Stage 2: radial5-odd (refines distortion) - works only on Stage 1 inliers
+                    # Stage 3: radial7-odd (captures edge distortion) - final refinement
                     # Outliers can't hide because they don't influence the fit
 
                     n_stars = len(img_stars)
@@ -1052,17 +1054,18 @@ class Platepar(object):
                     best_res = None
                     best_cost = float('inf')
 
-                    # RANSAC outlier detection: radial3-odd then radial5-odd with warm start
-                    # radial3-odd stabilizes quickly, then radial5-odd refines distortion
+                    # RANSAC outlier detection: radial3-odd -> radial5-odd -> radial7-odd with warm start
+                    # radial3-odd stabilizes quickly, radial5-odd refines, radial7-odd captures edges
                     print("    NN input: {:d} detected stars, {:d} catalog stars".format(
                         len(img_stars), len(catalog_stars)))
-                    print("    RANSAC outlier detection: 14 iterations")
+                    print("    RANSAC outlier detection: 21 iterations")
                     print("    Radial-weighted threshold: 1.0x at center, 2.0x at corners")
-                    print("    Iterations 1-7: radial3-odd, 8-14: radial5-odd (warm start)")
+                    print("    Iterations 1-7: radial3-odd, 8-14: radial5-odd, 15-21: radial7-odd")
 
                     # ========== RANSAC - identify outliers ==========
-                    total_iters = 14  # 7 + 7 iterations
-                    switch_iter = 7   # Switch from radial3-odd to radial5-odd after iteration 7
+                    total_iters = 21  # 7 + 7 + 7 iterations
+                    switch_iter_r5 = 7   # Switch from radial3-odd to radial5-odd after iteration 7
+                    switch_iter_r7 = 14  # Switch from radial5-odd to radial7-odd after iteration 14
 
                     # Start with radial3-odd - convert coefficients intelligently
                     # This preserves k1 when converting from e.g. radial7-odd to radial3-odd
@@ -1086,8 +1089,8 @@ class Platepar(object):
 
                     # Weighted outlier scoring: later iterations count more (fit is more refined)
                     # Outliers get +weight, inliers get -weight (redemption)
-                    # Weighted scoring: radial3-odd iterations weight=1, radial5-odd weight=2
-                    # This gives more influence to the more accurate radial5-odd fit
+                    # Weighted scoring: radial3-odd=1, radial5-odd=2, radial7-odd=3
+                    # This gives more influence to the more accurate higher-order fits
                     outlier_scores = np.zeros(n_stars, dtype=float)
                     n_subset = max(10, int(n_stars * subset_fraction))
 
@@ -1098,14 +1101,16 @@ class Platepar(object):
 
                     iteration = 0
                     while iteration < total_iters:
-                        # Compute weight for this iteration - radial5-odd counts more
-                        if iteration < switch_iter:
+                        # Compute weight for this iteration - higher order counts more
+                        if iteration < switch_iter_r5:
                             weight = 1  # radial3-odd phase
+                        elif iteration < switch_iter_r7:
+                            weight = 2  # radial5-odd phase
                         else:
-                            weight = 2  # radial5-odd phase - more accurate, counts more
+                            weight = 3  # radial7-odd phase - most accurate, counts most
 
                         # Switch to radial5-odd after iteration 7 with warm start
-                        if iteration == switch_iter:
+                        if iteration == switch_iter_r5:
                             # Save current best params from radial3-odd
                             if best_res is not None:
                                 ra_ref, dec_ref, pos_angle_ref, F_scale = best_res.x[:4]
@@ -1135,6 +1140,38 @@ class Platepar(object):
                             best_res = None  # Reset best result for new distortion type
                             best_cost = float('inf')
                             print("      --- Switching to radial5-odd (warm start with coefficient conversion) ---")
+
+                        # Switch to radial7-odd after iteration 14 with warm start
+                        elif iteration == switch_iter_r7:
+                            # Save current best params from radial5-odd
+                            if best_res is not None:
+                                ra_ref, dec_ref, pos_angle_ref, F_scale = best_res.x[:4]
+                                self.RA_d = (360 * ra_ref) % (360)
+                                self.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
+                                self.pos_angle_ref = (360 * pos_angle_ref) % (360)
+                                self.F_scale = abs(F_scale)
+                                # Update x_poly_fwd with best radial5-odd coefficients
+                                self.x_poly_fwd = np.array(best_res.x[4:])
+                                self.x_poly_rev = self.x_poly_fwd.copy()
+
+                            # Convert coefficients from radial5-odd to radial7-odd intelligently
+                            # This preserves x0, y0, xy, a1, a2, k1, k2 and adds k3=0
+                            radial7_x, radial7_y = self.convertDistortionCoeffs("radial7-odd")
+                            self.setDistortionType("radial7-odd", reset_params=False)
+                            self.x_poly_fwd = radial7_x
+                            self.x_poly_rev = radial7_x.copy()
+                            self.y_poly_fwd = radial7_y
+                            self.y_poly_rev = radial7_y.copy()
+
+                            p0_current = [
+                                self.RA_d / 360.0,
+                                self.dec_d / 90,
+                                self.pos_angle_ref / 360.0,
+                                self.F_scale,
+                            ] + self.x_poly_fwd.tolist()
+                            best_res = None  # Reset best result for new distortion type
+                            best_cost = float('inf')
+                            print("      --- Switching to radial7-odd (warm start with coefficient conversion) ---")
 
                         # Exclude stars that were outliers in the previous iteration
                         # This ensures outliers don't contaminate subsequent fits
@@ -1168,8 +1205,13 @@ class Platepar(object):
                                  (cat_y >= 0) & (cat_y < self.Y_res)
                         catalog_stars_fov = catalog_stars[in_fov]
 
-                        # Use tiered tolerances: looser for radial3-odd, tighter for radial5-odd
-                        ransac_opts = opt_options_ransac_r5 if iteration >= switch_iter else opt_options_ransac_r3
+                        # Use tiered tolerances: looser for radial3-odd, tighter for radial5/7-odd
+                        if iteration < switch_iter_r5:
+                            ransac_opts = opt_options_ransac_r3
+                        elif iteration < switch_iter_r7:
+                            ransac_opts = opt_options_ransac_r5
+                        else:
+                            ransac_opts = opt_options_ransac_r7
                         res = scipy.optimize.minimize(
                             cost_func, start_params,
                             args=(self, jd, catalog_stars_fov, img_stars_subset),
@@ -1234,7 +1276,12 @@ class Platepar(object):
                             best_cost = rmse_arcmin
                             best_res = res
 
-                        dist_label = "radial5-odd" if iteration >= switch_iter else "radial3-odd"
+                        if iteration < switch_iter_r5:
+                            dist_label = "radial3-odd"
+                        elif iteration < switch_iter_r7:
+                            dist_label = "radial5-odd"
+                        else:
+                            dist_label = "radial7-odd"
                         # Debug: show RA/Dec at each iteration
                         iter_ra = (360 * res.x[0]) % 360
                         iter_dec = -90 + (90 * res.x[1] + 90) % 180.000001
@@ -1246,15 +1293,22 @@ class Platepar(object):
                         if prev_outlier_mask is not None and np.array_equal(iteration_outliers, prev_outlier_mask):
                             stable_count += 1
                             if stable_count >= 2:
-                                if iteration < switch_iter:
+                                if iteration < switch_iter_r5:
                                     # In radial3-odd phase: skip to radial5-odd phase
                                     print("      -> Outliers stable for 2 iterations, skipping to radial5-odd")
-                                    iteration = switch_iter  # Jump to start of radial5-odd
-                                    stable_count = 0  # Reset for radial5-odd phase
+                                    iteration = switch_iter_r5  # Jump to start of radial5-odd
+                                    stable_count = 0  # Reset for next phase
+                                    prev_outlier_mask = None  # Reset to avoid false stability detection
+                                    continue
+                                elif iteration < switch_iter_r7:
+                                    # In radial5-odd phase: skip to radial7-odd phase
+                                    print("      -> Outliers stable for 2 iterations, skipping to radial7-odd")
+                                    iteration = switch_iter_r7  # Jump to start of radial7-odd
+                                    stable_count = 0  # Reset for next phase
                                     prev_outlier_mask = None  # Reset to avoid false stability detection
                                     continue
                                 else:
-                                    # In radial5-odd phase: exit entirely
+                                    # In radial7-odd phase: exit entirely
                                     print("      -> Outliers stable for 2 iterations, exiting RANSAC")
                                     break
                         else:
@@ -1263,8 +1317,8 @@ class Platepar(object):
                         iteration += 1
 
                     # Outlier mask: positive score = more outlier votes than inlier votes
-                    # Max possible score: 7*1 + 7*2 = 7+14 = 21 (all outlier)
-                    # Min possible score: -21 (all inlier)
+                    # Max possible score: 7*1 + 7*2 + 7*3 = 7+14+21 = 42 (all outlier)
+                    # Min possible score: -42 (all inlier)
                     final_outlier_mask = outlier_scores > 0
                     nn_inlier_mask = ~final_outlier_mask
                     n_inliers = np.sum(nn_inlier_mask)

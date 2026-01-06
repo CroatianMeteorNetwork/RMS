@@ -6787,11 +6787,12 @@ class PlateTool(QtWidgets.QMainWindow):
             img_stars_arr = np.column_stack([det_x, det_y, det_intens])
 
             # Use NN cost function to fit pointing + distortion
-            # Pass balanced catalog for optimal NN matching ratio
+            # Pass extended catalog (before strict XY filter) - NN iterations re-filter
+            # dynamically as distortion improves, allowing edge stars to "appear"
             self.platepar.setDistortionType("radial5-odd", reset_params=True)
             try:
                 self.platepar.fitAstrometry(
-                    jd, img_stars_arr, catalog_stars,  # Balanced catalog from magnitude adjustment
+                    jd, img_stars_arr, catalog_stars_extended,  # Extended catalog for edge stars
                     first_platepar_fit=True,
                     use_nn_cost=True
                 )

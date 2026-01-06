@@ -458,8 +458,8 @@ def getFOVSelectionRadius(platepar):
     ur_sep = np.degrees(angularSeparation(np.radians(ra3), np.radians(dec3), np.radians(ra_mid), np.radians(dec_mid)))
     ll_sep = np.degrees(angularSeparation(np.radians(ra4), np.radians(dec4), np.radians(ra_mid), np.radians(dec_mid)))
 
-    # Take the average radius
-    fov_radius = np.mean([ul_sep, lr_sep, ur_sep, ll_sep])
+    # Take the maximum radius to include all corners
+    fov_radius = np.max([ul_sep, lr_sep, ur_sep, ll_sep])
 
     return fov_radius
 
