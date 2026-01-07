@@ -1855,6 +1855,21 @@ class PlateTool(QtWidgets.QMainWindow):
         self.status_bar.addPermanentWidget(self.skyfit_button)
         self.status_bar.addPermanentWidget(self.manualreduction_button)
 
+        # Image navigation slider (like a video timeline)
+        self.image_navigation_label = QtWidgets.QLabel('Image: 1 / 1')
+        self.image_navigation_label.setMinimumWidth(80)
+        self.status_bar.addPermanentWidget(self.image_navigation_label)
+
+        self.image_navigation_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.image_navigation_slider.setMinimum(1)
+        self.image_navigation_slider.setMaximum(1)
+        self.image_navigation_slider.setValue(1)
+        self.image_navigation_slider.setMinimumWidth(200)
+        self.image_navigation_slider.setMaximumWidth(400)
+        self.image_navigation_slider.setToolTip("Drag or click to navigate through images")
+        self.image_navigation_slider.valueChanged.connect(self.jumpToImage)
+        self.status_bar.addPermanentWidget(self.image_navigation_slider)
+
         self.nextstar_button = QtWidgets.QPushButton('SkyFit')
         self.nextstar_button.pressed.connect(lambda: self.nextstar())
 
@@ -2343,6 +2358,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.show()
 
         self.updateLeftLabels()
+        self.updateImageNavigationDisplay()
         self.updateStars()
         self.updateDistortion()
         self.tab.param_manager.updatePlatepar()
@@ -2502,6 +2518,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.photometry()
 
         self.updateLeftLabels()
+        self.updateImageNavigationDisplay()
         self.tab.debruijn.updateTable()
 
     def onRefractionChanged(self):
@@ -3937,6 +3954,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         self.updateLeftLabels()
+        self.updateImageNavigationDisplay()
 
 
     def showFRBox(self):
@@ -3966,6 +3984,58 @@ class PlateTool(QtWidgets.QMainWindow):
 
             else:
                 self.fr_box.hide()
+
+
+    def jumpToImage(self, image_num):
+        """ Jump directly to a specific image number (1-indexed).
+
+        Arguments:
+            image_num: [int] Target image number (1-indexed, 1 to total_images)
+        """
+        # Only works in skyfit mode with multiple images
+        if self.mode != 'skyfit':
+            return
+
+        # Check if we have a valid image handle with ff_list
+        if not hasattr(self.img_handle, 'ff_list'):
+            return
+
+        # Convert 1-indexed UI to 0-indexed internal
+        target_index = image_num - 1
+        current_index = self.img_handle.current_ff_index
+
+        # Calculate delta and navigate
+        delta = target_index - current_index
+        if delta != 0:
+            # Block signals to prevent recursive calls
+            self.image_navigation_slider.blockSignals(True)
+            self.nextImg(n=delta)
+            self.image_navigation_slider.blockSignals(False)
+
+
+    def updateImageNavigationDisplay(self):
+        """ Update the image navigation slider and label to show current position. """
+        # Only update if we have a multi-image handle with ff_list
+        if not hasattr(self.img_handle, 'ff_list'):
+            self.image_navigation_slider.hide()
+            self.image_navigation_label.hide()
+            return
+
+        # Show slider for multi-image inputs
+        self.image_navigation_slider.show()
+        self.image_navigation_label.show()
+
+        # Update bounds and current value
+        total_images = len(self.img_handle.ff_list)
+        current_index = self.img_handle.current_ff_index
+
+        self.image_navigation_slider.blockSignals(True)
+        self.image_navigation_slider.setMaximum(total_images)
+        self.image_navigation_slider.setValue(current_index + 1)  # 1-indexed display
+        self.image_navigation_slider.blockSignals(False)
+
+        # Update label text
+        self.image_navigation_label.setText(f'Image: {current_index + 1} / {total_images}')
 
 
     def saveState(self):
