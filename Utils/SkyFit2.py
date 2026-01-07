@@ -1760,6 +1760,12 @@ class PlateTool(QtWidgets.QMainWindow):
             self.loadSatelliteTracks()
 
 
+    def closeEvent(self, event):
+        """ Handle window close event to properly exit application. """
+        event.accept()
+        QtWidgets.QApplication.quit()
+
+
     def setFPS(self):
         """ Update the FPS if it's forced. """
 
@@ -2351,9 +2357,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.setMinimumSize(1200, 800)
 
-        # Open in full screen
-        self.showMaximized()
-
+        # Size window to 80% of screen dimensions to avoid resize-to-fullscreen issue
+        # while still working on any screen size
+        screen = QtWidgets.QApplication.primaryScreen().availableGeometry()
+        self.resize(int(screen.width() * 0.8), int(screen.height() * 0.8))
 
         self.show()
 
