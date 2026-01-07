@@ -3175,8 +3175,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 # extractStarsFF returns: ff_name, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count
                 ff_name_ret, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count = star_list
 
-                # Construct star data in CALSTARS format: (y, x, amplitude, intensity, fwhm, background, snr, saturated_count)
-                star_data = list(zip(y_arr, x_arr, amplitude, intensity, fwhm, background, snr, saturated_count))
+                # Construct star data in CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
+                # Note: intensity=IntensSum (integrated), amplitude=Ampltd (peak)
+                star_data = list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, saturated_count))
 
                 # Store the override detected stars
                 self.star_detection_override_data[ff_name] = star_data
@@ -3246,7 +3247,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
                     if star_list:
                         ff_name_ret, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count = star_list
-                        star_data = list(zip(y_arr, x_arr, amplitude, intensity, fwhm, background, snr, saturated_count))
+                        # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
+                        star_data = list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, saturated_count))
                         self.star_detection_override_data[ff_name] = star_data
                         success_count += 1
 
@@ -4550,10 +4552,14 @@ class PlateTool(QtWidgets.QMainWindow):
                                 # Handle using FR files too
                                 ff_name_c = convertFRNameToFF(self.img_handle.name())
 
-                                if ff_name_c in self.calstars:
-
-                                    # Get the stars detected on this FF file
+                                # Use override data if enabled, otherwise CALSTARS
+                                star_data = None
+                                if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
+                                    star_data = np.array(self.star_detection_override_data[ff_name_c])
+                                elif ff_name_c in self.calstars:
                                     star_data = np.array(self.calstars[ff_name_c])
+
+                                if star_data is not None:
 
                                     if len(star_data):
 
@@ -6606,12 +6612,16 @@ class PlateTool(QtWidgets.QMainWindow):
         # Get current FF file name
         ff_name_c = convertFRNameToFF(self.img_handle.name())
 
-        # Check if we have detected stars for the current frame
-        if ff_name_c not in self.calstars:
+        # Use override data if enabled and available, otherwise use original CALSTARS
+        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
+            detected_stars = np.array(self.star_detection_override_data[ff_name_c])
+        elif ff_name_c in self.calstars:
+            detected_stars = np.array(self.calstars[ff_name_c])
+        else:
             print("  No detected stars available - falling back to astrometry.net")
             return False
 
-        detected_stars = np.array(self.calstars[ff_name_c])
+        detected_stars = np.array(detected_stars)
         if len(detected_stars) < 10:
             print("  Less than 10 detected stars - falling back to astrometry.net")
             return False
@@ -6814,11 +6824,17 @@ class PlateTool(QtWidgets.QMainWindow):
         # Compute JD for astrometry.net matching
         jd = date2JD(*self.img_handle.currentTime())
 
-        # Check if the given FF files is in the calstars list
-        if (ff_name_c in self.calstars) and (not upload_image):
-
-            # Get the stars detected on this FF file
+        # Use override data if enabled and available, otherwise use original CALSTARS
+        has_star_data = False
+        star_data = None
+        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
+            star_data = np.array(self.star_detection_override_data[ff_name_c])
+            has_star_data = True
+        elif ff_name_c in self.calstars:
             star_data = np.array(self.calstars[ff_name_c])
+            has_star_data = True
+
+        if has_star_data and (not upload_image):
 
             # Make sure that there are at least 10 stars
             if len(star_data) < 10:
@@ -6997,10 +7013,15 @@ class PlateTool(QtWidgets.QMainWindow):
 
         print("  Catalog stars in strict FOV: {:d}".format(len(catalog_stars)))
 
-        # Get detected stars from calstars
+        # Get detected stars - use override data if enabled, otherwise CALSTARS
         # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
-        if ff_name_c in self.calstars:
+        detected_stars = None
+        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
+            detected_stars = np.array(self.star_detection_override_data[ff_name_c])
+        elif ff_name_c in self.calstars:
             detected_stars = np.array(self.calstars[ff_name_c])
+
+        if detected_stars is not None and len(detected_stars) > 0:
             det_y = detected_stars[:, 0]
             det_x = detected_stars[:, 1]
             # Use index 2 (IntensSum/integrated intensity) not index 3 (Ampltd/peak amplitude)
@@ -8392,6 +8413,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
             img_x, img_y, fwhm, sum_intens, snr, saturated = paired_stars[0]
             ra, dec, mag = cat_coords
+
+            # Compute magnitude error from SNR (same formula as used in lightcurve plots and FTPdetectinfo)
+            if snr > 0:
+                mag_err_random = 2.5*np.log10(1 + 1/snr)
+                mag_err = np.sqrt(mag_err_random**2 + self.platepar.mag_lev_stddev**2)
+            else:
+                mag_err = 0.0
 
             delta_x = cat_x - img_x
             delta_y = cat_y - img_y
