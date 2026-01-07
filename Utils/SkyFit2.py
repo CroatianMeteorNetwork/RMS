@@ -50,7 +50,7 @@ from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2Apparent
 from RMS.Astrometry.AstrometryNet import astrometryNetSolve
 from RMS.Astrometry.NNalign import alignPlatepar
 import RMS.ConfigReader as cr
-from RMS.ExtractStars import extractStarsAndSave
+from RMS.ExtractStars import extractStarsAndSave, extractStarsFF
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
 from RMS.Formats.FFfile import convertFRNameToFF, constructFFName
@@ -1691,6 +1691,17 @@ class PlateTool(QtWidgets.QMainWindow):
         self.calstars = {}
         self.loadCalstars()
 
+        # Star detection override parameters
+        self.star_detection_override_enabled = False  # Use override parameters instead of CALSTARS
+        self.star_detection_override_data = {}  # Store re-detected stars per FF file
+        self.override_intensity_threshold = 18
+        self.override_neighborhood_size = 10
+        self.override_max_stars = 200
+        self.override_gamma = 1.0
+        self.override_segment_radius = 4
+        self.override_max_feature_ratio = 0.8
+        self.override_roundness_threshold = 0.5
+
 
         ###################################################################################################
         # PLATEPAR
@@ -2282,6 +2293,18 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.geolocation.sigReloadGeoPoints.connect(self.reloadGeoPoints)
         self.tab.geolocation.sigFitPressed.connect(lambda: self.fitPickedStars())
 
+        # Star detection override signals
+        self.tab.star_detection.sigRedetectStars.connect(self.redetectStars)
+        self.tab.star_detection.sigRedetectAllImages.connect(self.redetectAllImages)
+        self.tab.star_detection.sigUseOverrideToggled.connect(self.toggleStarDetectionOverride)
+        self.tab.star_detection.sigIntensityThresholdChanged.connect(self.updateIntensityThreshold)
+        self.tab.star_detection.sigNeighborhoodSizeChanged.connect(self.updateNeighborhoodSize)
+        self.tab.star_detection.sigMaxStarsChanged.connect(self.updateMaxStars)
+        self.tab.star_detection.sigGammaChanged.connect(self.updateGamma)
+        self.tab.star_detection.sigSegmentRadiusChanged.connect(self.updateSegmentRadius)
+        self.tab.star_detection.sigMaxFeatureRatioChanged.connect(self.updateMaxFeatureRatio)
+        self.tab.star_detection.sigRoundnessThresholdChanged.connect(self.updateRoundnessThreshold)
+
         self.tab.settings.sigMaxAveToggled.connect(self.toggleImageType)
         self.tab.settings.sigCatStarsToggled.connect(self.toggleShowCatStars)
         self.tab.settings.sigCalStarsToggled.connect(self.toggleShowCalStars)
@@ -2323,6 +2346,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateStars()
         self.updateDistortion()
         self.tab.param_manager.updatePlatepar()
+        self.initStarDetectionOverrides()
         self.changeMode(self.mode)
 
 
@@ -2978,12 +3002,14 @@ class PlateTool(QtWidgets.QMainWindow):
         # Handle using FR files
         ff_name_c = convertFRNameToFF(self.img_handle.name())
 
-        # Check if the given FF files is in the calstars list
-        if ff_name_c in self.calstars:
-
-            # Get the stars detected on this FF file
+        # Choose data source: override detections or original CALSTARS
+        star_data = None
+        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
+            star_data = np.array(self.star_detection_override_data[ff_name_c])
+        elif ff_name_c in self.calstars:
             star_data = np.array(self.calstars[ff_name_c])
 
+        if star_data is not None and len(star_data) > 0:
             # Get star coordinates
             y = star_data[:, 0]
             x = star_data[:, 1]
@@ -3000,6 +3026,238 @@ class PlateTool(QtWidgets.QMainWindow):
             self.calstar_markers2.setData(pos=[])
             self.calstar_markers_outer.setData(pos=[])
             self.calstar_markers_outer2.setData(pos=[])
+
+
+    def initStarDetectionOverrides(self):
+        """ Initialize star detection override parameters from config. """
+        if hasattr(self.config, 'intensity_threshold'):
+            self.override_intensity_threshold = self.config.intensity_threshold
+        if hasattr(self.config, 'neighborhood_size'):
+            self.override_neighborhood_size = self.config.neighborhood_size
+        if hasattr(self.config, 'max_stars'):
+            self.override_max_stars = self.config.max_stars
+        if hasattr(self.config, 'gamma'):
+            self.override_gamma = self.config.gamma
+        if hasattr(self.config, 'segment_radius'):
+            self.override_segment_radius = self.config.segment_radius
+        if hasattr(self.config, 'max_feature_ratio'):
+            self.override_max_feature_ratio = self.config.max_feature_ratio
+        if hasattr(self.config, 'roundness_threshold'):
+            self.override_roundness_threshold = self.config.roundness_threshold
+
+        # Update UI sliders
+        self.tab.star_detection.loadFromConfig(self.config)
+
+
+    def updateIntensityThreshold(self, value):
+        """ Update intensity threshold override parameter. """
+        self.override_intensity_threshold = value
+
+    def updateNeighborhoodSize(self, value):
+        """ Update neighborhood size override parameter. """
+        self.override_neighborhood_size = value
+
+    def updateMaxStars(self, value):
+        """ Update max stars override parameter. """
+        self.override_max_stars = value
+
+    def updateGamma(self, value):
+        """ Update gamma override parameter. """
+        self.override_gamma = value
+
+    def updateSegmentRadius(self, value):
+        """ Update segment radius override parameter. """
+        self.override_segment_radius = value
+
+    def updateMaxFeatureRatio(self, value):
+        """ Update max feature ratio override parameter. """
+        self.override_max_feature_ratio = value
+
+    def updateRoundnessThreshold(self, value):
+        """ Update roundness threshold override parameter. """
+        self.override_roundness_threshold = value
+
+
+    def toggleStarDetectionOverride(self):
+        """ Toggle between using override detections and original CALSTARS. """
+        self.star_detection_override_enabled = not self.star_detection_override_enabled
+
+        # Update platepar.gamma to match the detection source
+        if self.platepar is not None:
+            if self.star_detection_override_enabled:
+                # Using override detections - use override gamma
+                self.platepar.gamma = self.override_gamma
+                print(f"Switched to override detections (gamma={self.override_gamma:.3f})")
+            else:
+                # Using original CALSTARS - restore original gamma from config
+                if hasattr(self.config, 'gamma'):
+                    self.platepar.gamma = self.config.gamma
+                    print(f"Switched to original CALSTARS (gamma={self.config.gamma:.3f})")
+
+        # Update the display
+        self.updateCalstars()
+
+        # Update status in UI
+        ff_name = self.img_handle.name()
+        if self.star_detection_override_enabled and ff_name in self.star_detection_override_data:
+            star_count = len(self.star_detection_override_data[ff_name])
+            self.tab.star_detection.updateStatus(True, star_count)
+        else:
+            self.tab.star_detection.updateStatus(False)
+
+
+    def redetectStars(self):
+        """ Re-detect stars on current image using override parameters. """
+        print(f"Re-detecting stars with: threshold={self.override_intensity_threshold}, "
+              f"neighborhood={self.override_neighborhood_size}, max_stars={self.override_max_stars}, "
+              f"gamma={self.override_gamma:.3f}")
+
+        # Get current FF file name
+        ff_name = self.img_handle.name()
+
+        # Call extractStarsFF with override parameters
+        try:
+            # Temporarily modify config to use override parameters
+            original_intensity_threshold = getattr(self.config, 'intensity_threshold', 18)
+            original_neighborhood_size = getattr(self.config, 'neighborhood_size', 10)
+            original_max_stars = getattr(self.config, 'max_stars', 200)
+            original_gamma = getattr(self.config, 'gamma', 1.0)
+            original_segment_radius = getattr(self.config, 'segment_radius', 4)
+            original_max_feature_ratio = getattr(self.config, 'max_feature_ratio', 0.8)
+            original_roundness_threshold = getattr(self.config, 'roundness_threshold', 0.5)
+
+            # Set override values
+            self.config.intensity_threshold = self.override_intensity_threshold
+            self.config.neighborhood_size = self.override_neighborhood_size
+            self.config.max_stars = self.override_max_stars
+            self.config.gamma = self.override_gamma
+            self.config.segment_radius = self.override_segment_radius
+            self.config.max_feature_ratio = self.override_max_feature_ratio
+            self.config.roundness_threshold = self.override_roundness_threshold
+
+            try:
+                star_list = extractStarsFF(
+                    self.dir_path,
+                    ff_name,
+                    config=self.config,
+                    flat_struct=self.flat_struct if hasattr(self, 'flat_struct') else None,
+                    dark=self.dark if hasattr(self, 'dark') else None,
+                    mask=self.mask if hasattr(self, 'mask') else None
+                )
+            finally:
+                # Restore original config values
+                self.config.intensity_threshold = original_intensity_threshold
+                self.config.neighborhood_size = original_neighborhood_size
+                self.config.max_stars = original_max_stars
+                self.config.gamma = original_gamma
+                self.config.segment_radius = original_segment_radius
+                self.config.max_feature_ratio = original_max_feature_ratio
+                self.config.roundness_threshold = original_roundness_threshold
+
+            if star_list:
+                # extractStarsFF returns: ff_name, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count
+                ff_name_ret, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count = star_list
+
+                # Construct star data in CALSTARS format: (y, x, amplitude, intensity, fwhm, background, snr, saturated_count)
+                star_data = list(zip(y_arr, x_arr, amplitude, intensity, fwhm, background, snr, saturated_count))
+
+                # Store the override detected stars
+                self.star_detection_override_data[ff_name] = star_data
+                original_count = len(self.calstars.get(ff_name, []))
+                print(f"  Detected {len(star_data)} stars (original: {original_count})")
+
+                # Enable override mode and update display
+                self.star_detection_override_enabled = True
+                self.tab.star_detection.use_override_checkbox.setChecked(True)
+                self.updateCalstars()
+                self.tab.star_detection.updateStatus(True, len(star_data))
+
+            else:
+                print("  No stars detected")
+                self.tab.star_detection.updateStatus(False)
+
+        except Exception as e:
+            print(f"  Error during star detection: {e}")
+            import traceback
+            traceback.print_exc()
+
+
+    def redetectAllImages(self):
+        """ Re-detect stars on all images using override parameters. """
+        print("Re-detecting stars on all images...")
+
+        # Get list of all FF files
+        ff_files = list(self.calstars.keys())
+        if not ff_files:
+            print("  No FF files found in CALSTARS")
+            return
+
+        total = len(ff_files)
+        success_count = 0
+
+        # Save original config values
+        original_intensity_threshold = getattr(self.config, 'intensity_threshold', 18)
+        original_neighborhood_size = getattr(self.config, 'neighborhood_size', 10)
+        original_max_stars = getattr(self.config, 'max_stars', 200)
+        original_gamma = getattr(self.config, 'gamma', 1.0)
+        original_segment_radius = getattr(self.config, 'segment_radius', 4)
+        original_max_feature_ratio = getattr(self.config, 'max_feature_ratio', 0.8)
+        original_roundness_threshold = getattr(self.config, 'roundness_threshold', 0.5)
+
+        # Set override values
+        self.config.intensity_threshold = self.override_intensity_threshold
+        self.config.neighborhood_size = self.override_neighborhood_size
+        self.config.max_stars = self.override_max_stars
+        self.config.gamma = self.override_gamma
+        self.config.segment_radius = self.override_segment_radius
+        self.config.max_feature_ratio = self.override_max_feature_ratio
+        self.config.roundness_threshold = self.override_roundness_threshold
+
+        try:
+            for i, ff_name in enumerate(ff_files):
+                print(f"  Processing {i+1}/{total}: {ff_name}")
+
+                try:
+                    star_list = extractStarsFF(
+                        self.dir_path,
+                        ff_name,
+                        config=self.config,
+                        flat_struct=self.flat_struct if hasattr(self, 'flat_struct') else None,
+                        dark=self.dark if hasattr(self, 'dark') else None,
+                        mask=self.mask if hasattr(self, 'mask') else None
+                    )
+
+                    if star_list:
+                        ff_name_ret, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count = star_list
+                        star_data = list(zip(y_arr, x_arr, amplitude, intensity, fwhm, background, snr, saturated_count))
+                        self.star_detection_override_data[ff_name] = star_data
+                        success_count += 1
+
+                except Exception as e:
+                    print(f"    Error: {e}")
+
+        finally:
+            # Restore original config values
+            self.config.intensity_threshold = original_intensity_threshold
+            self.config.neighborhood_size = original_neighborhood_size
+            self.config.max_stars = original_max_stars
+            self.config.gamma = original_gamma
+            self.config.segment_radius = original_segment_radius
+            self.config.max_feature_ratio = original_max_feature_ratio
+            self.config.roundness_threshold = original_roundness_threshold
+
+        print(f"  Completed: {success_count}/{total} images processed")
+
+        # Enable override mode and update display
+        self.star_detection_override_enabled = True
+        self.tab.star_detection.use_override_checkbox.setChecked(True)
+        self.updateCalstars()
+
+        ff_name = self.img_handle.name()
+        if ff_name in self.star_detection_override_data:
+            self.tab.star_detection.updateStatus(True, len(self.star_detection_override_data[ff_name]))
+        else:
+            self.tab.star_detection.updateStatus(True)
 
 
     def updatePicks(self):
