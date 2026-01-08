@@ -3182,6 +3182,10 @@ class PlateTool(QtWidgets.QMainWindow):
                 # extractStarsFF returns: ff_name, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count
                 ff_name_ret, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count = star_list
 
+                # Debug: print SNR values from extractStarsFF
+                snr_arr = np.array(snr)
+                print(f"  extractStarsFF SNR: min={snr_arr.min():.1f}, max={snr_arr.max():.1f}, mean={snr_arr.mean():.1f}")
+
                 # Construct star data in CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
                 # Note: intensity=IntensSum (integrated), amplitude=Ampltd (peak)
                 star_data = list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, saturated_count))
@@ -6634,10 +6638,14 @@ class PlateTool(QtWidgets.QMainWindow):
             return False
 
         # Get detected star coordinates (note: calstars format is [y, x, ...])
+        # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
         det_y = detected_stars[:, 0]
         det_x = detected_stars[:, 1]
         # Use index 2 (IntensSum/integrated intensity) not index 3 (Ampltd/peak amplitude)
         det_intens = detected_stars[:, 2] if detected_stars.shape[1] > 2 else np.ones(len(det_x))
+        det_fwhm = detected_stars[:, 4] if detected_stars.shape[1] > 4 else np.zeros(len(det_x))
+        det_snr = detected_stars[:, 6] if detected_stars.shape[1] > 6 else np.ones(len(det_x))
+        det_saturated = detected_stars[:, 7] if detected_stars.shape[1] > 7 else np.zeros(len(det_x))
 
         # Prepare calstars_coords for alignPlatepar (x, y format)
         calstars_coords = np.column_stack([det_x, det_y])
@@ -6745,11 +6753,24 @@ class PlateTool(QtWidgets.QMainWindow):
                 img_x, img_y, img_intens = img_stars_matched[i]
                 cat_star = catalog_matched[i]
                 sky_obj = CatalogStar(cat_star[0], cat_star[1], cat_star[2])
+
+                # Look up FWHM, SNR, and saturation from detected stars
+                fwhm, snr, saturated = 2.5, 1.0, False
+                if len(det_x) > 0:
+                    distances = np.sqrt((det_x - img_x)**2 + (det_y - img_y)**2)
+                    closest_idx = np.argmin(distances)
+                    if distances[closest_idx] < 3.0:  # Within 3 pixels
+                        fwhm = det_fwhm[closest_idx]
+                        snr = det_snr[closest_idx]
+                        saturated = det_saturated[closest_idx] > 0
+
                 self.paired_stars.addPair(
                     img_x, img_y,
-                    2.5,  # Default FWHM
+                    fwhm,
                     img_intens,
-                    sky_obj
+                    sky_obj,
+                    snr=snr,
+                    saturated=saturated
                 )
 
         print("  Matched {} star pairs".format(len(self.paired_stars)))
@@ -7036,6 +7057,9 @@ class PlateTool(QtWidgets.QMainWindow):
             det_fwhm = detected_stars[:, 4] if detected_stars.shape[1] > 4 else np.zeros(len(det_x))
             det_snr = detected_stars[:, 6] if detected_stars.shape[1] > 6 else np.ones(len(det_x))
             det_saturated = detected_stars[:, 7] if detected_stars.shape[1] > 7 else np.zeros(len(det_x))
+            # Debug: print SNR stats
+            print("  SNR from detected stars: min={:.1f}, max={:.1f}, mean={:.1f}, shape={}".format(
+                det_snr.min(), det_snr.max(), det_snr.mean(), detected_stars.shape))
         else:
             print("No detected stars available for matching")
             det_x, det_y, det_intens = np.array([]), np.array([]), np.array([])
