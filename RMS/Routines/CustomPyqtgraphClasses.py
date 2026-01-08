@@ -2633,6 +2633,7 @@ class MaskWidget(QtWidgets.QWidget):
     def __init__(self, gui):
         QtWidgets.QWidget.__init__(self)
         self.gui = gui
+        self.unsaved = False  # Track if there are unsaved changes
 
         layout = QtWidgets.QVBoxLayout()
         layout.setContentsMargins(10, 10, 10, 10)
@@ -2731,15 +2732,29 @@ class MaskWidget(QtWidgets.QWidget):
 
     def updateStatus(self, polygon_count, drawing_points=0):
         """Update the status label."""
+        unsaved_suffix = ' (unsaved)' if self.unsaved else ''
+
         if drawing_points > 0:
             self.status_label.setText(f'Drawing: {drawing_points} points')
             self.status_label.setStyleSheet("color: orange; font-size: 9pt;")
         elif polygon_count == 0:
-            self.status_label.setText('No polygons')
-            self.status_label.setStyleSheet("color: gray; font-size: 9pt;")
+            if self.unsaved:
+                self.status_label.setText('No polygons (unsaved)')
+                self.status_label.setStyleSheet("color: orange; font-size: 9pt;")
+            else:
+                self.status_label.setText('No polygons')
+                self.status_label.setStyleSheet("color: gray; font-size: 9pt;")
         else:
-            self.status_label.setText(f'{polygon_count} polygon(s)')
-            self.status_label.setStyleSheet("color: green; font-size: 9pt;")
+            if self.unsaved:
+                self.status_label.setText(f'{polygon_count} polygon(s) (unsaved)')
+                self.status_label.setStyleSheet("color: orange; font-size: 9pt;")
+            else:
+                self.status_label.setText(f'{polygon_count} polygon(s) - saved')
+                self.status_label.setStyleSheet("color: green; font-size: 9pt;")
+
+    def setUnsaved(self, unsaved=True):
+        """Mark polygons as having unsaved changes."""
+        self.unsaved = unsaved
 
 
 class SettingsWidget(QtWidgets.QWidget):

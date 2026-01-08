@@ -64,9 +64,8 @@ from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
 from RMS.Routines.CustomPyqtgraphClasses import *
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle
 from RMS.Routines.Image import signalToNoise, applyDark, applyFlat
-from RMS.Routines.MaskImage import getMaskFile
+from RMS.Routines.MaskImage import getMaskFile, MaskStructure
 from RMS.Routines import RollingShutterCorrection
-from RMS.Routines.MaskImage import getMaskFile
 from RMS.Misc import maxDistBetweenPoints, getRmsRootDir
 from Utils.KalmanFilter import KalmanFilter
 
@@ -3343,9 +3342,11 @@ class PlateTool(QtWidgets.QMainWindow):
             # If there are points, close the polygon
             if len(self.mask_current_polygon) >= 3:
                 self.mask_polygons.append(self.mask_current_polygon.copy())
+                self.tab.mask.setUnsaved(True)
             self.mask_current_polygon = []
             self.tab.mask.setDrawMode(False)
         self.updateMaskDisplay()
+        self.tab.mask.updateStatus(len(self.mask_polygons))
 
     def addMaskPoint(self, x, y):
         """Add a point to the current polygon being drawn."""
@@ -3376,6 +3377,7 @@ class PlateTool(QtWidgets.QMainWindow):
         """Close the current polygon and add it to the list."""
         if len(self.mask_current_polygon) >= 3:
             self.mask_polygons.append(self.mask_current_polygon.copy())
+            self.tab.mask.setUnsaved(True)
         self.mask_current_polygon = []
         self.mask_draw_mode = False
         self.tab.mask.setDrawMode(False)
@@ -3389,6 +3391,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.mask_draw_mode = False
         self.mask_dragging_vertex = None
         self.tab.mask.setDrawMode(False)
+        self.tab.mask.setUnsaved(True)
         self.updateMaskDisplay()
         self.tab.mask.updateStatus(0)
 
@@ -3431,10 +3434,13 @@ class PlateTool(QtWidgets.QMainWindow):
                 if len(polygon) > 3:
                     # Keep polygon if it still has at least 3 vertices
                     del polygon[vert_idx]
+                    self.tab.mask.setUnsaved(True)
                     self.updateMaskDisplay()
+                    self.tab.mask.updateStatus(len(self.mask_polygons))
                 else:
                     # Delete entire polygon if less than 3 vertices would remain
                     del self.mask_polygons[poly_idx]
+                    self.tab.mask.setUnsaved(True)
                     self.updateMaskDisplay()
                     self.tab.mask.updateStatus(len(self.mask_polygons))
 
@@ -3465,8 +3471,10 @@ class PlateTool(QtWidgets.QMainWindow):
             poly_idx, vert_idx = vertex_ref
             if poly_idx < len(self.mask_polygons) and vert_idx < len(self.mask_polygons[poly_idx]):
                 self.mask_polygons[poly_idx][vert_idx] = (new_x, new_y)
+                self.tab.mask.setUnsaved(True)
 
         self.updateMaskDisplay()
+        self.tab.mask.updateStatus(len(self.mask_polygons))
 
     def updateMaskDisplay(self):
         """Update all mask graphics items."""
@@ -3556,7 +3564,7 @@ class PlateTool(QtWidgets.QMainWindow):
         return mask
 
     def saveMask(self):
-        """Save mask to file."""
+        """Save mask to file and update self.mask for star detection."""
         import cv2
         from PyQt5.QtWidgets import QFileDialog
 
@@ -3572,6 +3580,14 @@ class PlateTool(QtWidgets.QMainWindow):
             mask_img = self.generateMaskImage()
             cv2.imwrite(file_path, mask_img)
             print(f"Mask saved to: {file_path}")
+
+            # Update self.mask so star detection uses the new mask
+            self.mask = MaskStructure(mask_img)
+            print("Mask updated for star detection")
+
+            # Mark as saved
+            self.tab.mask.setUnsaved(False)
+            self.tab.mask.updateStatus(len(self.mask_polygons))
 
     def loadMaskDialog(self):
         """Open dialog to load a mask file."""
@@ -3617,6 +3633,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
         print(f"Loaded {len(self.mask_polygons)} polygon(s) from mask")
         self.updateMaskDisplay()
+
+        # Update self.mask so star detection uses the loaded mask
+        self.mask = MaskStructure(mask_img)
+        print("Mask updated for star detection")
+
+        # Mark as saved (loaded mask is in sync)
+        self.tab.mask.setUnsaved(False)
         self.tab.mask.updateStatus(len(self.mask_polygons))
 
     ###################################################################################################
