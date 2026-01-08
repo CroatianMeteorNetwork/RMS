@@ -2429,228 +2429,127 @@ class StarDetectionWidget(QtWidgets.QWidget):
         self.gui = gui
 
         layout = QtWidgets.QVBoxLayout()
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(5)
         self.setLayout(layout)
 
-        # Add title label
+        # Title
         title = QtWidgets.QLabel('Star Detection Override')
-        title.setStyleSheet("font-weight: bold; font-size: 12pt;")
+        title.setStyleSheet("font-weight: bold; font-size: 11pt;")
         layout.addWidget(title)
 
-        # Add info label
-        info = QtWidgets.QLabel(
-            'Test different star detection parameters to find\n'
-            'optimal settings for calibration. Changes affect\n'
-            'the current session only (not saved to .config).'
-        )
-        info.setWordWrap(True)
-        info.setStyleSheet("color: gray; font-size: 9pt;")
-        layout.addWidget(info)
+        # Use QGridLayout for stable slider layout
+        grid = QtWidgets.QGridLayout()
+        grid.setSpacing(5)
+        grid.setColumnStretch(0, 1)  # Label column stretches
+        grid.setColumnStretch(1, 0)  # Value column fixed
+        layout.addLayout(grid)
 
-        layout.addSpacing(5)
+        row = 0
+        slider_data = [
+            ('Intensity Threshold', 1, 50, 18, '18', self.onIntensityThresholdChanged),
+            ('Neighborhood Size', 5, 40, 10, '10', self.onNeighborhoodSizeChanged),
+            ('Max Stars', 50, 2000, 200, '200', self.onMaxStarsChanged),
+            ('Gamma', 45, 200, 100, '1.00', self.onGammaChanged),
+            ('Segment Radius', 4, 20, 4, '4', self.onSegmentRadiusChanged),
+            ('Max Feature Ratio', 50, 200, 80, '0.80', self.onMaxFeatureRatioChanged),
+            ('Roundness Threshold', 30, 90, 50, '0.50', self.onRoundnessThresholdChanged),
+        ]
 
-        # Intensity Threshold
-        intensity_label = QtWidgets.QLabel('intensity_threshold:')
-        intensity_label.setStyleSheet("font-weight: bold;")
-        layout.addWidget(intensity_label)
-        threshold_slider_layout = QtWidgets.QHBoxLayout()
-        self.intensity_threshold_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
-        self.intensity_threshold_slider.setMinimum(1)
-        self.intensity_threshold_slider.setMaximum(50)
-        self.intensity_threshold_slider.setValue(18)
-        self.intensity_threshold_slider.valueChanged.connect(self.onIntensityThresholdChanged)
-        threshold_slider_layout.addWidget(self.intensity_threshold_slider)
-        self.intensity_threshold_label = QtWidgets.QLabel('18')
-        self.intensity_threshold_label.setMinimumWidth(40)
-        threshold_slider_layout.addWidget(self.intensity_threshold_label)
-        layout.addLayout(threshold_slider_layout)
-        threshold_help = QtWidgets.QLabel('Higher = fewer faint stars')
-        threshold_help.setStyleSheet("color: gray; font-size: 8pt;")
-        layout.addWidget(threshold_help)
+        self.sliders = {}
+        self.slider_labels = {}
 
-        layout.addSpacing(5)
+        for name, min_val, max_val, default, default_str, callback in slider_data:
+            key = name.lower().replace(' ', '_')
 
-        # Neighborhood Size
-        neighborhood_label = QtWidgets.QLabel('neighborhood_size:')
-        neighborhood_label.setStyleSheet("font-weight: bold;")
-        layout.addWidget(neighborhood_label)
-        neighborhood_slider_layout = QtWidgets.QHBoxLayout()
-        self.neighborhood_size_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
-        self.neighborhood_size_slider.setMinimum(5)
-        self.neighborhood_size_slider.setMaximum(40)
-        self.neighborhood_size_slider.setValue(10)
-        self.neighborhood_size_slider.valueChanged.connect(self.onNeighborhoodSizeChanged)
-        neighborhood_slider_layout.addWidget(self.neighborhood_size_slider)
-        self.neighborhood_size_label = QtWidgets.QLabel('10')
-        self.neighborhood_size_label.setMinimumWidth(40)
-        neighborhood_slider_layout.addWidget(self.neighborhood_size_label)
-        layout.addLayout(neighborhood_slider_layout)
-        neighborhood_help = QtWidgets.QLabel('Smaller = more detections')
-        neighborhood_help.setStyleSheet("color: gray; font-size: 8pt;")
-        layout.addWidget(neighborhood_help)
+            # Row with label and value
+            grid.addWidget(QtWidgets.QLabel(name), row, 0)
+            val_label = QtWidgets.QLabel(default_str)
+            val_label.setFixedSize(45, 16)  # Lock both width and height
+            val_label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+            grid.addWidget(val_label, row, 1)
+            row += 1
 
-        layout.addSpacing(5)
+            # Row with slider spanning both columns
+            slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+            slider.setRange(min_val, max_val)
+            slider.setValue(default)
+            slider.valueChanged.connect(callback)
+            grid.addWidget(slider, row, 0, 1, 2)  # span 2 columns
+            row += 1
 
-        # Max Stars
-        maxstars_label = QtWidgets.QLabel('max_stars:')
-        maxstars_label.setStyleSheet("font-weight: bold;")
-        layout.addWidget(maxstars_label)
-        maxstars_slider_layout = QtWidgets.QHBoxLayout()
-        self.max_stars_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
-        self.max_stars_slider.setMinimum(50)
-        self.max_stars_slider.setMaximum(2000)
-        self.max_stars_slider.setValue(200)
-        self.max_stars_slider.setSingleStep(50)
-        self.max_stars_slider.valueChanged.connect(self.onMaxStarsChanged)
-        maxstars_slider_layout.addWidget(self.max_stars_slider)
-        self.max_stars_label = QtWidgets.QLabel('200')
-        self.max_stars_label.setMinimumWidth(40)
-        maxstars_slider_layout.addWidget(self.max_stars_label)
-        layout.addLayout(maxstars_slider_layout)
-        maxstars_help = QtWidgets.QLabel('Maximum candidates to process')
-        maxstars_help.setStyleSheet("color: gray; font-size: 8pt;")
-        layout.addWidget(maxstars_help)
+            self.sliders[key] = slider
+            self.slider_labels[key] = val_label
 
-        layout.addSpacing(5)
+            # Add gamma preset buttons right after gamma slider
+            if key == 'gamma':
+                gamma_presets = QtWidgets.QHBoxLayout()
+                gamma_presets.setSpacing(4)
+                gamma_presets.setContentsMargins(0, 0, 0, 5)
 
-        # Gamma
-        gamma_label = QtWidgets.QLabel('gamma:')
-        gamma_label.setStyleSheet("font-weight: bold;")
-        layout.addWidget(gamma_label)
-        gamma_slider_layout = QtWidgets.QHBoxLayout()
-        self.gamma_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
-        self.gamma_slider.setMinimum(45)
-        self.gamma_slider.setMaximum(200)
-        self.gamma_slider.setValue(100)
-        self.gamma_slider.valueChanged.connect(self.onGammaChanged)
-        gamma_slider_layout.addWidget(self.gamma_slider)
-        self.gamma_label = QtWidgets.QLabel('1.000')
-        self.gamma_label.setMinimumWidth(50)
-        gamma_slider_layout.addWidget(self.gamma_label)
-        layout.addLayout(gamma_slider_layout)
-        # Gamma presets
-        preset_layout = QtWidgets.QHBoxLayout()
-        gamma_preset_122 = QtWidgets.QPushButton('1/2.2')
-        gamma_preset_122.setMaximumWidth(50)
-        gamma_preset_122.clicked.connect(lambda: self.gamma_slider.setValue(45))
-        preset_layout.addWidget(gamma_preset_122)
-        gamma_preset_118 = QtWidgets.QPushButton('1/1.8')
-        gamma_preset_118.setMaximumWidth(50)
-        gamma_preset_118.clicked.connect(lambda: self.gamma_slider.setValue(56))
-        preset_layout.addWidget(gamma_preset_118)
-        gamma_preset_1 = QtWidgets.QPushButton('1.0')
-        gamma_preset_1.setMaximumWidth(50)
-        gamma_preset_1.clicked.connect(lambda: self.gamma_slider.setValue(100))
-        preset_layout.addWidget(gamma_preset_1)
-        preset_layout.addStretch()
-        layout.addLayout(preset_layout)
-        gamma_help = QtWidgets.QLabel('Affects intensity measurement')
-        gamma_help.setStyleSheet("color: gray; font-size: 8pt;")
-        layout.addWidget(gamma_help)
+                btn_gamma_22 = QtWidgets.QPushButton('1/2.2')
+                btn_gamma_22.clicked.connect(lambda: self.setGammaPreset(1/2.2))
+                gamma_presets.addWidget(btn_gamma_22)
 
-        layout.addSpacing(5)
+                btn_gamma_18 = QtWidgets.QPushButton('1/1.8')
+                btn_gamma_18.clicked.connect(lambda: self.setGammaPreset(1/1.8))
+                gamma_presets.addWidget(btn_gamma_18)
 
-        # Segment Radius
-        segment_label = QtWidgets.QLabel('segment_radius:')
-        segment_label.setStyleSheet("font-weight: bold;")
-        layout.addWidget(segment_label)
-        segment_slider_layout = QtWidgets.QHBoxLayout()
-        self.segment_radius_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
-        self.segment_radius_slider.setMinimum(4)
-        self.segment_radius_slider.setMaximum(10)
-        self.segment_radius_slider.setValue(4)
-        self.segment_radius_slider.valueChanged.connect(self.onSegmentRadiusChanged)
-        segment_slider_layout.addWidget(self.segment_radius_slider)
-        self.segment_radius_label = QtWidgets.QLabel('4')
-        self.segment_radius_label.setMinimumWidth(40)
-        segment_slider_layout.addWidget(self.segment_radius_label)
-        layout.addLayout(segment_slider_layout)
-        segment_help = QtWidgets.QLabel('Larger = better for bright/wide stars')
-        segment_help.setStyleSheet("color: gray; font-size: 8pt;")
-        layout.addWidget(segment_help)
+                btn_gamma_lin = QtWidgets.QPushButton('Linear')
+                btn_gamma_lin.clicked.connect(lambda: self.setGammaPreset(1.0))
+                gamma_presets.addWidget(btn_gamma_lin)
 
-        layout.addSpacing(5)
+                grid.addLayout(gamma_presets, row, 0, 1, 2)
+                grid.setRowMinimumHeight(row, 28)
+                row += 1
 
-        # Max Feature Ratio
-        feature_label = QtWidgets.QLabel('max_feature_ratio:')
-        feature_label.setStyleSheet("font-weight: bold;")
-        layout.addWidget(feature_label)
-        feature_slider_layout = QtWidgets.QHBoxLayout()
-        self.max_feature_ratio_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
-        self.max_feature_ratio_slider.setMinimum(50)
-        self.max_feature_ratio_slider.setMaximum(200)
-        self.max_feature_ratio_slider.setValue(80)
-        self.max_feature_ratio_slider.valueChanged.connect(self.onMaxFeatureRatioChanged)
-        feature_slider_layout.addWidget(self.max_feature_ratio_slider)
-        self.max_feature_ratio_label = QtWidgets.QLabel('0.80')
-        self.max_feature_ratio_label.setMinimumWidth(50)
-        feature_slider_layout.addWidget(self.max_feature_ratio_label)
-        layout.addLayout(feature_slider_layout)
-        feature_help = QtWidgets.QLabel('Higher = allow larger stars')
-        feature_help.setStyleSheet("color: gray; font-size: 8pt;")
-        layout.addWidget(feature_help)
+        # Create named references for compatibility
+        self.intensity_threshold_slider = self.sliders['intensity_threshold']
+        self.intensity_threshold_label = self.slider_labels['intensity_threshold']
+        self.neighborhood_size_slider = self.sliders['neighborhood_size']
+        self.neighborhood_size_label = self.slider_labels['neighborhood_size']
+        self.max_stars_slider = self.sliders['max_stars']
+        self.max_stars_label = self.slider_labels['max_stars']
+        self.gamma_slider = self.sliders['gamma']
+        self.gamma_label = self.slider_labels['gamma']
+        self.segment_radius_slider = self.sliders['segment_radius']
+        self.segment_radius_label = self.slider_labels['segment_radius']
+        self.max_feature_ratio_slider = self.sliders['max_feature_ratio']
+        self.max_feature_ratio_label = self.slider_labels['max_feature_ratio']
+        self.roundness_threshold_slider = self.sliders['roundness_threshold']
+        self.roundness_threshold_label = self.slider_labels['roundness_threshold']
 
-        layout.addSpacing(5)
+        layout.addSpacing(15)
 
-        # Roundness Threshold
-        roundness_label = QtWidgets.QLabel('roundness_threshold:')
-        roundness_label.setStyleSheet("font-weight: bold;")
-        layout.addWidget(roundness_label)
-        roundness_slider_layout = QtWidgets.QHBoxLayout()
-        self.roundness_threshold_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
-        self.roundness_threshold_slider.setMinimum(30)
-        self.roundness_threshold_slider.setMaximum(90)
-        self.roundness_threshold_slider.setValue(50)
-        self.roundness_threshold_slider.valueChanged.connect(self.onRoundnessThresholdChanged)
-        roundness_slider_layout.addWidget(self.roundness_threshold_slider)
-        self.roundness_threshold_label = QtWidgets.QLabel('0.50')
-        self.roundness_threshold_label.setMinimumWidth(50)
-        roundness_slider_layout.addWidget(self.roundness_threshold_label)
-        layout.addLayout(roundness_slider_layout)
-        roundness_help = QtWidgets.QLabel('Filters hot pixels')
-        roundness_help.setStyleSheet("color: gray; font-size: 8pt;")
-        layout.addWidget(roundness_help)
+        # Buttons in their own layout with spacing
+        btn_layout = QtWidgets.QVBoxLayout()
+        btn_layout.setSpacing(8)
 
+        self.redetect_button = QtWidgets.QPushButton('Re-Detect Current')
+        self.redetect_button.clicked.connect(self.sigRedetectStars.emit)
+        btn_layout.addWidget(self.redetect_button)
+
+        self.redetect_all_button = QtWidgets.QPushButton('Re-Detect All')
+        self.redetect_all_button.clicked.connect(self.sigRedetectAllImages.emit)
+        btn_layout.addWidget(self.redetect_all_button)
+
+        layout.addLayout(btn_layout)
         layout.addSpacing(10)
 
-        # Re-detect button
-        self.redetect_button = QtWidgets.QPushButton('Re-Detect Stars (Current Image)')
-        self.redetect_button.setStyleSheet("font-weight: bold;")
-        self.redetect_button.clicked.connect(self.sigRedetectStars.emit)
-        layout.addWidget(self.redetect_button)
-
-        layout.addSpacing(5)
-
-        # Re-detect all images button
-        self.redetect_all_button = QtWidgets.QPushButton('Re-Detect All Images')
-        self.redetect_all_button.setStyleSheet("font-weight: bold; background-color: #4CAF50; color: white;")
-        self.redetect_all_button.setToolTip(
-            'Re-detect stars on all FF files with current parameters.\n'
-            'Enables picking stars from all images with consistent settings.'
-        )
-        self.redetect_all_button.clicked.connect(self.sigRedetectAllImages.emit)
-        layout.addWidget(self.redetect_all_button)
-
-        layout.addSpacing(5)
-
-        # Use override checkbox
+        # Checkbox
         self.use_override_checkbox = QtWidgets.QCheckBox('Use Override Detections')
-        self.use_override_checkbox.setToolTip(
-            'When enabled, use re-detected stars instead of original CALSTARS.\n'
-            'Affects star display, residuals, and auto-pairing.'
-        )
         self.use_override_checkbox.released.connect(self.sigUseOverrideToggled.emit)
         layout.addWidget(self.use_override_checkbox)
 
-        layout.addSpacing(10)
+        layout.addSpacing(5)
 
-        # Status label
+        # Status
         self.status_label = QtWidgets.QLabel('Using original CALSTARS')
-        self.status_label.setWordWrap(True)
-        self.status_label.setStyleSheet("color: gray; font-size: 9pt; padding: 5px;")
+        self.status_label.setStyleSheet("color: gray; font-size: 10pt;")
         layout.addWidget(self.status_label)
 
-        # Add stretch to push everything to the top
         layout.addStretch()
+
 
     def onIntensityThresholdChanged(self, value):
         self.intensity_threshold_label.setText(str(value))
@@ -2666,8 +2565,12 @@ class StarDetectionWidget(QtWidgets.QWidget):
 
     def onGammaChanged(self, value):
         gamma = value / 100.0
-        self.gamma_label.setText(f'{gamma:.3f}')
+        self.gamma_label.setText(f'{gamma:.2f}')
         self.sigGammaChanged.emit(gamma)
+
+    def setGammaPreset(self, gamma):
+        """Set gamma to a preset value."""
+        self.gamma_slider.setValue(int(gamma * 100))
 
     def onSegmentRadiusChanged(self, value):
         self.segment_radius_label.setText(str(value))
