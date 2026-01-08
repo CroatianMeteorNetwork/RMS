@@ -1702,6 +1702,12 @@ class PlateTool(QtWidgets.QMainWindow):
         self.override_max_feature_ratio = 0.8
         self.override_roundness_threshold = 0.5
 
+        # Mask drawing state
+        self.mask_draw_mode = False
+        self.mask_current_polygon = []  # Points being drawn
+        self.mask_polygons = []  # List of completed polygons
+        self.mask_dragging_vertex = None  # (polygon_idx, vertex_idx) or ('current', vertex_idx)
+
 
         ###################################################################################################
         # PLATEPAR
@@ -2276,6 +2282,30 @@ class PlateTool(QtWidgets.QMainWindow):
         self.region_zoom.setZValue(10)
         self.zoom_window.addItem(self.region_zoom)
 
+        # Mask overlay (red tint over masked areas)
+        mask_lut = np.array([[0, 0, 0, 0], [255, 0, 0, 80]], dtype=np.ubyte)
+        self.mask_overlay = pg.ImageItem(lut=mask_lut)
+        self.mask_overlay.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)
+        self.mask_overlay.setZValue(8)
+        self.img_frame.addItem(self.mask_overlay)
+        self.mask_overlay.hide()
+
+        # Current polygon being drawn (yellow dashed line)
+        self.mask_current_line = pg.PlotCurveItem(
+            pen=pg.mkPen((255, 255, 0), width=2, style=QtCore.Qt.DashLine))
+        self.mask_current_line.setZValue(15)
+        self.img_frame.addItem(self.mask_current_line)
+
+        # Vertex markers for current polygon
+        self.mask_vertex_markers = pg.ScatterPlotItem(
+            pen=pg.mkPen((255, 255, 255), width=1),
+            brush=pg.mkBrush(255, 255, 0, 200), size=10)
+        self.mask_vertex_markers.setZValue(16)
+        self.img_frame.addItem(self.mask_vertex_markers)
+
+        # Storage for completed polygon graphics
+        self.mask_polygon_items = []
+
         self.tab = RightOptionsTab(self)
         self.tab.hist.setImageItem(self.img)
         self.tab.hist.setImages(self.img_zoom)
@@ -2326,6 +2356,13 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.star_detection.sigMaxFeatureRatioChanged.connect(self.updateMaxFeatureRatio)
         self.tab.star_detection.sigRoundnessThresholdChanged.connect(self.updateRoundnessThreshold)
 
+        # Mask widget signals
+        self.tab.mask.sigDrawModeToggled.connect(self.toggleMaskDrawMode)
+        self.tab.mask.sigClearPolygons.connect(self.clearMaskPolygons)
+        self.tab.mask.sigSaveMask.connect(self.saveMask)
+        self.tab.mask.sigLoadMask.connect(self.loadMaskDialog)
+        self.tab.mask.sigShowOverlayToggled.connect(self.toggleMaskOverlay)
+
         self.tab.settings.sigMaxAveToggled.connect(self.toggleImageType)
         self.tab.settings.sigCatStarsToggled.connect(self.toggleShowCatStars)
         self.tab.settings.sigCalStarsToggled.connect(self.toggleShowCalStars)
@@ -2370,6 +2407,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateDistortion()
         self.tab.param_manager.updatePlatepar()
         self.initStarDetectionOverrides()
+        self.initMaskFromFile()
         self.changeMode(self.mode)
 
 
@@ -3284,6 +3322,304 @@ class PlateTool(QtWidgets.QMainWindow):
             self.tab.star_detection.updateStatus(True, len(self.star_detection_override_data[ff_name]))
         else:
             self.tab.star_detection.updateStatus(True)
+
+
+    ###################################################################################################
+    # MASK DRAWING METHODS
+    ###################################################################################################
+
+    def initMaskFromFile(self):
+        """Auto-load mask.bmp if it exists in the working directory."""
+        mask_path = os.path.join(self.dir_path, "mask.bmp")
+        if os.path.exists(mask_path):
+            self.loadMaskFromFile(mask_path)
+
+    def toggleMaskDrawMode(self):
+        """Toggle mask polygon drawing mode."""
+        self.mask_draw_mode = self.tab.mask.draw_button.isChecked()
+        if self.mask_draw_mode:
+            self.mask_current_polygon = []
+        else:
+            # If there are points, close the polygon
+            if len(self.mask_current_polygon) >= 3:
+                self.mask_polygons.append(self.mask_current_polygon.copy())
+            self.mask_current_polygon = []
+            self.tab.mask.setDrawMode(False)
+        self.updateMaskDisplay()
+
+    def addMaskPoint(self, x, y):
+        """Add a point to the current polygon being drawn."""
+        # Get image dimensions - shape[0] is X, shape[1] is Y in this codebase
+        max_x = self.img.data.shape[0] - 1
+        max_y = self.img.data.shape[1] - 1
+
+        # Snap to edges if within threshold or outside bounds
+        snap_threshold = 15
+        if x < snap_threshold:
+            x = 0
+        elif x > max_x - snap_threshold:
+            x = max_x
+        if y < snap_threshold:
+            y = 0
+        elif y > max_y - snap_threshold:
+            y = max_y
+
+        # Clamp to valid bounds
+        x = np.clip(x, 0, max_x)
+        y = np.clip(y, 0, max_y)
+
+        self.mask_current_polygon.append((x, y))
+        self.updateMaskDisplay()
+        self.tab.mask.updateStatus(len(self.mask_polygons), len(self.mask_current_polygon))
+
+    def closeMaskPolygon(self):
+        """Close the current polygon and add it to the list."""
+        if len(self.mask_current_polygon) >= 3:
+            self.mask_polygons.append(self.mask_current_polygon.copy())
+        self.mask_current_polygon = []
+        self.mask_draw_mode = False
+        self.tab.mask.setDrawMode(False)
+        self.updateMaskDisplay()
+        self.tab.mask.updateStatus(len(self.mask_polygons))
+
+    def clearMaskPolygons(self):
+        """Clear all mask polygons."""
+        self.mask_polygons = []
+        self.mask_current_polygon = []
+        self.mask_draw_mode = False
+        self.mask_dragging_vertex = None
+        self.tab.mask.setDrawMode(False)
+        self.updateMaskDisplay()
+        self.tab.mask.updateStatus(0)
+
+    def findNearestMaskVertex(self, x, y, threshold=15):
+        """Find the nearest vertex to (x, y) within threshold.
+        Returns ('current', idx) for current polygon or (poly_idx, vert_idx) for completed polygons.
+        """
+        min_dist = threshold
+        result = None
+
+        # Check current polygon vertices
+        for i, (vx, vy) in enumerate(self.mask_current_polygon):
+            dist = np.hypot(x - vx, y - vy)
+            if dist < min_dist:
+                min_dist = dist
+                result = ('current', i)
+
+        # Check completed polygon vertices
+        for poly_idx, polygon in enumerate(self.mask_polygons):
+            for vert_idx, (vx, vy) in enumerate(polygon):
+                dist = np.hypot(x - vx, y - vy)
+                if dist < min_dist:
+                    min_dist = dist
+                    result = (poly_idx, vert_idx)
+
+        return result
+
+    def deleteMaskVertex(self, vertex_ref):
+        """Delete a vertex from a polygon."""
+        if vertex_ref[0] == 'current':
+            idx = vertex_ref[1]
+            if len(self.mask_current_polygon) > 0:
+                del self.mask_current_polygon[idx]
+                self.updateMaskDisplay()
+                self.tab.mask.updateStatus(len(self.mask_polygons), len(self.mask_current_polygon))
+        else:
+            poly_idx, vert_idx = vertex_ref
+            if poly_idx < len(self.mask_polygons):
+                polygon = self.mask_polygons[poly_idx]
+                if len(polygon) > 3:
+                    # Keep polygon if it still has at least 3 vertices
+                    del polygon[vert_idx]
+                    self.updateMaskDisplay()
+                else:
+                    # Delete entire polygon if less than 3 vertices would remain
+                    del self.mask_polygons[poly_idx]
+                    self.updateMaskDisplay()
+                    self.tab.mask.updateStatus(len(self.mask_polygons))
+
+    def moveMaskVertex(self, vertex_ref, new_x, new_y):
+        """Move a vertex to new position with edge snapping."""
+        # Apply edge snapping
+        max_x = self.img.data.shape[0] - 1
+        max_y = self.img.data.shape[1] - 1
+        snap_threshold = 15
+
+        if new_x < snap_threshold:
+            new_x = 0
+        elif new_x > max_x - snap_threshold:
+            new_x = max_x
+        if new_y < snap_threshold:
+            new_y = 0
+        elif new_y > max_y - snap_threshold:
+            new_y = max_y
+
+        new_x = np.clip(new_x, 0, max_x)
+        new_y = np.clip(new_y, 0, max_y)
+
+        if vertex_ref[0] == 'current':
+            idx = vertex_ref[1]
+            if idx < len(self.mask_current_polygon):
+                self.mask_current_polygon[idx] = (new_x, new_y)
+        else:
+            poly_idx, vert_idx = vertex_ref
+            if poly_idx < len(self.mask_polygons) and vert_idx < len(self.mask_polygons[poly_idx]):
+                self.mask_polygons[poly_idx][vert_idx] = (new_x, new_y)
+
+        self.updateMaskDisplay()
+
+    def updateMaskDisplay(self):
+        """Update all mask graphics items."""
+        # Update current polygon line
+        if len(self.mask_current_polygon) > 0:
+            pts = np.array(self.mask_current_polygon)
+            # Close the polygon visually
+            if len(pts) >= 3:
+                pts_closed = np.vstack([pts, pts[0]])
+                self.mask_current_line.setData(x=pts_closed[:, 0] + 0.5, y=pts_closed[:, 1] + 0.5)
+            else:
+                self.mask_current_line.setData(x=pts[:, 0] + 0.5, y=pts[:, 1] + 0.5)
+            self.mask_vertex_markers.setData(pos=pts + 0.5)
+        else:
+            self.mask_current_line.setData(x=[], y=[])
+            self.mask_vertex_markers.setData(pos=[])
+
+        # Remove old polygon items
+        for item in self.mask_polygon_items:
+            self.img_frame.removeItem(item)
+        self.mask_polygon_items = []
+
+        # Draw completed polygons
+        for polygon in self.mask_polygons:
+            pts = np.array(polygon)
+            pts_closed = np.vstack([pts, pts[0]])
+            line = pg.PlotCurveItem(
+                x=pts_closed[:, 0] + 0.5,
+                y=pts_closed[:, 1] + 0.5,
+                pen=pg.mkPen((255, 0, 0, 200), width=2),
+                fillLevel=0,
+                brush=pg.mkBrush(255, 0, 0, 50))
+            line.setZValue(12)
+            self.img_frame.addItem(line)
+            self.mask_polygon_items.append(line)
+
+        # Update mask overlay
+        self.updateMaskOverlayImage()
+
+    def updateMaskOverlayImage(self):
+        """Update the mask overlay image based on polygons."""
+        import cv2
+
+        if not self.tab.mask.show_overlay.isChecked():
+            self.mask_overlay.hide()
+            return
+
+        if len(self.mask_polygons) == 0:
+            self.mask_overlay.hide()
+            return
+
+        # Get image dimensions - shape[0] is X, shape[1] is Y in this codebase
+        img_width = self.img.data.shape[0]
+        img_height = self.img.data.shape[1]
+
+        # Create mask image (0 = clear, 1 = masked)
+        mask_img = np.zeros((img_height, img_width), dtype=np.uint8)
+
+        for polygon in self.mask_polygons:
+            pts = np.array(polygon, dtype=np.int32)
+            cv2.fillPoly(mask_img, [pts], 1)
+
+        # Transpose for pyqtgraph display
+        self.mask_overlay.setImage(mask_img.T)
+        self.mask_overlay.show()
+
+    def toggleMaskOverlay(self, visible):
+        """Toggle mask overlay visibility."""
+        if visible:
+            self.updateMaskOverlayImage()
+        else:
+            self.mask_overlay.hide()
+
+    def generateMaskImage(self):
+        """Generate mask.bmp image from polygons."""
+        import cv2
+
+        img_width = self.img.data.shape[0]
+        img_height = self.img.data.shape[1]
+
+        mask = np.full((img_height, img_width), 255, dtype=np.uint8)
+
+        for polygon in self.mask_polygons:
+            pts = np.array(polygon, dtype=np.int32)
+            cv2.fillPoly(mask, [pts], 0)
+
+        return mask
+
+    def saveMask(self):
+        """Save mask to file."""
+        import cv2
+        from PyQt5.QtWidgets import QFileDialog
+
+        if len(self.mask_polygons) == 0:
+            print("No polygons to save")
+            return
+
+        default_path = os.path.join(self.dir_path, "mask.bmp")
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Mask", default_path, "BMP Files (*.bmp);;All Files (*)")
+
+        if file_path:
+            mask_img = self.generateMaskImage()
+            cv2.imwrite(file_path, mask_img)
+            print(f"Mask saved to: {file_path}")
+
+    def loadMaskDialog(self):
+        """Open dialog to load a mask file."""
+        from PyQt5.QtWidgets import QFileDialog
+
+        default_path = self.dir_path
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Load Mask", default_path, "BMP Files (*.bmp);;All Files (*)")
+
+        if file_path:
+            self.loadMaskFromFile(file_path)
+
+    def loadMaskFromFile(self, mask_path):
+        """Load mask.bmp and convert masked regions to editable polygons."""
+        import cv2
+
+        if not os.path.exists(mask_path):
+            print(f"Mask file not found: {mask_path}")
+            return
+
+        mask_img = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+        if mask_img is None:
+            print(f"Failed to load mask: {mask_path}")
+            return
+
+        # Clear existing
+        self.mask_polygons = []
+        self.mask_current_polygon = []
+
+        # Find contours of masked (black) regions
+        inverted = cv2.bitwise_not(mask_img)
+        contours, _ = cv2.findContours(inverted, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        # Create polygon for each contour
+        for contour in contours:
+            # Simplify to reduce points
+            epsilon = 0.002 * cv2.arcLength(contour, True)
+            approx = cv2.approxPolyDP(contour, epsilon, True)
+            # Convert to list of (x, y) tuples
+            points = [(float(pt[0][0]), float(pt[0][1])) for pt in approx]
+            if len(points) >= 3:
+                self.mask_polygons.append(points)
+
+        print(f"Loaded {len(self.mask_polygons)} polygon(s) from mask")
+        self.updateMaskDisplay()
+        self.tab.mask.updateStatus(len(self.mask_polygons))
+
+    ###################################################################################################
 
 
     def updatePicks(self):
@@ -4449,6 +4785,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def onMouseReleased(self, event):
         self.clicked = 0
+        # Stop mask vertex dragging
+        self.mask_dragging_vertex = None
 
 
     def onMouseMoved(self, event):
@@ -4456,13 +4794,17 @@ class PlateTool(QtWidgets.QMainWindow):
         pos = event
 
         if self.img_frame.sceneBoundingRect().contains(pos):
-            
+
             self.img_frame.setFocus()
             mp = self.img_frame.mapSceneToView(pos)
 
             self.cursor.setCenter(mp)
             self.cursor2.setCenter(mp)
             self.mouse_x, self.mouse_y = mp.x(), mp.y()
+
+            # Handle mask vertex dragging
+            if self.mask_dragging_vertex is not None:
+                self.moveMaskVertex(self.mask_dragging_vertex, mp.x() - 0.5, mp.y() - 0.5)
 
             self.zoom()
 
@@ -4524,7 +4866,31 @@ class PlateTool(QtWidgets.QMainWindow):
             self.clicked = 3
 
         modifiers = QtWidgets.QApplication.keyboardModifiers()
-        
+
+        # Handle mask drawing/editing
+        if self.mask_draw_mode or len(self.mask_polygons) > 0 or len(self.mask_current_polygon) > 0:
+            pos = event.scenePos()
+            mp = self.img_frame.mapSceneToView(pos)
+            click_x, click_y = mp.x() - 0.5, mp.y() - 0.5
+
+            # Check if clicking near an existing vertex
+            vertex_hit = self.findNearestMaskVertex(click_x, click_y, threshold=15)
+
+            if event.button() == QtCore.Qt.LeftButton:
+                if vertex_hit is not None:
+                    # Start dragging this vertex
+                    self.mask_dragging_vertex = vertex_hit
+                    return
+                elif self.mask_draw_mode:
+                    # Add new point
+                    self.addMaskPoint(click_x, click_y)
+                    return
+            elif event.button() == QtCore.Qt.RightButton:
+                if vertex_hit is not None:
+                    # Delete this vertex
+                    self.deleteMaskVertex(vertex_hit)
+                    return
+
         if self.star_pick_mode:  # redundant
 
             # Add star pair in SkyFit
@@ -4721,6 +5087,13 @@ class PlateTool(QtWidgets.QMainWindow):
         qmodifiers = QtWidgets.QApplication.queryKeyboardModifiers()
 
         self.keys_pressed.append(event.key())
+
+        # Handle mask drawing - Space or Enter to close polygon
+        if self.mask_draw_mode and len(self.mask_current_polygon) >= 3:
+            if event.key() in (QtCore.Qt.Key_Space, QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
+                if modifiers == QtCore.Qt.NoModifier:
+                    self.closeMaskPolygon()
+                    return
 
         # Toggle auto levels
         if event.key() == QtCore.Qt.Key_A and (modifiers == QtCore.Qt.ControlModifier):

@@ -938,6 +938,7 @@ class RightOptionsTab(QtWidgets.QTabWidget):
         self.param_manager = PlateparParameterManager(gui)
         self.geolocation = GeolocationWidget(gui)
         self.star_detection = StarDetectionWidget(gui)
+        self.mask = MaskWidget(gui)
         self.settings = SettingsWidget(gui)
         self.debruijn = DebruijnSequenceManager(gui)
 
@@ -949,6 +950,7 @@ class RightOptionsTab(QtWidgets.QTabWidget):
         self.addTab(self.param_manager, 'Fit Parameters')
         self.addTab(self.geolocation, 'Station')
         self.addTab(self.star_detection, 'Star Detection')
+        self.addTab(self.mask, 'Mask')
         self.addTab(self.settings, 'Settings')
 
         self.setCurrentIndex(self.index)  # redundant
@@ -2615,6 +2617,129 @@ class StarDetectionWidget(QtWidgets.QWidget):
             self.max_feature_ratio_slider.setValue(int(config.max_feature_ratio * 100))
         if hasattr(config, 'roundness_threshold'):
             self.roundness_threshold_slider.setValue(int(config.roundness_threshold * 100))
+
+
+class MaskWidget(QtWidgets.QWidget):
+    """
+    Widget for creating and editing mask polygons.
+    Click to add points, right-click to close polygon.
+    """
+    sigDrawModeToggled = QtCore.pyqtSignal()
+    sigClearPolygons = QtCore.pyqtSignal()
+    sigSaveMask = QtCore.pyqtSignal()
+    sigLoadMask = QtCore.pyqtSignal()
+    sigShowOverlayToggled = QtCore.pyqtSignal(bool)
+
+    def __init__(self, gui):
+        QtWidgets.QWidget.__init__(self)
+        self.gui = gui
+
+        layout = QtWidgets.QVBoxLayout()
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+        self.setLayout(layout)
+
+        # Title
+        title = QtWidgets.QLabel('Mask Editor')
+        title.setStyleSheet("font-weight: bold; font-size: 11pt;")
+        layout.addWidget(title)
+
+        # Instructions
+        self.instructions = QtWidgets.QLabel(
+            'Draw: click to add points, Space/Enter to close\n'
+            'Edit: drag vertices, right-click vertex to delete')
+        self.instructions.setStyleSheet("color: gray; font-size: 9pt;")
+        self.instructions.setWordWrap(True)
+        layout.addWidget(self.instructions)
+
+        layout.addSpacing(10)
+
+        # Draw polygon button (toggle)
+        self.draw_button = QtWidgets.QPushButton('Draw Polygon')
+        self.draw_button.setCheckable(True)
+        self.draw_button.clicked.connect(self.onDrawToggled)
+        layout.addWidget(self.draw_button)
+
+        layout.addSpacing(5)
+
+        # Clear all button
+        self.clear_button = QtWidgets.QPushButton('Clear All')
+        self.clear_button.clicked.connect(self.onClearAll)
+        layout.addWidget(self.clear_button)
+
+        layout.addSpacing(15)
+
+        # File operations
+        file_layout = QtWidgets.QHBoxLayout()
+        file_layout.setSpacing(4)
+
+        self.load_button = QtWidgets.QPushButton('Load')
+        self.load_button.clicked.connect(self.sigLoadMask.emit)
+        file_layout.addWidget(self.load_button)
+
+        self.save_button = QtWidgets.QPushButton('Save')
+        self.save_button.clicked.connect(self.sigSaveMask.emit)
+        file_layout.addWidget(self.save_button)
+
+        layout.addLayout(file_layout)
+
+        layout.addSpacing(10)
+
+        # Show overlay checkbox
+        self.show_overlay = QtWidgets.QCheckBox('Show Mask Overlay')
+        self.show_overlay.setChecked(True)
+        self.show_overlay.toggled.connect(self.sigShowOverlayToggled.emit)
+        layout.addWidget(self.show_overlay)
+
+        layout.addSpacing(10)
+
+        # Status
+        self.status_label = QtWidgets.QLabel('No polygons')
+        self.status_label.setStyleSheet("color: gray; font-size: 9pt;")
+        layout.addWidget(self.status_label)
+
+        layout.addStretch()
+
+    def onDrawToggled(self):
+        """Handle draw button toggle."""
+        if self.draw_button.isChecked():
+            self.draw_button.setText('Drawing... (right-click to finish)')
+            self.draw_button.setStyleSheet("background-color: #FFA500;")
+        else:
+            self.draw_button.setText('Draw Polygon')
+            self.draw_button.setStyleSheet("")
+        self.sigDrawModeToggled.emit()
+
+    def setDrawMode(self, enabled):
+        """Set draw mode from external call."""
+        self.draw_button.setChecked(enabled)
+        if enabled:
+            self.draw_button.setText('Drawing... (right-click to finish)')
+            self.draw_button.setStyleSheet("background-color: #FFA500;")
+        else:
+            self.draw_button.setText('Draw Polygon')
+            self.draw_button.setStyleSheet("")
+
+    def onClearAll(self):
+        """Confirm and clear all polygons."""
+        from PyQt5.QtWidgets import QMessageBox
+        reply = QMessageBox.question(self, 'Clear All',
+            'Delete all mask polygons?',
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self.sigClearPolygons.emit()
+
+    def updateStatus(self, polygon_count, drawing_points=0):
+        """Update the status label."""
+        if drawing_points > 0:
+            self.status_label.setText(f'Drawing: {drawing_points} points')
+            self.status_label.setStyleSheet("color: orange; font-size: 9pt;")
+        elif polygon_count == 0:
+            self.status_label.setText('No polygons')
+            self.status_label.setStyleSheet("color: gray; font-size: 9pt;")
+        else:
+            self.status_label.setText(f'{polygon_count} polygon(s)')
+            self.status_label.setStyleSheet("color: green; font-size: 9pt;")
 
 
 class SettingsWidget(QtWidgets.QWidget):
