@@ -3182,10 +3182,6 @@ class PlateTool(QtWidgets.QMainWindow):
                 # extractStarsFF returns: ff_name, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count
                 ff_name_ret, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count = star_list
 
-                # Debug: print SNR values from extractStarsFF
-                snr_arr = np.array(snr)
-                print(f"  extractStarsFF SNR: min={snr_arr.min():.1f}, max={snr_arr.max():.1f}, mean={snr_arr.mean():.1f}")
-
                 # Construct star data in CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
                 # Note: intensity=IntensSum (integrated), amplitude=Ampltd (peak)
                 star_data = list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, saturated_count))
@@ -7057,9 +7053,6 @@ class PlateTool(QtWidgets.QMainWindow):
             det_fwhm = detected_stars[:, 4] if detected_stars.shape[1] > 4 else np.zeros(len(det_x))
             det_snr = detected_stars[:, 6] if detected_stars.shape[1] > 6 else np.ones(len(det_x))
             det_saturated = detected_stars[:, 7] if detected_stars.shape[1] > 7 else np.zeros(len(det_x))
-            # Debug: print SNR stats
-            print("  SNR from detected stars: min={:.1f}, max={:.1f}, mean={:.1f}, shape={}".format(
-                det_snr.min(), det_snr.max(), det_snr.mean(), detected_stars.shape))
         else:
             print("No detected stars available for matching")
             det_x, det_y, det_intens = np.array([]), np.array([]), np.array([])
