@@ -4183,6 +4183,97 @@ class PlateTool(QtWidgets.QMainWindow):
             fig_p.show()
 
 
+    def filterPhotometricOutliers(self, sigma_threshold=2.5):
+        """
+        Filter paired_stars by removing photometric outliers.
+
+        Performs preliminary photometry and removes stars whose magnitude
+        residuals exceed sigma_threshold standard deviations.
+
+        Arguments:
+            sigma_threshold: [float] Number of standard deviations for outlier detection.
+
+        Returns:
+            int: Number of stars removed.
+        """
+        if len(self.paired_stars) < 10:
+            return 0
+
+        # Collect magnitude residuals for non-saturated stars
+        residuals = []
+        valid_indices = []
+        ra_list = []
+        dec_list = []
+
+        for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(
+                self.paired_stars.paired_stars):
+
+            # Skip saturated stars
+            if saturated:
+                continue
+
+            # Skip geo points (only process catalog stars)
+            if hasattr(obj, 'pick_type') and obj.pick_type == "geopoint":
+                continue
+
+            ra, dec, cat_mag = obj.coords()
+
+            # Skip invalid intensities
+            if intens_acc <= 0 or np.isnan(intens_acc) or np.isinf(intens_acc):
+                continue
+
+            # Compute instrumental magnitude
+            inst_mag = -2.5 * np.log10(intens_acc)
+
+            # Store for extinction correction
+            residuals.append((cat_mag, inst_mag))
+            valid_indices.append(i)
+            ra_list.append(ra)
+            dec_list.append(dec)
+
+        if len(residuals) < 5:
+            return 0
+
+        # Apply extinction correction to catalog magnitudes
+        cat_mags = np.array([r[0] for r in residuals])
+        inst_mags = np.array([r[1] for r in residuals])
+
+        cat_mags_corrected = extinctionCorrectionTrueToApparent(
+            cat_mags, ra_list, dec_list,
+            date2JD(*self.img_handle.currentTime()),
+            self.platepar)
+
+        # Compute residuals (relative - offset cancels in sigma calc)
+        mag_residuals = cat_mags_corrected - inst_mags
+
+        # Sigma clipping
+        median = np.median(mag_residuals)
+        std = np.std(mag_residuals)
+
+        if std < 0.01:  # Avoid division issues
+            return 0
+
+        # Find outliers
+        outlier_mask = np.abs(mag_residuals - median) > sigma_threshold * std
+        outlier_indices = set(valid_indices[i] for i, is_outlier
+                              in enumerate(outlier_mask) if is_outlier)
+
+        # Remove outliers from paired_stars
+        if len(outlier_indices) > 0:
+            new_paired_stars = PairedStars()
+            for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(
+                    self.paired_stars.paired_stars):
+                if i not in outlier_indices:
+                    new_paired_stars.addPair(x, y, fwhm, intens_acc, obj, snr, saturated)
+            self.paired_stars = new_paired_stars
+
+        removed_count = len(outlier_indices)
+        if removed_count > 0:
+            print(f"Removed {removed_count} photometric outliers (>{sigma_threshold} sigma)")
+
+        return removed_count
+
+
     def changeDistortionType(self):
         """ Change the distortion type. """
 
@@ -7179,6 +7270,12 @@ class PlateTool(QtWidgets.QMainWindow):
         # Use reset_params=False to preserve the fitted coefficients, just add zeros for new terms
         self.platepar.setDistortionType(user_distortion_type, reset_params=False)
 
+        # Filter photometric outliers before final fit
+        if len(self.paired_stars) >= 15:
+            removed = self.filterPhotometricOutliers(sigma_threshold=2.5)
+            if removed > 0:
+                print("Pairs after photometric filtering: {}".format(len(self.paired_stars)))
+
         # Do a final fit with user's distortion settings
         if len(self.paired_stars) >= 10:
             print("Final refinement with user settings (distortion={})...".format(user_distortion_type))
@@ -7604,6 +7701,12 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar.refraction = user_refraction
             self.fit_only_pointing = user_fit_only_pointing
             self.fixed_scale = user_fixed_scale
+
+            # Filter photometric outliers before final fit
+            if len(self.paired_stars) >= 15:
+                removed = self.filterPhotometricOutliers(sigma_threshold=2.5)
+                if removed > 0:
+                    print("Pairs after photometric filtering: {}".format(len(self.paired_stars)))
 
             # Do the final fit with user's settings
             print()
