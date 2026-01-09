@@ -4274,6 +4274,78 @@ class PlateTool(QtWidgets.QMainWindow):
         return removed_count
 
 
+    def filterBlendedStars(self, blend_radius_arcsec=30.0, mag_diff_limit=2.0):
+        """
+        Filter paired_stars by removing likely blended stars.
+
+        A star is considered blended if there are other bright catalog stars
+        within blend_radius_arcsec of the matched catalog star position.
+
+        Arguments:
+            blend_radius_arcsec: [float] Radius in arcseconds to check for neighbors.
+            mag_diff_limit: [float] Only consider neighbors within this mag of matched star.
+
+        Returns:
+            int: Number of stars removed.
+        """
+        if len(self.paired_stars) < 5:
+            return 0
+
+        # Get all catalog stars for neighbor lookup
+        if not hasattr(self, 'catalog_stars') or self.catalog_stars is None:
+            return 0
+
+        catalog_ra = self.catalog_stars[:, 0]
+        catalog_dec = self.catalog_stars[:, 1]
+        catalog_mag = self.catalog_stars[:, 2]
+
+        blend_radius_deg = blend_radius_arcsec / 3600.0
+
+        blended_indices = set()
+
+        for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(
+                self.paired_stars.paired_stars):
+
+            # Skip geo points
+            if hasattr(obj, 'pick_type') and obj.pick_type == "geopoint":
+                continue
+
+            ra, dec, mag = obj.coords()
+
+            # Compute angular distances to all catalog stars
+            # Using small-angle approximation (accurate for small radii)
+            cos_dec = np.cos(np.radians(dec))
+            d_ra = (catalog_ra - ra) * cos_dec
+            d_dec = catalog_dec - dec
+            angular_dist = np.sqrt(d_ra**2 + d_dec**2)
+
+            # Find neighbors within radius (excluding self)
+            neighbor_mask = (angular_dist < blend_radius_deg) & (angular_dist > 0.001)
+
+            # Only count bright neighbors (within mag_diff_limit of matched star)
+            bright_neighbor_mask = neighbor_mask & (catalog_mag < mag + mag_diff_limit)
+
+            num_bright_neighbors = np.sum(bright_neighbor_mask)
+
+            if num_bright_neighbors > 0:
+                blended_indices.add(i)
+
+        # Remove blended stars from paired_stars
+        if len(blended_indices) > 0:
+            new_paired_stars = PairedStars()
+            for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(
+                    self.paired_stars.paired_stars):
+                if i not in blended_indices:
+                    new_paired_stars.addPair(x, y, fwhm, intens_acc, obj, snr, saturated)
+            self.paired_stars = new_paired_stars
+
+        removed_count = len(blended_indices)
+        if removed_count > 0:
+            print(f"Removed {removed_count} blended stars (neighbors within {blend_radius_arcsec}\")")
+
+        return removed_count
+
+
     def changeDistortionType(self):
         """ Change the distortion type. """
 
@@ -7276,6 +7348,12 @@ class PlateTool(QtWidgets.QMainWindow):
             if removed > 0:
                 print("Pairs after photometric filtering: {}".format(len(self.paired_stars)))
 
+        # Filter blended stars before final fit
+        if len(self.paired_stars) >= 15:
+            removed = self.filterBlendedStars(blend_radius_arcsec=30.0)
+            if removed > 0:
+                print("Pairs after blend filtering: {}".format(len(self.paired_stars)))
+
         # Do a final fit with user's distortion settings
         if len(self.paired_stars) >= 10:
             print("Final refinement with user settings (distortion={})...".format(user_distortion_type))
@@ -7707,6 +7785,12 @@ class PlateTool(QtWidgets.QMainWindow):
                 removed = self.filterPhotometricOutliers(sigma_threshold=2.5)
                 if removed > 0:
                     print("Pairs after photometric filtering: {}".format(len(self.paired_stars)))
+
+            # Filter blended stars before final fit
+            if len(self.paired_stars) >= 15:
+                removed = self.filterBlendedStars(blend_radius_arcsec=30.0)
+                if removed > 0:
+                    print("Pairs after blend filtering: {}".format(len(self.paired_stars)))
 
             # Do the final fit with user's settings
             print()
