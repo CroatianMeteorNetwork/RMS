@@ -2704,7 +2704,7 @@ class MaskWidget(QtWidgets.QWidget):
     def onDrawToggled(self):
         """Handle draw button toggle."""
         if self.draw_button.isChecked():
-            self.draw_button.setText('Drawing... (right-click to finish)')
+            self.draw_button.setText('Drawing... (Space to close)')
             self.draw_button.setStyleSheet("background-color: #FFA500;")
         else:
             self.draw_button.setText('Draw Polygon')
@@ -2715,7 +2715,7 @@ class MaskWidget(QtWidgets.QWidget):
         """Set draw mode from external call."""
         self.draw_button.setChecked(enabled)
         if enabled:
-            self.draw_button.setText('Drawing... (right-click to finish)')
+            self.draw_button.setText('Drawing... (Space to close)')
             self.draw_button.setStyleSheet("background-color: #FFA500;")
         else:
             self.draw_button.setText('Draw Polygon')

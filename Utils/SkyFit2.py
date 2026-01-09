@@ -2295,12 +2295,19 @@ class PlateTool(QtWidgets.QMainWindow):
         self.mask_current_line.setZValue(15)
         self.img_frame.addItem(self.mask_current_line)
 
-        # Vertex markers for current polygon
+        # Vertex markers for current polygon (yellow)
         self.mask_vertex_markers = pg.ScatterPlotItem(
             pen=pg.mkPen((255, 255, 255), width=1),
             brush=pg.mkBrush(255, 255, 0, 200), size=10)
         self.mask_vertex_markers.setZValue(16)
         self.img_frame.addItem(self.mask_vertex_markers)
+
+        # Vertex markers for completed polygons (red/white)
+        self.mask_completed_vertex_markers = pg.ScatterPlotItem(
+            pen=pg.mkPen((255, 255, 255), width=1),
+            brush=pg.mkBrush(255, 100, 100, 200), size=8)
+        self.mask_completed_vertex_markers.setZValue(14)
+        self.img_frame.addItem(self.mask_completed_vertex_markers)
 
         # Storage for completed polygon graphics
         self.mask_polygon_items = []
@@ -3497,19 +3504,27 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img_frame.removeItem(item)
         self.mask_polygon_items = []
 
-        # Draw completed polygons
+        # Draw completed polygons and collect vertices (outlines only, overlay handles fill)
+        all_completed_vertices = []
         for polygon in self.mask_polygons:
             pts = np.array(polygon)
             pts_closed = np.vstack([pts, pts[0]])
             line = pg.PlotCurveItem(
                 x=pts_closed[:, 0] + 0.5,
                 y=pts_closed[:, 1] + 0.5,
-                pen=pg.mkPen((255, 0, 0, 200), width=2),
-                fillLevel=0,
-                brush=pg.mkBrush(255, 0, 0, 50))
+                pen=pg.mkPen((255, 0, 0, 200), width=2))
             line.setZValue(12)
             self.img_frame.addItem(line)
             self.mask_polygon_items.append(line)
+            # Collect vertices for markers
+            all_completed_vertices.extend(polygon)
+
+        # Update completed polygon vertex markers
+        if len(all_completed_vertices) > 0:
+            verts = np.array(all_completed_vertices)
+            self.mask_completed_vertex_markers.setData(pos=verts + 0.5)
+        else:
+            self.mask_completed_vertex_markers.setData(pos=[])
 
         # Update mask overlay
         self.updateMaskOverlayImage()
@@ -3542,11 +3557,21 @@ class PlateTool(QtWidgets.QMainWindow):
         self.mask_overlay.show()
 
     def toggleMaskOverlay(self, visible):
-        """Toggle mask overlay visibility."""
+        """Toggle mask overlay visibility (includes outlines and vertices)."""
         if visible:
             self.updateMaskOverlayImage()
+            # Show polygon outlines
+            for item in self.mask_polygon_items:
+                item.show()
+            # Show completed vertex markers
+            self.mask_completed_vertex_markers.show()
         else:
             self.mask_overlay.hide()
+            # Hide polygon outlines
+            for item in self.mask_polygon_items:
+                item.hide()
+            # Hide completed vertex markers
+            self.mask_completed_vertex_markers.hide()
 
     def generateMaskImage(self):
         """Generate mask.bmp image from polygons."""
