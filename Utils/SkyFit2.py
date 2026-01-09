@@ -3568,10 +3568,6 @@ class PlateTool(QtWidgets.QMainWindow):
         import cv2
         from PyQt5.QtWidgets import QFileDialog
 
-        if len(self.mask_polygons) == 0:
-            print("No polygons to save")
-            return
-
         default_path = os.path.join(self.dir_path, "mask.bmp")
         file_path, _ = QFileDialog.getSaveFileName(
             self, "Save Mask", default_path, "BMP Files (*.bmp);;All Files (*)")
