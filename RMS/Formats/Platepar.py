@@ -1035,7 +1035,9 @@ class Platepar(object):
                     # Outliers can't hide because they don't influence the fit
 
                     n_stars = len(img_stars)
-                    subset_fraction = 0.5  # Fit on 50% of stars
+                    # Smaller fraction for initial iterations to reduce outlier contamination
+                    initial_subset_fraction = 0.25  # First 2 iterations: 25%
+                    normal_subset_fraction = 0.5    # Remaining iterations: 50%
                     all_indices = np.arange(n_stars)
 
                     # Compute radial distance from image center for weighted threshold
@@ -1092,12 +1094,17 @@ class Platepar(object):
                     # Weighted scoring: radial3-odd=1, radial5-odd=2, radial7-odd=3
                     # This gives more influence to the more accurate higher-order fits
                     outlier_scores = np.zeros(n_stars, dtype=float)
-                    n_subset = max(10, int(n_stars * subset_fraction))
 
                     # Track current iteration's outliers - exclude from next iteration's fit
                     current_outlier_mask = np.zeros(n_stars, dtype=bool)
                     prev_outlier_mask = None
                     stable_count = 0  # Consecutive iterations with unchanged outlier mask
+
+                    # Track RMSE progression for early iteration quality control
+                    prev_rmse = float('inf')
+                    initial_retry_count = 0
+                    max_initial_retries = 3
+                    initial_rmse_threshold = 10.0  # arcminutes - allows for wide FOV cameras
 
                     iteration = 0
                     while iteration < total_iters:
@@ -1178,10 +1185,19 @@ class Platepar(object):
                         available_mask = ~current_outlier_mask
                         available_indices = all_indices[available_mask]
 
+                        # Use smaller subset for first 2 iterations to reduce outlier contamination
+                        if iteration < 2:
+                            iter_subset_fraction = initial_subset_fraction
+                        else:
+                            iter_subset_fraction = normal_subset_fraction
+
+                        n_subset = max(10, int(n_stars * iter_subset_fraction))
+
                         if len(available_indices) < n_subset:
                             subset_indices = available_indices
                         else:
-                            np.random.seed(42 + iteration)
+                            # Different seed on retry to ensure variety
+                            np.random.seed(42 + iteration + initial_retry_count * 100)
                             subset_indices = np.random.choice(available_indices, n_subset, replace=False)
 
                         img_stars_subset = img_stars[subset_indices]
@@ -1288,6 +1304,30 @@ class Platepar(object):
                         print("      Iter {}: {} (w={}) fit on {}, {} outliers, RMSE={:.2f}', RA={:.2f} Dec={:.2f}".format(
                             iteration + 1, dist_label, weight, len(subset_indices),
                             np.sum(iteration_outliers), rmse_arcmin, iter_ra, iter_dec))
+
+                        # Quality control for first 2 iterations
+                        if iteration == 1:  # End of iteration 2 (0-indexed)
+                            if rmse_arcmin > prev_rmse or rmse_arcmin > initial_rmse_threshold:
+                                initial_retry_count += 1
+                                if initial_retry_count <= max_initial_retries:
+                                    print("      -> Initial RMSE not decreasing ({:.2f}' vs {:.2f}'), retry {}/{}".format(
+                                        rmse_arcmin, prev_rmse, initial_retry_count, max_initial_retries))
+                                    # Reset to retry initial iterations
+                                    iteration = 0
+                                    outlier_scores = np.zeros(n_stars, dtype=float)
+                                    current_outlier_mask = np.zeros(n_stars, dtype=bool)
+                                    prev_outlier_mask = None
+                                    stable_count = 0
+                                    best_res = None
+                                    best_cost = float('inf')
+                                    prev_rmse = float('inf')
+                                    continue
+                                else:
+                                    print("      -> Max retries reached, proceeding with current fit")
+                            else:
+                                print("      -> Initial fit stable (RMSE {:.2f}')".format(rmse_arcmin))
+
+                        prev_rmse = rmse_arcmin
 
                         # Early exit: if outlier mask unchanged for 2 consecutive iterations within phase
                         if prev_outlier_mask is not None and np.array_equal(iteration_outliers, prev_outlier_mask):
