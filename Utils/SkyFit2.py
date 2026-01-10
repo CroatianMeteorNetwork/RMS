@@ -1700,6 +1700,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.override_segment_radius = 4
         self.override_max_feature_ratio = 0.8
         self.override_roundness_threshold = 0.5
+        self._original_config_gamma = None  # Store original config gamma for restoration
 
         # Mask drawing state
         self.mask_draw_mode = False
@@ -3133,6 +3134,21 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Update gamma override parameter. """
         self.override_gamma = value
 
+        # If override is enabled, also sync config.gamma and platepar.gamma
+        if self.star_detection_override_enabled:
+            self.config.gamma = value
+            if self.platepar is not None:
+                self.platepar.gamma = value
+
+        # Sync display gamma (Settings tab) with camera gamma
+        self.img.setGamma(value)
+        self.img_zoom.setGamma(value)
+        # Block signals to prevent infinite loop
+        self.tab.settings.img_gamma.blockSignals(True)
+        self.tab.settings.img_gamma.setValue(value)
+        self.tab.settings.img_gamma.blockSignals(False)
+        self.updateLeftLabels()
+
     def updateSegmentRadius(self, value):
         """ Update segment radius override parameter. """
         self.override_segment_radius = value
@@ -3150,17 +3166,24 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Toggle between using override detections and original CALSTARS. """
         self.star_detection_override_enabled = not self.star_detection_override_enabled
 
-        # Update platepar.gamma to match the detection source
-        if self.platepar is not None:
-            if self.star_detection_override_enabled:
-                # Using override detections - use override gamma
+        # Update both platepar.gamma and config.gamma to match the detection source
+        if self.star_detection_override_enabled:
+            # Store original config gamma before overriding
+            if self._original_config_gamma is None:
+                self._original_config_gamma = getattr(self.config, 'gamma', 1.0)
+
+            # Using override detections - use override gamma everywhere
+            if self.platepar is not None:
                 self.platepar.gamma = self.override_gamma
-                print(f"Switched to override detections (gamma={self.override_gamma:.3f})")
-            else:
-                # Using original CALSTARS - restore original gamma from config
-                if hasattr(self.config, 'gamma'):
-                    self.platepar.gamma = self.config.gamma
-                    print(f"Switched to original CALSTARS (gamma={self.config.gamma:.3f})")
+            self.config.gamma = self.override_gamma
+            print(f"Switched to override detections (gamma={self.override_gamma:.3f})")
+        else:
+            # Using original CALSTARS - restore original gamma
+            if self._original_config_gamma is not None:
+                if self.platepar is not None:
+                    self.platepar.gamma = self._original_config_gamma
+                self.config.gamma = self._original_config_gamma
+                print(f"Switched to original CALSTARS (gamma={self._original_config_gamma:.3f})")
 
         # Update the display
         self.updateCalstars()
@@ -3238,6 +3261,15 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Enable override mode and update display
                 self.star_detection_override_enabled = True
                 self.tab.star_detection.use_override_checkbox.setChecked(True)
+
+                # Sync gamma: keep override gamma in config and platepar
+                if self._original_config_gamma is None:
+                    self._original_config_gamma = original_gamma
+                self.config.gamma = self.override_gamma
+                if self.platepar is not None:
+                    self.platepar.gamma = self.override_gamma
+                print(f"  Using override gamma={self.override_gamma:.3f} for photometry")
+
                 self.updateCalstars()
                 self.tab.star_detection.updateStatus(True, len(star_data))
 
@@ -3321,6 +3353,15 @@ class PlateTool(QtWidgets.QMainWindow):
         # Enable override mode and update display
         self.star_detection_override_enabled = True
         self.tab.star_detection.use_override_checkbox.setChecked(True)
+
+        # Sync gamma: keep override gamma in config and platepar
+        if self._original_config_gamma is None:
+            self._original_config_gamma = original_gamma
+        self.config.gamma = self.override_gamma
+        if self.platepar is not None:
+            self.platepar.gamma = self.override_gamma
+        print(f"  Using override gamma={self.override_gamma:.3f} for photometry")
+
         self.updateCalstars()
 
         ff_name = self.img_handle.name()
@@ -4365,6 +4406,187 @@ class PlateTool(QtWidgets.QMainWindow):
             print(f"Removed {removed_count} blended stars (neighbors within {blend_radius_arcsec}\")")
 
         return removed_count
+
+
+    def filterHighFWHMStars(self, fraction=0.10):
+        """
+        Filter paired_stars by removing the worst fraction of stars by FWHM.
+
+        Stars with high FWHM tend to have worse centroiding precision due to:
+        - Blended sources
+        - Extended objects (galaxies)
+        - Poor atmospheric seeing
+        - Saturation/defocus
+
+        Arguments:
+            fraction: [float] Fraction of stars to remove (0.10 = top 10% highest FWHM).
+
+        Returns:
+            int: Number of stars removed.
+        """
+        if len(self.paired_stars) < 10:
+            return 0
+
+        # Collect FWHM values and indices (excluding geo points)
+        fwhm_list = []
+        valid_indices = []
+
+        for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(
+                self.paired_stars.paired_stars):
+
+            # Skip geo points
+            if hasattr(obj, 'pick_type') and obj.pick_type == "geopoint":
+                continue
+
+            if fwhm is not None and fwhm > 0:
+                fwhm_list.append(fwhm)
+                valid_indices.append(i)
+
+        if len(fwhm_list) < 10:
+            return 0
+
+        fwhm_array = np.array(fwhm_list)
+
+        # Calculate the FWHM threshold (remove top fraction)
+        threshold_percentile = (1.0 - fraction) * 100
+        fwhm_threshold = np.percentile(fwhm_array, threshold_percentile)
+
+        # Find indices to remove
+        high_fwhm_indices = set()
+        for idx, fwhm_val in zip(valid_indices, fwhm_array):
+            if fwhm_val > fwhm_threshold:
+                high_fwhm_indices.add(idx)
+
+        # Remove high FWHM stars from paired_stars
+        if len(high_fwhm_indices) > 0:
+            new_paired_stars = PairedStars()
+            for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(
+                    self.paired_stars.paired_stars):
+                if i not in high_fwhm_indices:
+                    new_paired_stars.addPair(x, y, fwhm, intens_acc, obj, snr, saturated)
+            self.paired_stars = new_paired_stars
+
+        removed_count = len(high_fwhm_indices)
+        if removed_count > 0:
+            median_fwhm = np.median(fwhm_array)
+            print(f"Removed {removed_count} high-FWHM stars (FWHM > {fwhm_threshold:.2f}, median={median_fwhm:.2f})")
+
+        return removed_count
+
+
+    def balanceCatalogMagnitude(self):
+        """
+        Balance catalog magnitude limit to have ~2x more catalog stars than detected stars.
+
+        This improves NN matching by ensuring a good ratio between detected and catalog stars.
+        Updates self.cat_lim_mag and reloads catalog_stars if needed.
+
+        Returns:
+            bool: True if balancing was performed, False otherwise.
+        """
+        # Get current FF file name
+        ff_name_c = convertFRNameToFF(self.img_handle.name())
+
+        # Get detected stars count
+        n_detected = 0
+        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
+            n_detected = len(self.star_detection_override_data[ff_name_c])
+        elif ff_name_c in self.calstars:
+            n_detected = len(self.calstars[ff_name_c])
+
+        if n_detected < 10:
+            return False
+
+        # Compute JD for projection
+        jd = date2JD(*self.img_handle.currentTime())
+
+        # Get current catalog stars in FOV
+        _, catalog_stars_extended = self.filterCatalogStarsInsideFOV(self.catalog_stars)
+
+        # Project to image and count stars strictly inside FOV
+        catalog_x, catalog_y, _ = getCatalogStarsImagePositions(
+            catalog_stars_extended, jd, self.platepar)
+        in_fov = (catalog_x >= 0) & (catalog_x < self.platepar.X_res) & \
+                 (catalog_y >= 0) & (catalog_y < self.platepar.Y_res)
+        n_catalog = np.sum(in_fov)
+
+        # Target: 1.5x to 2.5x detected stars
+        target_min = int(n_detected * 1.5)
+        target_max = int(n_detected * 2.5)
+
+        if target_min <= n_catalog <= target_max:
+            # Already in range
+            return False
+
+        print()
+        print("Balancing catalog stars ({:d}) to match detected stars ({:d})...".format(
+            n_catalog, n_detected))
+        print("  Target range: {:d} - {:d} catalog stars".format(target_min, target_max))
+
+        # Binary search for optimal magnitude limit
+        current_mag_limit = self.config.catalog_mag_limit
+        mag_low, mag_high = 3.0, 12.0
+        best_mag_limit = current_mag_limit
+        best_n_catalog = n_catalog
+
+        for iteration in range(10):  # Max 10 iterations
+            if n_catalog < target_min:
+                # Need more catalog stars - increase mag limit
+                mag_low = current_mag_limit
+                current_mag_limit = (current_mag_limit + mag_high) / 2.0
+            elif n_catalog > target_max:
+                # Too many catalog stars - decrease mag limit
+                mag_high = current_mag_limit
+                current_mag_limit = (mag_low + current_mag_limit) / 2.0
+            else:
+                # In range, done
+                break
+
+            # Reload catalog with new limit
+            old_cat_lim_mag = self.cat_lim_mag
+            self.cat_lim_mag = current_mag_limit
+            temp_catalog = self.loadCatalogStars(current_mag_limit)
+            _, temp_catalog_fov = self.filterCatalogStarsInsideFOV(temp_catalog)
+            self.cat_lim_mag = old_cat_lim_mag  # Restore temporarily
+
+            # Project and filter to strict FOV
+            temp_x, temp_y, _ = getCatalogStarsImagePositions(temp_catalog_fov, jd, self.platepar)
+            in_fov = (temp_x >= 0) & (temp_x < self.platepar.X_res) & \
+                     (temp_y >= 0) & (temp_y < self.platepar.Y_res)
+            n_catalog = np.sum(in_fov)
+
+            print("    Iter {:d}: mag_limit={:.2f}, catalog_in_fov={:d}".format(
+                iteration + 1, current_mag_limit, n_catalog))
+
+            if target_min <= n_catalog <= target_max:
+                best_mag_limit = current_mag_limit
+                best_n_catalog = n_catalog
+                print("    -> In target range, done")
+                break
+
+            # Track best result so far
+            if abs(n_catalog - (target_min + target_max)/2) < abs(best_n_catalog - (target_min + target_max)/2):
+                best_mag_limit = current_mag_limit
+                best_n_catalog = n_catalog
+
+        # Apply best magnitude limit found
+        if best_mag_limit != self.config.catalog_mag_limit:
+            print("  Adjusted catalog mag limit: {:.1f} -> {:.1f}".format(
+                self.config.catalog_mag_limit, best_mag_limit))
+
+            # Permanently update cat_lim_mag and reload catalog
+            self.cat_lim_mag = best_mag_limit
+            self.catalog_stars = self.loadCatalogStars(best_mag_limit)
+
+            # Update GUI to show the balanced magnitude limit
+            self.updateLeftLabels()
+            self.tab.settings.updateLimMag()
+
+            return True
+        else:
+            print("  Could not reach target range (best: {:d} stars at mag_limit={:.1f})".format(
+                best_n_catalog, best_mag_limit))
+            return False
 
 
     def changeDistortionType(self):
@@ -7375,6 +7597,12 @@ class PlateTool(QtWidgets.QMainWindow):
             if removed > 0:
                 print("Pairs after blend filtering: {}".format(len(self.paired_stars)))
 
+        # Filter high FWHM stars before final fit (remove top 10%)
+        if len(self.paired_stars) >= 15:
+            removed = self.filterHighFWHMStars(fraction=0.10)
+            if removed > 0:
+                print("Pairs after FWHM filtering: {}".format(len(self.paired_stars)))
+
         # Do a final fit with user's distortion settings
         if len(self.paired_stars) >= 10:
             print("Final refinement with user settings (distortion={})...".format(user_distortion_type))
@@ -7403,6 +7631,9 @@ class PlateTool(QtWidgets.QMainWindow):
             )
             if reply != QtWidgets.QMessageBox.Yes:
                 return
+
+        # Balance catalog magnitude before any fitting (affects both quick and full paths)
+        self.balanceCatalogMagnitude()
 
         # First, try quick alignment with existing platepar (much faster than astrometry.net)
         quick_fit_success = self.tryQuickAlignment()
@@ -7812,6 +8043,12 @@ class PlateTool(QtWidgets.QMainWindow):
                 removed = self.filterBlendedStars(blend_radius_arcsec=30.0)
                 if removed > 0:
                     print("Pairs after blend filtering: {}".format(len(self.paired_stars)))
+
+            # Filter high FWHM stars before final fit (remove top 10%)
+            if len(self.paired_stars) >= 15:
+                removed = self.filterHighFWHMStars(fraction=0.10)
+                if removed > 0:
+                    print("Pairs after FWHM filtering: {}".format(len(self.paired_stars)))
 
             # Do the final fit with user's settings
             print()

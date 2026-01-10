@@ -2991,10 +2991,24 @@ class SettingsWidget(QtWidgets.QWidget):
         self.lim_mag.setValue(self.gui.cat_lim_mag)
 
     def onGammaChanged(self):
-        self.gui.img.setGamma(self.img_gamma.value())
-        self.gui.img_zoom.setGamma(self.img_gamma.value())
+        gamma_value = self.img_gamma.value()
+        self.gui.img.setGamma(gamma_value)
+        self.gui.img_zoom.setGamma(gamma_value)
         self.gui.updateLeftLabels()
         self.updateImageGamma()  # gamma may be changed by setGamma
+
+        # Sync with Star Detection gamma
+        self.gui.override_gamma = gamma_value
+        if self.gui.star_detection_override_enabled:
+            self.gui.config.gamma = gamma_value
+            if self.gui.platepar is not None:
+                self.gui.platepar.gamma = gamma_value
+
+        # Update Star Detection tab slider (convert to int for slider: gamma * 100)
+        self.gui.tab.star_detection.gamma_slider.blockSignals(True)
+        self.gui.tab.star_detection.gamma_slider.setValue(int(gamma_value * 100))
+        self.gui.tab.star_detection.gamma_label.setText(f'{gamma_value:.2f}')
+        self.gui.tab.star_detection.gamma_slider.blockSignals(False)
 
     def onGridChanged(self):
         if self.grid[0].isChecked():
