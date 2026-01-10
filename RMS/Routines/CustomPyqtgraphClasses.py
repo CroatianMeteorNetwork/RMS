@@ -1666,13 +1666,14 @@ class PlateparParameterManager(QtWidgets.QWidget):
         }
 
         full_layout = QtWidgets.QVBoxLayout()
+        full_layout.setContentsMargins(4, 4, 4, 4)  # Reduce margins for more content space
         self.setLayout(full_layout)
 
         full_layout.addWidget(QtWidgets.QLabel("Press Esc to focus on image"))
 
         # buttons
         box = QtWidgets.QVBoxLayout()
-
+        box.setContentsMargins(4, 4, 4, 4)  # Reduce margins for more button space
 
         # Fit buttons in a horizontal layout
         fit_hbox = QtWidgets.QHBoxLayout()
@@ -1696,6 +1697,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
         box.addWidget(QtWidgets.QLabel("Residuals:"))
 
         hbox = QtWidgets.QHBoxLayout()
+        hbox.setSpacing(4)  # Reduce spacing between buttons
         self.astrometry_button = QtWidgets.QPushButton('Astrometry')
         self.astrometry_button.clicked.connect(self.sigAstrometryPressed.emit)
         hbox.addWidget(self.astrometry_button)
@@ -1707,6 +1709,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
 
         self.updatePairedStars()
         group = QtWidgets.QGroupBox("Calibration")
+        group.setStyleSheet("QGroupBox { padding-top: 12px; padding-left: 2px; padding-right: 2px; }")
         group.setLayout(box)
         full_layout.addWidget(group)
 
