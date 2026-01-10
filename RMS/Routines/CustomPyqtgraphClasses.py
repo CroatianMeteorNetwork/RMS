@@ -928,6 +928,8 @@ class RightOptionsTab(QtWidgets.QTabWidget):
     Tab widget which initializes and holds each of the tabs. They can be accessed with
     self.hist, self.param_manager, self.debruijn and self.settings
     """
+    # Signal emitted when tab changes: (old_index, new_index)
+    sigTabChanged = QtCore.pyqtSignal(int, int)
 
     def __init__(self, gui):
         super(RightOptionsTab, self).__init__()
@@ -968,10 +970,13 @@ class RightOptionsTab(QtWidgets.QTabWidget):
 
 
     def onTabBarClicked(self, index):
+        old_index = self.index
         if index != self.index:
             self.index = index
             self.maximized = True
             self.setFixedWidth(250)
+            # Emit signal for tab change
+            self.sigTabChanged.emit(old_index, index)
         else:
             self.maximized = not self.maximized
             if self.maximized:
@@ -2629,6 +2634,7 @@ class MaskWidget(QtWidgets.QWidget):
     sigSaveMask = QtCore.pyqtSignal()
     sigLoadMask = QtCore.pyqtSignal()
     sigShowOverlayToggled = QtCore.pyqtSignal(bool)
+    sigUseFlatToggled = QtCore.pyqtSignal(bool)
 
     def __init__(self, gui):
         QtWidgets.QWidget.__init__(self)
@@ -2691,6 +2697,15 @@ class MaskWidget(QtWidgets.QWidget):
         self.show_overlay.setChecked(True)
         self.show_overlay.toggled.connect(self.sigShowOverlayToggled.emit)
         layout.addWidget(self.show_overlay)
+
+        layout.addSpacing(5)
+
+        # Use flat image checkbox
+        self.use_flat = QtWidgets.QCheckBox('Use Flat as Background')
+        self.use_flat.setChecked(False)  # Will be set to True if flat exists
+        self.use_flat.toggled.connect(self.sigUseFlatToggled.emit)
+        layout.addWidget(self.use_flat)
+        self.flat_available = False  # Track if flat.bmp exists
 
         layout.addSpacing(10)
 
@@ -2755,6 +2770,18 @@ class MaskWidget(QtWidgets.QWidget):
     def setUnsaved(self, unsaved=True):
         """Mark polygons as having unsaved changes."""
         self.unsaved = unsaved
+
+    def setFlatAvailable(self, available, use_by_default=True):
+        """Set whether flat.bmp is available and optionally use it by default."""
+        self.flat_available = available
+        self.use_flat.setEnabled(available)
+        if available:
+            self.use_flat.setText('Use Flat as Background')
+            if use_by_default:
+                self.use_flat.setChecked(True)
+        else:
+            self.use_flat.setText('Use Flat as Background (not found)')
+            self.use_flat.setChecked(False)
 
 
 class SettingsWidget(QtWidgets.QWidget):

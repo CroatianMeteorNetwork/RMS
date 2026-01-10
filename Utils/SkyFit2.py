@@ -1708,6 +1708,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.mask_polygons = []  # List of completed polygons
         self.mask_dragging_vertex = None  # (polygon_idx, vertex_idx) or ('current', vertex_idx)
 
+        # Flat image for mask editing background
+        self.flat_image_data = None  # Loaded flat.bmp data
+        self.mask_use_flat_background = False  # Whether to show flat as background
+
 
         ###################################################################################################
         # PLATEPAR
@@ -2369,6 +2373,13 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.mask.sigSaveMask.connect(self.saveMask)
         self.tab.mask.sigLoadMask.connect(self.loadMaskDialog)
         self.tab.mask.sigShowOverlayToggled.connect(self.toggleMaskOverlay)
+        self.tab.mask.sigUseFlatToggled.connect(self.toggleMaskFlatBackground)
+
+        # Check for flat.bmp and setup mask tab
+        self.checkAndSetupFlatForMask()
+
+        # Handle tab changes (for restoring image when leaving mask tab)
+        self.tab.sigTabChanged.connect(self.onTabChanged)
 
         self.tab.settings.sigMaxAveToggled.connect(self.toggleImageType)
         self.tab.settings.sigCatStarsToggled.connect(self.toggleShowCatStars)
@@ -3613,6 +3624,75 @@ class PlateTool(QtWidgets.QMainWindow):
                 item.hide()
             # Hide completed vertex markers
             self.mask_completed_vertex_markers.hide()
+
+    def loadFlatImage(self):
+        """Load flat.bmp from data directory if it exists."""
+        flat_path = os.path.join(self.dir_path, "flat.bmp")
+
+        if os.path.isfile(flat_path):
+            try:
+                from RMS.Routines.Image import loadImage
+                flat_img = loadImage(flat_path, flatten=0)
+
+                # Convert to single channel if needed
+                if len(flat_img.shape) > 2:
+                    flat_img = flat_img[:, :, 0]
+
+                self.flat_image_data = flat_img
+                print(f"Loaded flat image: {flat_path}")
+                return True
+            except Exception as e:
+                print(f"Failed to load flat image: {e}")
+                self.flat_image_data = None
+                return False
+        else:
+            self.flat_image_data = None
+            return False
+
+    def checkAndSetupFlatForMask(self):
+        """Check for flat.bmp and setup mask tab accordingly."""
+        flat_exists = self.loadFlatImage()
+
+        # Block signal to prevent showing flat during initialization
+        self.tab.mask.use_flat.blockSignals(True)
+        self.tab.mask.setFlatAvailable(flat_exists, use_by_default=flat_exists)
+        self.tab.mask.use_flat.blockSignals(False)
+
+        if flat_exists:
+            self.mask_use_flat_background = True
+
+    def toggleMaskFlatBackground(self, use_flat):
+        """Toggle between flat.bmp and current image as mask editing background."""
+        self.mask_use_flat_background = use_flat
+
+        # Only change the image if we're currently on the mask tab
+        mask_tab_index = self.tab.indexOf(self.tab.mask)
+        if self.tab.currentIndex() != mask_tab_index:
+            return
+
+        if use_flat and self.flat_image_data is not None:
+            # Switch to flat image
+            self.img.setImage(self.flat_image_data.T)
+            print("Mask background: using flat.bmp")
+        else:
+            # Switch back to current image
+            self.img.loadImage(self.mode, self.img_type_flag)
+            print("Mask background: using current image")
+
+    def onTabChanged(self, old_index, new_index):
+        """Handle tab changes - restore image when leaving mask tab."""
+        # Mask tab is at index 4 (Levels=0, Fit Parameters=1, Station=2, Star Detection=3, Mask=4)
+        mask_tab_index = self.tab.indexOf(self.tab.mask)
+
+        if old_index == mask_tab_index and self.mask_use_flat_background:
+            # Leaving mask tab while flat was shown - restore current image
+            self.img.loadImage(self.mode, self.img_type_flag)
+            print("Restored current image (left mask tab)")
+
+        elif new_index == mask_tab_index and self.mask_use_flat_background and self.flat_image_data is not None:
+            # Entering mask tab with flat enabled - show flat
+            self.img.setImage(self.flat_image_data.T)
+            print("Showing flat.bmp for mask editing")
 
     def generateMaskImage(self):
         """Generate mask.bmp image from polygons."""
