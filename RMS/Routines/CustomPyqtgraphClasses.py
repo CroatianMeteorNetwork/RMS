@@ -1707,7 +1707,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
     DEFAULT_FORCE_DISTORTION_CENTRE = False
     DEFAULT_DISTORTION_TYPE = "radial7-odd"
     DEFAULT_EXTINCTION_SCALE = 0.6
-    DEFAULT_VIGNETTING_FIXED = False
+    DEFAULT_VIGNETTING_FIXED = True
 
     # Width in characters for parameter input boxes
     PARAM_INPUT_CHARS = 13
@@ -1928,29 +1928,55 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.extinction_scale = DoubleSpinBox()
         self.extinction_scale.setMinimum(0)
         self.extinction_scale.setMaximum(100)
-        self.extinction_scale.setDecimals(8)
+        self.extinction_scale.setDecimals(4)
         self.extinction_scale.setSingleStep(0.1)
-        self.extinction_scale.setFixedWidth(self.scaledWidth(self.PARAM_INPUT_CHARS))
+        self.extinction_scale.setFixedWidth(self.scaledWidth(self.PARAM_INPUT_CHARS - 4))
         self.extinction_scale.valueModified.connect(self.onExtinctionChanged)
         hbox.addWidget(self.extinction_scale)
         hbox.addWidget(QtWidgets.QLabel('', alignment=QtCore.Qt.AlignLeft))
         form.addRow(QtWidgets.QLabel('Extinction'), hbox)
 
         hbox = QtWidgets.QHBoxLayout()
+        hbox.setAlignment(QtCore.Qt.AlignVCenter)
         self.vignetting_coeff = DoubleSpinBox()
         self.vignetting_coeff.setMinimum(0)
         self.vignetting_coeff.setMaximum(0.1)
-        self.vignetting_coeff.setDecimals(8)
+        self.vignetting_coeff.setDecimals(5)
         self.vignetting_coeff.setSingleStep(0.0001)
-        self.vignetting_coeff.setFixedWidth(self.scaledWidth(self.PARAM_INPUT_CHARS))
+        self.vignetting_coeff.setFixedWidth(self.scaledWidth(self.PARAM_INPUT_CHARS - 3))
         self.vignetting_coeff.valueModified.connect(self.onVignettingChanged)
         hbox.addWidget(self.vignetting_coeff)
-        hbox.addWidget(QtWidgets.QLabel('r/px', alignment=QtCore.Qt.AlignLeft))
+        hbox.addWidget(QtWidgets.QLabel('r/px'))
+        vignetting_info = QtWidgets.QToolButton()
+        vignetting_info.setText("ⓘ")
+        info_font = vignetting_info.font()
+        info_font.setPointSize(info_font.pointSize() + 2)
+        info_font.setBold(True)
+        vignetting_info.setFont(info_font)
+        vignetting_info.setStyleSheet("QToolButton { color: #0066cc; border: none; } QToolButton:hover { color: #0044aa; }")
+        vignetting_info.setCursor(QtCore.Qt.PointingHandCursor)
+        vignetting_info.clicked.connect(lambda: self.showVignettingInfo())
+        hbox.addWidget(vignetting_info)
         form.addRow(QtWidgets.QLabel("Vignetting"), hbox)
 
+        hbox_fixed = QtWidgets.QHBoxLayout()
+        hbox_fixed.setAlignment(QtCore.Qt.AlignVCenter)
         self.vignetting_fixed = QtWidgets.QCheckBox('Fixed vignetting')
+        self.vignetting_fixed.setChecked(True)
         self.vignetting_fixed.released.connect(self.onVignettingFixedToggled)
-        form.addRow(self.vignetting_fixed)
+        hbox_fixed.addWidget(self.vignetting_fixed)
+        vignetting_fixed_info = QtWidgets.QToolButton()
+        vignetting_fixed_info.setText("ⓘ")
+        info_font = vignetting_fixed_info.font()
+        info_font.setPointSize(info_font.pointSize() + 2)
+        info_font.setBold(True)
+        vignetting_fixed_info.setFont(info_font)
+        vignetting_fixed_info.setStyleSheet("QToolButton { color: #0066cc; border: none; } QToolButton:hover { color: #0044aa; }")
+        vignetting_fixed_info.setCursor(QtCore.Qt.PointingHandCursor)
+        vignetting_fixed_info.clicked.connect(lambda: self.showVignettingFixedInfo())
+        hbox_fixed.addWidget(vignetting_fixed_info)
+        hbox_fixed.addStretch()
+        form.addRow(hbox_fixed)
 
         self.updatePlatepar()
         self.updateRestoreDefaultsButton()
@@ -2178,6 +2204,40 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
     def onVignettingChanged(self):
         self.gui.platepar.vignetting_coeff = self.vignetting_coeff.value()
         self.sigVignettingChanged.emit()
+
+    def showVignettingInfo(self):
+        msg = QtWidgets.QMessageBox(self)
+        msg.setIcon(QtWidgets.QMessageBox.Information)
+        msg.setWindowTitle("Vignetting Coefficient")
+        msg.setText("Vignetting coefficient (radians per pixel)")
+        msg.setInformativeText(
+            "The displayed value comes from the loaded platepar.\n\n"
+            "For new platepars, defaults are calibrated for 4mm f/0.95 lens "
+            "and scaled by resolution:\n"
+            "• 720p (1280×720): 0.001 r/px\n"
+            "• 1080p (1920×1080): ~0.00068 r/px\n\n"
+            "For other lenses, consider fitting the coefficient\n"
+            "(see info next to Fixed Vignetting), or reach out to\n"
+            "the GMN community for known good values for your lens."
+        )
+        msg.exec_()
+
+    def showVignettingFixedInfo(self):
+        msg = QtWidgets.QMessageBox(self)
+        msg.setIcon(QtWidgets.QMessageBox.Information)
+        msg.setWindowTitle("Measuring Vignetting Coefficient")
+        msg.setText("Measuring vignetting requires ideal conditions:")
+        msg.setInformativeText(
+            "• Moonless, perfectly cloudless sky\n"
+            "• No haze or atmospheric gradients\n"
+            "• Camera pointed at high elevation\n"
+            "• Deep into the night (no skyglow)\n"
+            "• Well-distributed stars across FOV\n"
+            "• Results averaged across several nights\n\n"
+            "If these conditions are not met, it is best to leave\n"
+            "Fixed Vignetting checked and use the default value."
+        )
+        msg.exec_()
 
     def onVignettingFixedToggled(self):
         self.gui.platepar.vignetting_fixed = self.vignetting_fixed.isChecked()

@@ -8494,6 +8494,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.X_res = self.config.width
         self.platepar.Y_res = self.config.height
 
+        # Set the default vignetting coefficient scaled for this resolution
+        self.platepar.addVignettingCoeff(use_flat=self.config.use_flat)
+
         # Set the camera gamma from the config file
         self.platepar.gamma = self.config.gamma
 
