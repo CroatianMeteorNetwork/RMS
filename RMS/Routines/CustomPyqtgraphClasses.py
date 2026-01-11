@@ -1759,6 +1759,11 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
 
         box.addWidget(QtWidgets.QLabel("Residuals:"))
 
+        # RMSD display label with color coding
+        self.rmsd_label = QtWidgets.QLabel("--")
+        self.rmsd_label.setStyleSheet("font-weight: bold; font-size: 12pt;")
+        box.addWidget(self.rmsd_label)
+
         hbox = QtWidgets.QHBoxLayout()
         hbox.setSpacing(self.scaledSpacing(0.25))  # Reduce spacing between buttons
         self.astrometry_button = QtWidgets.QPushButton('Astrometry')
@@ -2254,6 +2259,31 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
 
         # Update restore defaults button state
         self.updateRestoreDefaultsButton()
+
+    def updateRMSD(self, rmsd_img, rmsd_angular, angular_error_label):
+        """Update the RMSD display with color coding based on pixel error.
+
+        Color coding thresholds:
+            - ≤ 0.2 px: green (great)
+            - 0.2 - 0.3 px: yellow/ok
+            - 0.3 - 0.5 px: orange/meh
+            - > 0.5 px: red (terrible)
+        """
+        # Format the text
+        text = "{:.2f} px, {:.2f} {:s}".format(rmsd_img, rmsd_angular, angular_error_label)
+
+        # Determine color based on rmsd_img threshold
+        if rmsd_img <= 0.2:
+            color = "#228B22"  # Forest green - great
+        elif rmsd_img <= 0.3:
+            color = "#DAA520"  # Goldenrod - ok
+        elif rmsd_img <= 0.5:
+            color = "#FF8C00"  # Dark orange - meh
+        else:
+            color = "#DC143C"  # Crimson - terrible
+
+        self.rmsd_label.setText(text)
+        self.rmsd_label.setStyleSheet("font-weight: bold; font-size: 12pt; color: {};".format(color))
 
     def onFitParametersChanged(self):
         # fit parameter object updates platepar by itself

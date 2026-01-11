@@ -602,20 +602,20 @@ class Platepar(object):
             img_coords = np.column_stack([img_x, img_y])
             nn_distances, _ = tree.query(img_coords, k=1)
 
-            # Use RMSE (root mean squared error) as cost
+            # Use RMSD (root mean square deviation) as cost
             # This normalizes by number of stars and gives interpretable units (pixels)
-            rmse = np.sqrt(np.mean(nn_distances ** 2))
+            rmsd = np.sqrt(np.mean(nn_distances ** 2))
 
-            return rmse
+            return rmsd
 
         # Initial parameters - use pp_work.RA_d which has been adjusted for the new JD/Ho
         p0 = [pp_work.RA_d, self.dec_d, self.pos_angle_ref]
         if not fixed_scale:
             p0.append(abs(self.F_scale))
 
-        # Debug: compute initial cost (RMSE in pixels)
+        # Debug: compute initial cost (RMSD in pixels)
         initial_cost = _calcPointingNNCostPixel(p0, pp_work, jd, ra_catalog, dec_catalog, img_x, img_y, fixed_scale)
-        print("    fitPointingNN: BEFORE RA={:.2f} Dec={:.2f} Rot={:.2f} RMSE={:.2f} px".format(
+        print("    fitPointingNN: BEFORE RA={:.2f} Dec={:.2f} Rot={:.2f} RMSD={:.2f} px".format(
             p0[0], p0[1], p0[2], initial_cost))
 
         # Fit using Nelder-Mead (robust for NN cost landscape)
@@ -627,8 +627,8 @@ class Platepar(object):
             options={'maxiter': 5000, 'adaptive': True},
         )
 
-        # Debug: show result (RMSE in pixels)
-        print("    fitPointingNN: AFTER  RA={:.2f} Dec={:.2f} Rot={:.2f} RMSE={:.2f} px success={}".format(
+        # Debug: show result (RMSD in pixels)
+        print("    fitPointingNN: AFTER  RA={:.2f} Dec={:.2f} Rot={:.2f} RMSD={:.2f} px success={}".format(
             res.x[0], res.x[1], res.x[2], res.fun, res.success))
 
         # Update fitted parameters
@@ -1100,11 +1100,11 @@ class Platepar(object):
                     prev_outlier_mask = None
                     stable_count = 0  # Consecutive iterations with unchanged outlier mask
 
-                    # Track RMSE progression for early iteration quality control
-                    prev_rmse = float('inf')
+                    # Track RMSD progression for early iteration quality control
+                    prev_rmsd = float('inf')
                     initial_retry_count = 0
                     max_initial_retries = 3
-                    initial_rmse_threshold = 10.0  # arcminutes - allows for wide FOV cameras
+                    initial_rmsd_threshold = 10.0  # arcminutes - allows for wide FOV cameras
 
                     iteration = 0
                     while iteration < total_iters:
@@ -1282,14 +1282,14 @@ class Platepar(object):
                         # Update current outlier mask for next iteration's exclusion
                         current_outlier_mask = iteration_outliers
 
-                        # RMSE in arcminutes on INLIERS only (nn_seps is in radians)
+                        # RMSD in arcminutes on INLIERS only (nn_seps is in radians)
                         inlier_seps = nn_seps[~iteration_outliers]
                         if len(inlier_seps) > 0:
-                            rmse_arcmin = np.degrees(np.sqrt(np.mean(inlier_seps**2))) * 60
+                            rmsd_arcmin = np.degrees(np.sqrt(np.mean(inlier_seps**2))) * 60
                         else:
-                            rmse_arcmin = np.inf
-                        if rmse_arcmin < best_cost:
-                            best_cost = rmse_arcmin
+                            rmsd_arcmin = np.inf
+                        if rmsd_arcmin < best_cost:
+                            best_cost = rmsd_arcmin
                             best_res = res
 
                         if iteration < switch_iter_r5:
@@ -1301,17 +1301,17 @@ class Platepar(object):
                         # Debug: show RA/Dec at each iteration
                         iter_ra = (360 * res.x[0]) % 360
                         iter_dec = -90 + (90 * res.x[1] + 90) % 180.000001
-                        print("      Iter {}: {} (w={}) fit on {}, {} outliers, RMSE={:.2f}', RA={:.2f} Dec={:.2f}".format(
+                        print("      Iter {}: {} (w={}) fit on {}, {} outliers, RMSD={:.2f}', RA={:.2f} Dec={:.2f}".format(
                             iteration + 1, dist_label, weight, len(subset_indices),
-                            np.sum(iteration_outliers), rmse_arcmin, iter_ra, iter_dec))
+                            np.sum(iteration_outliers), rmsd_arcmin, iter_ra, iter_dec))
 
                         # Quality control for first 2 iterations
                         if iteration == 1:  # End of iteration 2 (0-indexed)
-                            if rmse_arcmin > prev_rmse or rmse_arcmin > initial_rmse_threshold:
+                            if rmsd_arcmin > prev_rmsd or rmsd_arcmin > initial_rmsd_threshold:
                                 initial_retry_count += 1
                                 if initial_retry_count <= max_initial_retries:
-                                    print("      -> Initial RMSE not decreasing ({:.2f}' vs {:.2f}'), retry {}/{}".format(
-                                        rmse_arcmin, prev_rmse, initial_retry_count, max_initial_retries))
+                                    print("      -> Initial RMSD not decreasing ({:.2f}' vs {:.2f}'), retry {}/{}".format(
+                                        rmsd_arcmin, prev_rmsd, initial_retry_count, max_initial_retries))
                                     # Reset to retry initial iterations
                                     iteration = 0
                                     outlier_scores = np.zeros(n_stars, dtype=float)
@@ -1320,14 +1320,14 @@ class Platepar(object):
                                     stable_count = 0
                                     best_res = None
                                     best_cost = float('inf')
-                                    prev_rmse = float('inf')
+                                    prev_rmsd = float('inf')
                                     continue
                                 else:
                                     print("      -> Max retries reached, proceeding with current fit")
                             else:
-                                print("      -> Initial fit stable (RMSE {:.2f}')".format(rmse_arcmin))
+                                print("      -> Initial fit stable (RMSD {:.2f}')".format(rmsd_arcmin))
 
-                        prev_rmse = rmse_arcmin
+                        prev_rmsd = rmsd_arcmin
 
                         # Early exit: if outlier mask unchanged for 2 consecutive iterations within phase
                         if prev_outlier_mask is not None and np.array_equal(iteration_outliers, prev_outlier_mask):

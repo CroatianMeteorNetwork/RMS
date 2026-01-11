@@ -9435,6 +9435,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         print('RMSD: {:.2f} px, {:.2f} {:s}'.format(rmsd_img, rmsd_angular, angular_error_label))
 
+        # Update RMSD display in the Fit Parameters tab
+        self.tab.param_manager.updateRMSD(rmsd_img, rmsd_angular, angular_error_label)
+
         # Update fit residuals in the station tab when geopoints are used
         if self.geo_points_obj is not None:
             self.tab.geolocation.residuals_label.setText("Residuals:\n{:.2f} px, {:.2f} {:s}".format(rmsd_img,\
