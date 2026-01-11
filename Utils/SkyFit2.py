@@ -3718,7 +3718,7 @@ class PlateTool(QtWidgets.QMainWindow):
         import cv2
         from PyQt5.QtWidgets import QFileDialog
 
-        default_path = os.path.join(self.dir_path, "mask.bmp")
+        default_path = os.path.join(self.config.config_file_path, "mask.bmp")
         file_path, _ = QFileDialog.getSaveFileName(
             self, "Save Mask", default_path, "BMP Files (*.bmp);;All Files (*)")
 
