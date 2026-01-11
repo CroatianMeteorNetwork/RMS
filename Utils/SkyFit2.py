@@ -15,12 +15,6 @@ import traceback
 import random
 import copy
 
-# Disable Qt high DPI scaling - must be set before importing Qt
-os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"
-os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "0"
-os.environ["QT_SCALE_FACTOR"] = "1"
-os.environ["QT_DEVICE_PIXEL_RATIO"] = "1"
-
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -1935,23 +1929,27 @@ class PlateTool(QtWidgets.QMainWindow):
         # top left label
         self.show_key_help = 1
 
+        # Create font and metrics for overlay labels
+        label_font = QtGui.QFont('monospace', 8)
+        label_fm = QtGui.QFontMetrics(label_font)
+
         self.label1 = TextItem(color=(0, 0, 0), fill=(255, 255, 255, 100))
-        self.label1.setFont(QtGui.QFont('monospace', 8))
-        self.label1.setTextWidth(200)
+        self.label1.setFont(label_font)
+        self.label1.setTextWidth(label_fm.averageCharWidth() * 35)  # ~35 chars wide
         self.label1.setZValue(1000)
         self.label1.setParentItem(self.img_frame)
 
         # bottom left label
         self.label2 = TextItem(color=(0, 0, 0), fill=(255, 255, 255, 100))
-        self.label2.setFont(QtGui.QFont('monospace', 8))
-        self.label2.setTextWidth(200)
+        self.label2.setFont(label_font)
+        self.label2.setTextWidth(label_fm.averageCharWidth() * 38)  # ~38 chars wide
         self.label2.setZValue(1000)
         self.label2.setParentItem(self.img_frame)
 
         # F1 info label
         self.label_f1 = TextItem(color=(0, 0, 0), fill=(255, 255, 255, 100))
-        self.label_f1.setFont(QtGui.QFont('monospace', 8))
-        self.label_f1.setTextWidth(100)
+        self.label_f1.setFont(label_font)
+        self.label_f1.setTextWidth(label_fm.averageCharWidth() * 20)  # ~20 chars wide
         self.label_f1.setZValue(1000)
         self.label_f1.setParentItem(self.img_frame)
         self.label_f1.hide()
@@ -11463,18 +11461,7 @@ if __name__ == '__main__':
     else:
         beginning_time = None
 
-    # Disable high DPI scaling attributes
-    if hasattr(QtCore.Qt, 'AA_DisableHighDpiScaling'):
-        QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_DisableHighDpiScaling, True)
-    if hasattr(QtCore.Qt, 'AA_Use96Dpi'):
-        QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_Use96Dpi, True)
-
     app = QtWidgets.QApplication(sys.argv)
-
-    # Set fixed font size to prevent system scaling from affecting widget text
-    font = app.font()
-    font.setPixelSize(12)  # Fixed 12 pixel font (not affected by DPI)
-    app.setFont(font)
 
     # If the state file was given, load the state
     if cml_args.input_path.endswith('.state'):

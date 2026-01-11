@@ -21,6 +21,53 @@ import re
 import sys
 
 
+class ScaledSizeHelper:
+    """Helper mixin for calculating sizes that scale with font/DPI settings.
+
+    Use this to replace hardcoded pixel values with font-relative sizes.
+    """
+
+    # Reference character width at 96 DPI (typical default)
+    _REF_CHAR_WIDTH = 8
+    _REF_LINE_HEIGHT = 16
+
+    def scaledWidth(self, chars):
+        """Calculate width in pixels for given number of characters."""
+        fm = QtGui.QFontMetrics(self.font())
+        return int(fm.averageCharWidth() * chars)
+
+    def scaledHeight(self, lines):
+        """Calculate height in pixels for given number of lines."""
+        fm = QtGui.QFontMetrics(self.font())
+        return int(fm.height() * lines)
+
+    def scaledMargins(self, chars_h=0.5, lines_v=0.25):
+        """Calculate margins scaled to font size.
+
+        Args:
+            chars_h: Horizontal margin in character widths
+            lines_v: Vertical margin in line heights
+
+        Returns:
+            Tuple of (left, top, right, bottom) margins in pixels
+        """
+        fm = QtGui.QFontMetrics(self.font())
+        h_margin = int(fm.averageCharWidth() * chars_h)
+        v_margin = int(fm.height() * lines_v)
+        return (h_margin, v_margin, h_margin, v_margin)
+
+    def scaledSpacing(self, fraction=0.5):
+        """Calculate spacing scaled to font size.
+
+        Args:
+            fraction: Spacing as fraction of line height
+
+        Returns:
+            Spacing in pixels
+        """
+        fm = QtGui.QFontMetrics(self.font())
+        return int(fm.height() * fraction)
+
 
 def qmessagebox(message="", title="Error", message_type="warning"):
     msg = QtGui.QMessageBox()
@@ -923,13 +970,17 @@ class HistogramLUTItem(pg.HistogramLUTItem):
             self.setLevels(*self.saved_manual_levels)
 
 
-class RightOptionsTab(QtWidgets.QTabWidget):
+class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
     """
     Tab widget which initializes and holds each of the tabs. They can be accessed with
     self.hist, self.param_manager, self.debruijn and self.settings
     """
     # Signal emitted when tab changes: (old_index, new_index)
     sigTabChanged = QtCore.pyqtSignal(int, int)
+
+    # Tab width in characters (scales with font)
+    TAB_WIDTH_CHARS = 32
+    TAB_MINIMIZED_CHARS = 2
 
     def __init__(self, gui):
         super(RightOptionsTab, self).__init__()
@@ -946,7 +997,7 @@ class RightOptionsTab(QtWidgets.QTabWidget):
 
         self.index = 0
         self.maximized = True
-        self.setFixedWidth(250)
+        self.setFixedWidth(self.scaledWidth(self.TAB_WIDTH_CHARS))
 
         self.addTab(self.hist, 'Levels')
         self.addTab(self.param_manager, 'Fit Parameters')
@@ -974,15 +1025,15 @@ class RightOptionsTab(QtWidgets.QTabWidget):
         if index != self.index:
             self.index = index
             self.maximized = True
-            self.setFixedWidth(250)
+            self.setFixedWidth(self.scaledWidth(self.TAB_WIDTH_CHARS))
             # Emit signal for tab change
             self.sigTabChanged.emit(old_index, index)
         else:
             self.maximized = not self.maximized
             if self.maximized:
-                self.setFixedWidth(250)
+                self.setFixedWidth(self.scaledWidth(self.TAB_WIDTH_CHARS))
             else:
-                self.setFixedWidth(19)
+                self.setFixedWidth(self.scaledWidth(self.TAB_MINIMIZED_CHARS))
 
         # Always set the focus back to the image window
         self.gui.view_widget.setFocus()
@@ -1027,7 +1078,7 @@ class RightOptionsTab(QtWidgets.QTabWidget):
                 break
 
 
-class DebruijnSequenceManager(QtWidgets.QWidget):
+class DebruijnSequenceManager(QtWidgets.QWidget, ScaledSizeHelper):
     # this whole thing could use some huge lower level changes
     def __init__(self, gui):
         QtWidgets.QWidget.__init__(self)
@@ -1039,10 +1090,10 @@ class DebruijnSequenceManager(QtWidgets.QWidget):
 
         # table
         self.table = QtWidgets.QTableWidget(0, 3)
-        self.table.setFixedWidth(205)
-        self.table.setColumnWidth(0, 45)
-        self.table.setColumnWidth(1, 75)
-        self.table.setColumnWidth(2, 40)
+        self.table.setFixedWidth(self.scaledWidth(26))  # ~205px at 8px/char
+        self.table.setColumnWidth(0, self.scaledWidth(6))   # break
+        self.table.setColumnWidth(1, self.scaledWidth(10))  # time
+        self.table.setColumnWidth(2, self.scaledWidth(5))   # value
         self.table.setHorizontalHeaderLabels(['break', 'time', 'value'])
         # self.table.verticalHeader().hide()
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
@@ -1100,12 +1151,12 @@ class DebruijnSequenceManager(QtWidgets.QWidget):
             table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
             table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
             table.setHorizontalHeaderLabels(['break', 'start time', 'direction', 'pattern'])
-            table.setColumnWidth(0, 60)
-            table.setColumnWidth(3, 170)
+            table.setColumnWidth(0, self.scaledWidth(8))
+            table.setColumnWidth(3, self.scaledWidth(22))
             table.verticalHeader().hide()
             table.currentCellChanged.connect(lambda: msg.buttons()[0].setDisabled(False))
-            table.setFixedWidth(450)
-            table.setFixedHeight(300)
+            table.setFixedWidth(self.scaledWidth(56))   # ~450px at 8px/char
+            table.setFixedHeight(self.scaledHeight(18))  # ~300px at 16px/line
             msg.addWidget(table)
             for row, frame in enumerate(forward):
                 break_ = 2*frame + (not paired_first_bit)
@@ -1327,11 +1378,14 @@ class DebruijnSequenceManager(QtWidgets.QWidget):
             self.gui.updatePicks()
 
 
-class GeolocationWidget(QtWidgets.QWidget):
+class GeolocationWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
     sigLocationChanged = QtCore.pyqtSignal()
     sigReloadGeoPoints = QtCore.pyqtSignal()
     sigFitPressed = QtCore.pyqtSignal()
+
+    # Width in characters for coordinate input boxes
+    COORD_INPUT_CHARS = 15
 
     def __init__(self, gui):
         """ QWidget contains station information. """
@@ -1361,7 +1415,7 @@ class GeolocationWidget(QtWidgets.QWidget):
         self.lat.setMaximum(90)
         self.lat.setDecimals(8)
         self.lat.setSingleStep(0.00001)
-        self.lat.setFixedWidth(120)
+        self.lat.setFixedWidth(self.scaledWidth(self.COORD_INPUT_CHARS))
         self.lat.valueModified.connect(self.onLatChanged)
         hbox.addWidget(self.lat)
         hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
@@ -1373,7 +1427,7 @@ class GeolocationWidget(QtWidgets.QWidget):
         self.lon.setMaximum(180)
         self.lon.setDecimals(8)
         self.lon.setSingleStep(0.00001)
-        self.lon.setFixedWidth(120)
+        self.lon.setFixedWidth(self.scaledWidth(self.COORD_INPUT_CHARS))
         self.lon.valueModified.connect(self.onLonChanged)
         hbox.addWidget(self.lon)
         hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
@@ -1385,7 +1439,7 @@ class GeolocationWidget(QtWidgets.QWidget):
         self.elev.setMaximum(1000000)
         self.elev.setDecimals(3)
         self.elev.setSingleStep(1)
-        self.elev.setFixedWidth(120)
+        self.elev.setFixedWidth(self.scaledWidth(self.COORD_INPUT_CHARS))
         self.elev.valueModified.connect(self.onElevChanged)
         hbox.addWidget(self.elev)
         hbox.addWidget(QtWidgets.QLabel('m', alignment=QtCore.Qt.AlignLeft))
@@ -1445,7 +1499,7 @@ class GeolocationWidget(QtWidgets.QWidget):
         self.dist_box.setMaximum(1000)
         self.dist_box.setDecimals(3)
         self.dist_box.setSingleStep(1)
-        self.dist_box.setFixedWidth(90)
+        self.dist_box.setFixedWidth(self.scaledWidth(12))  # ~90px at 8px/char
         self.dist_box.setValue(self.distance)
         self.dist_box.valueModified.connect(self.onDistanceChanged)
         hbox.addWidget(QtWidgets.QLabel('Distance'))
@@ -1616,7 +1670,7 @@ class GeolocationWidget(QtWidgets.QWidget):
 
 
 
-class PlateparParameterManager(QtWidgets.QWidget):
+class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
     """
     QWidget that contains various QDoubleSpinBox's that can be changed to
     manage platepar parameters
@@ -1655,6 +1709,9 @@ class PlateparParameterManager(QtWidgets.QWidget):
     DEFAULT_EXTINCTION_SCALE = 0.6
     DEFAULT_VIGNETTING_FIXED = False
 
+    # Width in characters for parameter input boxes
+    PARAM_INPUT_CHARS = 13
+
     def __init__(self, gui):
         QtWidgets.QWidget.__init__(self)
         self.gui = gui
@@ -1666,14 +1723,14 @@ class PlateparParameterManager(QtWidgets.QWidget):
         }
 
         full_layout = QtWidgets.QVBoxLayout()
-        full_layout.setContentsMargins(4, 4, 4, 4)  # Reduce margins for more content space
+        full_layout.setContentsMargins(*self.scaledMargins(0.5, 0.25))
         self.setLayout(full_layout)
 
         full_layout.addWidget(QtWidgets.QLabel("Press Esc to focus on image"))
 
         # buttons
         box = QtWidgets.QVBoxLayout()
-        box.setContentsMargins(4, 4, 4, 4)  # Reduce margins for more button space
+        box.setContentsMargins(*self.scaledMargins(0.5, 0.25))
 
         # Fit buttons in a horizontal layout
         fit_hbox = QtWidgets.QHBoxLayout()
@@ -1697,7 +1754,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
         box.addWidget(QtWidgets.QLabel("Residuals:"))
 
         hbox = QtWidgets.QHBoxLayout()
-        hbox.setSpacing(4)  # Reduce spacing between buttons
+        hbox.setSpacing(self.scaledSpacing(0.25))  # Reduce spacing between buttons
         self.astrometry_button = QtWidgets.QPushButton('Astrometry')
         self.astrometry_button.clicked.connect(self.sigAstrometryPressed.emit)
         hbox.addWidget(self.astrometry_button)
@@ -1709,7 +1766,10 @@ class PlateparParameterManager(QtWidgets.QWidget):
 
         self.updatePairedStars()
         group = QtWidgets.QGroupBox("Calibration")
-        group.setStyleSheet("QGroupBox { padding-top: 12px; padding-left: 2px; padding-right: 2px; }")
+        # Dynamic stylesheet with scaled padding
+        pad_top = self.scaledHeight(0.75)
+        pad_side = self.scaledWidth(0.25)
+        group.setStyleSheet(f"QGroupBox {{ padding-top: {pad_top}px; padding-left: {pad_side}px; padding-right: {pad_side}px; }}")
         group.setLayout(box)
         full_layout.addWidget(group)
 
@@ -1764,7 +1824,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.az_centre.setMaximum(360)
         self.az_centre.setDecimals(8)
         self.az_centre.setSingleStep(1)
-        self.az_centre.setFixedWidth(100)
+        self.az_centre.setFixedWidth(self.scaledWidth(self.PARAM_INPUT_CHARS))
         self.az_centre.valueModified.connect(self.onAzChanged)
         hbox.addWidget(self.az_centre)
         hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
@@ -1776,7 +1836,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.alt_centre.setMaximum(90)
         self.alt_centre.setDecimals(8)
         self.alt_centre.setSingleStep(1)
-        self.alt_centre.setFixedWidth(100)
+        self.alt_centre.setFixedWidth(self.scaledWidth(self.PARAM_INPUT_CHARS))
         self.alt_centre.valueModified.connect(self.onAltChanged)
         hbox.addWidget(self.alt_centre)
         hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
@@ -1788,7 +1848,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.rotation_from_horiz.setMaximum(360)
         self.rotation_from_horiz.setDecimals(8)
         self.rotation_from_horiz.setSingleStep(1)
-        self.rotation_from_horiz.setFixedWidth(100)
+        self.rotation_from_horiz.setFixedWidth(self.scaledWidth(self.PARAM_INPUT_CHARS))
         self.rotation_from_horiz.valueModified.connect(self.onRotChanged)
         hbox.addWidget(self.rotation_from_horiz)
         hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
@@ -1800,7 +1860,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.F_scale.setMaximum(50)
         self.F_scale.setDecimals(8)
         self.F_scale.setSingleStep(0.1)
-        self.F_scale.setFixedWidth(100)
+        self.F_scale.setFixedWidth(self.scaledWidth(self.PARAM_INPUT_CHARS))
         self.F_scale.valueModified.connect(self.onScaleChanged)
         hbox.addWidget(self.F_scale)
         hbox.addWidget(QtWidgets.QLabel('\'/px', alignment=QtCore.Qt.AlignLeft))
@@ -1870,7 +1930,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.extinction_scale.setMaximum(100)
         self.extinction_scale.setDecimals(8)
         self.extinction_scale.setSingleStep(0.1)
-        self.extinction_scale.setFixedWidth(100)
+        self.extinction_scale.setFixedWidth(self.scaledWidth(self.PARAM_INPUT_CHARS))
         self.extinction_scale.valueModified.connect(self.onExtinctionChanged)
         hbox.addWidget(self.extinction_scale)
         hbox.addWidget(QtWidgets.QLabel('', alignment=QtCore.Qt.AlignLeft))
@@ -1882,7 +1942,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.vignetting_coeff.setMaximum(0.1)
         self.vignetting_coeff.setDecimals(8)
         self.vignetting_coeff.setSingleStep(0.0001)
-        self.vignetting_coeff.setFixedWidth(100)
+        self.vignetting_coeff.setFixedWidth(self.scaledWidth(self.PARAM_INPUT_CHARS))
         self.vignetting_coeff.valueModified.connect(self.onVignettingChanged)
         hbox.addWidget(self.vignetting_coeff)
         hbox.addWidget(QtWidgets.QLabel('r/px', alignment=QtCore.Qt.AlignLeft))
@@ -2312,13 +2372,16 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.fit_astrometry_button.setEnabled(len(self.gui.paired_stars) >= min_fit_stars)
 
 
-class ArrayTabWidget(QtWidgets.QTabWidget):
+class ArrayTabWidget(QtWidgets.QTabWidget, ScaledSizeHelper):
     """
     Widget to the right which holds the histogram as well as the parameter manager
     This class does not manipulate their values itself, that is done by accessing
     the variables themselves
     """
     valueModified = QtCore.pyqtSignal()
+
+    # Width in characters for coefficient input boxes
+    COEFF_INPUT_CHARS = 13
 
     def __init__(self, platepar):
         super(ArrayTabWidget, self).__init__()
@@ -2376,7 +2439,7 @@ class ArrayTabWidget(QtWidgets.QTabWidget):
         for j in range(self.max_n_shown):
             box = ScientificDoubleSpinBox()
             box.setSingleStep(0.5)
-            box.setFixedWidth(100)
+            box.setFixedWidth(self.scaledWidth(self.COEFF_INPUT_CHARS))
 
             # Set the value to the box from the platepar polynomial
             poly_arr = getattr(self.platepar, self.vars[i])
@@ -2418,7 +2481,7 @@ class ArrayTabWidget(QtWidgets.QTabWidget):
                     self.boxes[i][j].setValue(poly_arr[j])
 
 
-class StarDetectionWidget(QtWidgets.QWidget):
+class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
     """
     Widget for testing and adjusting star detection parameters.
     Allows overriding CALSTARS detection settings to find optimal parameters.
@@ -2439,8 +2502,8 @@ class StarDetectionWidget(QtWidgets.QWidget):
         self.gui = gui
 
         layout = QtWidgets.QVBoxLayout()
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(5)
+        layout.setContentsMargins(*self.scaledMargins(1, 0.5))
+        layout.setSpacing(self.scaledSpacing(0.3))
         self.setLayout(layout)
 
         # Title
@@ -2450,7 +2513,7 @@ class StarDetectionWidget(QtWidgets.QWidget):
 
         # Use QGridLayout for stable slider layout
         grid = QtWidgets.QGridLayout()
-        grid.setSpacing(5)
+        grid.setSpacing(self.scaledSpacing(0.3))
         grid.setColumnStretch(0, 1)  # Label column stretches
         grid.setColumnStretch(1, 0)  # Value column fixed
         layout.addLayout(grid)
@@ -2475,7 +2538,7 @@ class StarDetectionWidget(QtWidgets.QWidget):
             # Row with label and value
             grid.addWidget(QtWidgets.QLabel(name), row, 0)
             val_label = QtWidgets.QLabel(default_str)
-            val_label.setFixedSize(45, 16)  # Lock both width and height
+            val_label.setFixedSize(self.scaledWidth(6), self.scaledHeight(1))
             val_label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
             grid.addWidget(val_label, row, 1)
             row += 1
@@ -2494,8 +2557,8 @@ class StarDetectionWidget(QtWidgets.QWidget):
             # Add gamma preset buttons right after gamma slider
             if key == 'gamma':
                 gamma_presets = QtWidgets.QHBoxLayout()
-                gamma_presets.setSpacing(4)
-                gamma_presets.setContentsMargins(0, 0, 0, 5)
+                gamma_presets.setSpacing(self.scaledSpacing(0.25))
+                gamma_presets.setContentsMargins(0, 0, 0, self.scaledSpacing(0.3))
 
                 btn_gamma_22 = QtWidgets.QPushButton('1/2.2')
                 btn_gamma_22.clicked.connect(lambda: self.setGammaPreset(1/2.2))
@@ -2510,7 +2573,7 @@ class StarDetectionWidget(QtWidgets.QWidget):
                 gamma_presets.addWidget(btn_gamma_lin)
 
                 grid.addLayout(gamma_presets, row, 0, 1, 2)
-                grid.setRowMinimumHeight(row, 28)
+                grid.setRowMinimumHeight(row, self.scaledHeight(1.75))
                 row += 1
 
         # Create named references for compatibility
@@ -2529,11 +2592,11 @@ class StarDetectionWidget(QtWidgets.QWidget):
         self.roundness_threshold_slider = self.sliders['roundness_threshold']
         self.roundness_threshold_label = self.slider_labels['roundness_threshold']
 
-        layout.addSpacing(15)
+        layout.addSpacing(self.scaledSpacing(1))
 
         # Buttons in their own layout with spacing
         btn_layout = QtWidgets.QVBoxLayout()
-        btn_layout.setSpacing(8)
+        btn_layout.setSpacing(self.scaledSpacing(0.5))
 
         self.redetect_button = QtWidgets.QPushButton('Re-Detect Current')
         self.redetect_button.clicked.connect(self.sigRedetectStars.emit)
@@ -2544,14 +2607,14 @@ class StarDetectionWidget(QtWidgets.QWidget):
         btn_layout.addWidget(self.redetect_all_button)
 
         layout.addLayout(btn_layout)
-        layout.addSpacing(10)
+        layout.addSpacing(self.scaledSpacing(0.6))
 
         # Checkbox
         self.use_override_checkbox = QtWidgets.QCheckBox('Use Override Detections')
         self.use_override_checkbox.released.connect(self.sigUseOverrideToggled.emit)
         layout.addWidget(self.use_override_checkbox)
 
-        layout.addSpacing(5)
+        layout.addSpacing(self.scaledSpacing(0.3))
 
         # Status
         self.status_label = QtWidgets.QLabel('Using original CALSTARS')
@@ -2598,16 +2661,17 @@ class StarDetectionWidget(QtWidgets.QWidget):
 
     def updateStatus(self, using_override, star_count=None):
         """Update the status label to show current detection source."""
+        pad = self.scaledSpacing(0.3)
         if using_override:
             if star_count is not None:
                 self.status_label.setText(f'Using override detection ({star_count} stars)')
-                self.status_label.setStyleSheet("color: green; font-size: 9pt; padding: 5px; font-weight: bold;")
+                self.status_label.setStyleSheet(f"color: green; font-size: 9pt; padding: {pad}px; font-weight: bold;")
             else:
                 self.status_label.setText('Using override detection')
-                self.status_label.setStyleSheet("color: green; font-size: 9pt; padding: 5px; font-weight: bold;")
+                self.status_label.setStyleSheet(f"color: green; font-size: 9pt; padding: {pad}px; font-weight: bold;")
         else:
             self.status_label.setText('Using original CALSTARS')
-            self.status_label.setStyleSheet("color: gray; font-size: 9pt; padding: 5px;")
+            self.status_label.setStyleSheet(f"color: gray; font-size: 9pt; padding: {pad}px;")
 
     def loadFromConfig(self, config):
         """Initialize sliders from config values."""
@@ -2627,7 +2691,7 @@ class StarDetectionWidget(QtWidgets.QWidget):
             self.roundness_threshold_slider.setValue(int(config.roundness_threshold * 100))
 
 
-class MaskWidget(QtWidgets.QWidget):
+class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
     """
     Widget for creating and editing mask polygons.
     Click to add points, right-click to close polygon.
@@ -2645,8 +2709,8 @@ class MaskWidget(QtWidgets.QWidget):
         self.unsaved = False  # Track if there are unsaved changes
 
         layout = QtWidgets.QVBoxLayout()
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(8)
+        layout.setContentsMargins(*self.scaledMargins(1, 0.5))
+        layout.setSpacing(self.scaledSpacing(0.5))
         self.setLayout(layout)
 
         # Title
@@ -2662,7 +2726,7 @@ class MaskWidget(QtWidgets.QWidget):
         self.instructions.setWordWrap(True)
         layout.addWidget(self.instructions)
 
-        layout.addSpacing(10)
+        layout.addSpacing(self.scaledSpacing(0.6))
 
         # Draw polygon button (toggle)
         self.draw_button = QtWidgets.QPushButton('Draw Polygon')
@@ -2670,18 +2734,18 @@ class MaskWidget(QtWidgets.QWidget):
         self.draw_button.clicked.connect(self.onDrawToggled)
         layout.addWidget(self.draw_button)
 
-        layout.addSpacing(5)
+        layout.addSpacing(self.scaledSpacing(0.3))
 
         # Clear all button
         self.clear_button = QtWidgets.QPushButton('Clear All')
         self.clear_button.clicked.connect(self.onClearAll)
         layout.addWidget(self.clear_button)
 
-        layout.addSpacing(15)
+        layout.addSpacing(self.scaledSpacing(1))
 
         # File operations
         file_layout = QtWidgets.QHBoxLayout()
-        file_layout.setSpacing(4)
+        file_layout.setSpacing(self.scaledSpacing(0.25))
 
         self.load_button = QtWidgets.QPushButton('Load')
         self.load_button.clicked.connect(self.sigLoadMask.emit)
@@ -2693,7 +2757,7 @@ class MaskWidget(QtWidgets.QWidget):
 
         layout.addLayout(file_layout)
 
-        layout.addSpacing(10)
+        layout.addSpacing(self.scaledSpacing(0.6))
 
         # Show overlay checkbox
         self.show_overlay = QtWidgets.QCheckBox('Show Mask Overlay')
@@ -2701,7 +2765,7 @@ class MaskWidget(QtWidgets.QWidget):
         self.show_overlay.toggled.connect(self.sigShowOverlayToggled.emit)
         layout.addWidget(self.show_overlay)
 
-        layout.addSpacing(5)
+        layout.addSpacing(self.scaledSpacing(0.3))
 
         # Use flat image checkbox
         self.use_flat = QtWidgets.QCheckBox('Use Flat as Background')
@@ -2710,7 +2774,7 @@ class MaskWidget(QtWidgets.QWidget):
         layout.addWidget(self.use_flat)
         self.flat_available = False  # Track if flat.bmp exists
 
-        layout.addSpacing(10)
+        layout.addSpacing(self.scaledSpacing(0.6))
 
         # Status
         self.status_label = QtWidgets.QLabel('No polygons')
