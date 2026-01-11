@@ -1824,7 +1824,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.save_current_frame_action.setShortcut('Ctrl+W')
         self.save_current_frame_action.triggered.connect(self.saveCurrentFrame)
 
-        self.save_default_platepar_action = QtWidgets.QAction("Save default platepar")
+        self.save_default_platepar_action = QtWidgets.QAction("Save default platepar...")
         self.save_default_platepar_action.setShortcut('Ctrl+Shift+S')
         self.save_default_platepar_action.triggered.connect(self.saveDefaultPlatepar)
 
@@ -8446,11 +8446,15 @@ class PlateTool(QtWidgets.QMainWindow):
         print('Platepar written to:', self.platepar_file)
 
     def saveDefaultPlatepar(self):
-        platepar_default_path = os.path.join(self.config.config_file_path, self.config.platepar_name)
+        default_path = os.path.join(self.config.config_file_path, self.config.platepar_name)
 
-        # Save the platepar file
-        self.platepar.write(platepar_default_path, fmt=self.platepar_fmt)
-        print('Default platepar written to:', platepar_default_path)
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Save Default Platepar", default_path,
+            "Platepar files (*.cal);;All Files (*)")
+
+        if file_path:
+            self.platepar.write(file_path, fmt=self.platepar_fmt)
+            print('Default platepar written to:', file_path)
 
     def saveCurrentFrame(self):
         """ Saves the current frame to disk. """
