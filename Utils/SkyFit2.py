@@ -3490,6 +3490,69 @@ class PlateTool(QtWidgets.QMainWindow):
 
         return result
 
+    def findNearestMaskEdge(self, x, y, threshold=15):
+        """Find the nearest edge to (x, y) within threshold.
+        Returns (poly_idx, insert_idx) where insert_idx is the index to insert a new vertex,
+        or ('current', insert_idx) for the current polygon being drawn.
+        """
+        min_dist = threshold
+        result = None
+
+        def point_to_segment_dist(px, py, x1, y1, x2, y2):
+            """Calculate distance from point (px, py) to line segment (x1,y1)-(x2,y2)."""
+            # Vector from segment start to point
+            dx, dy = px - x1, py - y1
+            # Segment vector
+            sx, sy = x2 - x1, y2 - y1
+            # Segment length squared
+            seg_len_sq = sx*sx + sy*sy
+            if seg_len_sq == 0:
+                return np.hypot(dx, dy)  # Degenerate segment
+            # Parameter t for projection onto segment (clamped to [0,1])
+            t = max(0, min(1, (dx*sx + dy*sy) / seg_len_sq))
+            # Closest point on segment
+            closest_x = x1 + t * sx
+            closest_y = y1 + t * sy
+            return np.hypot(px - closest_x, py - closest_y)
+
+        # Check current polygon edges (if has at least 2 points)
+        if len(self.mask_current_polygon) >= 2:
+            for i in range(len(self.mask_current_polygon) - 1):
+                x1, y1 = self.mask_current_polygon[i]
+                x2, y2 = self.mask_current_polygon[i + 1]
+                dist = point_to_segment_dist(x, y, x1, y1, x2, y2)
+                if dist < min_dist:
+                    min_dist = dist
+                    result = ('current', i + 1)  # Insert after vertex i
+
+        # Check completed polygon edges
+        for poly_idx, polygon in enumerate(self.mask_polygons):
+            if len(polygon) >= 2:
+                for i in range(len(polygon)):
+                    x1, y1 = polygon[i]
+                    x2, y2 = polygon[(i + 1) % len(polygon)]  # Wrap around for closed polygon
+                    dist = point_to_segment_dist(x, y, x1, y1, x2, y2)
+                    if dist < min_dist:
+                        min_dist = dist
+                        result = (poly_idx, i + 1)  # Insert after vertex i
+
+        return result
+
+    def insertMaskVertex(self, edge_ref, x, y):
+        """Insert a new vertex at position (x, y) at the specified edge location."""
+        if edge_ref[0] == 'current':
+            insert_idx = edge_ref[1]
+            self.mask_current_polygon.insert(insert_idx, (x, y))
+            self.updateMaskDisplay()
+            self.tab.mask.updateStatus(len(self.mask_polygons), len(self.mask_current_polygon))
+        else:
+            poly_idx, insert_idx = edge_ref
+            if poly_idx < len(self.mask_polygons):
+                self.mask_polygons[poly_idx].insert(insert_idx, (x, y))
+                self.tab.mask.setUnsaved(True)
+                self.updateMaskDisplay()
+                self.tab.mask.updateStatus(len(self.mask_polygons))
+
     def deleteMaskVertex(self, vertex_ref):
         """Delete a vertex from a polygon."""
         if vertex_ref[0] == 'current':
@@ -5636,6 +5699,12 @@ class PlateTool(QtWidgets.QMainWindow):
                     # Start dragging this vertex
                     self.mask_dragging_vertex = vertex_hit
                     return
+                elif modifiers & QtCore.Qt.ControlModifier:
+                    # CTRL+click: insert vertex on nearest edge
+                    edge_hit = self.findNearestMaskEdge(click_x, click_y, threshold=15)
+                    if edge_hit is not None:
+                        self.insertMaskVertex(edge_hit, click_x, click_y)
+                        return
                 elif self.mask_draw_mode:
                     # Add new point
                     self.addMaskPoint(click_x, click_y)

@@ -2816,9 +2816,15 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
         # Instructions
         self.instructions = QtWidgets.QLabel(
-            'Draw: click to add points, Space/Enter to close\n'
-            'Edit: drag vertices, right-click vertex to delete')
-        self.instructions.setStyleSheet("color: gray; font-size: 9pt;")
+            '<b>Draw:</b><br>'
+            '• Click to add points<br>'
+            '• Space/Enter to close polygon<br><br>'
+            '<b>Edit:</b><br>'
+            '• Drag vertices to move<br>'
+            '• Right-click vertex to delete<br>'
+            '• Ctrl+click edge to add vertex<br><br>'
+            'Vertices near image border<br>'
+            'will snap to the edge.')
         self.instructions.setWordWrap(True)
         layout.addWidget(self.instructions)
 
