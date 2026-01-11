@@ -351,10 +351,11 @@ class ViewBox(pg.ViewBox):
 
     def mouseReleaseEvent(self, event):
         self.sigMouseReleased.emit(event)
+        super().mouseReleaseEvent(event)
 
-    def mousePressEvent(self, event):       
+    def mousePressEvent(self, event):
         self.sigMousePressed.emit(event)
-        event.accept()  
+        super().mousePressEvent(event)  
 
 
     def wheelEventModified(self, ev, axis=None):
