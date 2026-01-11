@@ -11377,9 +11377,10 @@ if __name__ == '__main__':
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Tool for fitting astrometry plates and photometric calibration.")
 
-    arg_parser.add_argument('input_path', metavar='INPUT_PATH', type=str,
+    arg_parser.add_argument('input_path', metavar='INPUT_PATH', type=str, nargs='?', default=None,
                             help='Path to the folder with FF or image files, path to a video file, or to a state file.'
-                                 ' If images or videos are given, their names must be in the format: YYYYMMDD_hhmmss.uuuuuu')
+                                 ' If images or videos are given, their names must be in the format: YYYYMMDD_hhmmss.uuuuuu'
+                                 ' If not provided, a dialog will prompt for selection.')
 
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
                             help="Path to a config file which will be used instead of the default one."
@@ -11469,6 +11470,37 @@ if __name__ == '__main__':
         beginning_time = None
 
     app = QtWidgets.QApplication(sys.argv)
+
+    # If no input path was provided, prompt for one
+    if cml_args.input_path is None:
+        # Ask user what type of input to select
+        msg = QtWidgets.QMessageBox()
+        msg.setWindowTitle("SkyFit2 - Select Input")
+        msg.setText("What would you like to open?")
+        folder_btn = msg.addButton("Folder (FF/images)", QtWidgets.QMessageBox.ActionRole)
+        file_btn = msg.addButton("File (video/state)", QtWidgets.QMessageBox.ActionRole)
+        cancel_btn = msg.addButton(QtWidgets.QMessageBox.Cancel)
+        msg.exec_()
+
+        input_path = None
+        if msg.clickedButton() == folder_btn:
+            input_path = QtWidgets.QFileDialog.getExistingDirectory(
+                None, "Select folder with FF/image files",
+                os.path.expanduser("~"),
+                QtWidgets.QFileDialog.ShowDirsOnly
+            )
+        elif msg.clickedButton() == file_btn:
+            input_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+                None, "Select video or state file",
+                os.path.expanduser("~"),
+                "All supported (*.state *.mp4 *.avi *.mkv *.mov);;State files (*.state);;Video files (*.mp4 *.avi *.mkv *.mov);;All files (*)"
+            )
+
+        if not input_path:
+            print("No input path selected. Exiting.")
+            sys.exit(0)
+
+        cml_args.input_path = input_path
 
     # If the state file was given, load the state
     if cml_args.input_path.endswith('.state'):
