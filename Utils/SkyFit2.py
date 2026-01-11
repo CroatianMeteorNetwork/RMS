@@ -1895,6 +1895,11 @@ class PlateTool(QtWidgets.QMainWindow):
         # Main Image
         self.scrolls_back = 0
         self.clicked = 0
+        # Track press position for click vs drag detection (scene coords for panning compatibility)
+        self.press_scene_x = None
+        self.press_scene_y = None
+        self.press_button = None
+        self.press_modifiers = None
 
         # Init the central image window
         self.view_widget = pg.GraphicsView()
@@ -1904,6 +1909,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Override the scroll function
         self.img_frame.wheelEvent = self.wheelEvent
+
+        # Install event filter to catch mouse release (ViewBox doesn't receive it during panning)
+        self.view_widget.viewport().installEventFilter(self)
 
         self.view_widget.setCentralWidget(self.img_frame)
         self.img_frame.invertY()
@@ -5302,10 +5310,230 @@ class PlateTool(QtWidgets.QMainWindow):
             self.setFPS()
 
 
-    def onMouseReleased(self, event):
-        self.clicked = 0
+    def eventFilter(self, obj, event):
+        """Event filter to catch mouse release on view_widget viewport (ViewBox doesn't receive it during panning)."""
+        if event.type() == QtCore.QEvent.MouseButtonRelease:
+            # Convert widget coords to scene coords
+            scene_pos = self.view_widget.mapToScene(event.pos())
+            self.handleMouseRelease(event.button(), scene_pos.x(), scene_pos.y())
+        return False  # Don't consume the event
+
+    def handleMouseRelease(self, button, scene_x, scene_y):
+        """Handle mouse release for star picking (called from eventFilter)."""
         # Stop mask vertex dragging
         self.mask_dragging_vertex = None
+
+        # Check if this was a click (not a drag) for star picking
+        if self.press_scene_x is not None and self.star_pick_mode:
+            # Check if mouse moved more than threshold in screen pixels
+            drag_distance = np.hypot(scene_x - self.press_scene_x, scene_y - self.press_scene_y)
+            click_threshold = 5.0  # screen pixels
+
+            if drag_distance < click_threshold:
+                self.handleStarPick(self.press_button, self.press_modifiers)
+
+        # Clear press tracking and clicked state
+        self.press_scene_x = None
+        self.press_scene_y = None
+        self.press_button = None
+        self.press_modifiers = None
+        self.clicked = 0
+
+    def onMouseReleased(self, event):
+        # Note: This may not be called during panning - handleMouseRelease via eventFilter is the main handler
+        # Keep this for non-panning scenarios and mask vertex dragging
+        self.mask_dragging_vertex = None
+
+
+    def handleStarPick(self, button, modifiers):
+        """Handle star picking on click (not drag). Called from onMouseReleased."""
+
+        # Add star pair in SkyFit
+        if self.mode == 'skyfit':
+
+            # Add star
+            if button == QtCore.Qt.LeftButton:
+
+                if self.cursor.mode == 0:
+
+                    # If CTRL is pressed, place the pick manually - NOTE: the intensity might be off then!!!
+                    if modifiers & QtCore.Qt.ControlModifier:
+                        self.x_centroid = self.mouse_x - 0.5
+                        self.y_centroid = self.mouse_y - 0.5
+
+                        # Compute the star intensity
+                        (
+                            _, _, self.star_fwhm, self.star_intensity, self.star_snr, self.star_saturated
+                        ) = self.centroid(
+                            prev_x_cent=self.x_centroid, prev_y_cent=self.y_centroid
+                            )
+                    else:
+
+                        # Check if a star centroid is available from CALSTARS, and use it first because
+                        #   the PSF fit should result in a better centroid estimate
+
+                        # Check if the closest CALSTARS star is within the radius
+
+                        calstars_centroid = False
+                        if self.img_handle is not None:
+
+                            # Handle using FR files too
+                            ff_name_c = convertFRNameToFF(self.img_handle.name())
+
+                            # Use override data if enabled, otherwise CALSTARS
+                            star_data = None
+                            if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
+                                star_data = np.array(self.star_detection_override_data[ff_name_c])
+                            elif ff_name_c in self.calstars:
+                                star_data = np.array(self.calstars[ff_name_c])
+
+                            if star_data is not None:
+
+                                if len(star_data):
+
+                                    # Get star coordinates
+                                    stars_x = star_data[:, 1]
+                                    stars_y = star_data[:, 0]
+
+                                    # Compute the distance from the mouse press
+                                    mouse_x = self.mouse_x - 0.5
+                                    mouse_y = self.mouse_y - 0.5
+                                    dist_arr = np.hypot(stars_x - mouse_x, stars_y - mouse_y)
+
+                                    # Find the closest distance
+                                    closest_dist_indx = np.argmin(dist_arr)
+
+                                    # If the CALSTARS entry is within the aperture radius, take that star
+                                    if dist_arr[closest_dist_indx] <= self.star_aperture_radius:
+
+                                        self.x_centroid = stars_x[closest_dist_indx]
+                                        self.y_centroid = stars_y[closest_dist_indx]
+
+                                        # Compute the star intensity
+                                        _, _, self.star_fwhm, \
+                                            self.star_intensity, self.star_snr, self.star_saturated = \
+                                            self.centroid( \
+                                            prev_x_cent=self.x_centroid, prev_y_cent=self.y_centroid)
+
+                                        calstars_centroid = True
+
+
+                        # If a CALSTARS star was not found, run a normal centroid
+                        if not calstars_centroid:
+
+                            # Perform centroiding with 2 iterations
+                            x_cent_tmp, y_cent_tmp, _, _, _, _ = self.centroid()
+
+                            # Check that the centroiding was successful
+                            if x_cent_tmp is not None:
+
+                                # Centroid the star around the pressed coordinates
+                                (
+                                    self.x_centroid, self.y_centroid, self.star_fwhm,
+                                    self.star_intensity, self.star_snr, self.star_saturated
+                                ) = self.centroid(prev_x_cent=x_cent_tmp, prev_y_cent=y_cent_tmp)
+
+                            else:
+                                return None
+
+                    # Add the centroid to the plot
+                    self.centroid_star_markers.addPoints(x=[self.x_centroid + 0.5], \
+                        y=[self.y_centroid + 0.5])
+                    self.centroid_star_markers2.addPoints(x=[self.x_centroid + 0.5], \
+                        y=[self.y_centroid + 0.5])
+
+
+                    # Find coordinates of the star or geo points closest to the clicked point
+                    x_data, y_data = self.findClickedStarOrGeoPoint(self.x_centroid, self.y_centroid)
+
+
+                    # Add a star marker to the main and zoom windows
+                    self.sel_cat_star_markers.addPoints(x=np.array(x_data) + 0.5, \
+                        y=np.array(y_data) + 0.5)
+                    self.sel_cat_star_markers2.addPoints(x=np.array(x_data) + 0.5, \
+                        y=np.array(y_data) + 0.5)
+
+                    # Switch to the mode where the catalog star is selected
+                    self.cursor.setMode(1)
+
+
+                elif self.cursor.mode == 1:
+
+                    # REMOVE marker for previously selected
+                    self.sel_cat_star_markers.setData(pos=self.paired_stars.imageCoords(draw=True))
+                    self.sel_cat_star_markers2.setData(pos=self.paired_stars.imageCoords(draw=True))
+
+
+                    # Find coordinates of the star or geo points closest to the clicked point
+                    x_data, y_data = self.findClickedStarOrGeoPoint(self.mouse_x, self.mouse_y)
+
+                    # Add the new point
+                    self.sel_cat_star_markers.addPoints(x=np.array(x_data) + 0.5, \
+                        y=np.array(y_data) + 0.5)
+                    self.sel_cat_star_markers2.addPoints(x=np.array(x_data) + 0.5, \
+                        y=np.array(y_data) + 0.5)
+
+
+            # Remove star pair on right click
+            elif button == QtCore.Qt.RightButton:
+                if self.cursor.mode == 0:
+
+                    # Remove the closest picked star from the list
+                    self.paired_stars.removeClosestPair(self.mouse_x, self.mouse_y)
+
+                    self.updatePairedStars()
+                    self.updateFitResiduals()
+                    self.photometry()
+
+        # Add centroid in manual reduction
+        else:
+            if button == QtCore.Qt.LeftButton:
+
+                if self.cursor.mode == 0:
+                    mode = 1
+
+                    if modifiers & QtCore.Qt.ControlModifier or \
+                            ((modifiers & QtCore.Qt.AltModifier or QtCore.Qt.Key_0 in self.keys_pressed) and
+                             self.img.img_handle.input_type == 'dfn'):
+
+                        self.x_centroid, self.y_centroid = self.mouse_x - 0.5, self.mouse_y - 0.5
+
+                    else:
+                        (
+                            self.x_centroid, self.y_centroid, self.star_fwhm,
+                            _, self.snr_centroid, self.saturated_centroid
+                        ) = self.centroid()
+
+                    if (modifiers & QtCore.Qt.AltModifier or QtCore.Qt.Key_0 in self.keys_pressed) and \
+                            self.img.img_handle.input_type == 'dfn':
+                        mode = 0
+
+                    self.addCentroid(self.img.getFrame(), self.x_centroid, self.y_centroid, mode=mode,
+                                     snr=self.snr_centroid, saturated=self.saturated_centroid)
+
+                    self.updatePicks()
+
+                    # Add photometry coloring if single-click photometry is turned on
+                    if self.single_click_photometry:
+
+                        self.changePhotometry(self.img.getFrame(), self.photometryColoring(),
+                                          add_photometry=True)
+                        self.drawPhotometryColoring()
+
+
+                elif self.cursor.mode == 2:
+                    self.changePhotometry(self.img.getFrame(), self.photometryColoring(),
+                                          add_photometry=True)
+                    self.drawPhotometryColoring()
+
+            elif button == QtCore.Qt.RightButton:
+                if self.cursor.mode == 0:
+                    self.removeCentroid(self.img.getFrame())
+                    self.updatePicks()
+                elif self.cursor.mode == 2:
+                    self.changePhotometry(self.img.getFrame(), self.photometryColoring(),
+                                          add_photometry=False)
+                    self.drawPhotometryColoring()
 
 
     def onMouseMoved(self, event):
@@ -5386,6 +5614,14 @@ class PlateTool(QtWidgets.QMainWindow):
 
         modifiers = QtWidgets.QApplication.keyboardModifiers()
 
+        # Store press position for click vs drag detection (used for star picking)
+        # Use scene coordinates (screen position) not view coordinates, because panning changes view coords
+        pos = event.scenePos()
+        self.press_scene_x = pos.x()
+        self.press_scene_y = pos.y()
+        self.press_button = event.button()
+        self.press_modifiers = modifiers
+
         # Handle mask drawing/editing
         if self.mask_draw_mode or len(self.mask_polygons) > 0 or len(self.mask_current_polygon) > 0:
             pos = event.scenePos()
@@ -5410,194 +5646,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.deleteMaskVertex(vertex_hit)
                     return
 
-        if self.star_pick_mode:  # redundant
-
-            # Add star pair in SkyFit
-            if self.mode == 'skyfit':
-
-                # Add star
-                if event.button() == QtCore.Qt.LeftButton:
-
-                    if self.cursor.mode == 0:
-
-                        # If CTRL is pressed, place the pick manually - NOTE: the intensity might be off then!!!
-                        if modifiers & QtCore.Qt.ControlModifier:
-                            self.x_centroid = self.mouse_x - 0.5
-                            self.y_centroid = self.mouse_y - 0.5
-
-                            # Compute the star intensity
-                            (
-                                _, _, self.star_fwhm, self.star_intensity, self.star_snr, self.star_saturated
-                            ) = self.centroid(
-                                prev_x_cent=self.x_centroid, prev_y_cent=self.y_centroid
-                                )
-                        else:
-
-                            # Check if a star centroid is available from CALSTARS, and use it first because
-                            #   the PSF fit should result in a better centroid estimate
-
-                            # Check if the closest CALSTARS star is within the radius
-
-                            calstars_centroid = False
-                            if self.img_handle is not None:
-
-                                # Handle using FR files too
-                                ff_name_c = convertFRNameToFF(self.img_handle.name())
-
-                                # Use override data if enabled, otherwise CALSTARS
-                                star_data = None
-                                if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
-                                    star_data = np.array(self.star_detection_override_data[ff_name_c])
-                                elif ff_name_c in self.calstars:
-                                    star_data = np.array(self.calstars[ff_name_c])
-
-                                if star_data is not None:
-
-                                    if len(star_data):
-
-                                        # Get star coordinates
-                                        stars_x = star_data[:, 1]
-                                        stars_y = star_data[:, 0]
-
-                                        # Compute the distance from the mouse press
-                                        mouse_x = self.mouse_x - 0.5
-                                        mouse_y = self.mouse_y - 0.5
-                                        dist_arr = np.hypot(stars_x - mouse_x, stars_y - mouse_y)
-
-                                        # Find the closest distance
-                                        closest_dist_indx = np.argmin(dist_arr)
-
-                                        # If the CALSTARS entry is within the aperture radius, take that star
-                                        if dist_arr[closest_dist_indx] <= self.star_aperture_radius:
-
-                                            self.x_centroid = stars_x[closest_dist_indx]
-                                            self.y_centroid = stars_y[closest_dist_indx]
-
-                                            # Compute the star intensity
-                                            _, _, self.star_fwhm, \
-                                                self.star_intensity, self.star_snr, self.star_saturated = \
-                                                self.centroid( \
-                                                prev_x_cent=self.x_centroid, prev_y_cent=self.y_centroid)
-
-                                            calstars_centroid = True
-
-
-                            # If a CALSTARS star was not found, run a normal centroid
-                            if not calstars_centroid:
-
-                                # Perform centroiding with 2 iterations
-                                x_cent_tmp, y_cent_tmp, _, _, _, _ = self.centroid()
-
-                                # Check that the centroiding was successful
-                                if x_cent_tmp is not None:
-
-                                    # Centroid the star around the pressed coordinates
-                                    (
-                                        self.x_centroid, self.y_centroid, self.star_fwhm,
-                                        self.star_intensity, self.star_snr, self.star_saturated
-                                    ) = self.centroid(prev_x_cent=x_cent_tmp, prev_y_cent=y_cent_tmp)
-
-                                else:
-                                    return None
-
-                        # Add the centroid to the plot
-                        self.centroid_star_markers.addPoints(x=[self.x_centroid + 0.5], \
-                            y=[self.y_centroid + 0.5])
-                        self.centroid_star_markers2.addPoints(x=[self.x_centroid + 0.5], \
-                            y=[self.y_centroid + 0.5])
-
-
-                        # Find coordinates of the star or geo points closest to the clicked point
-                        x_data, y_data = self.findClickedStarOrGeoPoint(self.x_centroid, self.y_centroid)
-
-
-                        # Add a star marker to the main and zoom windows
-                        self.sel_cat_star_markers.addPoints(x=np.array(x_data) + 0.5, \
-                            y=np.array(y_data) + 0.5)
-                        self.sel_cat_star_markers2.addPoints(x=np.array(x_data) + 0.5, \
-                            y=np.array(y_data) + 0.5)
-
-                        # Switch to the mode where the catalog star is selected
-                        self.cursor.setMode(1)
-
-
-                    elif self.cursor.mode == 1:
-
-                        # REMOVE marker for previously selected
-                        self.sel_cat_star_markers.setData(pos=self.paired_stars.imageCoords(draw=True))
-                        self.sel_cat_star_markers2.setData(pos=self.paired_stars.imageCoords(draw=True))
-
-
-                        # Find coordinates of the star or geo points closest to the clicked point
-                        x_data, y_data = self.findClickedStarOrGeoPoint(self.mouse_x, self.mouse_y)
-
-                        # Add the new point
-                        self.sel_cat_star_markers.addPoints(x=np.array(x_data) + 0.5, \
-                            y=np.array(y_data) + 0.5)
-                        self.sel_cat_star_markers2.addPoints(x=np.array(x_data) + 0.5, \
-                            y=np.array(y_data) + 0.5)
-
-
-                # Remove star pair on right click
-                elif event.button() == QtCore.Qt.RightButton:
-                    if self.cursor.mode == 0:
-
-                        # Remove the closest picked star from the list
-                        self.paired_stars.removeClosestPair(self.mouse_x, self.mouse_y)
-
-                        self.updatePairedStars()
-                        self.updateFitResiduals()
-                        self.photometry()
-
-            # Add centroid in manual reduction
-            else:
-                if event.button() == QtCore.Qt.LeftButton:
-
-                    if self.cursor.mode == 0:
-                        mode = 1
-
-                        if modifiers & QtCore.Qt.ControlModifier or \
-                                ((modifiers & QtCore.Qt.AltModifier or QtCore.Qt.Key_0 in self.keys_pressed) and
-                                 self.img.img_handle.input_type == 'dfn'):
-
-                            self.x_centroid, self.y_centroid = self.mouse_x - 0.5, self.mouse_y - 0.5
-
-                        else:
-                            (
-                                self.x_centroid, self.y_centroid, self.star_fwhm,
-                                _, self.snr_centroid, self.saturated_centroid
-                            ) = self.centroid()
-
-                        if (modifiers & QtCore.Qt.AltModifier or QtCore.Qt.Key_0 in self.keys_pressed) and \
-                                self.img.img_handle.input_type == 'dfn':
-                            mode = 0
-
-                        self.addCentroid(self.img.getFrame(), self.x_centroid, self.y_centroid, mode=mode,
-                                         snr=self.snr_centroid, saturated=self.saturated_centroid)
-
-                        self.updatePicks()
-
-                        # Add photometry coloring if single-click photometry is turned on
-                        if self.single_click_photometry:
-                            
-                            self.changePhotometry(self.img.getFrame(), self.photometryColoring(),
-                                              add_photometry=True)
-                            self.drawPhotometryColoring()
-
-
-                    elif self.cursor.mode == 2:
-                        self.changePhotometry(self.img.getFrame(), self.photometryColoring(),
-                                              add_photometry=True)
-                        self.drawPhotometryColoring()
-
-                elif event.button() == QtCore.Qt.RightButton:
-                    if self.cursor.mode == 0:
-                        self.removeCentroid(self.img.getFrame())
-                        self.updatePicks()
-                    elif self.cursor.mode == 2:
-                        self.changePhotometry(self.img.getFrame(), self.photometryColoring(),
-                                              add_photometry=False)
-                        self.drawPhotometryColoring()
+        # Star picking is handled in onMouseReleased to distinguish clicks from drags (panning)
 
     def keyPressEvent(self, event):
 
