@@ -3698,6 +3698,12 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img.setImage(self.flat_image_data.T)
             print("Showing flat.bmp for mask editing")
 
+        # Disable panning on mask tab to allow polygon editing
+        if new_index == mask_tab_index:
+            self.img_frame.panning_enabled = False
+        else:
+            self.img_frame.panning_enabled = True
+
     def generateMaskImage(self):
         """Generate mask.bmp image from polygons."""
         import cv2

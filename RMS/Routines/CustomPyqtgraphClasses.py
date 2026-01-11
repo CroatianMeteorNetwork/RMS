@@ -341,6 +341,7 @@ class ViewBox(pg.ViewBox):
 
     def __init__(self, *args, **kwargs):
         pg.ViewBox.__init__(self, *args, **kwargs)
+        self.panning_enabled = True  # Can be disabled for mask editing etc.
 
     def keyPressEvent(self, ev):
         """
@@ -351,11 +352,15 @@ class ViewBox(pg.ViewBox):
 
     def mouseReleaseEvent(self, event):
         self.sigMouseReleased.emit(event)
-        super().mouseReleaseEvent(event)
+        if self.panning_enabled:
+            super().mouseReleaseEvent(event)
 
     def mousePressEvent(self, event):
         self.sigMousePressed.emit(event)
-        super().mousePressEvent(event)  
+        if self.panning_enabled:
+            super().mousePressEvent(event)
+        else:
+            event.accept()  
 
 
     def wheelEventModified(self, ev, axis=None):
