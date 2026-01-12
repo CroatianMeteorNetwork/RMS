@@ -134,8 +134,12 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
         pointing_limit_deg = (translation_limit * platepar.F_scale) / 3600.0
 
         # Compute angular separation between original and fitted pointing
+        # Convert original RA to the aligned platepar's reference time (JD/Ho)
+        # RA changes with sidereal time: RA_new = RA_old + delta_Ho
+        delta_Ho = (platepar_aligned.Ho - platepar.Ho) % 360
+        original_RA_at_aligned_time = (platepar.RA_d + delta_Ho) % 360
         pointing_drift_deg = np.degrees(angularSeparation(
-            np.radians(platepar.RA_d), np.radians(platepar.dec_d),
+            np.radians(original_RA_at_aligned_time), np.radians(platepar.dec_d),
             np.radians(platepar_aligned.RA_d), np.radians(platepar_aligned.dec_d)
         ))
 
