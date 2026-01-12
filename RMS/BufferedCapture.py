@@ -1926,26 +1926,6 @@ class BufferedCapture(Process):
             # Update heartbeat timestamp for watchdog to detect hangs
             self.heartbeat.value = time.time()
 
-            # =============================================================================
-            # TEMPORARY TEST CODE FOR WATCHDOG - REMOVE AFTER TESTING
-            # Touch /tmp/rms_test_crash to simulate a crash (OOM kill, segfault, etc.)
-            # Touch /tmp/rms_test_hang to simulate a hang (deadlock, infinite loop, etc.)
-            # =============================================================================
-            if os.path.exists('/tmp/rms_test_crash'):
-                log.warning('TEST: Crash trigger file detected! Simulating crash...')
-                os.remove('/tmp/rms_test_crash')  # Remove so it doesn't trigger again on restart
-                time.sleep(1)  # Give time for log to flush
-                os._exit(1)  # Hard exit without cleanup (simulates crash/OOM kill)
-
-            if os.path.exists('/tmp/rms_test_hang'):
-                log.warning('TEST: Hang trigger file detected! Simulating hang...')
-                os.remove('/tmp/rms_test_hang')  # Remove so restart works
-                while True:  # Infinite loop (simulates deadlock)
-                    time.sleep(1)
-            # =============================================================================
-            # END TEMPORARY TEST CODE
-            # =============================================================================
-
             for i in range(block_frames):
 
                 # Read the frame (keep track how long it took to grab it), and check for color if saving raw frame
