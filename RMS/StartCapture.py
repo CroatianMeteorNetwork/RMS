@@ -126,10 +126,22 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
     else:
         daytime_mode_prev = False
 
+    # Track last watchdog log time to avoid spamming
+    last_watchdog_log = 0
+
     while True:
 
         # Sleep for a short interval
         time.sleep(1)
+
+        # Periodic watchdog status log (every 60 seconds)
+        now = time.time()
+        if now - last_watchdog_log >= 60:
+            bc_alive = buffered_capture.is_alive() if buffered_capture else None
+            comp_alive = compressor.is_alive() if compressor else None
+            log.debug('WATCHDOG: Status check - capture_alive={}, compressor_alive={}, daytime_mode_prev={}'.format(
+                bc_alive, comp_alive, daytime_mode_prev))
+            last_watchdog_log = now
 
 
         # Break in case camera modes switched
@@ -148,9 +160,17 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
         # This can happen if the process is killed by OOM or crashes in native code
         if (not daytime_mode_prev) and (buffered_capture is not None) and (not buffered_capture.is_alive()):
             # Only restart if the exit wasn't intentional
-            if not buffered_capture.exit.is_set():
+            try:
+                exit_was_set = buffered_capture.exit.is_set()
+            except Exception as e:
+                log.warning('WATCHDOG: Could not check exit flag ({}), assuming crash'.format(e))
+                exit_was_set = False
+
+            if not exit_was_set:
                 log.warning('WATCHDOG: BufferedCapture process died unexpectedly! Signaling for restart...')
                 return "capture_died"
+            else:
+                log.debug('WATCHDOG: BufferedCapture process exited intentionally (exit flag was set)')
 
 
         # WATCHDOG: Check heartbeat to detect hung processes
