@@ -1,39 +1,73 @@
 """ Functions for uploading files to server via SFTP. """
 
-from __future__ import print_function, division, absolute_import
-
 import logging
-import sys
 import os
 import ctypes
 import multiprocessing
 import time
+import threading
+from queue import Empty
+from multiprocessing import Manager
+
 import paramiko
 
 from RMS.Logger import LoggingManager, getLogger
+from RMS.Misc import mkdirP, UTCFromTimestamp
 
 # Suppress Paramiko internal errors before they appear in logs
 getLogger("paramiko.transport").setLevel(logging.CRITICAL)
 getLogger("paramiko.auth_handler").setLevel(logging.CRITICAL)
 
-from multiprocessing import Manager
-
-if sys.version_info >= (3, 3):
-    from queue import Empty  # Python 3
-else:
-    from Queue import Empty  # Python 2
-
 QueueEmpty = Empty
-
-
-from RMS.Misc import mkdirP, UTCFromTimestamp
-
-# Map FileNotFoundError to IOError in Python 2 as it does not exist
-if sys.version_info[0] < 3:
-    FileNotFoundError = IOError
 
 # Get the logger from the main module
 log = logging.getLogger("rmslogger")
+
+
+def runWithTimeout(func, args=(), kwargs=None, timeout=60):
+    """
+    Run a function with a hard timeout using threading.
+
+    Arguments:
+        func: The function to run.
+        args: Positional arguments to pass to the function.
+        kwargs: Keyword arguments to pass to the function.
+        timeout: Maximum time in seconds to wait for the function to complete.
+
+    Return:
+        A tuple of (success, result, exception):
+        - success: True if function completed within timeout, False if timed out
+        - result: The return value of the function (None if timed out or exception)
+        - exception: The exception raised by the function (None if no exception)
+    """
+    if kwargs is None:
+        kwargs = {}
+
+    result = [None]
+    exception = [None]
+    completed = threading.Event()
+
+    def target():
+        try:
+            result[0] = func(*args, **kwargs)
+        except Exception as e:
+            exception[0] = e
+        finally:
+            completed.set()
+
+    thread = threading.Thread(target=target)
+    thread.daemon = True
+    thread.start()
+
+    # Wait for completion or timeout
+    completed.wait(timeout)
+
+    if completed.is_set():
+        # Function completed (possibly with exception)
+        return (True, result[0], exception[0])
+    else:
+        # Timed out
+        return (False, None, None)
 
 
 def existsRemoteDirectory(sftp,path):
@@ -138,11 +172,16 @@ def getSSHClient(hostname,
                  timeout=300,
                  banner_timeout=300,
                  auth_timeout=300,
-                 keepalive_interval=30):
+                 keepalive_interval=30,
+                 hard_timeout=600):
     """
     Establishes an SSH connection and returns an SSH client.
     Handles key-based authentication first, then falls back to the SSH agent.
     Returns an SSH client or None.
+
+    The hard_timeout parameter provides a backstop timeout that wraps the entire
+    connection attempt, in case paramiko's internal timeouts don't trigger properly
+    (e.g., due to network edge cases or half-open connections).
     """
     log.debug("Paramiko version: {}".format(paramiko.__version__))
     log.debug("Establishing SSH connection to: {}:{}...".format(hostname, port))
@@ -150,41 +189,23 @@ def getSSHClient(hostname,
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-    # Try key_filename first if provided
-    if key_filename:
-        try:
-            ssh.connect(
-                hostname,
-                port=port,
-                username=username,
-                key_filename=key_filename,
-                timeout=timeout,
-                banner_timeout=banner_timeout,
-                auth_timeout=auth_timeout,
-                look_for_keys=False
-            )
-            log.debug("SSHClient connected successfully (key file).")
+    def do_connect_with_key():
+        """Inner function to attempt SSH connection with key file."""
+        ssh.connect(
+            hostname,
+            port=port,
+            username=username,
+            key_filename=key_filename,
+            timeout=timeout,
+            banner_timeout=banner_timeout,
+            auth_timeout=auth_timeout,
+            look_for_keys=False,
+            allow_agent=False  # Avoid potential hangs from broken SSH agent (paramiko #2147)
+        )
+        return True
 
-            transport = ssh.get_transport()
-            if transport and keepalive_interval > 0:
-                transport.set_keepalive(keepalive_interval)
-                log.debug("Keepalive set to {} seconds".format(keepalive_interval))
-
-            return ssh
-
-        except paramiko.SSHException as e:
-            log.warning("SSH error with provided key: {}".format(str(e)))
-        except ValueError:
-            log.warning("Key validation error.")
-        except paramiko.AuthenticationException:
-            log.warning("Server rejected our key - it may not be authorized")
-        except IOError as e:
-            log.warning("IO error with key file: {}".format(str(e)))
-        except Exception as e:
-            log.warning("Unexpected error with key file: {}".format(str(e)))
-
-    # Try agent-based authentication if key auth fails
-    try:
+    def do_connect_with_agent():
+        """Inner function to attempt SSH connection with agent fallback."""
         ssh.connect(
             hostname,
             port=port,
@@ -194,52 +215,109 @@ def getSSHClient(hostname,
             banner_timeout=banner_timeout,
             auth_timeout=auth_timeout
         )
-        log.debug("SSHClient connected via agent fallback.")
-        return ssh
+        return True
 
-    except paramiko.AuthenticationException:
-        log.warning("Agent authentication failed. No valid authorized keys found.")
-    except Exception as e:
-        log.warning("SSH connection failed during agent fallback: {}".format(str(e)))
-    
-    return None
+    # Try key_filename first if provided
+    if key_filename:
+        # Use hard timeout wrapper around ssh.connect()
+        success, result, exception = runWithTimeout(do_connect_with_key, timeout=hard_timeout)
 
-def getSFTPClient(ssh):
+        if not success:
+            log.error("SSH connection timed out after {} seconds (hard timeout)".format(hard_timeout))
+            try:
+                ssh.close()
+            except:
+                pass
+            return None
+
+        if exception is not None:
+            # Handle specific exceptions
+            if isinstance(exception, paramiko.SSHException):
+                log.warning("SSH error with provided key: {}".format(str(exception)))
+            elif isinstance(exception, ValueError):
+                log.warning("Key validation error.")
+            elif isinstance(exception, paramiko.AuthenticationException):
+                log.warning("Server rejected our key - it may not be authorized")
+            elif isinstance(exception, IOError):
+                log.warning("IO error with key file: {}".format(str(exception)))
+            else:
+                log.warning("Unexpected error with key file: {}".format(str(exception)))
+        else:
+            # Connection successful
+            log.debug("SSHClient connected successfully (key file).")
+
+            transport = ssh.get_transport()
+            if transport and keepalive_interval > 0:
+                transport.set_keepalive(keepalive_interval)
+                log.debug("Keepalive set to {} seconds".format(keepalive_interval))
+
+            return ssh
+
+    # Try agent-based authentication if key auth fails
+    # Use hard timeout wrapper around ssh.connect()
+    success, result, exception = runWithTimeout(do_connect_with_agent, timeout=hard_timeout)
+
+    if not success:
+        log.error("SSH connection timed out after {} seconds (hard timeout)".format(hard_timeout))
+        try:
+            ssh.close()
+        except:
+            pass
+        return None
+
+    if exception is not None:
+        if isinstance(exception, paramiko.AuthenticationException):
+            log.warning("Agent authentication failed. No valid authorized keys found.")
+        else:
+            log.warning("SSH connection failed during agent fallback: {}".format(str(exception)))
+        return None
+
+    log.debug("SSHClient connected via agent fallback.")
+    return ssh
+
+def getSFTPClient(ssh, sftp_timeout=300):
     """
     Opens an SFTP session from an established SSH client.
-    If SFTP fails, logs the error and returns None.
+    If SFTP fails or times out, logs the error and returns None.
+
+    Arguments:
+        ssh: [paramiko.SSHClient] An established SSH client.
+        sftp_timeout: [int] Maximum time in seconds to wait for SFTP session to open.
+            Default is 300 seconds (5 minutes) to accommodate slow connections.
     """
     if ssh is None:
         log.error("Cannot open SFTP session: SSH client is None.")
         return None
 
     log.debug("Attempting to open SFTP connection...")
-    try:
-        # TODO: consider using asyncio when Python 2 support is dropped
-        # as ssh.open_sftp() has the potential to hang indefinitely
-        # import asyncio
-        # async def open_sftp_async(ssh):
-        #     return await asyncio.get_event_loop().run_in_executor(None, ssh.open_sftp)
 
-        # # Usage
-        # sftp = await asyncio.wait_for(open_sftp_async(ssh), timeout=30)
+    # Use hard timeout wrapper around open_sftp() to prevent indefinite hangs
+    success, sftp, exception = runWithTimeout(ssh.open_sftp, timeout=sftp_timeout)
 
-        sftp = ssh.open_sftp()
-        log.debug("SFTP connection established.")
-        return sftp
-
-    except Exception as e:
-        log.error("Failed to open SFTP connection: {}".format(e))
+    if not success:
+        log.error("SFTP connection timed out after {} seconds".format(sftp_timeout))
         return None
 
+    if exception is not None:
+        log.error("Failed to open SFTP connection: {}".format(exception))
+        return None
 
-def getSSHAndSFTP(hostname, **kwargs):
+    log.debug("SFTP connection established.")
+    return sftp
+
+
+def getSSHAndSFTP(hostname, sftp_timeout=300, **kwargs):
     """
     Wrapper function that returns both SSH and SFTP clients.
     If SSH fails, SFTP is not attempted.
+
+    Arguments:
+        hostname: [str] Server name or IP address.
+        sftp_timeout: [int] Maximum time in seconds to wait for SFTP session to open.
+        **kwargs: Additional arguments passed to getSSHClient.
     """
     ssh = getSSHClient(hostname, **kwargs)
-    sftp = getSFTPClient(ssh) if ssh else None
+    sftp = getSFTPClient(ssh, sftp_timeout=sftp_timeout) if ssh else None
     return ssh, sftp
 
 
