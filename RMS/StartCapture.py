@@ -90,6 +90,12 @@ def resetSIGINT():
 
 
 
+# Heartbeat timeout in seconds - if no heartbeat for this long, assume capture is hung
+# Set conservatively high since legitimate waits (RTSP reconnection, probing) can take time
+# The heartbeat is updated during all active wait loops, so only true hangs will trigger this
+HEARTBEAT_TIMEOUT = 180  # 3 minutes
+
+
 def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
     """ The function will wait for the specified time, or it will stop when Enter is pressed. If no time was
         given (in seconds), it will wait until Enter is pressed. Additionally, it will also stop when the camera mode
@@ -103,7 +109,7 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
         daytime_mode: [multiprocessing.Value] shared boolean variable to keep track of camera day/night mode switching. None by default.
 
     Return:
-        [str] Reason for exit: "normal", "capture_died", "compressor_died", "mode_switch"
+        [str] Reason for exit: "normal", "capture_died", "capture_hung", "compressor_died", "mode_switch"
     """
 
     global STOP_CAPTURE
@@ -145,6 +151,17 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
             if not buffered_capture.exit.is_set():
                 log.warning('WATCHDOG: BufferedCapture process died unexpectedly! Signaling for restart...')
                 return "capture_died"
+
+
+        # WATCHDOG: Check heartbeat to detect hung processes
+        # This catches cases where the process is alive but stuck (deadlock, infinite loop, etc.)
+        if (not daytime_mode_prev) and (buffered_capture is not None) and buffered_capture.is_alive():
+            if hasattr(buffered_capture, 'heartbeat') and buffered_capture.heartbeat.value > 0:
+                heartbeat_age = time.time() - buffered_capture.heartbeat.value
+                if heartbeat_age > HEARTBEAT_TIMEOUT:
+                    log.warning('WATCHDOG: BufferedCapture heartbeat stale ({:.1f}s old, timeout={:d}s)! Process appears hung...'.format(
+                        heartbeat_age, HEARTBEAT_TIMEOUT))
+                    return "capture_hung"
 
 
         # If some wait time was given, check if it passed
@@ -444,16 +461,30 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             while True:
                 wait_result = wait(duration, None, bc, video_file, daytime_mode)
 
-                # WATCHDOG: If capture died, restart it and continue waiting
-                if wait_result == "capture_died":
+                # WATCHDOG: If capture died or hung, restart it and continue waiting
+                if wait_result in ("capture_died", "capture_hung"):
                     watchdog_restart_count += 1
-                    log.warning('WATCHDOG: Restarting BufferedCapture process (daytime mode), restart #{:d}...'.format(watchdog_restart_count))
+                    log.warning('WATCHDOG: Restarting BufferedCapture process (daytime mode), restart #{:d}, reason: {}...'.format(
+                        watchdog_restart_count, wait_result))
 
-                    # Clean up the dead process
-                    try:
-                        bc.join(timeout=1)
-                    except:
-                        pass
+                    # For hung processes, force kill first
+                    if wait_result == "capture_hung":
+                        log.warning('WATCHDOG: Force terminating hung process...')
+                        try:
+                            bc.terminate()
+                            bc.join(timeout=5)
+                            if bc.is_alive():
+                                log.warning('WATCHDOG: Process did not terminate, sending SIGKILL...')
+                                os.kill(bc.pid, signal.SIGKILL)
+                                bc.join(timeout=2)
+                        except Exception as e:
+                            log.error('WATCHDOG: Error during force termination: {}'.format(e))
+                    else:
+                        # Clean up the dead process
+                        try:
+                            bc.join(timeout=1)
+                        except:
+                            pass
 
                     # Wait a moment before restart to avoid rapid restart loops
                     time.sleep(5)
@@ -572,17 +603,31 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             while True:
                 wait_result = wait(duration, compressor, bc, video_file, daytime_mode)
 
-                # WATCHDOG: If capture died, restart it and continue waiting
+                # WATCHDOG: If capture died or hung, restart it and continue waiting
                 # The compressor keeps running since it uses shared memory arrays owned by parent
-                if wait_result == "capture_died":
+                if wait_result in ("capture_died", "capture_hung"):
                     watchdog_restart_count += 1
-                    log.warning('WATCHDOG: Restarting BufferedCapture process (nighttime mode), restart #{:d}...'.format(watchdog_restart_count))
+                    log.warning('WATCHDOG: Restarting BufferedCapture process (nighttime mode), restart #{:d}, reason: {}...'.format(
+                        watchdog_restart_count, wait_result))
 
-                    # Clean up the dead process
-                    try:
-                        bc.join(timeout=1)
-                    except:
-                        pass
+                    # For hung processes, force kill first
+                    if wait_result == "capture_hung":
+                        log.warning('WATCHDOG: Force terminating hung process...')
+                        try:
+                            bc.terminate()
+                            bc.join(timeout=5)
+                            if bc.is_alive():
+                                log.warning('WATCHDOG: Process did not terminate, sending SIGKILL...')
+                                os.kill(bc.pid, signal.SIGKILL)
+                                bc.join(timeout=2)
+                        except Exception as e:
+                            log.error('WATCHDOG: Error during force termination: {}'.format(e))
+                    else:
+                        # Clean up the dead process
+                        try:
+                            bc.join(timeout=1)
+                        except:
+                            pass
 
                     # Wait a moment before restart to avoid rapid restart loops
                     time.sleep(5)
