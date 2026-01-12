@@ -116,6 +116,8 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
 
 
     log.info('Press Ctrl+C to stop capturing...')
+    log.info('WATCHDOG: Monitoring capture process (daytime_mode={})'.format(
+        daytime_mode.value if daytime_mode is not None else None))
 
     # Get the time of capture start
     time_start = RmsDateTime.utcnow()
