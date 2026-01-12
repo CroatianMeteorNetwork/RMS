@@ -3765,10 +3765,28 @@ class PlateTool(QtWidgets.QMainWindow):
             # Switch to flat image
             self.img.setImage(self.flat_image_data.T)
             print("Mask background: using flat.bmp")
+            # Hide all stars when showing flat
+            self.cat_star_markers.hide()
+            self.cat_star_markers2.hide()
+            self.geo_markers.hide()
+            self.calstar_markers.hide()
+            self.calstar_markers2.hide()
+            self.calstar_markers_outer.hide()
+            self.calstar_markers_outer2.hide()
         else:
             # Switch back to current image
             self.img.loadImage(self.mode, self.img_type_flag)
             print("Mask background: using current image")
+            # Show stars when showing current image (if enabled)
+            if self.catalog_stars_visible:
+                self.cat_star_markers.show()
+                self.cat_star_markers2.show()
+                self.geo_markers.show()
+            if self.draw_calstars:
+                self.calstar_markers.show()
+                self.calstar_markers2.show()
+                self.calstar_markers_outer.show()
+                self.calstar_markers_outer2.show()
 
     def onTabChanged(self, old_index, new_index):
         """Handle tab changes - restore image when leaving mask tab."""
@@ -3785,9 +3803,63 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img.setImage(self.flat_image_data.T)
             print("Showing flat.bmp for mask editing")
 
-        # Disable panning on mask tab to allow polygon editing
+        # Handle mask tab visibility
         if new_index == mask_tab_index:
             self.img_frame.panning_enabled = False
+
+            # Always hide picks, selected stars, residual lines, and astrometry.net markers on mask tab
+            self.pick_marker.hide()
+            self.pick_marker2.hide()
+            self.sel_cat_star_markers.hide()
+            self.sel_cat_star_markers2.hide()
+            self.residual_lines_img.hide()
+            self.residual_lines_astro.hide()
+            self.astrometry_quad_markers.hide()
+            self.astrometry_quad_markers2.hide()
+            self.astrometry_matched_markers.hide()
+            self.astrometry_matched_markers2.hide()
+            # Clear error text (TextItemList children are parented to frame, not list)
+            self.residual_text.clear()
+
+            # Hide all stars when flat is displayed
+            if self.mask_use_flat_background and self.flat_image_data is not None:
+                self.cat_star_markers.hide()
+                self.cat_star_markers2.hide()
+                self.geo_markers.hide()
+                self.calstar_markers.hide()
+                self.calstar_markers2.hide()
+                self.calstar_markers_outer.hide()
+                self.calstar_markers_outer2.hide()
+
+        elif old_index == mask_tab_index:
+            # Leaving mask tab - restore visibility based on user settings
+            self.img_frame.panning_enabled = True
+
+            if self.catalog_stars_visible:
+                self.cat_star_markers.show()
+                self.cat_star_markers2.show()
+                self.geo_markers.show()
+            if self.selected_stars_visible:
+                self.sel_cat_star_markers.show()
+                self.sel_cat_star_markers2.show()
+                self.residual_lines_img.show()
+                self.residual_lines_astro.show()
+            if self.draw_calstars:
+                self.calstar_markers.show()
+                self.calstar_markers2.show()
+                self.calstar_markers_outer.show()
+                self.calstar_markers_outer2.show()
+            if self.astrometry_stars_visible:
+                self.astrometry_quad_markers.show()
+                self.astrometry_quad_markers2.show()
+                self.astrometry_matched_markers.show()
+                self.astrometry_matched_markers2.show()
+            # Restore error text by re-running photometry
+            self.photometry()
+            # Picks only visible in manual reduction mode
+            if self.mode == 'manualreduction':
+                self.pick_marker.show()
+                self.pick_marker2.show()
         else:
             self.img_frame.panning_enabled = True
 
