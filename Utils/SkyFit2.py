@@ -6370,25 +6370,12 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.tab.param_manager.onIndexChanged()
 
 
-            # Get initial parameters from astrometry.net
+            # Get initial parameters from astrometry.net (same as Auto Fit button)
             elif (event.key() == QtCore.Qt.Key_X) and ((modifiers == QtCore.Qt.ControlModifier) \
                 or (modifiers == (QtCore.Qt.ControlModifier | QtCore.Qt.ShiftModifier))):
 
-                print("Solving with astrometry.net")
-
-                upload_image = False #True
-
-                # If shift was pressed, only upload the detected stars
-                if modifiers == (QtCore.Qt.ControlModifier | QtCore.Qt.ShiftModifier):
-                    upload_image = False
-
-                # Estimate initial parameters using astrometry.net
-                self.getInitialParamsAstrometryNet(upload_image=upload_image)
-
-                self.updateDistortion()
-                self.updateLeftLabels()
-                self.updateStars()
-                self.tab.param_manager.updatePlatepar()
+                # Use the same auto-fit path as the button (includes catalog balancing, quick alignment)
+                self.autoFitAstrometryNet()
 
 
             # Toggle showing detected stars
