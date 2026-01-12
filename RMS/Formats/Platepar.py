@@ -1091,8 +1091,21 @@ class Platepar(object):
                         ra_cat_all, dec_cat_all, jd, self)
                     in_fov_init = (cat_x_init >= 0) & (cat_x_init < self.X_res) & \
                                   (cat_y_init >= 0) & (cat_y_init < self.Y_res)
+                    n_catalog_fov = np.sum(in_fov_init)
                     print("    NN input: {:d} detected stars, {:d} catalog stars in FOV".format(
-                        len(img_stars), np.sum(in_fov_init)))
+                        len(img_stars), n_catalog_fov))
+
+                    # Safety check: need minimum stars to proceed
+                    min_stars_required = 10
+                    if len(img_stars) < min_stars_required:
+                        print("    -> Not enough detected stars ({} < {}), skipping NN fit".format(
+                            len(img_stars), min_stars_required))
+                        return None
+                    if n_catalog_fov < min_stars_required:
+                        print("    -> Not enough catalog stars in FOV ({} < {}), skipping NN fit".format(
+                            n_catalog_fov, min_stars_required))
+                        return None
+
                     print("    RANSAC outlier detection: 21 iterations")
                     print("    Radial-weighted threshold: 1.0x at center, 2.0x at corners")
                     print("    Iterations 1-7: radial3-odd, 8-14: radial5-odd, 15-21: radial7-odd")
@@ -1212,6 +1225,13 @@ class Platepar(object):
                         available_mask = ~current_outlier_mask
                         available_indices = all_indices[available_mask]
 
+                        # Safety check: need minimum stars to fit
+                        min_stars_for_fit = 5
+                        if len(available_indices) < min_stars_for_fit:
+                            print("      -> Not enough non-outlier stars ({} < {}), exiting RANSAC early".format(
+                                len(available_indices), min_stars_for_fit))
+                            break
+
                         # Use smaller subset for first 2 iterations to reduce outlier contamination
                         if iteration < 2:
                             iter_subset_fraction = initial_subset_fraction
@@ -1258,6 +1278,12 @@ class Platepar(object):
                         in_fov = (cat_x >= 0) & (cat_x < self.X_res) & \
                                  (cat_y >= 0) & (cat_y < self.Y_res)
                         catalog_stars_fov = catalog_stars[in_fov]
+
+                        # Safety check: need minimum catalog stars for NN matching
+                        if len(catalog_stars_fov) < min_stars_for_fit:
+                            print("      -> Not enough catalog stars in FOV ({} < {}), exiting RANSAC early".format(
+                                len(catalog_stars_fov), min_stars_for_fit))
+                            break
 
                         # Use tiered tolerances: looser for radial3-odd, tighter for radial5/7-odd
                         if iteration < switch_iter_r5:
@@ -1378,8 +1404,15 @@ class Platepar(object):
                     n_inliers = np.sum(nn_inlier_mask)
                     n_outliers = np.sum(final_outlier_mask)
 
-                    print("    RANSAC result: {}/{} inliers (removed {} outliers with score > 0)".format(
-                        n_inliers, n_stars, n_outliers))
+                    print("    RANSAC result: {}/{} inliers (removed {} outliers with score > 0), RMSD={:.2f}'".format(
+                        n_inliers, n_stars, n_outliers, best_cost))
+
+                    # Safety check: if RMSD is too large, bail out
+                    max_rmsd_arcmin = 10.0
+                    if best_cost > max_rmsd_arcmin:
+                        print("    -> RMSD too large ({:.2f}' > {:.0f}'), skipping final fit".format(
+                            best_cost, max_rmsd_arcmin))
+                        return None
 
                     # Apply best RANSAC params to platepar
                     ra_ref, dec_ref, pos_angle_ref, F_scale = best_res.x[:4]
