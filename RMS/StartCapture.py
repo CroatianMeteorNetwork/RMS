@@ -160,7 +160,8 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
 
         # WATCHDOG: If the capture process has died unexpectedly, signal for restart
         # This can happen if the process is killed by OOM or crashes in native code
-        if (not daytime_mode_prev) and (buffered_capture is not None) and (not buffered_capture.is_alive()):
+        # Note: This check runs in BOTH daytime and nighttime modes
+        if (buffered_capture is not None) and (not buffered_capture.is_alive()):
             # Only restart if the exit wasn't intentional
             try:
                 exit_was_set = buffered_capture.exit.is_set()
@@ -177,7 +178,8 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
 
         # WATCHDOG: Check heartbeat to detect hung processes
         # This catches cases where the process is alive but stuck (deadlock, infinite loop, etc.)
-        if (not daytime_mode_prev) and (buffered_capture is not None) and buffered_capture.is_alive():
+        # Note: This check runs in BOTH daytime and nighttime modes
+        if (buffered_capture is not None) and buffered_capture.is_alive():
             if hasattr(buffered_capture, 'heartbeat') and buffered_capture.heartbeat.value > 0:
                 heartbeat_age = time.time() - buffered_capture.heartbeat.value
                 if heartbeat_age > HEARTBEAT_TIMEOUT:
