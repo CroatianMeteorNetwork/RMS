@@ -2101,6 +2101,22 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.unsuitable_stars_visble = True
 
+        # Distortion center marker (red cross) - main window
+        self.distortion_center_marker = pg.ScatterPlotItem()
+        self.distortion_center_marker.setPen((255, 0, 0), width=2)
+        self.distortion_center_marker.setSize(30)
+        self.distortion_center_marker.setSymbol(Plus())
+        self.distortion_center_marker.setZValue(5)
+        self.img_frame.addItem(self.distortion_center_marker)
+
+        # Distortion center marker (red cross) - zoom window
+        self.distortion_center_marker2 = pg.ScatterPlotItem()
+        self.distortion_center_marker2.setPen((255, 0, 0), width=2)
+        self.distortion_center_marker2.setSize(30)
+        self.distortion_center_marker2.setSymbol(Plus())
+        self.distortion_center_marker2.setZValue(5)
+        self.zoom_window.addItem(self.distortion_center_marker2)
+
         # calstar markers outer rings (dark green) - main window
         self.calstar_markers_outer = pg.ScatterPlotItem()
         self.calstar_markers_outer.setPen(pg.mkPen((0, 100, 0, 255), width=1.5))
@@ -4048,6 +4064,20 @@ class PlateTool(QtWidgets.QMainWindow):
             y[1::2] = y_nodist
 
             self.distortion_lines.setData(x=np.array(x) + 0.5, y=np.array(y) + 0.5)
+
+            # Update distortion center marker
+            self.updateDistortionCenterMarker()
+
+
+    def updateDistortionCenterMarker(self):
+        """Update the distortion center (optical axis) marker position."""
+        if self.platepar:
+            # Get the distortion center from the platepar
+            x_centre, y_centre = self.platepar.getDistortionCentre()
+
+            # Update marker position (add 0.5 for pixel center alignment)
+            self.distortion_center_marker.setData(x=[x_centre + 0.5], y=[y_centre + 0.5])
+            self.distortion_center_marker2.setData(x=[x_centre + 0.5], y=[y_centre + 0.5])
 
 
     def photometry(self, show_plot=False):

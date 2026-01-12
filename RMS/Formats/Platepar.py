@@ -395,6 +395,33 @@ class Platepar(object):
                 #   0.001 rad/px is for 720p.
                 self.vignetting_coeff = 0.001 * np.hypot(1280, 720) / np.hypot(self.X_res, self.Y_res)
 
+    def getDistortionCentre(self):
+        """Get the distortion center (optical axis) in pixel coordinates.
+
+        For radial distortion models with force_distortion_centre=False, the distortion center
+        is fitted and stored in x_poly_fwd[0] and x_poly_fwd[1] as normalized offsets.
+        Otherwise, the distortion center is at the image center.
+
+        Returns:
+            (x_centre, y_centre): [tuple of floats] Distortion center in pixel coordinates.
+        """
+
+        # If distortion center is forced to image center, or not using radial distortion
+        if self.force_distortion_centre or not self.distortion_type.startswith("radial"):
+            return self.X_res / 2.0, self.Y_res / 2.0
+
+        # For radial distortion, extract the center offsets from coefficients
+        # The offsets are stored normalized by X_res/2 and Y_res/2
+        x0 = self.x_poly_fwd[0] * (self.X_res / 2.0)
+        y0 = self.x_poly_fwd[1] * (self.Y_res / 2.0)
+
+        # Wrap offsets to always be within the image bounds
+        x0 = -self.X_res / 2.0 + (x0 + self.X_res / 2.0) % self.X_res
+        y0 = -self.Y_res / 2.0 + (y0 + self.Y_res / 2.0) % self.Y_res
+
+        # Return center in pixel coordinates (image center + offset)
+        return self.X_res / 2.0 + x0, self.Y_res / 2.0 + y0
+
     def fitPointing(self, jd, img_stars, catalog_stars, fixed_scale=False):
         """Fit pointing parameters to the list of star image and celestial catalog coordinates.
         At least 4 stars are needed to fit the rigid body parameters.
