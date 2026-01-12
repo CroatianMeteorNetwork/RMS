@@ -21,6 +21,53 @@ import re
 import sys
 
 
+class ScaledSizeHelper:
+    """Helper mixin for calculating sizes that scale with font/DPI settings.
+
+    Use this to replace hardcoded pixel values with font-relative sizes.
+    """
+
+    # Reference character width at 96 DPI (typical default)
+    _REF_CHAR_WIDTH = 8
+    _REF_LINE_HEIGHT = 16
+
+    def scaledWidth(self, chars):
+        """Calculate width in pixels for given number of characters."""
+        fm = QtGui.QFontMetrics(self.font())
+        return int(fm.averageCharWidth() * chars)
+
+    def scaledHeight(self, lines):
+        """Calculate height in pixels for given number of lines."""
+        fm = QtGui.QFontMetrics(self.font())
+        return int(fm.height() * lines)
+
+    def scaledMargins(self, chars_h=0.5, lines_v=0.25):
+        """Calculate margins scaled to font size.
+
+        Args:
+            chars_h: Horizontal margin in character widths
+            lines_v: Vertical margin in line heights
+
+        Returns:
+            Tuple of (left, top, right, bottom) margins in pixels
+        """
+        fm = QtGui.QFontMetrics(self.font())
+        h_margin = int(fm.averageCharWidth() * chars_h)
+        v_margin = int(fm.height() * lines_v)
+        return (h_margin, v_margin, h_margin, v_margin)
+
+    def scaledSpacing(self, fraction=0.5):
+        """Calculate spacing scaled to font size.
+
+        Args:
+            fraction: Spacing as fraction of line height
+
+        Returns:
+            Spacing in pixels
+        """
+        fm = QtGui.QFontMetrics(self.font())
+        return int(fm.height() * fraction)
+
 
 def qmessagebox(message="", title="Error", message_type="warning"):
     msg = QtGui.QMessageBox()
@@ -294,6 +341,7 @@ class ViewBox(pg.ViewBox):
 
     def __init__(self, *args, **kwargs):
         pg.ViewBox.__init__(self, *args, **kwargs)
+        self.panning_enabled = True  # Can be disabled for mask editing etc.
 
     def keyPressEvent(self, ev):
         """
@@ -304,10 +352,15 @@ class ViewBox(pg.ViewBox):
 
     def mouseReleaseEvent(self, event):
         self.sigMouseReleased.emit(event)
+        if self.panning_enabled:
+            super().mouseReleaseEvent(event)
 
-    def mousePressEvent(self, event):       
+    def mousePressEvent(self, event):
         self.sigMousePressed.emit(event)
-        event.accept()  
+        if self.panning_enabled:
+            super().mousePressEvent(event)
+        else:
+            event.accept()  
 
 
     def wheelEventModified(self, ev, axis=None):
@@ -923,11 +976,17 @@ class HistogramLUTItem(pg.HistogramLUTItem):
             self.setLevels(*self.saved_manual_levels)
 
 
-class RightOptionsTab(QtWidgets.QTabWidget):
+class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
     """
     Tab widget which initializes and holds each of the tabs. They can be accessed with
     self.hist, self.param_manager, self.debruijn and self.settings
     """
+    # Signal emitted when tab changes: (old_index, new_index)
+    sigTabChanged = QtCore.pyqtSignal(int, int)
+
+    # Tab width in characters (scales with font)
+    TAB_WIDTH_CHARS = 32
+    TAB_MINIMIZED_CHARS = 2
 
     def __init__(self, gui):
         super(RightOptionsTab, self).__init__()
@@ -937,16 +996,20 @@ class RightOptionsTab(QtWidgets.QTabWidget):
         self.hist = HistogramLUTWidget(gui)
         self.param_manager = PlateparParameterManager(gui)
         self.geolocation = GeolocationWidget(gui)
+        self.star_detection = StarDetectionWidget(gui)
+        self.mask = MaskWidget(gui)
         self.settings = SettingsWidget(gui)
         self.debruijn = DebruijnSequenceManager(gui)
 
         self.index = 0
         self.maximized = True
-        self.setFixedWidth(250)
+        self.setFixedWidth(self.scaledWidth(self.TAB_WIDTH_CHARS))
 
         self.addTab(self.hist, 'Levels')
         self.addTab(self.param_manager, 'Fit Parameters')
         self.addTab(self.geolocation, 'Station')
+        self.addTab(self.star_detection, 'Star Detection')
+        self.addTab(self.mask, 'Mask')
         self.addTab(self.settings, 'Settings')
 
         self.setCurrentIndex(self.index)  # redundant
@@ -964,16 +1027,19 @@ class RightOptionsTab(QtWidgets.QTabWidget):
 
 
     def onTabBarClicked(self, index):
+        old_index = self.index
         if index != self.index:
             self.index = index
             self.maximized = True
-            self.setFixedWidth(250)
+            self.setFixedWidth(self.scaledWidth(self.TAB_WIDTH_CHARS))
+            # Emit signal for tab change
+            self.sigTabChanged.emit(old_index, index)
         else:
             self.maximized = not self.maximized
             if self.maximized:
-                self.setFixedWidth(250)
+                self.setFixedWidth(self.scaledWidth(self.TAB_WIDTH_CHARS))
             else:
-                self.setFixedWidth(19)
+                self.setFixedWidth(self.scaledWidth(self.TAB_MINIMIZED_CHARS))
 
         # Always set the focus back to the image window
         self.gui.view_widget.setFocus()
@@ -1018,7 +1084,7 @@ class RightOptionsTab(QtWidgets.QTabWidget):
                 break
 
 
-class DebruijnSequenceManager(QtWidgets.QWidget):
+class DebruijnSequenceManager(QtWidgets.QWidget, ScaledSizeHelper):
     # this whole thing could use some huge lower level changes
     def __init__(self, gui):
         QtWidgets.QWidget.__init__(self)
@@ -1030,10 +1096,10 @@ class DebruijnSequenceManager(QtWidgets.QWidget):
 
         # table
         self.table = QtWidgets.QTableWidget(0, 3)
-        self.table.setFixedWidth(205)
-        self.table.setColumnWidth(0, 45)
-        self.table.setColumnWidth(1, 75)
-        self.table.setColumnWidth(2, 40)
+        self.table.setFixedWidth(self.scaledWidth(26))  # ~205px at 8px/char
+        self.table.setColumnWidth(0, self.scaledWidth(6))   # break
+        self.table.setColumnWidth(1, self.scaledWidth(10))  # time
+        self.table.setColumnWidth(2, self.scaledWidth(5))   # value
         self.table.setHorizontalHeaderLabels(['break', 'time', 'value'])
         # self.table.verticalHeader().hide()
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
@@ -1091,12 +1157,12 @@ class DebruijnSequenceManager(QtWidgets.QWidget):
             table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
             table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
             table.setHorizontalHeaderLabels(['break', 'start time', 'direction', 'pattern'])
-            table.setColumnWidth(0, 60)
-            table.setColumnWidth(3, 170)
+            table.setColumnWidth(0, self.scaledWidth(8))
+            table.setColumnWidth(3, self.scaledWidth(22))
             table.verticalHeader().hide()
             table.currentCellChanged.connect(lambda: msg.buttons()[0].setDisabled(False))
-            table.setFixedWidth(450)
-            table.setFixedHeight(300)
+            table.setFixedWidth(self.scaledWidth(56))   # ~450px at 8px/char
+            table.setFixedHeight(self.scaledHeight(18))  # ~300px at 16px/line
             msg.addWidget(table)
             for row, frame in enumerate(forward):
                 break_ = 2*frame + (not paired_first_bit)
@@ -1318,11 +1384,14 @@ class DebruijnSequenceManager(QtWidgets.QWidget):
             self.gui.updatePicks()
 
 
-class GeolocationWidget(QtWidgets.QWidget):
+class GeolocationWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
     sigLocationChanged = QtCore.pyqtSignal()
     sigReloadGeoPoints = QtCore.pyqtSignal()
     sigFitPressed = QtCore.pyqtSignal()
+
+    # Width in characters for coordinate input boxes
+    COORD_INPUT_CHARS = 15
 
     def __init__(self, gui):
         """ QWidget contains station information. """
@@ -1352,7 +1421,7 @@ class GeolocationWidget(QtWidgets.QWidget):
         self.lat.setMaximum(90)
         self.lat.setDecimals(8)
         self.lat.setSingleStep(0.00001)
-        self.lat.setFixedWidth(120)
+        self.lat.setFixedWidth(self.scaledWidth(self.COORD_INPUT_CHARS))
         self.lat.valueModified.connect(self.onLatChanged)
         hbox.addWidget(self.lat)
         hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
@@ -1364,7 +1433,7 @@ class GeolocationWidget(QtWidgets.QWidget):
         self.lon.setMaximum(180)
         self.lon.setDecimals(8)
         self.lon.setSingleStep(0.00001)
-        self.lon.setFixedWidth(120)
+        self.lon.setFixedWidth(self.scaledWidth(self.COORD_INPUT_CHARS))
         self.lon.valueModified.connect(self.onLonChanged)
         hbox.addWidget(self.lon)
         hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
@@ -1376,7 +1445,7 @@ class GeolocationWidget(QtWidgets.QWidget):
         self.elev.setMaximum(1000000)
         self.elev.setDecimals(3)
         self.elev.setSingleStep(1)
-        self.elev.setFixedWidth(120)
+        self.elev.setFixedWidth(self.scaledWidth(self.COORD_INPUT_CHARS))
         self.elev.valueModified.connect(self.onElevChanged)
         hbox.addWidget(self.elev)
         hbox.addWidget(QtWidgets.QLabel('m', alignment=QtCore.Qt.AlignLeft))
@@ -1436,7 +1505,7 @@ class GeolocationWidget(QtWidgets.QWidget):
         self.dist_box.setMaximum(1000)
         self.dist_box.setDecimals(3)
         self.dist_box.setSingleStep(1)
-        self.dist_box.setFixedWidth(90)
+        self.dist_box.setFixedWidth(self.scaledWidth(12))  # ~90px at 8px/char
         self.dist_box.setValue(self.distance)
         self.dist_box.valueModified.connect(self.onDistanceChanged)
         hbox.addWidget(QtWidgets.QLabel('Distance'))
@@ -1607,7 +1676,7 @@ class GeolocationWidget(QtWidgets.QWidget):
 
 
 
-class PlateparParameterManager(QtWidgets.QWidget):
+class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
     """
     QWidget that contains various QDoubleSpinBox's that can be changed to
     manage platepar parameters
@@ -1621,6 +1690,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
     sigVignettingChanged = QtCore.pyqtSignal()
 
     sigFitPressed = QtCore.pyqtSignal()
+    sigAutoFitPressed = QtCore.pyqtSignal()
     sigNextStarPressed = QtCore.pyqtSignal()
     sigAstrometryPressed = QtCore.pyqtSignal()
     sigPhotometryPressed = QtCore.pyqtSignal()
@@ -1632,23 +1702,53 @@ class PlateparParameterManager(QtWidgets.QWidget):
     sigAsymmetryCorrToggled = QtCore.pyqtSignal()
     sigForceDistortionToggled = QtCore.pyqtSignal()
     sigOnVignettingFixedToggled = QtCore.pyqtSignal()
+    sigRestoreDefaultsPressed = QtCore.pyqtSignal()
+
+    # Default settings for SkyFit2 Fit Parameters tab
+    DEFAULT_FIT_ONLY_POINTING = False
+    DEFAULT_FIXED_SCALE = False
+    DEFAULT_REFRACTION = True
+    DEFAULT_EQUAL_ASPECT = True
+    DEFAULT_ASYMMETRY_CORR = True
+    DEFAULT_FORCE_DISTORTION_CENTRE = False
+    DEFAULT_DISTORTION_TYPE = "radial7-odd"
+    DEFAULT_EXTINCTION_SCALE = 0.6
+    DEFAULT_VIGNETTING_FIXED = True
+
+    # Width in characters for parameter input boxes
+    PARAM_INPUT_CHARS = 13
 
     def __init__(self, gui):
         QtWidgets.QWidget.__init__(self)
         self.gui = gui
 
+        # Stash for coefficients that get hidden when reducing coefficient count
+        # This allows restoring them when toggling flags back
+        self._coeff_stash = {
+            'x_fwd': {}, 'x_rev': {}, 'y_fwd': {}, 'y_rev': {}
+        }
+
         full_layout = QtWidgets.QVBoxLayout()
+        full_layout.setContentsMargins(*self.scaledMargins(0.5, 0.25))
         self.setLayout(full_layout)
 
         full_layout.addWidget(QtWidgets.QLabel("Press Esc to focus on image"))
 
         # buttons
         box = QtWidgets.QVBoxLayout()
+        box.setContentsMargins(*self.scaledMargins(0.5, 0.25))
 
-
+        # Fit buttons in a horizontal layout
+        fit_hbox = QtWidgets.QHBoxLayout()
         self.fit_astrometry_button = QtWidgets.QPushButton("Fit")
         self.fit_astrometry_button.clicked.connect(self.sigFitPressed.emit)
-        box.addWidget(self.fit_astrometry_button)
+        fit_hbox.addWidget(self.fit_astrometry_button)
+
+        self.auto_fit_button = QtWidgets.QPushButton("Auto Fit")
+        self.auto_fit_button.setToolTip("Automatic plate solving using astrometry.net (Ctrl+X)")
+        self.auto_fit_button.clicked.connect(self.sigAutoFitPressed.emit)
+        fit_hbox.addWidget(self.auto_fit_button)
+        box.addLayout(fit_hbox)
 
         self.next_star_button = QtWidgets.QPushButton("Next Star")
         self.next_star_button.clicked.connect(self.sigNextStarPressed.emit)
@@ -1659,7 +1759,13 @@ class PlateparParameterManager(QtWidgets.QWidget):
 
         box.addWidget(QtWidgets.QLabel("Residuals:"))
 
+        # RMSD display label with color coding
+        self.rmsd_label = QtWidgets.QLabel("--")
+        self.rmsd_label.setStyleSheet("font-weight: bold; font-size: 12pt;")
+        box.addWidget(self.rmsd_label)
+
         hbox = QtWidgets.QHBoxLayout()
+        hbox.setSpacing(self.scaledSpacing(0.25))  # Reduce spacing between buttons
         self.astrometry_button = QtWidgets.QPushButton('Astrometry')
         self.astrometry_button.clicked.connect(self.sigAstrometryPressed.emit)
         hbox.addWidget(self.astrometry_button)
@@ -1671,12 +1777,21 @@ class PlateparParameterManager(QtWidgets.QWidget):
 
         self.updatePairedStars()
         group = QtWidgets.QGroupBox("Calibration")
+        # Dynamic stylesheet with scaled padding
+        pad_top = self.scaledHeight(0.75)
+        pad_side = self.scaledWidth(0.25)
+        group.setStyleSheet(f"QGroupBox {{ padding-top: {pad_top}px; padding-left: {pad_side}px; padding-right: {pad_side}px; }}")
         group.setLayout(box)
         full_layout.addWidget(group)
 
         hline = QHSeparationLine()
         full_layout.addWidget(hline)
         full_layout.addWidget(QtWidgets.QLabel("Astrometry parameters"))
+
+        # Restore defaults button at top of section
+        self.restore_defaults_button = QtWidgets.QPushButton("Restore Defaults")
+        self.restore_defaults_button.clicked.connect(self.onRestoreDefaults)
+        full_layout.addWidget(self.restore_defaults_button)
 
         # check boxes
         self.fit_only_pointing = QtWidgets.QCheckBox('Only fit pointing')
@@ -1720,7 +1835,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.az_centre.setMaximum(360)
         self.az_centre.setDecimals(8)
         self.az_centre.setSingleStep(1)
-        self.az_centre.setFixedWidth(100)
+        self.az_centre.setFixedWidth(self.scaledWidth(self.PARAM_INPUT_CHARS))
         self.az_centre.valueModified.connect(self.onAzChanged)
         hbox.addWidget(self.az_centre)
         hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
@@ -1732,7 +1847,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.alt_centre.setMaximum(90)
         self.alt_centre.setDecimals(8)
         self.alt_centre.setSingleStep(1)
-        self.alt_centre.setFixedWidth(100)
+        self.alt_centre.setFixedWidth(self.scaledWidth(self.PARAM_INPUT_CHARS))
         self.alt_centre.valueModified.connect(self.onAltChanged)
         hbox.addWidget(self.alt_centre)
         hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
@@ -1744,7 +1859,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.rotation_from_horiz.setMaximum(360)
         self.rotation_from_horiz.setDecimals(8)
         self.rotation_from_horiz.setSingleStep(1)
-        self.rotation_from_horiz.setFixedWidth(100)
+        self.rotation_from_horiz.setFixedWidth(self.scaledWidth(self.PARAM_INPUT_CHARS))
         self.rotation_from_horiz.valueModified.connect(self.onRotChanged)
         hbox.addWidget(self.rotation_from_horiz)
         hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
@@ -1756,7 +1871,7 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.F_scale.setMaximum(50)
         self.F_scale.setDecimals(8)
         self.F_scale.setSingleStep(0.1)
-        self.F_scale.setFixedWidth(100)
+        self.F_scale.setFixedWidth(self.scaledWidth(self.PARAM_INPUT_CHARS))
         self.F_scale.valueModified.connect(self.onScaleChanged)
         hbox.addWidget(self.F_scale)
         hbox.addWidget(QtWidgets.QLabel('\'/px', alignment=QtCore.Qt.AlignLeft))
@@ -1824,36 +1939,64 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.extinction_scale = DoubleSpinBox()
         self.extinction_scale.setMinimum(0)
         self.extinction_scale.setMaximum(100)
-        self.extinction_scale.setDecimals(8)
+        self.extinction_scale.setDecimals(4)
         self.extinction_scale.setSingleStep(0.1)
-        self.extinction_scale.setFixedWidth(100)
+        self.extinction_scale.setFixedWidth(self.scaledWidth(self.PARAM_INPUT_CHARS - 4))
         self.extinction_scale.valueModified.connect(self.onExtinctionChanged)
         hbox.addWidget(self.extinction_scale)
         hbox.addWidget(QtWidgets.QLabel('', alignment=QtCore.Qt.AlignLeft))
         form.addRow(QtWidgets.QLabel('Extinction'), hbox)
 
         hbox = QtWidgets.QHBoxLayout()
+        hbox.setAlignment(QtCore.Qt.AlignVCenter)
         self.vignetting_coeff = DoubleSpinBox()
         self.vignetting_coeff.setMinimum(0)
         self.vignetting_coeff.setMaximum(0.1)
-        self.vignetting_coeff.setDecimals(8)
+        self.vignetting_coeff.setDecimals(5)
         self.vignetting_coeff.setSingleStep(0.0001)
-        self.vignetting_coeff.setFixedWidth(100)
+        self.vignetting_coeff.setFixedWidth(self.scaledWidth(self.PARAM_INPUT_CHARS - 3))
         self.vignetting_coeff.valueModified.connect(self.onVignettingChanged)
         hbox.addWidget(self.vignetting_coeff)
-        hbox.addWidget(QtWidgets.QLabel('r/px', alignment=QtCore.Qt.AlignLeft))
+        hbox.addWidget(QtWidgets.QLabel('r/px'))
+        vignetting_info = QtWidgets.QToolButton()
+        vignetting_info.setText("ⓘ")
+        info_font = vignetting_info.font()
+        info_font.setPointSize(info_font.pointSize() + 2)
+        info_font.setBold(True)
+        vignetting_info.setFont(info_font)
+        vignetting_info.setStyleSheet("QToolButton { color: #0066cc; border: none; } QToolButton:hover { color: #0044aa; }")
+        vignetting_info.setCursor(QtCore.Qt.PointingHandCursor)
+        vignetting_info.clicked.connect(lambda: self.showVignettingInfo())
+        hbox.addWidget(vignetting_info)
         form.addRow(QtWidgets.QLabel("Vignetting"), hbox)
 
+        hbox_fixed = QtWidgets.QHBoxLayout()
+        hbox_fixed.setAlignment(QtCore.Qt.AlignVCenter)
         self.vignetting_fixed = QtWidgets.QCheckBox('Fixed vignetting')
+        self.vignetting_fixed.setChecked(True)
         self.vignetting_fixed.released.connect(self.onVignettingFixedToggled)
-        form.addRow(self.vignetting_fixed)
+        hbox_fixed.addWidget(self.vignetting_fixed)
+        vignetting_fixed_info = QtWidgets.QToolButton()
+        vignetting_fixed_info.setText("ⓘ")
+        info_font = vignetting_fixed_info.font()
+        info_font.setPointSize(info_font.pointSize() + 2)
+        info_font.setBold(True)
+        vignetting_fixed_info.setFont(info_font)
+        vignetting_fixed_info.setStyleSheet("QToolButton { color: #0066cc; border: none; } QToolButton:hover { color: #0044aa; }")
+        vignetting_fixed_info.setCursor(QtCore.Qt.PointingHandCursor)
+        vignetting_fixed_info.clicked.connect(lambda: self.showVignettingFixedInfo())
+        hbox_fixed.addWidget(vignetting_fixed_info)
+        hbox_fixed.addStretch()
+        form.addRow(hbox_fixed)
 
         self.updatePlatepar()
+        self.updateRestoreDefaultsButton()
 
 
     def onFitOnlyPointingToggled(self):
         self.gui.fit_only_pointing = self.fit_only_pointing.isChecked()
         self.updatePairedStars(min_fit_stars=self.gui.getMinFitStars())
+        self.updateRestoreDefaultsButton()
         self.sigFitOnlyPointingToggled.emit()
 
     def onFixScaleToggled(self):
@@ -1866,33 +2009,175 @@ class PlateparParameterManager(QtWidgets.QWidget):
         else:
             self.F_scale.setDisabled(False)
 
+        self.updateRestoreDefaultsButton()
+
     def onRefractionToggled(self):
         self.gui.platepar.refraction = self.refraction.isChecked()
+        self.updateRestoreDefaultsButton()
         self.sigRefractionToggled.emit()
 
+    def _stashCurrentCoeffs(self):
+        """Stash current coefficient values for later restoration.
+
+        This saves non-zero coefficients to the stash so they can be restored
+        when switching back to a distortion type/flags that need them.
+        """
+        pp = self.gui.platepar
+
+        # Only works for radial distortion types
+        if not pp.distortion_type.startswith("radial"):
+            return
+
+        # Extract current coefficients and update stash with non-zero values
+        x_coeffs_fwd = pp.extractRadialCoeffs(pp.x_poly_fwd)
+        x_coeffs_rev = pp.extractRadialCoeffs(pp.x_poly_rev)
+        y_coeffs_fwd = pp.extractRadialCoeffs(pp.y_poly_fwd)
+        y_coeffs_rev = pp.extractRadialCoeffs(pp.y_poly_rev)
+
+        if x_coeffs_fwd is not None:
+            for key, val in x_coeffs_fwd.items():
+                if val != 0.0:
+                    self._coeff_stash['x_fwd'][key] = val
+            for key, val in x_coeffs_rev.items():
+                if val != 0.0:
+                    self._coeff_stash['x_rev'][key] = val
+            for key, val in y_coeffs_fwd.items():
+                if val != 0.0:
+                    self._coeff_stash['y_fwd'][key] = val
+            for key, val in y_coeffs_rev.items():
+                if val != 0.0:
+                    self._coeff_stash['y_rev'][key] = val
+
+    def _restoreCoeffsFromStash(self):
+        """Restore any zero coefficients from the stash.
+
+        This restores stashed coefficient values where current values are zero.
+        """
+        pp = self.gui.platepar
+
+        # Only works for radial distortion types
+        if not pp.distortion_type.startswith("radial"):
+            return
+
+        # Extract current coefficients
+        x_coeffs_fwd = pp.extractRadialCoeffs(pp.x_poly_fwd)
+        x_coeffs_rev = pp.extractRadialCoeffs(pp.x_poly_rev)
+        y_coeffs_fwd = pp.extractRadialCoeffs(pp.y_poly_fwd)
+        y_coeffs_rev = pp.extractRadialCoeffs(pp.y_poly_rev)
+
+        if x_coeffs_fwd is not None:
+            # Restore stashed values where current value is zero
+            for key, val in self._coeff_stash['x_fwd'].items():
+                if x_coeffs_fwd.get(key, 0.0) == 0.0:
+                    x_coeffs_fwd[key] = val
+            for key, val in self._coeff_stash['x_rev'].items():
+                if x_coeffs_rev.get(key, 0.0) == 0.0:
+                    x_coeffs_rev[key] = val
+            for key, val in self._coeff_stash['y_fwd'].items():
+                if y_coeffs_fwd.get(key, 0.0) == 0.0:
+                    y_coeffs_fwd[key] = val
+            for key, val in self._coeff_stash['y_rev'].items():
+                if y_coeffs_rev.get(key, 0.0) == 0.0:
+                    y_coeffs_rev[key] = val
+
+            # Rebuild coefficient arrays with restored values
+            pp.x_poly_fwd = pp.buildRadialCoeffs(x_coeffs_fwd, pp.distortion_type)
+            pp.x_poly_rev = pp.buildRadialCoeffs(x_coeffs_rev, pp.distortion_type)
+            pp.y_poly_fwd = pp.buildRadialCoeffs(y_coeffs_fwd, pp.distortion_type)
+            pp.y_poly_rev = pp.buildRadialCoeffs(y_coeffs_rev, pp.distortion_type)
+            pp.x_poly = pp.x_poly_fwd
+            pp.y_poly = pp.y_poly_fwd
+
+    def _remapCoeffsWithStash(self, flag_name, new_value):
+        """Remap coefficients when toggling a flag, using the stash to restore hidden coefficients.
+
+        This method stashes the current coefficient values before remapping, then restores
+        any values that would otherwise be zeros after toggling back.
+
+        Arguments:
+            flag_name: [str] The flag being changed
+            new_value: [bool] The new value for the flag
+        """
+        pp = self.gui.platepar
+
+        # Only works for radial distortion types
+        if not pp.distortion_type.startswith("radial"):
+            setattr(pp, flag_name, new_value)
+            return
+
+        # Stash current coefficients before remapping
+        self._stashCurrentCoeffs()
+
+        # Do the standard remap
+        pp.remapCoeffsForFlagChange(flag_name, new_value)
+
+        # Restore any zeros from stash
+        self._restoreCoeffsFromStash()
+
+    def _changeDistortionTypeWithStash(self, new_dist_type):
+        """Change distortion type while preserving coefficients via stash.
+
+        This method stashes the current coefficient values before changing the
+        distortion type, then restores any values that would otherwise be zeros.
+
+        Arguments:
+            new_dist_type: [str] The new distortion type (e.g., 'radial3-odd', 'radial5-odd')
+        """
+        pp = self.gui.platepar
+
+        # Stash current coefficients before changing type (only for radial types)
+        self._stashCurrentCoeffs()
+
+        # Change the distortion type
+        pp.setDistortionType(new_dist_type, reset_params=False)
+
+        # Restore any zeros from stash (only for radial types)
+        self._restoreCoeffsFromStash()
+
     def onEqualAspectToggled(self):
-        self.gui.platepar.equal_aspect = self.eqAspect.isChecked()
+        new_value = self.eqAspect.isChecked()
+        # Remap coefficients with stash to preserve/restore values when toggling
+        self._remapCoeffsWithStash('equal_aspect', new_value)
+
+        # Update GUI to reflect new poly_length and coefficient values
+        self.fit_parameters.changeNumberShown(self.gui.platepar.poly_length)
+        self.fit_parameters.updateValues()
+
+        # Update restore defaults button state
+        self.updateRestoreDefaultsButton()
+
+        # Emit signal to trigger display updates (connected to onFitParametersChanged)
         self.sigEqAspectToggled.emit()
 
-        # Apply changes to distortion
-        self.sigResetDistortionPressed.emit()
-        self.onIndexChanged()
-
     def onAsymmetryCorrToggled(self):
-        self.gui.platepar.asymmetry_corr = self.asymmetryCorr.isChecked()
+        new_value = self.asymmetryCorr.isChecked()
+        # Remap coefficients with stash to preserve/restore values when toggling
+        self._remapCoeffsWithStash('asymmetry_corr', new_value)
+
+        # Update GUI to reflect new poly_length and coefficient values
+        self.fit_parameters.changeNumberShown(self.gui.platepar.poly_length)
+        self.fit_parameters.updateValues()
+
+        # Update restore defaults button state
+        self.updateRestoreDefaultsButton()
+
+        # Emit signal to trigger display updates (connected to onFitParametersChanged)
         self.sigAsymmetryCorrToggled.emit()
 
-        # Apply changes to distortion
-        self.sigResetDistortionPressed.emit()
-        self.onIndexChanged()
-
     def onForceDistortionToggled(self):
-        self.gui.platepar.force_distortion_centre = self.fdistortion.isChecked()
-        self.sigForceDistortionToggled.emit()
+        new_value = self.fdistortion.isChecked()
+        # Remap coefficients with stash to preserve/restore values when toggling
+        self._remapCoeffsWithStash('force_distortion_centre', new_value)
 
-        # Apply changes to distortion
-        self.sigResetDistortionPressed.emit()
-        self.onIndexChanged()
+        # Update GUI to reflect new poly_length and coefficient values
+        self.fit_parameters.changeNumberShown(self.gui.platepar.poly_length)
+        self.fit_parameters.updateValues()
+
+        # Update restore defaults button state
+        self.updateRestoreDefaultsButton()
+
+        # Emit signal to trigger display updates (connected to onFitParametersChanged)
+        self.sigForceDistortionToggled.emit()
 
     # def onLatChanged(self):
     #     self.gui.platepar.lat = self.lat.value()
@@ -1924,11 +2209,46 @@ class PlateparParameterManager(QtWidgets.QWidget):
 
     def onExtinctionChanged(self):
         self.gui.platepar.extinction_scale = self.extinction_scale.value()
+        self.updateRestoreDefaultsButton()
         self.sigExtinctionChanged.emit()
 
     def onVignettingChanged(self):
         self.gui.platepar.vignetting_coeff = self.vignetting_coeff.value()
         self.sigVignettingChanged.emit()
+
+    def showVignettingInfo(self):
+        msg = QtWidgets.QMessageBox(self)
+        msg.setIcon(QtWidgets.QMessageBox.Information)
+        msg.setWindowTitle("Vignetting Coefficient")
+        msg.setText("Vignetting coefficient (radians per pixel)")
+        msg.setInformativeText(
+            "The displayed value comes from the loaded platepar.\n\n"
+            "For new platepars, defaults are calibrated for 4mm f/0.95 lens "
+            "and scaled by resolution:\n"
+            "• 720p (1280×720): 0.001 r/px\n"
+            "• 1080p (1920×1080): ~0.00068 r/px\n\n"
+            "For other lenses, consider fitting the coefficient\n"
+            "(see info next to Fixed Vignetting), or reach out to\n"
+            "the GMN community for known good values for your lens."
+        )
+        msg.exec_()
+
+    def showVignettingFixedInfo(self):
+        msg = QtWidgets.QMessageBox(self)
+        msg.setIcon(QtWidgets.QMessageBox.Information)
+        msg.setWindowTitle("Measuring Vignetting Coefficient")
+        msg.setText("Measuring vignetting requires ideal conditions:")
+        msg.setInformativeText(
+            "• Moonless, perfectly cloudless sky\n"
+            "• No haze or atmospheric gradients\n"
+            "• Camera pointed at high elevation\n"
+            "• Deep into the night (no skyglow)\n"
+            "• Well-distributed stars across FOV\n"
+            "• Results averaged across several nights\n\n"
+            "If these conditions are not met, it is best to leave\n"
+            "Fixed Vignetting checked and use the default value."
+        )
+        msg.exec_()
 
     def onVignettingFixedToggled(self):
         self.gui.platepar.vignetting_fixed = self.vignetting_fixed.isChecked()
@@ -1937,13 +2257,43 @@ class PlateparParameterManager(QtWidgets.QWidget):
         # If the vignetting is fixed, allow setting manual values
         self.vignetting_coeff.setDisabled(not self.gui.platepar.vignetting_fixed)
 
+        # Update restore defaults button state
+        self.updateRestoreDefaultsButton()
+
+    def updateRMSD(self, rmsd_img, rmsd_angular, angular_error_label):
+        """Update the RMSD display with color coding based on pixel error.
+
+        Color coding thresholds:
+            - ≤ 0.2 px: green (great)
+            - 0.2 - 0.3 px: yellow/ok
+            - 0.3 - 0.5 px: orange/meh
+            - > 0.5 px: red (terrible)
+        """
+        # Format the text
+        text = "{:.2f} px, {:.2f} {:s}".format(rmsd_img, rmsd_angular, angular_error_label)
+
+        # Determine color based on rmsd_img threshold
+        if rmsd_img <= 0.2:
+            color = "#228B22"  # Forest green - great
+        elif rmsd_img <= 0.3:
+            color = "#DAA520"  # Goldenrod - ok
+        elif rmsd_img <= 0.5:
+            color = "#FF8C00"  # Dark orange - meh
+        else:
+            color = "#DC143C"  # Crimson - terrible
+
+        self.rmsd_label.setText(text)
+        self.rmsd_label.setStyleSheet("font-weight: bold; font-size: 12pt; color: {};".format(color))
+
     def onFitParametersChanged(self):
         # fit parameter object updates platepar by itself
         self.sigFitParametersChanged.emit()
 
     def onIndexChanged(self):
         text = self.distortion_type.currentText()
-        self.gui.platepar.setDistortionType(text, reset_params=False)
+
+        # Use stash-aware method to preserve coefficients when switching distortion types
+        self._changeDistortionTypeWithStash(text)
 
         # Set the number of shown poly parameters in the GUI
         self.fit_parameters.changeNumberShown(self.gui.platepar.poly_length)
@@ -1958,6 +2308,9 @@ class PlateparParameterManager(QtWidgets.QWidget):
             self.asymmetryCorr.hide()
             self.fdistortion.hide()
 
+        # Update restore defaults button state
+        self.updateRestoreDefaultsButton()
+
         self.sigFitParametersChanged.emit()
 
     def updatePlatepar(self):
@@ -1969,6 +2322,9 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.alt_centre.setValue(self.gui.platepar.alt_centre)
         self.rotation_from_horiz.setValue(self.gui.platepar.rotation_from_horiz)
         self.F_scale.setValue(60/self.gui.platepar.F_scale)
+        # Update platepar reference in fit_parameters widget in case a new platepar was loaded
+        self.fit_parameters.platepar = self.gui.platepar
+        self.fit_parameters.changeNumberShown(self.gui.platepar.poly_length)
         self.fit_parameters.updateValues()
         self.distortion_type.setCurrentIndex(
             self.gui.platepar.distortion_type_list.index(self.gui.platepar.distortion_type))
@@ -1994,6 +2350,114 @@ class PlateparParameterManager(QtWidgets.QWidget):
             self.asymmetryCorr.hide()
             self.fdistortion.hide()
 
+        # Update restore defaults button state
+        self.updateRestoreDefaultsButton()
+
+    def isAtDefaults(self):
+        """Check if current settings match the defaults."""
+        pp = self.gui.platepar
+        gui = self.gui
+        return (gui.fit_only_pointing == self.DEFAULT_FIT_ONLY_POINTING and
+                gui.fixed_scale == self.DEFAULT_FIXED_SCALE and
+                pp.refraction == self.DEFAULT_REFRACTION and
+                pp.equal_aspect == self.DEFAULT_EQUAL_ASPECT and
+                pp.asymmetry_corr == self.DEFAULT_ASYMMETRY_CORR and
+                pp.force_distortion_centre == self.DEFAULT_FORCE_DISTORTION_CENTRE and
+                pp.distortion_type == self.DEFAULT_DISTORTION_TYPE and
+                pp.extinction_scale == self.DEFAULT_EXTINCTION_SCALE and
+                pp.vignetting_fixed == self.DEFAULT_VIGNETTING_FIXED)
+
+    def updateRestoreDefaultsButton(self):
+        """Update restore defaults button color based on current settings.
+
+        Green when at defaults, amber when not at defaults.
+        """
+        at_defaults = self.isAtDefaults()
+        if at_defaults:
+            # Green background when at defaults
+            self.restore_defaults_button.setStyleSheet(
+                "QPushButton { background-color: #4CAF50; color: white; }"
+                "QPushButton:hover { background-color: #45a049; }"
+            )
+        else:
+            # Amber/orange background when not at defaults
+            self.restore_defaults_button.setStyleSheet(
+                "QPushButton { background-color: #FF9800; color: white; }"
+                "QPushButton:hover { background-color: #F57C00; }"
+            )
+        self.restore_defaults_button.setEnabled(not at_defaults)
+
+    def onRestoreDefaults(self):
+        """Restore all default settings for the Fit Parameters tab."""
+        pp = self.gui.platepar
+        gui = self.gui
+
+        # Restore fit only pointing
+        if gui.fit_only_pointing != self.DEFAULT_FIT_ONLY_POINTING:
+            gui.fit_only_pointing = self.DEFAULT_FIT_ONLY_POINTING
+            self.fit_only_pointing.setChecked(self.DEFAULT_FIT_ONLY_POINTING)
+
+        # Restore fixed scale
+        if gui.fixed_scale != self.DEFAULT_FIXED_SCALE:
+            gui.fixed_scale = self.DEFAULT_FIXED_SCALE
+            self.fixed_scale.setChecked(self.DEFAULT_FIXED_SCALE)
+            self.F_scale.setDisabled(self.DEFAULT_FIXED_SCALE)
+
+        # Restore refraction
+        if pp.refraction != self.DEFAULT_REFRACTION:
+            pp.refraction = self.DEFAULT_REFRACTION
+            self.refraction.setChecked(self.DEFAULT_REFRACTION)
+
+        # Restore equal aspect
+        if pp.equal_aspect != self.DEFAULT_EQUAL_ASPECT:
+            self._remapCoeffsWithStash('equal_aspect', self.DEFAULT_EQUAL_ASPECT)
+            self.eqAspect.setChecked(self.DEFAULT_EQUAL_ASPECT)
+
+        # Restore asymmetry correction
+        if pp.asymmetry_corr != self.DEFAULT_ASYMMETRY_CORR:
+            self._remapCoeffsWithStash('asymmetry_corr', self.DEFAULT_ASYMMETRY_CORR)
+            self.asymmetryCorr.setChecked(self.DEFAULT_ASYMMETRY_CORR)
+
+        # Restore force distortion centre
+        if pp.force_distortion_centre != self.DEFAULT_FORCE_DISTORTION_CENTRE:
+            self._remapCoeffsWithStash('force_distortion_centre', self.DEFAULT_FORCE_DISTORTION_CENTRE)
+            self.fdistortion.setChecked(self.DEFAULT_FORCE_DISTORTION_CENTRE)
+
+        # Restore distortion type
+        if pp.distortion_type != self.DEFAULT_DISTORTION_TYPE:
+            self._changeDistortionTypeWithStash(self.DEFAULT_DISTORTION_TYPE)
+            self.distortion_type.setCurrentIndex(
+                pp.distortion_type_list.index(self.DEFAULT_DISTORTION_TYPE))
+            self.fit_parameters.changeNumberShown(pp.poly_length)
+            self.fit_parameters.updateValues()
+
+        # Restore extinction scale
+        if pp.extinction_scale != self.DEFAULT_EXTINCTION_SCALE:
+            pp.extinction_scale = self.DEFAULT_EXTINCTION_SCALE
+            self.extinction_scale.setValue(self.DEFAULT_EXTINCTION_SCALE)
+
+        # Restore vignetting fixed
+        if pp.vignetting_fixed != self.DEFAULT_VIGNETTING_FIXED:
+            pp.vignetting_fixed = self.DEFAULT_VIGNETTING_FIXED
+            self.vignetting_fixed.setChecked(self.DEFAULT_VIGNETTING_FIXED)
+            self.vignetting_coeff.setDisabled(not self.DEFAULT_VIGNETTING_FIXED)
+
+        # Show/hide radial-specific options
+        if pp.distortion_type.startswith('radial'):
+            self.eqAspect.show()
+            self.asymmetryCorr.show()
+            self.fdistortion.show()
+        else:
+            self.eqAspect.hide()
+            self.asymmetryCorr.hide()
+            self.fdistortion.hide()
+
+        # Update button state
+        self.updateRestoreDefaultsButton()
+
+        # Emit signal to update the GUI
+        self.sigRestoreDefaultsPressed.emit()
+
     def updatePairedStars(self, min_fit_stars=4):
         """
         Updates QPushButtons to be enabled/disabled based on the number of paired stars
@@ -2004,13 +2468,16 @@ class PlateparParameterManager(QtWidgets.QWidget):
         self.fit_astrometry_button.setEnabled(len(self.gui.paired_stars) >= min_fit_stars)
 
 
-class ArrayTabWidget(QtWidgets.QTabWidget):
+class ArrayTabWidget(QtWidgets.QTabWidget, ScaledSizeHelper):
     """
     Widget to the right which holds the histogram as well as the parameter manager
     This class does not manipulate their values itself, that is done by accessing
     the variables themselves
     """
     valueModified = QtCore.pyqtSignal()
+
+    # Width in characters for coefficient input boxes
+    COEFF_INPUT_CHARS = 13
 
     def __init__(self, platepar):
         super(ArrayTabWidget, self).__init__()
@@ -2068,7 +2535,7 @@ class ArrayTabWidget(QtWidgets.QTabWidget):
         for j in range(self.max_n_shown):
             box = ScientificDoubleSpinBox()
             box.setSingleStep(0.5)
-            box.setFixedWidth(100)
+            box.setFixedWidth(self.scaledWidth(self.COEFF_INPUT_CHARS))
 
             # Set the value to the box from the platepar polynomial
             poly_arr = getattr(self.platepar, self.vars[i])
@@ -2079,7 +2546,15 @@ class ArrayTabWidget(QtWidgets.QTabWidget):
 
             box.valueModified.connect(self.onFitParameterChanged(i, j))
             label = QtWidgets.QLabel("{}[{}]".format(self.vars[i], j))
-            layout.addRow(label, box)
+
+            # Only add to layout if within n_shown; otherwise just store the widgets hidden
+            if j < self.n_shown:
+                layout.addRow(label, box)
+            else:
+                # Hide widgets that are beyond the current poly_length
+                label.hide()
+                box.hide()
+
             self.boxes[i].append(box)
             self.labels[i].append(label)
 
@@ -2100,6 +2575,382 @@ class ArrayTabWidget(QtWidgets.QTabWidget):
                 poly_arr = getattr(self.platepar, self.vars[i])
                 if len(poly_arr) > j:
                     self.boxes[i][j].setValue(poly_arr[j])
+
+
+class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
+    """
+    Widget for testing and adjusting star detection parameters.
+    Allows overriding CALSTARS detection settings to find optimal parameters.
+    """
+    sigRedetectStars = QtCore.pyqtSignal()
+    sigRedetectAllImages = QtCore.pyqtSignal()
+    sigUseOverrideToggled = QtCore.pyqtSignal()
+    sigIntensityThresholdChanged = QtCore.pyqtSignal(int)
+    sigNeighborhoodSizeChanged = QtCore.pyqtSignal(int)
+    sigMaxStarsChanged = QtCore.pyqtSignal(int)
+    sigGammaChanged = QtCore.pyqtSignal(float)
+    sigSegmentRadiusChanged = QtCore.pyqtSignal(int)
+    sigMaxFeatureRatioChanged = QtCore.pyqtSignal(float)
+    sigRoundnessThresholdChanged = QtCore.pyqtSignal(float)
+
+    def __init__(self, gui):
+        QtWidgets.QWidget.__init__(self)
+        self.gui = gui
+
+        layout = QtWidgets.QVBoxLayout()
+        layout.setContentsMargins(*self.scaledMargins(1, 0.5))
+        layout.setSpacing(self.scaledSpacing(0.3))
+        self.setLayout(layout)
+
+        # Title
+        title = QtWidgets.QLabel('Star Detection Override')
+        title.setStyleSheet("font-weight: bold; font-size: 11pt;")
+        layout.addWidget(title)
+
+        # Use QGridLayout for stable slider layout
+        grid = QtWidgets.QGridLayout()
+        grid.setSpacing(self.scaledSpacing(0.3))
+        grid.setColumnStretch(0, 1)  # Label column stretches
+        grid.setColumnStretch(1, 0)  # Value column fixed
+        layout.addLayout(grid)
+
+        row = 0
+        slider_data = [
+            ('Intensity Threshold', 1, 50, 18, '18', self.onIntensityThresholdChanged),
+            ('Neighborhood Size', 5, 40, 10, '10', self.onNeighborhoodSizeChanged),
+            ('Max Stars', 50, 2000, 200, '200', self.onMaxStarsChanged),
+            ('Gamma', 45, 200, 100, '1.00', self.onGammaChanged),
+            ('Segment Radius', 4, 20, 4, '4', self.onSegmentRadiusChanged),
+            ('Max Feature Ratio', 50, 200, 80, '0.80', self.onMaxFeatureRatioChanged),
+            ('Roundness Threshold', 30, 90, 50, '0.50', self.onRoundnessThresholdChanged),
+        ]
+
+        self.sliders = {}
+        self.slider_labels = {}
+
+        for name, min_val, max_val, default, default_str, callback in slider_data:
+            key = name.lower().replace(' ', '_')
+
+            # Row with label and value
+            grid.addWidget(QtWidgets.QLabel(name), row, 0)
+            val_label = QtWidgets.QLabel(default_str)
+            val_label.setFixedSize(self.scaledWidth(6), self.scaledHeight(1))
+            val_label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+            grid.addWidget(val_label, row, 1)
+            row += 1
+
+            # Row with slider spanning both columns
+            slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+            slider.setRange(min_val, max_val)
+            slider.setValue(default)
+            slider.valueChanged.connect(callback)
+            grid.addWidget(slider, row, 0, 1, 2)  # span 2 columns
+            row += 1
+
+            self.sliders[key] = slider
+            self.slider_labels[key] = val_label
+
+            # Add gamma preset buttons right after gamma slider
+            if key == 'gamma':
+                gamma_presets = QtWidgets.QHBoxLayout()
+                gamma_presets.setSpacing(self.scaledSpacing(0.25))
+                gamma_presets.setContentsMargins(0, 0, 0, self.scaledSpacing(0.3))
+
+                btn_gamma_22 = QtWidgets.QPushButton('1/2.2')
+                btn_gamma_22.clicked.connect(lambda: self.setGammaPreset(1/2.2))
+                gamma_presets.addWidget(btn_gamma_22)
+
+                btn_gamma_18 = QtWidgets.QPushButton('1/1.8')
+                btn_gamma_18.clicked.connect(lambda: self.setGammaPreset(1/1.8))
+                gamma_presets.addWidget(btn_gamma_18)
+
+                btn_gamma_lin = QtWidgets.QPushButton('Linear')
+                btn_gamma_lin.clicked.connect(lambda: self.setGammaPreset(1.0))
+                gamma_presets.addWidget(btn_gamma_lin)
+
+                grid.addLayout(gamma_presets, row, 0, 1, 2)
+                grid.setRowMinimumHeight(row, self.scaledHeight(1.75))
+                row += 1
+
+        # Create named references for compatibility
+        self.intensity_threshold_slider = self.sliders['intensity_threshold']
+        self.intensity_threshold_label = self.slider_labels['intensity_threshold']
+        self.neighborhood_size_slider = self.sliders['neighborhood_size']
+        self.neighborhood_size_label = self.slider_labels['neighborhood_size']
+        self.max_stars_slider = self.sliders['max_stars']
+        self.max_stars_label = self.slider_labels['max_stars']
+        self.gamma_slider = self.sliders['gamma']
+        self.gamma_label = self.slider_labels['gamma']
+        self.segment_radius_slider = self.sliders['segment_radius']
+        self.segment_radius_label = self.slider_labels['segment_radius']
+        self.max_feature_ratio_slider = self.sliders['max_feature_ratio']
+        self.max_feature_ratio_label = self.slider_labels['max_feature_ratio']
+        self.roundness_threshold_slider = self.sliders['roundness_threshold']
+        self.roundness_threshold_label = self.slider_labels['roundness_threshold']
+
+        layout.addSpacing(self.scaledSpacing(1))
+
+        # Buttons in their own layout with spacing
+        btn_layout = QtWidgets.QVBoxLayout()
+        btn_layout.setSpacing(self.scaledSpacing(0.5))
+
+        self.redetect_button = QtWidgets.QPushButton('Re-Detect Current')
+        self.redetect_button.clicked.connect(self.sigRedetectStars.emit)
+        btn_layout.addWidget(self.redetect_button)
+
+        self.redetect_all_button = QtWidgets.QPushButton('Re-Detect All')
+        self.redetect_all_button.clicked.connect(self.sigRedetectAllImages.emit)
+        btn_layout.addWidget(self.redetect_all_button)
+
+        layout.addLayout(btn_layout)
+        layout.addSpacing(self.scaledSpacing(0.6))
+
+        # Checkbox
+        self.use_override_checkbox = QtWidgets.QCheckBox('Use Override Detections')
+        self.use_override_checkbox.released.connect(self.sigUseOverrideToggled.emit)
+        layout.addWidget(self.use_override_checkbox)
+
+        layout.addSpacing(self.scaledSpacing(0.3))
+
+        # Status
+        self.status_label = QtWidgets.QLabel('Using original CALSTARS')
+        self.status_label.setStyleSheet("color: gray; font-size: 10pt;")
+        layout.addWidget(self.status_label)
+
+        layout.addStretch()
+
+
+    def onIntensityThresholdChanged(self, value):
+        self.intensity_threshold_label.setText(str(value))
+        self.sigIntensityThresholdChanged.emit(value)
+
+    def onNeighborhoodSizeChanged(self, value):
+        self.neighborhood_size_label.setText(str(value))
+        self.sigNeighborhoodSizeChanged.emit(value)
+
+    def onMaxStarsChanged(self, value):
+        self.max_stars_label.setText(str(value))
+        self.sigMaxStarsChanged.emit(value)
+
+    def onGammaChanged(self, value):
+        gamma = value / 100.0
+        self.gamma_label.setText(f'{gamma:.2f}')
+        self.sigGammaChanged.emit(gamma)
+
+    def setGammaPreset(self, gamma):
+        """Set gamma to a preset value."""
+        self.gamma_slider.setValue(int(gamma * 100))
+
+    def onSegmentRadiusChanged(self, value):
+        self.segment_radius_label.setText(str(value))
+        self.sigSegmentRadiusChanged.emit(value)
+
+    def onMaxFeatureRatioChanged(self, value):
+        ratio = value / 100.0
+        self.max_feature_ratio_label.setText(f'{ratio:.2f}')
+        self.sigMaxFeatureRatioChanged.emit(ratio)
+
+    def onRoundnessThresholdChanged(self, value):
+        threshold = value / 100.0
+        self.roundness_threshold_label.setText(f'{threshold:.2f}')
+        self.sigRoundnessThresholdChanged.emit(threshold)
+
+    def updateStatus(self, using_override, star_count=None):
+        """Update the status label to show current detection source."""
+        pad = self.scaledSpacing(0.3)
+        if using_override:
+            if star_count is not None:
+                self.status_label.setText(f'Using override detection ({star_count} stars)')
+                self.status_label.setStyleSheet(f"color: green; font-size: 9pt; padding: {pad}px; font-weight: bold;")
+            else:
+                self.status_label.setText('Using override detection')
+                self.status_label.setStyleSheet(f"color: green; font-size: 9pt; padding: {pad}px; font-weight: bold;")
+        else:
+            self.status_label.setText('Using original CALSTARS')
+            self.status_label.setStyleSheet(f"color: gray; font-size: 9pt; padding: {pad}px;")
+
+    def loadFromConfig(self, config):
+        """Initialize sliders from config values."""
+        if hasattr(config, 'intensity_threshold'):
+            self.intensity_threshold_slider.setValue(config.intensity_threshold)
+        if hasattr(config, 'neighborhood_size'):
+            self.neighborhood_size_slider.setValue(config.neighborhood_size)
+        if hasattr(config, 'max_stars'):
+            self.max_stars_slider.setValue(config.max_stars)
+        if hasattr(config, 'gamma'):
+            self.gamma_slider.setValue(int(config.gamma * 100))
+        if hasattr(config, 'segment_radius'):
+            self.segment_radius_slider.setValue(config.segment_radius)
+        if hasattr(config, 'max_feature_ratio'):
+            self.max_feature_ratio_slider.setValue(int(config.max_feature_ratio * 100))
+        if hasattr(config, 'roundness_threshold'):
+            self.roundness_threshold_slider.setValue(int(config.roundness_threshold * 100))
+
+
+class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
+    """
+    Widget for creating and editing mask polygons.
+    Click to add points, right-click to close polygon.
+    """
+    sigDrawModeToggled = QtCore.pyqtSignal()
+    sigClearPolygons = QtCore.pyqtSignal()
+    sigSaveMask = QtCore.pyqtSignal()
+    sigLoadMask = QtCore.pyqtSignal()
+    sigShowOverlayToggled = QtCore.pyqtSignal(bool)
+    sigUseFlatToggled = QtCore.pyqtSignal(bool)
+
+    def __init__(self, gui):
+        QtWidgets.QWidget.__init__(self)
+        self.gui = gui
+        self.unsaved = False  # Track if there are unsaved changes
+
+        layout = QtWidgets.QVBoxLayout()
+        layout.setContentsMargins(*self.scaledMargins(1, 0.5))
+        layout.setSpacing(self.scaledSpacing(0.5))
+        self.setLayout(layout)
+
+        # Title
+        title = QtWidgets.QLabel('Mask Editor')
+        title.setStyleSheet("font-weight: bold; font-size: 11pt;")
+        layout.addWidget(title)
+
+        # Instructions
+        self.instructions = QtWidgets.QLabel(
+            '<b>Draw:</b><br>'
+            '• Click to add points<br>'
+            '• Space/Enter to close polygon<br><br>'
+            '<b>Edit:</b><br>'
+            '• Drag vertices to move<br>'
+            '• Right-click vertex to delete<br>'
+            '• Ctrl+click edge to add vertex<br><br>'
+            'Vertices near image border<br>'
+            'will snap to the edge.')
+        self.instructions.setWordWrap(True)
+        layout.addWidget(self.instructions)
+
+        layout.addSpacing(self.scaledSpacing(0.6))
+
+        # Draw polygon button (toggle)
+        self.draw_button = QtWidgets.QPushButton('Draw Polygon')
+        self.draw_button.setCheckable(True)
+        self.draw_button.clicked.connect(self.onDrawToggled)
+        layout.addWidget(self.draw_button)
+
+        layout.addSpacing(self.scaledSpacing(0.3))
+
+        # Clear all button
+        self.clear_button = QtWidgets.QPushButton('Clear All')
+        self.clear_button.clicked.connect(self.onClearAll)
+        layout.addWidget(self.clear_button)
+
+        layout.addSpacing(self.scaledSpacing(1))
+
+        # File operations
+        file_layout = QtWidgets.QHBoxLayout()
+        file_layout.setSpacing(self.scaledSpacing(0.25))
+
+        self.load_button = QtWidgets.QPushButton('Load')
+        self.load_button.clicked.connect(self.sigLoadMask.emit)
+        file_layout.addWidget(self.load_button)
+
+        self.save_button = QtWidgets.QPushButton('Save')
+        self.save_button.clicked.connect(self.sigSaveMask.emit)
+        file_layout.addWidget(self.save_button)
+
+        layout.addLayout(file_layout)
+
+        layout.addSpacing(self.scaledSpacing(0.6))
+
+        # Show overlay checkbox
+        self.show_overlay = QtWidgets.QCheckBox('Show Mask Overlay')
+        self.show_overlay.setChecked(True)
+        self.show_overlay.toggled.connect(self.sigShowOverlayToggled.emit)
+        layout.addWidget(self.show_overlay)
+
+        layout.addSpacing(self.scaledSpacing(0.3))
+
+        # Use flat image checkbox
+        self.use_flat = QtWidgets.QCheckBox('Use Flat as Background')
+        self.use_flat.setChecked(False)  # Will be set to True if flat exists
+        self.use_flat.toggled.connect(self.sigUseFlatToggled.emit)
+        layout.addWidget(self.use_flat)
+        self.flat_available = False  # Track if flat.bmp exists
+
+        layout.addSpacing(self.scaledSpacing(0.6))
+
+        # Status
+        self.status_label = QtWidgets.QLabel('No polygons')
+        self.status_label.setStyleSheet("color: gray; font-size: 9pt;")
+        layout.addWidget(self.status_label)
+
+        layout.addStretch()
+
+    def onDrawToggled(self):
+        """Handle draw button toggle."""
+        if self.draw_button.isChecked():
+            self.draw_button.setText('Drawing... (Space to close)')
+            self.draw_button.setStyleSheet("background-color: #FFA500;")
+        else:
+            self.draw_button.setText('Draw Polygon')
+            self.draw_button.setStyleSheet("")
+        self.sigDrawModeToggled.emit()
+
+    def setDrawMode(self, enabled):
+        """Set draw mode from external call."""
+        self.draw_button.setChecked(enabled)
+        if enabled:
+            self.draw_button.setText('Drawing... (Space to close)')
+            self.draw_button.setStyleSheet("background-color: #FFA500;")
+        else:
+            self.draw_button.setText('Draw Polygon')
+            self.draw_button.setStyleSheet("")
+
+    def onClearAll(self):
+        """Confirm and clear all polygons."""
+        from PyQt5.QtWidgets import QMessageBox
+        reply = QMessageBox.question(self, 'Clear All',
+            'Delete all mask polygons?',
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self.sigClearPolygons.emit()
+
+    def updateStatus(self, polygon_count, drawing_points=0):
+        """Update the status label."""
+        unsaved_suffix = ' (unsaved)' if self.unsaved else ''
+
+        if drawing_points > 0:
+            self.status_label.setText(f'Drawing: {drawing_points} points')
+            self.status_label.setStyleSheet("color: orange; font-size: 9pt;")
+        elif polygon_count == 0:
+            if self.unsaved:
+                self.status_label.setText('No polygons (unsaved)')
+                self.status_label.setStyleSheet("color: orange; font-size: 9pt;")
+            else:
+                self.status_label.setText('No polygons')
+                self.status_label.setStyleSheet("color: gray; font-size: 9pt;")
+        else:
+            if self.unsaved:
+                self.status_label.setText(f'{polygon_count} polygon(s) (unsaved)')
+                self.status_label.setStyleSheet("color: orange; font-size: 9pt;")
+            else:
+                self.status_label.setText(f'{polygon_count} polygon(s) - saved')
+                self.status_label.setStyleSheet("color: green; font-size: 9pt;")
+
+    def setUnsaved(self, unsaved=True):
+        """Mark polygons as having unsaved changes."""
+        self.unsaved = unsaved
+
+    def setFlatAvailable(self, available, use_by_default=True):
+        """Set whether flat.bmp is available and optionally use it by default."""
+        self.flat_available = available
+        self.use_flat.setEnabled(available)
+        if available:
+            self.use_flat.setText('Use Flat as Background')
+            if use_by_default:
+                self.use_flat.setChecked(True)
+        else:
+            self.use_flat.setText('Use Flat as Background (not found)')
+            self.use_flat.setChecked(False)
 
 
 class SettingsWidget(QtWidgets.QWidget):
@@ -2336,10 +3187,24 @@ class SettingsWidget(QtWidgets.QWidget):
         self.lim_mag.setValue(self.gui.cat_lim_mag)
 
     def onGammaChanged(self):
-        self.gui.img.setGamma(self.img_gamma.value())
-        self.gui.img_zoom.setGamma(self.img_gamma.value())
+        gamma_value = self.img_gamma.value()
+        self.gui.img.setGamma(gamma_value)
+        self.gui.img_zoom.setGamma(gamma_value)
         self.gui.updateLeftLabels()
         self.updateImageGamma()  # gamma may be changed by setGamma
+
+        # Sync with Star Detection gamma
+        self.gui.override_gamma = gamma_value
+        if self.gui.star_detection_override_enabled:
+            self.gui.config.gamma = gamma_value
+            if self.gui.platepar is not None:
+                self.gui.platepar.gamma = gamma_value
+
+        # Update Star Detection tab slider (convert to int for slider: gamma * 100)
+        self.gui.tab.star_detection.gamma_slider.blockSignals(True)
+        self.gui.tab.star_detection.gamma_slider.setValue(int(gamma_value * 100))
+        self.gui.tab.star_detection.gamma_label.setText(f'{gamma_value:.2f}')
+        self.gui.tab.star_detection.gamma_slider.blockSignals(False)
 
     def onGridChanged(self):
         if self.grid[0].isChecked():
