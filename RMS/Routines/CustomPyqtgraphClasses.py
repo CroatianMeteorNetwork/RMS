@@ -2263,7 +2263,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
     def updateRMSD(self, rmsd_img, rmsd_angular, angular_error_label):
         """Update the RMSD display with color coding based on pixel error.
 
-        Color coding thresholds:
+        Color coding thresholds (at 720p reference, scaled by resolution):
             - ≤ 0.2 px: green (great)
             - 0.2 - 0.3 px: yellow/ok
             - 0.3 - 0.5 px: orange/meh
@@ -2272,12 +2272,17 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # Format the text
         text = "{:.2f} px, {:.2f} {:s}".format(rmsd_img, rmsd_angular, angular_error_label)
 
-        # Determine color based on rmsd_img threshold
-        if rmsd_img <= 0.2:
+        # Scale thresholds by resolution (reference: 720p)
+        # Higher resolution = more pixels per degree = higher acceptable pixel error
+        reference_height = 720.0
+        scale = self.gui.platepar.Y_res / reference_height
+
+        # Determine color based on scaled rmsd_img threshold
+        if rmsd_img <= 0.2 * scale:
             color = "#228B22"  # Forest green - great
-        elif rmsd_img <= 0.3:
+        elif rmsd_img <= 0.3 * scale:
             color = "#DAA520"  # Goldenrod - ok
-        elif rmsd_img <= 0.5:
+        elif rmsd_img <= 0.5 * scale:
             color = "#FF8C00"  # Dark orange - meh
         else:
             color = "#DC143C"  # Crimson - terrible
