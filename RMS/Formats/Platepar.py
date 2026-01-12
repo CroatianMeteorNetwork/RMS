@@ -1085,8 +1085,14 @@ class Platepar(object):
 
                     # RANSAC outlier detection: radial3-odd -> radial5-odd -> radial7-odd with warm start
                     # radial3-odd stabilizes quickly, radial5-odd refines, radial7-odd captures edges
-                    print("    NN input: {:d} detected stars, {:d} catalog stars".format(
-                        len(img_stars), len(catalog_stars)))
+                    # Pre-filter catalog to current FOV for count display
+                    ra_cat_all, dec_cat_all, _ = catalog_stars.T
+                    cat_x_init, cat_y_init = RMS.Astrometry.ApplyAstrometry.raDecToXYPP(
+                        ra_cat_all, dec_cat_all, jd, self)
+                    in_fov_init = (cat_x_init >= 0) & (cat_x_init < self.X_res) & \
+                                  (cat_y_init >= 0) & (cat_y_init < self.Y_res)
+                    print("    NN input: {:d} detected stars, {:d} catalog stars in FOV".format(
+                        len(img_stars), np.sum(in_fov_init)))
                     print("    RANSAC outlier detection: 21 iterations")
                     print("    Radial-weighted threshold: 1.0x at center, 2.0x at corners")
                     print("    Iterations 1-7: radial3-odd, 8-14: radial5-odd, 15-21: radial7-odd")
@@ -1126,12 +1132,6 @@ class Platepar(object):
                     current_outlier_mask = np.zeros(n_stars, dtype=bool)
                     prev_outlier_mask = None
                     stable_count = 0  # Consecutive iterations with unchanged outlier mask
-
-                    # Track RMSD progression for early iteration quality control
-                    prev_rmsd = float('inf')
-                    initial_retry_count = 0
-                    max_initial_retries = 3
-                    initial_rmsd_threshold = 10.0  # arcminutes - allows for wide FOV cameras
 
                     iteration = 0
                     while iteration < total_iters:
@@ -1223,9 +1223,20 @@ class Platepar(object):
                         if len(available_indices) < n_subset:
                             subset_indices = available_indices
                         else:
-                            # Different seed on retry to ensure variety
-                            np.random.seed(42 + iteration + initial_retry_count * 100)
-                            subset_indices = np.random.choice(available_indices, n_subset, replace=False)
+                            # Bias selection towards brighter stars (higher intensity)
+                            # Use intensity as weight, with sqrt to reduce extreme bias
+                            intensities = img_stars[available_indices, 2]
+                            # Clip extreme values (satellites/planets at top, noise at bottom)
+                            intensity_median = np.median(intensities)
+                            intensity_clipped = np.clip(intensities,
+                                                       intensity_median * 0.1,  # floor at 10% of median
+                                                       intensity_median * 10)   # cap at 10x median
+                            weights = np.sqrt(intensity_clipped)
+                            weights = weights / weights.sum()  # normalize to probabilities
+
+                            np.random.seed(42 + iteration)
+                            subset_indices = np.random.choice(available_indices, n_subset, replace=False,
+                                                             p=weights)
 
                         img_stars_subset = img_stars[subset_indices]
 
@@ -1331,30 +1342,6 @@ class Platepar(object):
                         print("      Iter {}: {} (w={}) fit on {}, {} outliers, RMSD={:.2f}', RA={:.2f} Dec={:.2f}".format(
                             iteration + 1, dist_label, weight, len(subset_indices),
                             np.sum(iteration_outliers), rmsd_arcmin, iter_ra, iter_dec))
-
-                        # Quality control for first 2 iterations
-                        if iteration == 1:  # End of iteration 2 (0-indexed)
-                            if rmsd_arcmin > prev_rmsd or rmsd_arcmin > initial_rmsd_threshold:
-                                initial_retry_count += 1
-                                if initial_retry_count <= max_initial_retries:
-                                    print("      -> Initial RMSD not decreasing ({:.2f}' vs {:.2f}'), retry {}/{}".format(
-                                        rmsd_arcmin, prev_rmsd, initial_retry_count, max_initial_retries))
-                                    # Reset to retry initial iterations
-                                    iteration = 0
-                                    outlier_scores = np.zeros(n_stars, dtype=float)
-                                    current_outlier_mask = np.zeros(n_stars, dtype=bool)
-                                    prev_outlier_mask = None
-                                    stable_count = 0
-                                    best_res = None
-                                    best_cost = float('inf')
-                                    prev_rmsd = float('inf')
-                                    continue
-                                else:
-                                    print("      -> Max retries reached, proceeding with current fit")
-                            else:
-                                print("      -> Initial fit stable (RMSD {:.2f}')".format(rmsd_arcmin))
-
-                        prev_rmsd = rmsd_arcmin
 
                         # Early exit: if outlier mask unchanged for 2 consecutive iterations within phase
                         if prev_outlier_mask is not None and np.array_equal(iteration_outliers, prev_outlier_mask):
