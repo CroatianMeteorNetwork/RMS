@@ -92,7 +92,7 @@ def resetSIGINT():
 
 def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
     """ The function will wait for the specified time, or it will stop when Enter is pressed. If no time was
-        given (in seconds), it will wait until Enter is pressed. Additionally, it will also stop when the camera mode 
+        given (in seconds), it will wait until Enter is pressed. Additionally, it will also stop when the camera mode
         (day/night) changes, in case of continuous capture mode.
 
     Arguments:
@@ -101,6 +101,9 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
         buffered_capture: [BufferedCapture] buffered capture process object
         video_file: [str] Path to the video file, if it was given as the video source.
         daytime_mode: [multiprocessing.Value] shared boolean variable to keep track of camera day/night mode switching. None by default.
+
+    Return:
+        [str] Reason for exit: "normal", "capture_died", "compressor_died", "mode_switch"
     """
 
     global STOP_CAPTURE
@@ -125,14 +128,23 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
 
         # Break in case camera modes switched
         if (daytime_mode is not None) and (daytime_mode_prev != daytime_mode.value):
-            break
+            return "mode_switch"
 
 
         # If the compressor has died, restart capture
         # This will not be checked during daytime
-        if (not daytime_mode_prev) and (not compressor.is_alive()):
+        if (not daytime_mode_prev) and (compressor is not None) and (not compressor.is_alive()):
             log.info('The compressor has died, restarting the capture!')
-            break
+            return "compressor_died"
+
+
+        # WATCHDOG: If the capture process has died unexpectedly, signal for restart
+        # This can happen if the process is killed by OOM or crashes in native code
+        if (not daytime_mode_prev) and (buffered_capture is not None) and (not buffered_capture.is_alive()):
+            # Only restart if the exit wasn't intentional
+            if not buffered_capture.exit.is_set():
+                log.warning('WATCHDOG: BufferedCapture process died unexpectedly! Signaling for restart...')
+                return "capture_died"
 
 
         # If some wait time was given, check if it passed
@@ -142,17 +154,17 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
 
             # If the total time is elapsed, break the wait
             if time_elapsed >= duration:
-                break
+                return "normal"
 
 
         if STOP_CAPTURE:
-            break
+            return "normal"
 
 
         # If a video is given, quit when the video is done
         if video_file is not None:
             if buffered_capture.exit.is_set():
-                break
+                return "normal"
 
 
 
@@ -421,12 +433,42 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
         # Continuous mode only: Daytime capture
         if config.continuous_capture and daytime_mode.value:
-                        
+
             log.info('Capturing in daytime mode...')
 
             # Capture until Ctrl+C is pressed / camera switches modes
             daytime_mode_prev = daytime_mode.value
-            wait(duration, None, bc, video_file, daytime_mode)
+
+            # Wait loop with watchdog restart capability
+            watchdog_restart_count = 0
+            while True:
+                wait_result = wait(duration, None, bc, video_file, daytime_mode)
+
+                # WATCHDOG: If capture died, restart it and continue waiting
+                if wait_result == "capture_died":
+                    watchdog_restart_count += 1
+                    log.warning('WATCHDOG: Restarting BufferedCapture process (daytime mode), restart #{:d}...'.format(watchdog_restart_count))
+
+                    # Clean up the dead process
+                    try:
+                        bc.join(timeout=1)
+                    except:
+                        pass
+
+                    # Wait a moment before restart to avoid rapid restart loops
+                    time.sleep(5)
+
+                    # Create and start new BufferedCapture with same parameters
+                    bc = BufferedCapture(sharedArray, startTime, sharedArray2, start_time2, config,
+                                         video_file=video_file, night_data_dir=night_data_dir,
+                                         saved_frames_dir=saved_frames_dir, daytime_mode=daytime_mode,
+                                         camera_mode_switch_trigger=camera_mode_switch_trigger)
+                    bc.startCapture()
+
+                    log.info('WATCHDOG: BufferedCapture restarted successfully')
+                    continue
+                else:
+                    break
 
 
         # Continuous OR standard mode: Nighttime capture
@@ -524,8 +566,38 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             # Capture until Ctrl+C is pressed / camera switches modes
             if (daytime_mode is not None):
                 daytime_mode_prev = daytime_mode.value
-                
-            wait(duration, compressor, bc, video_file, daytime_mode)
+
+            # Wait loop with watchdog restart capability
+            watchdog_restart_count = 0
+            while True:
+                wait_result = wait(duration, compressor, bc, video_file, daytime_mode)
+
+                # WATCHDOG: If capture died, restart it and continue waiting
+                # The compressor keeps running since it uses shared memory arrays owned by parent
+                if wait_result == "capture_died":
+                    watchdog_restart_count += 1
+                    log.warning('WATCHDOG: Restarting BufferedCapture process (nighttime mode), restart #{:d}...'.format(watchdog_restart_count))
+
+                    # Clean up the dead process
+                    try:
+                        bc.join(timeout=1)
+                    except:
+                        pass
+
+                    # Wait a moment before restart to avoid rapid restart loops
+                    time.sleep(5)
+
+                    # Create and start new BufferedCapture with same parameters
+                    bc = BufferedCapture(sharedArray, startTime, sharedArray2, start_time2, config,
+                                         video_file=video_file, night_data_dir=night_data_dir,
+                                         saved_frames_dir=saved_frames_dir, daytime_mode=daytime_mode,
+                                         camera_mode_switch_trigger=camera_mode_switch_trigger)
+                    bc.startCapture()
+
+                    log.info('WATCHDOG: BufferedCapture restarted successfully, capture continuing')
+                    continue
+                else:
+                    break
 
             # Stop the compressor
             log.debug('Stopping compression...')
