@@ -157,19 +157,6 @@ def getSSHClient(hostname,
         )
         return True
 
-    def doConnectWithAgent():
-        """Inner function to attempt SSH connection with agent fallback."""
-        ssh.connect(
-            hostname,
-            port=port,
-            username=username,
-            look_for_keys=True,
-            timeout=timeout,
-            banner_timeout=banner_timeout,
-            auth_timeout=auth_timeout
-        )
-        return True
-
     # Try key_filename first if provided
     if key_filename:
         # Use hard timeout wrapper around ssh.connect()
@@ -195,6 +182,12 @@ def getSSHClient(hostname,
                 log.warning("IO error with key file: {}".format(str(exception)))
             else:
                 log.warning("Unexpected error with key file: {}".format(str(exception)))
+
+            # Close the client before attempting agent auth to ensure clean state
+            try:
+                ssh.close()
+            except:
+                pass
         else:
             # Connection successful
             log.debug("SSHClient connected successfully (key file).")
@@ -206,7 +199,24 @@ def getSSHClient(hostname,
 
             return ssh
 
-    # Try agent-based authentication if key auth fails
+    # Try agent-based authentication if key auth fails or was not attempted
+    # Create a fresh SSHClient to ensure clean state
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+    def doConnectWithAgent():
+        """Inner function to attempt SSH connection with agent fallback."""
+        ssh.connect(
+            hostname,
+            port=port,
+            username=username,
+            look_for_keys=True,
+            timeout=timeout,
+            banner_timeout=banner_timeout,
+            auth_timeout=auth_timeout
+        )
+        return True
+
     # Use hard timeout wrapper around ssh.connect()
     success, result, exception = runWithTimeout(doConnectWithAgent, timeout=hard_timeout)
 
