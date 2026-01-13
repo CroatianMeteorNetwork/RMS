@@ -677,7 +677,7 @@ class Platepar(object):
         # Update alt/az of pointing
         self.updateRefAltAz()
 
-        return res.success
+        return res.success, res.fun  # Return (success, rmsd_pixels)
 
     def fitAstrometry(
         self,

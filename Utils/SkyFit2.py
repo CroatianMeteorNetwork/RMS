@@ -2874,6 +2874,7 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'CTRL + O - Toggle auto pan\n'
             text_str += 'CTRL + X - astrometry.net img upload\n'
             text_str += 'CTRL + SHIFT + X - astrometry.net XY only\n'
+            text_str += 'SHIFT + Q - Quick align test (debug)\n'
             text_str += 'SHIFT + Z - Show zoomed window\n'
             text_str += 'CTRL + N - New platepar\n'
             text_str += 'CTRL + S - Save platepar & state'
@@ -6183,8 +6184,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
 
-            # Move rotation parameter
-            elif event.key() == QtCore.Qt.Key_Q:
+            # Move rotation parameter (plain Q only, not Shift+Q)
+            elif event.key() == QtCore.Qt.Key_Q and not (modifiers == QtCore.Qt.ShiftModifier):
                 self.platepar.pos_angle_ref -= self.key_increment
                 self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
 
@@ -6448,6 +6449,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # Use the same auto-fit path as the button (includes catalog balancing, quick alignment)
                 self.autoFitAstrometryNet()
+
+            # Test quick align with config mag limit (Shift+Q) - simulates CheckFit/ApplyRecalibrate
+            elif (event.key() == QtCore.Qt.Key_Q) and (modifiers == QtCore.Qt.ShiftModifier):
+                self.testQuickAlignWithConfigMagLimit()
 
 
             # Toggle showing detected stars
@@ -7913,6 +7918,115 @@ class PlateTool(QtWidgets.QMainWindow):
         self.status_bar.showMessage("Quick alignment complete: {} stars".format(len(self.paired_stars)))
 
         return True
+
+
+    def testQuickAlignWithConfigMagLimit(self):
+        """ Test quick align using config.catalog_mag_limit (simulates CheckFit/ApplyRecalibrate).
+
+        This is a diagnostic tool to test how NNalign performs with the same catalog
+        that CheckFit and ApplyRecalibrate would use.
+        """
+        import sys
+
+        print(flush=True)
+        print("=" * 70, flush=True)
+        print("TEST: Quick align with config.catalog_mag_limit = {:.1f}".format(
+            self.config.catalog_mag_limit), flush=True)
+        print("      (Current SkyFit2 cat_lim_mag = {:.1f})".format(self.cat_lim_mag), flush=True)
+        print("=" * 70, flush=True)
+
+        # Store original platepar values to verify it's not modified
+        orig_ra = self.platepar.RA_d
+        orig_dec = self.platepar.dec_d
+        orig_rot = self.platepar.pos_angle_ref
+        print("  BEFORE: RA={:.4f} Dec={:.4f} Rot={:.4f}".format(orig_ra, orig_dec, orig_rot), flush=True)
+
+        # Get detected stars from current image (same as tryQuickAlignment)
+        ff_name_c = self.img_handle.current_ff_file if hasattr(self.img_handle, 'current_ff_file') else None
+
+        # Use override data if enabled and available, otherwise use original CALSTARS
+        detected_stars = None
+        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
+            detected_stars = np.array(self.star_detection_override_data[ff_name_c])
+        elif ff_name_c is not None and ff_name_c in self.calstars:
+            detected_stars = np.array(self.calstars[ff_name_c])
+
+        if detected_stars is None or len(detected_stars) < 5:
+            print("  Not enough detected stars ({})".format(
+                0 if detected_stars is None else len(detected_stars)), flush=True)
+            return
+
+        # Get star coordinates (CALSTARS format: Y(0) X(1) ...)
+        det_y = detected_stars[:, 0]
+        det_x = detected_stars[:, 1]
+        calstars_coords = np.column_stack([det_x, det_y])
+
+        # Get time for current image
+        if hasattr(self.img_handle, 'currentFrameTime'):
+            calstars_time = list(self.img_handle.currentFrameTime(dt_obj=False))
+            if len(calstars_time) == 6:
+                calstars_time.append(0)
+        else:
+            calstars_time = list(jd2Date(self.img_handle.currentTime(), dt_obj=False))
+            if len(calstars_time) == 6:
+                calstars_time.append(0)
+
+        print("  Detected stars: {}".format(len(calstars_coords)), flush=True)
+        print("  Image time: {}-{:02d}-{:02d} {:02d}:{:02d}:{:02d}".format(*calstars_time[:6]), flush=True)
+        sys.stdout.flush()
+
+        # Call alignPlatepar (same as CheckFit/ApplyRecalibrate would)
+        print("  Calling alignPlatepar()...", flush=True)
+        sys.stdout.flush()
+        try:
+            pp_aligned = alignPlatepar(self.config, self.platepar, calstars_time, calstars_coords)
+        except Exception as e:
+            import traceback
+            print("  alignPlatepar FAILED: {}".format(str(e)), flush=True)
+            traceback.print_exc()
+            return
+
+        # Check if original platepar was modified (it shouldn't be!)
+        if self.platepar.RA_d != orig_ra or self.platepar.dec_d != orig_dec:
+            print("  WARNING: Original platepar was MODIFIED! This is a bug!", flush=True)
+            print("    RA: {:.4f} -> {:.4f}".format(orig_ra, self.platepar.RA_d), flush=True)
+            print("    Dec: {:.4f} -> {:.4f}".format(orig_dec, self.platepar.dec_d), flush=True)
+
+        # Check if platepar changed
+        if pp_aligned is self.platepar:
+            print("  alignPlatepar returned ORIGINAL platepar (fit failed or drift exceeded)", flush=True)
+            return
+
+        # Report results
+        print("  alignPlatepar result:", flush=True)
+        print("    RA:  {:.4f} -> {:.4f} deg (delta: {:.4f})".format(
+            orig_ra, pp_aligned.RA_d, pp_aligned.RA_d - orig_ra), flush=True)
+        print("    Dec: {:.4f} -> {:.4f} deg (delta: {:.4f})".format(
+            orig_dec, pp_aligned.dec_d, pp_aligned.dec_d - orig_dec), flush=True)
+        print("    Rot: {:.4f} -> {:.4f} deg (delta: {:.4f})".format(
+            orig_rot, pp_aligned.pos_angle_ref,
+            pp_aligned.pos_angle_ref - orig_rot), flush=True)
+
+        # Apply the aligned platepar to see the result visually
+        self.platepar.RA_d = pp_aligned.RA_d
+        self.platepar.dec_d = pp_aligned.dec_d
+        self.platepar.pos_angle_ref = pp_aligned.pos_angle_ref
+        self.platepar.F_scale = pp_aligned.F_scale
+        self.platepar.JD = pp_aligned.JD
+        self.platepar.Ho = pp_aligned.Ho
+        self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
+        self.platepar.updateRefAltAz()
+
+        # Update display
+        self.updateStars()
+        self.updateLeftLabels()
+        self.updateDistortion()
+        self.tab.param_manager.updatePlatepar()
+
+        print("  APPLIED aligned platepar to display", flush=True)
+        print("=" * 70, flush=True)
+        print(flush=True)
+        sys.stdout.flush()
 
 
     def autoFitAstrometryNet(self):

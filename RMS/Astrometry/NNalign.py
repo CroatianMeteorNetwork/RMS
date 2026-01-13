@@ -28,14 +28,13 @@ from RMS.Logger import LoggingManager, getLogger
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog
-from RMS.Math import angularSeparation
 
 
 log = getLogger('rmslogger')
 
 
 def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update=False, show_plot=False,
-                  translation_limit=200, rotation_limit=30):
+                  max_rmsd_pixels=5.0):
     """ Align the platepar using nearest-neighbor optimization.
 
     This function fits the platepar pointing parameters (RA_d, dec_d, pos_angle_ref) by minimizing
@@ -51,9 +50,8 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
     Keyword arguments:
         scale_update: [bool] Update the platepar scale. False by default.
         show_plot: [bool] Unused, kept for backward compatibility.
-        translation_limit: [float] Maximum allowed translation in pixels. Default is 200.
-            Converted to angular limit using the plate scale.
-        rotation_limit: [float] Maximum allowed rotation in degrees. Default is 30.
+        max_rmsd_pixels: [float] Maximum RMSD in pixels to accept fit. Default is 5.0.
+            If the fit RMSD exceeds this, the original platepar is returned.
 
     Return:
         platepar_aligned: [Platepar instance] The aligned platepar.
@@ -117,43 +115,21 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
     log.info("alignPlatepar: Fitting pointing with {} detected stars, {} catalog stars".format(
         len(img_stars), len(catalog_stars_fov)))
 
-    success = platepar_aligned.fitPointingNN(
+    success, rmsd_pixels = platepar_aligned.fitPointingNN(
         jd, img_stars, catalog_stars_fov, fixed_scale=(not scale_update))
 
     if success:
-        log.info("alignPlatepar: Fit successful")
+        log.info("alignPlatepar: Fit successful, RMSD = {:.2f} px".format(rmsd_pixels))
         log.info("    RA:  {:.4f} -> {:.4f} deg".format(platepar.RA_d, platepar_aligned.RA_d))
         log.info("    Dec: {:.4f} -> {:.4f} deg".format(platepar.dec_d, platepar_aligned.dec_d))
         log.info("    Rot: {:.4f} -> {:.4f} deg".format(platepar.pos_angle_ref, platepar_aligned.pos_angle_ref))
         if scale_update:
             log.info("    Scale: {:.4f} -> {:.4f}".format(platepar.F_scale, platepar_aligned.F_scale))
 
-        # Sanity check: reject if pointing has drifted too far from the original
-        # Convert translation_limit (pixels) to angular limit using plate scale
-        # F_scale is in arcsec/pixel, so: angular_limit = translation_limit * F_scale / 3600
-        pointing_limit_deg = (translation_limit * platepar.F_scale) / 3600.0
-
-        # Compute angular separation between original and fitted pointing
-        # Convert original RA to the aligned platepar's reference time (JD/Ho)
-        # RA changes with sidereal time: RA_new = RA_old + delta_Ho
-        delta_Ho = (platepar_aligned.Ho - platepar.Ho) % 360
-        original_RA_at_aligned_time = (platepar.RA_d + delta_Ho) % 360
-        pointing_drift_deg = np.degrees(angularSeparation(
-            np.radians(original_RA_at_aligned_time), np.radians(platepar.dec_d),
-            np.radians(platepar_aligned.RA_d), np.radians(platepar_aligned.dec_d)
-        ))
-
-        # Check rotation change
-        rotation_change_deg = abs(platepar_aligned.pos_angle_ref - platepar.pos_angle_ref)
-        if rotation_change_deg > 180:
-            rotation_change_deg = 360 - rotation_change_deg
-
-        if pointing_drift_deg > pointing_limit_deg or rotation_change_deg > rotation_limit:
-            log.warning("alignPlatepar: Drift exceeds limits, returning original platepar")
-            log.warning("    Pointing drift: {:.2f} deg, limit: {:.2f} deg".format(
-                pointing_drift_deg, pointing_limit_deg))
-            log.warning("    Rotation change: {:.2f} deg, limit: {:.2f} deg".format(
-                rotation_change_deg, rotation_limit))
+        # Reject if RMSD is too large (fit didn't converge to a good solution)
+        if rmsd_pixels > max_rmsd_pixels:
+            log.warning("alignPlatepar: RMSD too large ({:.2f} > {:.2f} px), returning original platepar".format(
+                rmsd_pixels, max_rmsd_pixels))
             return platepar
 
     else:
