@@ -3188,8 +3188,9 @@ class PlateTool(QtWidgets.QMainWindow):
                             if has_text:
                                 html_text += "<br>"
                             
-                            # Greyish color for name
-                            html_text += f'<span style="color: #dddddd;">{star_name}</span>'
+                            # Greyish color for name, formatted as link
+                            url_name = star_name.replace(' ', '+')
+                            html_text += f'<a href="https://simbad.cds.unistra.fr/simbad/sim-id?Ident={url_name}" style="color: #dddddd; text-decoration: none;">{star_name}</a>'
                             has_text = True
 
 

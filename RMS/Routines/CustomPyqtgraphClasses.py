@@ -319,6 +319,8 @@ class TextItem(pg.TextItem):
     def __init__(self, text='', color=(200, 200, 200), html=None, anchor=(0, 0),
                  border=None, fill=None, angle=0, rotateAxis=None):
         pg.TextItem.__init__(self, text, color, html, anchor, border, fill, angle, rotateAxis)
+        self.textItem.setOpenExternalLinks(True)
+        self.textItem.setTextInteractionFlags(QtCore.Qt.TextBrowserInteraction)
 
     def setAlign(self, align):
         """
