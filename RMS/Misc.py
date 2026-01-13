@@ -105,6 +105,14 @@ def runWithTimeout(func, args=(), kwargs=None, timeout=60):
         - success: True if function completed within timeout, False if timed out
         - result: The return value of the function (None if timed out or exception)
         - exception: The exception raised by the function (None if no exception)
+
+    Note:
+        This function uses a daemon thread that continues running even after the timeout
+        expires. The timeout only allows the calling thread to proceed; it does not stop
+        the underlying operation. This may result in resource leaks (open sockets, file
+        descriptors) if the operation eventually completes or hangs indefinitely. Callers
+        are responsible for cleaning up any resources (e.g., closing connections) when a
+        timeout occurs.
     """
     if kwargs is None:
         kwargs = {}
