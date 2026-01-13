@@ -90,6 +90,52 @@ def interruptibleWait(seconds):
         raise
 
 
+def runWithTimeout(func, args=(), kwargs=None, timeout=60):
+    """
+    Run a function with a hard timeout using threading.
+
+    Arguments:
+        func: The function to run.
+        args: Positional arguments to pass to the function.
+        kwargs: Keyword arguments to pass to the function.
+        timeout: Maximum time in seconds to wait for the function to complete.
+
+    Return:
+        A tuple of (success, result, exception):
+        - success: True if function completed within timeout, False if timed out
+        - result: The return value of the function (None if timed out or exception)
+        - exception: The exception raised by the function (None if no exception)
+    """
+    if kwargs is None:
+        kwargs = {}
+
+    result = [None]
+    exception = [None]
+    completed = threading.Event()
+
+    def target():
+        try:
+            result[0] = func(*args, **kwargs)
+        except Exception as e:
+            exception[0] = e
+        finally:
+            completed.set()
+
+    thread = threading.Thread(target=target)
+    thread.daemon = True
+    thread.start()
+
+    # Wait for completion or timeout
+    completed.wait(timeout)
+
+    if completed.is_set():
+        # Function completed (possibly with exception)
+        return (True, result[0], exception[0])
+    else:
+        # Timed out
+        return (False, None, None)
+
+
 def mkdirP(path):
     """ Makes a directory and handles all errors.
     """

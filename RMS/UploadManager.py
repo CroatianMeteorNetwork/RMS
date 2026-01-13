@@ -5,14 +5,13 @@ import os
 import ctypes
 import multiprocessing
 import time
-import threading
 from queue import Empty
 from multiprocessing import Manager
 
 import paramiko
 
 from RMS.Logger import LoggingManager, getLogger
-from RMS.Misc import mkdirP, UTCFromTimestamp
+from RMS.Misc import mkdirP, UTCFromTimestamp, runWithTimeout
 
 # Suppress Paramiko internal errors before they appear in logs
 getLogger("paramiko.transport").setLevel(logging.CRITICAL)
@@ -22,52 +21,6 @@ QueueEmpty = Empty
 
 # Get the logger from the main module
 log = logging.getLogger("rmslogger")
-
-
-def runWithTimeout(func, args=(), kwargs=None, timeout=60):
-    """
-    Run a function with a hard timeout using threading.
-
-    Arguments:
-        func: The function to run.
-        args: Positional arguments to pass to the function.
-        kwargs: Keyword arguments to pass to the function.
-        timeout: Maximum time in seconds to wait for the function to complete.
-
-    Return:
-        A tuple of (success, result, exception):
-        - success: True if function completed within timeout, False if timed out
-        - result: The return value of the function (None if timed out or exception)
-        - exception: The exception raised by the function (None if no exception)
-    """
-    if kwargs is None:
-        kwargs = {}
-
-    result = [None]
-    exception = [None]
-    completed = threading.Event()
-
-    def target():
-        try:
-            result[0] = func(*args, **kwargs)
-        except Exception as e:
-            exception[0] = e
-        finally:
-            completed.set()
-
-    thread = threading.Thread(target=target)
-    thread.daemon = True
-    thread.start()
-
-    # Wait for completion or timeout
-    completed.wait(timeout)
-
-    if completed.is_set():
-        # Function completed (possibly with exception)
-        return (True, result[0], exception[0])
-    else:
-        # Timed out
-        return (False, None, None)
 
 
 def existsRemoteDirectory(sftp,path):
@@ -189,7 +142,7 @@ def getSSHClient(hostname,
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-    def do_connect_with_key():
+    def doConnectWithKey():
         """Inner function to attempt SSH connection with key file."""
         ssh.connect(
             hostname,
@@ -204,7 +157,7 @@ def getSSHClient(hostname,
         )
         return True
 
-    def do_connect_with_agent():
+    def doConnectWithAgent():
         """Inner function to attempt SSH connection with agent fallback."""
         ssh.connect(
             hostname,
@@ -220,7 +173,7 @@ def getSSHClient(hostname,
     # Try key_filename first if provided
     if key_filename:
         # Use hard timeout wrapper around ssh.connect()
-        success, result, exception = runWithTimeout(do_connect_with_key, timeout=hard_timeout)
+        success, result, exception = runWithTimeout(doConnectWithKey, timeout=hard_timeout)
 
         if not success:
             log.error("SSH connection timed out after {} seconds (hard timeout)".format(hard_timeout))
@@ -255,7 +208,7 @@ def getSSHClient(hostname,
 
     # Try agent-based authentication if key auth fails
     # Use hard timeout wrapper around ssh.connect()
-    success, result, exception = runWithTimeout(do_connect_with_agent, timeout=hard_timeout)
+    success, result, exception = runWithTimeout(doConnectWithAgent, timeout=hard_timeout)
 
     if not success:
         log.error("SSH connection timed out after {} seconds (hard timeout)".format(hard_timeout))
