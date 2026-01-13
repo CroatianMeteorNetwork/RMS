@@ -2046,6 +2046,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.astrometry_quad_markers.hide()
         self.astrometry_quad_markers2.hide()
 
+        self.catalog_stars_visible = True
+        self.show_spectral_type = False
+        self.show_star_names = False
         self.selected_stars_visible = True
         self.unsuitable_stars_visible = True
 
@@ -2243,6 +2246,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.stdev_text_filter = 0
         self.residual_text = TextItemList()
         self.img_frame.addItem(self.residual_text)
+
+        # Init the list of spectral type text items
+        self.spectral_type_text_list = TextItemList()
+        self.img_frame.addItem(self.spectral_type_text_list)
         self.residual_text.setZValue(10)
 
         ###################################################################################################
@@ -2411,6 +2418,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.tab.settings.sigMaxAveToggled.connect(self.toggleImageType)
         self.tab.settings.sigCatStarsToggled.connect(self.toggleShowCatStars)
+        self.tab.settings.sigSpectralTypeToggled.connect(self.toggleShowSpectralType)
+        self.tab.settings.sigStarNamesToggled.connect(self.toggleShowStarNames)
         self.tab.settings.sigCalStarsToggled.connect(self.toggleShowCalStars)
         self.tab.settings.sigSelStarsToggled.connect(self.toggleShowSelectedStars)
         self.tab.settings.sigPicksToggled.connect(self.toggleShowPicks)
@@ -3024,16 +3033,56 @@ class PlateTool(QtWidgets.QMainWindow):
         # Create a filtered catalog
         self.catalog_stars_filtered_unmasked = self.catalog_stars[filtered_indices_all]
 
+        # Filter spectral type
+        if hasattr(self, 'catalog_stars_spectral_type') and (self.catalog_stars_spectral_type is not None):
+            spectral_type_unmasked = self.catalog_stars_spectral_type[filtered_indices_all]
+        else:
+            spectral_type_unmasked = None
+
+        # Filter star names
+        if hasattr(self, 'catalog_stars_preferred_names') and (self.catalog_stars_preferred_names is not None):
+            star_names_unmasked = self.catalog_stars_preferred_names[filtered_indices_all]
+        else:
+            star_names_unmasked = None
+
+
         if (self.mask is None) or (not hasattr(self.mask, 'img')):
             cat_stars_xy, self.catalog_stars_filtered = [], []
-            for star_xy, star_radec in zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked):
-                    cat_stars_xy.append(star_xy)
-                    self.catalog_stars_filtered.append(star_radec)
+            self.catalog_stars_spectral_type_filtered = []
+            self.catalog_stars_preferred_names_filtered = []
+
+            # Prepare iterators
+            if spectral_type_unmasked is None:
+                spectral_type_unmasked = [None]*len(cat_stars_xy_unmasked)
+            
+            if star_names_unmasked is None:
+                star_names_unmasked = [None]*len(cat_stars_xy_unmasked)
+
+            iterator = zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked, spectral_type_unmasked, star_names_unmasked)
+            
+            for star_xy, star_radec, star_spec, star_name in iterator:
+                cat_stars_xy.append(star_xy)
+                self.catalog_stars_filtered.append(star_radec)
+                self.catalog_stars_spectral_type_filtered.append(star_spec)
+                self.catalog_stars_preferred_names_filtered.append(star_name)
 
         else:
 
             cat_stars_xy, self.catalog_stars_filtered = [], []
-            for star_xy, star_radec in zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked):
+            self.catalog_stars_spectral_type_filtered = []
+            self.catalog_stars_preferred_names_filtered = []
+
+            # Prepare iterators
+            if spectral_type_unmasked is None:
+                spectral_type_unmasked = [None]*len(cat_stars_xy_unmasked)
+            
+            if star_names_unmasked is None:
+                star_names_unmasked = [None]*len(cat_stars_xy_unmasked)
+
+            iterator = zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked, spectral_type_unmasked, star_names_unmasked)
+
+
+            for star_xy, star_radec, star_spec, star_name in iterator:
 
                 # Make sure that the dimensions of the mask match the image dimensions
                 if (self.mask.img.shape[0] == self.img.data.shape[0]) or \
@@ -3043,11 +3092,15 @@ class PlateTool(QtWidgets.QMainWindow):
                     if self.mask.img[int(star_xy[1]), int(star_xy[0])] != 0:
                         cat_stars_xy.append(star_xy)
                         self.catalog_stars_filtered.append(star_radec)
+                        self.catalog_stars_spectral_type_filtered.append(star_spec)
+                        self.catalog_stars_preferred_names_filtered.append(star_name)
 
                 # If the mask dimensions don't match the image dimensions, ignore the mask
                 else:
                     cat_stars_xy.append(star_xy)
                     self.catalog_stars_filtered.append(star_radec)
+                    self.catalog_stars_spectral_type_filtered.append(star_spec)
+                    self.catalog_stars_preferred_names_filtered.append(star_name)
 
         # Convert to an array in any case
         cat_stars_xy = np.array(cat_stars_xy)
@@ -3073,6 +3126,83 @@ class PlateTool(QtWidgets.QMainWindow):
                     y=self.catalog_y_filtered + 0.5, size=size)
                 self.cat_star_markers2.setData(x=self.catalog_x_filtered + 0.5, \
                     y=self.catalog_y_filtered + 0.5, size=size)
+                
+                # Plot spectral type text
+                self.spectral_type_text_list.clear()
+                
+                # Plot spectral type text
+                self.spectral_type_text_list.clear() # This clears all text items
+                
+                # Check if we should render anything
+                if (self.show_spectral_type or self.show_star_names) and \
+                   hasattr(self, 'catalog_stars_spectral_type_filtered') and \
+                   (self.catalog_stars_spectral_type_filtered is not None):
+                    
+                    
+                    # Prepare iterators
+                    # We need to handle cases where names might not exist (optional field)
+                    if hasattr(self, 'catalog_stars_preferred_names_filtered') and \
+                       (self.catalog_stars_preferred_names_filtered is not None):
+                        iter_names = self.catalog_stars_preferred_names_filtered
+                    else:
+                        iter_names = [None]*len(self.catalog_stars_spectral_type_filtered)
+
+
+                    iterator = zip(self.catalog_stars_spectral_type_filtered, iter_names)
+                    
+                    for i, (spec_type, star_name) in enumerate(iterator):
+                        
+                        html_text = ""
+                        has_text = False
+
+                        # Add spectral type
+                        if self.show_spectral_type and (spec_type is not None) and (len(spec_type) > 0):
+                            
+                            # Determine color based on spectral type
+                            # Default light green
+                            hex_color = "#90ee90" 
+                            
+                            first_char = spec_type[0].upper()
+                            if first_char == 'O':
+                                hex_color = "#9bb0ff" # Blue
+                            elif first_char == 'B':
+                                hex_color = "#aabfff" # Blue-white
+                            elif first_char == 'A':
+                                hex_color = "#cad7ff" # White-Blue
+                            elif first_char == 'F':
+                                hex_color = "#f8f7ff" # White
+                            elif first_char == 'G':
+                                hex_color = "#fff4ea" # Yellow-white
+                            elif first_char == 'K':
+                                hex_color = "#ffd2a1" # Orange
+                            elif first_char == 'M':
+                                hex_color = "#ffcc6f" # Red-orange
+
+                            html_text += f'<span style="color: {hex_color};">{spec_type}</span>'
+                            has_text = True
+
+
+                        # Add star name
+                        if self.show_star_names and (star_name is not None) and (len(star_name) > 0):
+                            
+                            if has_text:
+                                html_text += "<br>"
+                            
+                            # Greyish color for name
+                            html_text += f'<span style="color: #dddddd;">{star_name}</span>'
+                            has_text = True
+
+
+                        if not has_text:
+                            continue
+                        if not has_text:
+                            continue
+
+                        # Add text item with HTML
+                        text_item = TextItem(html=html_text, anchor=(1.2, 0.5))
+                        text_item.setAlign(QtCore.Qt.AlignRight)
+                        text_item.setPos(self.catalog_x_filtered[i] + 0.5, self.catalog_y_filtered[i] + 0.5)
+                        self.spectral_type_text_list.addTextItem(text_item)
             else:
                 print('No catalog stars visible!')
 
@@ -5157,6 +5287,14 @@ class PlateTool(QtWidgets.QMainWindow):
         variables = loadPickle(dir_path, state_name)
         for k, v in variables.items():
             setattr(self, k, v)
+        
+        # Init catalog_stars_spectral_type if it doesn't exist (loading old state files)
+        if not hasattr(self, 'catalog_stars_spectral_type'):
+            self.catalog_stars_spectral_type = None
+        
+        # Init catalog_stars_preferred_names if it doesn't exist
+        if not hasattr(self, 'catalog_stars_preferred_names'):
+            self.catalog_stars_preferred_names = None
 
         # Updating old state files with new platepar variables
         if self.platepar is not None:
@@ -7470,18 +7608,64 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateLeftLabels()
 
     def toggleShowCatStars(self):
-        """ Toggle between showing catalog stars and not """
+        """ Toggle showing/hiding catalog stars. """
         self.catalog_stars_visible = not self.catalog_stars_visible
-        if self.catalog_stars_visible:
-            self.cat_star_markers.show()
-            self.cat_star_markers2.show()
-            self.geo_markers.show()
-            self.geo_markers.show()
-        else:
+
+        # Hide markers if disabling
+        if not self.catalog_stars_visible:
             self.cat_star_markers.hide()
             self.cat_star_markers2.hide()
             self.geo_markers.hide()
             self.geo_markers.hide()
+            self.spectral_type_text_list.hide()
+
+        else:
+            self.cat_star_markers.show()
+            self.cat_star_markers2.show()
+            self.geo_markers.show()
+            self.geo_markers.show()
+            if self.show_spectral_type or self.show_star_names:
+                self.spectral_type_text_list.show()
+        
+        # Redraw
+        self.updateStars()
+
+        # Update the checkbox
+        self.tab.settings.updateShowCatStars()
+
+    def toggleShowSpectralType(self):
+        """ Toggle showing/hiding spectral types. """
+        self.show_spectral_type = not self.show_spectral_type
+
+        # Hide/show text items
+        if self.show_spectral_type or self.show_star_names:
+            if self.catalog_stars_visible:
+                self.spectral_type_text_list.show()
+        else:
+            self.spectral_type_text_list.hide()
+
+        # Redraw
+        self.updateStars()
+
+        # Update the checkbox
+        self.tab.settings.updateShowSpectralType()
+
+    def toggleShowStarNames(self):
+        """ Toggle showing/hiding star names. """
+        self.show_star_names = not self.show_star_names
+
+        # Hide/show text items
+        if self.show_spectral_type or self.show_star_names:
+            if self.catalog_stars_visible:
+                self.spectral_type_text_list.show()
+        else:
+            self.spectral_type_text_list.hide()
+
+        # Redraw
+        self.updateStars()
+
+        # Update the checkbox
+        self.tab.settings.updateShowStarNames()
 
     def toggleShowSelectedStars(self):
         """ Toggle whether to show the selected stars """
@@ -8580,13 +8764,34 @@ class PlateTool(QtWidgets.QMainWindow):
                 ).days/365.25
     
         # Load catalog stars
-        catalog_stars, self.mag_band_string, self.config.star_catalog_band_ratios = StarCatalog.readStarCatalog(
+        catalog_results = StarCatalog.readStarCatalog(
             self.config.star_catalog_path, self.config.star_catalog_file, 
             years_from_J2000=years_from_J2000,
             lim_mag=lim_mag,
-            mag_band_ratios=self.config.star_catalog_band_ratios)
+            mag_band_ratios=self.config.star_catalog_band_ratios,
+            additional_fields=['spectraltype_esphs', 'preferred_name'])
 
-        return catalog_stars
+        if len(catalog_results) == 4:
+            self.catalog_stars, self.mag_band_string, self.config.star_catalog_band_ratios, extras = catalog_results
+        else:
+            self.catalog_stars, self.mag_band_string, self.config.star_catalog_band_ratios = catalog_results
+            extras = {}
+
+        # Extract spectral type
+        if 'spectraltype_esphs' in extras:
+            # Decode bytes to strings if necessary
+            self.catalog_stars_spectral_type = np.array([x.decode('utf-8') for x in extras['spectraltype_esphs']])
+        else:
+            self.catalog_stars_spectral_type = None
+
+        # Extract preferred name
+        if 'preferred_name' in extras:
+            # Decode bytes to strings if necessary
+            self.catalog_stars_preferred_names = np.array([x.decode('utf-8') for x in extras['preferred_name']])
+        else:
+            self.catalog_stars_preferred_names = None
+
+        return self.catalog_stars
 
 
     def loadPlatepar(self, update=False, platepar_file=None):

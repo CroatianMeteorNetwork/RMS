@@ -2965,6 +2965,8 @@ class SettingsWidget(QtWidgets.QWidget):
     """
     sigMaxAveToggled = QtCore.pyqtSignal()
     sigCatStarsToggled = QtCore.pyqtSignal()
+    sigSpectralTypeToggled = QtCore.pyqtSignal()
+    sigStarNamesToggled = QtCore.pyqtSignal()
     sigCalStarsToggled = QtCore.pyqtSignal()
     sigDistortionToggled = QtCore.pyqtSignal()
     sigMeasGroundPointsToggled = QtCore.pyqtSignal()
@@ -3008,6 +3010,16 @@ class SettingsWidget(QtWidgets.QWidget):
         self.catalog_stars.released.connect(self.sigCatStarsToggled.emit)
         self.updateShowCatStars()
         vbox.addWidget(self.catalog_stars)
+
+        self.show_spectral_type = QtWidgets.QCheckBox('Show Spectral Type')
+        self.show_spectral_type.released.connect(self.sigSpectralTypeToggled.emit)
+        self.updateShowSpectralType()
+        vbox.addWidget(self.show_spectral_type)
+
+        self.show_star_names = QtWidgets.QCheckBox('Show Star Names')
+        self.show_star_names.released.connect(self.sigStarNamesToggled.emit)
+        self.updateShowStarNames()
+        vbox.addWidget(self.show_star_names)
 
         self.detected_stars = QtWidgets.QCheckBox('Show Detected Stars')
         self.detected_stars.released.connect(self.sigCalStarsToggled.emit)
@@ -3144,6 +3156,12 @@ class SettingsWidget(QtWidgets.QWidget):
 
     def updateShowCatStars(self):
         self.catalog_stars.setChecked(self.gui.catalog_stars_visible)
+
+    def updateShowSpectralType(self):
+        self.show_spectral_type.setChecked(self.gui.show_spectral_type)
+
+    def updateShowStarNames(self):
+        self.show_star_names.setChecked(self.gui.show_star_names)
 
     def updateShowCalStars(self):
         self.detected_stars.setChecked(self.gui.draw_calstars)
