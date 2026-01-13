@@ -236,6 +236,12 @@ def getSSHClient(hostname,
         return None
 
     log.debug("SSHClient connected via agent fallback.")
+
+    transport = ssh.get_transport()
+    if transport and keepalive_interval > 0:
+        transport.set_keepalive(keepalive_interval)
+        log.debug("Keepalive set to {} seconds".format(keepalive_interval))
+
     return ssh
 
 def getSFTPClient(ssh, sftp_timeout=300):
