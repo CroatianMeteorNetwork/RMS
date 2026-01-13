@@ -53,7 +53,7 @@ def existsRemoteDirectory(sftp,path):
         else:
             return False
         
-    except:
+    except Exception:
         log.error("Failure whilst checking that directory {} exists".format(path))
         return False
 
@@ -166,7 +166,7 @@ def getSSHClient(hostname,
             log.error("SSH connection timed out after {} seconds (hard timeout)".format(hard_timeout))
             try:
                 ssh.close()
-            except:
+            except Exception:
                 pass
             return None
 
@@ -186,7 +186,7 @@ def getSSHClient(hostname,
             # Close the client before attempting agent auth to ensure clean state
             try:
                 ssh.close()
-            except:
+            except Exception:
                 pass
         else:
             # Connection successful
@@ -224,7 +224,7 @@ def getSSHClient(hostname,
         log.error("SSH connection timed out after {} seconds (hard timeout)".format(hard_timeout))
         try:
             ssh.close()
-        except:
+        except Exception:
             pass
         return None
 
