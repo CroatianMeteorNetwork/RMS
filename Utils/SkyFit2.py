@@ -8946,11 +8946,11 @@ class PlateTool(QtWidgets.QMainWindow):
     
         # Load catalog stars
         catalog_results = StarCatalog.readStarCatalog(
-            self.config.star_catalog_path, self.config.star_catalog_file, 
+            self.config.star_catalog_path, self.config.star_catalog_file,
             years_from_J2000=years_from_J2000,
             lim_mag=lim_mag,
             mag_band_ratios=self.config.star_catalog_band_ratios,
-            additional_fields=['spectraltype_esphs', 'preferred_name'])
+            additional_fields=['spectraltype_esphs', 'preferred_name', 'common_name'])
 
         if len(catalog_results) == 4:
             self.catalog_stars, self.mag_band_string, self.config.star_catalog_band_ratios, extras = catalog_results
@@ -8970,13 +8970,18 @@ class PlateTool(QtWidgets.QMainWindow):
             # Decode bytes to strings if necessary
             self.catalog_stars_preferred_names = np.array([x.decode('utf-8') for x in extras['preferred_name']])
 
-            # Create common names array by looking up HD names
-            common_names = []
-            for name in self.catalog_stars_preferred_names:
-                # Look up common name if available, otherwise use the original name
-                common_name = self.star_common_names.get(name.strip(), name)
-                common_names.append(common_name)
-            self.catalog_stars_common_names = np.array(common_names)
+            # Check if common_name is embedded in the catalog (v2 format)
+            if 'common_name' in extras:
+                # Use embedded common names directly
+                self.catalog_stars_common_names = np.array([x.decode('utf-8') for x in extras['common_name']])
+            else:
+                # Fall back to JSON lookup for old catalog format
+                common_names = []
+                for name in self.catalog_stars_preferred_names:
+                    # Look up common name if available, otherwise use the original name
+                    common_name = self.star_common_names.get(name.strip(), name)
+                    common_names.append(common_name)
+                self.catalog_stars_common_names = np.array(common_names)
         else:
             self.catalog_stars_preferred_names = None
             self.catalog_stars_common_names = None
