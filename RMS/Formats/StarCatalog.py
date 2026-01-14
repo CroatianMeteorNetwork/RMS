@@ -219,8 +219,8 @@ def loadGMNStarCatalog(file_path,
     # Step 1: Cache the catalog data to avoid repeated decompression
     if not hasattr(loadGMNStarCatalog, cache_name):
 
-        # Define the data structure for the catalog
-        data_types = [
+        # Define the data structure for the catalog (v1 - 18 columns, without common_name)
+        data_types_v1 = [
             ('designation', 'S30'),
             ('ra', 'f8'),
             ('dec', 'f8'),
@@ -241,6 +241,29 @@ def loadGMNStarCatalog(file_path,
             ('Simbad_OType', 'S30')
         ]
 
+        # Define the data structure for the catalog (v2 - 19 columns, with common_name)
+        data_types_v2 = [
+            ('designation', 'S30'),
+            ('ra', 'f8'),
+            ('dec', 'f8'),
+            ('pmra', 'f8'),
+            ('pmdec', 'f8'),
+            ('phot_g_mean_mag', 'f4'),
+            ('phot_bp_mean_mag', 'f4'),
+            ('phot_rp_mean_mag', 'f4'),
+            ('classprob_dsc_specmod_star', 'f4'),
+            ('classprob_dsc_specmod_binarystar', 'f4'),
+            ('spectraltype_esphs', 'S8'),
+            ('B', 'f4'),
+            ('V', 'f4'),
+            ('R', 'f4'),
+            ('Ic', 'f4'),
+            ('oid', 'i4'),
+            ('preferred_name', 'S30'),
+            ('common_name', 'S30'),
+            ('Simbad_OType', 'S30')
+        ]
+
         with open(file_path, 'rb') as fid:
 
             # Read the catalog header
@@ -248,6 +271,12 @@ def loadGMNStarCatalog(file_path,
             num_rows = int(np.fromfile(fid, dtype=np.uint32, count=1)[0])
             num_columns = int(np.fromfile(fid, dtype=np.uint32, count=1)[0])
             fid.read(declared_header_size - 12)  # Skip column names
+
+            # Select data types based on number of columns (v1=18, v2=19)
+            if num_columns >= 19:
+                data_types = data_types_v2
+            else:
+                data_types = data_types_v1
 
             # Read and decompress the catalog data
             compressed_data = fid.read()
