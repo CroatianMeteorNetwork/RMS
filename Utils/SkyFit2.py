@@ -1498,16 +1498,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.config = config
 
-        # Load star common names lookup (HD number -> common name)
-        self.star_common_names = {}
-        common_names_path = os.path.join(config.star_catalog_path, 'star_common_names.json')
-        if os.path.isfile(common_names_path):
-            try:
-                with open(common_names_path, 'r') as f:
-                    self.star_common_names = json.load(f)
-            except Exception as e:
-                print(f"Warning: Could not load star common names: {e}")
-
         # Force the CV2 backend when SkyFit is being used
         self.config.media_backend = 'cv2'
 
@@ -3093,44 +3083,59 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             star_names_unmasked = None
 
+        # Filter common names
+        if hasattr(self, 'catalog_stars_common_names') and (self.catalog_stars_common_names is not None):
+            common_names_unmasked = self.catalog_stars_common_names[filtered_indices_all]
+        else:
+            common_names_unmasked = None
+
 
         if (self.mask is None) or (not hasattr(self.mask, 'img')):
             cat_stars_xy, self.catalog_stars_filtered = [], []
             self.catalog_stars_spectral_type_filtered = []
             self.catalog_stars_preferred_names_filtered = []
+            self.catalog_stars_common_names_filtered = []
 
             # Prepare iterators
             if spectral_type_unmasked is None:
                 spectral_type_unmasked = [None]*len(cat_stars_xy_unmasked)
-            
+
             if star_names_unmasked is None:
                 star_names_unmasked = [None]*len(cat_stars_xy_unmasked)
 
-            iterator = zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked, spectral_type_unmasked, star_names_unmasked)
-            
-            for star_xy, star_radec, star_spec, star_name in iterator:
+            if common_names_unmasked is None:
+                common_names_unmasked = [None]*len(cat_stars_xy_unmasked)
+
+            iterator = zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked, spectral_type_unmasked, star_names_unmasked, common_names_unmasked)
+
+            for star_xy, star_radec, star_spec, star_name, common_name in iterator:
                 cat_stars_xy.append(star_xy)
                 self.catalog_stars_filtered.append(star_radec)
                 self.catalog_stars_spectral_type_filtered.append(star_spec)
                 self.catalog_stars_preferred_names_filtered.append(star_name)
+                self.catalog_stars_common_names_filtered.append(common_name)
 
         else:
 
             cat_stars_xy, self.catalog_stars_filtered = [], []
             self.catalog_stars_spectral_type_filtered = []
             self.catalog_stars_preferred_names_filtered = []
+            self.catalog_stars_common_names_filtered = []
 
             # Prepare iterators
             if spectral_type_unmasked is None:
                 spectral_type_unmasked = [None]*len(cat_stars_xy_unmasked)
-            
+
             if star_names_unmasked is None:
                 star_names_unmasked = [None]*len(cat_stars_xy_unmasked)
 
-            iterator = zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked, spectral_type_unmasked, star_names_unmasked)
+            if common_names_unmasked is None:
+                common_names_unmasked = [None]*len(cat_stars_xy_unmasked)
+
+            iterator = zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked, spectral_type_unmasked, star_names_unmasked, common_names_unmasked)
 
 
-            for star_xy, star_radec, star_spec, star_name in iterator:
+            for star_xy, star_radec, star_spec, star_name, common_name in iterator:
 
                 # Make sure that the dimensions of the mask match the image dimensions
                 if (self.mask.img.shape[0] == self.img.data.shape[0]) or \
@@ -3142,6 +3147,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         self.catalog_stars_filtered.append(star_radec)
                         self.catalog_stars_spectral_type_filtered.append(star_spec)
                         self.catalog_stars_preferred_names_filtered.append(star_name)
+                        self.catalog_stars_common_names_filtered.append(common_name)
 
                 # If the mask dimensions don't match the image dimensions, ignore the mask
                 else:
@@ -3149,6 +3155,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.catalog_stars_filtered.append(star_radec)
                     self.catalog_stars_spectral_type_filtered.append(star_spec)
                     self.catalog_stars_preferred_names_filtered.append(star_name)
+                    self.catalog_stars_common_names_filtered.append(common_name)
 
         # Convert to an array in any case
         cat_stars_xy = np.array(cat_stars_xy)
@@ -3192,10 +3199,16 @@ class PlateTool(QtWidgets.QMainWindow):
                     else:
                         iter_names = [None]*len(self.catalog_stars_spectral_type_filtered)
 
+                    if hasattr(self, 'catalog_stars_common_names_filtered') and \
+                       (self.catalog_stars_common_names_filtered is not None):
+                        iter_common_names = self.catalog_stars_common_names_filtered
+                    else:
+                        iter_common_names = [None]*len(self.catalog_stars_spectral_type_filtered)
 
-                    iterator = zip(self.catalog_stars_spectral_type_filtered, iter_names)
-                    
-                    for i, (spec_type, star_name) in enumerate(iterator):
+
+                    iterator = zip(self.catalog_stars_spectral_type_filtered, iter_names, iter_common_names)
+
+                    for i, (spec_type, star_name, common_name) in enumerate(iterator):
                         
                         html_text = ""
                         has_text = False
@@ -3243,8 +3256,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
                             # Use HD/catalog name for SIMBAD URL
                             url_name = star_name.replace(' ', '+')
-                            # Look up common name for display (e.g., "Sirius" instead of "HD 48915")
-                            display_name = self.star_common_names.get(star_name.strip(), star_name)
+                            # Use common name for display (e.g., "Sirius" instead of "HD 48915")
+                            display_name = common_name if common_name else star_name
                             # Greyish color for name, formatted as link
                             html_text += f'<a href="https://simbad.cds.unistra.fr/simbad/sim-id?Ident={url_name}" style="color: #dddddd; text-decoration: none;">{display_name}</a>'
                             has_text = True
@@ -8975,13 +8988,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Use embedded common names directly
                 self.catalog_stars_common_names = np.array([x.decode('utf-8') for x in extras['common_name']])
             else:
-                # Fall back to JSON lookup for old catalog format
-                common_names = []
-                for name in self.catalog_stars_preferred_names:
-                    # Look up common name if available, otherwise use the original name
-                    common_name = self.star_common_names.get(name.strip(), name)
-                    common_names.append(common_name)
-                self.catalog_stars_common_names = np.array(common_names)
+                # No common names available, use preferred names as fallback
+                self.catalog_stars_common_names = self.catalog_stars_preferred_names.copy()
         else:
             self.catalog_stars_preferred_names = None
             self.catalog_stars_common_names = None
