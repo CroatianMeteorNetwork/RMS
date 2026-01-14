@@ -1986,7 +1986,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         vignetting_fixed_info.setFont(info_font)
         vignetting_fixed_info.setStyleSheet("QToolButton { color: #0066cc; border: none; } QToolButton:hover { color: #0044aa; }")
         vignetting_fixed_info.setCursor(QtCore.Qt.PointingHandCursor)
-        vignetting_fixed_info.clicked.connect(lambda: self.showVignettingFixedInfo())
+        vignetting_fixed_info.clicked.connect(self.showVignettingFixedInfo)
         hbox_fixed.addWidget(vignetting_fixed_info)
         hbox_fixed.addStretch()
         form.addRow(hbox_fixed)
