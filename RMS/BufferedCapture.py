@@ -174,6 +174,9 @@ class BufferedCapture(Process):
         # Flag for process control
         self.exit = Event()
 
+        # Heartbeat timestamp for watchdog - updated every frame block to detect hangs
+        self.heartbeat = Value('d', 0.0)
+
         # Initialize sync tick
         self.last_sync_tick = -1
         self.sync_tick_reference = 0  # reference epoch for sync ticks
@@ -669,6 +672,11 @@ class BufferedCapture(Process):
                 if stop_event is not None and stop_event.is_set():
                     log.info("RTSP probe aborted - shutdown requested")
                     return False, RtspProbeResult.UNKNOWN_ERROR
+
+                # Update heartbeat during probe attempts to show we're still alive
+                if hasattr(self, 'heartbeat'):
+                    self.heartbeat.value = time.time()
+
                 try:
                     # Try to resolve hostname first
                     try:
@@ -1670,6 +1678,9 @@ class BufferedCapture(Process):
         try:
             log.debug("Initializing process-specific resources...")
 
+            # Initialize heartbeat for watchdog
+            self.heartbeat.value = time.time()
+
             # GStreamer debug setup
             if GST_IMPORTED:
                 try:
@@ -1750,6 +1761,8 @@ class BufferedCapture(Process):
 
             # Main capture loop
             while not self.exit.is_set() and not self.initVideoDevice():
+                # Update heartbeat during connection attempts to show we're still alive
+                self.heartbeat.value = time.time()
                 log.info('Waiting for the video device to be connected...')
                 time.sleep(5)
 
@@ -1852,6 +1865,9 @@ class BufferedCapture(Process):
 
                 while not self.exit.is_set() and not self.initVideoDevice():
 
+                    # Update heartbeat during reconnection attempts to show we're still alive
+                    self.heartbeat.value = time.time()
+
                     log.info('Waiting for the video device to be reconnected...')
 
                     time.sleep(5)
@@ -1906,6 +1922,10 @@ class BufferedCapture(Process):
 
 
             log.info('Grabbing a new block of {:d} frames...'.format(block_frames))
+
+            # Update heartbeat timestamp for watchdog to detect hangs
+            self.heartbeat.value = time.time()
+
             for i in range(block_frames):
 
                 # Read the frame (keep track how long it took to grab it), and check for color if saving raw frame
