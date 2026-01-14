@@ -2969,6 +2969,7 @@ class SettingsWidget(QtWidgets.QWidget):
     sigCatStarsToggled = QtCore.pyqtSignal()
     sigSpectralTypeToggled = QtCore.pyqtSignal()
     sigStarNamesToggled = QtCore.pyqtSignal()
+    sigConstellationToggled = QtCore.pyqtSignal()
     sigCalStarsToggled = QtCore.pyqtSignal()
     sigDistortionToggled = QtCore.pyqtSignal()
     sigMeasGroundPointsToggled = QtCore.pyqtSignal()
@@ -3022,6 +3023,11 @@ class SettingsWidget(QtWidgets.QWidget):
         self.show_star_names.released.connect(self.sigStarNamesToggled.emit)
         self.updateShowStarNames()
         vbox.addWidget(self.show_star_names)
+
+        self.show_constellations = QtWidgets.QCheckBox('Show Constellation Lines')
+        self.show_constellations.released.connect(self.sigConstellationToggled.emit)
+        self.updateShowConstellations()
+        vbox.addWidget(self.show_constellations)
 
         self.detected_stars = QtWidgets.QCheckBox('Show Detected Stars')
         self.detected_stars.released.connect(self.sigCalStarsToggled.emit)
@@ -3164,6 +3170,9 @@ class SettingsWidget(QtWidgets.QWidget):
 
     def updateShowStarNames(self):
         self.show_star_names.setChecked(self.gui.show_star_names)
+
+    def updateShowConstellations(self):
+        self.show_constellations.setChecked(self.gui.show_constellations)
 
     def updateShowCalStars(self):
         self.detected_stars.setChecked(self.gui.draw_calstars)

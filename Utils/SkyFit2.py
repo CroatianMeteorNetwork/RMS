@@ -63,6 +63,7 @@ from RMS.Misc import decimalDegreesToSexHours
 from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
 from RMS.Routines.CustomPyqtgraphClasses import *
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle
+from RMS.Routines.SphericalPolygonCheck import sphericalPolygonCheck
 from RMS.Routines.Image import signalToNoise, applyDark, applyFlat
 from RMS.Routines.MaskImage import getMaskFile, MaskStructure
 from RMS.Routines import RollingShutterCorrection
@@ -1675,6 +1676,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         ###################################################################################################
+        
+        # Display options
+        self.show_spectral_type = False
+        self.show_star_names = False
+        self.show_constellations = False
+        self.selected_stars_visible = True
 
         # LOADING STARS
 
@@ -2059,6 +2066,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.catalog_stars_visible = True
         self.show_spectral_type = False
         self.show_star_names = False
+        self.show_constellations = False
         self.selected_stars_visible = True
         self.unsuitable_stars_visible = True
 
@@ -2257,17 +2265,39 @@ class PlateTool(QtWidgets.QMainWindow):
         self.residual_text = TextItemList()
         self.img_frame.addItem(self.residual_text)
 
-        # Init the list of spectral type text items
+        # Add spectral types text items
         self.spectral_type_text_list = TextItemList()
         self.img_frame.addItem(self.spectral_type_text_list)
-        self.residual_text.setZValue(10)
+
+        # Plotting item for constellation lines
+        # Background (black border)
+        self.constellation_lines_bg = pg.PlotCurveItem(
+            pen=pg.mkPen((0, 0, 0, 128), width=5), connect='pairs')
+        self.constellation_lines_bg.setZValue(4)
+        self.constellation_lines_bg.hide()
+        self.img_frame.addItem(self.constellation_lines_bg)
+
+        # Foreground (white line)
+        self.constellation_lines_fg = pg.PlotCurveItem(
+            pen=pg.mkPen((255, 255, 255, 128), width=2), connect='pairs')
+        self.constellation_lines_fg.setZValue(5)
+        self.constellation_lines_fg.hide()
+        self.img_frame.addItem(self.constellation_lines_fg)
+
+        # Load constellation lines
+        constellations_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), 
+            "../share/constellation_lines.csv")
+        try:
+            self.constellation_data = np.loadtxt(constellations_path, delimiter=",")
+        except Exception as e:
+            print("Could not load constellation lines from:", constellations_path)
+            self.constellation_data = None
 
         ###################################################################################################
         # RIGHT WIDGET
 
         # If the file is being loaded, detect the input type
         if loaded_file:
-            detect_input_type = False
 
             if not hasattr(self, "img_handle"):
                 detect_input_type = True
@@ -2430,6 +2460,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigCatStarsToggled.connect(self.toggleShowCatStars)
         self.tab.settings.sigSpectralTypeToggled.connect(self.toggleShowSpectralType)
         self.tab.settings.sigStarNamesToggled.connect(self.toggleShowStarNames)
+        self.tab.settings.sigConstellationToggled.connect(self.toggleShowConstellations)
         self.tab.settings.sigCalStarsToggled.connect(self.toggleShowCalStars)
         self.tab.settings.sigSelStarsToggled.connect(self.toggleShowSelectedStars)
         self.tab.settings.sigPicksToggled.connect(self.toggleShowPicks)
@@ -2958,6 +2989,13 @@ class PlateTool(QtWidgets.QMainWindow):
             # Draw stars detected on this image
             if self.draw_calstars:
                 self.updateCalstars()
+
+            # Update constellation lines
+            if self.show_constellations:
+                self.updateConstellations()
+            elif self.constellation_lines_bg.isVisible():
+                self.constellation_lines_bg.hide()
+                self.constellation_lines_fg.hide()
 
 
         # If in skyfit mode, take the time of the chunk
@@ -5310,6 +5348,14 @@ class PlateTool(QtWidgets.QMainWindow):
         if not hasattr(self, 'catalog_stars_preferred_names'):
             self.catalog_stars_preferred_names = None
 
+        # Init show_constellations if it doesn't exist
+        if not hasattr(self, 'show_constellations'):
+            self.show_constellations = False
+
+        # Init catalog_stars_common_names if it doesn't exist
+        if not hasattr(self, 'catalog_stars_common_names'):
+            self.catalog_stars_common_names = None
+
         # Updating old state files with new platepar variables
         if self.platepar is not None:
             if not hasattr(self.platepar, "equal_aspect"):
@@ -7621,6 +7667,115 @@ class PlateTool(QtWidgets.QMainWindow):
         self.img_zoom.setLevels(self.tab.hist.getLevels())
         self.updateLeftLabels()
 
+    def updateConstellations(self):
+        """ Projects and draws constellation lines. """
+
+        if self.constellation_data is None:
+            return
+
+        # Get current JD time
+        jd = date2JD(*self.img_handle.currentTime())
+
+        # Unpack constellation data
+        from_ra, from_dec = self.constellation_data[:, 0], self.constellation_data[:, 1]
+        to_ra, to_dec = self.constellation_data[:, 2], self.constellation_data[:, 3]
+        
+        # 0. Generate FOV polygon
+        w = self.platepar.X_res
+        h = self.platepar.Y_res
+        fov_poly = []
+
+        if self.fov_poly_cache is not None and self.fov_poly_jd == jd:
+            fov_poly = self.fov_poly_cache
+        else:
+            # Define edges: (x1, y1) -> (x2, y2)
+            edges = [
+                ((0, 0), (w, 0)),   # Top
+                ((w, 0), (w, h)),   # Right
+                ((w, h), (0, h)),   # Bottom
+                ((0, h), (0, 0))    # Left
+            ]
+            
+            samples_per_side = 10
+            
+            try:
+                for (x_start, y_start), (x_end, y_end) in edges:
+                    xs = np.linspace(x_start, x_end, samples_per_side, endpoint=False)
+                    ys = np.linspace(y_start, y_end, samples_per_side, endpoint=False)
+                    
+                    # Prepare inputs
+                    n = len(xs)
+                    jd_arr = [jd]*n
+                    level_arr = [1]*n
+                    
+                    _, r_arr, d_arr, _ = xyToRaDecPP(jd_arr, xs, ys, level_arr, self.platepar, jd_time=True, extinction_correction=False)
+                    
+                    for r, d in zip(r_arr, d_arr):
+                        fov_poly.append((r, d))
+                        
+                # Update cache
+                self.fov_poly_cache = fov_poly
+                self.fov_poly_jd = jd
+                
+            except Exception as e:
+                print(f"Error computing FOV polygon for constellations: {e}")
+                return
+
+        # 1. Filter using sphericalPolygonCheck
+        # Check start and end points
+        # If either is inside, keep the line
+        test_points_from = np.c_[from_ra, from_dec]
+        test_points_to = np.c_[to_ra, to_dec]
+        
+        mask_from = np.array(sphericalPolygonCheck(fov_poly, test_points_from))
+        mask_to = np.array(sphericalPolygonCheck(fov_poly, test_points_to))
+        
+        # Keep line if EITHER endpoint is inside
+        mask = mask_from | mask_to
+
+        if np.any(mask):
+            from_x, from_y = raDecToXYPP(from_ra[mask], from_dec[mask], jd, self.platepar)
+            to_x, to_y = raDecToXYPP(to_ra[mask], to_dec[mask], jd, self.platepar)
+
+            # 2. Filter based on image bounds (keep as redundant safety or remove?)
+            # Spherical check is accurate, but projection might still yield points slightly outside
+            # which is fine. The previous bounds check was mostly for the angular filter artifacts.
+            # We can relax it or remove it, but let's keep a loose one just in case.
+            
+            margin = 200 # Larger margin to allow lines entering from outside
+            in_bounds_from = (from_x > -margin) & (from_x < w + margin) & (from_y > -margin) & (from_y < h + margin)
+            in_bounds_to = (to_x > -margin) & (to_x < w + margin) & (to_y > -margin) & (to_y < h + margin)
+            mask_bounds = in_bounds_from | in_bounds_to
+            
+            from_x = from_x[mask_bounds]
+            from_y = from_y[mask_bounds]
+            to_x = to_x[mask_bounds]
+            to_y = to_y[mask_bounds]
+
+            if len(from_x) > 0:
+                # Interleave start and end points
+                pts_x = np.empty((from_x.size + to_x.size,), dtype=from_x.dtype)
+                pts_x[0::2] = from_x
+                pts_x[1::2] = to_x
+
+                pts_y = np.empty((from_y.size + to_y.size,), dtype=from_y.dtype)
+                pts_y[0::2] = from_y
+                pts_y[1::2] = to_y
+                
+                self.constellation_lines_bg.setData(pts_x, pts_y)
+                self.constellation_lines_bg.show()
+
+                self.constellation_lines_fg.setData(pts_x, pts_y)
+                self.constellation_lines_fg.show()
+            else:
+                self.constellation_lines_bg.hide()
+                self.constellation_lines_fg.hide()
+            
+        else:
+            self.constellation_lines_bg.hide()
+            self.constellation_lines_fg.hide()
+
+
     def toggleShowCatStars(self):
         """ Toggle showing/hiding catalog stars. """
         self.catalog_stars_visible = not self.catalog_stars_visible
@@ -7680,6 +7835,20 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Update the checkbox
         self.tab.settings.updateShowStarNames()
+
+    def toggleShowConstellations(self):
+        """ Toggle showing/hiding constellation lines. """
+        self.show_constellations = not self.show_constellations
+
+        # Force update
+        if self.show_constellations:
+            self.updateConstellations()
+        else:
+            self.constellation_lines_bg.hide()
+            self.constellation_lines_fg.hide()
+
+        # Update the checkbox
+        self.tab.settings.updateShowConstellations()
 
     def toggleShowSelectedStars(self):
         """ Toggle whether to show the selected stars """
