@@ -2923,7 +2923,6 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
     def updateStatus(self, polygon_count, drawing_points=0):
         """Update the status label."""
-        unsaved_suffix = ' (unsaved)' if self.unsaved else ''
 
         if drawing_points > 0:
             self.status_label.setText(f'Drawing: {drawing_points} points')

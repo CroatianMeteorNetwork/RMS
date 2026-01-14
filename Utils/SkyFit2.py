@@ -11,7 +11,6 @@ import datetime
 import collections
 import glob
 import sys
-import traceback
 import random
 import copy
 
@@ -21,6 +20,7 @@ import matplotlib.gridspec as gridspec
 import matplotlib.ticker as ticker
 try:
     import pyqtgraph as pg
+    from pyqtgraph.Qt import QtWidgets, QtGui
 except Exception as exc:
     message = [
         "SkyFit requires PyQtGraph/PyQt5 for its GUI components, but the import failed.",
@@ -61,10 +61,10 @@ from RMS.Pickling import loadPickle, savePickle
 from RMS.Math import angularSeparation, RMSD, vectNorm
 from RMS.Misc import decimalDegreesToSexHours
 from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
-from RMS.Routines.CustomPyqtgraphClasses import *
+from RMS.Routines.CustomPyqtgraphClasses import ViewBox, TextItem, TextItemList, Crosshair, Plus, Cross, CursorItem, ImageItem, RightOptionsTab
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle
 from RMS.Routines.SphericalPolygonCheck import sphericalPolygonCheck
-from RMS.Routines.Image import signalToNoise, applyDark, applyFlat
+from RMS.Routines.Image import loadFlat, loadDark, applyFlat, applyDark, signalToNoise, gammaCorrectionImage, adjustLevels, saveImage
 from RMS.Routines.MaskImage import getMaskFile, MaskStructure
 from RMS.Routines import RollingShutterCorrection
 from RMS.Misc import maxDistBetweenPoints, getRmsRootDir
@@ -83,7 +83,7 @@ try:
 
     from PyQt5.QtWidgets import (
         QDialog, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit, QGroupBox, QComboBox, QFileDialog,
-        QProgressBar, QWidget, QGridLayout
+        QProgressBar, QGridLayout
     )
     from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject
     from PyQt5 import QtCore
@@ -316,7 +316,7 @@ if ASTRA_IMPORTED:
                         h = QHBoxLayout()
                         h.addWidget(combo, 1)
                         h.addWidget(custom_edit, 1)
-                        container = QWidget()       
+                        container = QtWidgets.QWidget()
                         container.setLayout(h)      
                         layout.addWidget(container, row, col + 1)
 
@@ -1904,7 +1904,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.status_bar.addPermanentWidget(self.image_navigation_slider)
 
         self.nextstar_button = QtWidgets.QPushButton('SkyFit')
-        self.nextstar_button.pressed.connect(lambda: self.nextstar())
+        self.nextstar_button.pressed.connect(self.jumpNextStar)
 
         ###################################################################################################
         # CENTRAL WIDGET (DISPLAY)
@@ -2419,16 +2419,16 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.sigOnVignettingFixedToggled.connect(self.onVignettingChanged)
 
         # Connect astrometry & photometry buttons to functions
-        self.tab.param_manager.sigFitPressed.connect(lambda: self.fitPickedStars())
+        self.tab.param_manager.sigFitPressed.connect(self.fitPickedStars)
         self.tab.param_manager.sigAutoFitPressed.connect(self.autoFitAstrometryNet)
-        self.tab.param_manager.sigNextStarPressed.connect(lambda: self.jumpNextStar())
+        self.tab.param_manager.sigNextStarPressed.connect(self.jumpNextStar)
         self.tab.param_manager.sigPhotometryPressed.connect(lambda: self.photometry(show_plot=True))
         self.tab.param_manager.sigAstrometryPressed.connect(self.showAstrometryFitPlots)
         self.tab.param_manager.sigResetDistortionPressed.connect(self.resetDistortion)
 
         self.tab.geolocation.sigLocationChanged.connect(self.onAzAltChanged)
         self.tab.geolocation.sigReloadGeoPoints.connect(self.reloadGeoPoints)
-        self.tab.geolocation.sigFitPressed.connect(lambda: self.fitPickedStars())
+        self.tab.geolocation.sigFitPressed.connect(self.fitPickedStars)
 
         # Star detection override signals
         self.tab.star_detection.sigRedetectStars.connect(self.redetectStars)
@@ -3178,9 +3178,6 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Plot spectral type text
                 self.spectral_type_text_list.clear()
                 
-                # Plot spectral type text
-                self.spectral_type_text_list.clear() # This clears all text items
-                
                 # Check if we should render anything
                 if (self.show_spectral_type or self.show_star_names) and \
                    hasattr(self, 'catalog_stars_spectral_type_filtered') and \
@@ -3211,7 +3208,9 @@ class PlateTool(QtWidgets.QMainWindow):
                             hex_color = "#90ee90" 
                             
                             first_char = spec_type[0].upper()
-                            if first_char == 'O':
+                            if 'infrared' in spec_type.lower():
+                                hex_color = "#990000" # Red
+                            elif first_char == 'O':
                                 hex_color = "#9bb0ff" # Blue
                             elif first_char == 'B':
                                 hex_color = "#aabfff" # Blue-white
@@ -3225,6 +3224,12 @@ class PlateTool(QtWidgets.QMainWindow):
                                 hex_color = "#ffd2a1" # Orange
                             elif first_char == 'M':
                                 hex_color = "#ffcc6f" # Red-orange
+
+
+                            # Replace "infrared" with "IR"
+                            if 'infrared' in spec_type.lower():
+                                spec_type = "IR"
+                            
 
                             html_text += f'<span style="color: {hex_color};">{spec_type}</span>'
                             has_text = True
@@ -3245,8 +3250,6 @@ class PlateTool(QtWidgets.QMainWindow):
                             has_text = True
 
 
-                        if not has_text:
-                            continue
                         if not has_text:
                             continue
 
@@ -3501,7 +3504,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
         except Exception as e:
             print(f"  Error during star detection: {e}")
-            import traceback
             traceback.print_exc()
 
 
@@ -8348,7 +8350,6 @@ class PlateTool(QtWidgets.QMainWindow):
         try:
             pp_aligned = alignPlatepar(self.config, self.platepar, calstars_time, calstars_coords)
         except Exception as e:
-            import traceback
             print("  alignPlatepar FAILED: {}".format(str(e)), flush=True)
             traceback.print_exc()
             return
@@ -8502,7 +8503,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # Rescale the image to 8bit
                 minv, maxv = self.tab.hist.getLevels()
-                img_data = Image.adjustLevels(self.img.data, minv, self.img.gamma, maxv)
+                img_data = adjustLevels(self.img.data, minv, self.img.gamma, maxv)
                 img_data -= np.min(img_data)
                 img_data = 255*(img_data/np.max(img_data))
                 img_data = img_data.astype(np.uint8)
@@ -8634,9 +8635,6 @@ class PlateTool(QtWidgets.QMainWindow):
                     (catalog_y_ext >= 0) & (catalog_y_ext < self.platepar.Y_res)
 
         catalog_stars = catalog_stars_extended[in_fov_xy]
-        catalog_x = catalog_x_ext[in_fov_xy]
-        catalog_y = catalog_y_ext[in_fov_xy]
-        catalog_mag = catalog_mag_ext[in_fov_xy]
 
         print("  Catalog stars in strict FOV: {:d}".format(len(catalog_stars)))
 
@@ -9118,7 +9116,7 @@ class PlateTool(QtWidgets.QMainWindow):
         frame_file_path = os.path.join(dir_path, frame_file_name)
 
         # Save the frame to disk
-        Image.saveImage(frame_file_path, self.img.getFrame())
+        saveImage(frame_file_path, self.img.getFrame())
 
         print('Frame {:.1f} saved to: {:s}'.format(self.img.getFrame(), frame_file_path))
 
@@ -9250,7 +9248,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         try:
             # Load the flat, byteswap the flat if vid file is used or UWO png
-            flat = Image.loadFlat(*os.path.split(flat_file), dtype=self.img.data.dtype,
+            flat = loadFlat(*os.path.split(flat_file), dtype=self.img.data.dtype,
                       byteswap=self.img_handle.byteswap)
             flat.flat_img = np.swapaxes(flat.flat_img, 0, 1)
 
@@ -9325,7 +9323,7 @@ class PlateTool(QtWidgets.QMainWindow):
         try:
 
             # Load the dark
-            dark = Image.loadDark(*os.path.split(dark_file), dtype=self.img.data.dtype, \
+            dark = loadDark(*os.path.split(dark_file), dtype=self.img.data.dtype, \
                                   byteswap=self.img_handle.byteswap)
             
             print("Dark loaded successfully!")
@@ -9478,16 +9476,16 @@ class PlateTool(QtWidgets.QMainWindow):
             avepixel_data = self.img_handle.ff.avepixel.T
             # Apply dark and flat if available (same processing as displayed image)
             if self.dark is not None:
-                avepixel_data = Image.applyDark(avepixel_data, self.dark)
+                avepixel_data = applyDark(avepixel_data, self.dark)
             if self.flat_struct is not None:
-                avepixel_data = Image.applyFlat(avepixel_data, self.flat_struct)
+                avepixel_data = applyFlat(avepixel_data, self.flat_struct)
             img_crop_orig = avepixel_data[x_min:x_max, y_min:y_max]
         else:
             # For other input types (videos, images), use the current displayed image
             img_crop_orig = self.img.data[x_min:x_max, y_min:y_max]
 
         # Perform gamma correction
-        img_crop = Image.gammaCorrectionImage(img_crop_orig, self.config.gamma, out_type=np.float32)
+        img_crop = gammaCorrectionImage(img_crop_orig, self.config.gamma, out_type=np.float32)
 
 
         ######################################################################################################
@@ -10479,7 +10477,7 @@ class PlateTool(QtWidgets.QMainWindow):
             crop_img = masked_img[x_min:x_max, y_min:y_max]
 
             # Perform gamma correction on the colored part
-            crop_img = Image.gammaCorrectionImage(
+            crop_img = gammaCorrectionImage(
                 crop_img, self.config.gamma, 
                 bp=0, wp=(2**self.config.bit_depth - 1), 
                 out_type=np.float32
@@ -10494,7 +10492,7 @@ class PlateTool(QtWidgets.QMainWindow):
             crop_bg = masked_img_bg[x_min:x_max, y_min:y_max]
 
             # Perform gamma correction on the background
-            crop_bg = Image.gammaCorrectionImage(
+            crop_bg = gammaCorrectionImage(
                 crop_bg, self.config.gamma, 
                 bp=0, wp=(2**self.config.bit_depth - 1),
                 out_type=np.float32
@@ -10572,7 +10570,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 avepixel_crop = avepixel_masked[x_min:x_max, y_min:y_max]
 
                 # Perform gamma correction on the avepixel crop
-                avepixel_crop = Image.gammaCorrectionImage(
+                avepixel_crop = gammaCorrectionImage(
                     avepixel_crop, self.config.gamma, 
                     bp=0, wp=(2**self.config.bit_depth - 1),
                     out_type=np.float32

@@ -329,7 +329,7 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
         try:
             image_url = imgurUpload('skyfit_image.jpg', image_data=img_data)
             tmpimg = None
-        except:
+        except Exception as e:
             image_url = None
             tmpimg = os.path.join(os.getenv('TMP', default='/tmp'), 'skyfit_image.png')
             pil_img.save(tmpimg)
@@ -530,8 +530,8 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
     if tmpimg:
         try:
             os.remove(tmpimg)
-        except Exception:
-            pass
+        except Exception as e:
+            sys.stderr.write("Warning: failed to remove temporary image '{}': {}\n".format(tmpimg, e))
 
     return ra_mid, dec_mid, rot_eq_standard, scale, fov_w, fov_h, None, None
 
