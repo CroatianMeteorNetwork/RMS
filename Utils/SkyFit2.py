@@ -1497,6 +1497,16 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.config = config
 
+        # Load star common names lookup (HD number -> common name)
+        self.star_common_names = {}
+        common_names_path = os.path.join(config.star_catalog_path, 'star_common_names.json')
+        if os.path.isfile(common_names_path):
+            try:
+                with open(common_names_path, 'r') as f:
+                    self.star_common_names = json.load(f)
+            except Exception as e:
+                print(f"Warning: Could not load star common names: {e}")
+
         # Force the CV2 backend when SkyFit is being used
         self.config.media_backend = 'cv2'
 
@@ -3184,13 +3194,16 @@ class PlateTool(QtWidgets.QMainWindow):
 
                         # Add star name
                         if self.show_star_names and (star_name is not None) and (len(star_name) > 0):
-                            
+
                             if has_text:
                                 html_text += "<br>"
-                            
-                            # Greyish color for name, formatted as link
+
+                            # Use HD/catalog name for SIMBAD URL
                             url_name = star_name.replace(' ', '+')
-                            html_text += f'<a href="https://simbad.cds.unistra.fr/simbad/sim-id?Ident={url_name}" style="color: #dddddd; text-decoration: none;">{star_name}</a>'
+                            # Look up common name for display (e.g., "Sirius" instead of "HD 48915")
+                            display_name = self.star_common_names.get(star_name.strip(), star_name)
+                            # Greyish color for name, formatted as link
+                            html_text += f'<a href="https://simbad.cds.unistra.fr/simbad/sim-id?Ident={url_name}" style="color: #dddddd; text-decoration: none;">{display_name}</a>'
                             has_text = True
 
 
@@ -8789,8 +8802,17 @@ class PlateTool(QtWidgets.QMainWindow):
         if 'preferred_name' in extras:
             # Decode bytes to strings if necessary
             self.catalog_stars_preferred_names = np.array([x.decode('utf-8') for x in extras['preferred_name']])
+
+            # Create common names array by looking up HD names
+            common_names = []
+            for name in self.catalog_stars_preferred_names:
+                # Look up common name if available, otherwise use the original name
+                common_name = self.star_common_names.get(name.strip(), name)
+                common_names.append(common_name)
+            self.catalog_stars_common_names = np.array(common_names)
         else:
             self.catalog_stars_preferred_names = None
+            self.catalog_stars_common_names = None
 
         return self.catalog_stars
 
