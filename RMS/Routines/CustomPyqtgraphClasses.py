@@ -619,13 +619,21 @@ class ImageItem(pg.ImageItem):
 
     def getAutolevels(self, lower=0.1, upper=99.95, ignoretopperc=10):
 
+        if self.image is None or self.image.size == 0:
+            return 0, 255
+
         # Ignore the top 10% of the image pixel brightness (from the maximum) to avoid auto leveling on
         #  saturated pixels
         max_level = np.max(self.image)
         ignore_level = (100 - ignoretopperc)*max_level/100
+        
+        img_filtered = self.image[self.image < ignore_level]
 
-        return np.percentile(self.image[self.image < ignore_level], lower), \
-            np.percentile(self.image[self.image < ignore_level], upper)
+        # Validation: If the image is saturated or flat, the filtered image might be empty
+        if img_filtered.size == 0:
+            return np.percentile(self.image, lower), np.percentile(self.image, upper)
+
+        return np.percentile(img_filtered, lower), np.percentile(img_filtered, upper)
 
     def loadImage(self, mode, flag='avepixel'):
         """
