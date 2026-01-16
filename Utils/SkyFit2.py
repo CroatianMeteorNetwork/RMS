@@ -4488,7 +4488,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 if self.stdev_text_filter*std <= abs(fit_diff):
 
                     # Add the photometric residual text below the star
-                    text_resid = TextItem(photom_resid_txt, anchor=(0.5, -0.5))
+                    text_resid = TextItem(photom_resid_txt, anchor=(0.5, -0.5), interaction=False)
                     text_resid.setPos(star_x, star_y)
                     text_resid.setFont(QtGui.QFont('Arial', photom_resid_size))
                     text_resid.setColor(QtGui.QColor(255, 255, 255))
@@ -4496,7 +4496,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.residual_text.addTextItem(text_resid)
 
                     # Add the star magnitude above the star
-                    text_mag = TextItem("{:+6.2f}".format(star_mag), anchor=(0.5, 1.5))
+                    text_mag = TextItem("{:+6.2f}".format(star_mag), anchor=(0.5, 1.5), interaction=False)
                     text_mag.setPos(star_x, star_y)
                     text_mag.setFont(QtGui.QFont('Arial', 10))
                     text_mag.setColor(QtGui.QColor(0, 255, 0))
@@ -4504,7 +4504,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.residual_text.addTextItem(text_mag)
 
                     # Add SNR to the right of the star
-                    text_snr = TextItem(snr_txt, anchor=(-0.25, 0.5))
+                    text_snr = TextItem(snr_txt, anchor=(-0.25, 0.5), interaction=False)
                     text_snr.setPos(star_x, star_y)
                     text_snr.setFont(QtGui.QFont('Arial', 8))
                     text_snr.setColor(snr_color)

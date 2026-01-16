@@ -258,6 +258,7 @@ class TextItemList(pg.GraphicsObject):
         """
         text.setParentItem(self.parentItem())
         text.setZValue(self.z)
+        text.setVisible(self.isVisible())
         self.text_list.append(text)
 
     def addNewTextItem(self, *args, **kwargs):
@@ -267,6 +268,7 @@ class TextItemList(pg.GraphicsObject):
         new = TextItem(*args, **kwargs)
         new.setParentItem(self.parentItem())
         new.setZValue(self.z)
+        new.setVisible(self.isVisible())
         self.text_list.append(new)
 
     def setZValue(self, z):
@@ -307,6 +309,11 @@ class TextItemList(pg.GraphicsObject):
         for text in self.text_list:
             text.setParentItem(parent)
 
+    def setVisible(self, visible):
+        super().setVisible(visible)
+        for text in self.text_list:
+            text.setVisible(visible)
+
     def paint(self, painter, option, widget=None):
         for text in self.text_list:
             text.update()
@@ -317,10 +324,14 @@ class TextItemList(pg.GraphicsObject):
 
 class TextItem(pg.TextItem):
     def __init__(self, text='', color=(200, 200, 200), html=None, anchor=(0, 0),
-                 border=None, fill=None, angle=0, rotateAxis=None):
+                 border=None, fill=None, angle=0, rotateAxis=None, interaction=True):
         pg.TextItem.__init__(self, text, color, html, anchor, border, fill, angle, rotateAxis)
-        self.textItem.setOpenExternalLinks(True)
-        self.textItem.setTextInteractionFlags(QtCore.Qt.TextBrowserInteraction)
+        if interaction:
+            self.textItem.setOpenExternalLinks(True)
+            self.textItem.setTextInteractionFlags(QtCore.Qt.TextBrowserInteraction)
+        else:
+            self.textItem.setOpenExternalLinks(False)
+            self.textItem.setTextInteractionFlags(QtCore.Qt.NoTextInteraction)
 
     def setAlign(self, align):
         """
