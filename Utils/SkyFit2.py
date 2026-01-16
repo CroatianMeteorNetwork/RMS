@@ -8963,7 +8963,7 @@ class PlateTool(QtWidgets.QMainWindow):
             years_from_J2000=years_from_J2000,
             lim_mag=lim_mag,
             mag_band_ratios=self.config.star_catalog_band_ratios,
-            additional_fields=['spectraltype_esphs', 'preferred_name', 'common_name'])
+            additional_fields=['spectraltype_esphs', 'preferred_name', 'common_name', 'bayer_name'])
 
         if len(catalog_results) == 4:
             self.catalog_stars, self.mag_band_string, self.config.star_catalog_band_ratios, extras = catalog_results
@@ -8983,16 +8983,36 @@ class PlateTool(QtWidgets.QMainWindow):
             # Decode bytes to strings if necessary
             self.catalog_stars_preferred_names = np.array([x.decode('utf-8') for x in extras['preferred_name']])
 
-            # Check if common_name is embedded in the catalog (v2 format)
-            if 'common_name' in extras:
-                # Use embedded common names directly
-                self.catalog_stars_common_names = np.array([x.decode('utf-8') for x in extras['common_name']])
+            # Extract bayer_name if available
+            if 'bayer_name' in extras:
+                self.catalog_stars_bayer_names = np.array([x.decode('utf-8') for x in extras['bayer_name']])
             else:
-                # No common names available, use preferred names as fallback
-                self.catalog_stars_common_names = self.catalog_stars_preferred_names.copy()
+                self.catalog_stars_bayer_names = None
+
+            # Extract common_name if available
+            if 'common_name' in extras:
+                raw_common_names = np.array([x.decode('utf-8') for x in extras['common_name']])
+            else:
+                raw_common_names = None
+
+            # Build display names with priority: common_name > bayer_name > preferred_name
+            display_names = []
+            for i in range(len(self.catalog_stars_preferred_names)):
+                pref = self.catalog_stars_preferred_names[i].strip()
+                common = raw_common_names[i].strip() if raw_common_names is not None else ''
+                bayer = self.catalog_stars_bayer_names[i].strip() if self.catalog_stars_bayer_names is not None else ''
+
+                if common:
+                    display_names.append(common)
+                elif bayer:
+                    display_names.append(bayer)
+                else:
+                    display_names.append(pref)
+            self.catalog_stars_common_names = np.array(display_names)
         else:
             self.catalog_stars_preferred_names = None
             self.catalog_stars_common_names = None
+            self.catalog_stars_bayer_names = None
 
         return self.catalog_stars
 

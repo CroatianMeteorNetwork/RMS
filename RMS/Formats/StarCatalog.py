@@ -219,7 +219,7 @@ def loadGMNStarCatalog(file_path,
     # Step 1: Cache the catalog data to avoid repeated decompression
     if not hasattr(loadGMNStarCatalog, cache_name):
 
-        # Define the data structure for the catalog (v1 - 18 columns, without common_name)
+        # Define the data structure for the catalog (v1 - 18 columns, legacy format)
         data_types_v1 = [
             ('designation', 'S30'),
             ('ra', 'f8'),
@@ -241,7 +241,7 @@ def loadGMNStarCatalog(file_path,
             ('Simbad_OType', 'S30')
         ]
 
-        # Define the data structure for the catalog (v2 - 19 columns, with common_name)
+        # Define the data structure for the catalog (v2 - 20 columns, with common_name and bayer_name)
         data_types_v2 = [
             ('designation', 'S30'),
             ('ra', 'f8'),
@@ -261,6 +261,7 @@ def loadGMNStarCatalog(file_path,
             ('oid', 'i4'),
             ('preferred_name', 'S30'),
             ('common_name', 'S30'),
+            ('bayer_name', 'S30'),
             ('Simbad_OType', 'S30')
         ]
 
@@ -272,8 +273,8 @@ def loadGMNStarCatalog(file_path,
             num_columns = int(np.fromfile(fid, dtype=np.uint32, count=1)[0])
             fid.read(declared_header_size - 12)  # Skip column names
 
-            # Select data types based on number of columns (v1=18, v2=19)
-            if num_columns >= 19:
+            # Select data types based on number of columns (v1=18, v2=20)
+            if num_columns >= 20:
                 data_types = data_types_v2
             else:
                 data_types = data_types_v1
