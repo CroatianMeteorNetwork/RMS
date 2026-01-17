@@ -45,6 +45,8 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
     extinctionCorrectionTrueToApparent, applyAstrometryFTPdetectinfo, getFOVSelectionRadius
 from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
+from RMS.Astrometry.StarClasses import CatalogStar, GeoPoint, PairedStars
+from RMS.Astrometry.StarFilters import filterPhotometricOutliers, filterBlendedStars, filterHighFWHMStars
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, \
     apparentAltAz2TrueRADec, J2000_JD, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
 from RMS.Astrometry.AstrometryNet import astrometryNetSolve
@@ -1296,155 +1298,8 @@ class GeoPoints(object):
         self.ra_data = np.array(self.ra_data)
         self.dec_data = np.array(self.dec_data)
 
-        
 
-class CatalogStar(object):
-    def __init__(self, ra, dec, mag):
-        """ Container for a catalog star. """
-
-        self.pick_type = "star"
-
-        self.ra = ra
-        self.dec = dec
-        self.mag = mag
-
-
-    def coords(self):
-        """ Return sky coordinates. """
-
-        return self.ra, self.dec, self.mag
-
-
-
-class GeoPoint(object):
-    def __init__(self, geo_points_obj, geo_point_index):
-        """ Container for a geo point. """
-
-        self.pick_type = "geopoint"
-
-        self.geo_points_obj = geo_points_obj
-        self.geo_point_index = geo_point_index
-
-
-    def coords(self):
-        """ Return sky coordinates. """
-
-        ra = self.geo_points_obj.ra_data[self.geo_point_index]
-        dec = self.geo_points_obj.dec_data[self.geo_point_index]
-        mag = 1.0
-
-        return ra, dec, mag
-
-
-
-
-class PairedStars(object):
-    def __init__(self):
-        """ Container for picked stars and geo points. """
-
-        self.paired_stars = []
-
-
-    def addPair(self, x, y, fwhm, intens_acc, obj, snr=0, saturated=False):
-        """ Add a pair between image coordinates and a star or a geo point. 
-    
-        Arguments:
-            x: [float] Image X coordinate.
-            y: [float] Image Y coordinate.
-            fwhm: [float] Full width at half maximum (px).
-            intens_acc: [float] Sum of pixel intensities.
-            obj: [object] Instance of CatalogStar or GeoPoint.
-
-        """
-
-        self.paired_stars.append([x, y, fwhm, intens_acc, obj, snr, saturated])
-
-
-    def removeGeoPoints(self):
-        """ Remove all geo points form the list of pairs. """
-
-        self.paired_stars = [entry for entry in self.paired_stars if entry[3].pick_type != "geopoint"]
-
-
-
-    def findClosestPickedStarIndex(self, pos_x, pos_y):
-        """ Finds the index of the closest picked star on the image to the given image position. """
-
-        min_index = 0
-        min_dist = np.inf
-
-        picked_x = [star[0] for star in self.paired_stars]
-        picked_y = [star[1] for star in self.paired_stars]
-
-        # Find the index of the closest catalog star to the given image coordinates
-        for i, (x, y) in enumerate(zip(picked_x, picked_y)):
-
-            dist = (pos_x - x)**2 + (pos_y - y)**2
-
-            if dist < min_dist:
-                min_dist = dist
-                min_index = i
-
-        return min_index
-
-
-    def removeClosestPair(self, pos_x, pos_y):
-        """ Remove pair closest to the given image coordinates. """
-
-        if not len(self.paired_stars):
-            return None
-
-        # Find the closest star to the coordinates
-        min_index = self.findClosestPickedStarIndex(pos_x, pos_y)
-
-        # Remove the star from the list
-        self.paired_stars.pop(min_index)
-
-
-    def imageCoords(self, draw=False):
-        """ Return a list of image coordinates of the pairs. 
-    
-        Keyword arguments:
-            draw: [bool] Add an offset of 0.5 px for drwaing using pyqtgraph.
-        """
-
-        offset = 0
-        if draw:
-            offset = 0.5
-
-        img_coords = [(x + offset, y + offset, intens_acc) for x, y, _, intens_acc, _, _, _ 
-                      in self.paired_stars]
-
-        return img_coords
-
-
-    def skyCoords(self):
-        """ Return a list of sky coordinates. """
-
-        return [obj.coords() for _, _, _, _, obj, _, _ in self.paired_stars]
-
-
-    def allCoords(self):
-        """ Return all coordiantes, image and sky in the [(x, y, intens_acc, snr), (ra, dec, mag)] list form
-            for every entry. 
-        """
-
-        return [
-            [(x, y, fwhm, intens_acc, snr, saturated), obj.coords()]
-            for x, y, fwhm, intens_acc, obj, snr, saturated in self.paired_stars
-            ]
-
-    def snr(self):
-        """ Return a list of SNR values. """
-
-        return [snr for _, _, _, _, _, snr, _ in self.paired_stars]
-
-
-    def __len__(self):
-        """ Return the total number of paired stars. """
-
-        return len(self.paired_stars)
-
+# CatalogStar, GeoPoint, and PairedStars are now imported from RMS.Astrometry.StarClasses
 
 
 class PlateTool(QtWidgets.QMainWindow):
@@ -4811,60 +4666,16 @@ class PlateTool(QtWidgets.QMainWindow):
         Returns:
             int: Number of stars removed.
         """
-        if len(self.paired_stars) < 5:
-            return 0
-
         # Get all catalog stars for neighbor lookup
         if not hasattr(self, 'catalog_stars') or self.catalog_stars is None:
             return 0
 
-        catalog_ra = self.catalog_stars[:, 0]
-        catalog_dec = self.catalog_stars[:, 1]
-        catalog_mag = self.catalog_stars[:, 2]
-
-        blend_radius_deg = blend_radius_arcsec / 3600.0
-
-        blended_indices = set()
-
-        for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(
-                self.paired_stars.paired_stars):
-
-            # Skip geo points
-            if hasattr(obj, 'pick_type') and obj.pick_type == "geopoint":
-                continue
-
-            ra, dec, mag = obj.coords()
-
-            # Compute angular distances to all catalog stars
-            # Using small-angle approximation (accurate for small radii)
-            cos_dec = np.cos(np.radians(dec))
-            d_ra = (catalog_ra - ra) * cos_dec
-            d_dec = catalog_dec - dec
-            angular_dist = np.sqrt(d_ra**2 + d_dec**2)
-
-            # Find neighbors within radius (excluding self)
-            neighbor_mask = (angular_dist < blend_radius_deg) & (angular_dist > 0.001)
-
-            # Only count bright neighbors (within mag_diff_limit of matched star)
-            bright_neighbor_mask = neighbor_mask & (catalog_mag < mag + mag_diff_limit)
-
-            num_bright_neighbors = np.sum(bright_neighbor_mask)
-
-            if num_bright_neighbors > 0:
-                blended_indices.add(i)
-
-        # Remove blended stars from paired_stars
-        if len(blended_indices) > 0:
-            new_paired_stars = PairedStars()
-            for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(
-                    self.paired_stars.paired_stars):
-                if i not in blended_indices:
-                    new_paired_stars.addPair(x, y, fwhm, intens_acc, obj, snr, saturated)
-            self.paired_stars = new_paired_stars
-
-        removed_count = len(blended_indices)
-        if removed_count > 0:
-            print(f"Removed {removed_count} blended stars (neighbors within {blend_radius_arcsec}\")")
+        self.paired_stars, removed_count = filterBlendedStars(
+            self.paired_stars, self.catalog_stars,
+            blend_radius_arcsec=blend_radius_arcsec,
+            mag_diff_limit=mag_diff_limit,
+            verbose=True
+        )
 
         return removed_count
 
@@ -4885,52 +4696,11 @@ class PlateTool(QtWidgets.QMainWindow):
         Returns:
             int: Number of stars removed.
         """
-        if len(self.paired_stars) < 10:
-            return 0
-
-        # Collect FWHM values and indices (excluding geo points)
-        fwhm_list = []
-        valid_indices = []
-
-        for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(
-                self.paired_stars.paired_stars):
-
-            # Skip geo points
-            if hasattr(obj, 'pick_type') and obj.pick_type == "geopoint":
-                continue
-
-            if fwhm is not None and fwhm > 0:
-                fwhm_list.append(fwhm)
-                valid_indices.append(i)
-
-        if len(fwhm_list) < 10:
-            return 0
-
-        fwhm_array = np.array(fwhm_list)
-
-        # Calculate the FWHM threshold (remove top fraction)
-        threshold_percentile = (1.0 - fraction) * 100
-        fwhm_threshold = np.percentile(fwhm_array, threshold_percentile)
-
-        # Find indices to remove
-        high_fwhm_indices = set()
-        for idx, fwhm_val in zip(valid_indices, fwhm_array):
-            if fwhm_val > fwhm_threshold:
-                high_fwhm_indices.add(idx)
-
-        # Remove high FWHM stars from paired_stars
-        if len(high_fwhm_indices) > 0:
-            new_paired_stars = PairedStars()
-            for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(
-                    self.paired_stars.paired_stars):
-                if i not in high_fwhm_indices:
-                    new_paired_stars.addPair(x, y, fwhm, intens_acc, obj, snr, saturated)
-            self.paired_stars = new_paired_stars
-
-        removed_count = len(high_fwhm_indices)
-        if removed_count > 0:
-            median_fwhm = np.median(fwhm_array)
-            print(f"Removed {removed_count} high-FWHM stars (FWHM > {fwhm_threshold:.2f}, median={median_fwhm:.2f})")
+        self.paired_stars, removed_count = filterHighFWHMStars(
+            self.paired_stars,
+            fraction=fraction,
+            verbose=True
+        )
 
         return removed_count
 
