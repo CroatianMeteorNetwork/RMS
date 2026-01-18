@@ -27,6 +27,8 @@ from RMS.Logger import getLogger
 
 
 LATEST_LOG_UPLOADS_FILE_NAME = ".latestloguploads.json"
+ISO_DATE_2000 = datetime.datetime(int(2000), int(1), int(1), int(0), int(0), int(0)).isoformat()
+
 log = getLogger("logger")
 
 
@@ -71,10 +73,12 @@ def getLogTypes(config):
         [list] list of log file types
     """
     log_dir = os.path.join(config.data_dir, config.log_dir)
-    log_file_list, log_types_list = os.listdir(log_dir), []
-    unique_log_type_set  = {item.split("_")[0] for item in log_file_list if item.endswith(".log")}
-    for log_type in unique_log_type_set:
-        log.info(f"                 : {log_type}")
+
+    # Form the set of log names where ISO_DATE_2000 is not returned
+    log_file_set = {f for f in os.listdir(log_dir) if extractDateFromLogName(config, f) != ISO_DATE_2000}
+
+    # Form the set of unique log types
+    unique_log_type_set  = {item.split("_")[0] for item in log_file_set if item.endswith(".log")}
 
     return sorted(list(unique_log_type_set))
 
