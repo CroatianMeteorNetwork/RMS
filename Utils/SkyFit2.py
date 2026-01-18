@@ -8215,10 +8215,13 @@ class PlateTool(QtWidgets.QMainWindow):
         img_width = self.config.width
         img_height = self.config.height
 
-        # Build set of available image filenames (basenames only)
+        # Build set of available image filenames (basenames only), excluding placeholders
         available_images = set()
         for ff_path in self.img_handle.ff_list:
-            available_images.add(os.path.basename(ff_path))
+            basename = os.path.basename(ff_path)
+            # Skip placeholder images
+            if "_placeholder" not in basename:
+                available_images.add(basename)
 
         # Find the best frame from all CALSTARS
         best_ff, best_score, all_scores = selectBestFrame(
@@ -8373,6 +8376,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
                         self.updateStars()
                         self.updateLeftLabels()
+
+                        # Compute and display residuals
+                        if len(self.paired_stars) >= self.getMinFitStars():
+                            self.fitPickedStars()
 
                         # Save the platepar
                         platepar_path = os.path.join(self.dir_path, self.config.platepar_name)
