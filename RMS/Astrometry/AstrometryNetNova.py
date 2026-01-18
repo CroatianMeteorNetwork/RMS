@@ -615,7 +615,47 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
         except Exception as e:
             sys.stderr.write("Warning: failed to remove temporary image '{}': {}\n".format(tmpimg, e))
 
-    return ra_mid, dec_mid, rot_eq_standard, scale, fov_w, fov_h, None, None
+    # Try to fetch matched star data from server (for custom servers that support it)
+    matched_stars = []
+    solution_info = None
+    if api_url is not None and 'nova.astrometry.net' not in api_url:
+        try:
+            info_url = api_url.rstrip('/') + "/jobs/{}/info".format(solved_id)
+            info_resp = urlopen(info_url)
+            info_data = json.loads(info_resp.read())
+
+            # Parse star_data if available
+            if info_data.get('star_data'):
+                for star in info_data['star_data']:
+                    matched_stars.append({
+                        'ra_deg': star.get('ra', 0),
+                        'dec_deg': star.get('dec', 0),
+                        'x_pix': star.get('x', 0),
+                        'y_pix': star.get('y', 0)
+                    })
+                print("Matched stars from server: {:d}".format(len(matched_stars)))
+
+            # Build solution_info similar to local solver
+            # SkyFit2 looks for 'quad_stars' for magenta boxes
+            solution_info = {
+                'quad_stars': matched_stars,  # Used by SkyFit2 for magenta markers
+                'matched_stars': matched_stars,  # Keep for compatibility
+                'wcs_obj': wcs_obj,
+                'solve_time': info_data.get('solve_time', 0),
+                'objects_in_field': info_data.get('objects_in_field', [])
+            }
+        except Exception as e:
+            print("Could not fetch matched stars: {}".format(e))
+            solution_info = {'wcs_obj': wcs_obj}
+
+    # Return star_data as [x_coords, y_coords] for compatibility
+    star_data = None
+    if matched_stars:
+        star_x = [s['x_pix'] for s in matched_stars]
+        star_y = [s['y_pix'] for s in matched_stars]
+        star_data = [np.array(star_x), np.array(star_y)]
+
+    return ra_mid, dec_mid, rot_eq_standard, scale, fov_w, fov_h, star_data, solution_info
 
 
 if __name__ == '__main__':
