@@ -472,7 +472,7 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
 
     # Get results
     get_results_tries = 10
-    get_solution_tries = 30
+    get_solution_tries = 15  # ~75 sec polling, enough for 1 min server timeout
     results_tries = 0
     solution_tries = 0
     while True:
