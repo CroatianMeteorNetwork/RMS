@@ -321,7 +321,7 @@ def printFitResiduals(paired_stars, platepar, jd, ff_dt):
 
 
 def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
-                    fov_w_hint=None, distortion_type=DEFAULT_DISTORTION_TYPE,
+                    fov_w_hint=None, ff_name=None, distortion_type=DEFAULT_DISTORTION_TYPE,
                     equal_aspect=DEFAULT_EQUAL_ASPECT, asymmetry_corr=DEFAULT_ASYMMETRY_CORR,
                     force_distortion_centre=DEFAULT_FORCE_DISTORTION_CENTRE,
                     refraction=DEFAULT_REFRACTION,
@@ -334,7 +334,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
 
     This function replicates the behavior of SkyFit2's "Auto Fit" button:
     1. Loads CALSTARS data from the directory
-    2. Selects the best frame based on star distribution
+    2. Selects the best frame based on star distribution (or uses specified frame)
     3. Runs astrometry.net plate solving
     4. Performs NN-based refinement with intermediate settings
     5. Applies star filtering (photometric outliers, blended stars, high FWHM)
@@ -348,6 +348,8 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
         platepar_template: [Platepar] Optional template platepar with station location.
                           If None, uses config values.
         fov_w_hint: [float] Optional FOV width hint in degrees. If None, uses config.fov_w.
+        ff_name: [str] Optional specific FF filename to use. If None, selects best frame
+                 from CALSTARS automatically.
 
     Keyword arguments (final fit settings - match SkyFit2 defaults):
         distortion_type: [str] Distortion model for final fit (default: "radial5-odd")
@@ -395,30 +397,48 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
     img_width = config.width
     img_height = config.height
 
-    if verbose:
-        print()
-        print("Scoring frames for star distribution...")
+    # Use specified frame or find the best one
+    if ff_name is not None:
+        # Use the specified frame
+        if ff_name not in calstars:
+            if verbose:
+                print("ERROR: Specified frame '{:s}' not found in CALSTARS".format(ff_name))
+            return None, None, None
 
-    best_ff, best_score, all_scores = selectBestFrame(
-        calstars, img_width, img_height,
-        min_stars=10, max_stars=200,
-        verbose=verbose
-    )
+        best_ff = ff_name
+        best_score = None
+        all_scores = {}
 
-    if best_ff is None:
         if verbose:
-            print("ERROR: No valid frames found in CALSTARS")
-        return None, None, None
+            print()
+            print("Using specified frame: {:s}".format(best_ff))
+            print("  Stars: {:d}".format(len(calstars[best_ff])))
+    else:
+        # Find the best frame automatically
+        if verbose:
+            print()
+            print("Scoring frames for star distribution...")
 
-    if verbose:
-        print()
-        print("Best frame: {:s} (score={:.3f})".format(best_ff, best_score))
-        details = all_scores[best_ff]
-        print("  Stars: {:d}, Coverage: {:.1f}%, Non-saturated: {:.1f}%".format(
-            details['quality_details']['n_stars'],
-            details['distribution_details']['coverage_fraction'] * 100,
-            details['quality_details']['saturation_fraction'] * 100
-        ))
+        best_ff, best_score, all_scores = selectBestFrame(
+            calstars, img_width, img_height,
+            min_stars=10, max_stars=200,
+            verbose=verbose
+        )
+
+        if best_ff is None:
+            if verbose:
+                print("ERROR: No valid frames found in CALSTARS")
+            return None, None, None
+
+        if verbose:
+            print()
+            print("Best frame: {:s} (score={:.3f})".format(best_ff, best_score))
+            details = all_scores[best_ff]
+            print("  Stars: {:d}, Coverage: {:.1f}%, Non-saturated: {:.1f}%".format(
+                details['quality_details']['n_stars'],
+                details['distribution_details']['coverage_fraction'] * 100,
+                details['quality_details']['saturation_fraction'] * 100
+            ))
 
     # Get star data for best frame
     star_data = np.array(calstars[best_ff])
@@ -649,10 +669,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
             print("  Scale = {:.4f} arcmin/px".format(60 / platepar.F_scale))
             print("  Matched stars: {:d}".format(len(paired_stars)))
 
-    # Return matched stars in the format expected
-    matched_stars = paired_stars.allCoords()
-
-    return platepar, matched_stars, best_ff
+    return platepar, paired_stars, best_ff
 
 
 def loadCatalogStars(config, lim_mag, jd=None):

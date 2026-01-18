@@ -8212,9 +8212,14 @@ class PlateTool(QtWidgets.QMainWindow):
         img_width = self.config.width
         img_height = self.config.height
 
-        # Find the best frame
+        # Build set of available image filenames (basenames only)
+        available_images = set()
+        for ff_path in self.img_handle.ff_list:
+            available_images.add(os.path.basename(ff_path))
+
+        # Find the best frame from all CALSTARS
         best_ff, best_score, all_scores = selectBestFrame(
-            self.calstars, img_width, img_height, verbose=True
+            self.calstars, img_width, img_height, verbose=False
         )
 
         if best_ff is None:
@@ -8225,23 +8230,201 @@ class PlateTool(QtWidgets.QMainWindow):
             self.status_bar.showMessage("Best frame search failed")
             return
 
-        # Find the index of the best frame in ff_list
+        # Check if best frame is available in the image list
+        best_ff_available = best_ff in available_images
+
+        # Find best frame among only available images
+        calstars_available = {k: v for k, v in self.calstars.items() if k in available_images}
+
+        if len(calstars_available) == 0:
+            QtWidgets.QMessageBox.warning(
+                self, "No Matching Frames",
+                "None of the CALSTARS frames match the available images."
+            )
+            self.status_bar.showMessage("No matching frames")
+            return
+
+        best_available_ff, best_available_score, _ = selectBestFrame(
+            calstars_available, img_width, img_height, verbose=False
+        )
+
+        # Determine which frame to use
+        selected_ff = None
+        selected_score = None
+
+        if best_ff_available:
+            # Best overall is available - use it directly
+            selected_ff = best_ff
+            selected_score = best_score
+        elif best_available_ff is not None:
+            # Best overall not available, but we have a best among available
+            # Ask user what to do
+            msg_box = QtWidgets.QMessageBox(self)
+            msg_box.setWindowTitle("Best Frame Not Available")
+            msg_box.setText(
+                f"The best frame in CALSTARS is '{best_ff}' (score={best_score:.3f}), "
+                f"but it's not in the current image list.\n\n"
+                f"The best available image is '{best_available_ff}' (score={best_available_score:.3f})."
+            )
+            msg_box.setInformativeText(
+                "Auto Fit will create a platepar and show a placeholder image.\n"
+                "Navigate will go to the best available image for manual fitting."
+            )
+
+            # Add custom buttons
+            auto_fit_btn = msg_box.addButton("Auto Fit (placeholder)", QtWidgets.QMessageBox.ActionRole)
+            navigate_btn = msg_box.addButton("Navigate to Best Available", QtWidgets.QMessageBox.ActionRole)
+            cancel_btn = msg_box.addButton(QtWidgets.QMessageBox.Cancel)
+
+            msg_box.setDefaultButton(auto_fit_btn)
+            msg_box.exec_()
+
+            clicked = msg_box.clickedButton()
+
+            if clicked == auto_fit_btn:
+                # Run AutoPlatepar on the best CALSTARS frame
+                self.status_bar.showMessage(f"Running auto fit on {best_ff}...")
+                QtWidgets.QApplication.processEvents()
+
+                from RMS.Astrometry.AutoPlatepar import autoFitPlatepar
+
+                try:
+                    # autoFitPlatepar returns (platepar, matched_stars, ff_name)
+                    result = autoFitPlatepar(
+                        self.dir_path,
+                        self.config,
+                        self.catalog_stars,
+                        ff_name=best_ff
+                    )
+
+                    if result is None:
+                        new_platepar = None
+                    else:
+                        new_platepar, matched_stars, used_ff = result
+
+                    if new_platepar is not None:
+                        # Create a placeholder PNG image with diagonal stripes
+                        height, width = self.config.height, self.config.width
+                        placeholder = np.full((height, width), 24, dtype=np.uint8)
+
+                        # Add diagonal stripes (lighter gray)
+                        stripe_width = 40
+                        stripe_spacing = 80
+                        for i in range(-(height + width), height + width, stripe_spacing):
+                            for offset in range(stripe_width):
+                                y_coords = np.arange(height)
+                                x_coords = i + y_coords + offset
+                                valid = (x_coords >= 0) & (x_coords < width)
+                                placeholder[y_coords[valid], x_coords[valid]] = 40
+
+                        # Create placeholder filename based on original FF name
+                        # e.g. FF_USV003_20250416_091633_928_0628224.fits
+                        #   -> FF_USV003_20250416_091633_928_0628224_placeholder.png
+                        base_name = os.path.splitext(best_ff)[0]
+                        placeholder_name = f"{base_name}_placeholder.png"
+                        placeholder_path = os.path.join(self.dir_path, placeholder_name)
+
+                        # Save the placeholder PNG
+                        from PIL import Image
+                        img_pil = Image.fromarray(placeholder)
+                        img_pil.save(placeholder_path)
+                        print(f"Created placeholder image: {placeholder_path}")
+
+                        # Copy CALSTARS data to placeholder filename so detected stars are shown
+                        if best_ff in self.calstars:
+                            self.calstars[placeholder_name] = self.calstars[best_ff]
+
+                        # Refresh the file list and navigate to the placeholder
+                        # Re-detect input type to include new file
+                        self.img_handle = detectInputTypeFolder(
+                            self.dir_path, self.config,
+                            beginning_time=None, fps=self.fps
+                        )
+                        self.img.changeHandle(self.img_handle)
+
+                        # Find and navigate to the placeholder
+                        target_index = None
+                        for i, ff_path in enumerate(self.img_handle.ff_list):
+                            if os.path.basename(ff_path) == placeholder_name:
+                                target_index = i
+                                break
+
+                        if target_index is not None:
+                            current_index = self.img_handle.current_ff_index
+                            delta = target_index - current_index
+                            if delta != 0:
+                                self.nextImg(n=delta)
+                        else:
+                            # Fallback - just set the image directly
+                            self.img.setImage(placeholder.T)
+
+                        # Update the current platepar
+                        self.platepar = new_platepar
+                        self.tab.param_manager.updatePlatepar()
+                        self.updateDistortion()
+
+                        # Set up paired_stars from matched results
+                        if matched_stars is not None:
+                            self.paired_stars = matched_stars
+                            self.tab.param_manager.updatePairedStars(len(self.paired_stars))
+
+                        self.updateStars()
+                        self.updateLeftLabels()
+
+                        # Save the platepar
+                        platepar_path = os.path.join(self.dir_path, self.config.platepar_name)
+                        self.platepar.write(platepar_path, fmt=self.platepar_fmt)
+
+                        self.status_bar.showMessage(
+                            f"Auto fit complete: {placeholder_name} - {len(self.paired_stars)} stars"
+                        )
+                        print(f"\nAuto fit complete on {best_ff}")
+                        print(f"Platepar saved to: {platepar_path}")
+                    else:
+                        QtWidgets.QMessageBox.warning(
+                            self, "Auto Fit Failed",
+                            f"Failed to create platepar from {best_ff}."
+                        )
+                        self.status_bar.showMessage("Auto fit failed")
+
+                except Exception as e:
+                    QtWidgets.QMessageBox.warning(
+                        self, "Auto Fit Error",
+                        f"Error during auto fit: {str(e)}"
+                    )
+                    self.status_bar.showMessage("Auto fit error")
+                    import traceback
+                    traceback.print_exc()
+
+                return
+
+            elif clicked == navigate_btn:
+                selected_ff = best_available_ff
+                selected_score = best_available_score
+            else:
+                self.status_bar.showMessage("Best frame search cancelled")
+                return
+        else:
+            QtWidgets.QMessageBox.warning(
+                self, "No Valid Frame",
+                "Could not find a valid frame to navigate to."
+            )
+            self.status_bar.showMessage("No valid frame found")
+            return
+
+        # Find the index of selected frame in ff_list
         target_index = None
         for i, ff_name in enumerate(self.img_handle.ff_list):
-            # ff_list may contain full paths or just filenames
-            if os.path.basename(ff_name) == best_ff or ff_name == best_ff:
+            if os.path.basename(ff_name) == selected_ff or ff_name == selected_ff:
                 target_index = i
                 break
 
         if target_index is None:
-            QtWidgets.QMessageBox.warning(
-                self, "Frame Not Found",
-                f"Best frame '{best_ff}' not found in current image list."
-            )
-            self.status_bar.showMessage("Best frame not found in list")
+            # Should not happen at this point, but handle gracefully
+            self.status_bar.showMessage("Error finding frame index")
             return
 
-        # Navigate to the best frame
+        # Navigate to the selected frame
         current_index = self.img_handle.current_ff_index
         delta = target_index - current_index
 
@@ -8249,15 +8432,15 @@ class PlateTool(QtWidgets.QMainWindow):
             self.nextImg(n=delta)
 
         # Get score details for status message
-        score_info = all_scores.get(best_ff, {})
+        score_info = all_scores.get(selected_ff, {})
         n_stars = score_info.get('quality_details', {}).get('n_stars', 0)
 
         self.status_bar.showMessage(
-            f"Best frame: {best_ff} (score={best_score:.3f}, {n_stars} stars)"
+            f"Best frame: {selected_ff} (score={selected_score:.3f}, {n_stars} stars)"
         )
 
-        print(f"\nBest frame: {best_ff}")
-        print(f"  Score: {best_score:.3f}")
+        print(f"\nBest frame: {selected_ff}")
+        print(f"  Score: {selected_score:.3f}")
         print(f"  Stars: {n_stars}")
 
 

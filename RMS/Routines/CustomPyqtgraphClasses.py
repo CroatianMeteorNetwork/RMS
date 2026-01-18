@@ -1764,7 +1764,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # Best Frame button row
         best_frame_hbox = QtWidgets.QHBoxLayout()
         best_frame_hbox.setSpacing(self.scaledSpacing(0.25))
-        self.find_best_frame_button = QtWidgets.QPushButton("Best Frame")
+        self.find_best_frame_button = QtWidgets.QPushButton("Find Best Frame")
         self.find_best_frame_button.setToolTip("Find the frame with best star distribution for calibration")
         self.find_best_frame_button.clicked.connect(self.sigFindBestFramePressed.emit)
         best_frame_hbox.addWidget(self.find_best_frame_button)
