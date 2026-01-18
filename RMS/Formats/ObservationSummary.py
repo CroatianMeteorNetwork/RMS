@@ -1,6 +1,6 @@
 # The MIT License
 
-# Copyright (c) 2025
+# Copyright (c) 2026
 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -173,6 +173,19 @@ def getObservationDuration(config, start_time):
         start_time_ephem, duration_ephem, end_time_ephem = getObservationDurationNightTime(config, start_time)
 
     return start_time_ephem, duration_ephem, end_time_ephem
+
+def getUpstreamBranch():
+    """Identify the active upstream branch
+
+    Return: [str] active upstream branch
+
+    """
+    cmd = ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]
+    upstream_branch  = subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode().strip().splitlines()[0]
+
+    return upstream_branch
+
+
 
 def getTimeClient():
     """Attempt to identify which time service client, if any is providing a service.
@@ -1265,6 +1278,7 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
         days_behind, remote_branch = daysBehind()
         addObsParam(obs_db_conn, "repository_lag_remote_days", days_behind)
         addObsParam(obs_db_conn, "remote_branch", os.path.basename(remote_branch))
+        addObsParam(obs_db_conn, "upstream_branch", os.path.basename(getUpstreamBranch()))
     except:
         addObsParam(obs_db_conn, "repository_lag_remote_days", "Not determined")
     obs_db_conn.close()
@@ -1292,7 +1306,7 @@ if __name__ == "__main__":
     print("Start time was {}".format(start_time))
     print("Duration time was {:.2f} hours".format(duration/3600))
     print("End time was {}".format(end_time))
-
+    print("Upstream branch is  {}".format(getUpstreamBranch()))
 
 
     startObservationSummaryReport(config, 100, force_delete=False)
