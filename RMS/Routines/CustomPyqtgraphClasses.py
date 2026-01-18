@@ -1759,15 +1759,20 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # buttons
         box = QtWidgets.QVBoxLayout()
         box.setContentsMargins(*self.scaledMargins(0.5, 0.25))
+        box.setSpacing(self.scaledSpacing(0.25))
 
-        # Best Frame button on its own row
+        # Best Frame button row
+        best_frame_hbox = QtWidgets.QHBoxLayout()
+        best_frame_hbox.setSpacing(self.scaledSpacing(0.25))
         self.find_best_frame_button = QtWidgets.QPushButton("Best Frame")
         self.find_best_frame_button.setToolTip("Find the frame with best star distribution for calibration")
         self.find_best_frame_button.clicked.connect(self.sigFindBestFramePressed.emit)
-        box.addWidget(self.find_best_frame_button)
+        best_frame_hbox.addWidget(self.find_best_frame_button)
+        box.addLayout(best_frame_hbox)
 
         # Fit buttons in a horizontal layout
         fit_hbox = QtWidgets.QHBoxLayout()
+        fit_hbox.setSpacing(self.scaledSpacing(0.25))
         self.fit_astrometry_button = QtWidgets.QPushButton("Fit")
         self.fit_astrometry_button.clicked.connect(self.sigFitPressed.emit)
         fit_hbox.addWidget(self.fit_astrometry_button)
@@ -1778,10 +1783,14 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         fit_hbox.addWidget(self.auto_fit_button)
         box.addLayout(fit_hbox)
 
+        # Next Star button row
+        next_star_hbox = QtWidgets.QHBoxLayout()
+        next_star_hbox.setSpacing(self.scaledSpacing(0.25))
         self.next_star_button = QtWidgets.QPushButton("Next Star")
         self.next_star_button.clicked.connect(self.sigNextStarPressed.emit)
         self.next_star_button.setEnabled(False)
-        box.addWidget(self.next_star_button)
+        next_star_hbox.addWidget(self.next_star_button)
+        box.addLayout(next_star_hbox)
 
 
 
