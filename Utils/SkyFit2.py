@@ -8266,20 +8266,29 @@ class PlateTool(QtWidgets.QMainWindow):
             # Best overall not available, but we have a best among available
             # Ask user what to do
             msg_box = QtWidgets.QMessageBox(self)
-            msg_box.setWindowTitle("Best Frame Not Available")
+            msg_box.setWindowTitle("Best Frame for Calibration")
+
+            # Get star counts for display
+            n_stars_best = len(self.calstars.get(best_ff, []))
+            n_stars_available = len(self.calstars.get(best_available_ff, []))
+
             msg_box.setText(
-                f"The best frame in CALSTARS is '{best_ff}' (score={best_score:.3f}), "
-                f"but it's not in the current image list.\n\n"
-                f"The best available image is '{best_available_ff}' (score={best_available_score:.3f})."
+                "The frame with the best star distribution in CALSTARS\n"
+                "doesn't have a saved image file in the given directory.\n\n"
+                "You can either:\n"
+                "  • Calibrate automatically using the star data\n"
+                "    (a placeholder will be shown instead of the image)\n"
+                "  • Go to the best available image and calibrate from there"
             )
             msg_box.setInformativeText(
-                "Auto Fit will create a platepar and show a placeholder image.\n"
-                "Navigate will go to the best available image for manual fitting."
+                f"From CALSTARS:\n"
+                f"  Best frame:       {best_ff}  ({n_stars_best} stars)\n"
+                f"  Best with image:  {best_available_ff}  ({n_stars_available} stars)"
             )
 
             # Add custom buttons
             auto_fit_btn = msg_box.addButton("Auto Fit (placeholder)", QtWidgets.QMessageBox.ActionRole)
-            navigate_btn = msg_box.addButton("Navigate to Best Available", QtWidgets.QMessageBox.ActionRole)
+            navigate_btn = msg_box.addButton("Go to Best Image", QtWidgets.QMessageBox.ActionRole)
             cancel_btn = msg_box.addButton(QtWidgets.QMessageBox.Cancel)
 
             msg_box.setDefaultButton(auto_fit_btn)
