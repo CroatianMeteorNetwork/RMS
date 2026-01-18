@@ -1192,7 +1192,8 @@ def startObservationSummaryReport(config, duration, force_delete=False):
     captured_directories = captureDirectories(os.path.join(config.data_dir, config.captured_dir), config.stationID)
     addObsParam(conn, "captured_directories", captured_directories)
     try:
-        addObsParam(conn, "camera_information", gatherCameraInformation(config))
+        pass
+        # addObsParam(conn, "camera_information", gatherCameraInformation(config))
     except:
         addObsParam(conn, "camera_information", "Unavailable")
 
