@@ -3031,12 +3031,12 @@ class PlateTool(QtWidgets.QMainWindow):
                 cat_mag_faintest = np.max(catalog_mag_filtered)
 
                 # Plot catalog stars
-                size = ((4.0 + (cat_mag_faintest - catalog_mag_filtered))/2.0)**(2*2.512*0.5)
+                self.catalog_marker_size = ((4.0 + (cat_mag_faintest - catalog_mag_filtered))/2.0)**(2*2.512*0.5)
 
                 self.cat_star_markers.setData(x=self.catalog_x_filtered + 0.5, \
-                    y=self.catalog_y_filtered + 0.5, size=size)
+                    y=self.catalog_y_filtered + 0.5, size=self.catalog_marker_size)
                 self.cat_star_markers2.setData(x=self.catalog_x_filtered + 0.5, \
-                    y=self.catalog_y_filtered + 0.5, size=size)
+                    y=self.catalog_y_filtered + 0.5, size=self.catalog_marker_size)
                 
                 # Plot spectral type text
                 self.spectral_type_text_list.clear()
@@ -3123,9 +3123,12 @@ class PlateTool(QtWidgets.QMainWindow):
                             continue
 
                         # Add text item with HTML
-                        text_item = TextItem(html=html_text, anchor=(1.2, 0.5))
+                        # Anchor (1.0, 0.5) places text right edge at anchor point
+                        # Small offset clears the marker without drifting too much on zoom
+                        text_item = TextItem(html=html_text, anchor=(1.0, 0.5))
                         text_item.setAlign(QtCore.Qt.AlignRight)
-                        text_item.setPos(self.catalog_x_filtered[i] + 0.5, self.catalog_y_filtered[i] + 0.5)
+                        text_item.setPos(self.catalog_x_filtered[i] - 3,
+                                         self.catalog_y_filtered[i] + 0.5)
                         self.spectral_type_text_list.addTextItem(text_item)
             else:
                 print('No catalog stars visible!')
