@@ -18,9 +18,13 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.application  import MIMEApplication
 from email.encoders import encode_noop
 
+import warnings
+
 import numpy as np
 from astropy.wcs import WCS
 from astropy.io import fits
+from astropy.wcs import FITSFixedWarning
+from astropy.utils.exceptions import AstropyWarning
 
 try:
     # Python 2
@@ -56,6 +60,13 @@ from RMS.ImgurUpload import imgurUpload
 # Denis' API key for nova.astrometry.net
 API_KEY = "sybwjtfjbrpgomep"
 
+# Astrometry.net API URLs
+NOVA_API_URL = 'http://nova.astrometry.net/api/'
+CONTRAILCAST_API_URL = 'https://astro.contrailcast.com/api/'
+
+# Primary server (contrailcast is faster and more reliable)
+PRIMARY_API_URL = CONTRAILCAST_API_URL
+FALLBACK_API_URL = NOVA_API_URL
 
 DEBUG = False
 
@@ -189,7 +200,8 @@ class Client(object):
                                 ('crpix_center', None, bool),
                                 ('x', None, list),
                                 ('y', None, list),
-            # image_width, image_height
+                                ('image_width', None, int),
+                                ('image_height', None, int),
                                 ]:
             if key in kwargs:
                 val = kwargs.pop(key)
@@ -269,24 +281,26 @@ class Client(object):
 
 
 def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None, fov_w_range=None,
-    api_key=None, x_center=None, y_center=None):
-    """ Find an astrometric solution of X, Y image coordinates of stars detected on an image using the 
-        nova.astrometry.net service.
+    api_key=None, x_center=None, y_center=None, api_url=None):
+    """ Find an astrometric solution of X, Y image coordinates of stars detected on an image using the
+        nova.astrometry.net service or a compatible API.
 
     Keyword arguments:
         ff_file_path: [str] Path to the FF file to load.
         img: [ndarray] Numpy array containing image data.
         x_data: [list] A list of star x image coordinates.
         y_data: [list] A list of star y image coordinates
-        fov_w_range: [2 element tuple] A tuple of scale_lower and scale_upper, i.e. the estimate of the 
+        fov_w_range: [2 element tuple] A tuple of scale_lower and scale_upper, i.e. the estimate of the
             width of the FOV in degrees.
         api_key: [str] nova.astrometry.net user API key. None by default, in which case the default API
             key will be used.
         x_center: [float] X coordinate of the image center. If not given, the image center will be used.
         y_center: [float] Y coordinate of the image center. If not given, the image center will be used.
+        api_url: [str] Custom API URL. None by default, in which case nova.astrometry.net will be used.
+            Can be set to use alternative servers like 'https://astro.contrailcast.com/api/'.
 
     Return:
-        (ra, dec, orientation, scale, fov_w, fov_h, star_data): [tuple of floats] All in degrees, 
+        (ra, dec, orientation, scale, fov_w, fov_h, star_data): [tuple of floats] All in degrees,
             scale in px/deg.
     """
 
@@ -298,7 +312,14 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
                 stat = first_status
 
         if len(stat.get("user_images", "")):
-            print("Link to web page: http://nova.astrometry.net/user_images/{:d}".format(stat.get("user_images", "")[0]))
+            # Use correct server URL for the web link
+            is_nova = api_url is None or 'nova.astrometry.net' in api_url
+            if is_nova:
+                base_url = "http://nova.astrometry.net"
+            else:
+                # Extract base URL from api_url (remove /api/ suffix)
+                base_url = api_url.rstrip('/').replace('/api', '')
+            print("Link to web page: {}/user_images/{:d}".format(base_url, stat.get("user_images", "")[0]))
 
 
     # Read the FF file, if given
@@ -313,7 +334,10 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
         file_handle = None
 
 
-    tmpimg = None 
+    tmpimg = None
+    img_data = None
+    image_url = None
+
     # Convert an image to a file handle
     if img is not None:
 
@@ -325,19 +349,28 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
         pil_img.save(file_handle, format='JPEG')
         img_data = file_handle.getvalue()
 
-        # Upload the image to imgur
-        try:
-            image_url = imgurUpload('skyfit_image.jpg', image_data=img_data)
-            tmpimg = None
-        except Exception as e:
-            image_url = None
-            tmpimg = os.path.join(os.getenv('TMP', default='/tmp'), 'skyfit_image.png')
-            pil_img.save(tmpimg)
+    # Create client with custom URL if provided
+    if api_url is not None:
+        c = Client(apiurl=api_url)
+        # For custom servers (like contrailcast), upload directly - don't use imgur
+        use_direct_upload = True
+    else:
+        c = Client()
+        # For nova.astrometry.net, use imgur URL upload (their preferred method)
+        use_direct_upload = False
+        if img_data is not None:
+            try:
+                image_url = imgurUpload('skyfit_image.jpg', image_data=img_data)
+            except Exception as e:
+                # Imgur failed, fall back to direct upload
+                use_direct_upload = True
 
+    # If direct upload needed, save to temp file
+    if use_direct_upload and img_data is not None and image_url is None:
+        tmpimg = os.path.join(os.getenv('TMP', default='/tmp'), 'skyfit_image.png')
+        pil_img.save(tmpimg)
 
-    c = Client()
-
-    # Log in to nova.astrometry.net
+    # Log in to the astrometry service
     if api_key is None:
         api_key = API_KEY
 
@@ -354,21 +387,33 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
         scale_lower, scale_upper = fov_w_range
         kwargs['scale_lower'] = scale_lower
         kwargs['scale_upper'] = scale_upper
+        kwargs['scale_units'] = 'degwidth'  # FOV range is in degrees
 
 
     # Upload image or the list of stars
     if file_handle is not None:
         if image_url is not None:
+            # Use URL upload (for nova.astrometry.net via imgur)
             upres = c.url_upload(image_url, **kwargs)
+        elif img_data is not None:
+            # Direct upload with image data in memory (for contrailcast)
+            upres = c.upload(img_data=img_data, **kwargs)
+        elif tmpimg is not None:
+            # Upload from temp file
+            upres = c.upload(fn=tmpimg, **kwargs)
         else:
-            upres = c.upload(fn=tmpimg)
+            upres = None
 
     elif x_data is not None:
+        # For coordinate-only uploads, include image dimensions if available
+        if x_center is not None and y_center is not None:
+            kwargs['image_width'] = int(x_center * 2)
+            kwargs['image_height'] = int(y_center * 2)
         upres = c.upload(x=x_data, y=y_data, **kwargs)
 
     else:
         upres = None
-        print('No input given to the funtion!')
+        print('No input given to the function!')
 
 
     if upres is None:
@@ -481,11 +526,28 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
 
     # Download the wcs.fits file
     print("Downloading the WCS file...")
-    wcs_fits_link = "https://nova.astrometry.net/wcs_file/{:d}".format(solved_id)
+    # Use the correct server URL for WCS download
+    # Nova uses numeric job IDs, custom servers use UUIDs
+    is_nova = api_url is None or 'nova.astrometry.net' in api_url
+    if is_nova:
+        # Nova.astrometry.net uses numeric IDs and different URL format
+        wcs_fits_link = "https://nova.astrometry.net/wcs_file/{:d}".format(solved_id)
+    else:
+        # Custom server - use jobs/<id>/wcs_file endpoint with UUID
+        wcs_fits_link = api_url.rstrip('/') + "/jobs/{}/wcs_file".format(solved_id)
     wcs_fits = urlopen(wcs_fits_link).read()
 
     # Load the WCS file
-    wcs_obj = WCS(fits.Header.fromstring(wcs_fits))
+    # Suppress warnings about standalone WCS (no image data) and non-standard SIP keywords
+    import logging
+    astropy_logger = logging.getLogger('astropy')
+    original_level = astropy_logger.level
+    astropy_logger.setLevel(logging.ERROR)
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', FITSFixedWarning)
+        warnings.simplefilter('ignore', AstropyWarning)
+        wcs_obj = WCS(fits.Header.fromstring(wcs_fits), naxis=2)
+    astropy_logger.setLevel(original_level)
 
     # Print the WCS fields
     print("WCS fields:")
@@ -518,13 +580,33 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
     # Compute the equatorial orientation
     rot_eq_standard = np.degrees(np.arctan2(np.radians(dec_mid) - np.radians(dec_right), \
             np.radians(ra_mid) - np.radians(ra_right)))%360
-    
-    # Compute the scale
-    scale = 3600/result['pixscale']
 
-    # Compute the FOV width and height
-    fov_w = result['width_arcsec']/3600
-    fov_h = result['height_arcsec']/3600
+    # Compute the scale from server response or WCS
+    if result.get('pixscale', 0) > 0:
+        scale = 3600/result['pixscale']
+    else:
+        # Compute scale from WCS pixel_scale_matrix
+        # This gives the transformation matrix in deg/pixel
+        psm = wcs_obj.pixel_scale_matrix
+        # Pixel scale in deg/pixel from matrix determinant
+        pixscale_deg = np.sqrt(np.abs(np.linalg.det(psm)))
+        if pixscale_deg > 0:
+            scale = 1.0 / pixscale_deg  # px/deg
+        else:
+            scale = 100.0  # fallback
+
+    # Compute the FOV width and height from server response or estimate from WCS
+    if result.get('width_arcsec', 0) > 0 and result.get('height_arcsec', 0) > 0:
+        fov_w = result['width_arcsec']/3600
+        fov_h = result['height_arcsec']/3600
+    else:
+        # Estimate FOV from image size and scale
+        # Use NAXIS from WCS or estimate from center coordinates
+        wcs_header = wcs_obj.to_header()
+        naxis1 = wcs_header.get('IMAGEW', wcs_header.get('NAXIS1', 2*x_center))
+        naxis2 = wcs_header.get('IMAGEH', wcs_header.get('NAXIS2', 2*y_center))
+        fov_w = naxis1 / scale  # degrees
+        fov_h = naxis2 / scale  # degrees
 
     # clean up temp image
     if tmpimg:

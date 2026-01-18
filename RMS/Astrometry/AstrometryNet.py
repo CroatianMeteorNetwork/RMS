@@ -24,6 +24,12 @@ try:
 except ImportError:
     ASTROMETRY_NET_AVAILABLE = False
 
+# Allow disabling local astrometry.net via environment variable for testing
+import os
+if os.environ.get('RMS_DISABLE_LOCAL_ASTROMETRY', '').lower() in ('1', 'true', 'yes'):
+    ASTROMETRY_NET_AVAILABLE = False
+    print("NOTE: Local astrometry.net disabled via RMS_DISABLE_LOCAL_ASTROMETRY")
+
 
 def matchStarsIterative(x_data, y_data, input_intensities, catalog_stars, wcs_obj,
                         img_width, img_height, lat, lon, scale_px_per_deg, jd, verbose=False):
@@ -630,13 +636,33 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
         input_intensities: [ndarray] Star intensities for brightness-based matching. Optional.
     """
 
-    # If the local installation of astrometry.net is not available, use the nova.astrometry.net API
+    # Import API URLs
+    from RMS.Astrometry.AstrometryNetNova import PRIMARY_API_URL, FALLBACK_API_URL
+
+    # If the local installation of astrometry.net is not available, use remote API
     if not ASTROMETRY_NET_AVAILABLE:
+        # Try primary server (contrailcast) first
+        print("Local astrometry.net not available. Trying remote API...")
+        print(f"Trying primary server: {PRIMARY_API_URL}")
+
+        try:
+            result = novaAstrometryNetSolve(
+                ff_file_path=ff_file_path, img=img, x_data=x_data, y_data=y_data,
+                fov_w_range=fov_w_range, x_center=x_center, y_center=y_center,
+                api_url=PRIMARY_API_URL
+            )
+            if result is not None:
+                return result
+        except Exception as e:
+            print(f"Primary server failed: {e}")
+
+        # Fall back to nova.astrometry.net
+        print(f"Trying fallback server: {FALLBACK_API_URL}")
         return novaAstrometryNetSolve(
             ff_file_path=ff_file_path, img=img, x_data=x_data, y_data=y_data,
-            fov_w_range=fov_w_range, x_center=x_center, y_center=y_center
-            )
-
+            fov_w_range=fov_w_range, x_center=x_center, y_center=y_center,
+            api_url=FALLBACK_API_URL
+        )
 
     else:
 
@@ -649,17 +675,32 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
                 lat=lat, lon=lon, jd=jd, input_intensities=input_intensities
                 )
 
-        # If it fails, use the nova.astrometry.net API
+        # If local fails, try remote APIs
         except Exception as e:
 
             print("Local astrometry.net solver failed with error:")
             print(e)
-            print("Trying the nova.astrometry.net API...")
 
+            # Try primary server (contrailcast) first
+            print(f"Trying primary server: {PRIMARY_API_URL}")
+            try:
+                result = novaAstrometryNetSolve(
+                    ff_file_path=ff_file_path, img=img, x_data=x_data, y_data=y_data,
+                    fov_w_range=fov_w_range, x_center=x_center, y_center=y_center,
+                    api_url=PRIMARY_API_URL
+                )
+                if result is not None:
+                    return result
+            except Exception as e2:
+                print(f"Primary server failed: {e2}")
+
+            # Fall back to nova.astrometry.net
+            print(f"Trying fallback server: {FALLBACK_API_URL}")
             return novaAstrometryNetSolve(
                 ff_file_path=ff_file_path, img=img, x_data=x_data, y_data=y_data,
-                fov_w_range=fov_w_range, x_center=x_center, y_center=y_center
-                )
+                fov_w_range=fov_w_range, x_center=x_center, y_center=y_center,
+                api_url=FALLBACK_API_URL
+            )
 
 
 if __name__ == "__main__":
