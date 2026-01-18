@@ -990,7 +990,7 @@ def retrieveObservationData(conn, config, night_directory=None, ordering=None):
         # the two items into one.
 
         ordering = ['stationID',
-                    'commit_date', 'commit_hash', 'remote_branch', 'repository_lag_remote_days',
+                    'commit_date', 'commit_hash', 'upstream_branch', 'remote_branch', 'repository_lag_remote_days',
                     'media_backend','star_catalog_file',
                     'hardware_version',
                     'captured_directories',
