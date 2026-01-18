@@ -942,7 +942,10 @@ def daysBehind():
     target_directory = target_directory_obj.name
     remote_urls = getRemoteUrls(os.getcwd())
     commit_repo_directory = updateCommitHistoryDirectory(remote_urls, target_directory)
-    remote_branch_of_commit = getRemoteBranchNameForCommit(commit_repo_directory, latest_local_commit)
+    remote_branch_of_commit = getUpstreamBranch()
+    if remote_branch_of_commit is None:
+        remote_branch_of_commit = getRemoteBranchNameForCommit(commit_repo_directory, latest_local_commit)
+
     if not remote_branch_of_commit is None:
         latest_remote_date = getDateOfCommit(commit_repo_directory, remote_branch_of_commit)
         days_behind = (latest_remote_date - latest_local_date).total_seconds()/(60 * 60 * 24)
@@ -1277,7 +1280,7 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
     try:
         addObsParam(obs_db_conn, "upstream_branch", getUpstreamBranch())
     except:
-        addObsParam(obs_db_conn, "upstream_branch", "Not determined")
+        addObsParam(obs_db_conn, "upstream_branch", None)
 
     try:
         days_behind, remote_branch = daysBehind()
