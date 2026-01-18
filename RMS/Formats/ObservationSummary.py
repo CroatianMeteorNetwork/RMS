@@ -1278,7 +1278,7 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
         days_behind, remote_branch = daysBehind()
         addObsParam(obs_db_conn, "repository_lag_remote_days", days_behind)
         addObsParam(obs_db_conn, "remote_branch", os.path.basename(remote_branch))
-        addObsParam(obs_db_conn, "upstream_branch", os.path.basename(getUpstreamBranch()))
+        addObsParam(obs_db_conn, "upstream_branch", getUpstreamBranch())
     except:
         addObsParam(obs_db_conn, "repository_lag_remote_days", "Not determined")
     obs_db_conn.close()
