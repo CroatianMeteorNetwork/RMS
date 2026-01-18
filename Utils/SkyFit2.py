@@ -2266,6 +2266,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Connect astrometry & photometry buttons to functions
         self.tab.param_manager.sigFitPressed.connect(self.fitPickedStars)
         self.tab.param_manager.sigAutoFitPressed.connect(self.autoFitAstrometryNet)
+        self.tab.param_manager.sigFindBestFramePressed.connect(self.findBestFrame)
         self.tab.param_manager.sigNextStarPressed.connect(self.jumpNextStar)
         self.tab.param_manager.sigPhotometryPressed.connect(lambda: self.photometry(show_plot=True))
         self.tab.param_manager.sigAstrometryPressed.connect(self.showAstrometryFitPlots)
@@ -8178,6 +8179,86 @@ class PlateTool(QtWidgets.QMainWindow):
         print("=" * 70, flush=True)
         print(flush=True)
         sys.stdout.flush()
+
+
+    def findBestFrame(self):
+        """ Find the frame with the best star distribution for calibration.
+
+        Uses the CALSTARS data to score each frame based on spatial distribution
+        of detected stars. Navigates to the best frame.
+        """
+        from RMS.Astrometry.AutoPlatepar import selectBestFrame
+
+        # Check if we have CALSTARS data
+        if not hasattr(self, 'calstars') or self.calstars is None or len(self.calstars) == 0:
+            QtWidgets.QMessageBox.warning(
+                self, "No CALSTARS Data",
+                "No CALSTARS data available. Run star detection first."
+            )
+            return
+
+        # Check if we have a multi-image handle with ff_list
+        if not hasattr(self.img_handle, 'ff_list'):
+            QtWidgets.QMessageBox.warning(
+                self, "Single Image",
+                "This feature requires multiple images (FF files)."
+            )
+            return
+
+        self.status_bar.showMessage("Finding best frame...")
+        QtWidgets.QApplication.processEvents()
+
+        # Get image dimensions from config
+        img_width = self.config.width
+        img_height = self.config.height
+
+        # Find the best frame
+        best_ff, best_score, all_scores = selectBestFrame(
+            self.calstars, img_width, img_height, verbose=True
+        )
+
+        if best_ff is None:
+            QtWidgets.QMessageBox.warning(
+                self, "No Best Frame Found",
+                "Could not determine the best frame from CALSTARS data."
+            )
+            self.status_bar.showMessage("Best frame search failed")
+            return
+
+        # Find the index of the best frame in ff_list
+        target_index = None
+        for i, ff_name in enumerate(self.img_handle.ff_list):
+            # ff_list may contain full paths or just filenames
+            if os.path.basename(ff_name) == best_ff or ff_name == best_ff:
+                target_index = i
+                break
+
+        if target_index is None:
+            QtWidgets.QMessageBox.warning(
+                self, "Frame Not Found",
+                f"Best frame '{best_ff}' not found in current image list."
+            )
+            self.status_bar.showMessage("Best frame not found in list")
+            return
+
+        # Navigate to the best frame
+        current_index = self.img_handle.current_ff_index
+        delta = target_index - current_index
+
+        if delta != 0:
+            self.nextImg(n=delta)
+
+        # Get score details for status message
+        score_info = all_scores.get(best_ff, {})
+        n_stars = score_info.get('quality_details', {}).get('n_stars', 0)
+
+        self.status_bar.showMessage(
+            f"Best frame: {best_ff} (score={best_score:.3f}, {n_stars} stars)"
+        )
+
+        print(f"\nBest frame: {best_ff}")
+        print(f"  Score: {best_score:.3f}")
+        print(f"  Stars: {n_stars}")
 
 
     def autoFitAstrometryNet(self):

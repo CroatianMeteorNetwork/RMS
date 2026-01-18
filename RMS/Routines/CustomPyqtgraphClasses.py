@@ -1712,6 +1712,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
 
     sigFitPressed = QtCore.pyqtSignal()
     sigAutoFitPressed = QtCore.pyqtSignal()
+    sigFindBestFramePressed = QtCore.pyqtSignal()
     sigNextStarPressed = QtCore.pyqtSignal()
     sigAstrometryPressed = QtCore.pyqtSignal()
     sigPhotometryPressed = QtCore.pyqtSignal()
@@ -1758,6 +1759,12 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # buttons
         box = QtWidgets.QVBoxLayout()
         box.setContentsMargins(*self.scaledMargins(0.5, 0.25))
+
+        # Best Frame button on its own row
+        self.find_best_frame_button = QtWidgets.QPushButton("Best Frame")
+        self.find_best_frame_button.setToolTip("Find the frame with best star distribution for calibration")
+        self.find_best_frame_button.clicked.connect(self.sigFindBestFramePressed.emit)
+        box.addWidget(self.find_best_frame_button)
 
         # Fit buttons in a horizontal layout
         fit_hbox = QtWidgets.QHBoxLayout()
