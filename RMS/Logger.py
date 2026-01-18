@@ -612,7 +612,7 @@ def getLogger(name=None, level="DEBUG", stdout=False):
     Return:
         [Logger] Logger instance
     """
-    logger = logging.getLogger(name if name else "rmsogger")
+    logger = logging.getLogger(name if name else "rmslogger")
 
     level_map = {
         "DEBUG": logging.DEBUG,
