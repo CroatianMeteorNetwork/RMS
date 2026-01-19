@@ -137,26 +137,23 @@ def extractDateFromLogName(config, log_name):
         [str] iosoformat date and time extracted from log name
     """
 
+    log_name_fields = log_name.upper().split("_")
+    stationID_upper = config.stationID.upper()
 
-    log_name_fields = log_name.split("_")
-    next_field_is_date, next_field_is_time = False, False
+    if stationID_upper in log_name_fields:
+        index_date = log_name_fields.index(stationID_upper) + 1
+        index_time = index_date + 1
 
-    year, month, day, hour, minute, second = 2000,1,1,0,0,0
+        try:
+            if len(log_name_fields) >= index_time:
+                dtstr = f'{log_name_fields[index_date][0:8]}_{log_name_fields[index_time][0:6]}'
+                return datetime.datetime.strptime(dtstr, '%Y%m%d_%H%M%S').isoformat()
 
-    for field in log_name_fields:
-        if config.stationID.upper() == field.upper():
-            next_field_is_date = True
-            continue
-        if next_field_is_date and len(field) == 8:
-            year, month, day = field[0:4], field[4:6], field[6:8]
-            next_field_is_time, next_field_is_date = True, False
-            continue
-        if next_field_is_time and len(field) >= 6:
-            hour, minute, second = field[0:2], field[2:4], field[4:6]
-            next_field_is_time = False
-            break
-    return datetime.datetime(int(year), int(month), int(day), int(hour), int(minute), int(second)).isoformat()
+        except Exception:
+            pass
 
+
+    return ISO_DATE_2000
 
 def getLatestLogUploads(config):
     """If a json file exists with the latest log uploads, then read it and return a dict
