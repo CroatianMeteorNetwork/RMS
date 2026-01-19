@@ -109,10 +109,6 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
     platepar_aligned = copy.deepcopy(platepar)
 
     # Use the NN-based pointing fit
-    log.info("alignPlatepar: Input platepar RA={:.2f} Dec={:.2f} Ho={:.2f} JD={:.6f}".format(
-        platepar.RA_d, platepar.dec_d, platepar.Ho, platepar.JD))
-    log.info("alignPlatepar: Current JD={:.6f}, FOV center RA={:.2f} Dec={:.2f}".format(
-        jd, ra_centre, dec_centre))
     log.info("alignPlatepar: Fitting pointing with {} detected stars, {} catalog stars".format(
         len(img_stars), len(catalog_stars_fov)))
 
@@ -128,7 +124,6 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
         log.info("    Rot: {:.4f} -> {:.4f} deg (delta={:.4f})".format(
             platepar.pos_angle_ref, platepar_aligned.pos_angle_ref,
             platepar_aligned.pos_angle_ref - platepar.pos_angle_ref))
-        log.info("    Ho unchanged: {:.4f} (platepar_aligned.Ho)".format(platepar_aligned.Ho))
         if scale_update:
             log.info("    Scale: {:.4f} -> {:.4f}".format(platepar.F_scale, platepar_aligned.F_scale))
     else:

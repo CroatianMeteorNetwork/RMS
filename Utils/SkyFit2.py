@@ -8241,11 +8241,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Compute JD
         jd = date2JD(*calstars_time)
-        current_Ho = JD2HourAngle(jd) % 360
-
-        print("  Original platepar: RA={:.2f} Dec={:.2f} Ho={:.2f} JD={:.6f}".format(
-            self.platepar.RA_d, self.platepar.dec_d, self.platepar.Ho, self.platepar.JD))
-        print("  Current time: JD={:.6f} Ho={:.2f}".format(jd, current_Ho))
 
         # Try alignPlatepar to refine pointing
         try:
@@ -8260,16 +8255,13 @@ class PlateTool(QtWidgets.QMainWindow):
             return False
 
         # alignPlatepar succeeded - proceed to full NN fit
-        print("  alignPlatepar succeeded: RA={:.2f} Dec={:.2f} Ho={:.2f}".format(
-            pp_aligned.RA_d, pp_aligned.dec_d, pp_aligned.Ho))
+        print("  alignPlatepar succeeded: RA={:.2f} Dec={:.2f}".format(
+            pp_aligned.RA_d, pp_aligned.dec_d))
         self.platepar = pp_aligned
 
         # Update JD and hour angle
-        old_Ho = self.platepar.Ho
         self.platepar.JD = jd
         self.platepar.Ho = JD2HourAngle(jd) % 360
-        print("  Updated Ho: {:.2f} -> {:.2f} (delta={:.2f})".format(
-            old_Ho, self.platepar.Ho, self.platepar.Ho - old_Ho))
 
         # Save user's distortion settings for final fit
         user_distortion_type = self.platepar.distortion_type
@@ -8295,8 +8287,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # Perform full NN-based fit
         print()
         print("NN-based fitting...")
-        print("  Starting from: RA={:.2f} Dec={:.2f} Ho={:.2f} Scale={:.3f} arcmin/px".format(
-            self.platepar.RA_d, self.platepar.dec_d, self.platepar.Ho, 60/self.platepar.F_scale))
+        print("  Starting from: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
+            self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
         self.status_bar.showMessage("Fitting astrometry...")
         QtWidgets.QApplication.processEvents()
 
