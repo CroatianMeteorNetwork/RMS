@@ -68,6 +68,35 @@ class GeoPoint(object):
 
 
 
+class PlanetPoint(object):
+    def __init__(self, name, ra, dec, mag):
+        """ Container for a solar system body (planet, Moon, Sun).
+
+        Arguments:
+            name: [str] Name of the body (e.g., 'Jupiter', 'Moon').
+            ra: [float] Right ascension in degrees.
+            dec: [float] Declination in degrees.
+            mag: [float] Apparent magnitude.
+        """
+
+        self.pick_type = "planet"
+
+        self.name = name
+        self.ra = ra
+        self.dec = dec
+        self.mag = mag
+
+
+    def coords(self):
+        """ Return sky coordinates.
+
+        Returns:
+            tuple: (ra, dec, mag)
+        """
+
+        return self.ra, self.dec, self.mag
+
+
 
 class PairedStars(object):
     def __init__(self):

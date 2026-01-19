@@ -19,11 +19,100 @@ import matplotlib.pyplot as plt
 
 # Astropy imports for solar system body ephemeris
 try:
-    from astropy.coordinates import get_body, EarthLocation, AltAz
+    from astropy.coordinates import get_body, get_sun, EarthLocation, AltAz
     from astropy.time import Time
+    import astropy.units as u
     ASTROPY_AVAILABLE = True
+
+    # Suppress warning when computing angular separation between different GCRS frames
+    # (topocentric body vs geocentric sun for magnitude calculations)
+    import warnings
+    from astropy.coordinates import NonRotationTransformationWarning
+    warnings.filterwarnings('ignore', category=NonRotationTransformationWarning)
 except ImportError:
     ASTROPY_AVAILABLE = False
+
+
+def computeSolarSystemMagnitude(body_name, body, sun, time):
+    """Compute apparent magnitude of a solar system body.
+
+    Arguments:
+        body_name: [str] Name of the body ('sun', 'moon', 'jupiter', etc.)
+        body: [SkyCoord] Body position from get_body()
+        sun: [SkyCoord] Sun position from get_sun()
+        time: [Time] Observation time
+
+    Return:
+        [float] Apparent visual magnitude
+    """
+
+    # Sun - essentially constant
+    if body_name == 'sun':
+        return -26.74
+
+    # Distance from Earth in AU
+    delta = body.distance.to(u.AU).value
+
+    # Moon - varies with phase
+    if body_name == 'moon':
+        # Compute phase angle (Sun-Moon-Earth angle)
+        # Elongation is the angle between Moon and Sun as seen from Earth
+        elongation = body.separation(sun).deg
+        # Phase angle is approximately 180 - elongation for the Moon
+        phase_angle = 180 - elongation
+        # Moon's magnitude formula (simplified)
+        # Full moon is about -12.7, varies with phase
+        phase_fraction = (1 + np.cos(np.radians(phase_angle))) / 2
+        if phase_fraction > 0.001:
+            mag = -12.7 + 2.5 * np.log10(1.0 / phase_fraction)
+        else:
+            mag = 0  # New moon, essentially not visible
+        return mag
+
+    # Planets - use standard formula: V = V(1,0) + 5*log10(r*delta) + phase_correction
+    # V(1,0) values and phase coefficients from Astronomical Almanac
+
+    # Planet parameters: (V(1,0), phase_coeff1, phase_coeff2)
+    # V(1,0) is absolute magnitude at 1 AU from Sun and Earth at 0 phase
+    planet_params = {
+        'mercury': (-0.60, 0.0380, 0.000273),
+        'venus':   (-4.47, 0.0103, 0.000057),
+        'mars':    (-1.52, 0.0160, 0.0),
+        'jupiter': (-9.40, 0.0050, 0.0),
+        'saturn':  (-8.88, 0.0440, 0.0),
+        'uranus':  (-7.19, 0.0028, 0.0),
+        'neptune': (-6.87, 0.0, 0.0),
+    }
+
+    if body_name not in planet_params:
+        return 0.0
+
+    v_1_0, c1, c2 = planet_params[body_name]
+
+    # Average heliocentric distances in AU
+    avg_helio_dist = {
+        'mercury': 0.387,
+        'venus':   0.723,
+        'mars':    1.524,
+        'jupiter': 5.203,
+        'saturn':  9.537,
+        'uranus':  19.19,
+        'neptune': 30.07,
+    }
+
+    r = avg_helio_dist.get(body_name, 1.0)  # Heliocentric distance in AU
+
+    # Compute phase angle (Sun-Body-Earth angle)
+    elongation = body.separation(sun).deg
+    # Use law of cosines: cos(phase) = (r^2 + delta^2 - 1) / (2*r*delta)
+    cos_phase = (r**2 + delta**2 - 1) / (2 * r * delta)
+    cos_phase = np.clip(cos_phase, -1, 1)
+    phase_angle = np.degrees(np.arccos(cos_phase))
+
+    # Compute magnitude: V = V(1,0) + 5*log10(r*delta) + c1*phase + c2*phase^2
+    mag = v_1_0 + 5 * np.log10(r * delta) + c1 * phase_angle + c2 * phase_angle**2
+
+    return mag
 import matplotlib.gridspec as gridspec
 import matplotlib.ticker as ticker
 try:
@@ -53,7 +142,7 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
     extinctionCorrectionTrueToApparent, applyAstrometryFTPdetectinfo, getFOVSelectionRadius
 from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
-from RMS.Astrometry.StarClasses import CatalogStar, GeoPoint, PairedStars
+from RMS.Astrometry.StarClasses import CatalogStar, GeoPoint, PlanetPoint, PairedStars
 from RMS.Astrometry.StarFilters import filterPhotometricOutliers, filterBlendedStars, filterHighFWHMStars
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, \
     apparentAltAz2TrueRADec, J2000_JD, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
@@ -1424,6 +1513,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.saturated_centroid = False
         self.closest_type = None
         self.closest_cat_star_indx = None
+        self.closest_planet_indx = None
 
         # List of paired image and catalog stars
         self.pick_list = {}
@@ -1889,6 +1979,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Solar system body labels
         self.planet_labels = TextItemList()
         self.img_frame.addItem(self.planet_labels)
+
+        # Solar system body data for calibration: [(name, x, y, ra, dec, mag), ...]
+        self.planet_data = []
 
         # astrometry.net matched star markers (main window) - cyan color
         # These show catalog star positions that matched to input stars
@@ -3212,6 +3305,9 @@ class PlateTool(QtWidgets.QMainWindow):
         planet_x = []
         planet_y = []
         planet_names = []
+        planet_mags = []
+        planet_ra = []
+        planet_dec = []
 
         ff_jd = date2JD(*obs_time)
 
@@ -3222,6 +3318,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Cap at 90 degrees (gnomonic projection limit)
         fov_radius = getFOVSelectionRadius(self.platepar)
         max_ang_sep = min(90, fov_radius * 1.5)
+
+        # Get sun position for magnitude calculations
+        sun = get_sun(t)
 
         for body_name, display_name in bodies:
             try:
@@ -3239,9 +3338,11 @@ class PlateTool(QtWidgets.QMainWindow):
                 if ang_sep > max_ang_sep:
                     continue
 
+                # Compute apparent magnitude
+                mag = computeSolarSystemMagnitude(body_name, body, sun, t)
+
                 # Convert RA/Dec to image coordinates
-                # Create a fake "catalog star" array for the conversion function
-                body_radec = np.array([[ra_deg, dec_deg, -10]])  # fake bright magnitude
+                body_radec = np.array([[ra_deg, dec_deg, mag]])
                 x_arr, y_arr, _ = getCatalogStarsImagePositions(body_radec, ff_jd, self.platepar)
 
                 if len(x_arr) > 0:
@@ -3252,10 +3353,16 @@ class PlateTool(QtWidgets.QMainWindow):
                         planet_x.append(x)
                         planet_y.append(y)
                         planet_names.append(display_name)
+                        planet_mags.append(mag)
+                        planet_ra.append(ra_deg)
+                        planet_dec.append(dec_deg)
 
             except Exception as e:
                 # Skip bodies that fail (e.g., if ephemeris data is missing)
                 pass
+
+        # Store planet data for potential calibration use
+        self.planet_data = list(zip(planet_names, planet_x, planet_y, planet_ra, planet_dec, planet_mags))
 
         # Update markers
         if planet_x:
@@ -3264,10 +3371,11 @@ class PlateTool(QtWidgets.QMainWindow):
             self.planet_markers2.setData(x=np.array(planet_x) + 0.5,
                                          y=np.array(planet_y) + 0.5)
 
-            # Update labels
+            # Update labels with name and magnitude
             self.planet_labels.clear()
             for i, name in enumerate(planet_names):
-                label = TextItem(name, color=(255, 200, 0), anchor=(1.0, 0.5))
+                mag_str = "{:+.1f}".format(planet_mags[i])
+                label = TextItem("{} ({})".format(name, mag_str), color=(255, 200, 0), anchor=(1.0, 0.5))
                 label.setPos(planet_x[i] - 15, planet_y[i] + 0.5)
                 self.planet_labels.addTextItem(label)
         else:
@@ -5901,7 +6009,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def findClickedStarOrGeoPoint(self, x, y):
-        """ Find the coordinate of the star or geo point closest to the clicked point.  """
+        """ Find the coordinate of the star, geo point, or planet closest to the clicked point.  """
 
         # Select the closest catalog star to the centroid as the first guess
         self.closest_type, closest_indx = self.findClosestCatalogStarIndex(x, y)
@@ -5913,9 +6021,17 @@ class PlateTool(QtWidgets.QMainWindow):
             x_data = [self.catalog_x_filtered[self.closest_cat_star_indx]]
             y_data = [self.catalog_y_filtered[self.closest_cat_star_indx]]
 
+        elif self.closest_type == 'planet':
+
+            # Fetch the coordinates of the planet
+            self.closest_planet_indx = closest_indx
+            name, px, py, ra, dec, mag = self.planet_data[self.closest_planet_indx]
+            x_data = [px]
+            y_data = [py]
+
         else:
 
-            # Find the index among all geo points visible in the FOV of the one closest to the clicked 
+            # Find the index among all geo points visible in the FOV of the one closest to the clicked
             #   position
             self.closest_geo_point_indx = closest_indx
 
@@ -6656,7 +6772,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         self.unsuitable_star_markers2.addPoints(x=[self.current_autopan_x],
                                                                 y=[self.current_autopan_y])
 
-                    # If the catalog star or geo points has been selected, save the pair to the list
+                    # If the catalog star, planet, or geo point has been selected, save the pair to the list
                     if self.cursor.mode == 1:
 
                         # Star catalog points
@@ -6666,6 +6782,14 @@ class PlateTool(QtWidgets.QMainWindow):
 
                             # Init a catalog star pair object
                             pair_obj = CatalogStar(*selected_coords)
+
+                        # Planet points
+                        elif self.closest_type == 'planet':
+                            name, px, py, ra, dec, mag = self.planet_data[self.closest_planet_indx]
+                            self.closest_planet_indx = None
+
+                            # Init a planet point pair object
+                            pair_obj = PlanetPoint(name, ra, dec, mag)
 
                         # Geo coordinates of the selected points
                         else:
@@ -6686,7 +6810,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         # Add the image/catalog pair to the list
                         if not unsuitable:
                             self.paired_stars.addPair(self.x_centroid, self.y_centroid, self.star_fwhm,
-                                    self.star_intensity, pair_obj, 
+                                    self.star_intensity, pair_obj,
                                     snr=self.star_snr, saturated=self.star_saturated)
 
                         # Switch back to centroiding mode
@@ -10110,7 +10234,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def findClosestCatalogStarIndex(self, pos_x, pos_y):
-        """ Finds the index of the closest catalog star on the image to the given image position. """
+        """ Finds the index of the closest catalog star, geo point, or planet on the image. """
 
         min_index = 0
         min_dist = np.inf
@@ -10140,6 +10264,18 @@ class PlateTool(QtWidgets.QMainWindow):
                     min_dist = dist
                     min_index = i
                     min_type = 'geo'
+
+
+        # If planets are visible, check them too
+        if hasattr(self, 'planet_data') and self.planet_data:
+            for i, (name, x, y, ra, dec, mag) in enumerate(self.planet_data):
+
+                dist = (pos_x - x)**2 + (pos_y - y)**2
+
+                if dist < min_dist:
+                    min_dist = dist
+                    min_index = i
+                    min_type = 'planet'
 
 
         return min_type, min_index
