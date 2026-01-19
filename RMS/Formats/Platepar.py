@@ -640,10 +640,9 @@ class Platepar(object):
         if not fixed_scale:
             p0.append(abs(self.F_scale))
 
-        # Debug: compute initial cost (RMSD in pixels)
-        initial_cost = _calcPointingNNCostPixel(p0, pp_work, jd, ra_catalog, dec_catalog, img_x, img_y, fixed_scale)
-        print("    fitPointingNN: BEFORE RA={:.2f} Dec={:.2f} Rot={:.2f} RMSD={:.2f} px".format(
-            p0[0], p0[1], p0[2], initial_cost))
+        # Debug: show initial parameters
+        print("    fitPointingNN: BEFORE RA={:.2f} Dec={:.2f} Rot={:.2f}".format(
+            p0[0], p0[1], p0[2]))
 
         # Fit using Nelder-Mead (robust for NN cost landscape)
         res = scipy.optimize.minimize(
@@ -654,9 +653,9 @@ class Platepar(object):
             options={'maxiter': 5000, 'adaptive': True},
         )
 
-        # Debug: show optimizer result (RMSD in pixels)
-        print("    fitPointingNN: AFTER  RA={:.2f} Dec={:.2f} Rot={:.2f} RMSD={:.2f} px".format(
-            res.x[0], res.x[1], res.x[2], res.fun))
+        # Debug: show optimizer result
+        print("    fitPointingNN: AFTER  RA={:.2f} Dec={:.2f} Rot={:.2f}".format(
+            res.x[0], res.x[1], res.x[2]))
 
         # Check inlier fraction - more robust than RMSD which is skewed by outliers
         # Recompute NN distances with fitted parameters
@@ -677,11 +676,15 @@ class Platepar(object):
             # Count inliers (matches within threshold)
             inlier_threshold = 15.0  # pixels
             min_inlier_fraction = 0.4  # require 40% of detected stars to match
-            n_inliers = np.sum(nn_distances < inlier_threshold)
+            inlier_mask = nn_distances < inlier_threshold
+            n_inliers = np.sum(inlier_mask)
             inlier_fraction = n_inliers / len(nn_distances)
 
-            print("    fitPointingNN: Inliers {}/{} ({:.1f}%) within {}px".format(
-                n_inliers, len(nn_distances), 100*inlier_fraction, inlier_threshold))
+            # Compute RMSD on inliers only (more meaningful than total RMSD)
+            inlier_rmsd = np.sqrt(np.mean(nn_distances[inlier_mask] ** 2)) if n_inliers > 0 else 0
+
+            print("    fitPointingNN: Inliers {}/{} ({:.1f}%) within {}px, inlier RMSD={:.2f}px".format(
+                n_inliers, len(nn_distances), 100*inlier_fraction, inlier_threshold, inlier_rmsd))
 
             if inlier_fraction < min_inlier_fraction:
                 print("    fitPointingNN: Insufficient inliers, fit rejected")

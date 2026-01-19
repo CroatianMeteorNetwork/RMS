@@ -116,11 +116,11 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
     log.info("alignPlatepar: Fitting pointing with {} detected stars, {} catalog stars".format(
         len(img_stars), len(catalog_stars_fov)))
 
-    success, rmsd_pixels = platepar_aligned.fitPointingNN(
+    success, _ = platepar_aligned.fitPointingNN(
         jd, img_stars, catalog_stars_fov, fixed_scale=(not scale_update))
 
     if success:
-        log.info("alignPlatepar: Fit successful, RMSD = {:.2f} px".format(rmsd_pixels))
+        log.info("alignPlatepar: Fit successful")
         log.info("    RA:  {:.4f} -> {:.4f} deg (delta={:.4f})".format(
             platepar.RA_d, platepar_aligned.RA_d, platepar_aligned.RA_d - platepar.RA_d))
         log.info("    Dec: {:.4f} -> {:.4f} deg (delta={:.4f})".format(
