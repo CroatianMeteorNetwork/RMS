@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 
 # Astropy imports for solar system body ephemeris
 try:
-    from astropy.coordinates import get_body, EarthLocation, AltAz, FK5
+    from astropy.coordinates import get_body, EarthLocation, AltAz
     from astropy.time import Time
     ASTROPY_AVAILABLE = True
 except ImportError:
@@ -3217,14 +3217,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
         for body_name, display_name in bodies:
             try:
-                # Get body position in GCRS frame
+                # Get body position
                 body = get_body(body_name, t, loc)
-
-                # Convert to FK5 J2000 coordinates (what RMS astrometry expects)
-                # GCRS is instantaneous geocentric, but RMS expects J2000 equatorial
-                body_j2000 = body.transform_to(FK5(equinox='J2000'))
-                ra_deg = body_j2000.ra.deg
-                dec_deg = body_j2000.dec.deg
+                ra_deg = body.ra.deg
+                dec_deg = body.dec.deg
 
                 # Convert RA/Dec to image coordinates
                 # Create a fake "catalog star" array for the conversion function
