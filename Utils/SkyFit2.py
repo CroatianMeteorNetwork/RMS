@@ -16,6 +16,14 @@ import copy
 
 import numpy as np
 import matplotlib.pyplot as plt
+
+# Astropy imports for solar system body ephemeris
+try:
+    from astropy.coordinates import get_body, EarthLocation, AltAz
+    from astropy.time import Time
+    ASTROPY_AVAILABLE = True
+except ImportError:
+    ASTROPY_AVAILABLE = False
 import matplotlib.gridspec as gridspec
 import matplotlib.ticker as ticker
 try:
@@ -1860,6 +1868,28 @@ class PlateTool(QtWidgets.QMainWindow):
         self.geo_markers2.setZValue(4)
         self.zoom_window.addItem(self.geo_markers2)
 
+        # Solar system body markers (main window) - yellow/orange color
+        self.planet_markers = pg.ScatterPlotItem()
+        self.planet_markers.setPen(pg.mkPen(color=(255, 200, 0), width=2))  # yellow-orange
+        self.planet_markers.setBrush((0, 0, 0, 0))
+        self.planet_markers.setSize(25)
+        self.planet_markers.setSymbol('o')  # circle
+        self.planet_markers.setZValue(6)
+        self.img_frame.addItem(self.planet_markers)
+
+        # Solar system body markers (zoom window)
+        self.planet_markers2 = pg.ScatterPlotItem()
+        self.planet_markers2.setPen(pg.mkPen(color=(255, 200, 0), width=2))
+        self.planet_markers2.setBrush((0, 0, 0, 0))
+        self.planet_markers2.setSize(35)
+        self.planet_markers2.setSymbol('o')
+        self.planet_markers2.setZValue(6)
+        self.zoom_window.addItem(self.planet_markers2)
+
+        # Solar system body labels
+        self.planet_labels = TextItemList()
+        self.img_frame.addItem(self.planet_labels)
+
         # astrometry.net matched star markers (main window) - cyan color
         # These show catalog star positions that matched to input stars
         self.astrometry_matched_markers = pg.ScatterPlotItem()
@@ -2843,6 +2873,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.constellation_lines_bg.hide()
                 self.constellation_lines_fg.hide()
 
+            # Update solar system bodies (planets, Moon, Sun)
+            self.updatePlanets()
+
 
         # If in skyfit mode, take the time of the chunk
         # If in manual reduction mode, take the time of the current frame
@@ -3132,6 +3165,98 @@ class PlateTool(QtWidgets.QMainWindow):
                         self.spectral_type_text_list.addTextItem(text_item)
             else:
                 print('No catalog stars visible!')
+
+
+    def updatePlanets(self):
+        """ Update the display of solar system bodies (planets, Moon, Sun). """
+
+        if not ASTROPY_AVAILABLE:
+            return
+
+        if not self.catalog_stars_visible:
+            self.planet_markers.setData(pos=[])
+            self.planet_markers2.setData(pos=[])
+            self.planet_labels.clear()
+            return
+
+        if self.platepar is None:
+            return
+
+        # Get observation time
+        if self.mode == 'skyfit':
+            obs_time = self.img_handle.currentTime()
+        else:
+            obs_time = self.img_handle.currentFrameTime()
+
+        # Convert to astropy Time
+        dt = datetime.datetime(*obs_time[:6])
+        t = Time(dt)
+
+        # Observer location
+        loc = EarthLocation(lat=self.platepar.lat, lon=self.platepar.lon,
+                           height=self.platepar.elev)
+
+        # Bodies to display (name, display_name)
+        bodies = [
+            ('sun', 'Sun'),
+            ('moon', 'Moon'),
+            ('mercury', 'Mercury'),
+            ('venus', 'Venus'),
+            ('mars', 'Mars'),
+            ('jupiter', 'Jupiter'),
+            ('saturn', 'Saturn'),
+            ('uranus', 'Uranus'),
+            ('neptune', 'Neptune'),
+        ]
+
+        planet_x = []
+        planet_y = []
+        planet_names = []
+
+        ff_jd = date2JD(*obs_time)
+
+        for body_name, display_name in bodies:
+            try:
+                # Get body position
+                body = get_body(body_name, t, loc)
+                ra_deg = body.ra.deg
+                dec_deg = body.dec.deg
+
+                # Convert RA/Dec to image coordinates
+                # Create a fake "catalog star" array for the conversion function
+                body_radec = np.array([[ra_deg, dec_deg, -10]])  # fake bright magnitude
+                x_arr, y_arr, _ = getCatalogStarsImagePositions(body_radec, ff_jd, self.platepar)
+
+                if len(x_arr) > 0:
+                    x, y = x_arr[0], y_arr[0]
+
+                    # Check if within image bounds
+                    if 0 <= x < self.platepar.X_res and 0 <= y < self.platepar.Y_res:
+                        planet_x.append(x)
+                        planet_y.append(y)
+                        planet_names.append(display_name)
+
+            except Exception as e:
+                # Skip bodies that fail (e.g., if ephemeris data is missing)
+                pass
+
+        # Update markers
+        if planet_x:
+            self.planet_markers.setData(x=np.array(planet_x) + 0.5,
+                                        y=np.array(planet_y) + 0.5)
+            self.planet_markers2.setData(x=np.array(planet_x) + 0.5,
+                                         y=np.array(planet_y) + 0.5)
+
+            # Update labels
+            self.planet_labels.clear()
+            for i, name in enumerate(planet_names):
+                label = TextItem(name, color=(255, 200, 0), anchor=(1.0, 0.5))
+                label.setPos(planet_x[i] - 15, planet_y[i] + 0.5)
+                self.planet_labels.addTextItem(label)
+        else:
+            self.planet_markers.setData(pos=[])
+            self.planet_markers2.setData(pos=[])
+            self.planet_labels.clear()
 
 
     def updatePairedStars(self):
@@ -4220,6 +4345,16 @@ class PlateTool(QtWidgets.QMainWindow):
 
         ### Make a photometry plot
 
+        # Highly variable star types to exclude from photometric calibration
+        # These can vary by many magnitudes, making them unreliable for photometry
+        EXCLUDE_FROM_PHOTOMETRY = {
+            'Mira', 'Mira_Candidate',  # Can vary by 6-8 magnitudes
+            'RCrBV*', 'RCrBV*_Candidate',  # R CrB stars can fade by 8+ magnitudes
+            'CataclyV*', 'CataclyV*_Candidate',  # Cataclysmic variables with outbursts
+            'Nova', 'Nova_Candidate',  # Novae
+            'IrregularV*',  # Irregular variables
+        }
+
         # Extract star intensities and star magnitudes
         star_coords = []
         radius_list = []
@@ -4230,6 +4365,7 @@ class PlateTool(QtWidgets.QMainWindow):
         elevation_list = []
         snr_list = []
         saturation_list = []
+        variable_star_list = []  # Track highly variable stars to exclude from photometry
 
         for paired_star in self.paired_stars.allCoords():
 
@@ -4251,6 +4387,20 @@ class PlateTool(QtWidgets.QMainWindow):
             catalog_mags.append(star_mag)
             snr_list.append(snr)
             saturation_list.append(saturated)
+
+            # Check if this is a highly variable star that should be excluded from photometry
+            is_variable = False
+            if hasattr(self, 'catalog_stars_simbad_otypes') and self.catalog_stars_simbad_otypes is not None:
+                # Find the closest catalog star by RA/Dec to get its object type
+                ra_diff = np.abs(self.catalog_stars[:, 0] - star_ra)
+                dec_diff = np.abs(self.catalog_stars[:, 1] - star_dec)
+                dist = np.sqrt(ra_diff**2 + dec_diff**2)
+                closest_idx = np.argmin(dist)
+                if dist[closest_idx] < 0.01:  # Within ~36 arcsec
+                    otype = self.catalog_stars_simbad_otypes[closest_idx].strip()
+                    if otype in EXCLUDE_FROM_PHOTOMETRY:
+                        is_variable = True
+            variable_star_list.append(is_variable)
 
             # Compute the azimuth and elevation of the star
             _, alt = trueRaDec2ApparentAltAz(star_ra, star_dec, date2JD(*self.img_handle.currentTime()),
@@ -4294,10 +4444,11 @@ class PlateTool(QtWidgets.QMainWindow):
         # Fit the photometric offset (disable vignetting fit if a flat is used)
         # The fit is going to be weighted by the signal to noise ratio to reduce the influence of
         #  faint stars with large errors
-        # Saturated stars are excluded from the fit
+        # Saturated stars and highly variable stars are excluded from the fit
+        exclude_list = [sat or var for sat, var in zip(saturation_list, variable_star_list)]
         photom_params, self.photom_fit_stddev, self.photom_fit_resids = photometryFit(
             px_intens_list, radius_list, catalog_mags, fixed_vignetting=fixed_vignetting,
-            weights=weights, exclude_list=saturation_list)
+            weights=weights, exclude_list=exclude_list)
 
         photom_offset, vignetting_coeff = photom_params
 
@@ -7566,7 +7717,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def toggleShowCatStars(self):
-        """ Toggle showing/hiding catalog stars. """
+        """ Toggle showing/hiding catalog stars, planets, and related overlays. """
         self.catalog_stars_visible = not self.catalog_stars_visible
 
         # Hide markers if disabling
@@ -7576,6 +7727,10 @@ class PlateTool(QtWidgets.QMainWindow):
             self.geo_markers.hide()
             self.geo_markers.hide()
             self.spectral_type_text_list.hide()
+            # Hide planets
+            self.planet_markers.hide()
+            self.planet_markers2.hide()
+            self.planet_labels.hide()
 
         else:
             self.cat_star_markers.show()
@@ -7584,7 +7739,11 @@ class PlateTool(QtWidgets.QMainWindow):
             self.geo_markers.show()
             if self.show_spectral_type or self.show_star_names:
                 self.spectral_type_text_list.show()
-        
+            # Show planets
+            self.planet_markers.show()
+            self.planet_markers2.show()
+            self.planet_labels.show()
+
         # Redraw
         self.updateStars()
 
@@ -9016,7 +9175,7 @@ class PlateTool(QtWidgets.QMainWindow):
             years_from_J2000=years_from_J2000,
             lim_mag=lim_mag,
             mag_band_ratios=self.config.star_catalog_band_ratios,
-            additional_fields=['spectraltype_esphs', 'preferred_name', 'common_name', 'bayer_name'])
+            additional_fields=['spectraltype_esphs', 'preferred_name', 'common_name', 'bayer_name', 'Simbad_OType'])
 
         if len(catalog_results) == 4:
             self.catalog_stars, self.mag_band_string, self.config.star_catalog_band_ratios, extras = catalog_results
@@ -9066,6 +9225,12 @@ class PlateTool(QtWidgets.QMainWindow):
             self.catalog_stars_preferred_names = None
             self.catalog_stars_common_names = None
             self.catalog_stars_bayer_names = None
+
+        # Extract Simbad object type (for photometry filtering)
+        if 'Simbad_OType' in extras:
+            self.catalog_stars_simbad_otypes = np.array([x.decode('utf-8') for x in extras['Simbad_OType']])
+        else:
+            self.catalog_stars_simbad_otypes = None
 
         return self.catalog_stars
 
