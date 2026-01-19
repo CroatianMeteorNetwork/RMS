@@ -3215,12 +3215,30 @@ class PlateTool(QtWidgets.QMainWindow):
 
         ff_jd = date2JD(*obs_time)
 
+        # Get FOV center coordinates for filtering
+        fov_ra = self.platepar.RA_d
+        fov_dec = self.platepar.dec_d
+
+        # Use same FOV radius as catalog filtering, with margin for edge cases
+        # Cap at 90 degrees (gnomonic projection limit)
+        fov_radius = getFOVSelectionRadius(self.platepar)
+        max_ang_sep = min(90, fov_radius * 1.5)
+
         for body_name, display_name in bodies:
             try:
                 # Get body position
                 body = get_body(body_name, t, loc)
                 ra_deg = body.ra.deg
                 dec_deg = body.dec.deg
+
+                # Check angular separation from FOV center
+                # Skip bodies outside the extended FOV radius
+                ang_sep = np.degrees(angularSeparation(
+                    np.radians(ra_deg), np.radians(dec_deg),
+                    np.radians(fov_ra), np.radians(fov_dec)
+                ))
+                if ang_sep > max_ang_sep:
+                    continue
 
                 # Convert RA/Dec to image coordinates
                 # Create a fake "catalog star" array for the conversion function
