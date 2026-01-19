@@ -8407,7 +8407,6 @@ class PlateTool(QtWidgets.QMainWindow):
         This is a diagnostic tool to test how NNalign performs with the same catalog
         that CheckFit and ApplyRecalibrate would use.
         """
-        import sys
 
         print(flush=True)
         print("=" * 70, flush=True)
