@@ -5027,6 +5027,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         if target_min <= n_catalog <= target_max:
             # Already in range
+            print("Catalog balance OK: {} catalog stars for {} detected (target {}-{})".format(
+                n_catalog, n_detected, target_min, target_max))
             return False
 
         print()
@@ -5089,6 +5091,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Permanently update cat_lim_mag and reload catalog
             self.cat_lim_mag = best_mag_limit
+            self.config.catalog_mag_limit = best_mag_limit  # Update config so alignPlatepar sees it
             self.catalog_stars = self.loadCatalogStars(best_mag_limit)
 
             # Update GUI to show the balanced magnitude limit
@@ -8238,6 +8241,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Compute JD
         jd = date2JD(*calstars_time)
+        current_Ho = JD2HourAngle(jd) % 360
+
+        print("  Original platepar: RA={:.2f} Dec={:.2f} Ho={:.2f} JD={:.6f}".format(
+            self.platepar.RA_d, self.platepar.dec_d, self.platepar.Ho, self.platepar.JD))
+        print("  Current time: JD={:.6f} Ho={:.2f}".format(jd, current_Ho))
 
         # Try alignPlatepar to refine pointing
         try:
@@ -8246,45 +8254,22 @@ class PlateTool(QtWidgets.QMainWindow):
             print("  alignPlatepar failed: {} - falling back to astrometry.net".format(str(e)))
             return False
 
-        # Check if alignPlatepar improved the fit by counting matched stars
-        # Get catalog stars within FOV using the aligned platepar
-        _, catalog_stars_fov = self.filterCatalogStarsInsideFOV(self.catalog_stars)
-
-        if len(catalog_stars_fov) < 10:
-            print("  Not enough catalog stars in FOV - falling back to astrometry.net")
+        # Check if alignPlatepar returned the original platepar (same object = fit failed)
+        if pp_aligned is self.platepar:
+            print("  alignPlatepar did not converge - falling back to astrometry.net")
             return False
 
-        # Project catalog stars to image coordinates
-        catalog_x, catalog_y, _ = getCatalogStarsImagePositions(catalog_stars_fov, jd, pp_aligned)
-
-        # Count matches: detected stars with a catalog star within match_radius pixels
-        match_radius = 10.0  # pixels
-        n_matched = 0
-        for i in range(len(det_x)):
-            dist = np.sqrt((catalog_x - det_x[i])**2 + (catalog_y - det_y[i])**2)
-            if np.min(dist) < match_radius:
-                n_matched += 1
-
-        match_fraction = n_matched / len(det_x) if len(det_x) > 0 else 0
-
-        print("  Quick alignment: {}/{} stars matched ({:.1f}%) within {}px".format(
-            n_matched, len(det_x), 100*match_fraction, match_radius))
-
-        # Require at least 10 matched stars and >50% match rate
-        min_matched_stars = 10
-        min_match_fraction = 0.5
-
-        if n_matched < min_matched_stars or match_fraction < min_match_fraction:
-            print("  Insufficient matches - falling back to astrometry.net")
-            return False
-
-        # Quick alignment succeeded - apply the aligned platepar and do full NN fit
-        print("  Quick alignment successful! Skipping astrometry.net")
+        # alignPlatepar succeeded - proceed to full NN fit
+        print("  alignPlatepar succeeded: RA={:.2f} Dec={:.2f} Ho={:.2f}".format(
+            pp_aligned.RA_d, pp_aligned.dec_d, pp_aligned.Ho))
         self.platepar = pp_aligned
 
         # Update JD and hour angle
+        old_Ho = self.platepar.Ho
         self.platepar.JD = jd
         self.platepar.Ho = JD2HourAngle(jd) % 360
+        print("  Updated Ho: {:.2f} -> {:.2f} (delta={:.2f})".format(
+            old_Ho, self.platepar.Ho, self.platepar.Ho - old_Ho))
 
         # Save user's distortion settings for final fit
         user_distortion_type = self.platepar.distortion_type
@@ -8310,8 +8295,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # Perform full NN-based fit
         print()
         print("NN-based fitting...")
-        print("  Starting from: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
-            self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
+        print("  Starting from: RA={:.2f} Dec={:.2f} Ho={:.2f} Scale={:.3f} arcmin/px".format(
+            self.platepar.RA_d, self.platepar.dec_d, self.platepar.Ho, 60/self.platepar.F_scale))
         self.status_bar.showMessage("Fitting astrometry...")
         QtWidgets.QApplication.processEvents()
 

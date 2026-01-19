@@ -654,9 +654,38 @@ class Platepar(object):
             options={'maxiter': 5000, 'adaptive': True},
         )
 
-        # Debug: show result (RMSD in pixels)
-        print("    fitPointingNN: AFTER  RA={:.2f} Dec={:.2f} Rot={:.2f} RMSD={:.2f} px success={}".format(
-            res.x[0], res.x[1], res.x[2], res.fun, res.success))
+        # Debug: show optimizer result (RMSD in pixels)
+        print("    fitPointingNN: AFTER  RA={:.2f} Dec={:.2f} Rot={:.2f} RMSD={:.2f} px".format(
+            res.x[0], res.x[1], res.x[2], res.fun))
+
+        # Check inlier fraction - more robust than RMSD which is skewed by outliers
+        # Recompute NN distances with fitted parameters
+        pp_work.RA_d, pp_work.dec_d, pp_work.pos_angle_ref = res.x[:3]
+        if not fixed_scale:
+            pp_work.F_scale = abs(res.x[3])
+        cat_x, cat_y = raDecToXYPP(ra_catalog, dec_catalog, jd, pp_work)
+        valid_mask = (cat_x >= 0) & (cat_x < pp_work.X_res) & (cat_y >= 0) & (cat_y < pp_work.Y_res)
+        cat_x_valid = cat_x[valid_mask]
+        cat_y_valid = cat_y[valid_mask]
+
+        if len(cat_x_valid) >= 3:
+            cat_coords = np.column_stack([cat_x_valid, cat_y_valid])
+            tree = cKDTree(cat_coords)
+            img_coords = np.column_stack([img_x, img_y])
+            nn_distances, _ = tree.query(img_coords, k=1)
+
+            # Count inliers (matches within threshold)
+            inlier_threshold = 15.0  # pixels
+            min_inlier_fraction = 0.4  # require 40% of detected stars to match
+            n_inliers = np.sum(nn_distances < inlier_threshold)
+            inlier_fraction = n_inliers / len(nn_distances)
+
+            print("    fitPointingNN: Inliers {}/{} ({:.1f}%) within {}px".format(
+                n_inliers, len(nn_distances), 100*inlier_fraction, inlier_threshold))
+
+            if inlier_fraction < min_inlier_fraction:
+                print("    fitPointingNN: Insufficient inliers, fit rejected")
+                return False, res.fun
 
         # Update fitted parameters
         self.RA_d, self.dec_d, self.pos_angle_ref = res.x[:3]

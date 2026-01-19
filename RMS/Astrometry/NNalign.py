@@ -33,8 +33,7 @@ from RMS.Astrometry.CyFunctions import subsetCatalog
 log = getLogger('rmslogger')
 
 
-def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update=False, show_plot=False,
-                  max_rmsd_pixels=5.0):
+def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update=False, show_plot=False):
     """ Align the platepar using nearest-neighbor optimization.
 
     This function fits the platepar pointing parameters (RA_d, dec_d, pos_angle_ref) by minimizing
@@ -50,11 +49,9 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
     Keyword arguments:
         scale_update: [bool] Update the platepar scale. False by default.
         show_plot: [bool] Unused, kept for backward compatibility.
-        max_rmsd_pixels: [float] Maximum RMSD in pixels to accept fit. Default is 5.0.
-            If the fit RMSD exceeds this, the original platepar is returned.
 
     Return:
-        platepar_aligned: [Platepar instance] The aligned platepar.
+        platepar_aligned: [Platepar instance] The aligned platepar, or original if fit failed.
     """
 
     # Create a copy of the config not to mess with the original config parameters
@@ -112,6 +109,10 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
     platepar_aligned = copy.deepcopy(platepar)
 
     # Use the NN-based pointing fit
+    log.info("alignPlatepar: Input platepar RA={:.2f} Dec={:.2f} Ho={:.2f} JD={:.6f}".format(
+        platepar.RA_d, platepar.dec_d, platepar.Ho, platepar.JD))
+    log.info("alignPlatepar: Current JD={:.6f}, FOV center RA={:.2f} Dec={:.2f}".format(
+        jd, ra_centre, dec_centre))
     log.info("alignPlatepar: Fitting pointing with {} detected stars, {} catalog stars".format(
         len(img_stars), len(catalog_stars_fov)))
 
@@ -120,18 +121,16 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
 
     if success:
         log.info("alignPlatepar: Fit successful, RMSD = {:.2f} px".format(rmsd_pixels))
-        log.info("    RA:  {:.4f} -> {:.4f} deg".format(platepar.RA_d, platepar_aligned.RA_d))
-        log.info("    Dec: {:.4f} -> {:.4f} deg".format(platepar.dec_d, platepar_aligned.dec_d))
-        log.info("    Rot: {:.4f} -> {:.4f} deg".format(platepar.pos_angle_ref, platepar_aligned.pos_angle_ref))
+        log.info("    RA:  {:.4f} -> {:.4f} deg (delta={:.4f})".format(
+            platepar.RA_d, platepar_aligned.RA_d, platepar_aligned.RA_d - platepar.RA_d))
+        log.info("    Dec: {:.4f} -> {:.4f} deg (delta={:.4f})".format(
+            platepar.dec_d, platepar_aligned.dec_d, platepar_aligned.dec_d - platepar.dec_d))
+        log.info("    Rot: {:.4f} -> {:.4f} deg (delta={:.4f})".format(
+            platepar.pos_angle_ref, platepar_aligned.pos_angle_ref,
+            platepar_aligned.pos_angle_ref - platepar.pos_angle_ref))
+        log.info("    Ho unchanged: {:.4f} (platepar_aligned.Ho)".format(platepar_aligned.Ho))
         if scale_update:
             log.info("    Scale: {:.4f} -> {:.4f}".format(platepar.F_scale, platepar_aligned.F_scale))
-
-        # Reject if RMSD is too large (fit didn't converge to a good solution)
-        if rmsd_pixels > max_rmsd_pixels:
-            log.warning("alignPlatepar: RMSD too large ({:.2f} > {:.2f} px), returning original platepar".format(
-                rmsd_pixels, max_rmsd_pixels))
-            return platepar
-
     else:
         log.warning("alignPlatepar: Fit did not converge, returning original platepar")
         return platepar
