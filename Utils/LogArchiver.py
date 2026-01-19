@@ -29,7 +29,7 @@ from RMS.Logger import getLogger
 LATEST_LOG_UPLOADS_FILE_NAME = ".latestloguploads.json"
 ISO_DATE_2000 = datetime.datetime(int(2000), int(1), int(1), int(0), int(0), int(0)).isoformat()
 
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 def getTimeOfLastLogEntry(config, log_file):
