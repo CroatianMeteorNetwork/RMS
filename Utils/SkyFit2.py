@@ -5365,6 +5365,31 @@ class PlateTool(QtWidgets.QMainWindow):
         if 'sat_markers' in dic:
             del dic['sat_markers']
 
+        # Remove other PlotCurveItem objects which cannot be pickled
+        # Generic scrubber for pyqtgraph/qt items
+        keys_to_remove = []
+        for k, v in dic.items():
+            
+            # Check for direct objects
+            if hasattr(v, '__class__') and hasattr(v.__class__, '__module__'):
+                 if v.__class__.__module__.startswith(('pyqtgraph', 'PyQt5')):
+                      keys_to_remove.append(k)
+                      continue
+
+            # Check for lists of objects
+            if isinstance(v, list) and v:
+                 # Check first item in list (heuristic)
+                 first = v[0]
+                 if hasattr(first, '__class__') and hasattr(first.__class__, '__module__'):
+                      if first.__class__.__module__.startswith(('pyqtgraph', 'PyQt5')):
+                          keys_to_remove.append(k)
+                          continue
+
+        for k in keys_to_remove:
+            if k in dic:
+                del dic[k]
+
+
         # Save the FF file name if the input type is FF
         if self.img_handle.input_type == 'ff':
             dic['ff_file'] = self.img_handle.name()
