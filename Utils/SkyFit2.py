@@ -3215,9 +3215,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         ff_jd = date2JD(*obs_time)
 
-        # Get FOV center coordinates for filtering
-        fov_ra = self.platepar.RA_d
-        fov_dec = self.platepar.dec_d
+        # Get current FOV center coordinates for filtering (apparent coordinates)
+        fov_ra, fov_dec = self.computeCentreRADec()
 
         # Use same FOV radius as catalog filtering, with margin for edge cases
         # Cap at 90 degrees (gnomonic projection limit)
@@ -3226,13 +3225,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
         for body_name, display_name in bodies:
             try:
-                # Get body position
+                # Get body position (GCRS apparent coordinates)
                 body = get_body(body_name, t, loc)
                 ra_deg = body.ra.deg
                 dec_deg = body.dec.deg
 
                 # Check angular separation from FOV center
-                # Skip bodies outside the extended FOV radius
+                # Skip bodies outside the extended FOV radius (prevents gnomonic projection wrapping)
                 ang_sep = np.degrees(angularSeparation(
                     np.radians(ra_deg), np.radians(dec_deg),
                     np.radians(fov_ra), np.radians(fov_dec)
