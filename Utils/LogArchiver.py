@@ -145,13 +145,11 @@ def extractDateFromLogName(config, log_name):
         index_time = index_date + 1
 
         try:
-            if len(log_name_fields) >= index_time:
+            if len(log_name_fields) > index_time:
                 dtstr = f'{log_name_fields[index_date][0:8]}_{log_name_fields[index_time][0:6]}'
                 return datetime.datetime.strptime(dtstr, '%Y%m%d_%H%M%S').isoformat()
-
         except Exception:
             pass
-
 
     return ISO_DATE_2000
 
