@@ -967,12 +967,10 @@ class Platepar(object):
         ### ASTROMETRIC PARAMETERS FIT ###
 
         # Fit the pointing parameters (RA, Dec, rotation, scale)
-        #   Only do the fit for the polynomial distortion model, or the first time if the radial distortion
-        #   is used
-        #   Skip when using NN cost since pointing is included in the radial fit
+        #   Only do the fit for the polynomial distortion model, or if only pointing is requested
+        #   For radial distortion, pointing is fitted jointly with distortion - no separate step needed
         if (
             self.distortion_type.startswith("poly")
-            or (not self.distortion_type.startswith("poly") and first_platepar_fit)
             or fit_only_pointing
         ) and not use_nn_cost:
 
@@ -1484,83 +1482,74 @@ class Platepar(object):
                     self.setDistortionType(original_dist_type, reset_params=False)
 
                     # Final fit: call fitAstrometry recursively with matched pairs
-                    # Use first_platepar_fit=True to ensure fitPointing runs and x_poly_rev syncs
                     print("    Final fit on {} matched stars with {} (recursive call)...".format(
                         len(img_stars_clean), original_dist_type))
                     self.fitAstrometry(jd, img_stars_clean, matched_catalog,
-                                       first_platepar_fit=True, use_nn_cost=False)
+                                       first_platepar_fit=False, use_nn_cost=False)
 
                     # Return the actual matched pairs from RANSAC
                     return (img_stars_clean, matched_catalog)
                 else:
-                    res = scipy.optimize.minimize(
-                        cost_func,
-                        p0,
-                        args=(self, jd, catalog_stars, img_stars),
-                        method='Nelder-Mead',
-                        options=opt_options_final,
-                    )
+                    # Iterate forward-reverse fits until convergence
+                    # Forward fits pointing + distortion, reverse fits distortion only.
+                    # Without iteration, one pass leaves forward/reverse inconsistent.
+                    max_fwd_rev_iter = 3
+                    convergence_threshold = 1e-6
 
-                # Update fitted astrometric parameters (Unnormalize the pointing parameters)
-                ra_ref, dec_ref, pos_angle_ref, F_scale = res.x[:4]
-                self.RA_d = (360 * ra_ref) % (360)
-                self.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
-                self.pos_angle_ref = (360 * pos_angle_ref) % (360)
-                self.F_scale = abs(F_scale)
+                    for fwd_rev_iter in range(max_fwd_rev_iter):
+                        # Store previous params to check convergence
+                        prev_x_poly_fwd = self.x_poly_fwd.copy()
+                        prev_x_poly_rev = self.x_poly_rev.copy()
 
-                self.updateRefAltAz()
+                        ### FORWARD MAPPING FIT ###
+                        res = scipy.optimize.minimize(
+                            cost_func,
+                            p0,
+                            args=(self, jd, catalog_stars, img_stars),
+                            method='Nelder-Mead',
+                            options=opt_options_final,
+                        )
 
-                # Extract distortion parameters, IMPORTANT NOTE - the X polynomial is used to store the
-                #   fit parameters
-                self.x_poly_fwd = np.array(res.x[4:])
+                        # Update fitted astrometric parameters (Unnormalize the pointing parameters)
+                        ra_ref, dec_ref, pos_angle_ref, F_scale = res.x[:4]
+                        self.RA_d = (360 * ra_ref) % (360)
+                        self.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
+                        self.pos_angle_ref = (360 * pos_angle_ref) % (360)
+                        self.F_scale = abs(F_scale)
 
-                ### ###
+                        self.updateRefAltAz()
 
-                # If this is the first fit of the distortion, set the forward parameters to be equal to the reverse
-                if first_platepar_fit:
-                    self.x_poly_rev = np.array(self.x_poly_fwd)
+                        # Extract distortion parameters
+                        self.x_poly_fwd = np.array(res.x[4:])
 
-                ### REVERSE MAPPING FIT ###
-                # Skip reverse fit when using NN cost (no matched pairs available)
-                if not use_nn_cost:
+                        # Update p0 for next iteration with current fitted values
+                        p0 = [self.RA_d / 360.0, self.dec_d / 90.0, self.pos_angle_ref / 360.0,
+                              abs(self.F_scale)]
+                        p0 += self.x_poly_fwd.tolist()
 
-                    # # Initial parameters for the pointing and distortion fit (normalize to the 0-1 range)
-                    # p0  = [self.RA_d/360.0, self.dec_d/90.0, self.pos_angle_ref/360.0, abs(self.F_scale)]
-                    # p0 += self.x_poly_rev.tolist()
+                        ### REVERSE MAPPING FIT ###
+                        res_rev = scipy.optimize.minimize(
+                            _calcImageResidualsDistortion,
+                            self.x_poly_rev,
+                            args=(self, jd, catalog_stars, img_stars, 'radial'),
+                            method='Nelder-Mead',
+                            options={'maxiter': 10000, 'adaptive': True},
+                        )
 
-                    # # Fit the radial distortion - the X polynomial is used to store the fit parameters
-                    # res = scipy.optimize.minimize(_calcImageResidualsAstroAndDistortionRadial, p0, \
-                    #     args=(self, jd, catalog_stars, img_stars), method='Nelder-Mead', \
-                    #     options={'maxiter': 10000, 'adaptive': True})
+                        self.x_poly_rev = res_rev.x
 
-                    # # Update fitted astrometric parameters (Unnormalize the pointing parameters)
-                    # ra_ref, dec_ref, pos_angle_ref, F_scale = res.x[:4]
-                    # self.RA_d = (360*ra_ref)%(360)
-                    # self.dec_d = -90 + (90*dec_ref + 90)%(180.000001)
-                    # self.pos_angle_ref = (360*pos_angle_ref)%(360)
-                    # self.F_scale = abs(F_scale)
+                        # Check convergence
+                        fwd_change = np.max(np.abs(self.x_poly_fwd - prev_x_poly_fwd))
+                        rev_change = np.max(np.abs(self.x_poly_rev - prev_x_poly_rev))
 
-                    # # Compute reference Alt/Az to apparent coordinates, epoch of date
-                    # self.updateRefAltAz()
+                        if fwd_rev_iter > 0:
+                            print("    Fwd-rev iteration {}: fwd_change={:.2e}, rev_change={:.2e}".format(
+                                fwd_rev_iter + 1, fwd_change, rev_change))
 
-                    # # Extract distortion parameters, IMPORTANT NOTE - the X polynomial is used to store the
-                    # #   fit parameters
-                    # self.x_poly_rev = res.x[4:]
-
-                    ## Distortion-only fit below!
-
-                    # Fit the radial distortion - the X polynomial is used to store the fit parameters
-                    res = scipy.optimize.minimize(
-                        _calcImageResidualsDistortion,
-                        self.x_poly_rev,
-                        args=(self, jd, catalog_stars, img_stars, 'radial'),
-                        method='Nelder-Mead',
-                        options={'maxiter': 10000, 'adaptive': True},
-                    )
-
-                    # Extract distortion parameters, IMPORTANT NOTE - the X polynomial is used to store the
-                    #   fit parameters
-                    self.x_poly_rev = res.x
+                        if fwd_change < convergence_threshold and rev_change < convergence_threshold:
+                            if fwd_rev_iter > 0:
+                                print("    Converged after {} iterations".format(fwd_rev_iter + 1))
+                            break
 
                 ### ###
 
