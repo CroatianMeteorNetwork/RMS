@@ -674,8 +674,8 @@ class Platepar(object):
             nn_distances, _ = tree.query(img_coords, k=1)
 
             # Count inliers (matches within threshold)
-            inlier_threshold = 15.0  # pixels
-            min_inlier_fraction = 0.4  # require 40% of detected stars to match
+            inlier_threshold = 5.0  # pixels
+            min_inlier_fraction = 0.5  # require 50% of detected stars to match
             inlier_mask = nn_distances < inlier_threshold
             n_inliers = np.sum(inlier_mask)
             inlier_fraction = n_inliers / len(nn_distances)
