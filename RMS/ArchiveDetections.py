@@ -268,7 +268,9 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         imgdata_set = (set([item for item in file_list if item.startswith("FF") and item.endswith(".fits")]) |
                        set([item for item in file_list if item.startswith("FR") and item.endswith(".bin")]))
 
-        # Create the metadata set which is the relative complement of file_list in imgdata_set
+        # Create the metadata set which is all the files from _detected excluding the files in imgdata_set,
+        # (*.fits and *.bin)
+
         metadata_set = set([item for item in file_list if item not in imgdata_set])
 
         # Create all the required archive names and paths
