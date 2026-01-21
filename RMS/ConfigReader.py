@@ -1418,7 +1418,7 @@ def parseBuildArgs(config, parser):
 
 
 def parseCompression(config, parser):
-    section = "Compression" 
+    section = "Compression"
     pass
 
 
