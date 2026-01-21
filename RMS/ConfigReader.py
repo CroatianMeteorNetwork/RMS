@@ -718,6 +718,7 @@ class Config:
 
         # colour scheme to use for showers
         self.shower_color_map = 'viridis'
+        self.sporadic_color ='gray'
 
 
         #### EGM96 vs WGS84 heights file
@@ -1417,7 +1418,7 @@ def parseBuildArgs(config, parser):
 
 
 def parseCompression(config, parser):
-    section = "Compression"
+    section = "Compression" 
     pass
 
 
@@ -1871,3 +1872,6 @@ def parseColors(config, parser):
 
     if parser.has_option(section, "shower_color_map"):
         config.shower_color_map = parser.get(section, "shower_color_map")
+        
+    if parser.has_option(section, "sporadic_color"):
+        config.sporadic_color = parser.get(section, "sporadic_color")
