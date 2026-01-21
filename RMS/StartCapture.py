@@ -681,7 +681,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
             # Put the archive up for upload
             if upload_manager is not None:
-                log.info(f"Adding files to upload list: {files_to_add_list}", )
+                log.info(f"Adding files to upload list: {files_to_add_list}")
                 upload_manager.addFiles(files_to_add_list)
                 if files_to_add_list:
                     if len(files_to_add_list) == 1:
