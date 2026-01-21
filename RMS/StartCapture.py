@@ -829,15 +829,10 @@ def processIncompleteCaptures(config, upload_manager):
             if upload_manager is not None:
                 files_to_add_list_unfiltered = [archive_name, metadata_archive_name, imgdata_archive_name]
                 files_to_add_list = [f for f in files_to_add_list_unfiltered if f is not None]
-                if files_to_add_list:
-                    for f in files_to_add_list:
-                        log.info(f"Adding file to upload list: {f}")
                 upload_manager.addFiles(files_to_add_list)
                 if files_to_add_list:
-                    if len(files_to_add_list) < 2:
-                        log.info("File added...")
-                    else:
-                        log.info("Files added...")
+                    for f in files_to_add_list:
+                        log.info(f"Added {f} to upload list")
 
             # Delete detection backup files
             if detector is not None:

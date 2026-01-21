@@ -1333,7 +1333,7 @@ def parseUpload(config, parser):
     if parser.has_option(section, "upload_enabled"):
         config.upload_enabled = parser.getboolean(section, "upload_enabled")
 
-    # Enable  uploading images in one archive and data derived from images in another
+    # Enable uploading images in one archive and data derived from images in another
     if parser.has_option(section, "upload_split"):
         config.upload_split = parser.getboolean(section, "upload_split")
 
