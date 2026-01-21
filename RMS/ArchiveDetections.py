@@ -278,14 +278,15 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         imgdata_archived_path = f"{archived_path}_imgdata"
         imgdata_archive_name = f"{archive_base}_imgdata"
 
+        # In all cases, generate the _detected directory and archive as a record for the station
+
+        log.info(f"Generating archive file {archive_name}")
+
+        archive_name = archiveDir(captured_path, file_list, archived_path, archive_name, extra_files=extra_files)
+
         if not config.upload_split:
 
-            # Archive the files
-            log.info(f"Generating archive file {archive_name}")
-
-            archive_name = archiveDir(captured_path, file_list, archived_path, archive_name, \
-                extra_files=extra_files)
-
+            # Set to None, as these archives will not be generated in this path
             imgdata_archive_name, metadata_archive_name = None, None
 
         else:
@@ -308,6 +309,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
                 if os.path.isdir(imgdata_archived_path):
                     shutil.rmtree(imgdata_archived_path)
 
+            # Set to None, even though it has been generated, do not upload
             archive_name = None
 
         return archive_name, imgdata_archive_name, metadata_archive_name
