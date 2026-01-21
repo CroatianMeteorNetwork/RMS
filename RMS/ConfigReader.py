@@ -21,6 +21,7 @@ import os
 import sys
 from RMS.Misc import getRmsRootDir
 from Utils.GenerateTimelapse import isFfmpegWorking
+import matplotlib.colors as mcolors
 
 # Consolidated version-specific imports and definitions
 if sys.version_info[0] == 3:
@@ -1875,3 +1876,5 @@ def parseColors(config, parser):
         
     if parser.has_option(section, "sporadic_color"):
         config.sporadic_color = parser.get(section, "sporadic_color")
+        if config.sporadic_color not in mcolors.CSS4_COLORS:
+            config.sporadic_color = 'gray'
