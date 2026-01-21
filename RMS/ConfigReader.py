@@ -19,7 +19,10 @@ from __future__ import absolute_import, division, print_function
 import math
 import os
 import sys
+import numpy as np
+
 from RMS.Misc import getRmsRootDir
+from RMS.GeoidHeightEGM96 import mslToWGS84Height
 from Utils.GenerateTimelapse import isFfmpegWorking
 
 # Consolidated version-specific imports and definitions
@@ -724,6 +727,7 @@ class Config:
 
         self.egm96_path = os.path.join(self.rms_root_dir, 'share')
         self.egm96_file_name = 'WW15MGH.DAC'
+        self.egm96_full_path = os.path.join(self.egm96_path, self.egm96_file_name)
 
         # How many degrees in solar longitude to check from the shower peak for showers that don't have
         # a specified beginning and end
@@ -907,6 +911,21 @@ def parseSystem(config, parser):
 
     if parser.has_option(section, "elevation"):
         config.elevation = parser.getfloat(section, "elevation")
+    
+    if parser.has_option(section, "height_wgs84"):
+        config.height_wgs84 = parser.getfloat(section, "height_wgs84")
+    else:
+        try:
+            # Calculate WGS84 height if not provided
+            config.height_wgs84 = mslToWGS84Height(
+                np.radians(config.latitude),
+                np.radians(config.longitude),
+                config.elevation,
+                egm96_file_path=config.egm96_full_path
+            )
+        except Exception as e:
+            config.height_wgs84 = config.elevation
+            print("Warning: Calculating WGS84 height failed {}. Using Geoid height instead.".format(str(e)))
         
 
     if parser.has_option(section, "cams_code"):
