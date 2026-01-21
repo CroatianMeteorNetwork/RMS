@@ -11,6 +11,8 @@ import sys
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
+import matplotlib.colors as mcolors
+
 from RMS.Astrometry.Conversions import (EARTH_CONSTANTS, datetime2JD,
                                         jd2Date, raDec2AltAz, raDec2Vector,
                                         vector2RaDec, AEH2Range)
@@ -1153,6 +1155,9 @@ if __name__ == "__main__":
     sporadic_color = cml_args.sporadic_color
     if sporadic_color is None:
         sporadic_color = config.sporadic_color
+    if sporadic_color not in mcolors.CSS4_COLORS:
+        sporadic_color = 'gray'
+
        
 
     # Perform shower association
