@@ -3190,6 +3190,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
                     iterator = zip(self.catalog_stars_spectral_type_filtered, iter_names, iter_common_names)
 
+                    # Keep track of placed labels to avoid overlap
+                    placed_labels_xy = []  # List of (x, y) tuples
+
                     for i, (spec_type, star_name, common_name) in enumerate(iterator):
                         
                         html_text = ""
@@ -3247,6 +3250,24 @@ class PlateTool(QtWidgets.QMainWindow):
 
                         if not has_text:
                             continue
+
+                        # Check for overlap with existing labels
+                        # Label position is roughly at (cat_x, cat_y)
+                        curr_x = self.catalog_x_filtered[i]
+                        curr_y = self.catalog_y_filtered[i]
+
+                        overlap = False
+                        for (placed_x, placed_y) in placed_labels_xy:
+                            # Check vertical and horizontal distance (pixels)
+                            # Assume label height ~15-20px, allow some horizontal overlap but not if too close vertically
+                            if abs(curr_y - placed_y) < 15 and abs(curr_x - placed_x) < 50:
+                                overlap = True
+                                break
+                        
+                        if overlap:
+                            continue
+
+                        placed_labels_xy.append((curr_x, curr_y))
 
                         # Add text item with HTML
                         # Anchor (1.0, 0.5) places text right edge at anchor point
