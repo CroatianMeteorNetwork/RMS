@@ -283,39 +283,25 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
         # In all cases, generate the _detected directory and archive as a record for the station
 
-        log.info(f"Generating archive directory at {archived_path}")
         # Make the archive directory and compress into _detected.tar.bz2 if config.upload_split is False.
 
         create_detected_tar_bz2 = not config.upload_split
         archive_name = archiveDir(captured_path, file_list, archived_path, archive_name, extra_files=extra_files,
                                   create_archive=create_detected_tar_bz2)
 
-        if archive_name is None:
-            log.info(f"Generated archive directory at {archived_path}, did not generate detected archive.")
-        else:
-            log.info(f"Generated archive directory at {archived_path}, and archive file {archive_name}")
-
         if config.upload_split:
-
             # Create a directory to hold the metadata files, archive, then remove the directory
-            log.info(f"Generating metadata archive file {metadata_archive_name}")
             metadata_archive_name = archiveDir(captured_path, metadata_set, metadata_archived_path,
                                                metadata_archive_name, extra_files=extra_files, delete_dest_dir=True)
 
             # Create a directory to hold the imgdata files, archive, then remove the directory
-            log.info(f"Generating imgdata archive file {imgdata_archive_name}")
             imgdata_archive_name = archiveDir(captured_path, imgdata_set, imgdata_archived_path,
-                                              imgdata_archive_name, extra_files=extra_files)
-
-            if os.path.exists(imgdata_archived_path):
-                if os.path.isdir(imgdata_archived_path):
-                    shutil.rmtree(imgdata_archived_path)
+                                              imgdata_archive_name, extra_files=extra_files, delete_dest_dir=True)
 
             # Set to archive_name to None to prevent upload from this execution path
             archive_name = None
 
         else:
-
             # Set to None, as these archives will not be generated in this path
             imgdata_archive_name, metadata_archive_name = None, None
 
