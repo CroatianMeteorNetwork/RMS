@@ -3168,31 +3168,47 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.cat_star_markers2.setData(x=self.catalog_x_filtered + 0.5, \
                     y=self.catalog_y_filtered + 0.5, size=self.catalog_marker_size)
                 
-                # Plot spectral type text
+                # Plot spectral type text and/or star names
                 self.spectral_type_text_list.clear()
-                
+
+                # Pre-set visibility so items added will inherit correct state
+                should_show = self.catalog_stars_visible and (self.show_spectral_type or self.show_star_names)
+                self.spectral_type_text_list.setVisible(should_show)
+
+                # Check if we have any data to render
+                has_spectral_data = hasattr(self, 'catalog_stars_spectral_type_filtered') and \
+                                    (self.catalog_stars_spectral_type_filtered is not None) and \
+                                    len(self.catalog_stars_spectral_type_filtered) > 0
+                has_name_data = hasattr(self, 'catalog_stars_preferred_names_filtered') and \
+                                (self.catalog_stars_preferred_names_filtered is not None) and \
+                                len(self.catalog_stars_preferred_names_filtered) > 0
+
                 # Check if we should render anything
                 if (self.show_spectral_type or self.show_star_names) and \
-                   hasattr(self, 'catalog_stars_spectral_type_filtered') and \
-                   (self.catalog_stars_spectral_type_filtered is not None):
-                    
-                    
-                    # Prepare iterators
-                    # We need to handle cases where names might not exist (optional field)
-                    if hasattr(self, 'catalog_stars_preferred_names_filtered') and \
-                       (self.catalog_stars_preferred_names_filtered is not None):
+                   (has_spectral_data or has_name_data):
+
+                    # Determine the number of stars to iterate over
+                    n_stars = len(self.catalog_x_filtered)
+
+                    # Prepare iterators - use data if available, otherwise None placeholders
+                    if has_spectral_data:
+                        iter_spectral = self.catalog_stars_spectral_type_filtered
+                    else:
+                        iter_spectral = [None] * n_stars
+
+                    if has_name_data:
                         iter_names = self.catalog_stars_preferred_names_filtered
                     else:
-                        iter_names = [None]*len(self.catalog_stars_spectral_type_filtered)
+                        iter_names = [None] * n_stars
 
                     if hasattr(self, 'catalog_stars_common_names_filtered') and \
                        (self.catalog_stars_common_names_filtered is not None):
                         iter_common_names = self.catalog_stars_common_names_filtered
                     else:
-                        iter_common_names = [None]*len(self.catalog_stars_spectral_type_filtered)
+                        iter_common_names = [None] * n_stars
 
 
-                    iterator = zip(self.catalog_stars_spectral_type_filtered, iter_names, iter_common_names)
+                    iterator = zip(iter_spectral, iter_names, iter_common_names)
 
                     # Keep track of placed labels to avoid overlap
                     placed_labels_xy = []  # List of (x, y) tuples
@@ -3281,8 +3297,13 @@ class PlateTool(QtWidgets.QMainWindow):
                         text_item.setPos(self.catalog_x_filtered[i] - 3,
                                          self.catalog_y_filtered[i] + 0.5)
                         self.spectral_type_text_list.addTextItem(text_item)
+
             else:
                 print('No catalog stars visible!')
+
+        else:
+            # Catalog stars not visible - hide the text list
+            self.spectral_type_text_list.setVisible(False)
 
 
     def updatePlanets(self):
@@ -7931,7 +7952,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.cat_star_markers2.hide()
             self.geo_markers.hide()
             self.geo_markers.hide()
-            self.spectral_type_text_list.hide()
             # Hide planets
             self.planet_markers.hide()
             self.planet_markers2.hide()
@@ -7942,12 +7962,12 @@ class PlateTool(QtWidgets.QMainWindow):
             self.cat_star_markers2.show()
             self.geo_markers.show()
             self.geo_markers.show()
-            if self.show_spectral_type or self.show_star_names:
-                self.spectral_type_text_list.show()
             # Show planets
             self.planet_markers.show()
             self.planet_markers2.show()
             self.planet_labels.show()
+
+        # Note: spectral_type_text_list visibility is handled in updateStars()
 
         # Redraw
         self.updateStars()
@@ -7959,14 +7979,7 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Toggle showing/hiding spectral types. """
         self.show_spectral_type = not self.show_spectral_type
 
-        # Hide/show text items
-        if self.show_spectral_type or self.show_star_names:
-            if self.catalog_stars_visible:
-                self.spectral_type_text_list.show()
-        else:
-            self.spectral_type_text_list.hide()
-
-        # Redraw
+        # Redraw (handles visibility)
         self.updateStars()
 
         # Update the checkbox
@@ -7976,14 +7989,7 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Toggle showing/hiding star names. """
         self.show_star_names = not self.show_star_names
 
-        # Hide/show text items
-        if self.show_spectral_type or self.show_star_names:
-            if self.catalog_stars_visible:
-                self.spectral_type_text_list.show()
-        else:
-            self.spectral_type_text_list.hide()
-
-        # Redraw
+        # Redraw (handles visibility)
         self.updateStars()
 
         # Update the checkbox
