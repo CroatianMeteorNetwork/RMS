@@ -8712,15 +8712,10 @@ class PlateTool(QtWidgets.QMainWindow):
                         if len(self.paired_stars) >= self.getMinFitStars():
                             self.fitPickedStars()
 
-                        # Save the platepar
-                        platepar_path = os.path.join(self.dir_path, self.config.platepar_name)
-                        self.platepar.write(platepar_path, fmt=self.platepar_fmt)
-
                         self.status_bar.showMessage(
                             f"Auto fit complete: {placeholder_name} - {len(self.paired_stars)} stars"
                         )
                         print(f"\nAuto fit complete on {best_ff}")
-                        print(f"Platepar saved to: {platepar_path}")
                     else:
                         QtWidgets.QMessageBox.warning(
                             self, "Auto Fit Failed",
