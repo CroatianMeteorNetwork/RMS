@@ -284,11 +284,9 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         # In all cases, generate the _detected directory and archive as a record for the station
 
         log.info(f"Generating archive directory at {archived_path}")
-        # Make the archive directory and compress into a bz2.
+        # Make the archive directory and compress into _detected.tar.bz2 if config.upload_split is False.
 
-        # create_detected_tar_bz2 is true if we are not splitting the uploads into two files and only creating _detected
         create_detected_tar_bz2 = not config.upload_split
-
         archive_name = archiveDir(captured_path, file_list, archived_path, archive_name, extra_files=extra_files,
                                   create_archive=create_detected_tar_bz2)
 
