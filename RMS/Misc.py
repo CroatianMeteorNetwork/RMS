@@ -188,8 +188,7 @@ def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=F
         create_archive: [bool] Optional, default True, create a bz2 archive
 
     Return:
-        archive_name: [str] Full name of the archive, if one was created, else None.
-
+        archive_name: [str] If an archive was created, full name of the archive, else None.
     """
 
     # Make the archive directory
@@ -231,17 +230,14 @@ def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=F
                 except Exception as e:
                     log.warning(e)
 
-
     # If create_archive is set compress the archive directory into a bz2 file
     archive_name = None
     if create_archive:
         archive_name = shutil.make_archive(os.path.join(dest_dir, compress_file), 'bztar', dest_dir, logger=log)
 
-
     # Delete the archive directory after compression
     if delete_dest_dir:
         shutil.rmtree(dest_dir)
-
 
     return archive_name
 
