@@ -8025,9 +8025,13 @@ class PlateTool(QtWidgets.QMainWindow):
         if self.draw_calstars:
             self.calstar_markers.show()
             self.calstar_markers2.show()
+            self.calstar_markers_outer.show()
+            self.calstar_markers_outer2.show()
         else:
             self.calstar_markers.hide()
             self.calstar_markers2.hide()
+            self.calstar_markers_outer.hide()
+            self.calstar_markers_outer2.hide()
 
     def toggleShowAstrometryNetStars(self):
         """ Toggle whether to show astrometry.net matched stars """
