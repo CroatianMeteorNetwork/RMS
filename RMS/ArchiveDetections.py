@@ -283,27 +283,28 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         # In all cases, generate the _detected directory and archive as a record for the station
 
         log.info(f"Generating archive file {archive_name}")
+        # Make the archive directory and compress into a bz2.
 
-        archive_name = archiveDir(captured_path, file_list, archived_path, archive_name, extra_files=extra_files)
+        # create_archive is true if we are not splitting the uploads into two files and only creating _detected
+        create_archive = not config.upload_split
 
-        if not config.upload_split:
+        archive_name = archiveDir(captured_path, file_list, archived_path, archive_name, extra_files=extra_files,
+                                  create_archive=create_archive)
 
-            # Set to None, as these archives will not be generated in this path
-            imgdata_archive_name, metadata_archive_name = None, None
-
+        if create_archive:
+            log.info(f"Created archive directory {archived_path} and file {archive_name}")
         else:
+            log.info(f"Created file {archive_name}, but removed archive directory {archived_path}")
+
+        if config.upload_split:
 
             # Create a directory to hold the metadata files, archive, then remove the directory
-            log.info(f"Generating archive file {metadata_archive_name}")
+            log.info(f"Generating metadata archive file {metadata_archive_name}")
             metadata_archive_name = archiveDir(captured_path, metadata_set, metadata_archived_path,
-                                               metadata_archive_name, extra_files=extra_files)
-
-            if os.path.exists(metadata_archived_path):
-                if os.path.isdir(metadata_archived_path):
-                    shutil.rmtree(metadata_archived_path)
+                                               metadata_archive_name, extra_files=extra_files, delete_dest_dir=True)
 
             # Create a directory to hold the imgdata files, archive, then remove the directory
-            log.info(f"Generating archive file {imgdata_archive_name}")
+            log.info(f"Generating imgdata archive file {imgdata_archive_name}")
             imgdata_archive_name = archiveDir(captured_path, imgdata_set, imgdata_archived_path,
                                               imgdata_archive_name, extra_files=extra_files)
 
@@ -311,8 +312,13 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
                 if os.path.isdir(imgdata_archived_path):
                     shutil.rmtree(imgdata_archived_path)
 
-            # Set to None, even though it has been generated, do not upload
+            # Set to archive_name to None to prevent upload from this path
             archive_name = None
+
+        else:
+
+            # Set to None, as these archives will not be generated in this path
+            imgdata_archive_name, metadata_archive_name = None, None
 
         return archive_name, imgdata_archive_name, metadata_archive_name
 
