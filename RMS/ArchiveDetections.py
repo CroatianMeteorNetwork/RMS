@@ -312,7 +312,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
                 if os.path.isdir(imgdata_archived_path):
                     shutil.rmtree(imgdata_archived_path)
 
-            # Set to archive_name to None to prevent upload from this path
+            # Set to archive_name to None to prevent upload from this execution path
             archive_name = None
 
         else:
