@@ -1983,6 +1983,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # Solar system body data for calibration: [(name, x, y, ra, dec, mag), ...]
         self.planet_data = []
 
+        # Cache for planet ephemerides (expensive astropy calls)
+        self._planet_cache_time = None  # Observation time when ephemerides were computed
+        self._planet_cache_radec = []   # List of (name, ra, dec, mag) from astropy
+
         # astrometry.net matched star markers (main window) - cyan color
         # These show catalog star positions that matched to input stars
         self.astrometry_matched_markers = pg.ScatterPlotItem()
@@ -3302,35 +3306,62 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             obs_time = self.img_handle.currentFrameTime()
 
-        # Convert to astropy Time
-        dt = datetime.datetime(*obs_time[:6])
-        t = Time(dt)
+        ff_jd = date2JD(*obs_time)
 
-        # Observer location
-        loc = EarthLocation(lat=self.platepar.lat, lon=self.platepar.lon,
-                           height=self.platepar.elev)
+        # Check if we need to recompute ephemerides (expensive astropy calls)
+        # Only recompute when the observation time changes
+        if self._planet_cache_time != obs_time[:6]:
+            # Convert to astropy Time
+            dt = datetime.datetime(*obs_time[:6])
+            t = Time(dt)
 
-        # Bodies to display (name, display_name)
-        bodies = [
-            ('sun', 'Sun'),
-            ('moon', 'Moon'),
-            ('mercury', 'Mercury'),
-            ('venus', 'Venus'),
-            ('mars', 'Mars'),
-            ('jupiter', 'Jupiter'),
-            ('saturn', 'Saturn'),
-            ('uranus', 'Uranus'),
-            ('neptune', 'Neptune'),
-        ]
+            # Observer location
+            loc = EarthLocation(lat=self.platepar.lat, lon=self.platepar.lon,
+                               height=self.platepar.elev)
 
+            # Bodies to display (name, display_name)
+            bodies = [
+                ('sun', 'Sun'),
+                ('moon', 'Moon'),
+                ('mercury', 'Mercury'),
+                ('venus', 'Venus'),
+                ('mars', 'Mars'),
+                ('jupiter', 'Jupiter'),
+                ('saturn', 'Saturn'),
+                ('uranus', 'Uranus'),
+                ('neptune', 'Neptune'),
+            ]
+
+            # Get sun position for magnitude calculations
+            sun = get_sun(t)
+
+            # Compute and cache ephemerides
+            self._planet_cache_radec = []
+            for body_name, display_name in bodies:
+                try:
+                    # Get body position (GCRS apparent coordinates)
+                    body = get_body(body_name, t, loc)
+                    ra_deg = body.ra.deg
+                    dec_deg = body.dec.deg
+
+                    # Compute apparent magnitude
+                    mag = computeSolarSystemMagnitude(body_name, body, sun, t)
+
+                    self._planet_cache_radec.append((display_name, ra_deg, dec_deg, mag))
+
+                except Exception as e:
+                    # Skip bodies that fail (e.g., if ephemeris data is missing)
+                    pass
+
+            self._planet_cache_time = obs_time[:6]
+
+        # Now compute x/y positions from cached RA/Dec (this is fast and depends on platepar)
         planet_x = []
         planet_y = []
         planet_names = []
         planet_mags = []
         planet_ra = []
         planet_dec = []
-
-        ff_jd = date2JD(*obs_time)
 
         # Get current FOV center coordinates for filtering (apparent coordinates)
         fov_ra, fov_dec = self.computeCentreRADec()
@@ -3340,47 +3371,31 @@ class PlateTool(QtWidgets.QMainWindow):
         fov_radius = getFOVSelectionRadius(self.platepar)
         max_ang_sep = min(90, fov_radius * 1.5)
 
-        # Get sun position for magnitude calculations
-        sun = get_sun(t)
+        for display_name, ra_deg, dec_deg, mag in self._planet_cache_radec:
+            # Check angular separation from FOV center
+            # Skip bodies outside the extended FOV radius (prevents gnomonic projection wrapping)
+            ang_sep = np.degrees(angularSeparation(
+                np.radians(ra_deg), np.radians(dec_deg),
+                np.radians(fov_ra), np.radians(fov_dec)
+            ))
+            if ang_sep > max_ang_sep:
+                continue
 
-        for body_name, display_name in bodies:
-            try:
-                # Get body position (GCRS apparent coordinates)
-                body = get_body(body_name, t, loc)
-                ra_deg = body.ra.deg
-                dec_deg = body.dec.deg
+            # Convert RA/Dec to image coordinates
+            body_radec = np.array([[ra_deg, dec_deg, mag]])
+            x_arr, y_arr, _ = getCatalogStarsImagePositions(body_radec, ff_jd, self.platepar)
 
-                # Check angular separation from FOV center
-                # Skip bodies outside the extended FOV radius (prevents gnomonic projection wrapping)
-                ang_sep = np.degrees(angularSeparation(
-                    np.radians(ra_deg), np.radians(dec_deg),
-                    np.radians(fov_ra), np.radians(fov_dec)
-                ))
-                if ang_sep > max_ang_sep:
-                    continue
+            if len(x_arr) > 0:
+                x, y = x_arr[0], y_arr[0]
 
-                # Compute apparent magnitude
-                mag = computeSolarSystemMagnitude(body_name, body, sun, t)
-
-                # Convert RA/Dec to image coordinates
-                body_radec = np.array([[ra_deg, dec_deg, mag]])
-                x_arr, y_arr, _ = getCatalogStarsImagePositions(body_radec, ff_jd, self.platepar)
-
-                if len(x_arr) > 0:
-                    x, y = x_arr[0], y_arr[0]
-
-                    # Check if within image bounds
-                    if 0 <= x < self.platepar.X_res and 0 <= y < self.platepar.Y_res:
-                        planet_x.append(x)
-                        planet_y.append(y)
-                        planet_names.append(display_name)
-                        planet_mags.append(mag)
-                        planet_ra.append(ra_deg)
-                        planet_dec.append(dec_deg)
-
-            except Exception as e:
-                # Skip bodies that fail (e.g., if ephemeris data is missing)
-                pass
+                # Check if within image bounds
+                if 0 <= x < self.platepar.X_res and 0 <= y < self.platepar.Y_res:
+                    planet_x.append(x)
+                    planet_y.append(y)
+                    planet_names.append(display_name)
+                    planet_mags.append(mag)
+                    planet_ra.append(ra_deg)
+                    planet_dec.append(dec_deg)
 
         # Store planet data for potential calibration use
         self.planet_data = list(zip(planet_names, planet_x, planet_y, planet_ra, planet_dec, planet_mags))
