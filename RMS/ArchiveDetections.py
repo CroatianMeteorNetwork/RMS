@@ -285,16 +285,11 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         log.info(f"Generating archive file {archive_name}")
         # Make the archive directory and compress into a bz2.
 
-        # create_archive is true if we are not splitting the uploads into two files and only creating _detected
-        create_archive = not config.upload_split
+        # create_detected_tar_bz2 is true if we are not splitting the uploads into two files and only creating _detected
+        create_detected_tar_bz2 = not config.upload_split
 
         archive_name = archiveDir(captured_path, file_list, archived_path, archive_name, extra_files=extra_files,
-                                  create_archive=create_archive)
-
-        if create_archive:
-            log.info(f"Created archive directory {archived_path} and file {archive_name}")
-        else:
-            log.info(f"Created file {archive_name}, but removed archive directory {archived_path}")
+                                  create_archive=create_detected_tar_bz2)
 
         if config.upload_split:
 
