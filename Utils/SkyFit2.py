@@ -4989,16 +4989,16 @@ class PlateTool(QtWidgets.QMainWindow):
         return removed_count
 
 
-    def filterBlendedStars(self, blend_radius_arcsec=30.0, mag_diff_limit=2.0):
+    def filterBlendedStars(self, blend_radius_px=10.0, mag_margin=0.3):
         """
         Filter paired_stars by removing likely blended stars.
 
-        A star is considered blended if there are other bright catalog stars
-        within blend_radius_arcsec of the matched catalog star position.
+        A star is considered blended if there are other catalog stars (brighter
+        than lim_mag + mag_margin) within blend_radius_px pixels in the image.
 
         Arguments:
-            blend_radius_arcsec: [float] Radius in arcseconds to check for neighbors.
-            mag_diff_limit: [float] Only consider neighbors within this mag of matched star.
+            blend_radius_px: [float] Radius in pixels to check for neighbors.
+            mag_margin: [float] Margin above limiting magnitude for catalog stars to consider.
 
         Returns:
             int: Number of stars removed.
@@ -5007,10 +5007,16 @@ class PlateTool(QtWidgets.QMainWindow):
         if not hasattr(self, 'catalog_stars') or self.catalog_stars is None:
             return 0
 
+        jd = date2JD(*self.img_handle.currentFrameTime())
+
         self.paired_stars, removed_count = filterBlendedStars(
-            self.paired_stars, self.catalog_stars,
-            blend_radius_arcsec=blend_radius_arcsec,
-            mag_diff_limit=mag_diff_limit,
+            self.paired_stars,
+            self.catalog_stars,
+            self.platepar,
+            jd,
+            self.cat_lim_mag,
+            blend_radius_px=blend_radius_px,
+            mag_margin=mag_margin,
             verbose=True
         )
 
@@ -8401,7 +8407,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Filter blended stars before final fit
         if len(self.paired_stars) >= 15:
-            removed = self.filterBlendedStars(blend_radius_arcsec=30.0)
+            removed = self.filterBlendedStars(blend_radius_px=10.0, mag_margin=0.3)
             if removed > 0:
                 print("Pairs after blend filtering: {}".format(len(self.paired_stars)))
 
@@ -9136,7 +9142,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Filter blended stars before final fit
             if len(self.paired_stars) >= 15:
-                removed = self.filterBlendedStars(blend_radius_arcsec=30.0)
+                removed = self.filterBlendedStars(blend_radius_px=10.0, mag_margin=0.3)
                 if removed > 0:
                     print("Pairs after blend filtering: {}".format(len(self.paired_stars)))
 
