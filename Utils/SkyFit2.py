@@ -4995,15 +4995,15 @@ class PlateTool(QtWidgets.QMainWindow):
         return removed_count
 
 
-    def filterBlendedStars(self, blend_radius_px=10.0, mag_margin=0.3):
+    def filterBlendedStars(self, fwhm_mult=2.0, mag_margin=0.3):
         """
         Filter paired_stars by removing likely blended stars.
 
         A star is considered blended if there are other catalog stars (brighter
-        than lim_mag + mag_margin) within blend_radius_px pixels in the image.
+        than lim_mag + mag_margin) within fwhm_mult * FWHM pixels of the star.
 
         Arguments:
-            blend_radius_px: [float] Radius in pixels to check for neighbors.
+            fwhm_mult: [float] Multiplier of the star's FWHM for blend detection radius.
             mag_margin: [float] Margin above limiting magnitude for catalog stars to consider.
 
         Returns:
@@ -5021,7 +5021,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar,
             jd,
             self.cat_lim_mag,
-            blend_radius_px=blend_radius_px,
+            fwhm_mult=fwhm_mult,
             mag_margin=mag_margin,
             verbose=True
         )
@@ -8413,7 +8413,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Filter blended stars before final fit
         if len(self.paired_stars) >= 15:
-            removed = self.filterBlendedStars(blend_radius_px=10.0, mag_margin=0.3)
+            removed = self.filterBlendedStars(fwhm_mult=2.0, mag_margin=0.3)
             if removed > 0:
                 print("Pairs after blend filtering: {}".format(len(self.paired_stars)))
 
@@ -9148,7 +9148,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Filter blended stars before final fit
             if len(self.paired_stars) >= 15:
-                removed = self.filterBlendedStars(blend_radius_px=10.0, mag_margin=0.3)
+                removed = self.filterBlendedStars(fwhm_mult=2.0, mag_margin=0.3)
                 if removed > 0:
                     print("Pairs after blend filtering: {}".format(len(self.paired_stars)))
 

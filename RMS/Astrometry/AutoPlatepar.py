@@ -29,8 +29,8 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
 from RMS.Astrometry.AstrometryNet import astrometryNetSolve
 from RMS.Astrometry.StarClasses import CatalogStar, PairedStars
 from RMS.Astrometry.StarFilters import (filterPhotometricOutliers, filterBlendedStars, filterHighFWHMStars,
-                                         DEFAULT_PHOTOMETRIC_SIGMA, DEFAULT_BLEND_RADIUS_ARCSEC,
-                                         DEFAULT_BLEND_MAG_DIFF, DEFAULT_HIGH_FWHM_FRACTION)
+                                         DEFAULT_PHOTOMETRIC_SIGMA, DEFAULT_BLEND_FWHM_MULT,
+                                         DEFAULT_BLEND_MAG_MARGIN, DEFAULT_HIGH_FWHM_FRACTION)
 from RMS.Formats.Platepar import getCatalogStarsImagePositions
 from RMS.Formats import CALSTARS
 from RMS.Formats.Platepar import Platepar
@@ -326,7 +326,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
                     force_distortion_centre=DEFAULT_FORCE_DISTORTION_CENTRE,
                     refraction=DEFAULT_REFRACTION,
                     photometric_sigma=DEFAULT_PHOTOMETRIC_SIGMA,
-                    blend_radius_arcsec=DEFAULT_BLEND_RADIUS_ARCSEC,
+                    fwhm_mult=DEFAULT_BLEND_FWHM_MULT,
                     high_fwhm_fraction=DEFAULT_HIGH_FWHM_FRACTION,
                     verbose=True):
     """
@@ -360,7 +360,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
 
     Keyword arguments (filtering parameters):
         photometric_sigma: [float] Sigma threshold for photometric outlier removal (default: 2.5)
-        blend_radius_arcsec: [float] Radius for blend detection in arcsec (default: 30.0)
+        fwhm_mult: [float] Multiplier of FWHM for blend detection radius (default: 2.0)
         high_fwhm_fraction: [float] Fraction of high-FWHM stars to remove (default: 0.10)
 
         verbose: [bool] Print progress information
@@ -612,7 +612,8 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
 
     if len(paired_stars) >= 15:
         paired_stars, removed = filterBlendedStars(
-            paired_stars, catalog_stars, blend_radius_arcsec=blend_radius_arcsec, verbose=verbose)
+            paired_stars, catalog_stars, platepar, jd, config.catalog_mag_limit,
+            fwhm_mult=fwhm_mult, verbose=verbose)
 
     if len(paired_stars) >= 15:
         paired_stars, removed = filterHighFWHMStars(
@@ -733,8 +734,8 @@ if __name__ == "__main__":
     # Filtering parameters
     parser.add_argument("--photom-sigma", type=float, default=DEFAULT_PHOTOMETRIC_SIGMA,
                         help="Photometric outlier sigma threshold (default: {:.1f})".format(DEFAULT_PHOTOMETRIC_SIGMA))
-    parser.add_argument("--blend-radius", type=float, default=DEFAULT_BLEND_RADIUS_ARCSEC,
-                        help="Blend detection radius in arcsec (default: {:.1f})".format(DEFAULT_BLEND_RADIUS_ARCSEC))
+    parser.add_argument("--fwhm-mult", type=float, default=DEFAULT_BLEND_FWHM_MULT,
+                        help="FWHM multiplier for blend detection radius (default: {:.1f})".format(DEFAULT_BLEND_FWHM_MULT))
     parser.add_argument("--fwhm-fraction", type=float, default=DEFAULT_HIGH_FWHM_FRACTION,
                         help="Fraction of high-FWHM stars to remove (default: {:.2f})".format(DEFAULT_HIGH_FWHM_FRACTION))
 
@@ -763,7 +764,7 @@ if __name__ == "__main__":
         force_distortion_centre=args.force_distortion_centre,
         refraction=not args.no_refraction,
         photometric_sigma=args.photom_sigma,
-        blend_radius_arcsec=args.blend_radius,
+        fwhm_mult=args.fwhm_mult,
         high_fwhm_fraction=args.fwhm_fraction,
         verbose=True
     )

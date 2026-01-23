@@ -19,7 +19,7 @@ from RMS.Astrometry.ApplyAstrometry import extinctionCorrectionTrueToApparent, r
 
 # Default filtering parameters
 DEFAULT_PHOTOMETRIC_SIGMA = 2.5
-DEFAULT_BLEND_RADIUS_PX = 10.0  # Pixel radius for blending detection
+DEFAULT_BLEND_FWHM_MULT = 2.0  # Multiplier of FWHM for blending detection radius
 DEFAULT_BLEND_MAG_MARGIN = 0.3  # Margin above limiting magnitude for blend check
 DEFAULT_HIGH_FWHM_FRACTION = 0.10
 
@@ -108,13 +108,13 @@ def filterPhotometricOutliers(paired_stars, platepar, jd, sigma_threshold=DEFAUL
 
 
 def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
-                       blend_radius_px=DEFAULT_BLEND_RADIUS_PX,
+                       fwhm_mult=DEFAULT_BLEND_FWHM_MULT,
                        mag_margin=DEFAULT_BLEND_MAG_MARGIN, verbose=False):
     """
     Filter paired_stars by removing likely blended stars.
 
     A star is considered blended if there are other catalog stars (brighter than
-    lim_mag + mag_margin) within blend_radius_px pixels in the image.
+    lim_mag + mag_margin) within fwhm_mult * FWHM pixels of the star.
 
     Arguments:
         paired_stars: [PairedStars] Paired stars object.
@@ -124,10 +124,10 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
         lim_mag: [float] Current limiting magnitude for star detection.
 
     Keyword arguments:
-        blend_radius_px: [float] Radius in pixels to check for neighbors.
-            Default is 10.0.
+        fwhm_mult: [float] Multiplier of the star's FWHM for blend detection radius.
+            Default is 2.0.
         mag_margin: [float] Margin above lim_mag - only consider catalog stars
-            brighter than (lim_mag + mag_margin). Default is 1.0.
+            brighter than (lim_mag + mag_margin). Default is 0.3.
         verbose: [bool] Print filtering info. Default is False.
 
     Returns:
@@ -158,6 +158,9 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
         if hasattr(obj, 'pick_type') and obj.pick_type == "geopoint":
             continue
 
+        # Compute blend radius based on this star's FWHM
+        blend_radius = fwhm_mult * fwhm
+
         # Get the matched catalog star's RA/Dec and project to pixels
         matched_ra, matched_dec, mag = obj.coords()
         matched_x, matched_y = raDecToXYPP(np.array([matched_ra]), np.array([matched_dec]), jd, platepar)
@@ -167,7 +170,7 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
         pixel_dist = np.sqrt((matched_x - catalog_x)**2 + (matched_y - catalog_y)**2)
 
         # Find neighbors within radius (excluding self - use small threshold for floating point)
-        neighbor_mask = (pixel_dist < blend_radius_px) & (pixel_dist > 0.1)
+        neighbor_mask = (pixel_dist < blend_radius) & (pixel_dist > 0.1)
 
         if np.sum(neighbor_mask) > 0:
             blended_indices.add(i)
@@ -179,8 +182,8 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
                 new_paired_stars.addPair(x, y, fwhm, intens_acc, obj, snr, saturated)
 
         if verbose:
-            print("  Removed {:d} blended stars (catalog neighbors within {:.1f} px, mag < {:.1f})".format(
-                len(blended_indices), blend_radius_px, max_mag))
+            print("  Removed {:d} blended stars (catalog neighbors within {:.1f}x FWHM, mag < {:.1f})".format(
+                len(blended_indices), fwhm_mult, max_mag))
 
         return new_paired_stars, len(blended_indices)
 
