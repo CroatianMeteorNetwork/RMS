@@ -31,7 +31,7 @@ import RMS.ConfigReader as cr
 
 LOG_FILE_PREFIX = "EXTERNAL"
 
-log = getLogger("logger", stdout=False)
+log = getLogger("rmslogger", stdout=False)
 
 
 def createLock(config, log):
