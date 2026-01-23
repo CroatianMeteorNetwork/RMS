@@ -21,6 +21,7 @@ import os
 import sys
 from RMS.Misc import getRmsRootDir
 from Utils.GenerateTimelapse import isFfmpegWorking
+import matplotlib.colors as mcolors
 
 # Consolidated version-specific imports and definitions
 if sys.version_info[0] == 3:
@@ -721,6 +722,7 @@ class Config:
 
         # colour scheme to use for showers
         self.shower_color_map = 'viridis'
+        self.sporadic_color ='gray'
 
 
         #### EGM96 vs WGS84 heights file
@@ -1878,3 +1880,8 @@ def parseColors(config, parser):
 
     if parser.has_option(section, "shower_color_map"):
         config.shower_color_map = parser.get(section, "shower_color_map")
+        
+    if parser.has_option(section, "sporadic_color"):
+        config.sporadic_color = parser.get(section, "sporadic_color")
+        if config.sporadic_color not in mcolors.CSS4_COLORS:
+            config.sporadic_color = 'gray'
