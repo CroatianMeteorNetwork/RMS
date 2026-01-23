@@ -2626,6 +2626,15 @@ class PlateTool(QtWidgets.QMainWindow):
         self.img.changeHandle(self.img_handle)
         self.img_zoom.changeHandle(self.img_handle)
         self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
+
+        # Update view limits based on actual image dimensions
+        img_width = self.img.data.shape[0]
+        img_height = self.img.data.shape[1]
+        if img_height/img_width < self.img_frame.height()/self.img_frame.width():
+            self.img_frame.setLimits(xMin=0, xMax=img_width, yMin=None, yMax=None)
+        else:
+            self.img_frame.setLimits(xMin=None, xMax=None, yMin=0, yMax=img_height)
+
         self.img_frame.autoRange(padding=0)
 
         self.paired_stars = PairedStars()
