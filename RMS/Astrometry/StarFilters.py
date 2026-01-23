@@ -14,13 +14,13 @@ from __future__ import print_function, division, absolute_import
 import numpy as np
 
 from RMS.Astrometry.StarClasses import PairedStars
-from RMS.Astrometry.ApplyAstrometry import extinctionCorrectionTrueToApparent
+from RMS.Astrometry.ApplyAstrometry import extinctionCorrectionTrueToApparent, raDecToXYPP
 
 
 # Default filtering parameters
 DEFAULT_PHOTOMETRIC_SIGMA = 2.5
-DEFAULT_BLEND_RADIUS_ARCSEC = 30.0
-DEFAULT_BLEND_MAG_DIFF = 2.0
+DEFAULT_BLEND_RADIUS_PX = 10.0  # Pixel radius for blending detection
+DEFAULT_BLEND_MAG_MARGIN = 0.3  # Margin above limiting magnitude for blend check
 DEFAULT_HIGH_FWHM_FRACTION = 0.10
 
 
@@ -107,23 +107,27 @@ def filterPhotometricOutliers(paired_stars, platepar, jd, sigma_threshold=DEFAUL
     return paired_stars, 0
 
 
-def filterBlendedStars(paired_stars, catalog_stars, blend_radius_arcsec=DEFAULT_BLEND_RADIUS_ARCSEC,
-                       mag_diff_limit=DEFAULT_BLEND_MAG_DIFF, verbose=False):
+def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
+                       blend_radius_px=DEFAULT_BLEND_RADIUS_PX,
+                       mag_margin=DEFAULT_BLEND_MAG_MARGIN, verbose=False):
     """
     Filter paired_stars by removing likely blended stars.
 
-    A star is considered blended if there are other bright catalog stars
-    within blend_radius_arcsec of the matched catalog star position.
+    A star is considered blended if there are other catalog stars (brighter than
+    lim_mag + mag_margin) within blend_radius_px pixels in the image.
 
     Arguments:
         paired_stars: [PairedStars] Paired stars object.
         catalog_stars: [ndarray] Full catalog stars array with columns [ra, dec, mag, ...].
+        platepar: [Platepar] Platepar for coordinate conversion.
+        jd: [float] Julian date.
+        lim_mag: [float] Current limiting magnitude for star detection.
 
     Keyword arguments:
-        blend_radius_arcsec: [float] Radius in arcseconds to check for neighbors.
-            Default is 30.0.
-        mag_diff_limit: [float] Only consider neighbors within this mag of matched star.
-            Default is 2.0.
+        blend_radius_px: [float] Radius in pixels to check for neighbors.
+            Default is 10.0.
+        mag_margin: [float] Margin above lim_mag - only consider catalog stars
+            brighter than (lim_mag + mag_margin). Default is 1.0.
         verbose: [bool] Print filtering info. Default is False.
 
     Returns:
@@ -133,33 +137,39 @@ def filterBlendedStars(paired_stars, catalog_stars, blend_radius_arcsec=DEFAULT_
     if len(paired_stars) < 5 or catalog_stars is None:
         return paired_stars, 0
 
-    catalog_ra = catalog_stars[:, 0]
-    catalog_dec = catalog_stars[:, 1]
-    catalog_mag = catalog_stars[:, 2]
+    # Only consider catalog stars bright enough to be detectable
+    max_mag = lim_mag + mag_margin
+    bright_mask = catalog_stars[:, 2] < max_mag
 
-    blend_radius_deg = blend_radius_arcsec / 3600.0
+    if np.sum(bright_mask) == 0:
+        return paired_stars, 0
+
+    # Get bright catalog star coordinates
+    catalog_ra = catalog_stars[bright_mask, 0]
+    catalog_dec = catalog_stars[bright_mask, 1]
+
+    # Convert bright catalog stars to pixel coordinates
+    catalog_x, catalog_y = raDecToXYPP(catalog_ra, catalog_dec, jd, platepar)
 
     blended_indices = set()
 
+    # Check each paired star's matched catalog position against other catalog stars
     for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(paired_stars.paired_stars):
         if hasattr(obj, 'pick_type') and obj.pick_type == "geopoint":
             continue
 
-        ra, dec, mag = obj.coords()
+        # Get the matched catalog star's RA/Dec and project to pixels
+        matched_ra, matched_dec, mag = obj.coords()
+        matched_x, matched_y = raDecToXYPP(np.array([matched_ra]), np.array([matched_dec]), jd, platepar)
+        matched_x, matched_y = matched_x[0], matched_y[0]
 
-        # Compute angular distances using small-angle approximation
-        cos_dec = np.cos(np.radians(dec))
-        d_ra = (catalog_ra - ra) * cos_dec
-        d_dec = catalog_dec - dec
-        angular_dist = np.sqrt(d_ra**2 + d_dec**2)
+        # Compute pixel distances from matched catalog star to all bright catalog stars
+        pixel_dist = np.sqrt((matched_x - catalog_x)**2 + (matched_y - catalog_y)**2)
 
-        # Find neighbors within radius (excluding self)
-        neighbor_mask = (angular_dist < blend_radius_deg) & (angular_dist > 0.001)
+        # Find neighbors within radius (excluding self - use small threshold for floating point)
+        neighbor_mask = (pixel_dist < blend_radius_px) & (pixel_dist > 0.1)
 
-        # Only count bright neighbors (within mag_diff_limit of matched star)
-        bright_neighbor_mask = neighbor_mask & (catalog_mag < mag + mag_diff_limit)
-
-        if np.sum(bright_neighbor_mask) > 0:
+        if np.sum(neighbor_mask) > 0:
             blended_indices.add(i)
 
     if len(blended_indices) > 0:
@@ -169,8 +179,8 @@ def filterBlendedStars(paired_stars, catalog_stars, blend_radius_arcsec=DEFAULT_
                 new_paired_stars.addPair(x, y, fwhm, intens_acc, obj, snr, saturated)
 
         if verbose:
-            print("  Removed {:d} blended stars (neighbors within {:.0f}\")".format(
-                len(blended_indices), blend_radius_arcsec))
+            print("  Removed {:d} blended stars (catalog neighbors within {:.1f} px, mag < {:.1f})".format(
+                len(blended_indices), blend_radius_px, max_mag))
 
         return new_paired_stars, len(blended_indices)
 
