@@ -2608,14 +2608,20 @@ class PlateTool(QtWidgets.QMainWindow):
         if not dir_path:
             return
 
+        self.input_path = dir_path
         self.dir_path = dir_path
         self.config = cr.loadConfigFromDirectory('.', self.dir_path)
+        self.initMaskFromFile()
         self.detectInputType()
         self.catalog_stars = self.loadCatalogStars(self.config.catalog_mag_limit)
         self.cat_lim_mag = self.config.catalog_mag_limit
         self.loadCalstars()
         self.loadPlatepar(update=True)
-        print()
+
+        # Recreate saturation mask with new image dimensions
+        saturation_mask_img = np.zeros_like(self.img_handle.loadChunk().maxpixel).T
+        self.saturation_mask_img = np.zeros(saturation_mask_img.shape + (4,), dtype='uint8')
+        self.saturation_mask.setImage(self.saturation_mask_img)
 
         self.img.changeHandle(self.img_handle)
         self.img_zoom.changeHandle(self.img_handle)
