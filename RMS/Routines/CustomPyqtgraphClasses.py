@@ -2949,11 +2949,10 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
     def onClearAll(self):
         """Confirm and clear all polygons."""
-        from PyQt5.QtWidgets import QMessageBox
-        reply = QMessageBox.question(self, 'Clear All',
+        reply = QtWidgets.QMessageBox.question(self, 'Clear All',
             'Delete all mask polygons?',
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if reply == QMessageBox.Yes:
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.No)
+        if reply == QtWidgets.QMessageBox.Yes:
             self.sigClearPolygons.emit()
 
     def updateStatus(self, polygon_count, drawing_points=0):

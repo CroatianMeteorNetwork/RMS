@@ -561,7 +561,7 @@ class Platepar(object):
             fixed_scale: [bool] Keep scale fixed. True by default (for camera drift correction).
 
         """
-
+        # Import here to avoid circular import (ApplyAstrometry imports Platepar)
         from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
 
         # Create a single working copy of platepar to reuse in cost function

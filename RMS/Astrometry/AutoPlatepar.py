@@ -19,7 +19,9 @@ in SkyFit2 on the selected image.
 
 from __future__ import print_function, division, absolute_import
 
+import datetime
 import os
+
 import numpy as np
 
 from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle, JD2LST
@@ -32,7 +34,7 @@ from RMS.Astrometry.StarFilters import (filterPhotometricOutliers, filterBlended
                                          DEFAULT_PHOTOMETRIC_SIGMA, DEFAULT_BLEND_FWHM_MULT,
                                          DEFAULT_BLEND_MAG_MARGIN, DEFAULT_HIGH_FWHM_FRACTION)
 from RMS.Formats.Platepar import getCatalogStarsImagePositions
-from RMS.Formats import CALSTARS
+from RMS.Formats import CALSTARS, StarCatalog
 from RMS.Formats.Platepar import Platepar
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Routines.MaskImage import getMaskFile
@@ -685,9 +687,6 @@ def loadCatalogStars(config, lim_mag, jd=None):
     Returns:
         catalog_stars: [ndarray] Star catalog array
     """
-    from RMS.Formats import StarCatalog
-    import datetime
-
     star_catalog_path = config.star_catalog_path
     if not os.path.isdir(star_catalog_path):
         star_catalog_path = os.path.join(config.rms_root_dir, 'Catalogs')

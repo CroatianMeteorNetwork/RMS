@@ -12,7 +12,7 @@ from astropy.wcs import WCS
 from RMS.ExtractStars import extractStarsAuto
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.Platepar import Platepar
-from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve
+from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve, PRIMARY_API_URL, FALLBACK_API_URL
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
 from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz
 from RMS.Logger import getLogger
@@ -635,9 +635,6 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
         jd: [float] Julian date. Required for iterative matching.
         input_intensities: [ndarray] Star intensities for brightness-based matching. Optional.
     """
-
-    # Import API URLs
-    from RMS.Astrometry.AstrometryNetNova import PRIMARY_API_URL, FALLBACK_API_URL
 
     # Helper to try coordinate-only first, then fall back to image if available
     def _tryRemoteSolve(api_url, ff_path, image, x_coords, y_coords, fov_range, x_cen, y_cen):

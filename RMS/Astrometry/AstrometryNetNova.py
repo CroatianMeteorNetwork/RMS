@@ -7,7 +7,9 @@ Modified from: https://github.com/dstndstn/astrometry.net/blob/master/net/client
 
 from __future__ import print_function
 
+import logging
 import os
+import random
 import sys
 import copy
 import time
@@ -116,7 +118,6 @@ class Client(object):
 
         # If we're sending a file, format a multipart/form-data
         if file_args is not None:
-            import random
             boundary_key = ''.join([random.choice('0123456789') for i in range(19)])
             boundary = '===============%s==' % boundary_key
             headers = {'Content-Type':
@@ -539,7 +540,6 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
 
     # Load the WCS file
     # Suppress warnings about standalone WCS (no image data) and non-standard SIP keywords
-    import logging
     astropy_logger = logging.getLogger('astropy')
     original_level = astropy_logger.level
     astropy_logger.setLevel(logging.ERROR)

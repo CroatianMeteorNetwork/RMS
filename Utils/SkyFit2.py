@@ -14,7 +14,10 @@ import sys
 import random
 import copy
 
+import cv2
 import numpy as np
+from PIL import Image
+
 import matplotlib.pyplot as plt
 
 # Astropy imports for solar system body ephemeris
@@ -147,6 +150,7 @@ from RMS.Astrometry.StarFilters import filterPhotometricOutliers, filterBlendedS
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, \
     apparentAltAz2TrueRADec, J2000_JD, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
 from RMS.Astrometry.AstrometryNet import astrometryNetSolve
+from RMS.Astrometry.AutoPlatepar import selectBestFrame, autoFitPlatepar
 from RMS.Astrometry.NNalign import alignPlatepar
 import RMS.ConfigReader as cr
 from RMS.ExtractStars import extractStarsAndSave, extractStarsFF
@@ -163,7 +167,7 @@ from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
 from RMS.Routines.CustomPyqtgraphClasses import ViewBox, TextItem, TextItemList, Crosshair, Plus, Cross, CursorItem, ImageItem, RightOptionsTab, qmessagebox
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle
 from RMS.Routines.SphericalPolygonCheck import sphericalPolygonCheck
-from RMS.Routines.Image import loadFlat, loadDark, applyFlat, applyDark, signalToNoise, gammaCorrectionImage, adjustLevels, saveImage
+from RMS.Routines.Image import loadFlat, loadDark, applyFlat, applyDark, signalToNoise, gammaCorrectionImage, adjustLevels, saveImage, loadImage
 from RMS.Routines.MaskImage import getMaskFile, MaskStructure
 from RMS.Routines import RollingShutterCorrection
 from RMS.Misc import maxDistBetweenPoints, getRmsRootDir
@@ -4053,8 +4057,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def updateMaskOverlayImage(self):
         """Update the mask overlay image based on polygons."""
-        import cv2
-
         if not self.tab.mask.show_overlay.isChecked():
             self.mask_overlay.hide()
             return
@@ -4101,7 +4103,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
         if os.path.isfile(flat_path):
             try:
-                from RMS.Routines.Image import loadImage
                 flat_img = loadImage(flat_path, flatten=0)
 
                 # Convert to single channel if needed
@@ -4244,8 +4245,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def generateMaskImage(self):
         """Generate mask.bmp image from polygons."""
-        import cv2
-
         img_width = self.img.data.shape[0]
         img_height = self.img.data.shape[1]
 
@@ -4259,9 +4258,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def saveMask(self):
         """Save mask to file and update self.mask for star detection."""
-        import cv2
-        from PyQt5.QtWidgets import QFileDialog
-
         default_path = os.path.join(self.config.config_file_path, "mask.bmp")
         file_path, _ = QFileDialog.getSaveFileName(
             self, "Save Mask", default_path, "BMP Files (*.bmp);;All Files (*)")
@@ -4281,8 +4277,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def loadMaskDialog(self):
         """Open dialog to load a mask file."""
-        from PyQt5.QtWidgets import QFileDialog
-
         default_path = self.dir_path
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Load Mask", default_path, "BMP Files (*.bmp);;All Files (*)")
@@ -4292,8 +4286,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def loadMaskFromFile(self, mask_path):
         """Load mask.bmp and convert masked regions to editable polygons."""
-        import cv2
-
         if not os.path.exists(mask_path):
             print(f"Mask file not found: {mask_path}")
             return
@@ -8558,8 +8550,6 @@ class PlateTool(QtWidgets.QMainWindow):
         Uses the CALSTARS data to score each frame based on spatial distribution
         of detected stars. Navigates to the best frame.
         """
-        from RMS.Astrometry.AutoPlatepar import selectBestFrame
-
         # Check if we have CALSTARS data
         if not hasattr(self, 'calstars') or self.calstars is None or len(self.calstars) == 0:
             QtWidgets.QMessageBox.warning(
@@ -8669,8 +8659,6 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.status_bar.showMessage(f"Running auto fit on {best_ff}...")
                 QtWidgets.QApplication.processEvents()
 
-                from RMS.Astrometry.AutoPlatepar import autoFitPlatepar
-
                 try:
                     # autoFitPlatepar returns (platepar, matched_stars, ff_name)
                     result = autoFitPlatepar(
@@ -8708,7 +8696,6 @@ class PlateTool(QtWidgets.QMainWindow):
                         placeholder_path = os.path.join(self.dir_path, placeholder_name)
 
                         # Save the placeholder PNG
-                        from PIL import Image
                         img_pil = Image.fromarray(placeholder)
                         img_pil.save(placeholder_path)
                         print(f"Created placeholder image: {placeholder_path}")
@@ -8775,7 +8762,6 @@ class PlateTool(QtWidgets.QMainWindow):
                         f"Error during auto fit: {str(e)}"
                     )
                     self.status_bar.showMessage("Auto fit error")
-                    import traceback
                     traceback.print_exc()
 
                 return
