@@ -38,7 +38,7 @@ import pyximport
 import RMS.Astrometry.ApplyAstrometry
 import scipy.optimize
 from scipy.spatial import cKDTree
-from RMS.Astrometry.Conversions import date2JD, jd2Date, trueRaDec2ApparentAltAz
+from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle, trueRaDec2ApparentAltAz
 from RMS.Math import angularSeparation, sphericalPointFromHeadingAndDistance
 
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
@@ -578,13 +578,7 @@ class Platepar(object):
         old_Ho = pp_work.Ho
 
         pp_work.JD = jd
-        T = (jd - 2451545.0) / 36525.0
-        new_Ho = (
-            280.46061837
-            + 360.98564736629 * (jd - 2451545.0)
-            + 0.000387933 * T ** 2
-            - T ** 3 / 38710000.0
-        ) % 360
+        new_Ho = JD2HourAngle(jd)
         pp_work.Ho = new_Ho
 
         # Compute delta Ho and adjust RA_d to preserve pointing direction
@@ -698,13 +692,7 @@ class Platepar(object):
         # Update JD and Ho to match the observation time
         # This ensures the fitted RA_d is consistent with the new reference time
         self.JD = jd
-        T = (jd - 2451545.0) / 36525.0
-        self.Ho = (
-            280.46061837
-            + 360.98564736629 * (jd - 2451545.0)
-            + 0.000387933 * T ** 2
-            - T ** 3 / 38710000.0
-        ) % 360
+        self.Ho = JD2HourAngle(jd)
 
         # Update alt/az of pointing
         self.updateRefAltAz()
@@ -1999,13 +1987,7 @@ class Platepar(object):
                 self.JD = date2JD(Y, M, D, h, m, s)
 
                 # Calculate the reference hour angle
-                T = (self.JD - 2451545.0) / 36525.0
-                self.Ho = (
-                    280.46061837
-                    + 360.98564736629 * (self.JD - 2451545.0)
-                    + 0.000387933 * T ** 2
-                    - T ** 3 / 38710000.0
-                ) % 360
+                self.Ho = JD2HourAngle(self.JD)
 
                 # Parse camera parameters
                 self.X_res, self.Y_res, self.focal_length = self.parseLine(f)

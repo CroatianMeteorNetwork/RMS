@@ -473,7 +473,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
                  ff_dt.hour, ff_dt.minute, ff_dt.second, ff_dt.microsecond/1000.0)
 
     platepar.JD = jd
-    platepar.Ho = JD2HourAngle(jd) % 360
+    platepar.Ho = JD2HourAngle(jd)
 
     # FOV hint
     if fov_w_hint is None:

@@ -8320,7 +8320,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Update JD and hour angle
         self.platepar.JD = jd
-        self.platepar.Ho = JD2HourAngle(jd) % 360
+        self.platepar.Ho = JD2HourAngle(jd)
 
         # Save user's distortion settings for final fit
         user_distortion_type = self.platepar.distortion_type
@@ -8972,7 +8972,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Set the platepar reference JD and compute the reference hour angle
         # (jd was computed earlier for the astrometry.net call)
         self.platepar.JD = jd
-        self.platepar.Ho = JD2HourAngle(jd) % 360
+        self.platepar.Ho = JD2HourAngle(jd)
 
         # Compute reference azimuth and altitude
         azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, self.platepar.lat, self.platepar.lon)
@@ -9226,7 +9226,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.JD = date2JD(*img_time)
 
         # Set the reference hour angle
-        self.platepar.Ho = JD2HourAngle(self.platepar.JD)%360
+        self.platepar.Ho = JD2HourAngle(self.platepar.JD)
 
         # Convert FOV centre to RA, Dec
         ra, dec = apparentAltAz2TrueRADec(self.azim_centre, self.alt_centre, date2JD(*img_time),
