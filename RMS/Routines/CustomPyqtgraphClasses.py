@@ -3018,6 +3018,7 @@ class SettingsWidget(QtWidgets.QWidget):
     sigLoadTLEPressed = QtCore.pyqtSignal()
     sigClearTLEPressed = QtCore.pyqtSignal()
     sigRedrawSatTracksPressed = QtCore.pyqtSignal()
+    sigCatalogChanged = QtCore.pyqtSignal(str)  # Emits the selected catalog filename
 
     def __init__(self, gui):
         QtWidgets.QWidget.__init__(self)
@@ -3191,6 +3192,14 @@ class SettingsWidget(QtWidgets.QWidget):
 
         form.addRow(QtWidgets.QLabel("Press Enter to accept value"))
 
+        # Star catalog selector - on separate lines for full width
+        vbox.addWidget(QtWidgets.QLabel('Star Catalog:'))
+        self.catalog_combo = QtWidgets.QComboBox()
+        self.catalog_combo.setToolTip("Select star catalog (catalogs with star names show names when enabled)")
+        self.populateCatalogList()
+        self.catalog_combo.currentTextChanged.connect(self.onCatalogChanged)
+        vbox.addWidget(self.catalog_combo)
+
     def updateMaxAvePixel(self):
         self.ave_pixel.setChecked(self.gui.img_type_flag == 'avepixel')
         self.max_pixel.setChecked(self.gui.img_type_flag == 'maxpixel')
@@ -3287,6 +3296,63 @@ class SettingsWidget(QtWidgets.QWidget):
         self.gui.catalog_stars = self.gui.loadCatalogStars(self.gui.cat_lim_mag)
         self.gui.updateLeftLabels()
         self.gui.updateStars()
+
+    def populateCatalogList(self):
+        """Populate the catalog combo box with available catalogs."""
+        import os
+        self.catalog_combo.blockSignals(True)
+        self.catalog_combo.clear()
+
+        # Add "Config Default" option
+        self.catalog_combo.addItem("(Config Default)")
+
+        # Find available catalogs
+        catalog_path = self.gui.config.star_catalog_path
+        if not os.path.isdir(catalog_path):
+            catalog_path = os.path.join(self.gui.config.rms_root_dir, 'Catalogs')
+
+        if os.path.isdir(catalog_path):
+            for f in sorted(os.listdir(catalog_path)):
+                if f.endswith('.npy') or f.endswith('.bin'):
+                    self.catalog_combo.addItem(f)
+
+        # Set current selection to match config
+        current_catalog = self.gui.config.star_catalog_file
+        index = self.catalog_combo.findText(current_catalog)
+        if index >= 0:
+            self.catalog_combo.setCurrentIndex(index)
+
+        self.catalog_combo.blockSignals(False)
+
+    def onCatalogChanged(self, catalog_name):
+        """Handle catalog selection change."""
+        if catalog_name == "(Config Default)":
+            # Reset to config default - reload config value
+            self.gui.config.star_catalog_file = self.gui._original_catalog_file
+        else:
+            self.gui.config.star_catalog_file = catalog_name
+
+        # Reset band ratios to None so the catalog uses its own defaults
+        # Different catalogs have different band requirements
+        self.gui.config.star_catalog_band_ratios = None
+
+        # Reload catalog stars with new catalog
+        self.gui.catalog_stars = self.gui.loadCatalogStars(self.gui.cat_lim_mag)
+        self.gui.updateLeftLabels()
+        self.gui.updateStars()
+
+        self.sigCatalogChanged.emit(catalog_name)
+
+    def updateCatalogSelection(self):
+        """Update the combo box to match the current catalog."""
+        self.catalog_combo.blockSignals(True)
+        current_catalog = self.gui.config.star_catalog_file
+        index = self.catalog_combo.findText(current_catalog)
+        if index >= 0:
+            self.catalog_combo.setCurrentIndex(index)
+        else:
+            self.catalog_combo.setCurrentIndex(0)  # Config Default
+        self.catalog_combo.blockSignals(False)
 
     def onStdChanged(self):
         self.gui.stdev_text_filter = self.std.value()

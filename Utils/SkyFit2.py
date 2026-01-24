@@ -1454,6 +1454,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.config = config
 
+        # Store original catalog file for "Config Default" option
+        self._original_catalog_file = self.config.star_catalog_file
+
         # Force the CV2 backend when SkyFit is being used
         self.config.media_backend = 'cv2'
 
@@ -2615,12 +2618,19 @@ class PlateTool(QtWidgets.QMainWindow):
         self.input_path = dir_path
         self.dir_path = dir_path
         self.config = cr.loadConfigFromDirectory('.', self.dir_path)
+
+        # Update original catalog file for the new station
+        self._original_catalog_file = self.config.star_catalog_file
+
         self.initMaskFromFile()
         self.detectInputType()
         self.catalog_stars = self.loadCatalogStars(self.config.catalog_mag_limit)
         self.cat_lim_mag = self.config.catalog_mag_limit
         self.loadCalstars()
         self.loadPlatepar(update=True)
+
+        # Update catalog combo box selection
+        self.tab.settings.populateCatalogList()
 
         # Recreate saturation mask with new image dimensions
         saturation_mask_img = np.zeros_like(self.img_handle.loadChunk().maxpixel).T
@@ -2650,6 +2660,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.drawPhotometryColoring()
         self.photometry()
 
+        self.updateStars()
+        self.updateDistortion()
         self.updateLeftLabels()
         self.updateImageNavigationDisplay()
         self.tab.debruijn.updateTable()
