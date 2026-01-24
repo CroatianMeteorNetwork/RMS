@@ -1147,13 +1147,20 @@ class BufferedCapture(Process):
                 # Transition through states
                 log.info("Starting pipeline state transitions...")
 
-                success, start_time = self.handleStateChange(self.pipeline, Gst.State.PLAYING)
+                # First transition to PAUSED to capture start_time
+                success, start_time = self.handleStateChange(self.pipeline, Gst.State.PAUSED)
                 if not success:
-                    raise ValueError("Failed to transition pipeline to PLAYING state")
+                    raise ValueError("Failed to transition pipeline to PAUSED state")
 
-                # Calculate start timestamp
+                # Calculate start timestamp BEFORE going to PLAYING
+                # This ensures splitmuxsink has correct timing reference when it creates first segment
                 if start_time is not None:
                     self.start_timestamp = start_time - (self.config.camera_buffer/self.config.fps + self.config.camera_latency)
+
+                # Now transition to PLAYING
+                success, _ = self.handleStateChange(self.pipeline, Gst.State.PLAYING)
+                if not success:
+                    raise ValueError("Failed to transition pipeline to PLAYING state")
 
                 # Log start time
                 start_time_str = (UTCFromTimestamp.utcfromtimestamp(self.start_timestamp)
