@@ -95,7 +95,8 @@ class RawFrameSaver(multiprocessing.Process):
         frame_count = sum(1 for _, ts in frametimes if ts != 0)
         if frame_count > 0:
             mode_str = "day" if daytime_mode else "night"
-            log.info("Saving block of %d raw frames to disk (%s mode)", frame_count, mode_str)
+            if not self.config.quieten_continuous_capture_logging:
+                log.info("Saving block of %d raw frames to disk (%s mode)", frame_count, mode_str)
 
         for (frame, timestamp) in frametimes:
 

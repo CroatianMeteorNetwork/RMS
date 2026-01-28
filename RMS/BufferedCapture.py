@@ -1927,8 +1927,8 @@ class BufferedCapture(Process):
                     # If the camera mode switch trigger is set, switch the camera mode
                     switchCameraMode(self.config, self.daytime_mode, self.camera_mode_switch_trigger)
 
-
-            log.info('Grabbing a new block of {:d} frames...'.format(block_frames))
+            if not self.config.quieten_continuous_capture_logging:
+                log.info('Grabbing a new block of {:d} frames...'.format(block_frames))
 
             # Update heartbeat timestamp for watchdog to detect hangs
             self.heartbeat.value = time.time()
@@ -2188,7 +2188,8 @@ class BufferedCapture(Process):
                         ten_min_ago = current_time - 600  # 10 minutes in seconds
                         recent_dropped = len([t for t in self.dropped_frames_timestamps if t > ten_min_ago])
 
-                        log.info(f"Buffer fill: {buffer_fill_percent:.1f}%. Dropped frames: {recent_dropped} (last 10 min), {self.dropped_frames.value} this session")
+                        if not self.config.quieten_continuous_capture_logging:
+                            log.info(f"Buffer fill: {buffer_fill_percent:.1f}%. Dropped frames: {recent_dropped} (last 10 min), {self.dropped_frames.value} this session")
 
                 last_frame_timestamp = frame_timestamp
                 
