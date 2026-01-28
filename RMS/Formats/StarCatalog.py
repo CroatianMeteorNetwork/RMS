@@ -366,14 +366,12 @@ def loadGMNStarCatalog(file_path,
         else:
             requested = list(additional_fields)
 
-        # Sanity-check
+        # Filter to only fields that exist in this catalog version (backward compatibility)
         valid = set(catalog_data.dtype.names)
-        unknown = [n for n in requested if n not in valid]
-        if unknown:
-            raise ValueError("Unknown field(s) in additional_fields:" + ', '.join(unknown))
+        available = [n for n in requested if n in valid]
 
-        # Populate dict
-        for name in requested:
+        # Populate dict with available fields only
+        for name in available:
             extras_dict[name] = catalog_data[name]
 
     # Stack core fields for legacy callers
