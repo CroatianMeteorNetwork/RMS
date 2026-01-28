@@ -483,7 +483,7 @@ class Config:
         # Switch camera settings between day/night modes, for when continuous_capture is enabled
         self.switch_camera_modes = False
 
-        # Silence most of the logging from continuous capture
+        # Quieten the logging from continuous capture
         self.quieten_continuous_capture_logging = False
 
         ##### Upload
