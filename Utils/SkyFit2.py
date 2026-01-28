@@ -8940,18 +8940,32 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.updatePlatepar()
 
 
-    def getInitialParamsAstrometryNet(self, upload_image=True):
-        """ Get the estimate of the initial astrometric parameters using astrometry.net. """
+    def getInitialParamsAstrometryNet(self, upload_image=True, wide_fov_search=False):
+        """ Get the estimate of the initial astrometric parameters using astrometry.net.
+
+        Arguments:
+            upload_image: [bool] If True, upload the whole image to astrometry.net.
+            wide_fov_search: [bool] If True, use a wide FOV search range (2° to 200°) instead of
+                the config-based range. Used as fallback when the tight search fails.
+        """
 
         # Show status and process events so GUI updates
-        self.status_bar.showMessage("Solving with astrometry.net...")
+        if wide_fov_search:
+            self.status_bar.showMessage("Solving with astrometry.net (wide FOV search)...")
+        else:
+            self.status_bar.showMessage("Solving with astrometry.net...")
         QtWidgets.QApplication.processEvents()
 
         fail = False
         solution = None
 
-        # Construct FOV width estimate (0.75x to 1.5x range)
-        fov_w_range = [0.75*self.config.fov_w, 1.5*self.config.fov_w]
+        # Construct FOV width estimate
+        if wide_fov_search:
+            # Wide search range covers all common lens types (2° telephoto to 200° fisheye)
+            fov_w_range = [2, max(200, 1.5*self.config.fov_w)]
+        else:
+            # Tight search range based on config (0.75x to 1.5x)
+            fov_w_range = [0.75*self.config.fov_w, 1.5*self.config.fov_w]
 
         # Handle using FR files too
         ff_name_c = convertFRNameToFF(self.img_handle.name())
@@ -9026,6 +9040,11 @@ class PlateTool(QtWidgets.QMainWindow):
                                           lat=self.platepar.lat, lon=self.platepar.lon, jd=jd)
 
         if solution is None:
+            # If tight FOV search failed, try wide search as fallback
+            if not wide_fov_search:
+                print("Tight FOV search failed, trying wide FOV search...")
+                return self.getInitialParamsAstrometryNet(upload_image=upload_image, wide_fov_search=True)
+
             self.status_bar.showMessage("Astrometry.net failed to find a solution")
             qmessagebox(title='Astrometry.net error',
                         message='Astrometry.net failed to find a solution!',
@@ -9081,6 +9100,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.platepar.pos_angle_ref = rotationWrtStandardToPosAngle(self.platepar, rot_standard)
 
+        # Rebalance catalog magnitude now that we have the correct FOV
+        # (initial balancing may have been wrong if config FOV was off)
+        self.balanceCatalogMagnitude()
+
         # Print estimated parameters
         print()
         print('Astrometry.net solution:')
@@ -9113,13 +9136,35 @@ class PlateTool(QtWidgets.QMainWindow):
         QtWidgets.QApplication.processEvents()
 
         # Ask user if they want to continue with NN refinement
-        reply = QtWidgets.QMessageBox.question(self, 'Astrometry.net Solution',
-            'Astrometry.net found a solution.\n\n'
-            'RA = {:.2f} deg, Dec = {:.2f} deg\n'
-            'Scale = {:.3f} arcmin/px\n\n'
-            'Continue with NN-based refinement?'.format(
-                self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale),
-            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.Yes)
+        # Build message with optional FOV mismatch warning
+        msg = 'Astrometry.net found a solution.\n\n'
+        msg += 'RA = {:.2f} deg, Dec = {:.2f} deg\n'.format(self.platepar.RA_d, self.platepar.dec_d)
+        msg += 'Scale = {:.3f} arcmin/px\n'.format(60/self.platepar.F_scale)
+        msg += 'FOV = {:.1f} x {:.1f} deg\n'.format(fov_w, fov_h)
+
+        # Check if solved FOV differs significantly from config FOV (>50% difference)
+        fov_ratio = fov_w / self.config.fov_w if self.config.fov_w > 0 else 1.0
+        fov_mismatch = fov_ratio < 0.5 or fov_ratio > 2.0
+
+        if fov_mismatch:
+            msg += '\nWARNING: Solved FOV ({:.1f} deg) differs significantly from config FOV ({:.1f} deg). '.format(
+                fov_w, self.config.fov_w)
+            msg += 'Consider updating fov_w and fov_h in your .config file.\n'
+
+        msg += '\nContinue with NN-based refinement?'
+
+        # Use warning icon if FOV mismatch, otherwise question icon
+        if fov_mismatch:
+            msgbox = QtWidgets.QMessageBox(self)
+            msgbox.setWindowTitle('Astrometry.net Solution - FOV Mismatch')
+            msgbox.setText(msg)
+            msgbox.setIcon(QtWidgets.QMessageBox.Warning)
+            msgbox.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+            msgbox.setDefaultButton(QtWidgets.QMessageBox.Yes)
+            reply = msgbox.exec_()
+        else:
+            reply = QtWidgets.QMessageBox.question(self, 'Astrometry.net Solution', msg,
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.Yes)
 
         if reply == QtWidgets.QMessageBox.No:
             self.status_bar.showMessage("Astrometry.net solution applied (no refinement)")

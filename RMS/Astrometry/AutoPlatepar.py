@@ -330,6 +330,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
                     photometric_sigma=DEFAULT_PHOTOMETRIC_SIGMA,
                     fwhm_mult=DEFAULT_BLEND_FWHM_MULT,
                     high_fwhm_fraction=DEFAULT_HIGH_FWHM_FRACTION,
+                    wide_fov_search=False,
                     verbose=True):
     """
     Automatically create a platepar from CALSTARS data in a directory.
@@ -365,6 +366,8 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
         fwhm_mult: [float] Multiplier of FWHM for blend detection radius (default: 2.0)
         high_fwhm_fraction: [float] Fraction of high-FWHM stars to remove (default: 0.10)
 
+        wide_fov_search: [bool] If True, use a wide FOV search range (2° to 200°) instead of
+                         the config-based range. Used as fallback when the tight search fails.
         verbose: [bool] Print progress information
 
     Returns:
@@ -478,7 +481,14 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
     # FOV hint
     if fov_w_hint is None:
         fov_w_hint = config.fov_w
-    fov_w_range = [0.75 * fov_w_hint, 1.5 * fov_w_hint]
+
+    # Construct FOV width estimate
+    if wide_fov_search:
+        # Wide search range covers all common lens types (2° telephoto to 200° fisheye)
+        fov_w_range = [2, max(200, 1.5 * fov_w_hint)]
+    else:
+        # Tight search range based on config (0.75x to 1.5x)
+        fov_w_range = [0.75 * fov_w_hint, 1.5 * fov_w_hint]
 
     # Load mask if available
     mask = getMaskFile(dir_path, config)
@@ -493,7 +503,8 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
 
     if verbose:
         print()
-        print("Running astrometry.net plate solving...")
+        search_mode = "wide" if wide_fov_search else "tight"
+        print("Running astrometry.net plate solving ({:s} FOV search)...".format(search_mode))
         print("  Stars: {:d}".format(len(x_data)))
         print("  FOV range: {:.1f} - {:.1f} deg".format(fov_w_range[0], fov_w_range[1]))
 
@@ -513,6 +524,23 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
     )
 
     if solution is None:
+        # If tight FOV search failed, try wide search as fallback
+        if not wide_fov_search:
+            if verbose:
+                print("Tight FOV search failed, trying wide FOV search...")
+            return autoFitPlatepar(
+                dir_path, config, catalog_stars, platepar_template=platepar_template,
+                fov_w_hint=fov_w_hint, ff_name=best_ff, distortion_type=distortion_type,
+                equal_aspect=equal_aspect, asymmetry_corr=asymmetry_corr,
+                force_distortion_centre=force_distortion_centre,
+                refraction=refraction,
+                photometric_sigma=photometric_sigma,
+                fwhm_mult=fwhm_mult,
+                high_fwhm_fraction=high_fwhm_fraction,
+                wide_fov_search=True,
+                verbose=verbose
+            )
+
         if verbose:
             print("ERROR: Astrometry.net failed to find a solution")
         return None, None, best_ff
