@@ -8951,7 +8951,7 @@ class PlateTool(QtWidgets.QMainWindow):
         solution = None
 
         # Construct FOV width estimate (0.75x to 1.5x range)
-        fov_w_range = [2, 110]
+        fov_w_range = [min(2, 0.75*self.config.fov_w), max(110, 1.5*self.config.fov_w)]
 
         # Handle using FR files too
         ff_name_c = convertFRNameToFF(self.img_handle.name())
