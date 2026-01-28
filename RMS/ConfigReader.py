@@ -484,7 +484,7 @@ class Config:
         self.switch_camera_modes = False
 
         # Silence most of the logging from continuous capture
-        self.silence_continuous_capture_logging = False
+        self.quieten_continuous_capture_logging = False
 
         ##### Upload
 
