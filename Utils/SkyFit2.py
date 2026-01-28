@@ -1630,7 +1630,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Display options
         self.show_spectral_type = False
         self.show_star_names = False
-        self.max_star_labels = 50
+        self.label_mag_limit = 5.0
         self.show_constellations = False
         self.selected_stars_visible = True
 
@@ -2046,7 +2046,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.catalog_stars_visible = True
         self.show_spectral_type = False
         self.show_star_names = False
-        self.max_star_labels = 50
+        self.label_mag_limit = 5.0
         self.show_constellations = False
         self.selected_stars_visible = True
         self.unsuitable_stars_visible = True
@@ -2442,7 +2442,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigCatStarsToggled.connect(self.toggleShowCatStars)
         self.tab.settings.sigSpectralTypeToggled.connect(self.toggleShowSpectralType)
         self.tab.settings.sigStarNamesToggled.connect(self.toggleShowStarNames)
-        self.tab.settings.sigMaxLabelsChanged.connect(self.onMaxLabelsChanged)
+        self.tab.settings.sigLabelMagLimitChanged.connect(self.onLabelMagLimitChanged)
         self.tab.settings.sigConstellationToggled.connect(self.toggleShowConstellations)
         self.tab.settings.sigCalStarsToggled.connect(self.toggleShowCalStars)
         self.tab.settings.sigSelStarsToggled.connect(self.toggleShowSelectedStars)
@@ -3297,14 +3297,14 @@ class PlateTool(QtWidgets.QMainWindow):
                     # Cache key suffix: different display options produce different HTML
                     _cache_key_suffix = (self.show_spectral_type, self.show_star_names)
 
-                    _label_count = 0
-
-                    # Iterate in brightness order (brightest first), limited by max_star_labels
+                    # Iterate in brightness order (brightest first), limited by magnitude
                     for sort_idx in brightness_order:
-                        if _label_count >= self.max_star_labels:
-                            break
-
                         i = sort_idx
+
+                        # Skip stars fainter than the magnitude limit
+                        star_mag = mags[i] if i < len(mags) else 99.0
+                        if star_mag > self.label_mag_limit:
+                            continue
                         spec_type = iter_spectral[i] if iter_spectral else None
                         star_name = iter_names[i] if iter_names else None
                         common_name = iter_common_names[i] if iter_common_names else None
@@ -3391,7 +3391,6 @@ class PlateTool(QtWidgets.QMainWindow):
                                 self._star_label_cache[_cache_key] = text_item
 
                         self.spectral_type_text_list.addTextItem(text_item)
-                        _label_count += 1
 
             else:
                 print('No catalog stars visible!')
@@ -8094,9 +8093,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update the checkbox
         self.tab.settings.updateShowStarNames()
 
-    def onMaxLabelsChanged(self, value):
-        """ Handle change in max star labels setting. """
-        self.max_star_labels = value
+    def onLabelMagLimitChanged(self, value):
+        """ Handle change in label magnitude limit setting. """
+        self.label_mag_limit = value
         # Clear cache since we might show different stars now
         self._star_label_cache = {}
         # Redraw if labels are visible
