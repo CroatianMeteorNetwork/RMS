@@ -12729,6 +12729,10 @@ if __name__ == '__main__':
 
     app = QtWidgets.QApplication(sys.argv)
 
+    # Default directory for file dialogs: use ~/RMS_data if it exists, otherwise ~
+    rms_data_dir = os.path.expanduser("~/RMS_data")
+    default_dir = rms_data_dir if os.path.isdir(rms_data_dir) else os.path.expanduser("~")
+
     # If no input path was provided, prompt for one
     if cml_args.input_path is None:
         # Ask user what type of input to select
@@ -12744,13 +12748,13 @@ if __name__ == '__main__':
         if msg.clickedButton() == folder_btn:
             input_path = QtWidgets.QFileDialog.getExistingDirectory(
                 None, "Select folder with FF/image files",
-                os.path.expanduser("~"),
+                default_dir,
                 QtWidgets.QFileDialog.ShowDirsOnly
             )
         elif msg.clickedButton() == file_btn:
             input_path, _ = QtWidgets.QFileDialog.getOpenFileName(
                 None, "Select video or state file",
-                os.path.expanduser("~"),
+                default_dir,
                 "All supported (*.state *.mp4 *.avi *.mkv *.mov);;State files (*.state);;Video files (*.mp4 *.avi *.mkv *.mov);;All files (*)"
             )
 
@@ -12776,7 +12780,7 @@ if __name__ == '__main__':
         elif msg.clickedButton() == browse_btn:
             config_path, _ = QtWidgets.QFileDialog.getOpenFileName(
                 None, "Select config file",
-                os.path.expanduser("~"),
+                default_dir,
                 "Config files (*.config);;All files (*)"
             )
             if config_path:
