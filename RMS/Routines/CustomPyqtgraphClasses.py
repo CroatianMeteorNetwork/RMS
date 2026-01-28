@@ -287,8 +287,21 @@ class TextItemList(pg.GraphicsObject):
         """
         Remove all TextItem's in list
         """
+        # Get scene once for efficiency
+        try:
+            scene = self.parentItem().scene()
+        except:
+            scene = None
+
+        # Remove all items (iterate in reverse to avoid O(n²) from pop(0))
         while self.text_list:
-            self.removeTextItem(0)
+            item = self.text_list.pop()  # Pop from end is O(1)
+            if scene is not None:
+                try:
+                    scene.removeItem(item)
+                except:
+                    pass
+            item.setParentItem(None)
 
     def removeTextItem(self, i):
         """
@@ -3002,6 +3015,7 @@ class SettingsWidget(QtWidgets.QWidget):
     sigCatStarsToggled = QtCore.pyqtSignal()
     sigSpectralTypeToggled = QtCore.pyqtSignal()
     sigStarNamesToggled = QtCore.pyqtSignal()
+    sigMaxLabelsChanged = QtCore.pyqtSignal(int)
     sigConstellationToggled = QtCore.pyqtSignal()
     sigCalStarsToggled = QtCore.pyqtSignal()
     sigDistortionToggled = QtCore.pyqtSignal()
@@ -3057,6 +3071,19 @@ class SettingsWidget(QtWidgets.QWidget):
         self.show_star_names.released.connect(self.sigStarNamesToggled.emit)
         self.updateShowStarNames()
         vbox.addWidget(self.show_star_names)
+
+        # Max labels spinbox (horizontal layout with label)
+        max_labels_layout = QtWidgets.QHBoxLayout()
+        max_labels_layout.addWidget(QtWidgets.QLabel('Max Labels:'))
+        self.max_labels_spinbox = QtWidgets.QSpinBox()
+        self.max_labels_spinbox.setRange(10, 500)
+        self.max_labels_spinbox.setValue(50)
+        self.max_labels_spinbox.setSingleStep(10)
+        self.max_labels_spinbox.setToolTip('Maximum number of star labels to display (brightest first)')
+        self.max_labels_spinbox.valueChanged.connect(self.sigMaxLabelsChanged.emit)
+        max_labels_layout.addWidget(self.max_labels_spinbox)
+        max_labels_layout.addStretch()
+        vbox.addLayout(max_labels_layout)
 
         self.show_constellations = QtWidgets.QCheckBox('Show Constellation Lines')
         self.show_constellations.released.connect(self.sigConstellationToggled.emit)

@@ -1630,6 +1630,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Display options
         self.show_spectral_type = False
         self.show_star_names = False
+        self.max_star_labels = 50
         self.show_constellations = False
         self.selected_stars_visible = True
 
@@ -2045,6 +2046,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.catalog_stars_visible = True
         self.show_spectral_type = False
         self.show_star_names = False
+        self.max_star_labels = 50
         self.show_constellations = False
         self.selected_stars_visible = True
         self.unsuitable_stars_visible = True
@@ -2440,6 +2442,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigCatStarsToggled.connect(self.toggleShowCatStars)
         self.tab.settings.sigSpectralTypeToggled.connect(self.toggleShowSpectralType)
         self.tab.settings.sigStarNamesToggled.connect(self.toggleShowStarNames)
+        self.tab.settings.sigMaxLabelsChanged.connect(self.onMaxLabelsChanged)
         self.tab.settings.sigConstellationToggled.connect(self.toggleShowConstellations)
         self.tab.settings.sigCalStarsToggled.connect(self.toggleShowCalStars)
         self.tab.settings.sigSelStarsToggled.connect(self.toggleShowSelectedStars)
@@ -2978,7 +2981,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def updateStars(self, only_update_catalog=False):
         """ Updates only the stars, including catalog stars, calstars and paired stars.
-         
+
         Keyword arguments:
             only_update_catalog: [bool] If True, only the catalog stars will be updated. (default: False)
 
@@ -3085,6 +3088,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Filter out catalog image stars
         cat_stars_xy_unmasked = cat_stars_xy[filtered_indices_all]
 
+        # Track original catalog indices for precomputed HTML lookup
+        original_indices_unmasked = np.where(filtered_indices_all)[0]
+
         # Create a filtered catalog
         self.catalog_stars_filtered_unmasked = self.catalog_stars[filtered_indices_all]
 
@@ -3112,6 +3118,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.catalog_stars_spectral_type_filtered = []
             self.catalog_stars_preferred_names_filtered = []
             self.catalog_stars_common_names_filtered = []
+            self._filtered_original_indices = []
 
             # Prepare iterators
             if spectral_type_unmasked is None:
@@ -3123,14 +3130,15 @@ class PlateTool(QtWidgets.QMainWindow):
             if common_names_unmasked is None:
                 common_names_unmasked = [None]*len(cat_stars_xy_unmasked)
 
-            iterator = zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked, spectral_type_unmasked, star_names_unmasked, common_names_unmasked)
+            iterator = zip(original_indices_unmasked, cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked, spectral_type_unmasked, star_names_unmasked, common_names_unmasked)
 
-            for star_xy, star_radec, star_spec, star_name, common_name in iterator:
+            for orig_idx, star_xy, star_radec, star_spec, star_name, common_name in iterator:
                 cat_stars_xy.append(star_xy)
                 self.catalog_stars_filtered.append(star_radec)
                 self.catalog_stars_spectral_type_filtered.append(star_spec)
                 self.catalog_stars_preferred_names_filtered.append(star_name)
                 self.catalog_stars_common_names_filtered.append(common_name)
+                self._filtered_original_indices.append(orig_idx)
 
         else:
 
@@ -3138,6 +3146,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.catalog_stars_spectral_type_filtered = []
             self.catalog_stars_preferred_names_filtered = []
             self.catalog_stars_common_names_filtered = []
+            self._filtered_original_indices = []
 
             # Prepare iterators
             if spectral_type_unmasked is None:
@@ -3149,10 +3158,10 @@ class PlateTool(QtWidgets.QMainWindow):
             if common_names_unmasked is None:
                 common_names_unmasked = [None]*len(cat_stars_xy_unmasked)
 
-            iterator = zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked, spectral_type_unmasked, star_names_unmasked, common_names_unmasked)
+            iterator = zip(original_indices_unmasked, cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked, spectral_type_unmasked, star_names_unmasked, common_names_unmasked)
 
 
-            for star_xy, star_radec, star_spec, star_name, common_name in iterator:
+            for orig_idx, star_xy, star_radec, star_spec, star_name, common_name in iterator:
 
                 # Make sure that the dimensions of the mask match the image dimensions
                 if (self.mask.img.shape[0] == self.img.data.shape[0]) or \
@@ -3165,6 +3174,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         self.catalog_stars_spectral_type_filtered.append(star_spec)
                         self.catalog_stars_preferred_names_filtered.append(star_name)
                         self.catalog_stars_common_names_filtered.append(common_name)
+                        self._filtered_original_indices.append(orig_idx)
 
                 # If the mask dimensions don't match the image dimensions, ignore the mask
                 else:
@@ -3173,6 +3183,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.catalog_stars_spectral_type_filtered.append(star_spec)
                     self.catalog_stars_preferred_names_filtered.append(star_name)
                     self.catalog_stars_common_names_filtered.append(common_name)
+                    self._filtered_original_indices.append(orig_idx)
 
         # Convert to an array in any case
         cat_stars_xy = np.array(cat_stars_xy)
@@ -3239,95 +3250,148 @@ class PlateTool(QtWidgets.QMainWindow):
                         iter_common_names = [None] * n_stars
 
 
-                    iterator = zip(iter_spectral, iter_names, iter_common_names)
+                    # Sort by brightness (magnitude) so brightest stars get labels first
+                    # catalog_stars_filtered has (ra, dec, mag) - lower mag = brighter
+                    if len(self.catalog_stars_filtered) > 0:
+                        mags = np.array([s[2] for s in self.catalog_stars_filtered])
+                        brightness_order = np.argsort(mags)  # Brightest first
+                    else:
+                        brightness_order = np.arange(n_stars)
 
-                    # Keep track of placed labels to avoid overlap
-                    placed_labels_xy = []  # List of (x, y) tuples
+                    # Keep track of placed labels using spatial grid for O(1) overlap checking
+                    # Grid cell size matches exclusion zone
+                    grid_cell_x = 50
+                    grid_cell_y = 15
+                    placed_labels_grid = {}  # Dict: (grid_x, grid_y) -> list of (x, y)
 
-                    for i, (spec_type, star_name, common_name) in enumerate(iterator):
-                        
+                    def check_overlap(x, y):
+                        """Check if position overlaps with any placed label. O(1) average."""
+                        gx = int(x // grid_cell_x)
+                        gy = int(y // grid_cell_y)
+                        # Check current cell and adjacent cells
+                        for dx in (-1, 0, 1):
+                            for dy in (-1, 0, 1):
+                                cell = (gx + dx, gy + dy)
+                                if cell in placed_labels_grid:
+                                    for (px, py) in placed_labels_grid[cell]:
+                                        if abs(y - py) < 15 and abs(x - px) < 50:
+                                            return True
+                        return False
+
+                    def add_to_grid(x, y):
+                        """Add position to spatial grid."""
+                        cell = (int(x // grid_cell_x), int(y // grid_cell_y))
+                        if cell not in placed_labels_grid:
+                            placed_labels_grid[cell] = []
+                        placed_labels_grid[cell].append((x, y))
+
+                    # Check if we have precomputed HTML available
+                    has_precomputed_spectral = hasattr(self, '_star_label_html_spectral') and self._star_label_html_spectral
+                    has_precomputed_name = hasattr(self, '_star_label_html_name') and self._star_label_html_name
+                    has_original_indices = hasattr(self, '_filtered_original_indices') and self._filtered_original_indices
+
+                    # Initialize TextItem cache if not present
+                    if not hasattr(self, '_star_label_cache'):
+                        self._star_label_cache = {}
+
+                    # Cache key suffix: different display options produce different HTML
+                    _cache_key_suffix = (self.show_spectral_type, self.show_star_names)
+
+                    _label_count = 0
+
+                    # Iterate in brightness order (brightest first), limited by max_star_labels
+                    for sort_idx in brightness_order:
+                        if _label_count >= self.max_star_labels:
+                            break
+
+                        i = sort_idx
+                        spec_type = iter_spectral[i] if iter_spectral else None
+                        star_name = iter_names[i] if iter_names else None
+                        common_name = iter_common_names[i] if iter_common_names else None
+
                         html_text = ""
                         has_text = False
 
-                        # Add spectral type
-                        if self.show_spectral_type and (spec_type is not None) and (len(spec_type) > 0):
-                            
-                            # Determine color based on spectral type
-                            # Default light green
-                            hex_color = "#90ee90" 
-                            
-                            first_char = spec_type[0].upper()
-                            if 'infrared' in spec_type.lower():
-                                hex_color = "#990000" # Red
-                            elif first_char == 'O':
-                                hex_color = "#9bb0ff" # Blue
-                            elif first_char == 'B':
-                                hex_color = "#aabfff" # Blue-white
-                            elif first_char == 'A':
-                                hex_color = "#cad7ff" # White-Blue
-                            elif first_char == 'F':
-                                hex_color = "#f8f7ff" # White
-                            elif first_char == 'G':
-                                hex_color = "#fff4ea" # Yellow-white
-                            elif first_char == 'K':
-                                hex_color = "#ffd2a1" # Orange
-                            elif first_char == 'M':
-                                hex_color = "#ffcc6f" # Red-orange
+                        # Get original catalog index for precomputed HTML lookup
+                        orig_idx = self._filtered_original_indices[i] if has_original_indices and i < len(self._filtered_original_indices) else None
 
+                        # Add spectral type - use precomputed HTML if available
+                        if self.show_spectral_type:
+                            if has_precomputed_spectral and orig_idx is not None and self._star_label_html_spectral[orig_idx]:
+                                html_text += self._star_label_html_spectral[orig_idx]
+                                has_text = True
+                            elif (spec_type is not None) and (len(spec_type) > 0):
+                                # Fallback to computing HTML (for catalogs loaded before this change)
+                                hex_color = "#90ee90"  # Default light green
+                                first_char = spec_type[0].upper()
+                                if 'infrared' in spec_type.lower():
+                                    hex_color = "#990000"
+                                elif first_char == 'O':
+                                    hex_color = "#9bb0ff"
+                                elif first_char == 'B':
+                                    hex_color = "#aabfff"
+                                elif first_char == 'A':
+                                    hex_color = "#cad7ff"
+                                elif first_char == 'F':
+                                    hex_color = "#f8f7ff"
+                                elif first_char == 'G':
+                                    hex_color = "#fff4ea"
+                                elif first_char == 'K':
+                                    hex_color = "#ffd2a1"
+                                elif first_char == 'M':
+                                    hex_color = "#ffcc6f"
+                                display_type = "IR" if 'infrared' in spec_type.lower() else spec_type
+                                html_text += f'<span style="color: {hex_color};">{display_type}</span>'
+                                has_text = True
 
-                            # Replace "infrared" with "IR"
-                            if 'infrared' in spec_type.lower():
-                                spec_type = "IR"
-                            
-
-                            html_text += f'<span style="color: {hex_color};">{spec_type}</span>'
-                            has_text = True
-
-
-                        # Add star name
-                        if self.show_star_names and (star_name is not None) and (len(star_name) > 0):
-
-                            if has_text:
-                                html_text += "<br>"
-
-                            # Use HD/catalog name for SIMBAD URL
-                            url_name = star_name.replace(' ', '+')
-                            # Use common name for display (e.g., "Sirius" instead of "HD 48915")
-                            display_name = common_name if common_name else star_name
-                            # Greyish color for name, formatted as link
-                            html_text += f'<a href="https://simbad.cds.unistra.fr/simbad/sim-id?Ident={url_name}" style="color: #dddddd; text-decoration: none;">{display_name}</a>'
-                            has_text = True
-
+                        # Add star name - use precomputed HTML if available
+                        if self.show_star_names:
+                            if has_precomputed_name and orig_idx is not None and self._star_label_html_name[orig_idx]:
+                                if has_text:
+                                    html_text += "<br>"
+                                html_text += self._star_label_html_name[orig_idx]
+                                has_text = True
+                            elif (star_name is not None) and (len(star_name) > 0):
+                                if has_text:
+                                    html_text += "<br>"
+                                url_name = star_name.replace(' ', '+')
+                                display_name = common_name if common_name else star_name
+                                html_text += f'<a href="https://simbad.cds.unistra.fr/simbad/sim-id?Ident={url_name}" style="color: #dddddd; text-decoration: none;">{display_name}</a>'
+                                has_text = True
 
                         if not has_text:
                             continue
 
-                        # Check for overlap with existing labels
-                        # Label position is roughly at (cat_x, cat_y)
+                        # Check for overlap with existing labels using spatial grid
                         curr_x = self.catalog_x_filtered[i]
                         curr_y = self.catalog_y_filtered[i]
 
-                        overlap = False
-                        for (placed_x, placed_y) in placed_labels_xy:
-                            # Check vertical and horizontal distance (pixels)
-                            # Assume label height ~15-20px, allow some horizontal overlap but not if too close vertically
-                            if abs(curr_y - placed_y) < 15 and abs(curr_x - placed_x) < 50:
-                                overlap = True
-                                break
-                        
-                        if overlap:
+                        if check_overlap(curr_x, curr_y):
                             continue
 
-                        placed_labels_xy.append((curr_x, curr_y))
+                        add_to_grid(curr_x, curr_y)
 
-                        # Add text item with HTML
-                        # Anchor (1.0, 0.5) places text right edge at anchor point
-                        # Small offset clears the marker without drifting too much on zoom
-                        text_item = TextItem(html=html_text, anchor=(1.0, 0.5))
-                        text_item.setAlign(QtCore.Qt.AlignRight)
-                        text_item.setPos(self.catalog_x_filtered[i] - 3,
-                                         self.catalog_y_filtered[i] + 0.5)
+                        # Check cache for existing TextItem (keyed by original index + display options)
+                        _cache_key = (orig_idx, _cache_key_suffix) if orig_idx is not None else None
+                        if _cache_key is not None and _cache_key in self._star_label_cache:
+                            # Reuse cached TextItem - just update position
+                            text_item = self._star_label_cache[_cache_key]
+                            text_item.setPos(self.catalog_x_filtered[i] - 3,
+                                             self.catalog_y_filtered[i] + 0.5)
+                        else:
+                            # Create new TextItem with HTML
+                            # Anchor (1.0, 0.5) places text right edge at anchor point
+                            # Small offset clears the marker without drifting too much on zoom
+                            text_item = TextItem(html=html_text, anchor=(1.0, 0.5))
+                            text_item.setAlign(QtCore.Qt.AlignRight)
+                            text_item.setPos(self.catalog_x_filtered[i] - 3,
+                                             self.catalog_y_filtered[i] + 0.5)
+                            # Cache for reuse
+                            if _cache_key is not None:
+                                self._star_label_cache[_cache_key] = text_item
+
                         self.spectral_type_text_list.addTextItem(text_item)
+                        _label_count += 1
 
             else:
                 print('No catalog stars visible!')
@@ -5530,6 +5594,16 @@ class PlateTool(QtWidgets.QMainWindow):
         # Init catalog_stars_common_names if it doesn't exist
         if not hasattr(self, 'catalog_stars_common_names'):
             self.catalog_stars_common_names = None
+
+        # Init star label cache and precomputed HTML arrays if they don't exist
+        if not hasattr(self, '_star_label_cache'):
+            self._star_label_cache = {}
+        if not hasattr(self, '_star_label_html_spectral'):
+            self._star_label_html_spectral = []
+        if not hasattr(self, '_star_label_html_name'):
+            self._star_label_html_name = []
+        if not hasattr(self, '_filtered_original_indices'):
+            self._filtered_original_indices = []
 
         # Updating old state files with new platepar variables
         if self.platepar is not None:
@@ -8020,6 +8094,15 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update the checkbox
         self.tab.settings.updateShowStarNames()
 
+    def onMaxLabelsChanged(self, value):
+        """ Handle change in max star labels setting. """
+        self.max_star_labels = value
+        # Clear cache since we might show different stars now
+        self._star_label_cache = {}
+        # Redraw if labels are visible
+        if self.show_star_names or self.show_spectral_type:
+            self.updateStars()
+
     def toggleShowConstellations(self):
         """ Toggle showing/hiding constellation lines. """
         self.show_constellations = not self.show_constellations
@@ -9434,7 +9517,80 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             self.catalog_stars_simbad_otypes = None
 
+        # Precompute HTML strings for star labels (spectral type + name)
+        # This avoids building HTML strings on every updateStars() call
+        self._precomputeStarLabelHTML()
+
+        # Clear any cached TextItem objects when catalog changes
+        self._star_label_cache = {}
+
         return self.catalog_stars
+
+
+    def _precomputeStarLabelHTML(self):
+        """Precompute HTML strings for star labels.
+
+        This precomputes:
+        - self._star_label_html_spectral: HTML for spectral type (with color)
+        - self._star_label_html_name: HTML for star name (with SIMBAD link)
+
+        These arrays are indexed by the catalog star index.
+        """
+        n_stars = len(self.catalog_stars) if self.catalog_stars is not None else 0
+
+        # Initialize arrays
+        self._star_label_html_spectral = [None] * n_stars
+        self._star_label_html_name = [None] * n_stars
+
+        if n_stars == 0:
+            return
+
+        # Precompute spectral type HTML
+        if hasattr(self, 'catalog_stars_spectral_type') and self.catalog_stars_spectral_type is not None:
+            for i, spec_type in enumerate(self.catalog_stars_spectral_type):
+                if spec_type is None or len(spec_type) == 0:
+                    continue
+
+                # Determine color based on spectral type
+                hex_color = "#90ee90"  # Default light green
+
+                first_char = spec_type[0].upper()
+                if 'infrared' in spec_type.lower():
+                    hex_color = "#990000"  # Red
+                elif first_char == 'O':
+                    hex_color = "#9bb0ff"  # Blue
+                elif first_char == 'B':
+                    hex_color = "#aabfff"  # Blue-white
+                elif first_char == 'A':
+                    hex_color = "#cad7ff"  # White-Blue
+                elif first_char == 'F':
+                    hex_color = "#f8f7ff"  # White
+                elif first_char == 'G':
+                    hex_color = "#fff4ea"  # Yellow-white
+                elif first_char == 'K':
+                    hex_color = "#ffd2a1"  # Orange
+                elif first_char == 'M':
+                    hex_color = "#ffcc6f"  # Red-orange
+
+                # Replace "infrared" with "IR"
+                display_type = "IR" if 'infrared' in spec_type.lower() else spec_type
+
+                self._star_label_html_spectral[i] = f'<span style="color: {hex_color};">{display_type}</span>'
+
+        # Precompute star name HTML
+        if hasattr(self, 'catalog_stars_preferred_names') and self.catalog_stars_preferred_names is not None:
+            common_names = getattr(self, 'catalog_stars_common_names', None)
+
+            for i, star_name in enumerate(self.catalog_stars_preferred_names):
+                if star_name is None or len(star_name.strip()) == 0:
+                    continue
+
+                # Use HD/catalog name for SIMBAD URL
+                url_name = star_name.replace(' ', '+')
+                # Use common name for display (e.g., "Sirius" instead of "HD 48915")
+                display_name = common_names[i] if common_names is not None and common_names[i] else star_name
+                # Greyish color for name, formatted as link
+                self._star_label_html_name[i] = f'<a href="https://simbad.cds.unistra.fr/simbad/sim-id?Ident={url_name}" style="color: #dddddd; text-decoration: none;">{display_name}</a>'
 
 
     def loadPlatepar(self, update=False, platepar_file=None):
