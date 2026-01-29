@@ -31,7 +31,8 @@ import copy
 import uuid
 import random
 import string
-
+import ephem
+import RMS.CaptureModeSwitcher
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, correctVignetting, extinctionCorrectionApparentToTrue
 from matplotlib import pyplot as plt
@@ -2399,7 +2400,31 @@ class EventMonitor(multiprocessing.Process):
             self.getEventsAndCheck(last_check_start_time,next_check_start_time)
             last_check_start_time = check_start_time
 
-            start_time, duration = captureDuration(self.syscon.latitude, self.syscon.longitude, self.syscon.elevation)
+            if self.syscon.continuous_capture:
+                # Handle start time when using continuous capture
+                o = ephem.Observer()
+                o.lat, o.long = str(self.syscon.latitude), str(self.syscon.longitude)
+                o.elevation = self.syscon.elevation
+                # The Sun should be about 9 degrees below the horizon when the capture modes switch
+                o.horizon = RMS.CaptureModeSwitcher.SWITCH_HORIZON_DEG
+
+                # Set the current time
+                o.date = RmsDateTime.utcnow()
+
+                # Calculate sun positions
+                s = ephem.Sun()
+                s.compute()
+                next_set = o.next_setting(s).datetime()
+                if o.next_rising(s).datetime() < next_set:
+                    # It is night time, because the next sunrise comes before the next sunset
+                    # Set start_time to True to indicate that capture is in progress
+                    start_time = True
+                else:
+                    # It is day time, so set start_time to the next_set time
+                    start_time = next_set
+
+            else:
+                start_time, duration = captureDuration(self.syscon.latitude, self.syscon.longitude, self.syscon.elevation)
 
             if not isinstance(start_time, bool):
 
@@ -2410,9 +2435,9 @@ class EventMonitor(multiprocessing.Process):
                 next_check_start_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
                 log.info('Next EventMonitor run : {} UTC; {:3.1f} minutes from now'.format(next_check_start_time_str, int(self.check_interval)))
                 if time_left_before_start_minutes < 120:
-                    log.info('Next Capture start    : {} UTC; {:3.1f} minutes from now'.format(str(start_time.strftime('%H:%M:%S')),time_left_before_start_minutes))
+                    log.info('Next night time capture start    : {} UTC; {:3.1f} minutes from now'.format(str(start_time.strftime('%H:%M:%S')),time_left_before_start_minutes))
                 else:
-                    log.info('Next Capture start    : {} UTC'.format(str(start_time.strftime('%H:%M:%S'))))
+                    log.info('Next night time capture start    : {} UTC'.format(str(start_time.strftime('%H:%M:%S'))))
             else:
                 next_check_start_time = (RmsDateTime.utcnow() + datetime.timedelta(minutes=self.check_interval))
                 next_check_start_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
