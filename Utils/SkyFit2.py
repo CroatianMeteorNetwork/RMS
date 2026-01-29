@@ -7815,18 +7815,18 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Unzoom the image
                 if delta < 0:
 
-                    # Track number of scroll backs in the star picking mode so it resets the image after
-                    #   multiple zoomouts
-                    if self.star_pick_mode:
-                        self.scrolls_back += 1
-                    else:
-                        self.scrolls_back = 0
+                    # Check if already at full zoom-out (at limits)
+                    x_range, y_range = self.img_frame.viewRange()
+                    x_limits = self.img_frame.state['limits']['xLimits']
+                    y_limits = self.img_frame.state['limits']['yLimits']
+                    at_limits = (x_limits == [round(x, 8) for x in x_range] or
+                                 y_limits == [round(y, 8) for y in y_range])
 
-                    # Reset the zoom if scrolled back multiple times
-                    if self.scrolls_back > 1:
+                    if at_limits:
+                        # Already at full zoom - recenter the image
                         self.img_frame.autoRange(padding=0)
-
                     else:
+                        # Normal zoom out
                         self.img_frame.wheelEventModified(event, axis)
 
                 # Zoom in the image
