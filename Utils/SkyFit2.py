@@ -9341,10 +9341,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # Get FOV centre
         d = QFOVinputDialog(self)
         d.loadLensTemplates(self.config, self.dir_path, self.config.width, self.config.height)
-        if d.exec_():
-             data = d.getInputs()
-        else:
-            return 0, 0, 0, "none"
+
+        # Get inputs regardless of OK or Cancel - both use same defaults if empty
+        d.exec_()
+        data = d.getInputs()
 
         self.azim_centre, self.alt_centre, rot_horizontal, lenses_template_file = data
 
