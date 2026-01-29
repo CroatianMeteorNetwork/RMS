@@ -3883,6 +3883,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.mask_draw_mode = self.tab.mask.draw_button.isChecked()
         if self.mask_draw_mode:
             self.mask_current_polygon = []
+            # Disable hyperlinks on star labels so clicks go to mask drawing
+            self.spectral_type_text_list.setInteractionEnabled(False)
         else:
             # If there are points, close the polygon
             if len(self.mask_current_polygon) >= 3:
@@ -3890,6 +3892,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.tab.mask.setUnsaved(True)
             self.mask_current_polygon = []
             self.tab.mask.setDrawMode(False)
+            # Re-enable hyperlinks on star labels
+            self.spectral_type_text_list.setInteractionEnabled(True)
         self.updateMaskDisplay()
         self.tab.mask.updateStatus(len(self.mask_polygons))
 

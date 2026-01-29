@@ -327,6 +327,17 @@ class TextItemList(pg.GraphicsObject):
         for text in self.text_list:
             text.setVisible(visible)
 
+    def setInteractionEnabled(self, enabled):
+        """
+        Enable or disable text interaction (hyperlinks) on all TextItems in the list.
+
+        Arguments:
+            enabled [bool]: True to enable interaction, False to disable.
+        """
+        for text in self.text_list:
+            if hasattr(text, 'setInteraction'):
+                text.setInteraction(enabled)
+
     def paint(self, painter, option, widget=None):
         for text in self.text_list:
             text.update()
@@ -340,6 +351,20 @@ class TextItem(pg.TextItem):
                  border=None, fill=None, angle=0, rotateAxis=None, interaction=True):
         pg.TextItem.__init__(self, text, color, html, anchor, border, fill, angle, rotateAxis)
         if interaction:
+            self.textItem.setOpenExternalLinks(True)
+            self.textItem.setTextInteractionFlags(QtCore.Qt.TextBrowserInteraction)
+        else:
+            self.textItem.setOpenExternalLinks(False)
+            self.textItem.setTextInteractionFlags(QtCore.Qt.NoTextInteraction)
+
+    def setInteraction(self, enabled):
+        """
+        Enable or disable text interaction (hyperlinks, selection).
+
+        Arguments:
+            enabled [bool]: True to enable interaction, False to disable.
+        """
+        if enabled:
             self.textItem.setOpenExternalLinks(True)
             self.textItem.setTextInteractionFlags(QtCore.Qt.TextBrowserInteraction)
         else:
