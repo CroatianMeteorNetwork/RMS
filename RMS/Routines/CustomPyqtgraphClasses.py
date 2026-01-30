@@ -3201,10 +3201,13 @@ class SettingsWidget(QtWidgets.QWidget):
         vbox.addWidget(QHSeparationLine())
 
 
+        vbox.addWidget(QtWidgets.QLabel('Grid:'))
         hbox = QtWidgets.QHBoxLayout()
+        hbox.setContentsMargins(0, 0, 0, 0)
+        hbox.setSpacing(2)
         grid_group = QtWidgets.QButtonGroup()
         self.grid = []
-        for i, text in enumerate(['None', 'RaDec Grid', 'AzAlt Grid']):
+        for i, text in enumerate(['None', 'Ra/Dec', 'Az/Alt']):
             button = QtWidgets.QRadioButton(text)
             grid_group.addButton(button)
             button.released.connect(self.onGridChanged)
