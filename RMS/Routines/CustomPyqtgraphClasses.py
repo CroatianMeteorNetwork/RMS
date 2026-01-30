@@ -1462,9 +1462,6 @@ class GeolocationWidget(QtWidgets.QWidget, ScaledSizeHelper):
         full_layout.setAlignment(QtCore.Qt.AlignTop)
         self.setLayout(full_layout)
 
-        full_layout.addWidget(QtWidgets.QLabel("Press Esc to focus on image"))
-
-
         # Station geo position input boxes
         form = QtWidgets.QFormLayout()
         form.setLabelAlignment(QtCore.Qt.AlignRight)
@@ -1791,8 +1788,6 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         full_layout = QtWidgets.QVBoxLayout()
         full_layout.setContentsMargins(*self.scaledMargins(0.5, 0.25))
         self.setLayout(full_layout)
-
-        full_layout.addWidget(QtWidgets.QLabel("Press Esc to focus on image"))
 
         # buttons
         box = QtWidgets.QVBoxLayout()
@@ -3066,8 +3061,6 @@ class SettingsWidget(QtWidgets.QWidget):
         vbox = QtWidgets.QVBoxLayout()
         vbox.setAlignment(QtCore.Qt.AlignTop)
         self.setLayout(vbox)
-
-        vbox.addWidget(QtWidgets.QLabel("Press Esc to focus on image"))
 
         hbox = QtWidgets.QHBoxLayout()
         pixel_group = QtWidgets.QButtonGroup(self)

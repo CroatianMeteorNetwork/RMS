@@ -1888,6 +1888,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Install event filter to catch mouse release (ViewBox doesn't receive it during panning)
         self.view_widget.viewport().installEventFilter(self)
 
+        # Install event filter on application to catch global keyboard shortcuts
+        QtWidgets.QApplication.instance().installEventFilter(self)
+
         self.view_widget.setCentralWidget(self.img_frame)
         self.img_frame.invertY()
         layout.addWidget(self.view_widget, 0, 1)
@@ -5951,12 +5954,51 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def eventFilter(self, obj, event):
-        """Event filter to catch mouse release on view_widget viewport (ViewBox doesn't receive it during panning)."""
+        """Event filter to catch mouse release and global keyboard shortcuts."""
+
+        # Handle mouse release on view_widget viewport (ViewBox doesn't receive it during panning)
         if event.type() == QtCore.QEvent.MouseButtonRelease:
-            # Convert widget coords to scene coords
-            scene_pos = self.view_widget.mapToScene(event.pos())
-            self.handleMouseRelease(event.button(), scene_pos.x(), scene_pos.y())
-        return False  # Don't consume the event
+            # Only handle if obj is the view_widget viewport
+            if obj == self.view_widget.viewport():
+                # Convert widget coords to scene coords
+                scene_pos = self.view_widget.mapToScene(event.pos())
+                self.handleMouseRelease(event.button(), scene_pos.x(), scene_pos.y())
+            return False  # Don't consume the event
+
+        # Handle global keyboard shortcuts
+        if event.type() == QtCore.QEvent.KeyPress:
+            modifiers = event.modifiers()
+            key = event.key()
+
+            # Check if this is a shortcut we want to handle globally
+            should_intercept = False
+
+            # Intercept Ctrl+key combinations (but not when in a text input that needs Ctrl+C/V/X/A)
+            if modifiers & QtCore.Qt.ControlModifier:
+                # Don't intercept standard text editing shortcuts in text widgets
+                if isinstance(obj, (QtWidgets.QLineEdit, QtWidgets.QTextEdit, QtWidgets.QPlainTextEdit)):
+                    if key in (QtCore.Qt.Key_C, QtCore.Qt.Key_V, QtCore.Qt.Key_X, QtCore.Qt.Key_A):
+                        return False  # Let text widget handle copy/paste/cut/select-all
+                should_intercept = True
+
+            # Intercept arrow keys (for image navigation and scale adjustment)
+            elif key in (QtCore.Qt.Key_Left, QtCore.Qt.Key_Right, QtCore.Qt.Key_Up, QtCore.Qt.Key_Down):
+                # Don't intercept if focus is on a spinbox (arrows change values)
+                if not isinstance(obj, (QtWidgets.QSpinBox, QtWidgets.QDoubleSpinBox,
+                                       QtWidgets.QAbstractSpinBox)):
+                    should_intercept = True
+
+            # Intercept Escape key to return focus to image
+            elif key == QtCore.Qt.Key_Escape:
+                self.img_frame.setFocus()
+                return True  # Consume the event
+
+            if should_intercept:
+                # Forward to keyPressEvent
+                self.keyPressEvent(event)
+                return True  # Consume the event
+
+        return False  # Don't consume other events
 
     def handleMouseRelease(self, button, scene_x, scene_y):
         """Handle mouse release for star picking (called from eventFilter)."""
