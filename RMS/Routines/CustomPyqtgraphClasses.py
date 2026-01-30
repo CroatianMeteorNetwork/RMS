@@ -1991,14 +1991,29 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         form.addRow(QtWidgets.QLabel('Distortion'), self.distortion_type)
 
 
-        self.reset_distortion_button = QtWidgets.QPushButton("Reset distortion")
+        # Distortion buttons row - use widget container to prevent clipping
+        distortion_widget = QtWidgets.QWidget()
+        distortion_widget.setMinimumHeight(28)
+        distortion_buttons = QtWidgets.QHBoxLayout(distortion_widget)
+        distortion_buttons.setSpacing(4)
+        distortion_buttons.setContentsMargins(0, 0, 0, 0)
+
+        self.reset_distortion_button = QtWidgets.QPushButton("Reset")
         self.reset_distortion_button.clicked.connect(self.sigResetDistortionPressed.emit)
-        form.addWidget(self.reset_distortion_button)
+        distortion_buttons.addWidget(self.reset_distortion_button)
 
-        self.fit_parameters = ArrayTabWidget(platepar=self.gui.platepar)
-        self.fit_parameters.valueModified.connect(self.onFitParametersChanged)
-        form.addRow(self.fit_parameters)
+        self.edit_distortion_button = QtWidgets.QPushButton("Coefficients...")
+        self.edit_distortion_button.clicked.connect(self.openDistortionDialog)
+        distortion_buttons.addWidget(self.edit_distortion_button)
 
+        form.addRow(distortion_widget)
+
+        # Create the distortion dialog (hidden initially)
+        self.distortion_dialog = DistortionDialog(self.gui, self.gui.platepar)
+        self.distortion_dialog.valueModified.connect(self.onFitParametersChanged)
+
+        # Keep reference for compatibility with existing code that accesses fit_parameters
+        self.fit_parameters = self.distortion_dialog.fit_parameters
 
         # Add horizontal line
         hline = QHSeparationLine()
@@ -2364,6 +2379,14 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # fit parameter object updates platepar by itself
         self.sigFitParametersChanged.emit()
 
+    def openDistortionDialog(self):
+        """Open the distortion parameters dialog."""
+        # Update the dialog with current platepar before showing
+        self.distortion_dialog.updatePlatepar(self.gui.platepar)
+        self.distortion_dialog.show()
+        self.distortion_dialog.raise_()
+        self.distortion_dialog.activateWindow()
+
     def onIndexChanged(self):
         text = self.distortion_type.currentText()
 
@@ -2397,10 +2420,8 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.alt_centre.setValue(self.gui.platepar.alt_centre)
         self.rotation_from_horiz.setValue(self.gui.platepar.rotation_from_horiz)
         self.F_scale.setValue(60/self.gui.platepar.F_scale)
-        # Update platepar reference in fit_parameters widget in case a new platepar was loaded
-        self.fit_parameters.platepar = self.gui.platepar
-        self.fit_parameters.changeNumberShown(self.gui.platepar.poly_length)
-        self.fit_parameters.updateValues()
+        # Update platepar reference in distortion dialog in case a new platepar was loaded
+        self.distortion_dialog.updatePlatepar(self.gui.platepar)
         self.distortion_type.setCurrentIndex(
             self.gui.platepar.distortion_type_list.index(self.gui.platepar.distortion_type))
         self.extinction_scale.setValue(self.gui.platepar.extinction_scale)
@@ -2650,6 +2671,86 @@ class ArrayTabWidget(QtWidgets.QTabWidget, ScaledSizeHelper):
                 poly_arr = getattr(self.platepar, self.vars[i])
                 if len(poly_arr) > j:
                     self.boxes[i][j].setValue(poly_arr[j])
+
+
+class DistortionDialog(QtWidgets.QDialog, ScaledSizeHelper):
+    """
+    Non-modal dialog for editing lens distortion parameters.
+    Allows manual editing of polynomial coefficients with live preview.
+    """
+    valueModified = QtCore.pyqtSignal()
+
+    def __init__(self, parent, platepar):
+        super(DistortionDialog, self).__init__(parent)
+        self.platepar = platepar
+        self.parent_widget = parent
+
+        self.setWindowTitle("Lens Distortion Parameters")
+        self.setModal(False)  # Non-modal for live preview
+
+        # Main layout
+        layout = QtWidgets.QVBoxLayout(self)
+
+        # Info label
+        info_label = QtWidgets.QLabel(
+            "Edit polynomial coefficients for lens distortion correction.\n"
+            "Changes are applied immediately to the image display."
+        )
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: gray; font-size: 9pt;")
+        layout.addWidget(info_label)
+
+        # Create the array tab widget for coefficients
+        self.fit_parameters = ArrayTabWidget(platepar=self.platepar)
+        self.fit_parameters.valueModified.connect(self.onValueModified)
+        layout.addWidget(self.fit_parameters)
+
+        # Button row
+        button_layout = QtWidgets.QHBoxLayout()
+
+        self.reset_button = QtWidgets.QPushButton("Reset to Zero")
+        self.reset_button.clicked.connect(self.resetToZero)
+        button_layout.addWidget(self.reset_button)
+
+        button_layout.addStretch()
+
+        self.close_button = QtWidgets.QPushButton("Close")
+        self.close_button.clicked.connect(self.close)
+        button_layout.addWidget(self.close_button)
+
+        layout.addLayout(button_layout)
+
+        # Set reasonable size
+        self.resize(self.scaledWidth(35), self.scaledHeight(30))
+
+    def onValueModified(self):
+        """Forward signal when a coefficient is modified."""
+        self.valueModified.emit()
+
+    def resetToZero(self):
+        """Reset all distortion coefficients to zero (except offset terms)."""
+        # Reset polynomial arrays, keeping only the offset (index 0)
+        for var in ['x_poly_rev', 'y_poly_rev', 'x_poly_fwd', 'y_poly_fwd']:
+            poly = getattr(self.platepar, var)
+            for i in range(1, len(poly)):
+                poly[i] = 0.0
+        self.fit_parameters.updateValues()
+        self.valueModified.emit()
+
+    def updatePlatepar(self, platepar):
+        """Update the platepar reference and refresh display."""
+        self.platepar = platepar
+        self.fit_parameters.platepar = platepar
+        self.fit_parameters.changeNumberShown(platepar.poly_length)
+        self.fit_parameters.updateValues()
+
+    def changeNumberShown(self, n):
+        """Change the number of coefficients shown."""
+        self.fit_parameters.changeNumberShown(n)
+
+    def updateValues(self):
+        """Update displayed values from platepar."""
+        self.fit_parameters.updateValues()
 
 
 class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
