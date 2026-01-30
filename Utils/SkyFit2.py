@@ -5533,23 +5533,26 @@ class PlateTool(QtWidgets.QMainWindow):
             del dic[remove]
 
         # Explicitly remove pyqtgraph items that might not have been caught
-        if 'sat_track_curves' in dic:
-            del dic['sat_track_curves']
-        if 'sat_track_labels' in dic:
-            del dic['sat_track_labels']
-        if 'sat_track_arrows' in dic:
-            del dic['sat_track_arrows']
-        if 'sat_markers' in dic:
-            del dic['sat_markers']
+        pyqtgraph_keys = [
+            'sat_track_curves', 'sat_track_labels', 'sat_track_arrows', 'sat_markers',
+            # TextItem objects
+            'label1', 'label2', 'label_f1', 'star_pick_info',
+            # TextItemList objects
+            'planet_labels', 'residual_text', 'spectral_type_text_list',
+        ]
+        for key in pyqtgraph_keys:
+            if key in dic:
+                del dic[key]
 
         # Remove other PlotCurveItem objects which cannot be pickled
         # Generic scrubber for pyqtgraph/qt items
+        unpicklable_modules = ('pyqtgraph', 'PyQt5', 'RMS.Routines.CustomPyqtgraphClasses')
         keys_to_remove = []
         for k, v in dic.items():
-            
+
             # Check for direct objects
             if hasattr(v, '__class__') and hasattr(v.__class__, '__module__'):
-                 if v.__class__.__module__.startswith(('pyqtgraph', 'PyQt5')):
+                 if v.__class__.__module__.startswith(unpicklable_modules):
                       keys_to_remove.append(k)
                       continue
 
@@ -5558,7 +5561,7 @@ class PlateTool(QtWidgets.QMainWindow):
                  # Check first item in list (heuristic)
                  first = v[0]
                  if hasattr(first, '__class__') and hasattr(first.__class__, '__module__'):
-                      if first.__class__.__module__.startswith(('pyqtgraph', 'PyQt5')):
+                      if first.__class__.__module__.startswith(unpicklable_modules):
                           keys_to_remove.append(k)
                           continue
 
