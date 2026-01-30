@@ -1550,6 +1550,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Store the mask
         self.mask = mask
 
+        # Last directory used for loading masks (for file dialog)
+        self.last_mask_dir = None
+
         # Flat field
         self.flat_struct = None
 
@@ -4360,11 +4363,14 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def loadMaskDialog(self):
         """Open dialog to load a mask file."""
-        default_path = self.dir_path
+        # Use last mask directory if set, otherwise fall back to image directory
+        default_path = self.last_mask_dir if self.last_mask_dir else self.dir_path
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Load Mask", default_path, "BMP Files (*.bmp);;All Files (*)")
 
         if file_path:
+            # Remember the directory for next time
+            self.last_mask_dir = os.path.dirname(file_path)
             self.loadMaskFromFile(file_path)
 
     def loadMaskFromFile(self, mask_path):
