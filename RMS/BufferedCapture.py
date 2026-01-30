@@ -16,6 +16,7 @@
 
 from __future__ import print_function, division, absolute_import
 
+import gc
 import os
 import sys
 import ctypes
@@ -173,9 +174,6 @@ class BufferedCapture(Process):
 
         # Flag for process control
         self.exit = Event()
-
-        # Heartbeat timestamp for watchdog - updated every frame block to detect hangs
-        self.heartbeat = Value('d', 0.0)
 
         # Initialize sync tick
         self.last_sync_tick = -1
@@ -672,11 +670,6 @@ class BufferedCapture(Process):
                 if stop_event is not None and stop_event.is_set():
                     log.info("RTSP probe aborted - shutdown requested")
                     return False, RtspProbeResult.UNKNOWN_ERROR
-
-                # Update heartbeat during probe attempts to show we're still alive
-                if hasattr(self, 'heartbeat'):
-                    self.heartbeat.value = time.time()
-
                 try:
                     # Try to resolve hostname first
                     try:
@@ -995,11 +988,11 @@ class BufferedCapture(Process):
         """Poll the GStreamer bus and drain queued messages.
 
         Runs in a background daemon thread:
-                - Wakes every 5 s via ``bus.timed_pop_filtered``.
+                - Wakes every 1 s via ``bus.timed_pop_filtered``.
                 - Logs any ``ERROR`` or ``WARNING`` message for visibility.
                 - Silently discards all other message types to keep the queue small.
 
-        The loop exits when ``self.pipeline`` becomes ``None`` inside ``releaseResources``.
+        The loop exits when ``_bus_should_exit`` is set or EOS is received.
 
         Arguments:
             None
@@ -1012,15 +1005,24 @@ class BufferedCapture(Process):
             return
 
         try:
-            bus = self.pipeline.get_bus()
+            # Get bus reference - this keeps the bus (and indirectly the pipeline)
+            # alive until this thread exits, preventing premature garbage collection
+            pipeline = self.pipeline
+            if pipeline is None:
+                log.debug("_busPoller: No pipeline, exiting immediately")
+                return
+
+            bus = pipeline.get_bus()
+            if bus is None:
+                log.debug("_busPoller: No bus, exiting immediately")
+                return
+
             mask = Gst.MessageType.ANY
 
-            while not self._bus_should_exit and self.pipeline is not None:
-                msg = bus.timed_pop_filtered(5 * Gst.SECOND, mask)
+            # Use shorter timeout (1 second) so thread can check exit flag more frequently
+            while not self._bus_should_exit:
+                msg = bus.timed_pop_filtered(1 * Gst.SECOND, mask)
                 if not msg:
-                    # Check if pipeline still exists
-                    if self.pipeline is None:
-                        break
                     continue
 
                 if msg.type == Gst.MessageType.ERROR:
@@ -1032,10 +1034,15 @@ class BufferedCapture(Process):
                 elif msg.type == Gst.MessageType.EOS:
                     log.debug("_busPoller: Received EOS, exiting")
                     break
-                    
+
         except Exception as e:
             log.debug("_busPoller: Exception occurred: %s", str(e))
         finally:
+            # Explicitly release local references to allow GC to free the pipeline
+            # These would go out of scope anyway, but being explicit ensures cleanup
+            # happens promptly even if this thread is slow to fully exit
+            pipeline = None
+            bus = None
             log.debug("_busPoller: Thread exiting")
 
 
@@ -1147,20 +1154,13 @@ class BufferedCapture(Process):
                 # Transition through states
                 log.info("Starting pipeline state transitions...")
 
-                # First transition to PAUSED to capture start_time
-                success, start_time = self.handleStateChange(self.pipeline, Gst.State.PAUSED)
-                if not success:
-                    raise ValueError("Failed to transition pipeline to PAUSED state")
-
-                # Calculate start timestamp BEFORE going to PLAYING
-                # This ensures splitmuxsink has correct timing reference when it creates first segment
-                if start_time is not None:
-                    self.start_timestamp = start_time - (self.config.camera_buffer/self.config.fps + self.config.camera_latency)
-
-                # Now transition to PLAYING
-                success, _ = self.handleStateChange(self.pipeline, Gst.State.PLAYING)
+                success, start_time = self.handleStateChange(self.pipeline, Gst.State.PLAYING)
                 if not success:
                     raise ValueError("Failed to transition pipeline to PLAYING state")
+
+                # Calculate start timestamp
+                if start_time is not None:
+                    self.start_timestamp = start_time - (self.config.camera_buffer/self.config.fps + self.config.camera_latency)
 
                 # Log start time
                 start_time_str = (UTCFromTimestamp.utcfromtimestamp(self.start_timestamp)
@@ -1530,34 +1530,32 @@ class BufferedCapture(Process):
                 log.debug("releaseResources: Posting EOS to wake poller")
                 bus.post(Gst.Message.new_eos(None))
 
-            pipe = self.pipeline
         else:
             log.debug("releaseResources: No pipeline to shutdown")
-            pipe = None
+
+        # Clear pipeline reference. Note: the bus poller thread holds its own local
+        # reference to the pipeline, so it won't be garbage collected until that
+        # thread exits. We set _bus_should_exit=True below to signal the thread to stop.
+        self.pipeline = None
 
         # shut down the poller
         if self._bus_thread and self._bus_thread.is_alive():
             log.debug(f"releaseResources: Bus thread is alive (thread={self._bus_thread})")
             self._bus_should_exit = True
-            
+
             log.debug("releaseResources: Joining bus thread (6 second timeout)")
             self._bus_thread.join(timeout=6)
-            
+
             if self._bus_thread.is_alive():
                 log.debug("releaseResources: WARNING - Bus thread still alive after timeout!")
             else:
                 log.debug("releaseResources: Bus thread joined successfully")
         self._bus_thread = None
 
-        # only now drop the last reference
-        if pipe:
-            log.debug("releaseResources: Unreffing pipeline")
-            # Use a timed call as final safety net (should not be needed with teardown-timeout)
-            if not _timedCall(pipe.unref, timeout_s=10):
-                log.warning("releaseResources: pipeline.unref() timed out after 10 seconds - this indicates a GStreamer bug")
-            else:
-                log.debug("releaseResources: Pipeline unreffed successfully")
-        self.pipeline = None
+        # NOTE: Do NOT call pipeline.unref() manually! Python's GI bindings handle
+        # reference counting automatically. Calling unref() manually causes double-free
+        # crashes when Python's garbage collector also tries to free the object.
+        # The pipeline will be cleaned up when all Python references go out of scope.
 
         # device section
         if self.device:
@@ -1568,22 +1566,11 @@ class BufferedCapture(Process):
                     if not _timedCall(self.device.release):
                         log.warning("releaseResources: cap.release() hung - fd dropped")
 
-                elif hasattr(self.device, "set_state"):                  # GStreamer branch
-                    try:
-                        self.device.set_state(Gst.State.NULL)
-                    except Exception as exc:
-                        log.warning("releaseResources: Gst set_state(NULL) failed: %s", exc)
-                
-                elif self.video_device_type == "gst" and GST_IMPORTED:
-                    # This is likely a GstAppSink - ensure it's properly cleaned
-                    log.debug("releaseResources: Releasing GStreamer AppSink")
-                    # AppSink cleanup happens when pipeline is unreffed
-                    # Just ensure we're not holding extra references
-                    if hasattr(self.device, 'set_emit_signals'):
-                        try:
-                            self.device.set_emit_signals(False)
-                        except Exception as e:
-                            log.debug("set_emit_signals cleanup failed: %s", e)
+                # For GStreamer devices (AppSink), cleanup happens automatically when
+                # the pipeline is garbage collected. Don't try to access the device
+                # as it may have already been freed with the pipeline.
+                elif self.video_device_type == "gst":
+                    log.debug("releaseResources: GStreamer device cleaned up with pipeline")
 
                 else:                                                    # Fallback
                     log.debug("releaseResources: Unknown device type - just dropping ref")
@@ -1592,7 +1579,12 @@ class BufferedCapture(Process):
                 self.device = None
 
         log.debug("releaseResources: Completed")
-        
+
+        # Force garbage collection to break any reference cycles and ensure
+        # GStreamer resources are freed. This replaces the manual unref() call
+        # which caused double-free crashes.
+        gc.collect()
+
         # Reset the flag so future calls can proceed
         self._releasing_resources = False
 
@@ -1685,9 +1677,6 @@ class BufferedCapture(Process):
         try:
             log.debug("Initializing process-specific resources...")
 
-            # Initialize heartbeat for watchdog
-            self.heartbeat.value = time.time()
-
             # GStreamer debug setup
             if GST_IMPORTED:
                 try:
@@ -1768,8 +1757,6 @@ class BufferedCapture(Process):
 
             # Main capture loop
             while not self.exit.is_set() and not self.initVideoDevice():
-                # Update heartbeat during connection attempts to show we're still alive
-                self.heartbeat.value = time.time()
                 log.info('Waiting for the video device to be connected...')
                 time.sleep(5)
 
@@ -1872,9 +1859,6 @@ class BufferedCapture(Process):
 
                 while not self.exit.is_set() and not self.initVideoDevice():
 
-                    # Update heartbeat during reconnection attempts to show we're still alive
-                    self.heartbeat.value = time.time()
-
                     log.info('Waiting for the video device to be reconnected...')
 
                     time.sleep(5)
@@ -1929,10 +1913,6 @@ class BufferedCapture(Process):
 
 
             log.info('Grabbing a new block of {:d} frames...'.format(block_frames))
-
-            # Update heartbeat timestamp for watchdog to detect hangs
-            self.heartbeat.value = time.time()
-
             for i in range(block_frames):
 
                 # Read the frame (keep track how long it took to grab it), and check for color if saving raw frame
