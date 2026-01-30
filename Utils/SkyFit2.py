@@ -1578,6 +1578,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.photom_fit_stddev = None
         self.photom_fit_resids = None
 
+        # Figure references for toggling Astrometry/Photometry windows
+        self.fig_astrometry = None
+        self.fig_photometry = None
+
         # Compute the saturation threshold
         self.saturation_threshold = int(round(0.98*(2**self.config.bit_depth - 1)))
 
@@ -4796,6 +4800,17 @@ class PlateTool(QtWidgets.QMainWindow):
         # Show the photometry fit plot
         if show_plot:
 
+            # Check if figure already exists and is open - if so, close it (toggle off)
+            if self.fig_photometry is not None:
+                try:
+                    if plt.fignum_exists(self.fig_photometry.number):
+                        plt.close(self.fig_photometry)
+                        self.fig_photometry = None
+                        return
+                except:
+                    pass
+                self.fig_photometry = None
+
             ### PLOT PHOTOMETRY FIT ###
             # Note: An almost identical code exists in Utils.CalibrationReport
 
@@ -4804,7 +4819,8 @@ class PlateTool(QtWidgets.QMainWindow):
             #                                    gridspec_kw={'height_ratios': [3, 1, 1]})
 
             # Init plot for photometry
-            fig_p = plt.figure(figsize=(10, 5))  # Adjust the figure size as needed
+            self.fig_photometry = plt.figure(figsize=(10, 5))  # Adjust the figure size as needed
+            fig_p = self.fig_photometry
 
             # Create a grid with 2 columns and 2 rows
             gs = gridspec.GridSpec(2, 2, width_ratios=[1, 1], height_ratios=[1, 1])
@@ -10770,7 +10786,18 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateStars()
 
     def showAstrometryFitPlots(self):
-        """ Show window with astrometry fit details. """
+        """ Show window with astrometry fit details. Toggle on/off if already open. """
+
+        # Check if figure already exists and is open - if so, close it (toggle off)
+        if self.fig_astrometry is not None:
+            try:
+                if plt.fignum_exists(self.fig_astrometry.number):
+                    plt.close(self.fig_astrometry)
+                    self.fig_astrometry = None
+                    return
+            except:
+                pass
+            self.fig_astrometry = None
 
         # Extract paired catalog stars and image coordinates separately (with SNR and saturation)
         all_coords = list(self.paired_stars.allCoords())
@@ -10872,11 +10899,12 @@ class PlateTool(QtWidgets.QMainWindow):
             total_error_px.append(np.hypot(cat_x - img_x, cat_y - img_y))
 
         # Init astrometry fit window (3 rows: angular, pixel, SNR/mag/FWHM)
-        fig_a, (
+        self.fig_astrometry, (
             (ax_azim, ax_elev, ax_skyradius),
             (ax_x, ax_y, ax_radius),
             (ax_snr, ax_mag, ax_fwhm)
         ) = plt.subplots(ncols=3, nrows=3, facecolor=None, figsize=(12, 9))
+        fig_a = self.fig_astrometry
 
         # Set figure title
         try:
