@@ -4608,11 +4608,11 @@ class PlateTool(QtWidgets.QMainWindow):
         """Update the distortion center (optical axis) marker position."""
         if self.platepar:
             # Get the distortion center from the platepar
+            # getDistortionCentre returns the actual center position (includes 0.5 offset from CyFunctions)
             x_centre, y_centre = self.platepar.getDistortionCentre()
 
-            # Update marker position (add 0.5 for pixel center alignment)
-            self.distortion_center_marker.setData(x=[x_centre + 0.5], y=[y_centre + 0.5])
-            self.distortion_center_marker2.setData(x=[x_centre + 0.5], y=[y_centre + 0.5])
+            self.distortion_center_marker.setData(x=[x_centre], y=[y_centre])
+            self.distortion_center_marker2.setData(x=[x_centre], y=[y_centre])
 
 
     def photometry(self, show_plot=False):

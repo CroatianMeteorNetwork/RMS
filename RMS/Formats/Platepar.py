@@ -287,19 +287,24 @@ class Platepar(object):
 
         # Reset the image centre
         else:
-            # Set the first coeffs to 0.5, as that is the real centre of the FOV
-            self.x_poly_fwd[0] = 0.5
-            self.y_poly_fwd[0] = 0.5
-            self.x_poly_rev[0] = 0.5
-            self.y_poly_rev[0] = 0.5
-
-            # If the distortion is radial, set the second X parameter to 0.5, as x_poly[1] is used for the Y
-            #   offset in the radial models
+            # If the distortion is radial, center may be in x_poly[0] and x_poly[1]
             if self.distortion_type.startswith("radial"):
-                self.x_poly_fwd[0] /= self.X_res / 2
-                self.x_poly_rev[0] /= self.X_res / 2
-                self.x_poly_fwd[1] = 0.5 / (self.Y_res / 2)
-                self.x_poly_rev[1] = 0.5 / (self.Y_res / 2)
+                # Only set center coefficients if force_distortion_centre is False
+                # When force_distortion_centre=True, there are no center coefficients in the array
+                if not self.force_distortion_centre:
+                    # Match CyFunctions which uses 0.5/(res/2) when force_distortion_centre=True
+                    # After normalization (coeff * res/2), this gives x0=0.5 offset
+                    self.x_poly_fwd[0] = 0.5 / (self.X_res / 2.0)
+                    self.x_poly_rev[0] = 0.5 / (self.X_res / 2.0)
+                    self.x_poly_fwd[1] = 0.5 / (self.Y_res / 2.0)
+                    self.x_poly_rev[1] = 0.5 / (self.Y_res / 2.0)
+                # y_poly stays all zeros for radial
+            else:
+                # For polynomial distortion, center is in x_poly[0] and y_poly[0]
+                self.x_poly_fwd[0] = 0.5
+                self.y_poly_fwd[0] = 0.5
+                self.x_poly_rev[0] = 0.5
+                self.y_poly_rev[0] = 0.5
 
                 # If the distortion center is forced to the center of the image, reset all parameters to zero
                 if self.force_distortion_centre:
@@ -408,7 +413,8 @@ class Platepar(object):
 
         # If distortion center is forced to image center, or not using radial distortion
         if self.force_distortion_centre or not self.distortion_type.startswith("radial"):
-            return self.X_res / 2.0, self.Y_res / 2.0
+            # CyFunctions uses x0=0.5 offset when forced, so match that here
+            return self.X_res / 2.0 + 0.5, self.Y_res / 2.0 + 0.5
 
         # For radial distortion, extract the center offsets from coefficients
         # The offsets are stored normalized by X_res/2 and Y_res/2

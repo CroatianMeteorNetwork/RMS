@@ -2573,13 +2573,15 @@ class ArrayTabWidget(QtWidgets.QTabWidget, ScaledSizeHelper):
     valueModified = QtCore.pyqtSignal()
 
     # Width in characters for coefficient input boxes
-    COEFF_INPUT_CHARS = 13
+    COEFF_INPUT_CHARS = 15
 
     def __init__(self, platepar):
         super(ArrayTabWidget, self).__init__()
         self.platepar = platepar
 
         self.vars = ['x_poly_rev', 'y_poly_rev', 'x_poly_fwd', 'y_poly_fwd']
+        # Shorter display names for tabs
+        self.tab_names = ['x_rev', 'y_rev', 'x_fwd', 'y_fwd']
 
         # Maximum number of parameters that can be shown
         self.max_n_shown = max(self.platepar.distortion_type_poly_length)
@@ -2592,7 +2594,7 @@ class ArrayTabWidget(QtWidgets.QTabWidget, ScaledSizeHelper):
         self.n_shown = self.platepar.poly_length
 
         for i in range(len(self.vars)):
-            self.addTab(self.tabs[i], self.vars[i])
+            self.addTab(self.tabs[i], self.tab_names[i])
             self.setupTab(i)
 
     def changeNumberShown(self, n):
@@ -2641,7 +2643,8 @@ class ArrayTabWidget(QtWidgets.QTabWidget, ScaledSizeHelper):
                 box.setValue(0)
 
             box.valueModified.connect(self.onFitParameterChanged(i, j))
-            label = QtWidgets.QLabel("{}[{}]".format(self.vars[i], j))
+            # Just show index since tab name identifies the array
+            label = QtWidgets.QLabel("[{}]".format(j))
 
             # Only add to layout if within n_shown; otherwise just store the widgets hidden
             if j < self.n_shown:
@@ -2654,7 +2657,7 @@ class ArrayTabWidget(QtWidgets.QTabWidget, ScaledSizeHelper):
             self.boxes[i].append(box)
             self.labels[i].append(label)
 
-        self.setTabText(i, self.vars[i])
+        self.setTabText(i, self.tab_names[i])
         self.tabs[i].setLayout(layout)
         self.layouts.append(layout)
 
@@ -2667,8 +2670,8 @@ class ArrayTabWidget(QtWidgets.QTabWidget, ScaledSizeHelper):
 
     def updateValues(self):
         for i in range(len(self.vars)):
+            poly_arr = getattr(self.platepar, self.vars[i])
             for j in range(self.n_shown):
-                poly_arr = getattr(self.platepar, self.vars[i])
                 if len(poly_arr) > j:
                     self.boxes[i][j].setValue(poly_arr[j])
 
@@ -2708,7 +2711,7 @@ class DistortionDialog(QtWidgets.QDialog, ScaledSizeHelper):
         # Button row
         button_layout = QtWidgets.QHBoxLayout()
 
-        self.reset_button = QtWidgets.QPushButton("Reset to Zero")
+        self.reset_button = QtWidgets.QPushButton("Reset")
         self.reset_button.clicked.connect(self.resetToZero)
         button_layout.addWidget(self.reset_button)
 
@@ -2720,19 +2723,28 @@ class DistortionDialog(QtWidgets.QDialog, ScaledSizeHelper):
 
         layout.addLayout(button_layout)
 
-        # Set reasonable size
-        self.resize(self.scaledWidth(35), self.scaledHeight(30))
+        # Set reasonable size (wider to accommodate coefficient values)
+        self.resize(self.scaledWidth(40), self.scaledHeight(30))
 
     def onValueModified(self):
         """Forward signal when a coefficient is modified."""
         self.valueModified.emit()
 
     def resetToZero(self):
-        """Reset all distortion coefficients to zero (except offset terms)."""
-        # Reset polynomial arrays, keeping only the offset (index 0)
+        """Reset distortion coefficients, preserving center/offset terms."""
+        # Determine how many leading indices to preserve (center coefficients)
+        # For radial distortion without force_distortion_centre, indices 0 and 1 are center x and y
+        # For polynomial distortion, index 0 is the offset
+        if self.platepar.distortion_type.startswith("radial") and not self.platepar.force_distortion_centre:
+            preserve_count = 2  # Preserve x_poly[0] and x_poly[1] for radial center
+        else:
+            preserve_count = 1  # Preserve index 0 only
+
         for var in ['x_poly_rev', 'y_poly_rev', 'x_poly_fwd', 'y_poly_fwd']:
             poly = getattr(self.platepar, var)
-            for i in range(1, len(poly)):
+            # For y_poly in radial, all values should be zero (no center there)
+            start_idx = preserve_count if var.startswith('x_') else 1
+            for i in range(start_idx, len(poly)):
                 poly[i] = 0.0
         self.fit_parameters.updateValues()
         self.valueModified.emit()
@@ -3643,12 +3655,11 @@ class ScientificDoubleSpinBox(QtWidgets.QDoubleSpinBox):
         return format_float(value)
 
     def stepBy(self, steps):
-        text = self.cleanText()
-        groups = _float_re.search(text).groups()
-        decimal = float(groups[1])
-        decimal += steps*self.singleStep()
-        new_string = "{:e}".format(float(str(decimal) + groups[3]))
-        self.lineEdit().setText(new_string)
+        # Get current value and add step
+        current_value = self.value()
+        new_value = current_value + steps * self.singleStep()
+        # Use format_float to maintain consistent display
+        self.lineEdit().setText(format_float(new_value))
 
         self.buttonPressed.emit()
         self.valueModified.emit()
@@ -3660,7 +3671,8 @@ class ScientificDoubleSpinBox(QtWidgets.QDoubleSpinBox):
 
 
 def format_float(value):
-    """Modified form of the 'g' format specifier."""
-    string = "{:e}".format(value)  # .replace("e+", "e")
-    # string = re.sub("e(-?)0*(\d+)", r"e\1\2", string)
-    return string
+    """Format float to match platepar format - fixed decimal for larger values, scientific for small."""
+    if abs(value) > 1e-4 or value == 0:
+        return "{:+.6f}".format(value)
+    else:
+        return "{:+.3e}".format(value)
