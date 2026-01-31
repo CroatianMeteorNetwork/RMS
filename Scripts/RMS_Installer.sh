@@ -61,6 +61,7 @@ sudo systemctl enable ssh
 
 # Clone repositories
 git clone https://github.com/g7gpr/RMS.git
+git checkout
 git clone https://github.com/g7gpr/cmn_binviewer.git
 
 # Set up Python virtual environment with access to system packages
