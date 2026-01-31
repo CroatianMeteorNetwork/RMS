@@ -6015,6 +6015,12 @@ class PlateTool(QtWidgets.QMainWindow):
             click_threshold = 5.0  # screen pixels
 
             if drag_distance < click_threshold:
+                # Update mouse_x/y to the actual click position before picking
+                # (press_scene_x/y come from pyqtgraph's scenePos which is reliable)
+                scene_pos = QtCore.QPointF(self.press_scene_x, self.press_scene_y)
+                view_pos = self.img_frame.mapSceneToView(scene_pos)
+                self.mouse_x = view_pos.x()
+                self.mouse_y = view_pos.y()
                 self.handleStarPick(self.press_button, self.press_modifiers)
 
         # Clear press tracking and clicked state
@@ -10193,10 +10199,11 @@ class PlateTool(QtWidgets.QMainWindow):
         if y_max > self.platepar.Y_res - 1:
             y_max = self.platepar.Y_res - 1
 
-        # Crop the image - always use avepixel for intensity calculation to match calstars extraction
-        # This ensures consistency regardless of whether maxpixel or avepixel is being displayed
-        if hasattr(self.img_handle, 'ff') and self.img_handle.ff is not None:
-            # For FF files, always use avepixel (same as calstars extraction)
+        # Crop the image for centroiding
+        # In SkyFit mode: use avepixel for FF files to match calstars extraction
+        # In ManualReduction mode: use current displayed frame (individual frame data)
+        if self.mode == 'skyfit' and hasattr(self.img_handle, 'ff') and self.img_handle.ff is not None:
+            # For FF files in SkyFit mode, use avepixel (same as calstars extraction)
             avepixel_data = self.img_handle.ff.avepixel.T
             # Apply dark and flat if available (same processing as displayed image)
             if self.dark is not None:
@@ -10205,7 +10212,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 avepixel_data = applyFlat(avepixel_data, self.flat_struct)
             img_crop_orig = avepixel_data[x_min:x_max, y_min:y_max]
         else:
-            # For other input types (videos, images), use the current displayed image
+            # For ManualReduction mode or non-FF inputs, use the current displayed image
             img_crop_orig = self.img.data[x_min:x_max, y_min:y_max]
 
         # Perform gamma correction
