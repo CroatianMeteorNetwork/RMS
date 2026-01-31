@@ -645,7 +645,7 @@ class Config:
         self.dark_file = 'dark.bmp'
 
         self.star_catalog_path = os.path.join(self.rms_root_dir, 'Catalogs')
-        self.star_catalog_file = 'gaia_dr2_mag_11.5.npy'
+        self.star_catalog_file = 'GMN_StarCatalog'
 
         # Catalog band ratios for Sony CMOS cameras
         #                                   B     V     R     I   (G    BR    BR)
