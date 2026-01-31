@@ -61,7 +61,7 @@ sudo systemctl enable ssh
 
 # Clone repositories
 git clone https://github.com/g7gpr/RMS.git
-git clone https://github.com/CroatianMeteorNetwork/RMS/cmn_binviewer.git
+git clone https://github.com/CroatianMeteorNetwork/cmn_binviewer.git
 
 # Set up Python virtual environment with access to system packages
 cd ~
