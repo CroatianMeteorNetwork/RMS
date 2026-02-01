@@ -60,6 +60,7 @@ import numpy as np
 
 import RMS.ConfigReader as cr
 import json
+import subprocess
 
 from RMS.Formats.CALSTARS import readCALSTARS
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector, raDec2AltAz
@@ -1505,8 +1506,8 @@ class EventMonitor(multiprocessing.Process):
 
         platepar_file = ""
 
-        if len(self.getDirectoryList(event)) > 0:
-            platepar_file_list = self.getFile(self.syscon.platepar_name, self.getDirectoryList(event)[0])
+        if len(self.getCapturedDirectoryList(event)) > 0:
+            platepar_file_list = self.getFile(self.syscon.platepar_name, self.getCapturedDirectoryList(event)[0])
             if len(platepar_file_list) > 0:
                 platepar_file = platepar_file_list[0]
             else:
@@ -1515,7 +1516,7 @@ class EventMonitor(multiprocessing.Process):
 
         return platepar_file
 
-    def getDirectoryList(self, event):
+    def getCapturedDirectoryList(self, event):
 
         """ Get the paths of directories which may contain files associated with an event
 
@@ -1551,7 +1552,7 @@ class EventMonitor(multiprocessing.Process):
 
 
 
-    def findEventFiles(self, event, directory_list, file_extension_list):
+    def findEventCapturedFiles(self, event, directory_list, file_extension_list):
 
         """Take an event, directory list and an extension list and return paths to files
 
@@ -1577,8 +1578,8 @@ class EventMonitor(multiprocessing.Process):
 
         seeking_first_fits_after_event = True # to prevent warning of possibly uninitialised variable
         file_list = []
-        # Iterate through the directory list, appending files with the correct extension
 
+        # Iterate through the directory list, appending files with the correct extension
 
         last_fits_file = None
         for directory in directory_list:
@@ -1615,9 +1616,9 @@ class EventMonitor(multiprocessing.Process):
                             last_fits_file = file
         return file_list
 
-    def getFileList(self, event):
+    def getCapturedFileList(self, event):
 
-        """Take an event, return paths to files
+        """Take an event, return paths to files from captured_dir
 
            Arguments:
                event: [event] Event of interest
@@ -1629,14 +1630,94 @@ class EventMonitor(multiprocessing.Process):
 
         file_list = []
 
-        file_list += self.findEventFiles(event, self.getDirectoryList(event), [".fits", ".bin"])
+        file_list += self.findEventCapturedFiles(event, self.getCapturedDirectoryList(event), [".fits", ".bin"])
 
         # Have to use system .config file_name here because we have not yet identified the files for the event
-        if len(self.getDirectoryList(event)) > 0:
-            file_list += self.getFile(os.path.basename(self.syscon.config_file_name), self.getDirectoryList(event)[0])
+        if len(self.getCapturedDirectoryList(event)) > 0:
+            file_list += self.getFile(os.path.basename(self.syscon.config_file_name), self.getCapturedDirectoryList(event)[0])
             file_list += [self.getPlateparFilePath(event)]
             #log.info("File list {}".format(file_list))
         return file_list
+
+    def searchByTime(self, event, search_from_list=[], suffix_list=[]):
+        """Take an event, return paths to files from subdirs in search_from_list
+
+        Arguments:
+            event: [event] Event of interest
+
+        Keyword arguments:
+           search_from_list: [list] List of paths under config.data_dir to search, default []
+                                If empty list is passed, then self.config.video_dir and self.config.frame_dir
+                                are searched
+
+            suffix_list: [list] List of suffixes to search in the same order as search_from_list
+
+        Return:
+            file_list: [list of paths] List of paths to files
+
+        """
+
+        time_matched_path_and_file_list = []
+        if not len(search_from_list):
+            search_from_list = [self.config.video_dir, self.config.frame_dir]
+
+        if not len(suffix_list):
+            suffix_list = ['mkv', 'jpg']
+
+        for search_from , suffix in zip(search_from_list, suffix_list):
+            candidate_file_list = []
+            search_from = os.path.join(self.config.data_dir, search_from)
+            if not os.path.exists(search_from):
+                continue
+            for root, dir_list, file_list in os.walk(search_from):
+                candidate_file_list += file_list
+
+
+            # Now sort the candidate file list lexicographically
+            candidate_file_list.sort()
+
+            # Get all the files where the file name timestamp is inside the time tolerance
+            time_matched_file_list = []
+
+            # Initialise a last_file and not_matched, so that we can recover the file before the first match
+            # as it may contain frames that are within the time tolerance
+
+            not_matched, last_file = True, None
+            for f in candidate_file_list:
+                if not f.startswith(self.config.stationID):
+                    continue
+                if not f.endswith(suffix):
+                    continue
+                if not len(f.split("_")) == 5:
+                    log.info(f"Rejecting file {f} as has length {len(f.split('_'))}")
+                    continue
+
+                file_time = convertGMNTimeToPOSIX(f"{f.split('_')[1]}_{f.split('_')[2]}")
+                event_time = convertGMNTimeToPOSIX(event.dt)
+                time_delta = abs(event_time - file_time).total_seconds()
+                if time_delta < int(event.time_tolerance):
+                    if not_matched and last_file is not None:
+                        time_matched_file_list.append(last_file)
+                    time_matched_file_list.append(f)
+                    log.info(f"Found {f}")
+                    not_matched = False
+
+                # Update the last_file
+                last_file = f
+
+
+            for root, dir_list, file_list in os.walk(search_from):
+                for f in file_list:
+                    if f in time_matched_file_list:
+                        time_matched_path_and_file_list.append(os.path.join(root, f))
+        time_matched_path_and_file_list.sort()
+        if len(time_matched_path_and_file_list):
+            log.info(f"For event at time {event.dt} found :")
+        for p in time_matched_path_and_file_list:
+            log.info(f"         {p}")
+
+        return time_matched_path_and_file_list
+
 
     def trajectoryVisible(self, rp, event):
 
@@ -1842,6 +1923,56 @@ class EventMonitor(multiprocessing.Process):
         batchFFtoImage(os.path.join(this_event_directory), "jpg", add_timestamp=True,
                         ff_component='maxpixel')
 
+        # combine multiple mvk files into one
+
+        mkv_list = [f for f in os.listdir(this_event_directory) if f.lower().endswith(".mkv")]
+
+        log.info(f"got {len(mkv_list)} files will combine into single mp4")
+
+        mkv_list_path = os.path.join(this_event_directory, "mkv_list.txt")
+        output_mp4 = os.path.join(this_event_directory, f"{event.dt}_raw_files.mp4")
+        output_mkv = os.path.join(this_event_directory, f"{event.dt}_raw_files.mkv")
+
+        with open(mkv_list_path, "w") as f:
+            for item in mkv_list:
+                f.write(f"file '{item}'\n")
+
+
+
+        try:
+            log.info(f"Concatenating {mkv_list} into an mp4 for compatibility")
+            subprocess.run([ "ffmpeg",
+                             "-y",
+                             "-f",
+                             "concat",
+                             "-safe", "0",
+                             "-i",
+                             mkv_list_path,
+                             "-c:v",
+                             "libx264",
+                             "-c:a",
+                             "aac",
+                             "-preset",
+                             "fast",
+                             output_mp4])
+        except Exception as e:
+            log.debug(e)
+
+
+        try:
+            log.info(f"Concatenating {mkv_list} into a single mkv")
+            subprocess.run([ "ffmpeg",
+                             "-y",
+                             "-f",
+                             "concat",
+                             "-safe", "0",
+                             "-i",
+                             mkv_list_path,
+                             output_mkv])
+        except Exception as e:
+            log.debug(e)
+
+
         with open(os.path.join(this_event_directory, "event_report.txt"), "w") as info:
             info.write(event.eventToString())
 
@@ -1966,7 +2097,7 @@ class EventMonitor(multiprocessing.Process):
         # Events can be specified in different ways, make sure converted to LatLon
         observed_event.latLonAzElToLatLonLatLon()
         # Get the files
-        file_list = self.getFileList(observed_event)
+        file_list = self.getCapturedFileList(observed_event) + self.searchByTime(observed_event)
 
         # If there are no files based on time, then mark as processed and continue
         if (len(file_list) == 0 or file_list == [None]) and not test_mode:
@@ -2362,6 +2493,8 @@ class EventMonitor(multiprocessing.Process):
         Return:
             Nothing
         """
+
+
 
         events = self.getEventsfromWebPage(testmode)
         # Don't try to iterate over None - this check should never be needed
