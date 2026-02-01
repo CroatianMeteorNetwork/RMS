@@ -1942,22 +1942,24 @@ class EventMonitor(multiprocessing.Process):
                              "-c:a",
                              "aac",
                              "-preset",
-                             "fast",
+                             "slow",
+                             "-crf", "23",
                              output_mp4], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception as e:
             log.debug(e)
 
 
         try:
-            log.info("Concatenating to mkv")
-            subprocess.run(["ffmpeg",
-                             "-y",
-                             "-f",
-                             "concat",
-                             "-safe", "0",
-                             "-i",
-                             mkv_list_path,
-                             output_mkv],stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            #log.info("Concatenating to mkv")
+            #subprocess.run(["ffmpeg",
+            #                 "-y",
+            #                 "-f",
+            #                 "concat",
+            #                 "-safe", "0",
+            #                 "-i",
+            #                 mkv_list_path,
+            #                 output_mkv],stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            pass
         except Exception as e:
             log.debug(e)
 
