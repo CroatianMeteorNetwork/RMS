@@ -1664,7 +1664,7 @@ class EventMonitor(multiprocessing.Process):
         if not len(suffix_list):
             suffix_list = ['mkv', 'jpg']
 
-        for search_from , suffix in zip(search_from_list, suffix_list):
+        for search_from, suffix in zip(search_from_list, suffix_list):
             candidate_file_list = []
             search_from = os.path.join(self.config.data_dir, search_from)
             if not os.path.exists(search_from):
@@ -1684,37 +1684,37 @@ class EventMonitor(multiprocessing.Process):
 
             not_matched, last_file = True, None
             for f in candidate_file_list:
+
+                # Continue for any file which does not fit the expected patterns
                 if not f.startswith(self.config.stationID):
                     continue
                 if not f.endswith(suffix):
                     continue
                 if not len(f.split("_")) == 5:
-                    log.info(f"Rejecting file {f} as has length {len(f.split('_'))}")
                     continue
 
+                # Convert to python time objects, and check time_tolerance
                 file_time = convertGMNTimeToPOSIX(f"{f.split('_')[1]}_{f.split('_')[2]}")
                 event_time = convertGMNTimeToPOSIX(event.dt)
                 time_delta = abs(event_time - file_time).total_seconds()
                 if time_delta < int(event.time_tolerance):
+                    # If we get our first match, add the previous file
                     if not_matched and last_file is not None:
                         time_matched_file_list.append(last_file)
                     time_matched_file_list.append(f)
-                    log.info(f"Found {f}")
                     not_matched = False
 
                 # Update the last_file
                 last_file = f
 
-
+            # Iterate through the directory, converting filenames to full paths
             for root, dir_list, file_list in os.walk(search_from):
                 for f in file_list:
                     if f in time_matched_file_list:
                         time_matched_path_and_file_list.append(os.path.join(root, f))
+
+        # Sort, to keep logging tidy
         time_matched_path_and_file_list.sort()
-        if len(time_matched_path_and_file_list):
-            log.info(f"For event at time {event.dt} found :")
-        for p in time_matched_path_and_file_list:
-            log.info(f"         {p}")
 
         return time_matched_path_and_file_list
 
