@@ -1913,57 +1913,6 @@ class EventMonitor(multiprocessing.Process):
         batchFFtoImage(os.path.join(this_event_directory), "jpg", add_timestamp=True,
                         ff_component='maxpixel')
 
-        # combine multiple mvk files into one
-
-        mkv_list = [f for f in os.listdir(this_event_directory) if f.lower().endswith(".mkv")]
-
-
-        mkv_list_path = os.path.join(this_event_directory, "mkv_list.txt")
-        output_mp4 = os.path.join(this_event_directory, f"{evcon.stationID}_{event.dt}_combined.mp4")
-        output_mkv = os.path.join(this_event_directory, f"{evcon.stationID}_{event.dt}_combined.mkv")
-
-        with open(mkv_list_path, "w") as f:
-            for item in mkv_list:
-                f.write(f"file '{item}'\n")
-
-
-
-        try:
-            log.info("Concatenating to mp4")
-            subprocess.run([ "ffmpeg",
-                             "-y",
-                             "-f",
-                             "concat",
-                             "-safe", "0",
-                             "-i",
-                             mkv_list_path,
-                             "-c:v",
-                             "libx264",
-                             "-c:a",
-                             "aac",
-                             "-preset",
-                             "slow",
-                             "-crf", "23",
-                             output_mp4], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception as e:
-            log.debug(e)
-
-
-        try:
-            #log.info("Concatenating to mkv")
-            #subprocess.run(["ffmpeg",
-            #                 "-y",
-            #                 "-f",
-            #                 "concat",
-            #                 "-safe", "0",
-            #                 "-i",
-            #                 mkv_list_path,
-            #                 output_mkv],stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            pass
-        except Exception as e:
-            log.debug(e)
-
-
         with open(os.path.join(this_event_directory, "event_report.txt"), "w") as info:
             info.write(event.eventToString())
 
