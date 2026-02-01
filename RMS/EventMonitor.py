@@ -1631,7 +1631,7 @@ class EventMonitor(multiprocessing.Process):
             #log.info("File list {}".format(file_list))
         return file_list
 
-    def searchByTime(self, event, search_from_list=[], suffix_list=[]):
+    def searchByTime(self, event, search_from_list=[], suffix_list=[], duration_list=[]):
         """Take an event, return paths to files from subdirs in search_from_list
 
         Arguments:
@@ -1649,32 +1649,33 @@ class EventMonitor(multiprocessing.Process):
 
         """
 
-        time_matched_path_and_file_list = []
+        time_matched_path_and_file_set = {}
         if not len(search_from_list):
             search_from_list = [self.config.video_dir, self.config.frame_dir]
 
         if not len(suffix_list):
             suffix_list = ['mkv', 'jpg']
 
-        for search_from, suffix in zip(search_from_list, suffix_list):
-            candidate_file_list = []
+        if not len(durartion_list):
+            duration_list = [config.raw_video_duration, config.frame_save_aligned_interval]
+
+
+        for search_from, suffix, duration in zip(search_from_list, suffix_list, duration_list):
+            candidate_file_set = set()
             search_from = os.path.join(self.config.data_dir, search_from)
             if not os.path.exists(search_from):
                 continue
             for root, dir_list, file_list in os.walk(search_from):
-                candidate_file_list += file_list
+                candidate_file_set.update(file_list)
 
 
             # Now sort the candidate file list lexicographically
-            candidate_file_list.sort()
+            candidate_file_list = sorted(list(candidate_file_set))
 
             # Get all the files where the file name timestamp is inside the time tolerance
-            time_matched_file_list = []
+            time_matched_file_set = set()
 
-            # Initialise a last_file and not_matched, so that we can recover the file before the first match
-            # as it may contain frames that are within the time tolerance
 
-            not_matched, last_file = True, None
             for f in candidate_file_list:
 
                 # Continue for any file which does not fit the expected patterns
@@ -1685,27 +1686,27 @@ class EventMonitor(multiprocessing.Process):
                 if not len(f.split("_")) == 5:
                     continue
 
-                # Convert to python time objects, and check time_tolerance
-                file_time = convertGMNTimeToPOSIX(f"{f.split('_')[1]}_{f.split('_')[2]}")
+                # Convert file start and end times to python time objects, and check time_tolerance
+                file_start_time = convertGMNTimeToPOSIX(f"{f.split('_')[1]}_{f.split('_')[2]}")
+                file_end_time = file_start_time + datetime.timedelta(seconds=duration)
+                times_list = [file_start_time, file_end_time]
                 event_time = convertGMNTimeToPOSIX(event.dt)
-                time_delta = abs(event_time - file_time).total_seconds()
-                if time_delta < int(event.time_tolerance):
-                    # If we get our first match, add the previous file
-                    if not_matched and last_file is not None:
-                        time_matched_file_list.append(last_file)
-                    time_matched_file_list.append(f)
-                    not_matched = False
 
-                # Update the last_file
-                last_file = f
+
+                for time_point in times_list:
+                    time_delta = abs(time_point - event_time).total_seconds()
+                    if time_delta < int(event.time_tolerance):
+                        # If we get our first match, add the previous file
+                        time_matched_file_set.add(f)
 
             # Iterate through the directory, converting filenames to full paths
             for root, dir_list, file_list in os.walk(search_from):
                 for f in file_list:
-                    if f in time_matched_file_list:
-                        time_matched_path_and_file_list.append(os.path.join(root, f))
+                    if f in time_matched_file_set:
+                        time_matched_path_and_file_set.add(os.path.join(root, f))
 
         # Sort, to keep logging tidy
+        time_matched_path_and_file_list = list(time_matched_path_and_file_set)
         time_matched_path_and_file_list.sort()
 
         return time_matched_path_and_file_list
