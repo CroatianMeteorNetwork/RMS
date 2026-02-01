@@ -1940,7 +1940,6 @@ class EventMonitor(multiprocessing.Process):
 
         try:
             log.info("Concatenating to mp4")
-
             subprocess.run([ "ffmpeg",
                              "-y",
                              "-f",
@@ -1961,10 +1960,6 @@ class EventMonitor(multiprocessing.Process):
 
         try:
             log.info("Concatenating to mkv")
-            for item in mkv_list:
-                log.info(f"{item}")
-            log.info(f"into a single mkv")
-
             subprocess.run(["ffmpeg",
                              "-y",
                              "-f",
