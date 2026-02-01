@@ -1920,7 +1920,7 @@ class EventMonitor(multiprocessing.Process):
 
         mkv_list_path = os.path.join(this_event_directory, "mkv_list.txt")
         output_mp4 = os.path.join(this_event_directory, f"{evcon.stationID}_{event.dt}_combined.mp4")
-        output_mkv = os.path.join(this_event_directory, f"{evon.stationd}_{event.dt}_combined.mkv")
+        output_mkv = os.path.join(this_event_directory, f"{evcon.stationd}_{event.dt}_combined.mkv")
 
         with open(mkv_list_path, "w") as f:
             for item in mkv_list:
