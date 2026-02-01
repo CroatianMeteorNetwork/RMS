@@ -338,8 +338,7 @@ class EventContainer(object):
 
     def hasCartSD(self):
 
-        """
-        True if event contains any non-zero cartesian deviation parameters
+        """True if event contains any non-zero cartesian deviation parameters
 
         Return:
             [bool]
@@ -372,13 +371,12 @@ class EventContainer(object):
 
     def appendPopulation(self, population, population_size):
 
-        """
-        Append to a population identical copies of self event.
+        """Append to a population identical copies of self event.
 
-        arguments:
+        Arguments:
             population: [list] population of events.
 
-        return:
+        Return:
             population [list] population of events.
 
         """
@@ -392,7 +390,7 @@ class EventContainer(object):
         """
         Return ECEF vector (meters) representation of search trajectory.
 
-        return:
+        Return:
             [vector] ECEF vector.
         """
 
@@ -403,13 +401,15 @@ class EventContainer(object):
 
     def applyCartesianSDToPoint(self, pt, std):
 
-        """
-        Apply random number from normal distribution to each component of a 3 dimension vector
+        """Apply random number from normal distribution to each component of a 3 dimension vector
         If this fails, just return the point.
 
-        arguments:
+        Arguments:
             pt: [vector] vector.
             std: [float] sigma to apply.
+
+        Return:
+            pt: [vector] vector.
 
         """
 
@@ -420,16 +420,14 @@ class EventContainer(object):
 
     def applyCartesianSD(self, population, seed = None):
 
-        """
-        Apply standard deviation to the Cartesian coordinate of a population of trajectories
+        """Apply standard deviation to the Cartesian coordinate of a population of trajectories
         Take the absolute value, in case a negative value was passed.
 
-        arguments:
+        Arguments:
             population: [list] population of events.
 
         Return:
             population: [list] population of events.
-
         """
 
         if seed is not None:
@@ -477,8 +475,7 @@ class EventContainer(object):
 
     def hasAzEl(self):
 
-        """
-        Are polar end points non-zero for trajectory?
+        """Are polar end points non-zero for trajectory?
 
         Arguments:
 
@@ -496,8 +493,7 @@ class EventContainer(object):
 
     def limitAzEl(self, min_elev_hard, min_elev, prob_elev, max_elev):
 
-        """
-        Acts on self to correct any strange elevations.
+        """Acts on self to correct any strange elevations.
 
         Arguments
             min_elev_hard: [float] minimum elevation considered reasonable.
@@ -507,7 +503,6 @@ class EventContainer(object):
 
         Return:
             Nothing.
-
         """
 
         # Detect, fix and log elevations outside range
@@ -522,18 +517,18 @@ class EventContainer(object):
 
     def limitHeights(self, obsvd_ht, min_lum_flt_ht, max_lum_flt_ht, gap):
 
-        """
-        Adjust default illuminated flight heights to match event specification. Leave a gap
+        """Adjust default illuminated flight heights to match event specification. Leave a gap
         between the observation and the limit to allow accurate angles to be calculated.
 
-        Arguments
+        Arguments:
             observd_ht: [float] height of observation.
             min_lum_flt_ht: [float] minimum expected illuminated flight.
             max_lum_flt_ht: [float] maximum expected illuminated flight.
             gap : [float] minimum gap between the observed_bt and either of the limits.
 
-            All must be specified with the same unit multiplier.
-
+        Return:
+            min_lum_flt_ht: [float] minimum expected illuminated flight.
+            max_lum_flt_ht: [float] maximum expected illuminated flight.
         """
 
         max_lum_flt_ht = obsvd_ht + gap if obsvd_ht >= (max_lum_flt_ht - gap) else max_lum_flt_ht
@@ -543,11 +538,10 @@ class EventContainer(object):
 
     def getRanges(self, obs_lat, obs_lon, obs_ht, min_lum_flt_ht, max_lum_flt_ht):
 
-        """
-        For an event containing a trajectory specified with two lat,lon, heights, calculate the range from
+        """For an event containing a trajectory specified with two lat,lon, heights, calculate the range from
         the observed point to the maximum luminous flight height, and to the minimum luminous flight height.
 
-        arguments:
+        Arguments:
             obsvd_lat : [float] latitude (degrees) of observed point.
             obsvd_lon : [float] longitude (degrees) of observed point.
             obsvd_ht : [float] height (meters) of observed point.
@@ -581,15 +575,14 @@ class EventContainer(object):
 
     def addElevationRange(self, population, ob_ev, min_elevation):
 
-        """
-        Take a single observed point on a trajectory, and a minimum elevation.
+        """Take a single observed point on a trajectory, and a minimum elevation.
         Create a population of trajectories from the min_elevation through to observed elevation
         in steps of 1 degree.
 
         The trajectories pivot around the observed lat, lon and height, and this function checks that
         this point is close to all the produced trajectories.
 
-        arguments:
+        Arguments:
             population: [list] list of trajectories to append to.
             ob_ev: An observed event, specified as a lat (degrees), lon (degrees), ht (km) and elevation (degrees).
             min_elevation: [degrees] observed elevation, which will always be the minimum.
@@ -625,8 +618,7 @@ class EventContainer(object):
 
     def adjustTrajectoryLimits(self, bwd_range, fwd_range, obs_lat, obs_lon, obs_ht):
 
-        """
-        Move the start and end of a trajectory
+        """Move the start and end of a trajectory.
 
         Extend the trajectory of this event backwards by bwd_range and forwards by fwd_range maintaining the same
         azimuth and elevation. One application for this function could be to extend a trajectory to the expected
@@ -640,7 +632,7 @@ class EventContainer(object):
             obs_ht: [float] observed height (metres) of reference point.
 
         Return:
-            Nothjing
+            Nothing
 
         """
 
@@ -660,7 +652,7 @@ class EventContainer(object):
 
         Results are checked, and significant errors are sent to error log.
 
-        arguments:
+        Arguments:
             force: [bool] force conversion
 
         return:
@@ -733,14 +725,12 @@ class EventContainer(object):
 
     def latLonlatLonToLatLonAzEl(self):
 
-        """
-        Populate azimuth and elevation for an event defined with two Lat,Lons and Hts
-
+        """Populate azimuth and elevation for an event defined with two Lat,Lons and Hts.
         Elevation is always positive.
 
-        arguments:
+        Arguments:
 
-        return:
+        Return:
             azimuth(degrees), elevation(degrees)
         """
 
@@ -755,7 +745,7 @@ class EventMonitor(multiprocessing.Process):
     def __init__(self, config):
         """ Automatically uploads data files of an event (e.g. fireball) as given on the website.
         Arguments:
-            config: [Config] Configuration object.
+            config: [config] RMS config instance.
         """
 
         super(EventMonitor, self).__init__()
@@ -782,9 +772,13 @@ class EventMonitor(multiprocessing.Process):
 
     def createDB(self):
 
-        """
-        Attempt multiple times to create a database to hold event search specifications.
+        """Attempt multiple times to create a database to hold event search specifications.
 
+        Arguments:
+            None
+
+        Return:
+            None
         """
 
         for createdb_attempts in range(30):
@@ -893,9 +887,12 @@ class EventMonitor(multiprocessing.Process):
 
     def recoverFromDatabaseError(self):
 
-        """
+        """Called if a database error is detected, and tries to recreate the database and connection.
 
-        Called if a database error is detected, and tries to recreate the database and connection.
+        Arguments:
+
+        Return:
+            None
         """
 
         log.error("Attempting to recover from database error")
@@ -909,13 +906,12 @@ class EventMonitor(multiprocessing.Process):
 
     def delEventMonitorDB(self):
 
-        """ Delete the EventMonitor database.
+        """Delete the EventMonitor database.
 
         Arguments:
 
         Return:
             Status: [bool] True if a db was found at that location, otherwise false
-
         """
 
         # This check is to prevent accidental deletion of the working directory
@@ -928,17 +924,14 @@ class EventMonitor(multiprocessing.Process):
 
     def upgradeDB(self,conn):
 
-
-        """
-
-        Checks that any columns required by subsequent releases of EventMonitor are present. If they are not,
+        """Checks that any columns required by subsequent releases of EventMonitor are present. If they are not,
         then they are added.
 
-        Args:
-            conn: Connection to the EventMonitor database
+        Arguments:
+            conn: Connection to the EventMonitor database.
 
-        Return: Nothing
-
+        Return:
+            Nothing
         """
 
         if not self.checkDBcol(conn,"Suffix"):
@@ -967,7 +960,6 @@ class EventMonitor(multiprocessing.Process):
 
 
     def addDBcol(self, column, coltype):
-
 
         """ Add a new column to the database. This is used when upgrading the database to later features.
 
@@ -1003,10 +995,8 @@ class EventMonitor(multiprocessing.Process):
             conn: [connection] database connection
             column: [string] Name of column to check for
 
-
         Return:
             Status: [bool] True if column exists
-
         """
 
         sql_command = ""
@@ -1021,11 +1011,14 @@ class EventMonitor(multiprocessing.Process):
 
     def deleteDBoldrecords(self):
 
-        """
-        Remove old record from the database, notional time of 14 days selected.
+        """Remove old record from the database, notional time of 14 days selected.
         The deletion is made on the criteria of when the record was added to the database, not the event date
         If the event is still listed on the website, then it will be added, and uploaded.
 
+        Arguments:
+
+        Return:
+            None
         """
 
         sql_statement = ""
@@ -1121,11 +1114,14 @@ class EventMonitor(multiprocessing.Process):
 
     def delOldRecords(self):
 
-        """
-
-        Remove old record from the database, notional time of 14 days selected.
+        """Remove old record from the database, notional time of 14 days selected.
         The deletion is made on the criteria of when the record was added to the database, not the event date
         If the event is still listed on the website, then it will be added, and uploaded.
+
+        Arguments:
+
+        Return:
+            None
 
         """
 
@@ -1147,18 +1143,14 @@ class EventMonitor(multiprocessing.Process):
 
     def addEvent(self, event):
 
-        """
-
-        Checks to see if an event exists, if not then add to the database
+        """Checks to see if an event exists, if not then add to the database
 
         Arguments:
             event: [event] Event to be added to the database
 
         Return:
             added: [bool] True if added, else false
-
-            """
-
+        """
 
         self.delOldRecords()
 
@@ -1221,6 +1213,7 @@ class EventMonitor(multiprocessing.Process):
             event: [event] Event to be marked as processed
 
         Return:
+            None
         """
 
         sql_statement = ""
@@ -1246,7 +1239,8 @@ class EventMonitor(multiprocessing.Process):
         Arguments:
             uuid: [event] Locally generated uuid of the event to be queried
 
-        Return: [bool] True if processed, False if unprocessed or does not exist
+        Return:
+            [bool] True if processed, False if unprocessed or does not exist
 
         """
 
@@ -1274,7 +1268,6 @@ class EventMonitor(multiprocessing.Process):
 
         Return:
             [bool] True if uploaded, False if not uploaded or does not exist
-
         """
 
         sql_statement = ""
@@ -1329,7 +1322,7 @@ class EventMonitor(multiprocessing.Process):
         """ Updates table when server publishes UUID of an event which has been sent
             This allows public acknowledgement of a stations transmission to be obfuscated
 
-        rguments:
+        Arguments:
              uuid: [string] uuid of event received by server
 
         Return:
@@ -1352,7 +1345,7 @@ class EventMonitor(multiprocessing.Process):
 
         """ Reads a webpage, and generates a list of events
 
-            Arguments:
+        Arguments:
 
         Return:
             events : [list of events]
@@ -1416,10 +1409,10 @@ class EventMonitor(multiprocessing.Process):
 
         """ Get the unprocessed events from the database
 
-            Arguments:
+        Arguments:
 
-            Return:
-                events : [list of events]
+        Return:
+            events : [list of events]
         """
 
 
@@ -1472,12 +1465,12 @@ class EventMonitor(multiprocessing.Process):
             If not, then return the path to RMS root directory
 
 
-            Arguments:
-                file_name: [string] name of file
-                directory: [string] path to preferred directory
+        Arguments:
+            file_name: [string] name of file
+            directory: [string] path to preferred directory
 
-            Return:
-                 file: [string] Path to platepar
+        Return:
+            file: [string] Path to platepar
         """
 
         file_list = []
@@ -1497,11 +1490,11 @@ class EventMonitor(multiprocessing.Process):
         """ Get the path to the best platepar from the directory matching the event time
 
 
-            Arguments:
-                event: [event]
+        Arguments:
+            event: [event]
 
-            Return:
-                file: [string] Path to platepar
+        Return:
+            file: [string] Path to platepar.
         """
 
         platepar_file = ""
@@ -1520,11 +1513,11 @@ class EventMonitor(multiprocessing.Process):
 
         """ Get the paths of directories which may contain files associated with an event
 
-             Arguments:
-                 event: [event]
+         Arguments:
+             event: [event]
 
-             Return:
-                 directorylist: [list of paths] List of directories
+         Return:
+             directorylist: [list of paths] List of directories
         """
 
         directory_list = []
@@ -1561,13 +1554,13 @@ class EventMonitor(multiprocessing.Process):
            If the file being compared is the first file after the event time, put the previous file into the list,
            if it is not already there.
 
-           Arguments:
-                event: [event] Event of interest
-                directory_list: [list of paths] List of directories which may contain the files sought
-                file_extension_list: [list of extensions] List of file extensions such as .fits, .bin
+       Arguments:
+            event: [event] Event of interest
+            directory_list: [list of paths] List of directories which may contain the files sought
+            file_extension_list: [list of extensions] List of file extensions such as .fits, .bin
 
-           Return:
-                file_list: [list of paths] List of paths to files
+       Return:
+            file_list: [list of paths] List of paths to files
         """
         
         try:
@@ -1620,12 +1613,11 @@ class EventMonitor(multiprocessing.Process):
 
         """Take an event, return paths to files from captured_dir
 
-           Arguments:
-               event: [event] Event of interest
+       Arguments:
+           event: [event] Event of interest
 
-
-           Return:
-               file_list: [list of paths] List of paths to files
+       Return:
+           file_list: [list of paths] List of paths to files
         """
 
         file_list = []
@@ -1643,17 +1635,17 @@ class EventMonitor(multiprocessing.Process):
         """Take an event, return paths to files from subdirs in search_from_list
 
         Arguments:
-            event: [event] Event of interest
+            event: [event] Event of interest.
 
         Keyword arguments:
            search_from_list: [list] List of paths under config.data_dir to search, default []
                                 If empty list is passed, then self.config.video_dir and self.config.frame_dir
-                                are searched
+                                are searched.
 
-            suffix_list: [list] List of suffixes to search in the same order as search_from_list
+            suffix_list: [list] List of suffixes to search in the same order as search_from_list.
 
         Return:
-            file_list: [list of paths] List of paths to files
+            file_list: [list of paths] List of paths to files.
 
         """
 
@@ -1721,24 +1713,23 @@ class EventMonitor(multiprocessing.Process):
 
     def trajectoryVisible(self, rp, event):
 
-        """
-        Given a platepar and an event, calculate the centiles of the trajectory which would be in the FoV.
+        """Given a platepar and an event, calculate the centiles of the trajectory which would be in the FoV.
         Working is in ECI, relative to the station coordinates.
 
-        Args:
+        Arguments:
             rp: [platepar] reference platepar
             event: [event] event of interest
 
         Return:
-            points_in_fov: [integer] the number of points out of 100 in the field of view
-            start_distance: [float] the distance in metres from the station to the trajectory start
+            points_in_fov: [integer] the number of points out of 100 in the field of view.
+            start_distance: [float] the distance in metres from the station to the trajectory start.
             start_angle: [float] the angle between the vector from the station to start of the trajectory
-                        and the vector of the centre of the FOV
-            end_distance: [float] the distance in metres from the station to the trajectort end
+                        and the vector of the centre of the FOV.
+            end_distance: [float] the distance in metres from the station to the trajectort end.
             end_angle: [float] the angle between the vector from the station to end of the trajectory
-                        and the vector of the centre of the FOV
-            fov_ra: [float]  field of view Ra (degrees)
-            fov_dec: [float] fov_dec of view Dec (degrees)
+                        and the vector of the centre of the FOV.
+            fov_ra: [float]  field of view Ra (degrees).
+            fov_dec: [float] fov_dec of view Dec (degrees).
 
         """
         # Calculate diagonal FoV of camera
@@ -1785,20 +1776,19 @@ class EventMonitor(multiprocessing.Process):
 
     def trajectoryThroughFOV(self, event):
 
-        """
-        For the trajectory contained in the event, calculate if it passed through the FoV defined by the
-        of the time of the event
+        """For the trajectory contained in the event, calculate if it passed through the FoV defined by the
+        of the time of the event.
 
-        Args:
-            event: [event] Calculate if the trajectory of this event passed through the field of view
+        Arguments:
+            event: [event] Calculate if the trajectory of this event passed through the field of view.
 
         Return:
             pts_in_FOV: [integer] Number of points of the trajectory split into 100 parts
-                                   apparently in the FOV of the camera
-            sta_dist: [float] Distance from station to the start of the trajectory
-            sta_ang: [float] Angle from the centre of the FoV to the start of the trajectory
-            end_dist: [float] Distance from station to the end of the trajectory
-            end_ang: [float] Angle from the centre of the FoV to the end of the trajectory
+                                   apparently in the FOV of the camera.
+            sta_dist: [float] Distance from station to the start of the trajectory.
+            sta_ang: [float] Angle from the centre of the FoV to the start of the trajectory.
+            end_dist: [float] Distance from station to the end of the trajectory.
+            end_ang: [float] Angle from the centre of the FoV to the end of the trajectory.
         """
 
         # Read in the platepar for the event
@@ -1816,16 +1806,16 @@ class EventMonitor(multiprocessing.Process):
         """Move all the files to a single directory. Make MP4s, stacks and jpgs
            Archive into a bz2 file and upload, using paramiko. Delete all working folders.
 
-        Args:
-            event: [event] the event to be uploaded
-            evcon: [path] path to the config file for the event
-            file_list: [list of paths] the files to be uploaded
-            keep_files: [bool] keep the files after upload
-            no_upload: [bool] if True do everything apart from uploading
-            test_mode: [bool] if True prevents upload
+        Arguments:
+            event: [event] the event to be uploaded.
+            evcon: [path] path to the config file for the event.
+            file_list: [list of paths] the files to be uploaded.
+            keep_files: [bool] keep the files after upload.
+            no_upload: [bool] if True do everything apart from uploading.
+            test_mode: [bool] if True prevents upload.
 
         Return:
-            uploadstatus: [bool] status of upload
+            uploadstatus: [bool] status of upload.
 
         """
 
@@ -2040,6 +2030,14 @@ class EventMonitor(multiprocessing.Process):
         return upload_status
 
     def frFileInList(self, file_list):
+        """Return true if an FR file is in the list
+
+        Aruments:
+            file_list [list] File list
+
+        Return:
+            [bool] True if present
+        """
 
         found = False
         for file_to_check in file_list:
@@ -2049,6 +2047,16 @@ class EventMonitor(multiprocessing.Process):
         return found
 
     def handleFutureEvents(self, observed_event, future_events):
+        """Adjust the eventmonitor timer loop to capture future events as quickly as possible
+
+        Aruments:
+            observed_event: [event] The observed event.
+            future_events: [list of events] The list of future events.
+
+        Return:
+            future_events: [event] The list of future events.
+            in_future: [bool] True if future events exist.
+        """
 
         if convertGMNTimeToPOSIX(observed_event.dt) + \
                 datetime.timedelta(seconds=int(observed_event.time_tolerance)) > RmsDateTime.utcnow():
