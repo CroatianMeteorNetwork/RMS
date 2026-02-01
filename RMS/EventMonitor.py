@@ -1631,7 +1631,7 @@ class EventMonitor(multiprocessing.Process):
             #log.info("File list {}".format(file_list))
         return file_list
 
-    def searchByTime(self, event, search_from_list=[], suffix_list=[], duration_list=[]):
+    def searchByTime(self, event, search_from_list=[], suffix_list=[], duration_list=[], log_returned_files=False):
         """Take an event, return paths to files from subdirs in search_from_list
 
         Arguments:
@@ -1643,21 +1643,23 @@ class EventMonitor(multiprocessing.Process):
                                 are searched.
 
             suffix_list: [list] List of suffixes to search in the same order as search_from_list.
+            duration_list: [list] List of durations, same order at search_from_list.
+            log_returned_file: [bool] Optional, default false, if true log every returned file
 
         Return:
             file_list: [list of paths] List of paths to files.
 
         """
 
-        time_matched_path_and_file_set = {}
+        time_matched_path_and_file_set = set()
         if not len(search_from_list):
             search_from_list = [self.config.video_dir, self.config.frame_dir]
 
         if not len(suffix_list):
             suffix_list = ['mkv', 'jpg']
 
-        if not len(durartion_list):
-            duration_list = [config.raw_video_duration, config.frame_save_aligned_interval]
+        if not len(duration_list):
+            duration_list = [self.config.raw_video_duration, self.config.frame_save_aligned_interval]
 
 
         for search_from, suffix, duration in zip(search_from_list, suffix_list, duration_list):
@@ -1669,14 +1671,11 @@ class EventMonitor(multiprocessing.Process):
                 candidate_file_set.update(file_list)
 
 
-            # Now sort the candidate file list lexicographically
-            candidate_file_list = sorted(list(candidate_file_set))
-
             # Get all the files where the file name timestamp is inside the time tolerance
             time_matched_file_set = set()
 
 
-            for f in candidate_file_list:
+            for f in candidate_file_set:
 
                 # Continue for any file which does not fit the expected patterns
                 if not f.startswith(self.config.stationID):
@@ -1692,11 +1691,14 @@ class EventMonitor(multiprocessing.Process):
                 times_list = [file_start_time, file_end_time]
                 event_time = convertGMNTimeToPOSIX(event.dt)
 
-
+                times_list.sort()
                 for time_point in times_list:
                     time_delta = abs(time_point - event_time).total_seconds()
-                    if time_delta < int(event.time_tolerance):
+                    # Is the event_time point within tolerance of the start and end, or between the start and end
+                    if time_delta < int(event.time_tolerance) or times_list[0] <= event_time <= times_list[1]:
                         # If we get our first match, add the previous file
+                        if log_returned_files:
+                            log.info(f"Adding {f} with a time_delta of {time_delta}")
                         time_matched_file_set.add(f)
 
             # Iterate through the directory, converting filenames to full paths
@@ -1705,9 +1707,15 @@ class EventMonitor(multiprocessing.Process):
                     if f in time_matched_file_set:
                         time_matched_path_and_file_set.add(os.path.join(root, f))
 
-        # Sort, to keep logging tidy
+        # Return as sorted list, to keep logging tidy
         time_matched_path_and_file_list = list(time_matched_path_and_file_set)
         time_matched_path_and_file_list.sort()
+
+        if log_returned_files:
+            log.info(f"For event at {event.dt} with time tolerance {event.time_tolerance}")
+            log.info("Returning: ")
+            for f in time_matched_path_and_file_list:
+                log.info(f"         {f}")
 
         return time_matched_path_and_file_list
 
