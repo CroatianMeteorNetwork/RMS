@@ -1725,7 +1725,7 @@ class EventMonitor(multiprocessing.Process):
             start_distance: [float] the distance in metres from the station to the trajectory start.
             start_angle: [float] the angle between the vector from the station to start of the trajectory
                         and the vector of the centre of the FOV.
-            end_distance: [float] the distance in metres from the station to the trajectort end.
+            end_distance: [float] the distance in metres from the station to the trajectory end.
             end_angle: [float] the angle between the vector from the station to end of the trajectory
                         and the vector of the centre of the FOV.
             fov_ra: [float]  field of view Ra (degrees).
