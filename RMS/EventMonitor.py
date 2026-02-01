@@ -1927,7 +1927,6 @@ class EventMonitor(multiprocessing.Process):
 
         mkv_list = [f for f in os.listdir(this_event_directory) if f.lower().endswith(".mkv")]
 
-        log.info(f"got {len(mkv_list)} files will combine into single mp4")
 
         mkv_list_path = os.path.join(this_event_directory, "mkv_list.txt")
         output_mp4 = os.path.join(this_event_directory, f"{event.dt}_raw_files.mp4")
@@ -1940,10 +1939,7 @@ class EventMonitor(multiprocessing.Process):
 
 
         try:
-            log.info(f"Concatenating")
-            for item in mkv_list:
-                log.info(f"{item}")
-            log.info(f"into an MP4 for compatibility")
+            log.info("Concatenating to mp4")
 
             subprocess.run([ "ffmpeg",
                              "-y",
@@ -1964,7 +1960,7 @@ class EventMonitor(multiprocessing.Process):
 
 
         try:
-            log.info(f"Concatenating:")
+            log.info("Concatenating to mkv")
             for item in mkv_list:
                 log.info(f"{item}")
             log.info(f"into a single mkv")
