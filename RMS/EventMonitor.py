@@ -2051,10 +2051,10 @@ class EventMonitor(multiprocessing.Process):
 
         Aruments:
             observed_event: [event] The observed event.
-            future_events: [list of events] The list of future events.
+            future_events: [int] The count of future events.
 
         Return:
-            future_events: [event] The list of future events.
+            future_events: [int] The count of future events.
             in_future: [bool] True if future events exist.
         """
 
@@ -2090,6 +2090,23 @@ class EventMonitor(multiprocessing.Process):
 
 
     def processLatLonEvent(self, observed_event, future_events, ev_con, check_time_start, test_mode=False, write_log=False):
+
+        """ Process a latitude and longitude style event
+
+        Arguments:
+            observed_event: [event] The observed event.
+            future_events: [int] The count of future events.
+            ev_con: [RMS config instance] The config instance appropriate to the event.
+            check_time_start: [time object] The clock time of the start of the check.
+
+        Keyword Arguments:
+            test_mode: [bool] Optional, default false, inhibits uploads.
+            write_log: [bool] Optional, default false, logs more information.
+
+        Return:
+            future_events: [int] The count of future events.
+            in_future: [bool] true in future events exist.
+        """
 
         # check to see if the end of this event is in the future, if it is then do not process
         # if the end of the event is before the next scheduled execution of event monitor loop,
@@ -2255,15 +2272,17 @@ class EventMonitor(multiprocessing.Process):
         """
 
         Arguments:
-            e:[object] Event specification
-            future_events: Number of future events found so far
-            sys_con: [config] RMS event instance for the system
-            check_time_start: [datetime] Start time of the check
-            test_mode:
+            e:[object] Event specification.
+            future_events: Number of future events found so far.
+            sys_con: [config] RMS event instance for the system.
+            check_time_start: [datetime] Start time of the check.
+
         Keyword Arguments:
+            test_mode: [bool] Optional, default false.
 
         Return:
-            future_events; [int] number of future events found
+            future_events: [int] number of future events found
+            in_future: [bool] true if future events are found
         """
 
         e.dt = jd2RMSStyle(e.jd_end)
@@ -2493,9 +2512,9 @@ class EventMonitor(multiprocessing.Process):
         Calls self.checkevents to see if the database holds any unprocessed events
 
         Args:
-            start_time: time to start checking from
-            end_time: time to start checking to
-            testmode: [bool] if set true looks for a local file, rather than a web address
+            start_time: time to start checking from.
+            end_time: time to start checking to.
+            testmode: [bool] if set true looks for a local file, rather than a web address.
 
         Return:
             Nothing
