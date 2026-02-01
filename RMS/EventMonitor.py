@@ -1940,7 +1940,11 @@ class EventMonitor(multiprocessing.Process):
 
 
         try:
-            log.info(f"Concatenating {mkv_list} into an mp4 for compatibility")
+            log.info(f"Concatenating")
+            for item in mkv_list:
+                log.info(f"{item}")
+            log.info(f"into an MP4 for compatibility")
+
             subprocess.run([ "ffmpeg",
                              "-y",
                              "-f",
@@ -1954,21 +1958,25 @@ class EventMonitor(multiprocessing.Process):
                              "aac",
                              "-preset",
                              "fast",
-                             output_mp4])
+                             output_mp4], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception as e:
             log.debug(e)
 
 
         try:
-            log.info(f"Concatenating {mkv_list} into a single mkv")
-            subprocess.run([ "ffmpeg",
+            log.info(f"Concatenating:")
+            for item in mkv_list:
+                log.info(f"{item}")
+            log.info(f"into a single mkv")
+
+            subprocess.run(["ffmpeg",
                              "-y",
                              "-f",
                              "concat",
                              "-safe", "0",
                              "-i",
                              mkv_list_path,
-                             output_mkv])
+                             output_mkv],stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception as e:
             log.debug(e)
 
