@@ -3162,6 +3162,7 @@ class SettingsWidget(QtWidgets.QWidget):
     sigRegionToggled = QtCore.pyqtSignal()
     sigSingleClickPhotometryToggled = QtCore.pyqtSignal()
     sigSatTracksToggled = QtCore.pyqtSignal()
+    sigAutoComputeSatTracksToggled = QtCore.pyqtSignal()
     sigLoadTLEPressed = QtCore.pyqtSignal()
     sigClearTLEPressed = QtCore.pyqtSignal()
     sigRedrawSatTracksPressed = QtCore.pyqtSignal()
@@ -3287,6 +3288,11 @@ class SettingsWidget(QtWidgets.QWidget):
         self.updateShowSatTracks()
         # self.sat_tracks.hide() # Always show it so user can turn it on
         vbox.addWidget(self.sat_tracks)
+
+        self.auto_compute_sat_tracks = QtWidgets.QCheckBox(' Automatically compute tracks')
+        self.auto_compute_sat_tracks.released.connect(self.sigAutoComputeSatTracksToggled.emit)
+        self.auto_compute_sat_tracks.setChecked(False)  # Default: disabled to avoid performance issues
+        vbox.addWidget(self.auto_compute_sat_tracks)
 
         self.tle_label = QtWidgets.QLabel("TLE: latest downloaded")
         self.tle_label.setWordWrap(True)
@@ -3414,6 +3420,9 @@ class SettingsWidget(QtWidgets.QWidget):
 
     def updateShowSatTracks(self):
         self.sat_tracks.setChecked(self.gui.show_sattracks)
+
+    def updateAutoComputeSatTracks(self):
+        self.auto_compute_sat_tracks.setChecked(self.gui.auto_compute_sattracks)
 
     def updateTLELabel(self, text):
         self.tle_label.setText("TLE: " + text)

@@ -1601,6 +1601,7 @@ class PlateTool(QtWidgets.QMainWindow):
         
         # Satellite tracks config
         self.show_sattracks = show_sattracks
+        self.auto_compute_sattracks = False  # Default: don't auto-compute (performance)
         self.tle_file = tle_file
         self.satellite_tracks = []
         
@@ -2256,6 +2257,16 @@ class PlateTool(QtWidgets.QMainWindow):
         self.residual_text = TextItemList()
         self.img_frame.addItem(self.residual_text)
 
+        # Satellite track computing status text (large, centered overlay)
+        self.sat_computing_text = TextItem('Computing satellite tracks...', 
+                                           anchor=(0.5, 0.5), 
+                                           color=(0, 0, 0), 
+                                           fill=(255, 255, 255, 200))
+        self.sat_computing_text.setFont(QtGui.QFont('Arial', 24, QtGui.QFont.Bold))
+        self.sat_computing_text.hide()
+        self.sat_computing_text.setZValue(100)  # Very high z-value to be on top
+        self.img_frame.addItem(self.sat_computing_text)
+
         # Add spectral types text items
         self.spectral_type_text_list = TextItemList()
         self.img_frame.addItem(self.spectral_type_text_list)
@@ -2466,6 +2477,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigAutoPanToggled.connect(self.toggleAutoPan)
         self.tab.settings.sigSingleClickPhotometryToggled.connect(self.toggleSingleClickPhotometry)
         self.tab.settings.sigSatTracksToggled.connect(self.toggleShowSatTracks)
+        self.tab.settings.sigAutoComputeSatTracksToggled.connect(self.toggleAutoComputeSatTracks)
         self.tab.settings.sigLoadTLEPressed.connect(self.loadTLEFileDialog)
         self.tab.settings.sigClearTLEPressed.connect(self.clearTLESelection)
         self.tab.settings.sigRedrawSatTracksPressed.connect(self.redrawSatelliteTracks)
@@ -5358,6 +5370,24 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateFitResiduals()
             self.residual_text.clear()
 
+            # Clear satellite tracks when image changes (they're time-specific)
+            self.clearSatelliteTracks()
+            
+            # Automatically recompute if enabled
+            if self.auto_compute_sattracks and SKYFIELD_AVAILABLE:
+                # Show computing status text (centered on image)
+                self.sat_computing_text.setPos(self.platepar.X_res / 2, self.platepar.Y_res / 2)
+                self.sat_computing_text.show()
+                
+                # Force GUI update to show the text before blocking computation
+                QtWidgets.QApplication.processEvents()
+                
+                # Load satellite tracks (this takes time)
+                self.loadSatelliteTracks()
+                
+                # Hide computing status text
+                self.sat_computing_text.hide()
+
             self.drawPhotometryColoring()
 
             self.updateStars()
@@ -5868,6 +5898,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Add the missing satellite overlay variables
         if not hasattr(self, "show_sattracks"):
             self.show_sattracks = False
+        
+        if not hasattr(self, "auto_compute_sattracks"):
+            self.auto_compute_sattracks = False
         if not hasattr(self, "tle_file"):
             self.tle_file = None
         if not hasattr(self, "satellite_tracks"):
@@ -12051,6 +12084,37 @@ class PlateTool(QtWidgets.QMainWindow):
                 return
 
         self.drawSatelliteTracks()
+
+
+    def toggleAutoComputeSatTracks(self):
+        """ Toggle whether to automatically recompute satellite tracks when image changes. """
+        
+        self.auto_compute_sattracks = not self.auto_compute_sattracks
+        self.tab.settings.updateAutoComputeSatTracks()
+        print(f"Automatically compute satellite tracks: {self.auto_compute_sattracks}")
+        
+        # If enabling auto-compute and tracks aren't already loaded, load them now for current frame
+        if self.auto_compute_sattracks and not self.satellite_tracks and SKYFIELD_AVAILABLE:
+            if self.show_sattracks:  # Only load if satellite display is enabled
+                # Show computing status text (centered on image)
+                self.sat_computing_text.setPos(self.platepar.X_res / 2, self.platepar.Y_res / 2)
+                self.sat_computing_text.show()
+                
+                # Force GUI update to show the text before blocking computation
+                QtWidgets.QApplication.processEvents()
+                
+                # Load satellite tracks (this takes time)
+                self.loadSatelliteTracks()
+                
+                # Hide computing status text
+                self.sat_computing_text.hide()
+
+
+    def clearSatelliteTracks(self):
+        """ Clear satellite tracks from display and memory. """
+        
+        self.satellite_tracks = []
+        self.drawSatelliteTracks()  # Redraw (will clear since list is empty)
 
     def loadTLEFileDialog(self):
         """ Opens a file dialog to choose a TLE file and loads it. """

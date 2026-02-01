@@ -167,16 +167,23 @@ def loadRobustTLEs(file_path):
 
 def loadTLEs(cache_dir, cache_file_name="active.txt", 
                          url="http://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=tle", 
-                         max_age_hours=24.0):
+                         max_age_hours=24.0,
+                         use_daily_cache=True):
     """ Load TLEs from a local cache or download them if the cache is old or missing.
+    
+    By default, uses daily cache files with date-stamped names (TLE_YYYYMMDD_HHMMSS_<name>.txt).
+    This allows tracking of TLE updates over time and enables findClosestTLEFile to select
+    the most appropriate TLE data for a given observation time.
 
     Arguments:
         cache_dir: [str] Directory to store the TLE file.
 
     Keyword arguments:
-        cache_file_name: [str] Name of the cache file. "active.txt" by default.
+        cache_file_name: [str] Base name of the cache file. "active.txt" by default.
         url: [str] URL to download TLEs from.
         max_age_hours: [float] Maximum age of the cache in hours. 24.0 by default.
+        use_daily_cache: [bool] If True, creates date-stamped cache files. If False, uses 
+                                the legacy single-file cache behavior. True by default.
 
     Return:
         satellites: [list] List of properties for EarthSatellite objects.
@@ -185,15 +192,50 @@ def loadTLEs(cache_dir, cache_file_name="active.txt",
         print("Skyfield not available, cannot load TLEs.")
         return []
 
-    cache_path = os.path.join(cache_dir, cache_file_name)
-    
-    download = True
-    if os.path.exists(cache_path):
-        # Check file age
-        file_age_hours = (time.time() - os.path.getmtime(cache_path))/3600.0
-        if file_age_hours < max_age_hours:
-            download = False
-            # print(f"Using cached TLEs from {cache_path} ({file_age_hours:.1f} hours old).")
+    # Generate cache file path with optional daily naming
+    if use_daily_cache:
+        # Create date-stamped filename: TLE_YYYYMMDD_HHMMSS_<original_name>
+        now = datetime.datetime.utcnow()
+        date_str = now.strftime("%Y%m%d")
+        
+        # Check if today's cache already exists
+        existing_files = []
+        if os.path.exists(cache_dir):
+            pattern = f"TLE_{date_str}_*_{cache_file_name}"
+            existing_files = glob.glob(os.path.join(cache_dir, pattern))
+            
+        # Use the most recent file from today if it exists and is fresh
+        cache_path = None
+        download = True
+        
+        if existing_files:
+            # Sort by modification time, newest first
+            existing_files.sort(key=os.path.getmtime, reverse=True)
+            newest_file = existing_files[0]
+            
+            # Check file age
+            file_age_hours = (time.time() - os.path.getmtime(newest_file))/3600.0
+            if file_age_hours < max_age_hours:
+                cache_path = newest_file
+                download = False
+                # print(f"Using cached TLEs from {cache_path} ({file_age_hours:.1f} hours old).")
+        
+        # If we need to download, create a new timestamped file
+        if download:
+            timestamp_str = now.strftime("%Y%m%d_%H%M%S")
+            daily_cache_name = f"TLE_{timestamp_str}_{cache_file_name}"
+            cache_path = os.path.join(cache_dir, daily_cache_name)
+    else:
+        # Legacy behavior: single cache file
+        cache_path = os.path.join(cache_dir, cache_file_name)
+        
+        download = True
+        if os.path.exists(cache_path):
+            # Check file age
+            file_age_hours = (time.time() - os.path.getmtime(cache_path))/3600.0
+            if file_age_hours < max_age_hours:
+                download = False
+                # print(f"Using cached TLEs from {cache_path} ({file_age_hours:.1f} hours old).")
     
     if download:
         print(f"Downloading TLEs from {url}...")
