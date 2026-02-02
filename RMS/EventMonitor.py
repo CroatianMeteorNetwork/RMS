@@ -60,7 +60,6 @@ import numpy as np
 
 import RMS.ConfigReader as cr
 import json
-import subprocess
 
 from RMS.Formats.CALSTARS import readCALSTARS
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector, raDec2AltAz
@@ -375,6 +374,7 @@ class EventContainer(object):
 
         Arguments:
             population: [list] population of events.
+            population_size [int] size of population of events
 
         Return:
             population [list] population of events.
@@ -418,13 +418,16 @@ class EventContainer(object):
         except:
             return pt
 
-    def applyCartesianSD(self, population, seed = None):
+    def applyCartesianSD(self, population, seed=None):
 
         """Apply standard deviation to the Cartesian coordinate of a population of trajectories
         Take the absolute value, in case a negative value was passed.
 
         Arguments:
             population: [list] population of events.
+
+        Keyword arguments:
+            seed: [int] seed for random number generation, if default NOne, the seed is randomised
 
         Return:
             population: [list] population of events.
@@ -521,7 +524,7 @@ class EventContainer(object):
         between the observation and the limit to allow accurate angles to be calculated.
 
         Arguments:
-            observd_ht: [float] height of observation.
+            obsvd_ht: [float] height of observation.
             min_lum_flt_ht: [float] minimum expected illuminated flight.
             max_lum_flt_ht: [float] maximum expected illuminated flight.
             gap : [float] minimum gap between the observed_bt and either of the limits.
@@ -542,9 +545,9 @@ class EventContainer(object):
         the observed point to the maximum luminous flight height, and to the minimum luminous flight height.
 
         Arguments:
-            obsvd_lat : [float] latitude (degrees) of observed point.
-            obsvd_lon : [float] longitude (degrees) of observed point.
-            obsvd_ht : [float] height (meters) of observed point.
+            obs_lat : [float] latitude (degrees) of observed point.
+            obs_lon : [float] longitude (degrees) of observed point.
+            obs_ht : [float] height (meters) of observed point.
             min_lum_flt_ht: [float] height (meters) of minimum luminous flight.
             max_lum_flt_ht: [float] height (meters) of maximum luminous flight.
 
@@ -775,7 +778,6 @@ class EventMonitor(multiprocessing.Process):
         """Attempt multiple times to create a database to hold event search specifications.
 
         Arguments:
-            None
 
         Return:
             None
@@ -1631,20 +1633,22 @@ class EventMonitor(multiprocessing.Process):
             #log.info("File list {}".format(file_list))
         return file_list
 
-    def searchByTime(self, event, search_from_list=[], suffix_list=[], duration_list=[], log_returned_files=False):
+    def searchByTime(self, event, search_from_list=None, suffix_list=None, duration_list=None, log_returned_files=False):
         """Take an event, return paths to files from subdirs in search_from_list
 
         Arguments:
             event: [event] Event of interest.
 
         Keyword arguments:
-           search_from_list: [list] List of paths under config.data_dir to search, default []
-                                If empty list is passed, then self.config.video_dir and self.config.frame_dir
+           search_from_list: [list] List of paths under config.data_dir to search, default None
+                                If None, then self.config.video_dir and self.config.frame_dir
                                 are searched.
 
-            suffix_list: [list] List of suffixes to search in the same order as search_from_list.
-            duration_list: [list] List of durations, same order at search_from_list.
-            log_returned_file: [bool] Optional, default false, if true log every returned file
+            suffix_list: [list] List of suffixes to search in the same order as search_from_list. If not passsed
+                                then ['mkv', 'jpg'] are used.
+            duration_list: [list] List of durations, same order as search_from_list. If not passed, then
+                                [self.config.raw_video_duration, self.config.frame_save_aligned_interval]
+            log_returned_files: [bool] Optional, default false, if true log every returned file
 
         Return:
             file_list: [list of paths] List of paths to files.
@@ -1652,13 +1656,13 @@ class EventMonitor(multiprocessing.Process):
         """
 
         time_matched_path_and_file_set = set()
-        if not len(search_from_list):
+        if search_from_list is None:
             search_from_list = [self.config.video_dir, self.config.frame_dir]
 
-        if not len(suffix_list):
+        if suffix_list is None:
             suffix_list = ['mkv', 'jpg']
 
-        if not len(duration_list):
+        if duration_list is None:
             duration_list = [self.config.raw_video_duration, self.config.frame_save_aligned_interval]
 
 
@@ -1673,7 +1677,6 @@ class EventMonitor(multiprocessing.Process):
 
             # Get all the files where the file name timestamp is inside the time tolerance
             time_matched_file_set = set()
-
 
             for f in candidate_file_set:
 
@@ -1992,7 +1995,7 @@ class EventMonitor(multiprocessing.Process):
     def frFileInList(self, file_list):
         """Return true if an FR file is in the list
 
-        Aruments:
+        Arguments:
             file_list [list] File list
 
         Return:
@@ -2009,7 +2012,7 @@ class EventMonitor(multiprocessing.Process):
     def handleFutureEvents(self, observed_event, future_events):
         """Adjust the eventmonitor timer loop to capture future events as quickly as possible
 
-        Aruments:
+        Arguments:
             observed_event: [event] The observed event.
             future_events: [int] The count of future events.
 
@@ -2065,7 +2068,7 @@ class EventMonitor(multiprocessing.Process):
 
         Return:
             future_events: [int] The count of future events.
-            in_future: [bool] true in future events exist.
+            in_future: [bool] true if future events exist.
         """
 
         # check to see if the end of this event is in the future, if it is then do not process
@@ -4065,7 +4068,7 @@ def filterDirectoriesByJD(path, earliest_jd, latest_jd = None, write_log=False):
         path [string]: path to directory to be filtered.
         earliest_jd [float]: earliest jd to include.
 
-    Keyword arugments:
+    Keyword arguments:
         latest_jd: [float] latest jd to include, if none then only the directory containing earliest is returned
         write_logs: [bool] optional, default False, write logs
 
