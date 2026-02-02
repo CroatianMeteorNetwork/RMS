@@ -1699,7 +1699,6 @@ class EventMonitor(multiprocessing.Process):
                     time_delta = abs(time_point - event_time).total_seconds()
                     # Is the event_time point within tolerance of the start and end, or between the start and end
                     if time_delta < int(event.time_tolerance) or times_list[0] <= event_time <= times_list[1]:
-                        # If we get our first match, add the previous file
                         if log_returned_files:
                             log.info(f"Adding {f} with a time_delta of {time_delta}")
                         time_matched_file_set.add(f)
