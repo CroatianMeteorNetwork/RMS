@@ -60,7 +60,7 @@ sudo systemctl start ssh
 sudo systemctl enable ssh
 
 # Clone repositories
-git clone https://github.com/g7gpr/RMS.git
+git clone https://github.com/CroatianMeteorNetwork/RMS.git
 git clone https://github.com/CroatianMeteorNetwork/cmn_binviewer.git
 
 # Set up Python virtual environment with access to system packages
@@ -69,7 +69,6 @@ python3 -m venv --system-site-packages vRMS
 source ~/vRMS/bin/activate
 
 # Install Python packages
-python -m pip install psutil
 python -m pip install --upgrade pip setuptools wheel
 python -m pip install -r ~/source/RMS/requirements.txt
 
