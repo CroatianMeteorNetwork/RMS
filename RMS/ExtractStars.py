@@ -479,8 +479,10 @@ def extractStarsImgHandle(img_handle,
             )
 
 
+        # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
+        # Note: intensity=IntensSum (integrated), amplitude=Ampltd (peak)
         star_list.append(
-            [ff_name, list(zip(y_arr, x_arr, amplitude, intensity, fwhm, background, snr, saturated_count))]
+            [ff_name, list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, saturated_count))]
              )
 
         # Go to the next chunk
@@ -851,7 +853,9 @@ def extractStarsAndSave(config, ff_dir):
 
 
         # Construct the table of the star parameters
-        star_data = list(zip(y2, x2, amplitude, intensity, fwhm_data, background, snr, saturated_count))
+        # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
+        # Note: intensity=IntensSum (integrated), amplitude=Ampltd (peak)
+        star_data = list(zip(y2, x2, intensity, amplitude, fwhm_data, background, snr, saturated_count))
 
         # Add star info to the star list
         star_list.append([ff_name, star_data])
