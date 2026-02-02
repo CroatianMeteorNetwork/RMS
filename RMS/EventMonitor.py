@@ -1655,7 +1655,10 @@ class EventMonitor(multiprocessing.Process):
 
         """
 
+        # Create a set which will hold all the candidate files
         time_matched_path_and_file_set = set()
+
+        # Initialise the keyword variables
         if search_from_list is None:
             search_from_list = [self.config.video_dir, self.config.frame_dir]
 
@@ -1665,7 +1668,7 @@ class EventMonitor(multiprocessing.Process):
         if duration_list is None:
             duration_list = [self.config.raw_video_duration, self.config.frame_save_aligned_interval]
 
-
+        # Populate the candidate file set with al the files from the list of starting search points
         for search_from, suffix, duration in zip(search_from_list, suffix_list, duration_list):
             candidate_file_set = set()
             search_from = os.path.join(self.config.data_dir, search_from)
@@ -1694,7 +1697,10 @@ class EventMonitor(multiprocessing.Process):
                 times_list = [file_start_time, file_end_time]
                 event_time = convertGMNTimeToPOSIX(event.dt)
 
+                # Sort the times list, so that the first element is before the second
                 times_list.sort()
+
+                # Now check the times
                 for time_point in times_list:
                     time_delta = abs(time_point - event_time).total_seconds()
                     # Is the event_time point within tolerance of the start and end, or between the start and end
