@@ -70,6 +70,7 @@ source ~/vRMS/bin/activate
 
 # Install Python packages
 python -m pip install cython
+python -m pip install psutil
 python -m pip install --upgrade pip setuptools wheel
 python -m pip install -r ~/source/RMS/requirements.txt
 
