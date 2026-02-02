@@ -1598,10 +1598,9 @@ class PlateTool(QtWidgets.QMainWindow):
             self.astra_dialog = None
             self.astra_config_params = None
 
-        
         # Satellite tracks config
         self.show_sattracks = show_sattracks
-        self.auto_compute_sattracks = False  # Default: don't auto-compute (performance)
+        self.auto_compute_sattracks = show_sattracks  # Enable auto-compute if satellite tracks requested
         self.tle_file = tle_file
         self.satellite_tracks = []
         
@@ -1744,6 +1743,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # If the satellite tracks should be shown, load the TLE data and show the tracks
         if show_sattracks:
             self.loadSatelliteTracks()
+            # Update the checkbox to reflect auto-compute state
+            self.tab.settings.updateAutoComputeSatTracks()
 
 
     def closeEvent(self, event):
@@ -5373,8 +5374,8 @@ class PlateTool(QtWidgets.QMainWindow):
             # Clear satellite tracks when image changes (they're time-specific)
             self.clearSatelliteTracks()
             
-            # Automatically recompute if enabled
-            if self.auto_compute_sattracks and SKYFIELD_AVAILABLE:
+            # Automatically recompute if both auto-compute and satellite display are enabled
+            if self.show_sattracks and self.auto_compute_sattracks and SKYFIELD_AVAILABLE:
                 # Show computing status text (centered on image)
                 self.sat_computing_text.setPos(self.platepar.X_res / 2, self.platepar.Y_res / 2)
                 self.sat_computing_text.show()
@@ -12089,6 +12090,10 @@ class PlateTool(QtWidgets.QMainWindow):
     def toggleAutoComputeSatTracks(self):
         """ Toggle whether to automatically recompute satellite tracks when image changes. """
         
+        # Do not allow toggling if satellite tracks are not shown
+        if not self.show_sattracks:
+            return
+
         self.auto_compute_sattracks = not self.auto_compute_sattracks
         self.tab.settings.updateAutoComputeSatTracks()
         print(f"Automatically compute satellite tracks: {self.auto_compute_sattracks}")
@@ -12875,7 +12880,7 @@ if __name__ == '__main__':
                             help="Flip the image upside down. Only applied to images and videos.")
 
     arg_parser.add_argument('--sattracks', action="store_true", \
-                            help="Show satellite tracks overlaid on the image (requires internet to download TLEs).")
+                            help="Show satellite tracks overlaid on the image and automatically compute tracks when advancing frames (requires internet to download TLEs).")
 
     arg_parser.add_argument('--tle_file', type=str, default=None,
                             help="Path to a specific TLE file to use for satellite tracks (skips download). "
@@ -13020,6 +13025,7 @@ if __name__ == '__main__':
 
         # Initialize satellite track related attributes for loaded state
         plate_tool.show_sattracks = cml_args.sattracks
+        plate_tool.auto_compute_sattracks = cml_args.sattracks  # Auto-compute if --sattracks flag used
         plate_tool.tle_file = cml_args.tle_file
         plate_tool.satellite_tracks = []
         plate_tool.sat_track_curves = []

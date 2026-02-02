@@ -3285,13 +3285,13 @@ class SettingsWidget(QtWidgets.QWidget):
 
         self.sat_tracks = QtWidgets.QCheckBox('Show Satellite Tracks')
         self.sat_tracks.released.connect(self.sigSatTracksToggled.emit)
-        self.updateShowSatTracks()
         # self.sat_tracks.hide() # Always show it so user can turn it on
         vbox.addWidget(self.sat_tracks)
 
         self.auto_compute_sat_tracks = QtWidgets.QCheckBox(' Automatically compute tracks')
         self.auto_compute_sat_tracks.released.connect(self.sigAutoComputeSatTracksToggled.emit)
         self.auto_compute_sat_tracks.setChecked(False)  # Default: disabled to avoid performance issues
+        self.updateShowSatTracks()  # Initialize after both checkboxes are created
         vbox.addWidget(self.auto_compute_sat_tracks)
 
         self.tle_label = QtWidgets.QLabel("TLE: latest downloaded")
@@ -3420,6 +3420,8 @@ class SettingsWidget(QtWidgets.QWidget):
 
     def updateShowSatTracks(self):
         self.sat_tracks.setChecked(self.gui.show_sattracks)
+        # Enable/disable auto-compute checkbox based on satellite tracks visibility
+        self.auto_compute_sat_tracks.setEnabled(self.gui.show_sattracks)
 
     def updateAutoComputeSatTracks(self):
         self.auto_compute_sat_tracks.setChecked(self.gui.auto_compute_sattracks)
