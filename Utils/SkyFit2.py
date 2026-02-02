@@ -2510,6 +2510,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.updatePlatepar()
         self.initStarDetectionOverrides()
         self.initMaskFromFile()
+        self.updateFindBestFrameButton()
         self.changeMode(self.mode)
 
 
@@ -9642,6 +9643,23 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Convert the list to a dictionary
         self.calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
+
+        # Update Find Best Frame button state (disable if only one frame)
+        self.updateFindBestFrameButton()
+
+
+    def updateFindBestFrameButton(self):
+        """ Enable/disable the Find Best Frame button based on the number of frames in CALSTARS. """
+        if hasattr(self, 'tab') and hasattr(self.tab, 'param_manager'):
+            # Disable button if there's only one frame or no frames
+            enable = len(self.calstars) > 1
+            self.tab.param_manager.find_best_frame_button.setEnabled(enable)
+            if not enable:
+                self.tab.param_manager.find_best_frame_button.setToolTip(
+                    "Only one frame available - no need to find best frame")
+            else:
+                self.tab.param_manager.find_best_frame_button.setToolTip(
+                    "Find the frame with best star distribution for calibration")
 
 
     def reloadGeoPoints(self):
