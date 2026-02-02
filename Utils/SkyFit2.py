@@ -12074,10 +12074,10 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
                 # If None returned or path was bad, fallback to standard download/cache
                 cache_dir = os.path.join(getRmsRootDir(), ".skyfield_cache")
-                sats = loadTLEs(cache_dir, max_age_hours=24)
+                sats = loadTLEs(cache_dir, max_age_hours=24, time_of_interest=t_start)
         else:
             cache_dir = os.path.join(getRmsRootDir(), ".skyfield_cache")
-            sats = loadTLEs(cache_dir, max_age_hours=24)
+            sats = loadTLEs(cache_dir, max_age_hours=24, time_of_interest=t_start)
         
         if not sats:
             return

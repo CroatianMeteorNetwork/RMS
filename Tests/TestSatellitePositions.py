@@ -77,7 +77,45 @@ class TestSatellitePositions(unittest.TestCase):
                 mock_download.assert_not_called()
 
 
+                mock_download.assert_not_called()
 
+
+    def test_load_tles_with_time(self):
+        if not SKYFIELD_AVAILABLE:
+            self.skipTest("Skyfield not installed")
+            
+        cache_file = "active.txt"
+        
+        # Create two dummy cached files with timestamps
+        # File 1: 2020-01-01 (Old)
+        date_str_1 = "20200101"
+        file_1 = os.path.join(self.test_dir, f"TLE_{date_str_1}_000000_{cache_file}")
+        with open(file_1, 'w') as f:
+            f.write("DUMMY OLD TLE\n")
+            
+        # File 2: 2023-01-01 (Newer)
+        date_str_2 = "20230101"
+        file_2 = os.path.join(self.test_dir, f"TLE_{date_str_2}_000000_{cache_file}")
+        with open(file_2, 'w') as f:
+            f.write("DUMMY NEW TLE\n")
+            
+        # Mock loadRobustTLEs to avoid parsing error
+        with patch('RMS.Routines.SatellitePositions.loadRobustTLEs') as mock_load:
+            mock_load.return_value = []
+            
+            # Case 1: Ask for time near File 1 (2020)
+            target_time_1 = datetime.datetime(2020, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+            loadTLEs(self.test_dir, cache_file, time_of_interest=target_time_1)
+            
+            # Should load file 1
+            mock_load.assert_called_with(file_1)
+            
+            # Case 2: Ask for time near File 2 (2023)
+            target_time_2 = datetime.datetime(2023, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+            loadTLEs(self.test_dir, cache_file, time_of_interest=target_time_2)
+            
+            # Should load file 2
+            mock_load.assert_called_with(file_2)
     def test_satellite_predictor(self):
         if not SKYFIELD_AVAILABLE:
             self.skipTest("Skyfield not installed")
