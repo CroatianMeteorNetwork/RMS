@@ -3287,7 +3287,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     grid_cell_y = 15
                     placed_labels_grid = {}  # Dict: (grid_x, grid_y) -> list of (x, y)
 
-                    def check_overlap(x, y):
+                    def checkOverlap(x, y):
                         """Check if position overlaps with any placed label. O(1) average."""
                         gx = int(x // grid_cell_x)
                         gy = int(y // grid_cell_y)
@@ -3301,7 +3301,7 @@ class PlateTool(QtWidgets.QMainWindow):
                                             return True
                         return False
 
-                    def add_to_grid(x, y):
+                    def addToGrid(x, y):
                         """Add position to spatial grid."""
                         cell = (int(x // grid_cell_x), int(y // grid_cell_y))
                         if cell not in placed_labels_grid:
@@ -3389,10 +3389,10 @@ class PlateTool(QtWidgets.QMainWindow):
                         curr_x = self.catalog_x_filtered[i]
                         curr_y = self.catalog_y_filtered[i]
 
-                        if check_overlap(curr_x, curr_y):
+                        if checkOverlap(curr_x, curr_y):
                             continue
 
-                        add_to_grid(curr_x, curr_y)
+                        addToGrid(curr_x, curr_y)
 
                         # Check cache for existing TextItem (keyed by original index + display options)
                         _cache_key = (orig_idx, _cache_key_suffix) if orig_idx is not None else None
@@ -3999,7 +3999,7 @@ class PlateTool(QtWidgets.QMainWindow):
         min_dist = threshold
         result = None
 
-        def point_to_segment_dist(px, py, x1, y1, x2, y2):
+        def pointToSegmentDist(px, py, x1, y1, x2, y2):
             """Calculate distance from point (px, py) to line segment (x1,y1)-(x2,y2)."""
             # Vector from segment start to point
             dx, dy = px - x1, py - y1
@@ -4021,7 +4021,7 @@ class PlateTool(QtWidgets.QMainWindow):
             for i in range(len(self.mask_current_polygon) - 1):
                 x1, y1 = self.mask_current_polygon[i]
                 x2, y2 = self.mask_current_polygon[i + 1]
-                dist = point_to_segment_dist(x, y, x1, y1, x2, y2)
+                dist = pointToSegmentDist(x, y, x1, y1, x2, y2)
                 if dist < min_dist:
                     min_dist = dist
                     result = ('current', i + 1)  # Insert after vertex i
@@ -4032,7 +4032,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 for i in range(len(polygon)):
                     x1, y1 = polygon[i]
                     x2, y2 = polygon[(i + 1) % len(polygon)]  # Wrap around for closed polygon
-                    dist = point_to_segment_dist(x, y, x1, y1, x2, y2)
+                    dist = pointToSegmentDist(x, y, x1, y1, x2, y2)
                     if dist < min_dist:
                         min_dist = dist
                         result = (poly_idx, i + 1)  # Insert after vertex i

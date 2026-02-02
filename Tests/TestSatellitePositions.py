@@ -24,13 +24,13 @@ class TestSatellitePositions(unittest.TestCase):
         cache_file = "test_tle.txt"
         
         # Test 1: Daily cache mode - should create date-stamped files
-        def create_dummy_tle(url, filepath):
+        def createDummyTle(url, filepath):
             """Side effect for mock to actually create a file"""
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
             with open(filepath, 'w') as f:
                 f.write("DUMMY TLE DATA\n")
         
-        with patch('urllib.request.urlretrieve', side_effect=create_dummy_tle) as mock_download:
+        with patch('urllib.request.urlretrieve', side_effect=createDummyTle) as mock_download:
             with patch('RMS.Routines.SatellitePositions.loadRobustTLEs') as mock_load:
                 mock_load.return_value = []
                 
@@ -54,7 +54,7 @@ class TestSatellitePositions(unittest.TestCase):
                 self.assertEqual(len(cache_files), 1, "Should still have only one cache file")
         
         # Test 2: Legacy mode - should use single cache file (backward compatibility)
-        with patch('urllib.request.urlretrieve', side_effect=create_dummy_tle) as mock_download:
+        with patch('urllib.request.urlretrieve', side_effect=createDummyTle) as mock_download:
             with patch('RMS.Routines.SatellitePositions.loadRobustTLEs') as mock_load:
                 mock_load.return_value = []
                 

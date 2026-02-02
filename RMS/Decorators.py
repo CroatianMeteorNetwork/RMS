@@ -99,18 +99,18 @@ class memoizeSingle(object):
         spec = inspect.getargs(self.func.__code__).args
         return dict(list(kwargs.items()) + list(zip(spec, args)))
 
-    def _make_hashable(self, obj):
+    def _makeHashable(self, obj):
         """ Convert unhashable types to hashable equivalents for cache keys. """
         if isinstance(obj, list):
-            return tuple(self._make_hashable(x) for x in obj)
+            return tuple(self._makeHashable(x) for x in obj)
         if isinstance(obj, dict):
-            return tuple(sorted((k, self._make_hashable(v)) for k, v in obj.items()))
+            return tuple(sorted((k, self._makeHashable(v)) for k, v in obj.items()))
         if isinstance(obj, set):
-            return frozenset(self._make_hashable(x) for x in obj)
+            return frozenset(self._makeHashable(x) for x in obj)
         return obj
 
     def key(self, args, kwargs):
         a = self.normalize_args(args, kwargs)
         # Convert any unhashable values (lists, dicts) to hashable equivalents
-        hashable_items = [(k, self._make_hashable(v)) for k, v in a.items()]
+        hashable_items = [(k, self._makeHashable(v)) for k, v in a.items()]
         return tuple(sorted(hashable_items))
