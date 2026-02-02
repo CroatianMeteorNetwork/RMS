@@ -9093,6 +9093,10 @@ class PlateTool(QtWidgets.QMainWindow):
             if reply != QtWidgets.QMessageBox.Yes:
                 return
 
+        # Show busy state on button
+        self.tab.param_manager.setAutoFitButtonBusy(True)
+        QtWidgets.QApplication.processEvents()
+
         # Balance catalog magnitude before any fitting (affects both quick and full paths)
         self.balanceCatalogMagnitude()
 
@@ -9108,6 +9112,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateLeftLabels()
         self.updateStars()
         self.tab.param_manager.updatePlatepar()
+
+        # Restore button state
+        self.tab.param_manager.setAutoFitButtonBusy(False)
 
 
     def getInitialParamsAstrometryNet(self, upload_image=True, wide_fov_search=False):
@@ -10763,11 +10770,15 @@ class PlateTool(QtWidgets.QMainWindow):
         min_stars = self.getMinFitStars()
         if len(self.paired_stars) < min_stars:
 
-            qmessagebox(title='Number of stars', 
-                        message="At least {:d} paired stars are needed to do the fit!".format(min_stars), 
+            qmessagebox(title='Number of stars',
+                        message="At least {:d} paired stars are needed to do the fit!".format(min_stars),
                         message_type="warning")
 
             return self.platepar
+
+        # Show busy state on button
+        self.tab.param_manager.setFitButtonBusy(True)
+        QtWidgets.QApplication.processEvents()
 
         print()
         print("----------------------------------------")
@@ -10945,6 +10956,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateStars()
         self.updateFitResiduals()
         self.tab.param_manager.updatePlatepar()
+
+        # Restore button state
+        self.tab.param_manager.setFitButtonBusy(False)
 
 
     def jumpNextStar(self, miss_this_one=False):

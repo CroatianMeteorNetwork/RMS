@@ -2567,6 +2567,46 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.fit_astrometry_button.setEnabled(len(self.gui.paired_stars) >= min_fit_stars)
 
 
+    def setFitButtonBusy(self, busy):
+        """Set the Fit button to show busy state.
+
+        Arguments:
+            busy: [bool] If True, show busy state. If False, restore normal state.
+        """
+        if busy:
+            self.fit_astrometry_button.setText("Fitting...")
+            self.fit_astrometry_button.setEnabled(False)
+            self.auto_fit_button.setEnabled(False)
+            # Force visual update
+            self.fit_astrometry_button.repaint()
+            self.auto_fit_button.repaint()
+        else:
+            self.fit_astrometry_button.setText("Fit")
+            # Re-enable based on paired stars count
+            self.updatePairedStars(min_fit_stars=self.gui.getMinFitStars())
+            self.auto_fit_button.setEnabled(True)
+
+
+    def setAutoFitButtonBusy(self, busy):
+        """Set the Auto Fit button to show busy state.
+
+        Arguments:
+            busy: [bool] If True, show busy state. If False, restore normal state.
+        """
+        if busy:
+            self.auto_fit_button.setText("Fitting...")
+            self.auto_fit_button.setEnabled(False)
+            self.fit_astrometry_button.setEnabled(False)
+            # Force visual update
+            self.auto_fit_button.repaint()
+            self.fit_astrometry_button.repaint()
+        else:
+            self.auto_fit_button.setText("Auto Fit")
+            self.auto_fit_button.setEnabled(True)
+            # Re-enable fit button based on paired stars count
+            self.updatePairedStars(min_fit_stars=self.gui.getMinFitStars())
+
+
 class ArrayTabWidget(QtWidgets.QTabWidget, ScaledSizeHelper):
     """
     Widget to the right which holds the histogram as well as the parameter manager
