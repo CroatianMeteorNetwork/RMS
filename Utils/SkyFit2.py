@@ -8409,6 +8409,48 @@ class PlateTool(QtWidgets.QMainWindow):
 
         return ra_centre, dec_centre
 
+
+    def filterCatalogStarsByMask(self, catalog_x, catalog_y, catalog_stars=None):
+        """Filter out catalog stars that fall behind the mask.
+
+        Arguments:
+            catalog_x: [ndarray] X coordinates of catalog stars on the image.
+            catalog_y: [ndarray] Y coordinates of catalog stars on the image.
+            catalog_stars: [ndarray] Optional catalog star data (ra, dec, mag) to filter.
+                If None, only returns the mask.
+
+        Returns:
+            If catalog_stars is provided:
+                filtered_catalog_stars: [ndarray] Catalog stars not behind the mask.
+                not_masked: [ndarray] Boolean mask of stars not behind the mask.
+            If catalog_stars is None:
+                not_masked: [ndarray] Boolean mask of stars not behind the mask.
+        """
+        # If no mask, return all stars
+        if self.mask is None or not hasattr(self.mask, 'img'):
+            not_masked = np.ones(len(catalog_x), dtype=bool)
+            if catalog_stars is not None:
+                return catalog_stars, not_masked
+            return not_masked
+
+        # Check mask dimensions match image dimensions
+        if self.mask.img.shape[0] != self.platepar.Y_res or \
+           self.mask.img.shape[1] != self.platepar.X_res:
+            not_masked = np.ones(len(catalog_x), dtype=bool)
+            if catalog_stars is not None:
+                return catalog_stars, not_masked
+            return not_masked
+
+        # Vectorized mask check - clip coordinates to valid range
+        x_int = np.clip(catalog_x.astype(int), 0, self.mask.img.shape[1] - 1)
+        y_int = np.clip(catalog_y.astype(int), 0, self.mask.img.shape[0] - 1)
+        not_masked = self.mask.img[y_int, x_int] != 0
+
+        if catalog_stars is not None:
+            return catalog_stars[not_masked], not_masked
+        return not_masked
+
+
     def filterCatalogStarsInsideFOV(self, catalog_stars, remove_under_horizon=True, sort_declination=False):
         """ Take only catalogs stars which are inside the FOV.
 
@@ -8548,17 +8590,34 @@ class PlateTool(QtWidgets.QMainWindow):
         # Prepare detected stars array for NN fit
         img_stars_arr = np.column_stack([det_x, det_y, det_intens])
 
+        # Filter catalog stars by mask
+        # First, get catalog star positions on the image
+        catalog_x, catalog_y, _ = getCatalogStarsImagePositions(
+            self.catalog_stars, jd, self.platepar)
+
+        # Filter by image bounds first
+        in_image = (catalog_x >= 0) & (catalog_x < self.platepar.X_res) & \
+                   (catalog_y >= 0) & (catalog_y < self.platepar.Y_res)
+        catalog_stars_filtered = self.catalog_stars[in_image]
+        catalog_x_filtered = catalog_x[in_image]
+        catalog_y_filtered = catalog_y[in_image]
+
+        # Then filter by mask
+        catalog_stars_filtered, _ = self.filterCatalogStarsByMask(
+            catalog_x_filtered, catalog_y_filtered, catalog_stars_filtered)
+
         # Perform full NN-based fit
         print()
         print("NN-based fitting...")
         print("  Starting from: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
             self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
+        print("  Catalog stars (mask filtered): {:d}".format(len(catalog_stars_filtered)))
         self.status_bar.showMessage("Fitting astrometry...")
         QtWidgets.QApplication.processEvents()
 
         try:
             ransac_result = self.platepar.fitAstrometry(
-                jd, img_stars_arr, self.catalog_stars,
+                jd, img_stars_arr, catalog_stars_filtered,
                 first_platepar_fit=True,
                 use_nn_cost=True
             )
@@ -9300,8 +9359,15 @@ class PlateTool(QtWidgets.QMainWindow):
                     (catalog_y_ext >= 0) & (catalog_y_ext < self.platepar.Y_res)
 
         catalog_stars = catalog_stars_extended[in_fov_xy]
+        catalog_x_fov = catalog_x_ext[in_fov_xy]
+        catalog_y_fov = catalog_y_ext[in_fov_xy]
 
         print("  Catalog stars in strict FOV: {:d}".format(len(catalog_stars)))
+
+        # Filter out catalog stars behind the mask
+        catalog_stars, not_masked = self.filterCatalogStarsByMask(
+            catalog_x_fov, catalog_y_fov, catalog_stars)
+        print("  Catalog stars after mask filter: {:d}".format(len(catalog_stars)))
 
         # Get detected stars - use override data if enabled, otherwise CALSTARS
         # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
