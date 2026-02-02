@@ -2074,6 +2074,9 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         hbox_fixed.addStretch()
         form.addRow(hbox_fixed)
 
+        # Add stretch to absorb extra vertical space at the bottom
+        full_layout.addStretch()
+
         self.updatePlatepar()
         self.updateRestoreDefaultsButton()
 
