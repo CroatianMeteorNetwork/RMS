@@ -331,6 +331,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
                     fwhm_mult=DEFAULT_BLEND_FWHM_MULT,
                     high_fwhm_fraction=DEFAULT_HIGH_FWHM_FRACTION,
                     wide_fov_search=False,
+                    final_catalog_stars=None,
                     verbose=True):
     """
     Automatically create a platepar from CALSTARS data in a directory.
@@ -588,7 +589,8 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
         result = platepar.fitAstrometry(
             jd, img_stars_arr, catalog_stars,
             first_platepar_fit=True,
-            use_nn_cost=True
+            use_nn_cost=True,
+            final_catalog_stars=final_catalog_stars
         )
 
         if verbose:
@@ -668,9 +670,10 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
         print("  force_distortion_centre: {:s}".format(str(force_distortion_centre)))
         print("  refraction: {:s}".format(str(refraction)))
 
-    platepar.equal_aspect = equal_aspect
-    platepar.asymmetry_corr = asymmetry_corr
-    platepar.force_distortion_centre = force_distortion_centre
+    # Use remapCoeffsForFlagChange to properly handle coefficient structure changes
+    platepar.remapCoeffsForFlagChange('equal_aspect', equal_aspect)
+    platepar.remapCoeffsForFlagChange('asymmetry_corr', asymmetry_corr)
+    platepar.remapCoeffsForFlagChange('force_distortion_centre', force_distortion_centre)
     platepar.refraction = refraction
     platepar.setDistortionType(distortion_type, reset_params=False)
 

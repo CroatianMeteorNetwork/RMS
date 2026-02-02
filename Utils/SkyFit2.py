@@ -175,7 +175,7 @@ from Utils.KalmanFilter import KalmanFilter
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
-from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
+from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession, matchStars
 from RMS.Routines.SatellitePositions import SatellitePredictor, loadTLEs, loadRobustTLEs, findClosestTLEFile, SKYFIELD_AVAILABLE
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
 from RMS.Astrometry.Conversions import datetime2JD
@@ -2445,6 +2445,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.star_detection.sigSegmentRadiusChanged.connect(self.updateSegmentRadius)
         self.tab.star_detection.sigMaxFeatureRatioChanged.connect(self.updateMaxFeatureRatio)
         self.tab.star_detection.sigRoundnessThresholdChanged.connect(self.updateRoundnessThreshold)
+        self.tab.star_detection.sigTuneParameters.connect(self.tuneStarDetection)
 
         # Mask widget signals
         self.tab.mask.sigDrawModeToggled.connect(self.toggleMaskDrawMode)
@@ -3890,6 +3891,528 @@ class PlateTool(QtWidgets.QMainWindow):
             self.tab.star_detection.updateStatus(True, len(self.star_detection_override_data[ff_name]))
         else:
             self.tab.star_detection.updateStatus(True)
+
+
+    def tuneStarDetection(self):
+        """
+        Auto-tune star detection parameters by sweeping intensity_threshold downward
+        and finding where false detections start to explode, then optimizing segment_radius.
+
+        Algorithm:
+        1. Use current catalog stars projected to image
+        2. Sweep intensity_threshold from 40 down to 3
+        3. Count true positives (within 2px of catalog) vs false positives
+        4. Find threshold where false positive ratio starts exploding
+        5. Sweep segment_radius 3-20 to potentially recover more bright stars
+        """
+        # Validate platepar exists
+        if self.platepar is None:
+            qmessagebox(message="A valid platepar is required for tuning.",
+                title="Tuning Error", message_type="warning")
+            return
+
+        # Get current FF file name
+        ff_name = self.img_handle.name()
+        if ff_name is None:
+            qmessagebox(message="No image loaded.",
+                title="Tuning Error", message_type="warning")
+            return
+
+        # Update button text and disable during tuning
+        self.tab.star_detection.tune_button.setText("Tuning...")
+        self.tab.star_detection.tune_button.setEnabled(False)
+        QtWidgets.QApplication.processEvents()
+
+        # Store original config values before try block for finally
+        original_max_stars = self.config.max_stars
+
+        try:
+            # Compute JD for the current image
+            jd = date2JD(*self.img_handle.currentTime())
+
+            # Store original config values
+            original_intensity_threshold = self.config.intensity_threshold
+            original_segment_radius = self.config.segment_radius
+
+            # Temporarily increase max_stars limit during tuning
+            self.config.max_stars = max(2000, original_max_stars)
+
+            # Load a DEEP catalog (LM 8.0) for true/false positive matching
+            # This ensures we don't miscount faint real stars as false positives
+            deep_catalog_lm = 8.0
+            deep_catalog = self.loadCatalogStars(deep_catalog_lm)
+
+            if deep_catalog is None or len(deep_catalog) == 0:
+                qmessagebox(message="No catalog stars available.",
+                    title="Tuning Error", message_type="warning")
+                return
+
+            # Project deep catalog to image coordinates
+            catalog_x, catalog_y, _ = getCatalogStarsImagePositions(
+                deep_catalog, jd, self.platepar)
+
+            # Filter to stars within image bounds
+            in_image = ((catalog_x >= 0) & (catalog_x < self.platepar.X_res) &
+                       (catalog_y >= 0) & (catalog_y < self.platepar.Y_res))
+
+            # Apply mask filtering if mask exists
+            if self.mask is not None and self.mask.img is not None:
+                if (self.mask.img.shape[0] == self.platepar.Y_res and
+                    self.mask.img.shape[1] == self.platepar.X_res):
+                    x_int = np.clip(catalog_x.astype(int), 0, self.mask.img.shape[1] - 1)
+                    y_int = np.clip(catalog_y.astype(int), 0, self.mask.img.shape[0] - 1)
+                    not_masked = self.mask.img[y_int, x_int] != 0
+                    in_image = in_image & not_masked
+
+            # Get visible catalog star positions
+            visible_cat_x = catalog_x[in_image]
+            visible_cat_y = catalog_y[in_image]
+            n_catalog_visible = len(visible_cat_x)
+
+            print(f"\n=== Star Detection Tuning ===")
+            print(f"  Using deep catalog (LM={deep_catalog_lm}) for matching: {n_catalog_visible} stars in FOV")
+
+            if n_catalog_visible < 5:
+                qmessagebox(message=f"Only {n_catalog_visible} catalog stars visible in FOV.\n"
+                            "Need at least 5 for tuning. Try increasing catalog magnitude limit.",
+                    title="Tuning Error", message_type="warning")
+                return
+
+            # Phase 1: Sweep segment radius with HIGH intensity threshold
+            # This focuses on bright stars first - they need adequate segment_radius
+            # to pass the max_feature_ratio filter (wide PSF needs larger segment)
+            high_intensity_threshold = 25  # Only detect bright stars
+            print(f"\n  Phase 1: Segment radius sweep (intensity_threshold={high_intensity_threshold}, bright stars only)")
+            segment_values = list(range(3, 21))
+
+            # Collect results for all segment values
+            segment_results = []
+            for segment in segment_values:
+                self.status_bar.showMessage(f"Tuning... segment radius {segment}")
+                QtWidgets.QApplication.processEvents()
+
+                n_true_pos, n_false_pos, n_detected = self._countTrueFalsePositives(
+                    ff_name, high_intensity_threshold, segment, visible_cat_x, visible_cat_y)
+
+                if n_detected > 0:
+                    fp_ratio = n_false_pos / n_detected
+                    print(f"    segment={segment:2d}: detected={n_detected:3d}, "
+                          f"true_pos={n_true_pos:3d}, false_pos={n_false_pos:3d}, fp_ratio={fp_ratio:.2f}")
+                    segment_results.append((segment, n_true_pos, n_false_pos, fp_ratio))
+
+            # Find max true positives and select smallest segment achieving 98% of max
+            # Using 98% instead of 95% to prioritize capturing bright/wide stars
+            if segment_results:
+                max_true_pos = max(r[1] for r in segment_results)
+                threshold_98 = 0.98 * max_true_pos
+
+                # Find smallest segment with true_pos >= 98% of max
+                best_segment = segment_results[0][0]
+                best_true_pos_seg = segment_results[0][1]
+                best_fp_ratio_seg = segment_results[0][3]
+
+                for segment, n_true_pos, n_false_pos, fp_ratio in segment_results:
+                    if n_true_pos >= threshold_98:
+                        best_segment = segment
+                        best_true_pos_seg = n_true_pos
+                        best_fp_ratio_seg = fp_ratio
+                        break  # Take the first (smallest) segment meeting threshold
+
+                print(f"\n  Selected segment_radius: {best_segment} (>={threshold_98:.0f} true pos, 98% of max {max_true_pos})")
+            else:
+                best_segment = 4
+                best_true_pos_seg = 0
+                best_fp_ratio_seg = 1.0
+                print(f"\n  Selected segment_radius: {best_segment} (default, no results)")
+
+            # Phase 2: Sweep intensity threshold from high to low with best segment
+            # Early exit when we hit stopping criteria to save time
+            print(f"\n  Phase 2: Intensity threshold sweep (segment_radius={best_segment})")
+            intensity_values = list(range(40, 2, -1))  # 40 down to 3
+
+            # Stopping criteria parameters (must match _findOptimalThreshold)
+            max_fp_ratio = 0.07
+            min_true_pos = 50
+
+            results = []  # (threshold, n_true_pos, n_false_pos, n_detected)
+            prev_tp, prev_fp = 0, 0
+            early_exit = False
+
+            for i, intensity in enumerate(intensity_values):
+                self.status_bar.showMessage(f"Tuning... threshold sweep {intensity}")
+                QtWidgets.QApplication.processEvents()
+
+                n_true_pos, n_false_pos, n_detected = self._countTrueFalsePositives(
+                    ff_name, intensity, best_segment, visible_cat_x, visible_cat_y)
+
+                results.append((intensity, n_true_pos, n_false_pos, n_detected))
+
+                if n_detected > 0:
+                    fp_ratio = n_false_pos / n_detected
+                    print(f"    threshold={intensity:2d}: detected={n_detected:3d}, "
+                          f"true_pos={n_true_pos:3d}, false_pos={n_false_pos:3d}, fp_ratio={fp_ratio:.2f}")
+
+                    # Check early exit conditions (only after we have meaningful data)
+                    if n_true_pos >= min_true_pos and i > 0:
+                        # Exit if fp_ratio exceeds maximum
+                        if fp_ratio > max_fp_ratio:
+                            print(f"    -> Early exit: fp_ratio {fp_ratio:.2f} > {max_fp_ratio}")
+                            early_exit = True
+                            break
+
+                        # Exit if false positives growing too fast relative to true positives
+                        tp_gain = n_true_pos - prev_tp
+                        fp_gain = n_false_pos - prev_fp
+                        if tp_gain > 0 and fp_gain > 3 and (fp_gain / tp_gain) > 0.30:
+                            print(f"    -> Early exit: fp_gain/tp_gain = {fp_gain/tp_gain:.2f}")
+                            early_exit = True
+                            break
+
+                    prev_tp, prev_fp = n_true_pos, n_false_pos
+                else:
+                    # No detections (too many candidates) - stop here
+                    print(f"    threshold={intensity:2d}: no detections (too many candidates)")
+                    break
+
+            # Find optimal threshold from collected results
+            best_threshold = self._findOptimalThreshold(results)
+            print(f"\n  Selected intensity_threshold: {best_threshold}")
+
+            # Get final stats with current detection parameters, including true positive positions
+            n_true_pos, n_false_pos, n_detected, tp_x, tp_y = self._countTrueFalsePositives(
+                ff_name, best_threshold, best_segment, visible_cat_x, visible_cat_y,
+                return_positions=True)
+
+            # Phase 3: Find catalog LM that matches the detected true positives
+            print(f"\n  Phase 3: Finding catalog LM to match {n_true_pos} true positives")
+            self.status_bar.showMessage(f"Tuning... finding optimal catalog LM")
+            QtWidgets.QApplication.processEvents()
+
+            best_lm = self._findOptimalCatalogLM(jd, tp_x, tp_y, n_true_pos)
+            print(f"\n  Selected catalog LM: {best_lm:.1f}")
+
+            # Restore original config
+            self.config.intensity_threshold = original_intensity_threshold
+            self.config.segment_radius = original_segment_radius
+            self.config.max_stars = original_max_stars
+
+            # Update sliders to the optimal values
+            self.tab.star_detection.intensity_threshold_slider.setValue(best_threshold)
+            self.tab.star_detection.segment_radius_slider.setValue(best_segment)
+
+            # Update catalog LM and reload catalog
+            self.cat_lim_mag = best_lm
+            self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
+
+            # Store tuned LM for restoration after fitting (balancing may change it)
+            self.tuned_cat_lim_mag = best_lm
+            self.catalog_lm_tuned = True
+
+            # Count visible catalog stars at new LM
+            new_cat_x, new_cat_y, _ = getCatalogStarsImagePositions(
+                self.catalog_stars, jd, self.platepar)
+            in_image = ((new_cat_x >= 0) & (new_cat_x < self.platepar.X_res) &
+                       (new_cat_y >= 0) & (new_cat_y < self.platepar.Y_res))
+            if self.mask is not None and self.mask.img is not None:
+                if (self.mask.img.shape[0] == self.platepar.Y_res and
+                    self.mask.img.shape[1] == self.platepar.X_res):
+                    x_int = np.clip(new_cat_x.astype(int), 0, self.mask.img.shape[1] - 1)
+                    y_int = np.clip(new_cat_y.astype(int), 0, self.mask.img.shape[0] - 1)
+                    not_masked = self.mask.img[y_int, x_int] != 0
+                    in_image = in_image & not_masked
+            n_catalog_final = np.sum(in_image)
+
+            # Enable override mode
+            self.tab.star_detection.use_override_checkbox.setChecked(True)
+
+            # Update override_max_stars to handle the expected number of detected stars
+            # Use 2x detected count, rounded up to nearest 100
+            self.override_max_stars = int(np.ceil(n_detected * 2 / 100) * 100)
+
+            # Update the GUI slider to reflect the new max_stars value
+            # First ensure the slider range can accommodate the value
+            current_max = self.tab.star_detection.max_stars_slider.maximum()
+            if self.override_max_stars > current_max:
+                self.tab.star_detection.max_stars_slider.setMaximum(self.override_max_stars)
+            self.tab.star_detection.max_stars_slider.setValue(self.override_max_stars)
+
+            # Trigger re-detection with the new parameters
+            self.redetectStars()
+
+            # Update catalog star display (includes catalog stars and paired stars)
+            self.updateStars()
+
+            # Show result summary
+            precision = n_true_pos / n_detected if n_detected > 0 else 0
+            result_msg = (
+                f"Optimal parameters found:\n\n"
+                f"  Intensity Threshold: {best_threshold}\n"
+                f"  Segment Radius: {best_segment}\n"
+                f"  Catalog LM: {best_lm:.1f}\n\n"
+                f"Results:\n"
+                f"  Detected stars: {n_detected}\n"
+                f"  True positives (within 2px of catalog): {n_true_pos}\n"
+                f"  False positives: {n_false_pos}\n"
+                f"  Precision: {precision:.1%}\n"
+                f"  Catalog stars in FOV: {n_catalog_final}"
+            )
+
+            self.status_bar.showMessage(
+                f"Tuning complete: {n_true_pos} matched, threshold={best_threshold}, "
+                f"radius={best_segment}, LM={best_lm:.1f}")
+
+            print(f"\n  Final: {n_true_pos} true positives, {n_false_pos} false positives, "
+                  f"precision={precision:.1%}, catalog LM={best_lm:.1f} ({n_catalog_final} stars)")
+
+            qmessagebox(message=result_msg, title="Tuning Complete", message_type="info")
+
+        finally:
+            # Restore button state and config
+            self.tab.star_detection.tune_button.setText("Tune")
+            self.tab.star_detection.tune_button.setEnabled(True)
+            self.config.max_stars = original_max_stars
+
+
+    def _countTrueFalsePositives(self, ff_name, intensity_threshold, segment_radius,
+                                  catalog_x, catalog_y, match_radius=3.0, return_positions=False):
+        """
+        Count true and false positive detections.
+
+        Arguments:
+            ff_name: [str] Name of the FF file.
+            intensity_threshold: [int] Intensity threshold for detection.
+            segment_radius: [int] Segment radius for detection.
+            catalog_x: [ndarray] X coordinates of visible catalog stars.
+            catalog_y: [ndarray] Y coordinates of visible catalog stars.
+            match_radius: [float] Maximum distance in pixels for a match.
+            return_positions: [bool] If True, also return true positive coordinates.
+
+        Returns:
+            (n_true_pos, n_false_pos, n_detected): Tuple of counts.
+            If return_positions=True: (n_true_pos, n_false_pos, n_detected, tp_x, tp_y)
+        """
+        try:
+            # Set detection parameters - must match what redetectStars uses
+            self.config.intensity_threshold = intensity_threshold
+            self.config.segment_radius = segment_radius
+            self.config.max_feature_ratio = self.override_max_feature_ratio
+            self.config.roundness_threshold = self.override_roundness_threshold
+
+            # Run star detection
+            star_list = extractStarsFF(
+                self.dir_path, ff_name, config=self.config,
+                flat_struct=self.flat_struct, dark=self.dark, mask=self.mask
+            )
+
+            if not star_list or len(star_list[1]) == 0:
+                if return_positions:
+                    return 0, 0, 0, np.array([]), np.array([])
+                return 0, 0, 0
+
+            ff_name_ret, x_arr, y_arr, amplitude, intensity, fwhm_arr, background, snr, saturated = star_list
+            n_detected = len(x_arr)
+
+            if n_detected == 0:
+                if return_positions:
+                    return 0, 0, 0, np.array([]), np.array([])
+                return 0, 0, 0
+
+            # Count matches: for each detected star, check if within match_radius of any catalog star
+            # Use dynamic match radius based on FWHM - wide stars have less precise centroids
+            n_true_pos = 0
+            true_pos_x = []
+            true_pos_y = []
+            for det_x, det_y, det_fwhm in zip(x_arr, y_arr, fwhm_arr):
+                # Dynamic match radius: at least 3px, or 1.5x FWHM for wide stars
+                effective_radius = max(match_radius, 1.5 * det_fwhm)
+
+                # Calculate distances to all catalog stars
+                distances = np.sqrt((catalog_x - det_x)**2 + (catalog_y - det_y)**2)
+                if np.min(distances) <= effective_radius:
+                    n_true_pos += 1
+                    true_pos_x.append(det_x)
+                    true_pos_y.append(det_y)
+
+            n_false_pos = n_detected - n_true_pos
+
+            if return_positions:
+                return n_true_pos, n_false_pos, n_detected, np.array(true_pos_x), np.array(true_pos_y)
+            return n_true_pos, n_false_pos, n_detected
+
+        except Exception as e:
+            print(f"    Detection error: {e}")
+            if return_positions:
+                return 0, 0, 0, np.array([]), np.array([])
+            return 0, 0, 0
+
+
+    def _findOptimalThreshold(self, results):
+        """
+        Find the optimal intensity threshold from sweep results.
+
+        Strategy: Stop when false positive ratio exceeds acceptable limits or
+        when false positives are growing too fast relative to true positives.
+
+        Arguments:
+            results: List of (threshold, n_true_pos, n_false_pos, n_detected) tuples,
+                    sorted from high threshold to low.
+
+        Returns:
+            optimal_threshold: [int] The selected threshold value.
+        """
+        if not results:
+            return 20  # Default fallback
+
+        # Filter to results with detections
+        valid = [(t, tp, fp, det) for t, tp, fp, det in results if det > 0]
+        if not valid:
+            return 20
+
+        # Parameters for stopping criteria
+        max_fp_ratio = 0.07  # Stop if fp_ratio exceeds 7%
+        min_true_pos = 50    # Need at least this many true positives before applying criteria
+
+        best_threshold = valid[0][0]
+        best_true_pos = valid[0][1]
+
+        prev_tp, prev_fp, prev_fp_ratio = 0, 0, 0
+        for i, (threshold, true_pos, false_pos, detected) in enumerate(valid):
+            fp_ratio = false_pos / detected if detected > 0 else 0
+
+            if i == 0:
+                prev_tp, prev_fp, prev_fp_ratio = true_pos, false_pos, fp_ratio
+                best_threshold = threshold
+                best_true_pos = true_pos
+                continue
+
+            # Calculate gains from previous threshold
+            tp_gain = true_pos - prev_tp
+            fp_gain = false_pos - prev_fp
+
+            # Only apply stopping criteria if we have meaningful detections
+            if true_pos >= min_true_pos:
+                # Stop condition 1: fp_ratio exceeds maximum allowed
+                if fp_ratio > max_fp_ratio:
+                    print(f"    Stopping at threshold={threshold}: fp_ratio={fp_ratio:.2f} exceeds {max_fp_ratio:.2f}")
+                    break
+
+                # Stop condition 2: fp_gain is more than 30% of tp_gain (noise growing too fast)
+                # Only trigger if we're gaining significant false positives (> 3)
+                if tp_gain > 0 and fp_gain > 3:
+                    fp_to_tp_ratio = fp_gain / tp_gain
+                    if fp_to_tp_ratio > 0.30:
+                        print(f"    Stopping at threshold={threshold}: fp_gain/tp_gain={fp_to_tp_ratio:.2f} "
+                              f"(+{tp_gain} true, +{fp_gain} false)")
+                        break
+
+            # This threshold is still good
+            best_threshold = threshold
+            best_true_pos = true_pos
+            prev_tp, prev_fp, prev_fp_ratio = true_pos, false_pos, fp_ratio
+
+        return best_threshold
+
+
+    def _findOptimalCatalogLM(self, jd, detected_x, detected_y, target_matches, match_radius=2.0):
+        """
+        Find the catalog limiting magnitude where catalog stars match the detected
+        true positive positions. Uses coarse then fine search to find peak matches.
+
+        Arguments:
+            jd: [float] Julian date for the current image.
+            detected_x: [ndarray] X coordinates of detected true positive stars.
+            detected_y: [ndarray] Y coordinates of detected true positive stars.
+            target_matches: [int] Target number of matches (true positives found).
+            match_radius: [float] Match radius in pixels.
+
+        Returns:
+            optimal_lm: [float] The catalog limiting magnitude.
+        """
+        def count_matches_at_lm(test_lm):
+            """Count how many detected stars match catalog at given LM."""
+            test_catalog = self.loadCatalogStars(test_lm)
+            if test_catalog is None or len(test_catalog) == 0:
+                return 0, 0
+
+            cat_x, cat_y, _ = getCatalogStarsImagePositions(test_catalog, jd, self.platepar)
+
+            in_image = ((cat_x >= 0) & (cat_x < self.platepar.X_res) &
+                       (cat_y >= 0) & (cat_y < self.platepar.Y_res))
+
+            if self.mask is not None and self.mask.img is not None:
+                if (self.mask.img.shape[0] == self.platepar.Y_res and
+                    self.mask.img.shape[1] == self.platepar.X_res):
+                    x_int = np.clip(cat_x.astype(int), 0, self.mask.img.shape[1] - 1)
+                    y_int = np.clip(cat_y.astype(int), 0, self.mask.img.shape[0] - 1)
+                    not_masked = self.mask.img[y_int, x_int] != 0
+                    in_image = in_image & not_masked
+
+            visible_cat_x = cat_x[in_image]
+            visible_cat_y = cat_y[in_image]
+
+            n_matched = 0
+            for det_x, det_y in zip(detected_x, detected_y):
+                distances = np.sqrt((visible_cat_x - det_x)**2 + (visible_cat_y - det_y)**2)
+                if len(distances) > 0 and np.min(distances) <= match_radius:
+                    n_matched += 1
+
+            return n_matched, len(visible_cat_x)
+
+        # Coarse pass: 0.5 mag steps with early exit on diminishing returns
+        print("    Coarse pass (0.5 mag steps):")
+        coarse_lm_values = np.arange(3.0, 10.1, 0.5)
+
+        prev_matched, prev_catalog = 0, 0
+        best_lm = coarse_lm_values[0]
+        best_matches = 0
+
+        for i, test_lm in enumerate(coarse_lm_values):
+            n_matched, n_catalog = count_matches_at_lm(test_lm)
+
+            # Calculate diminishing returns metrics
+            match_gain = n_matched - prev_matched
+            catalog_gain = n_catalog - prev_catalog
+            coverage = n_matched / target_matches if target_matches > 0 else 0
+
+            if i == 0:
+                print(f"      LM={test_lm:.1f}: {n_matched}/{target_matches} matched ({n_catalog} cat stars)")
+            elif match_gain > 0:
+                cost = catalog_gain / match_gain
+                print(f"      LM={test_lm:.1f}: {n_matched}/{target_matches} ({coverage:.0%}), "
+                      f"+{match_gain} matches, cost={cost:.0f} cat/match")
+
+                # Early exit: cost > 200 catalog stars per match AND >80% coverage
+                if cost > 200 and coverage > 0.80:
+                    print(f"    -> Diminishing returns at LM={test_lm:.1f}")
+                    break
+            else:
+                print(f"      LM={test_lm:.1f}: {n_matched}/{target_matches} ({coverage:.0%}), no gain")
+
+            best_lm = test_lm
+            best_matches = n_matched
+            prev_matched, prev_catalog = n_matched, n_catalog
+
+        # Fine pass: 0.1 mag steps around the found LM
+        print(f"    Fine pass (0.1 mag steps around {best_lm:.1f}):")
+        fine_lm_values = np.arange(best_lm - 0.3, best_lm + 0.4, 0.1)
+        fine_lm_values = fine_lm_values[(fine_lm_values >= 3.0) & (fine_lm_values <= 10.0)]
+
+        fine_results = []
+        for test_lm in fine_lm_values:
+            n_matched, n_catalog = count_matches_at_lm(test_lm)
+            fine_results.append((test_lm, n_matched, n_catalog))
+            print(f"      LM={test_lm:.1f}: {n_matched}/{target_matches} matched ({n_catalog} cat stars)")
+
+        # Pick the LM with best matches in the fine range
+        final_lm = best_lm
+        final_matches = best_matches
+        for test_lm, n_matched, n_catalog in fine_results:
+            if n_matched > final_matches:
+                final_lm = test_lm
+                final_matches = n_matched
+
+        print(f"    -> Selected LM={final_lm:.1f} with {final_matches} matches")
+        return final_lm
 
 
     ###################################################################################################
@@ -8582,10 +9105,11 @@ class PlateTool(QtWidgets.QMainWindow):
         # Use standard fitting settings for NN fit, but KEEP existing distortion params
         # The aligned platepar from alignPlatepar() has good pointing AND distortion coefficients
         # Setting reset_params=True would zero out distortion and cause RANSAC to diverge
+        # IMPORTANT: Use remapCoeffsForFlagChange() when changing flags that affect coefficient structure
         self.platepar.refraction = True
-        self.platepar.equal_aspect = True
-        self.platepar.asymmetry_corr = False
-        self.platepar.force_distortion_centre = False
+        self.platepar.remapCoeffsForFlagChange('equal_aspect', True)
+        self.platepar.remapCoeffsForFlagChange('asymmetry_corr', False)
+        self.platepar.remapCoeffsForFlagChange('force_distortion_centre', False)
         self.platepar.setDistortionType("radial5-odd", reset_params=False)
 
         # Prepare detected stars array for NN fit
@@ -8617,10 +9141,16 @@ class PlateTool(QtWidgets.QMainWindow):
         QtWidgets.QApplication.processEvents()
 
         try:
+            # Load tuned catalog if available for final fitting stages
+            tuned_catalog = None
+            if getattr(self, 'catalog_lm_tuned', False) and hasattr(self, 'tuned_cat_lim_mag'):
+                tuned_catalog = self.loadCatalogStars(self.tuned_cat_lim_mag)
+
             ransac_result = self.platepar.fitAstrometry(
                 jd, img_stars_arr, catalog_stars_filtered,
                 first_platepar_fit=True,
-                use_nn_cost=True
+                use_nn_cost=True,
+                final_catalog_stars=tuned_catalog
             )
             print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
                 self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
@@ -8660,10 +9190,10 @@ class PlateTool(QtWidgets.QMainWindow):
         print("  Matched {} star pairs".format(len(self.paired_stars)))
 
         # Restore user's distortion settings for final refinement fit
-        # Must restore flags BEFORE calling setDistortionType so poly_length is computed correctly
-        self.platepar.equal_aspect = user_equal_aspect
-        self.platepar.asymmetry_corr = user_asymmetry_corr
-        self.platepar.force_distortion_centre = user_force_distortion_centre
+        # Use remapCoeffsForFlagChange to properly handle coefficient structure changes
+        self.platepar.remapCoeffsForFlagChange('equal_aspect', user_equal_aspect)
+        self.platepar.remapCoeffsForFlagChange('asymmetry_corr', user_asymmetry_corr)
+        self.platepar.remapCoeffsForFlagChange('force_distortion_centre', user_force_distortion_centre)
         self.platepar.refraction = user_refraction
         self.fit_only_pointing = user_fit_only_pointing
         self.fixed_scale = user_fixed_scale
@@ -8925,12 +9455,18 @@ class PlateTool(QtWidgets.QMainWindow):
                 QtWidgets.QApplication.processEvents()
 
                 try:
+                    # Load tuned catalog if available for final fitting stages
+                    tuned_catalog = None
+                    if getattr(self, 'catalog_lm_tuned', False) and hasattr(self, 'tuned_cat_lim_mag'):
+                        tuned_catalog = self.loadCatalogStars(self.tuned_cat_lim_mag)
+
                     # autoFitPlatepar returns (platepar, matched_stars, ff_name)
                     result = autoFitPlatepar(
                         self.dir_path,
                         self.config,
                         self.catalog_stars,
-                        ff_name=best_ff
+                        ff_name=best_ff,
+                        final_catalog_stars=tuned_catalog
                     )
 
                     if result is None:
@@ -9106,6 +9642,12 @@ class PlateTool(QtWidgets.QMainWindow):
         if not quick_fit_success:
             # Fall back to astrometry.net if quick alignment failed
             self.getInitialParamsAstrometryNet(upload_image=False)
+
+        # Restore tuned catalog LM if it was set (balancing may have changed it)
+        if getattr(self, 'catalog_lm_tuned', False) and hasattr(self, 'tuned_cat_lim_mag'):
+            print(f"  Restoring tuned catalog LM: {self.tuned_cat_lim_mag:.1f}")
+            self.cat_lim_mag = self.tuned_cat_lim_mag
+            self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
 
         # Update the GUI
         self.updateDistortion()
@@ -9413,11 +9955,18 @@ class PlateTool(QtWidgets.QMainWindow):
             # Pass extended catalog (before strict XY filter) - NN iterations re-filter
             # dynamically as distortion improves, allowing edge stars to "appear"
             self.platepar.setDistortionType("radial5-odd", reset_params=True)
+
+            # Load tuned catalog if available for final fitting stages
+            tuned_catalog = None
+            if getattr(self, 'catalog_lm_tuned', False) and hasattr(self, 'tuned_cat_lim_mag'):
+                tuned_catalog = self.loadCatalogStars(self.tuned_cat_lim_mag)
+
             try:
                 self.platepar.fitAstrometry(
                     jd, img_stars_arr, catalog_stars_extended,  # Extended catalog for edge stars
                     first_platepar_fit=True,
-                    use_nn_cost=True
+                    use_nn_cost=True,
+                    final_catalog_stars=tuned_catalog
                 )
                 print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
                     self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
@@ -9449,11 +9998,12 @@ class PlateTool(QtWidgets.QMainWindow):
         # Finalize the fit with user's settings
         if len(self.paired_stars) >= 10:
             # Restore user's settings for the final fit
+            # Use remapCoeffsForFlagChange to properly handle coefficient structure changes
             print()
             print("Restoring user settings: {:s}".format(user_distortion_type))
-            self.platepar.equal_aspect = user_equal_aspect
-            self.platepar.asymmetry_corr = user_asymmetry_corr
-            self.platepar.force_distortion_centre = user_force_distortion_centre
+            self.platepar.remapCoeffsForFlagChange('equal_aspect', user_equal_aspect)
+            self.platepar.remapCoeffsForFlagChange('asymmetry_corr', user_asymmetry_corr)
+            self.platepar.remapCoeffsForFlagChange('force_distortion_centre', user_force_distortion_centre)
             self.platepar.setDistortionType(user_distortion_type, reset_params=False)
             self.platepar.refraction = user_refraction
             self.fit_only_pointing = user_fit_only_pointing
@@ -9484,6 +10034,12 @@ class PlateTool(QtWidgets.QMainWindow):
             QtWidgets.QApplication.processEvents()
             self.first_platepar_fit = True
             self.fitPickedStars()
+
+            # Restore tuned catalog LM if it was set
+            if getattr(self, 'catalog_lm_tuned', False) and hasattr(self, 'tuned_cat_lim_mag'):
+                print(f"  Restoring tuned catalog LM: {self.tuned_cat_lim_mag:.1f}")
+                self.cat_lim_mag = self.tuned_cat_lim_mag
+                self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
 
             # Update the display
             self.updateStars()

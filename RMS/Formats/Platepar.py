@@ -428,7 +428,7 @@ class Platepar(object):
         # Return center in pixel coordinates (image center + offset)
         return self.X_res / 2.0 + x0, self.Y_res / 2.0 + y0
 
-    def fitPointing(self, jd, img_stars, catalog_stars, fixed_scale=False):
+    def fitPointing(self, jd, img_stars, catalog_stars, fixed_scale=False, final_catalog_stars=None):
         """Fit pointing parameters to the list of star image and celestial catalog coordinates.
         At least 4 stars are needed to fit the rigid body parameters.
 
@@ -441,6 +441,8 @@ class Platepar(object):
 
         Keyword arguments:
             fixed_scale: [bool] Keep the scale fixed. False by default.
+            final_catalog_stars: [list] Optional deeper catalog to use for final radial7 fitting.
+                                 If provided, switches to this catalog after radial7 switch.
 
         """
 
@@ -714,6 +716,7 @@ class Platepar(object):
         fit_only_pointing=False,
         fixed_scale=False,
         use_nn_cost=False,
+        final_catalog_stars=None,
     ):
         """Fit astrometric parameters to the list of star image and celestial catalog coordinates.
         At least 4 stars are needed to fit the rigid body parameters.
@@ -729,6 +732,8 @@ class Platepar(object):
             first_platepar_fit: [bool] Fit a platepar from scratch. False by default.
             fit_only_pointing: [bool] Only fit the pointing parameters, and not distortion.
             fixed_scale: [bool] Keep the scale fixed. False by default.
+            final_catalog_stars: [list] Optional deeper catalog to use for final radial7 fitting.
+                                 If provided, switches to this catalog after radial7 switch.
 
         """
 
@@ -1243,6 +1248,11 @@ class Platepar(object):
                             best_res = None  # Reset best result for new distortion type
                             best_cost = float('inf')
                             print("      --- Switching to radial7-odd (warm start with coefficient conversion) ---")
+
+                            # Switch to deeper catalog for final iterations if provided
+                            if final_catalog_stars is not None:
+                                catalog_stars = final_catalog_stars
+                                print(f"      --- Using final catalog ({len(catalog_stars)} stars) for radial7 fitting ---")
 
                         # Exclude stars that were outliers in the previous iteration
                         # This ensures outliers don't contaminate subsequent fits

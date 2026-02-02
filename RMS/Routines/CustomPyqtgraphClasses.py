@@ -2815,6 +2815,7 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
     """
     sigRedetectStars = QtCore.pyqtSignal()
     sigRedetectAllImages = QtCore.pyqtSignal()
+    sigTuneParameters = QtCore.pyqtSignal()
     sigUseOverrideToggled = QtCore.pyqtSignal()
     sigIntensityThresholdChanged = QtCore.pyqtSignal(int)
     sigNeighborhoodSizeChanged = QtCore.pyqtSignal(int)
@@ -2932,6 +2933,11 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.redetect_all_button = QtWidgets.QPushButton('Re-Detect All')
         self.redetect_all_button.clicked.connect(self.sigRedetectAllImages.emit)
         btn_layout.addWidget(self.redetect_all_button)
+
+        self.tune_button = QtWidgets.QPushButton('Tune')
+        self.tune_button.setToolTip('Auto-find optimal threshold and segment radius')
+        self.tune_button.clicked.connect(self.sigTuneParameters.emit)
+        btn_layout.addWidget(self.tune_button)
 
         layout.addLayout(btn_layout)
         layout.addSpacing(self.scaledSpacing(0.6))
