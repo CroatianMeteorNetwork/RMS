@@ -44,7 +44,10 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
         platepar: [Platepar instance] Initial platepar.
         calstars_time: [list] A single entry of (year, month, day, hour, minute, second, millisecond)
             of the middle of the FF file used for alignment.
-        calstars_coords: [ndarray] A 2D numpy array of (x, y) coordinates of image stars.
+        calstars_coords: [ndarray] A 2D numpy array of star data. Can be:
+            - (x, y) coordinates only (legacy format)
+            - Full CALSTARS format: (y, x, intensity, amplitude, fwhm, bg, snr, saturated)
+            If intensities are available, catalog LM is inferred from detected star magnitudes.
 
     Keyword arguments:
         scale_update: [bool] Update the platepar scale. False by default.
@@ -66,6 +69,37 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
 
     # Compute Julian date
     jd = date2JD(*calstars_time)
+
+    # Extract coordinates and optionally infer catalog LM from intensities
+    calstars_coords = np.array(calstars_coords)
+    if calstars_coords.shape[1] >= 3:
+        # Full CALSTARS format: (y, x, intensity, ...)
+        det_x = calstars_coords[:, 1]
+        det_y = calstars_coords[:, 0]
+        det_intens = calstars_coords[:, 2]
+
+        # Infer catalog LM from detected star magnitudes using platepar photometry
+        # Filter out invalid intensities
+        valid_intens = det_intens[det_intens > 0]
+        if len(valid_intens) > 0:
+            inst_mags = -2.5 * np.log10(valid_intens)
+            est_cat_mags = inst_mags + platepar.mag_lev
+
+            # Use 95th percentile + margin to ensure catalog covers all detections
+            # Cap at reasonable max to avoid noise-driven values
+            inferred_lim_mag = min(np.percentile(est_cat_mags, 95) + 1.0, 12.0)
+            inferred_lim_mag = max(inferred_lim_mag, 4.0)  # Floor at 4.0
+
+            log.info("alignPlatepar: Inferred catalog LM={:.1f} from {} detected stars (config={:.1f})".format(
+                inferred_lim_mag, len(valid_intens), config.catalog_mag_limit))
+            config.catalog_mag_limit = inferred_lim_mag
+
+        # Reformat to (x, y) for rest of function
+        calstars_coords = np.column_stack([det_x, det_y])
+    else:
+        # Legacy (x, y) format - use config LM
+        log.info("alignPlatepar: Using config catalog LM={:.1f} (no intensity data)".format(
+            config.catalog_mag_limit))
 
     # Load the catalog stars
     catalog_stars, _, _ = StarCatalog.readStarCatalog(
@@ -206,15 +240,15 @@ if __name__ == "__main__":
     # Extract star list from CALSTARS file from FF file with most stars
     max_len_ff = max(calstars_dict, key=lambda k: len(calstars_dict[k]))
 
-    # Take only X, Y (change order so X is first)
-    calstars_coords = np.array(calstars_dict[max_len_ff])[:, :2]
-    calstars_coords[:, [0, 1]] = calstars_coords[:, [1, 0]]
+    # Pass full CALSTARS data - alignPlatepar will extract coordinates and use intensities
+    # to infer appropriate catalog limiting magnitude
+    calstars_data = np.array(calstars_dict[max_len_ff])
 
     # Get the time of the FF file
     calstars_time = getMiddleTimeFF(max_len_ff, config.fps, ret_milliseconds=True, ff_frames=ff_frames)
 
     # Align the platepar with stars in CALSTARS
-    platepar_aligned = alignPlatepar(config, platepar, calstars_time, calstars_coords, show_plot=False)
+    platepar_aligned = alignPlatepar(config, platepar, calstars_time, calstars_data, show_plot=False)
 
     # Save the aligned platepar
     platepar_aligned.write(platepar_path)

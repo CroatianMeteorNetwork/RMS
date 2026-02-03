@@ -490,11 +490,10 @@ def recalibratePlateparsForFF(
 
                 log.info('Running NN alignment...')
 
-                # Run NN alignment
-                calstars_coords = np.array(star_dict_ff[jd])[:, :2]
-                calstars_coords[:, [0, 1]] = calstars_coords[:, [1, 0]]
+                # Run NN alignment - pass full CALSTARS data so alignPlatepar can infer catalog LM
+                calstars_data = np.array(star_dict_ff[jd])
                 test_platepar = alignPlatepar(
-                    config, prev_platepar, calstars_time, calstars_coords, show_plot=False
+                    config, prev_platepar, calstars_time, calstars_data, show_plot=False
                 )
 
                 # Try to recalibrate after NN alignment

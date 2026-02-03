@@ -2351,11 +2351,13 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
     def updateRMSD(self, rmsd_img, rmsd_angular, angular_error_label, reduced_chi_squared=None):
         """Update the RMSD display with color coding based on reduced chi-squared.
 
-        Reduced chi-squared measures fit quality relative to theoretical centroid precision:
-            - χ² ≈ 1: Fit is as good as theoretically possible (green)
-            - χ² ≈ 2-3: Fit is reasonable (yellow)
-            - χ² ≈ 4-6: Fit has room for improvement (orange)
-            - χ² > 6: Fit is poor or has systematic errors (red)
+        Reduced chi-squared measures fit quality relative to theoretical centroid precision
+        (based on FWHM and integrated intensity using Lindegren 1978 formula):
+            - χ² ≈ 1-2: Exceptional, near photon-noise limited (green)
+            - χ² ≈ 3-7: Good, typical conditions (light green)
+            - χ² ≈ 8-12: Acceptable, some systematic errors (yellow)
+            - χ² ≈ 13-18: Marginal, significant systematics (orange)
+            - χ² > 18: Poor conditions or calibration problems (red)
 
         This metric is independent of resolution, focal length, and optical quality.
         """
@@ -2366,16 +2368,16 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
 
             # Determine color based on reduced chi-squared
             # χ² ≈ 1 means fit is as good as expected given measurement noise
-            if reduced_chi_squared <= 1.5:
-                color = "#228B22"  # Forest green - excellent (at theoretical limit)
-            elif reduced_chi_squared <= 3.0:
-                color = "#32CD32"  # Lime green - very good
-            elif reduced_chi_squared <= 5.0:
-                color = "#DAA520"  # Goldenrod - good
-            elif reduced_chi_squared <= 10.0:
-                color = "#FF8C00"  # Dark orange - acceptable
+            if reduced_chi_squared <= 2.0:
+                color = "#228B22"  # Forest green - exceptional (near photon-limited)
+            elif reduced_chi_squared <= 7.0:
+                color = "#32CD32"  # Lime green - good typical conditions
+            elif reduced_chi_squared <= 12.0:
+                color = "#DAA520"  # Goldenrod - acceptable
+            elif reduced_chi_squared <= 18.0:
+                color = "#FF8C00"  # Dark orange - marginal
             else:
-                color = "#DC143C"  # Crimson - needs improvement
+                color = "#DC143C"  # Crimson - poor
         else:
             # Fallback to pixel-based coloring if chi-squared not available
             text = "{:.2f} px, {:.2f} {:s}".format(rmsd_img, rmsd_angular, angular_error_label)

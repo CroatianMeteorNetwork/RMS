@@ -9308,9 +9308,6 @@ class PlateTool(QtWidgets.QMainWindow):
         det_snr = detected_stars[:, 6] if detected_stars.shape[1] > 6 else np.ones(len(det_x))
         det_saturated = detected_stars[:, 7] if detected_stars.shape[1] > 7 else np.zeros(len(det_x))
 
-        # Prepare calstars_coords for alignPlatepar (x, y format)
-        calstars_coords = np.column_stack([det_x, det_y])
-
         # Get time for the current frame
         calstars_time = list(self.img_handle.currentTime())
 
@@ -9318,8 +9315,9 @@ class PlateTool(QtWidgets.QMainWindow):
         jd = date2JD(*calstars_time)
 
         # Try alignPlatepar to refine pointing
+        # Pass full CALSTARS data so alignPlatepar can infer catalog LM from intensities
         try:
-            pp_aligned = alignPlatepar(self.config, self.platepar, calstars_time, calstars_coords)
+            pp_aligned = alignPlatepar(self.config, self.platepar, calstars_time, detected_stars)
         except Exception as e:
             print("  alignPlatepar failed: {} - falling back to astrometry.net".format(str(e)))
             return False
@@ -9509,11 +9507,6 @@ class PlateTool(QtWidgets.QMainWindow):
                 0 if detected_stars is None else len(detected_stars)), flush=True)
             return
 
-        # Get star coordinates (CALSTARS format: Y(0) X(1) ...)
-        det_y = detected_stars[:, 0]
-        det_x = detected_stars[:, 1]
-        calstars_coords = np.column_stack([det_x, det_y])
-
         # Get time for current image
         if hasattr(self.img_handle, 'currentFrameTime'):
             calstars_time = list(self.img_handle.currentFrameTime(dt_obj=False))
@@ -9524,15 +9517,16 @@ class PlateTool(QtWidgets.QMainWindow):
             if len(calstars_time) == 6:
                 calstars_time.append(0)
 
-        print("  Detected stars: {}".format(len(calstars_coords)), flush=True)
+        print("  Detected stars: {}".format(len(detected_stars)), flush=True)
         print("  Image time: {}-{:02d}-{:02d} {:02d}:{:02d}:{:02d}".format(*calstars_time[:6]), flush=True)
         sys.stdout.flush()
 
         # Call alignPlatepar (same as CheckFit/ApplyRecalibrate would)
+        # Pass full CALSTARS data so alignPlatepar can infer catalog LM from intensities
         print("  Calling alignPlatepar()...", flush=True)
         sys.stdout.flush()
         try:
-            pp_aligned = alignPlatepar(self.config, self.platepar, calstars_time, calstars_coords)
+            pp_aligned = alignPlatepar(self.config, self.platepar, calstars_time, detected_stars)
         except Exception as e:
             print("  alignPlatepar FAILED: {}".format(str(e)), flush=True)
             traceback.print_exc()
@@ -11693,7 +11687,7 @@ class PlateTool(QtWidgets.QMainWindow):
             angular_distance = np.degrees(angularSeparation(np.radians(ra), np.radians(dec), \
                 np.radians(ra_img), np.radians(dec_img)))
 
-            residuals.append([img_x, img_y, angle, distance, angular_distance, fwhm, snr])
+            residuals.append([img_x, img_y, angle, distance, angular_distance, fwhm, snr, sum_intens])
 
             lsp = -2.5*np.log10(sum_intens)
 
@@ -11712,16 +11706,20 @@ class PlateTool(QtWidgets.QMainWindow):
         rmsd_img = RMSD([entry[3] for entry in residuals])
 
         # Compute reduced chi-squared: χ² = Σ(residual_i / σ_i)² / (N - DOF)
-        # where σ_i = FWHM_i / (2 * SNR_i) is the theoretical centroid precision
+        # Using Lindegren (1978) formula for centroid precision:
+        #   σ_i = FWHM_i / (2.355 * sqrt(intensity_i))
+        # where intensity is proportional to the number of detected photons.
+        # This avoids the problematic photometric SNR which uses a large aperture.
+        MIN_INTENSITY_FOR_CHI2 = 100.0  # Minimum intensity for meaningful precision
         chi_squared_sum = 0.0
         n_valid = 0
         for entry in residuals:
             distance_px = entry[3]  # pixel residual
             fwhm = entry[5]
-            snr = entry[6]
-            # Handle None values and ensure positive FWHM/SNR
-            if fwhm is not None and snr is not None and fwhm > 0 and snr > 0:
-                sigma = fwhm / (2.0 * snr)  # theoretical centroid precision
+            intensity = entry[7]
+            # Require minimum intensity for meaningful centroid precision estimate
+            if fwhm is not None and intensity is not None and fwhm > 0 and intensity >= MIN_INTENSITY_FOR_CHI2:
+                sigma = fwhm / (2.355 * np.sqrt(intensity))  # theoretical centroid precision
                 chi_squared_sum += (distance_px / sigma) ** 2
                 n_valid += 1
 

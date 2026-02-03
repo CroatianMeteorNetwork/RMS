@@ -465,9 +465,9 @@ def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
             # Extract star list from CALSTARS file from FF file with most stars
             max_len_ff = max(calstars_dict, key=lambda k: len(calstars_dict[k]))
 
-            # Take only X, Y (change order so X is first)
-            calstars_coords = np.array(calstars_dict[max_len_ff])[:, :2]
-            calstars_coords[:, [0, 1]] = calstars_coords[:, [1, 0]]
+            # Pass full CALSTARS data (y, x, intensity, ...) - alignPlatepar will extract what it needs
+            # and use intensities to infer appropriate catalog limiting magnitude
+            calstars_coords = np.array(calstars_dict[max_len_ff])
 
             # Get the time of the FF file
             calstars_time = FFfile.getMiddleTimeFF(max_len_ff, config.fps, ret_milliseconds=True,
