@@ -11747,7 +11747,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         if reduced_chi_squared is not None:
-            print('RMSD: {:.2f} px, {:.2f} {:s}, χ²={:.2f}'.format(rmsd_img, rmsd_angular, angular_error_label,
+            print('RMSD: {:.2f} px, {:.2f} {:s}, X2={:.2f}'.format(rmsd_img, rmsd_angular, angular_error_label,
                                                                     reduced_chi_squared))
         else:
             print('RMSD: {:.2f} px, {:.2f} {:s}'.format(rmsd_img, rmsd_angular, angular_error_label))

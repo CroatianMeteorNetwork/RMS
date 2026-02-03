@@ -2361,7 +2361,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         """
         # Format the text with chi-squared if available
         if reduced_chi_squared is not None and reduced_chi_squared != float('inf'):
-            text = "{:.2f} px, {:.2f} {:s}, χ²={:.1f}".format(
+            text = "{:.2f} px, {:.2f} {:s}, X2={:.1f}".format(
                 rmsd_img, rmsd_angular, angular_error_label, reduced_chi_squared)
 
             # Determine color based on reduced chi-squared
