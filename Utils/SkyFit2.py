@@ -6799,6 +6799,19 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.img_frame.setFocus()
                 return True  # Consume the event
 
+            # Intercept single-letter shortcuts that should work globally
+            # (but not when typing in text inputs or spinboxes)
+            elif key in (QtCore.Qt.Key_M, QtCore.Qt.Key_R, QtCore.Qt.Key_F, QtCore.Qt.Key_H,
+                         QtCore.Qt.Key_I, QtCore.Qt.Key_P, QtCore.Qt.Key_C, QtCore.Qt.Key_D,
+                         QtCore.Qt.Key_N, QtCore.Qt.Key_B, QtCore.Qt.Key_V, QtCore.Qt.Key_1,
+                         QtCore.Qt.Key_2, QtCore.Qt.Key_3, QtCore.Qt.Key_4, QtCore.Qt.Key_5,
+                         QtCore.Qt.Key_6, QtCore.Qt.Key_7, QtCore.Qt.Key_8, QtCore.Qt.Key_9):
+                # Don't intercept if focus is on a text/spin widget
+                if not isinstance(obj, (QtWidgets.QLineEdit, QtWidgets.QTextEdit,
+                                       QtWidgets.QPlainTextEdit, QtWidgets.QSpinBox,
+                                       QtWidgets.QDoubleSpinBox, QtWidgets.QAbstractSpinBox)):
+                    should_intercept = True
+
             if should_intercept:
                 # Forward to keyPressEvent
                 self.keyPressEvent(event)
