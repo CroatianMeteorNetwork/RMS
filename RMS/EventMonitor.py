@@ -2427,7 +2427,7 @@ class EventMonitor(multiprocessing.Process):
                 end_time = RmsDateTime.utcnow() + datetime.timedelta(seconds=duration)
                 time_left_before_end_minutes = duration / 60
                 if time_left_before_end_minutes < 120:
-                    log.info('Next night capture end       : {} UTC; {:05.1f} minutes from now'.format(str(end_time.strftime('%H:%M:%S')),
+                    log.info('Night capture end           : {} UTC; {:05.1f} minutes from now'.format(str(end_time.strftime('%H:%M:%S')),
                                                                                              time_left_before_end_minutes))
             # Wait for the next check
             self.exit.wait(60*self.check_interval)
