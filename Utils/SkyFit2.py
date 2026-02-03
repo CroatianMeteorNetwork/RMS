@@ -6803,13 +6803,18 @@ class PlateTool(QtWidgets.QMainWindow):
             # (but not when typing in text inputs or spinboxes)
             elif key in (QtCore.Qt.Key_M, QtCore.Qt.Key_R, QtCore.Qt.Key_F, QtCore.Qt.Key_H,
                          QtCore.Qt.Key_I, QtCore.Qt.Key_P, QtCore.Qt.Key_C, QtCore.Qt.Key_D,
-                         QtCore.Qt.Key_N, QtCore.Qt.Key_B, QtCore.Qt.Key_V, QtCore.Qt.Key_1,
-                         QtCore.Qt.Key_2, QtCore.Qt.Key_3, QtCore.Qt.Key_4, QtCore.Qt.Key_5,
-                         QtCore.Qt.Key_6, QtCore.Qt.Key_7, QtCore.Qt.Key_8, QtCore.Qt.Key_9):
+                         QtCore.Qt.Key_B, QtCore.Qt.Key_V):
                 # Don't intercept if focus is on a text/spin widget
-                if not isinstance(obj, (QtWidgets.QLineEdit, QtWidgets.QTextEdit,
-                                       QtWidgets.QPlainTextEdit, QtWidgets.QSpinBox,
-                                       QtWidgets.QDoubleSpinBox, QtWidgets.QAbstractSpinBox)):
+                # Check the widget and its parent (spinbox line edits have spinbox as parent)
+                widget = obj
+                parent = obj.parent() if obj else None
+                is_input = isinstance(widget, (QtWidgets.QLineEdit, QtWidgets.QTextEdit,
+                                              QtWidgets.QPlainTextEdit, QtWidgets.QSpinBox,
+                                              QtWidgets.QDoubleSpinBox, QtWidgets.QAbstractSpinBox))
+                is_input = is_input or isinstance(parent, (QtWidgets.QSpinBox,
+                                                           QtWidgets.QDoubleSpinBox,
+                                                           QtWidgets.QAbstractSpinBox))
+                if not is_input:
                     should_intercept = True
 
             if should_intercept:
