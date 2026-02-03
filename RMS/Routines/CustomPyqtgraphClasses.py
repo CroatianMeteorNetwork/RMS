@@ -2348,32 +2348,50 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # Update restore defaults button state
         self.updateRestoreDefaultsButton()
 
-    def updateRMSD(self, rmsd_img, rmsd_angular, angular_error_label):
-        """Update the RMSD display with color coding based on pixel error.
+    def updateRMSD(self, rmsd_img, rmsd_angular, angular_error_label, reduced_chi_squared=None):
+        """Update the RMSD display with color coding based on reduced chi-squared.
 
-        Color coding thresholds (at 720p reference, scaled by resolution):
-            - ≤ 0.2 px: green (great)
-            - 0.2 - 0.3 px: yellow/ok
-            - 0.3 - 0.5 px: orange/meh
-            - > 0.5 px: red (terrible)
+        Reduced chi-squared measures fit quality relative to theoretical centroid precision:
+            - χ² ≈ 1: Fit is as good as theoretically possible (green)
+            - χ² ≈ 2-3: Fit is reasonable (yellow)
+            - χ² ≈ 4-6: Fit has room for improvement (orange)
+            - χ² > 6: Fit is poor or has systematic errors (red)
+
+        This metric is independent of resolution, focal length, and optical quality.
         """
-        # Format the text
-        text = "{:.2f} px, {:.2f} {:s}".format(rmsd_img, rmsd_angular, angular_error_label)
+        # Format the text with chi-squared if available
+        if reduced_chi_squared is not None and reduced_chi_squared != float('inf'):
+            text = "{:.2f} px, {:.2f} {:s}, χ²={:.1f}".format(
+                rmsd_img, rmsd_angular, angular_error_label, reduced_chi_squared)
 
-        # Scale thresholds by resolution (reference: 720p)
-        # Higher resolution = more pixels per degree = higher acceptable pixel error
-        reference_height = 720.0
-        scale = self.gui.platepar.Y_res / reference_height
-
-        # Determine color based on scaled rmsd_img threshold
-        if rmsd_img <= 0.2 * scale:
-            color = "#228B22"  # Forest green - great
-        elif rmsd_img <= 0.3 * scale:
-            color = "#DAA520"  # Goldenrod - ok
-        elif rmsd_img <= 0.5 * scale:
-            color = "#FF8C00"  # Dark orange - meh
+            # Determine color based on reduced chi-squared
+            # χ² ≈ 1 means fit is as good as expected given measurement noise
+            if reduced_chi_squared <= 1.5:
+                color = "#228B22"  # Forest green - excellent (at theoretical limit)
+            elif reduced_chi_squared <= 3.0:
+                color = "#32CD32"  # Lime green - very good
+            elif reduced_chi_squared <= 5.0:
+                color = "#DAA520"  # Goldenrod - good
+            elif reduced_chi_squared <= 10.0:
+                color = "#FF8C00"  # Dark orange - acceptable
+            else:
+                color = "#DC143C"  # Crimson - needs improvement
         else:
-            color = "#DC143C"  # Crimson - terrible
+            # Fallback to pixel-based coloring if chi-squared not available
+            text = "{:.2f} px, {:.2f} {:s}".format(rmsd_img, rmsd_angular, angular_error_label)
+
+            # Scale thresholds by resolution (reference: 720p)
+            reference_height = 720.0
+            scale = self.gui.platepar.Y_res / reference_height
+
+            if rmsd_img <= 0.2 * scale:
+                color = "#228B22"  # Forest green - great
+            elif rmsd_img <= 0.3 * scale:
+                color = "#DAA520"  # Goldenrod - ok
+            elif rmsd_img <= 0.5 * scale:
+                color = "#FF8C00"  # Dark orange - meh
+            else:
+                color = "#DC143C"  # Crimson - terrible
 
         self.rmsd_label.setText(text)
         self.rmsd_label.setStyleSheet("font-weight: bold; font-size: 12pt; color: {};".format(color))

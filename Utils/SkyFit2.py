@@ -4048,18 +4048,41 @@ class PlateTool(QtWidgets.QMainWindow):
                 best_fp_ratio_seg = 1.0
                 print(f"\n  Selected segment_radius: {best_segment} (default, no results)")
 
+            # Early bail-out check after Phase 1
+            # With high intensity threshold (bright stars only), we expect good precision.
+            # If false positive ratio > 80%, the calibration is likely wrong.
+            if best_fp_ratio_seg > 0.80:
+                # Compute precision for the message
+                best_result = next((r for r in segment_results if r[0] == best_segment), None)
+                n_detected_seg = best_result[1] + best_result[2] if best_result else 0
+                precision_seg = (1.0 - best_fp_ratio_seg) * 100
+
+                print(f"\n  *** TUNING ABORTED ***")
+                print(f"  Only {max_true_pos} true positive(s) found with {best_fp_ratio_seg:.0%} false positive ratio.")
+                print(f"  Precision: {precision_seg:.1f}% (expected >20% with bright stars)")
+                print(f"  This suggests the platepar calibration is incorrect or the image has issues.")
+                self.status_bar.showMessage("Tuning aborted: calibration appears invalid")
+                qmessagebox(
+                    message="Tuning aborted: could not find enough matching stars.\n\n"
+                            f"Only {max_true_pos} star(s) matched catalog positions out of "
+                            f"~{n_detected_seg} detections ({precision_seg:.1f}% precision).\n\n"
+                            "With bright stars only (high threshold), precision should be >20%.\n\n"
+                            "This usually means:\n"
+                            "• The platepar calibration is incorrect\n"
+                            "• The image pointing doesn't match the platepar\n"
+                            "• The image has severe issues (clouds, daylight, etc.)\n\n"
+                            "Please verify your calibration before trying again.",
+                    title="Tuning Aborted", message_type="warning")
+                return
+
             # Phase 2: Sweep intensity threshold from high to low with best segment
             # Early exit when we hit stopping criteria to save time
             print(f"\n  Phase 2: Intensity threshold sweep (segment_radius={best_segment})")
             intensity_values = list(range(40, 2, -1))  # 40 down to 3
 
-            # Stopping criteria parameters (must match _findOptimalThreshold)
-            max_fp_ratio = 0.07
-            min_true_pos = 50
-
+            # Collect results, with lenient early exit to see the "elbow"
+            # We'll pick the best threshold from collected data using a score function
             results = []  # (threshold, n_true_pos, n_false_pos, n_detected)
-            prev_tp, prev_fp = 0, 0
-            early_exit = False
 
             for i, intensity in enumerate(intensity_values):
                 self.status_bar.showMessage(f"Tuning... threshold sweep {intensity}")
@@ -4075,23 +4098,11 @@ class PlateTool(QtWidgets.QMainWindow):
                     print(f"    threshold={intensity:2d}: detected={n_detected:3d}, "
                           f"true_pos={n_true_pos:3d}, false_pos={n_false_pos:3d}, fp_ratio={fp_ratio:.2f}")
 
-                    # Check early exit conditions (only after we have meaningful data)
-                    if n_true_pos >= min_true_pos and i > 0:
-                        # Exit if fp_ratio exceeds maximum
-                        if fp_ratio > max_fp_ratio:
-                            print(f"    -> Early exit: fp_ratio {fp_ratio:.2f} > {max_fp_ratio}")
-                            early_exit = True
-                            break
-
-                        # Exit if false positives growing too fast relative to true positives
-                        tp_gain = n_true_pos - prev_tp
-                        fp_gain = n_false_pos - prev_fp
-                        if tp_gain > 0 and fp_gain > 3 and (fp_gain / tp_gain) > 0.30:
-                            print(f"    -> Early exit: fp_gain/tp_gain = {fp_gain/tp_gain:.2f}")
-                            early_exit = True
-                            break
-
-                    prev_tp, prev_fp = n_true_pos, n_false_pos
+                    # Lenient early exit - just to avoid running forever
+                    # We overshoot a bit to see the elbow, then pick best from results
+                    if fp_ratio > 0.25:
+                        print(f"    -> Stopping: fp_ratio {fp_ratio:.2f} > 0.25")
+                        break
                 else:
                     # No detections (too many candidates) - stop here
                     print(f"    threshold={intensity:2d}: no detections (too many candidates)")
@@ -4105,6 +4116,42 @@ class PlateTool(QtWidgets.QMainWindow):
             n_true_pos, n_false_pos, n_detected, tp_x, tp_y = self._countTrueFalsePositives(
                 ff_name, best_threshold, best_segment, visible_cat_x, visible_cat_y,
                 return_positions=True)
+
+            # Early bail-out check after Phase 2
+            # If precision is very low, the calibration is likely wrong
+            if n_detected > 0:
+                precision = n_true_pos / n_detected
+                # Bail out if precision < 10% - even with many detections, this means
+                # most detections are noise/artifacts, not real stars matching catalog
+                if precision < 0.10:
+                    print(f"\n  *** TUNING ABORTED ***")
+                    print(f"  Only {n_true_pos} true positive(s) out of {n_detected} detections ({precision:.1%} precision).")
+                    print(f"  This suggests the platepar calibration is incorrect or the image has issues.")
+                    self.status_bar.showMessage("Tuning aborted: calibration appears invalid")
+                    qmessagebox(
+                        message="Tuning aborted: very low detection precision.\n\n"
+                                f"Only {n_true_pos} star(s) out of {n_detected} detections "
+                                f"matched catalog positions ({precision:.1%} precision).\n\n"
+                                "Expected precision >10% for a valid calibration.\n\n"
+                                "This usually means:\n"
+                                "• The platepar calibration is incorrect\n"
+                                "• The image pointing doesn't match the platepar\n"
+                                "• The image has severe issues (clouds, daylight, etc.)\n\n"
+                                "Please verify your calibration before trying again.",
+                        title="Tuning Aborted", message_type="warning")
+                    return
+            elif n_detected == 0:
+                print(f"\n  *** TUNING ABORTED ***")
+                print(f"  No stars detected with any threshold.")
+                self.status_bar.showMessage("Tuning aborted: no stars detected")
+                qmessagebox(
+                    message="Tuning aborted: no stars could be detected.\n\n"
+                            "This may indicate:\n"
+                            "• Image is too noisy or has severe artifacts\n"
+                            "• Detection parameters are incompatible with this image\n"
+                            "• Image has no visible stars (clouds, daylight, etc.)",
+                    title="Tuning Aborted", message_type="warning")
+                return
 
             # Phase 3: Find catalog LM that matches the detected true positives
             print(f"\n  Phase 3: Finding catalog LM to match {n_true_pos} true positives")
@@ -4280,8 +4327,8 @@ class PlateTool(QtWidgets.QMainWindow):
         """
         Find the optimal intensity threshold from sweep results.
 
-        Strategy: Stop when false positive ratio exceeds acceptable limits or
-        when false positives are growing too fast relative to true positives.
+        Strategy: Use a score function to balance true positives vs false positives.
+        Score = true_pos - 2*false_pos (penalize false positives)
 
         Arguments:
             results: List of (threshold, n_true_pos, n_false_pos, n_detected) tuples,
@@ -4298,47 +4345,26 @@ class PlateTool(QtWidgets.QMainWindow):
         if not valid:
             return 20
 
-        # Parameters for stopping criteria
-        max_fp_ratio = 0.07  # Stop if fp_ratio exceeds 7%
-        min_true_pos = 50    # Need at least this many true positives before applying criteria
+        # Score function: maximize true positives while penalizing false positives
+        # Higher penalty (2x) on false positives to prefer cleaner detections
+        def score(tp, fp):
+            return tp - 2 * fp
 
         best_threshold = valid[0][0]
-        best_true_pos = valid[0][1]
+        best_score = score(valid[0][1], valid[0][2])
 
-        prev_tp, prev_fp, prev_fp_ratio = 0, 0, 0
-        for i, (threshold, true_pos, false_pos, detected) in enumerate(valid):
-            fp_ratio = false_pos / detected if detected > 0 else 0
-
-            if i == 0:
-                prev_tp, prev_fp, prev_fp_ratio = true_pos, false_pos, fp_ratio
+        for threshold, true_pos, false_pos, detected in valid:
+            s = score(true_pos, false_pos)
+            if s > best_score:
+                best_score = s
                 best_threshold = threshold
-                best_true_pos = true_pos
-                continue
 
-            # Calculate gains from previous threshold
-            tp_gain = true_pos - prev_tp
-            fp_gain = false_pos - prev_fp
-
-            # Only apply stopping criteria if we have meaningful detections
-            if true_pos >= min_true_pos:
-                # Stop condition 1: fp_ratio exceeds maximum allowed
-                if fp_ratio > max_fp_ratio:
-                    print(f"    Stopping at threshold={threshold}: fp_ratio={fp_ratio:.2f} exceeds {max_fp_ratio:.2f}")
-                    break
-
-                # Stop condition 2: fp_gain is more than 30% of tp_gain (noise growing too fast)
-                # Only trigger if we're gaining significant false positives (> 3)
-                if tp_gain > 0 and fp_gain > 3:
-                    fp_to_tp_ratio = fp_gain / tp_gain
-                    if fp_to_tp_ratio > 0.30:
-                        print(f"    Stopping at threshold={threshold}: fp_gain/tp_gain={fp_to_tp_ratio:.2f} "
-                              f"(+{tp_gain} true, +{fp_gain} false)")
-                        break
-
-            # This threshold is still good
-            best_threshold = threshold
-            best_true_pos = true_pos
-            prev_tp, prev_fp, prev_fp_ratio = true_pos, false_pos, fp_ratio
+        # Print the selection reasoning
+        best_result = next((r for r in valid if r[0] == best_threshold), None)
+        if best_result:
+            t, tp, fp, det = best_result
+            print(f"    -> Best: threshold={t}, true_pos={tp}, false_pos={fp}, "
+                  f"score={score(tp, fp)}")
 
         return best_threshold
 
@@ -4442,15 +4468,25 @@ class PlateTool(QtWidgets.QMainWindow):
                 if cost > 200 and coverage > 0.80:
                     print(f"    -> Diminishing returns at LM={test_lm:.1f}")
                     break
-            else:
-                print(f"      LM={test_lm:.1f}: {n_matched}/{target_matches} ({coverage:.0%}), no gain")
-                # Early exit if we've hit 100% coverage and no more gains
-                if coverage >= 1.0:
-                    print(f"    -> 100% coverage at LM={best_lm:.1f}, stopping")
+
+                # Early exit if coverage is very high (>98%)
+                if coverage >= 0.98:
+                    print(f"    -> {coverage:.0%} coverage at LM={test_lm:.1f}, stopping")
+                    best_lm = test_lm
+                    best_matches = n_matched
                     break
 
-            best_lm = test_lm
-            best_matches = n_matched
+                # Only update best when there's actual gain
+                best_lm = test_lm
+                best_matches = n_matched
+            else:
+                print(f"      LM={test_lm:.1f}: {n_matched}/{target_matches} ({coverage:.0%}), no gain")
+                # No gain - don't update best_lm, just continue to see if more stars appear
+                # But if we already have very high coverage, stop
+                if coverage >= 0.98:
+                    print(f"    -> {coverage:.0%} coverage with no gain, stopping at LM={best_lm:.1f}")
+                    break
+
             prev_matched, prev_catalog = n_matched, n_catalog
 
         # Fine pass: 0.1 mag steps around the found LM
@@ -5257,7 +5293,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Plot the residuals (enlarge 100x)
             res_scale = 100
             for entry in self.residuals:
-                img_x, img_y, angle, distance, angular_distance = entry
+                img_x, img_y, angle, distance, angular_distance = entry[:5]
 
 
                 ### Limit the distance to the edge of the image ###
@@ -9839,6 +9875,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.setAutoFitButtonBusy(True)
         QtWidgets.QApplication.processEvents()
 
+        # Capture current catalog LM before fitting (user may have set this via tune or manually)
+        user_cat_lim_mag = self.cat_lim_mag
+
         # Balance catalog magnitude before any fitting (affects both quick and full paths)
         self.balanceCatalogMagnitude()
 
@@ -9849,10 +9888,10 @@ class PlateTool(QtWidgets.QMainWindow):
             # Fall back to astrometry.net if quick alignment failed
             self.getInitialParamsAstrometryNet(upload_image=False)
 
-        # Restore tuned catalog LM if it was set (balancing may have changed it)
-        if getattr(self, 'catalog_lm_tuned', False) and hasattr(self, 'tuned_cat_lim_mag'):
-            print(f"  Restoring tuned catalog LM: {self.tuned_cat_lim_mag:.1f}")
-            self.cat_lim_mag = self.tuned_cat_lim_mag
+        # Restore the user's catalog LM (balancing may have changed it)
+        if self.cat_lim_mag != user_cat_lim_mag:
+            print(f"  Restoring user catalog LM: {user_cat_lim_mag:.1f}")
+            self.cat_lim_mag = user_cat_lim_mag
             self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
 
         # Update the GUI
@@ -10235,11 +10274,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.first_platepar_fit = True
             self.fitPickedStars()
 
-            # Restore tuned catalog LM if it was set
-            if getattr(self, 'catalog_lm_tuned', False) and hasattr(self, 'tuned_cat_lim_mag'):
-                print(f"  Restoring tuned catalog LM: {self.tuned_cat_lim_mag:.1f}")
-                self.cat_lim_mag = self.tuned_cat_lim_mag
-                self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
+            # Note: catalog LM restoration is handled by the caller (autoFitAstrometryNet)
 
             # Update the display
             self.updateStars()
@@ -11658,7 +11693,7 @@ class PlateTool(QtWidgets.QMainWindow):
             angular_distance = np.degrees(angularSeparation(np.radians(ra), np.radians(dec), \
                 np.radians(ra_img), np.radians(dec_img)))
 
-            residuals.append([img_x, img_y, angle, distance, angular_distance])
+            residuals.append([img_x, img_y, angle, distance, angular_distance, fwhm, snr])
 
             lsp = -2.5*np.log10(sum_intens)
 
@@ -11676,6 +11711,28 @@ class PlateTool(QtWidgets.QMainWindow):
         rmsd_angular = 60*RMSD([entry[4] for entry in residuals])
         rmsd_img = RMSD([entry[3] for entry in residuals])
 
+        # Compute reduced chi-squared: χ² = Σ(residual_i / σ_i)² / (N - DOF)
+        # where σ_i = FWHM_i / (2 * SNR_i) is the theoretical centroid precision
+        chi_squared_sum = 0.0
+        n_valid = 0
+        for entry in residuals:
+            distance_px = entry[3]  # pixel residual
+            fwhm = entry[5]
+            snr = entry[6]
+            # Handle None values and ensure positive FWHM/SNR
+            if fwhm is not None and snr is not None and fwhm > 0 and snr > 0:
+                sigma = fwhm / (2.0 * snr)  # theoretical centroid precision
+                chi_squared_sum += (distance_px / sigma) ** 2
+                n_valid += 1
+
+        # Reduced chi-squared (DOF = 4 for pointing params: RA, Dec, rotation, scale)
+        # For distortion fitting, DOF is higher, but 4 is a reasonable approximation
+        dof = 4
+        if n_valid > dof:
+            reduced_chi_squared = chi_squared_sum / (n_valid - dof)
+        else:
+            reduced_chi_squared = None  # Not enough valid data for chi-squared
+
         # If the average angular error is larger than 60 arc minutes, report it in degrees
         if rmsd_angular > 60:
             rmsd_angular /= 60
@@ -11689,10 +11746,14 @@ class PlateTool(QtWidgets.QMainWindow):
             angular_error_label = 'arcsec'
 
 
-        print('RMSD: {:.2f} px, {:.2f} {:s}'.format(rmsd_img, rmsd_angular, angular_error_label))
+        if reduced_chi_squared is not None:
+            print('RMSD: {:.2f} px, {:.2f} {:s}, χ²={:.2f}'.format(rmsd_img, rmsd_angular, angular_error_label,
+                                                                    reduced_chi_squared))
+        else:
+            print('RMSD: {:.2f} px, {:.2f} {:s}'.format(rmsd_img, rmsd_angular, angular_error_label))
 
         # Update RMSD display in the Fit Parameters tab
-        self.tab.param_manager.updateRMSD(rmsd_img, rmsd_angular, angular_error_label)
+        self.tab.param_manager.updateRMSD(rmsd_img, rmsd_angular, angular_error_label, reduced_chi_squared)
 
         # Update fit residuals in the station tab when geopoints are used
         if self.geo_points_obj is not None:
