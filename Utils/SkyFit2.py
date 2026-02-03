@@ -146,7 +146,7 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     extinctionCorrectionTrueToApparent, applyAstrometryFTPdetectinfo, getFOVSelectionRadius
 from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
 from RMS.Astrometry.StarClasses import CatalogStar, GeoPoint, PlanetPoint, PairedStars
-from RMS.Astrometry.StarFilters import filterPhotometricOutliers, filterBlendedStars, filterHighFWHMStars
+from RMS.Astrometry.StarFilters import filterPhotometricOutliers, filterBlendedStars
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, \
     apparentAltAz2TrueRADec, J2000_JD, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
 from RMS.Astrometry.AstrometryNet import astrometryNetSolve
@@ -2402,6 +2402,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.tab.settings.updateInvertColours()
         self.tab.settings.updateImageGamma()
+        self.tab.star_detection.setCatalogLM(self.cat_lim_mag)
         if loaded_file:
             self.updatePairedStars()
 
@@ -2446,6 +2447,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.star_detection.sigMaxFeatureRatioChanged.connect(self.updateMaxFeatureRatio)
         self.tab.star_detection.sigRoundnessThresholdChanged.connect(self.updateRoundnessThreshold)
         self.tab.star_detection.sigTuneParameters.connect(self.tuneStarDetection)
+        self.tab.star_detection.sigSaveToConfig.connect(self.saveStarDetectionToConfig)
+        self.tab.star_detection.sigCatalogLMChanged.connect(self.updateCatalogLMFromStarDetection)
 
         # Mask widget signals
         self.tab.mask.sigDrawModeToggled.connect(self.toggleMaskDrawMode)
@@ -3684,6 +3687,19 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Update roundness threshold override parameter. """
         self.override_roundness_threshold = value
 
+    def updateCatalogLMFromStarDetection(self, value):
+        """ Update catalog limiting magnitude from Star Detection panel spinbox. """
+        self.cat_lim_mag = value
+        self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
+
+        # Sync the Settings panel spinbox
+        self.tab.settings.lim_mag.blockSignals(True)
+        self.tab.settings.lim_mag.setValue(value)
+        self.tab.settings.lim_mag.blockSignals(False)
+
+        self.updateLeftLabels()
+        self.updateStars()
+
 
     def toggleStarDetectionOverride(self):
         """ Toggle between using override detections and original CALSTARS. """
@@ -3947,9 +3963,16 @@ class PlateTool(QtWidgets.QMainWindow):
                     title="Tuning Error", message_type="warning")
                 return
 
-            # Project deep catalog to image coordinates
+            # Filter catalog to stars actually in FOV (prevents back-projection issues)
+            _, deep_catalog_fov = self.filterCatalogStarsInsideFOV(deep_catalog)
+            if len(deep_catalog_fov) == 0:
+                qmessagebox(message="No catalog stars visible in FOV.",
+                    title="Tuning Error", message_type="warning")
+                return
+
+            # Project FOV-filtered catalog to image coordinates
             catalog_x, catalog_y, _ = getCatalogStarsImagePositions(
-                deep_catalog, jd, self.platepar)
+                deep_catalog_fov, jd, self.platepar)
 
             # Filter to stars within image bounds
             in_image = ((catalog_x >= 0) & (catalog_x < self.platepar.X_res) &
@@ -3983,7 +4006,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # to pass the max_feature_ratio filter (wide PSF needs larger segment)
             high_intensity_threshold = 25  # Only detect bright stars
             print(f"\n  Phase 1: Segment radius sweep (intensity_threshold={high_intensity_threshold}, bright stars only)")
-            segment_values = list(range(3, 21))
+            segment_values = list(range(4, 21))
 
             # Collect results for all segment values
             segment_results = []
@@ -4104,23 +4127,30 @@ class PlateTool(QtWidgets.QMainWindow):
             self.cat_lim_mag = best_lm
             self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
 
+            # Update both LM spinboxes (Settings and Star Detection panels)
+            self.tab.settings.updateLimMag()
+
             # Store tuned LM for restoration after fitting (balancing may change it)
             self.tuned_cat_lim_mag = best_lm
             self.catalog_lm_tuned = True
 
-            # Count visible catalog stars at new LM
-            new_cat_x, new_cat_y, _ = getCatalogStarsImagePositions(
-                self.catalog_stars, jd, self.platepar)
-            in_image = ((new_cat_x >= 0) & (new_cat_x < self.platepar.X_res) &
-                       (new_cat_y >= 0) & (new_cat_y < self.platepar.Y_res))
-            if self.mask is not None and self.mask.img is not None:
-                if (self.mask.img.shape[0] == self.platepar.Y_res and
-                    self.mask.img.shape[1] == self.platepar.X_res):
-                    x_int = np.clip(new_cat_x.astype(int), 0, self.mask.img.shape[1] - 1)
-                    y_int = np.clip(new_cat_y.astype(int), 0, self.mask.img.shape[0] - 1)
-                    not_masked = self.mask.img[y_int, x_int] != 0
-                    in_image = in_image & not_masked
-            n_catalog_final = np.sum(in_image)
+            # Count visible catalog stars at new LM (filter to FOV first to prevent back-projection)
+            _, catalog_in_fov = self.filterCatalogStarsInsideFOV(self.catalog_stars)
+            if catalog_in_fov is not None and len(catalog_in_fov) > 0:
+                new_cat_x, new_cat_y, _ = getCatalogStarsImagePositions(
+                    catalog_in_fov, jd, self.platepar)
+                in_image = ((new_cat_x >= 0) & (new_cat_x < self.platepar.X_res) &
+                           (new_cat_y >= 0) & (new_cat_y < self.platepar.Y_res))
+                if self.mask is not None and self.mask.img is not None:
+                    if (self.mask.img.shape[0] == self.platepar.Y_res and
+                        self.mask.img.shape[1] == self.platepar.X_res):
+                        x_int = np.clip(new_cat_x.astype(int), 0, self.mask.img.shape[1] - 1)
+                        y_int = np.clip(new_cat_y.astype(int), 0, self.mask.img.shape[0] - 1)
+                        not_masked = self.mask.img[y_int, x_int] != 0
+                        in_image = in_image & not_masked
+                n_catalog_final = np.sum(in_image)
+            else:
+                n_catalog_final = 0
 
             # Enable override mode
             self.tab.star_detection.use_override_checkbox.setChecked(True)
@@ -4334,6 +4364,33 @@ class PlateTool(QtWidgets.QMainWindow):
             if test_catalog is None or len(test_catalog) == 0:
                 return 0, 0
 
+            # Filter catalog to stars actually in front of camera (prevent back-projection)
+            # Use angular distance in celestial coordinates, not self.filterCatalogStarsInsideFOV
+            # which incorrectly uses self.cat_lim_mag instead of the test catalog's LM
+            catalog_ra = test_catalog[:, 0]
+            catalog_dec = test_catalog[:, 1]
+            ra_rad = np.radians(catalog_ra)
+            dec_rad = np.radians(catalog_dec)
+            ra_center = np.radians(self.platepar.RA_d)
+            dec_center = np.radians(self.platepar.dec_d)
+
+            # Spherical angular distance from camera pointing to each catalog star
+            cos_ang_dist = (np.sin(dec_center) * np.sin(dec_rad) +
+                            np.cos(dec_center) * np.cos(dec_rad) * np.cos(ra_rad - ra_center))
+            cos_ang_dist = np.clip(cos_ang_dist, -1, 1)
+            ang_dist_deg = np.degrees(np.arccos(cos_ang_dist))
+
+            # FOV radius with margin (stars behind camera have ang_dist > 90)
+            fov_diagonal = np.sqrt(self.platepar.X_res**2 + self.platepar.Y_res**2)
+            fov_radius = (fov_diagonal / 2) * self.platepar.F_scale * 1.5
+            fov_radius = min(fov_radius, 90)
+
+            in_fov = ang_dist_deg < fov_radius
+            test_catalog = test_catalog[in_fov]
+
+            if len(test_catalog) == 0:
+                return 0, 0
+
             cat_x, cat_y, _ = getCatalogStarsImagePositions(test_catalog, jd, self.platepar)
 
             in_image = ((cat_x >= 0) & (cat_x < self.platepar.X_res) &
@@ -4387,6 +4444,10 @@ class PlateTool(QtWidgets.QMainWindow):
                     break
             else:
                 print(f"      LM={test_lm:.1f}: {n_matched}/{target_matches} ({coverage:.0%}), no gain")
+                # Early exit if we've hit 100% coverage and no more gains
+                if coverage >= 1.0:
+                    print(f"    -> 100% coverage at LM={best_lm:.1f}, stopping")
+                    break
 
             best_lm = test_lm
             best_matches = n_matched
@@ -4413,6 +4474,174 @@ class PlateTool(QtWidgets.QMainWindow):
 
         print(f"    -> Selected LM={final_lm:.1f} with {final_matches} matches")
         return final_lm
+
+
+    def saveStarDetectionToConfig(self):
+        """Save current star detection parameters to the .config file."""
+
+        # Calculate catalog_mag_limit to save
+        # Subtract 1.0 because ApplyRecalibrate adds +1.0 margin when loading catalog
+        config_catalog_lm = self.cat_lim_mag - 1.0
+        config_catalog_lm = max(3.0, config_catalog_lm)  # Don't go below 3.0
+
+        # Build summary of values to save
+        values_summary = (
+            f"[StarExtraction]\n"
+            f"  intensity_threshold: {self.override_intensity_threshold}\n"
+            f"  segment_radius: {self.override_segment_radius}\n"
+            f"  max_stars: {self.override_max_stars}\n"
+            f"  neighborhood_size: {self.override_neighborhood_size}\n"
+            f"  max_feature_ratio: {self.override_max_feature_ratio:.2f}\n"
+            f"  roundness_threshold: {self.override_roundness_threshold:.2f}\n\n"
+            f"[Calibration]\n"
+            f"  catalog_mag_limit: {config_catalog_lm:.1f}\n"
+            f"  (current LM {self.cat_lim_mag:.1f} - 1.0, since recalibration adds +1.0 margin)"
+        )
+
+        # Show confirmation dialog with options
+        msg = QtWidgets.QMessageBox()
+        msg.setWindowTitle("Save Star Detection Settings")
+        msg.setText("Save these star detection settings to config file?")
+        msg.setInformativeText(values_summary)
+        msg.setIcon(QtWidgets.QMessageBox.Question)
+
+        # Add buttons
+        save_btn = msg.addButton("Save to Station Config", QtWidgets.QMessageBox.AcceptRole)
+        browse_btn = msg.addButton("Choose File...", QtWidgets.QMessageBox.ActionRole)
+        cancel_btn = msg.addButton(QtWidgets.QMessageBox.Cancel)
+
+        msg.setDefaultButton(save_btn)
+        msg.exec_()
+
+        clicked = msg.clickedButton()
+
+        if clicked == cancel_btn:
+            return
+
+        # Determine which file to save to
+        if clicked == browse_btn:
+            # Provide a sensible default filename based on station ID
+            default_dir = os.path.dirname(self.config.config_file_name)
+            default_name = f"{self.config.stationID}.config"
+            default_path = os.path.join(default_dir, default_name)
+            config_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+                self, "Save Config File", default_path,
+                "Config Files (*.config *.cfg);;All Files (*)"
+            )
+            if not config_path:
+                return  # User cancelled file dialog
+        else:
+            config_path = self.config.config_file_name
+
+        # Write to the config file
+        self._writeStarDetectionConfig(config_path, config_catalog_lm)
+
+    def _writeStarDetectionConfig(self, config_path, catalog_mag_limit):
+        """Write star detection parameters to the specified config file.
+
+        Preserves comments and formatting by doing surgical line updates.
+        Uses ': ' separator like the RMS config format.
+        """
+        import re
+
+        # Values to update: (section, key, value)
+        updates = {
+            "StarExtraction": {
+                "intensity_threshold": str(self.override_intensity_threshold),
+                "segment_radius": str(self.override_segment_radius),
+                "max_stars": str(self.override_max_stars),
+                "neighborhood_size": str(self.override_neighborhood_size),
+                "max_feature_ratio": str(self.override_max_feature_ratio),
+                "roundness_threshold": str(self.override_roundness_threshold),
+            },
+            "Calibration": {
+                "catalog_mag_limit": f"{catalog_mag_limit:.1f}",
+            },
+        }
+
+        try:
+            # Read existing file
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    lines = f.readlines()
+            else:
+                lines = []
+
+            # Track which updates were applied
+            applied = {section: {k: False for k in keys} for section, keys in updates.items()}
+            current_section = None
+
+            # Update existing lines
+            new_lines = []
+            for line in lines:
+                stripped = line.strip()
+
+                # Track current section
+                section_match = re.match(r'\s*\[([^\]]+)\]', stripped)
+                if section_match:
+                    current_section = section_match.group(1)
+                    new_lines.append(line)
+                    continue
+
+                # Check if this line is a key we want to update
+                updated = False
+                if current_section and ': ' in stripped and not stripped.startswith((';', '#')):
+                    key = stripped.split(': ')[0].strip()
+                    if current_section in updates and key in updates[current_section]:
+                        value = updates[current_section][key]
+                        new_lines.append(f"{key}: {value}\n")
+                        applied[current_section][key] = True
+                        updated = True
+
+                if not updated:
+                    new_lines.append(line)
+
+            # Add any missing sections/keys at the end
+            for section, keys in updates.items():
+                missing_keys = [k for k, was_applied in applied[section].items() if not was_applied]
+                if not missing_keys:
+                    continue
+
+                # Check if section exists
+                section_exists = any(f'[{section}]' in line for line in new_lines)
+                if not section_exists:
+                    new_lines.append(f"\n[{section}]\n")
+                    for key in missing_keys:
+                        new_lines.append(f"{key}: {updates[section][key]}\n")
+                else:
+                    # Find section end and insert keys
+                    insert_idx = None
+                    in_section = False
+                    for i, line in enumerate(new_lines):
+                        if f'[{section}]' in line:
+                            in_section = True
+                            insert_idx = i + 1
+                        elif in_section:
+                            if line.strip().startswith('['):
+                                break
+                            if line.strip() and not line.strip().startswith(';'):
+                                insert_idx = i + 1
+
+                    if insert_idx is not None:
+                        for key in reversed(missing_keys):
+                            new_lines.insert(insert_idx, f"{key}: {updates[section][key]}\n")
+
+            # Write back
+            with open(config_path, 'w') as f:
+                f.writelines(new_lines)
+
+            print(f"Saved star detection settings to: {config_path}")
+            print(f"  intensity_threshold: {self.override_intensity_threshold}")
+            print(f"  segment_radius: {self.override_segment_radius}")
+            print(f"  max_stars: {self.override_max_stars}")
+            print(f"  catalog_mag_limit: {catalog_mag_limit:.1f}")
+
+            qmessagebox(message=f"Star detection settings saved to:\n{config_path}",
+                       title="Settings Saved", message_type="info")
+
+        except Exception as e:
+            qmessagebox(message=f"Error saving config:\n{str(e)}",
+                       title="Save Error", message_type="warning")
 
 
     ###################################################################################################
@@ -5651,45 +5880,25 @@ class PlateTool(QtWidgets.QMainWindow):
         Returns:
             int: Number of stars removed.
         """
-        # Get all catalog stars for neighbor lookup
-        if not hasattr(self, 'catalog_stars') or self.catalog_stars is None:
+        # Get FOV-filtered catalog stars for neighbor lookup
+        # Using filtered catalog prevents false positives from stars behind the camera
+        if hasattr(self, 'catalog_stars_filtered_unmasked') and self.catalog_stars_filtered_unmasked is not None:
+            catalog_for_blend = self.catalog_stars_filtered_unmasked
+        elif hasattr(self, 'catalog_stars') and self.catalog_stars is not None:
+            catalog_for_blend = self.catalog_stars
+        else:
             return 0
 
         jd = date2JD(*self.img_handle.currentFrameTime())
 
         self.paired_stars, removed_count = filterBlendedStars(
             self.paired_stars,
-            self.catalog_stars,
+            catalog_for_blend,
             self.platepar,
             jd,
             self.cat_lim_mag,
             fwhm_mult=fwhm_mult,
             mag_margin=mag_margin,
-            verbose=True
-        )
-
-        return removed_count
-
-
-    def filterHighFWHMStars(self, fraction=0.10):
-        """
-        Filter paired_stars by removing the worst fraction of stars by FWHM.
-
-        Stars with high FWHM tend to have worse centroiding precision due to:
-        - Blended sources
-        - Extended objects (galaxies)
-        - Poor atmospheric seeing
-        - Saturation/defocus
-
-        Arguments:
-            fraction: [float] Fraction of stars to remove (0.10 = top 10% highest FWHM).
-
-        Returns:
-            int: Number of stars removed.
-        """
-        self.paired_stars, removed_count = filterHighFWHMStars(
-            self.paired_stars,
-            fraction=fraction,
             verbose=True
         )
 
@@ -9115,15 +9324,17 @@ class PlateTool(QtWidgets.QMainWindow):
         # Prepare detected stars array for NN fit
         img_stars_arr = np.column_stack([det_x, det_y, det_intens])
 
-        # Filter catalog stars by mask
-        # First, get catalog star positions on the image
-        catalog_x, catalog_y, _ = getCatalogStarsImagePositions(
-            self.catalog_stars, jd, self.platepar)
+        # Filter catalog stars to those in FOV (prevents back-projection issues)
+        _, catalog_stars_fov = self.filterCatalogStarsInsideFOV(self.catalog_stars)
 
-        # Filter by image bounds first
+        # Project FOV-filtered catalog to image coordinates
+        catalog_x, catalog_y, _ = getCatalogStarsImagePositions(
+            catalog_stars_fov, jd, self.platepar)
+
+        # Filter by image bounds
         in_image = (catalog_x >= 0) & (catalog_x < self.platepar.X_res) & \
                    (catalog_y >= 0) & (catalog_y < self.platepar.Y_res)
-        catalog_stars_filtered = self.catalog_stars[in_image]
+        catalog_stars_filtered = catalog_stars_fov[in_image]
         catalog_x_filtered = catalog_x[in_image]
         catalog_y_filtered = catalog_y[in_image]
 
@@ -9213,11 +9424,6 @@ class PlateTool(QtWidgets.QMainWindow):
             if removed > 0:
                 print("Pairs after blend filtering: {}".format(len(self.paired_stars)))
 
-        # Filter high FWHM stars before final fit (remove top 10%)
-        if len(self.paired_stars) >= 15:
-            removed = self.filterHighFWHMStars(fraction=0.10)
-            if removed > 0:
-                print("Pairs after FWHM filtering: {}".format(len(self.paired_stars)))
 
         # Do a final fit with user's distortion settings
         if len(self.paired_stars) >= 10:
@@ -10020,12 +10226,6 @@ class PlateTool(QtWidgets.QMainWindow):
                 removed = self.filterBlendedStars(fwhm_mult=2.0, mag_margin=0.3)
                 if removed > 0:
                     print("Pairs after blend filtering: {}".format(len(self.paired_stars)))
-
-            # Filter high FWHM stars before final fit (remove top 10%)
-            if len(self.paired_stars) >= 15:
-                removed = self.filterHighFWHMStars(fraction=0.10)
-                if removed > 0:
-                    print("Pairs after FWHM filtering: {}".format(len(self.paired_stars)))
 
             # Do the final fit with user's settings
             print()

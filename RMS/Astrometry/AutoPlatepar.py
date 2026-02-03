@@ -30,9 +30,9 @@ from RMS.Astrometry.ApplyAstrometry import rotationWrtStandardToPosAngle
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
 from RMS.Astrometry.AstrometryNet import astrometryNetSolve
 from RMS.Astrometry.StarClasses import CatalogStar, PairedStars
-from RMS.Astrometry.StarFilters import (filterPhotometricOutliers, filterBlendedStars, filterHighFWHMStars,
+from RMS.Astrometry.StarFilters import (filterPhotometricOutliers, filterBlendedStars,
                                          DEFAULT_PHOTOMETRIC_SIGMA, DEFAULT_BLEND_FWHM_MULT,
-                                         DEFAULT_BLEND_MAG_MARGIN, DEFAULT_HIGH_FWHM_FRACTION)
+                                         DEFAULT_BLEND_MAG_MARGIN)
 from RMS.Formats.Platepar import getCatalogStarsImagePositions
 from RMS.Formats import CALSTARS, StarCatalog
 from RMS.Formats.Platepar import Platepar
@@ -329,7 +329,6 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
                     refraction=DEFAULT_REFRACTION,
                     photometric_sigma=DEFAULT_PHOTOMETRIC_SIGMA,
                     fwhm_mult=DEFAULT_BLEND_FWHM_MULT,
-                    high_fwhm_fraction=DEFAULT_HIGH_FWHM_FRACTION,
                     wide_fov_search=False,
                     final_catalog_stars=None,
                     verbose=True):
@@ -365,7 +364,6 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
     Keyword arguments (filtering parameters):
         photometric_sigma: [float] Sigma threshold for photometric outlier removal (default: 2.5)
         fwhm_mult: [float] Multiplier of FWHM for blend detection radius (default: 2.0)
-        high_fwhm_fraction: [float] Fraction of high-FWHM stars to remove (default: 0.10)
 
         wide_fov_search: [bool] If True, use a wide FOV search range (2° to 200°) instead of
                          the config-based range. Used as fallback when the tight search fails.
@@ -537,7 +535,6 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
                 refraction=refraction,
                 photometric_sigma=photometric_sigma,
                 fwhm_mult=fwhm_mult,
-                high_fwhm_fraction=high_fwhm_fraction,
                 wide_fov_search=True,
                 verbose=verbose
             )
@@ -646,10 +643,6 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
         paired_stars, removed = filterBlendedStars(
             paired_stars, catalog_stars, platepar, jd, config.catalog_mag_limit,
             fwhm_mult=fwhm_mult, verbose=verbose)
-
-    if len(paired_stars) >= 15:
-        paired_stars, removed = filterHighFWHMStars(
-            paired_stars, fraction=high_fwhm_fraction, verbose=verbose)
 
     if verbose:
         print("  Stars after filtering: {:d}".format(len(paired_stars)))
@@ -766,8 +759,6 @@ if __name__ == "__main__":
                         help="Photometric outlier sigma threshold (default: {:.1f})".format(DEFAULT_PHOTOMETRIC_SIGMA))
     parser.add_argument("--fwhm-mult", type=float, default=DEFAULT_BLEND_FWHM_MULT,
                         help="FWHM multiplier for blend detection radius (default: {:.1f})".format(DEFAULT_BLEND_FWHM_MULT))
-    parser.add_argument("--fwhm-fraction", type=float, default=DEFAULT_HIGH_FWHM_FRACTION,
-                        help="Fraction of high-FWHM stars to remove (default: {:.2f})".format(DEFAULT_HIGH_FWHM_FRACTION))
 
     parser.add_argument("-o", "--output", help="Output platepar filename", default="platepar_auto.cal")
 
@@ -795,7 +786,6 @@ if __name__ == "__main__":
         refraction=not args.no_refraction,
         photometric_sigma=args.photom_sigma,
         fwhm_mult=args.fwhm_mult,
-        high_fwhm_fraction=args.fwhm_fraction,
         verbose=True
     )
 

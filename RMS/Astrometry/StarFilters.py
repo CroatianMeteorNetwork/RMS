@@ -148,7 +148,33 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
     catalog_ra = catalog_stars[bright_mask, 0]
     catalog_dec = catalog_stars[bright_mask, 1]
 
-    # Convert bright catalog stars to pixel coordinates
+    # Filter to stars actually in front of the camera (within FOV + margin)
+    # This prevents false positives from stars behind the camera that could
+    # project to valid-looking pixel coordinates
+    ra_rad = np.radians(catalog_ra)
+    dec_rad = np.radians(catalog_dec)
+    ra_center = np.radians(platepar.RA_d)
+    dec_center = np.radians(platepar.dec_d)
+
+    # Spherical angular distance from camera pointing to each catalog star
+    cos_ang_dist = (np.sin(dec_center) * np.sin(dec_rad) +
+                    np.cos(dec_center) * np.cos(dec_rad) * np.cos(ra_rad - ra_center))
+    cos_ang_dist = np.clip(cos_ang_dist, -1, 1)
+    ang_dist_deg = np.degrees(np.arccos(cos_ang_dist))
+
+    # Estimate FOV radius from platepar (diagonal / 2 * scale, with margin)
+    fov_diagonal = np.sqrt(platepar.X_res**2 + platepar.Y_res**2)
+    fov_radius = (fov_diagonal / 2) * platepar.F_scale * 1.5  # 50% margin
+    fov_radius = min(fov_radius, 90)  # Cap at 90 degrees
+
+    in_fov = ang_dist_deg < fov_radius
+    catalog_ra = catalog_ra[in_fov]
+    catalog_dec = catalog_dec[in_fov]
+
+    if len(catalog_ra) == 0:
+        return paired_stars, 0
+
+    # Convert FOV-filtered catalog stars to pixel coordinates
     catalog_x, catalog_y = raDecToXYPP(catalog_ra, catalog_dec, jd, platepar)
 
     blended_indices = set()

@@ -2816,6 +2816,8 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
     sigRedetectStars = QtCore.pyqtSignal()
     sigRedetectAllImages = QtCore.pyqtSignal()
     sigTuneParameters = QtCore.pyqtSignal()
+    sigSaveToConfig = QtCore.pyqtSignal()
+    sigCatalogLMChanged = QtCore.pyqtSignal(float)
     sigUseOverrideToggled = QtCore.pyqtSignal()
     sigIntensityThresholdChanged = QtCore.pyqtSignal(int)
     sigNeighborhoodSizeChanged = QtCore.pyqtSignal(int)
@@ -2852,7 +2854,7 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
             ('Neighborhood Size', 5, 40, 10, '10', self.onNeighborhoodSizeChanged),
             ('Max Stars', 50, 2000, 200, '200', self.onMaxStarsChanged),
             ('Gamma', 45, 200, 100, '1.00', self.onGammaChanged),
-            ('Segment Radius', 4, 20, 4, '4', self.onSegmentRadiusChanged),
+            ('Segment Radius', 2, 20, 4, '4', self.onSegmentRadiusChanged),
             ('Max Feature Ratio', 50, 200, 80, '0.80', self.onMaxFeatureRatioChanged),
             ('Roundness Threshold', 30, 90, 50, '0.50', self.onRoundnessThresholdChanged),
         ]
@@ -2939,8 +2941,28 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.tune_button.clicked.connect(self.sigTuneParameters.emit)
         btn_layout.addWidget(self.tune_button)
 
+        self.save_config_button = QtWidgets.QPushButton('Save to Config')
+        self.save_config_button.setToolTip('Save current star detection settings to .config file')
+        self.save_config_button.clicked.connect(self.sigSaveToConfig.emit)
+        btn_layout.addWidget(self.save_config_button)
+
         layout.addLayout(btn_layout)
         layout.addSpacing(self.scaledSpacing(0.6))
+
+        # Catalog Limiting Magnitude (synced with Settings panel)
+        lm_layout = QtWidgets.QHBoxLayout()
+        lm_layout.addWidget(QtWidgets.QLabel('Lim Mag'))
+        self.catalog_lm_spinbox = DoubleSpinBox()
+        self.catalog_lm_spinbox.setSingleStep(0.1)
+        self.catalog_lm_spinbox.setMinimum(3.0)
+        self.catalog_lm_spinbox.setMaximum(12.0)
+        self.catalog_lm_spinbox.setDecimals(1)
+        self.catalog_lm_spinbox.valueModified.connect(self.onCatalogLMChanged)
+        lm_layout.addWidget(self.catalog_lm_spinbox)
+        lm_layout.addStretch()
+        layout.addLayout(lm_layout)
+
+        layout.addSpacing(self.scaledSpacing(0.3))
 
         # Checkbox
         self.use_override_checkbox = QtWidgets.QCheckBox('Use Override Detections')
@@ -2991,6 +3013,16 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         threshold = value / 100.0
         self.roundness_threshold_label.setText(f'{threshold:.2f}')
         self.sigRoundnessThresholdChanged.emit(threshold)
+
+    def onCatalogLMChanged(self):
+        """Handle catalog LM spinbox change."""
+        self.sigCatalogLMChanged.emit(self.catalog_lm_spinbox.value())
+
+    def setCatalogLM(self, value):
+        """Update the catalog LM spinbox without triggering signal."""
+        self.catalog_lm_spinbox.blockSignals(True)
+        self.catalog_lm_spinbox.setValue(value)
+        self.catalog_lm_spinbox.blockSignals(False)
 
     def updateStatus(self, using_override, star_count=None):
         """Update the status label to show current detection source."""
@@ -3483,6 +3515,9 @@ class SettingsWidget(QtWidgets.QWidget):
 
     def updateLimMag(self):
         self.lim_mag.setValue(self.gui.cat_lim_mag)
+        # Sync with Star Detection panel (if it exists - may not during init)
+        if hasattr(self.gui, 'tab') and hasattr(self.gui.tab, 'star_detection'):
+            self.gui.tab.star_detection.setCatalogLM(self.gui.cat_lim_mag)
 
     def onGammaChanged(self):
         gamma_value = self.img_gamma.value()
@@ -3518,6 +3553,9 @@ class SettingsWidget(QtWidgets.QWidget):
         self.gui.catalog_stars = self.gui.loadCatalogStars(self.gui.cat_lim_mag)
         self.gui.updateLeftLabels()
         self.gui.updateStars()
+
+        # Sync with Star Detection panel
+        self.gui.tab.star_detection.setCatalogLM(self.gui.cat_lim_mag)
 
     def populateCatalogList(self):
         """Populate the catalog combo box with available catalogs."""
