@@ -7069,8 +7069,13 @@ class PlateTool(QtWidgets.QMainWindow):
                     else:
                         (
                             self.x_centroid, self.y_centroid, self.star_fwhm,
-                            _, self.snr_centroid, self.saturated_centroid
+                            source_intens, self.snr_centroid, self.saturated_centroid
                         ) = self.centroid()
+
+                        # Skip detections with non-positive intensity (matches ExtractStars behavior)
+                        if source_intens <= 0:
+                            print("Skipping detection: non-positive intensity ({:.1f})".format(source_intens))
+                            return
 
                     if (modifiers & QtCore.Qt.AltModifier or QtCore.Qt.Key_0 in self.keys_pressed) and \
                             self.img.img_handle.input_type == 'dfn':
