@@ -1513,6 +1513,7 @@ class Platepar(object):
                             method='Nelder-Mead',
                             options=opt_options_final,
                         )
+                        fwd_status = "maxiter" if res.nit >= opt_options_final['maxiter'] else "converged"
 
                         # Update fitted astrometric parameters (Unnormalize the pointing parameters)
                         ra_ref, dec_ref, pos_angle_ref, F_scale = res.x[:4]
@@ -1532,13 +1533,20 @@ class Platepar(object):
                         p0 += self.x_poly_fwd.tolist()
 
                         ### REVERSE MAPPING FIT ###
+                        # Initialize reverse fit from forward coefficients as starting point
+                        # This provides a much better initial guess than zeros, especially for
+                        # cameras with extreme distortion center offset where the optimizer
+                        # can diverge when starting from zeros
+                        rev_init = self.x_poly_fwd.copy()
+                        rev_maxiter = 10000
                         res_rev = scipy.optimize.minimize(
                             _calcImageResidualsDistortion,
-                            self.x_poly_rev,
+                            rev_init,
                             args=(self, jd, catalog_stars, img_stars, 'radial'),
                             method='Nelder-Mead',
-                            options={'maxiter': 10000, 'adaptive': True},
+                            options={'maxiter': rev_maxiter, 'adaptive': True},
                         )
+                        rev_status = "maxiter" if res_rev.nit >= rev_maxiter else "converged"
 
                         self.x_poly_rev = res_rev.x
 
@@ -1546,9 +1554,8 @@ class Platepar(object):
                         fwd_change = np.max(np.abs(self.x_poly_fwd - prev_x_poly_fwd))
                         rev_change = np.max(np.abs(self.x_poly_rev - prev_x_poly_rev))
 
-                        if fwd_rev_iter > 0:
-                            print("    Fwd-rev iteration {}: fwd_change={:.2e}, rev_change={:.2e}".format(
-                                fwd_rev_iter + 1, fwd_change, rev_change))
+                        print("    Fwd-rev iteration {}: fwd_change={:.2e} ({}), rev_change={:.2e} ({})".format(
+                            fwd_rev_iter + 1, fwd_change, fwd_status, rev_change, rev_status))
 
                         if fwd_change < convergence_threshold and rev_change < convergence_threshold:
                             if fwd_rev_iter > 0:
