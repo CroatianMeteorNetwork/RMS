@@ -3964,7 +3964,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 return
 
             # Filter catalog to stars actually in FOV (prevents back-projection issues)
-            _, deep_catalog_fov = self.filterCatalogStarsInsideFOV(deep_catalog)
+            # Pass lim_mag explicitly to avoid using self.cat_lim_mag which may differ
+            _, deep_catalog_fov = self.filterCatalogStarsInsideFOV(deep_catalog, lim_mag=deep_catalog_lm)
             if len(deep_catalog_fov) == 0:
                 qmessagebox(message="No catalog stars visible in FOV.",
                     title="Tuning Error", message_type="warning")
@@ -4076,13 +4077,14 @@ class PlateTool(QtWidgets.QMainWindow):
                 return
 
             # Phase 2: Sweep intensity threshold from high to low with best segment
-            # Early exit when we hit stopping criteria to save time
+            # Continue until we see clear degradation, then analyze all results
             print(f"\n  Phase 2: Intensity threshold sweep (segment_radius={best_segment})")
             intensity_values = list(range(40, 2, -1))  # 40 down to 3
 
-            # Collect results, with lenient early exit to see the "elbow"
-            # We'll pick the best threshold from collected data using a score function
+            # Collect results - we'll analyze the full curve to find optimal point
             results = []  # (threshold, n_true_pos, n_false_pos, n_detected)
+            max_true_pos_seen = 0
+            true_pos_plateau_count = 0
 
             for i, intensity in enumerate(intensity_values):
                 self.status_bar.showMessage(f"Tuning... threshold sweep {intensity}")
@@ -4098,10 +4100,26 @@ class PlateTool(QtWidgets.QMainWindow):
                     print(f"    threshold={intensity:2d}: detected={n_detected:3d}, "
                           f"true_pos={n_true_pos:3d}, false_pos={n_false_pos:3d}, fp_ratio={fp_ratio:.2f}")
 
-                    # Lenient early exit - just to avoid running forever
-                    # We overshoot a bit to see the elbow, then pick best from results
-                    if fp_ratio > 0.25:
-                        print(f"    -> Stopping: fp_ratio {fp_ratio:.2f} > 0.25")
+                    # Track if true_pos has plateaued (not increasing)
+                    if n_true_pos > max_true_pos_seen:
+                        max_true_pos_seen = n_true_pos
+                        true_pos_plateau_count = 0
+                    else:
+                        true_pos_plateau_count += 1
+
+                    # Smart exit conditions:
+                    # 1. fp_ratio > 0.7 - too much noise, unlikely to improve
+                    # 2. true_pos plateaued for 5+ steps AND fp_ratio > 0.4 - diminishing returns
+                    # 3. precision < 0.3 - mostly detecting noise
+                    precision = n_true_pos / n_detected
+                    if fp_ratio > 0.7:
+                        print(f"    -> Stopping: fp_ratio {fp_ratio:.2f} > 0.7 (too noisy)")
+                        break
+                    if true_pos_plateau_count >= 5 and fp_ratio > 0.4:
+                        print(f"    -> Stopping: true_pos plateaued for {true_pos_plateau_count} steps, fp_ratio={fp_ratio:.2f}")
+                        break
+                    if precision < 0.3:
+                        print(f"    -> Stopping: precision {precision:.2f} < 0.3 (mostly noise)")
                         break
                 else:
                     # No detections (too many candidates) - stop here
@@ -4325,10 +4343,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def _findOptimalThreshold(self, results):
         """
-        Find the optimal intensity threshold from sweep results.
+        Find the optimal intensity threshold from sweep results using elbow detection.
 
-        Strategy: Use a score function to balance true positives vs false positives.
-        Score = true_pos - 2*false_pos (penalize false positives)
+        Strategy: Find the "elbow" where marginal cost (additional FP per additional TP)
+        explodes. This adapts to each image's noise characteristics rather than using
+        a fixed precision cutoff.
 
         Arguments:
             results: List of (threshold, n_true_pos, n_false_pos, n_detected) tuples,
@@ -4345,26 +4364,63 @@ class PlateTool(QtWidgets.QMainWindow):
         if not valid:
             return 20
 
-        # Score function: maximize true positives while penalizing false positives
-        # Higher penalty (2x) on false positives to prefer cleaner detections
-        def score(tp, fp):
-            return tp - 2 * fp
+        # Parameters for elbow detection
+        max_marginal_cost = 2.0  # Stop when gaining >2 FP per TP
+        min_precision = 0.80     # Safety floor - don't go below 80% precision
+
+        # Results are sorted high threshold to low (40, 39, 38, ...)
+        # As threshold decreases, TP and FP both increase
+        # We want to find where marginal cost exceeds the limit
 
         best_threshold = valid[0][0]
-        best_score = score(valid[0][1], valid[0][2])
+        best_tp = valid[0][1]
+        best_fp = valid[0][2]
+        best_det = valid[0][3]
+        elbow_reason = "first valid"
 
-        for threshold, true_pos, false_pos, detected in valid:
-            s = score(true_pos, false_pos)
-            if s > best_score:
-                best_score = s
-                best_threshold = threshold
+        prev_tp = valid[0][1]
+        prev_fp = valid[0][2]
 
-        # Print the selection reasoning
-        best_result = next((r for r in valid if r[0] == best_threshold), None)
-        if best_result:
-            t, tp, fp, det = best_result
-            print(f"    -> Best: threshold={t}, true_pos={tp}, false_pos={fp}, "
-                  f"score={score(tp, fp)}")
+        for i in range(1, len(valid)):
+            threshold, tp, fp, det = valid[i]
+            precision = tp / det if det > 0 else 0
+
+            # Calculate marginal cost from previous threshold
+            delta_tp = tp - prev_tp
+            delta_fp = fp - prev_fp
+
+            if delta_tp > 0:
+                marginal_cost = delta_fp / delta_tp
+            else:
+                # No gain in TP, any FP increase is infinite cost
+                marginal_cost = float('inf') if delta_fp > 0 else 0
+
+            # Check stopping conditions
+            if marginal_cost > max_marginal_cost:
+                elbow_reason = f"marginal cost {marginal_cost:.1f} > {max_marginal_cost}"
+                print(f"    -> Elbow at threshold={threshold}: {elbow_reason} "
+                      f"(+{delta_tp} TP, +{delta_fp} FP)")
+                break
+
+            if precision < min_precision:
+                elbow_reason = f"precision {precision:.0%} < {min_precision:.0%}"
+                print(f"    -> Elbow at threshold={threshold}: {elbow_reason}")
+                break
+
+            # This threshold is acceptable, update best
+            best_threshold = threshold
+            best_tp = tp
+            best_fp = fp
+            best_det = det
+            elbow_reason = "last acceptable"
+
+            prev_tp = tp
+            prev_fp = fp
+
+        # Print selection
+        prec = best_tp / best_det if best_det > 0 else 0
+        print(f"    -> Selected: threshold={best_threshold}, true_pos={best_tp}, "
+              f"false_pos={best_fp}, precision={prec:.0%}")
 
         return best_threshold
 
@@ -9238,7 +9294,8 @@ class PlateTool(QtWidgets.QMainWindow):
         return not_masked
 
 
-    def filterCatalogStarsInsideFOV(self, catalog_stars, remove_under_horizon=True, sort_declination=False):
+    def filterCatalogStarsInsideFOV(self, catalog_stars, remove_under_horizon=True, sort_declination=False,
+                                      lim_mag=None):
         """ Take only catalogs stars which are inside the FOV.
 
         Arguments:
@@ -9249,6 +9306,7 @@ class PlateTool(QtWidgets.QMainWindow):
             remove_under_horizon: [bool] Remove stars below the horizon (-5 deg below).
             sort_declination: [bool] Sort the stars by descending declination. Only needs to be done for geo
                 points.
+            lim_mag: [float] Limiting magnitude for filtering. If None, uses self.cat_lim_mag.
         """
 
         if sort_declination:
@@ -9268,8 +9326,10 @@ class PlateTool(QtWidgets.QMainWindow):
         jd = date2JD(*self.img_handle.currentTime())
 
         # Take only those stars which are inside the FOV
+        # Use passed lim_mag if provided, otherwise fall back to self.cat_lim_mag
+        effective_lim_mag = lim_mag if lim_mag is not None else self.cat_lim_mag
         filtered_indices, filtered_catalog_stars = subsetCatalog(catalog_stars, ra_centre, dec_centre, \
-            jd, self.platepar.lat, self.platepar.lon, fov_radius, self.cat_lim_mag, \
+            jd, self.platepar.lat, self.platepar.lon, fov_radius, effective_lim_mag, \
             remove_under_horizon=remove_under_horizon)
 
         filtered_catalog_stars = np.array(filtered_catalog_stars)
