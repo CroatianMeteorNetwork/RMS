@@ -1096,14 +1096,14 @@ class Platepar(object):
                     normal_subset_fraction = 0.5    # Remaining iterations: 50%
                     all_indices = np.arange(n_stars)
 
-                    # Compute radial distance from image center for weighted threshold
-                    # Edge stars have larger errors due to lens distortion
-                    cx, cy = self.X_res / 2.0, self.Y_res / 2.0
+                    # Get detected star positions (used for radial distance computation)
                     img_x_all, img_y_all, _ = img_stars.T
-                    r = np.sqrt((img_x_all - cx)**2 + (img_y_all - cy)**2)
-                    r_max = np.sqrt(cx**2 + cy**2)  # Corner distance
-                    # Scale threshold: allow 2x error at edges vs center
-                    radial_scale = 1.0 + (r / r_max)  # Range [1.0, 2.0]
+
+                    # Initial radial_scale using image center (updated in loop with distortion center)
+                    cx_init, cy_init = self.X_res / 2.0, self.Y_res / 2.0
+                    r_init = np.sqrt((img_x_all - cx_init)**2 + (img_y_all - cy_init)**2)
+                    r_max = np.sqrt(cx_init**2 + cy_init**2)  # Corner distance
+                    radial_scale = 1.0 + (r_init / r_max)  # Range [1.0, 2.0]
 
                     # Save original distortion type for final fit
                     original_dist_type = self.distortion_type
