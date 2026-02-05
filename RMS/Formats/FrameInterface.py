@@ -31,25 +31,57 @@ from RMS.Formats.Vid import VidStruct
 from RMS.GeoidHeightEGM96 import wgs84toMSLHeight
 from RMS.Routines import Image
 from RMS.Routines.GstreamerCapture import GstVideoFile
+from RMS.Logger import getLogger
+
+# Get the logger from the main module
+log = getLogger("rmslogger")
 
 
-# If there is not display, messagebox will simply print to the console
-if os.environ.get('DISPLAY') is None:
-    messagebox = lambda title, message: print(title + ': ' + message)
-
-else:
-
-    # Try importing a Qt message box if available
+# Define a single, safe messagebox function
+def messagebox(title, message):
+    """
+    Displays a message box if a GUI is available, otherwise prints to the console.
+    It prioritizes Qt if a QApplication instance is running, then falls back
+    to Tkinter, and finally to the console.
+    """
+    
+    # First, try Qt. This is the most specific and desired case.
     try:
-        from RMS.Routines.CustomPyqtgraphClasses import qmessagebox as messagebox
-    except:
+        # We must import QApplication to check for an instance
+        from PyQt5.QtWidgets import QApplication, QMessageBox
+        
+        # Check if a QApplication instance already exists
+        if QApplication.instance():
+            # If it exists, we can safely create and show a message box
+            msg_box = QMessageBox()
+            msg_box.setWindowTitle(title)
+            msg_box.setText(message)
+            msg_box.exec_()
+            return # Success, so we exit the function
+    except ImportError:
+        # This means PyQt5 (or your chosen binding) is not installed.
+        # We'll just pass and try the next option.
+        pass
 
-        # Otherwise import a tk message box
-        # tkinter import that works on both Python 2 and 3
+    # Second, check for a display and try Tkinter as a fallback
+    if os.environ.get('DISPLAY'):
         try:
+            # tkinter is part of the standard library
+            import tkinter as tk
             from tkinter import messagebox
-        except:
-            import tkMessageBox as messagebox
+            
+            # We need to create a temporary, hidden root window
+            root = tk.Tk()
+            root.withdraw() # Hide the main window
+            messagebox.showinfo(title, message)
+            root.destroy() # Clean up the root window
+            return # Success
+        except ImportError:
+            # Should be rare, but if tkinter is missing
+            pass
+            
+    # Ultimate fallback: if no GUI is available or works, print to console
+    print(f"{title}: {message}")
 
 
 GST_IMPORTED = False
@@ -198,12 +230,12 @@ class InputTypeFRFF(InputType):
         self.byteswap = False
 
         if self.single_ff:
-            print('Using file:', self.dir_path)
+            log.debug('Using file: {}'.format(self.dir_path))
         else:
             if use_fr_files:
-                print('Using FF and/or FR files from:', self.dir_path)
+                log.debug('Using FF and/or FR files from: {}'.format(self.dir_path))
             else:
-                print('Using FF files from:', self.dir_path)
+                log.debug('Using FF files from: {}'.format(self.dir_path))
 
 
         # List of FF and FR file names
@@ -1097,7 +1129,7 @@ class InputTypeVideo(InputType):
 
 
 class InputTypeUWOVid(InputType):
-    def __init__(self, file_path, config, detection=False, chunk_frames=128):
+    def __init__(self, file_path, config, detection=False, chunk_frames=128, flipud=False):
         """ Input file type handle for UWO .vid files.
         
         Arguments:
@@ -1124,6 +1156,8 @@ class InputTypeUWOVid(InputType):
         if chunk_frames is None:
             chunk_frames = 128
         self.chunk_frames = chunk_frames
+
+        self.flipud = flipud
 
         self.ff = None
 
@@ -1266,6 +1300,10 @@ class InputTypeUWOVid(InputType):
             # Add the unix time to list
             self.frame_chunk_unix_times.append(unix_time)
 
+            # Flip the frame if needed
+            if self.flipud:
+                frame = np.flipud(frame)
+
             # Add frame for FF processing (the frame should already be uint16)
             ff_struct_fake.addFrame(frame)
 
@@ -1351,6 +1389,10 @@ class InputTypeUWOVid(InputType):
         unix_time_lst = (self.vid.ts, self.vid.tu)
         if unix_time_lst not in self.utime_frame_dict:
             self.utime_frame_dict[self.current_frame] = unix_time_lst
+
+        # Flip the frame if needed
+        if self.flipud:
+            frame = np.flipud(frame)
 
         return frame
 
@@ -1624,9 +1666,9 @@ class InputTypeImages(object):
                 self.config.longitude = self.fripon_header["SITELONG"]
                 self.config.elevation = self.fripon_header["SITEELEV"] # MSL
 
-                # Set the catalog to BSC5
+                # Set the catalog to the GMN catalog
                 self.config.star_catalog_path = os.path.join(self.config.rms_root_dir, "Catalogs")
-                self.config.star_catalog_file = "BSC5"
+                self.config.star_catalog_file = "GMN_StarCatalog"
 
                 # Set approximate FOV
                 self.config.fov_h = 180
@@ -1958,7 +2000,10 @@ class InputTypeImages(object):
 
                 # Load the frame time
                 timestamp_stripped = head["DATE-OBS"].strip("=").strip("'").strip()
-                self.dt_frame_time = datetime.datetime.strptime(timestamp_stripped, "%Y-%m-%dT%H:%M:%S.%f")
+                try:
+                    self.dt_frame_time = datetime.datetime.strptime(timestamp_stripped, "%Y-%m-%dT%H:%M:%S.%f")
+                except ValueError:
+                    self.dt_frame_time = datetime.datetime.strptime(timestamp_stripped, "%Y-%m-%dT%H:%M:%S")
 
                 # If CABERNET is used, set a fixed FPS
                 if "COMMENT" in head:
@@ -2464,7 +2509,7 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
         # If FR files are not used, only check for FF files
         if not use_fr_files:
             if not any([validFFName(ff_file) for ff_file in os.listdir(input_dir)]):
-                print("No FF files found in directory!")
+                log.info("No FF files found in directory!")
                 return None
 
 

@@ -83,7 +83,19 @@ def angularSeparationDeg(ra1, dec1, ra2, dec2):
 def angularSeparationVect(vect1, vect2):
     """ Calculates angle between vectors in radians. """
 
-    return np.abs(np.arccos(np.dot(vect1, vect2)))
+    # The dot product gives |a||b|cos(theta). If the vectors are not normalized the
+    # magnitude term will incorrectly scale the value passed to arccos which can
+    # yield wildly wrong angles (and even NaNs if the product exceeds 1).  Ensure
+    # both vectors are normalized before evaluating the inverse cosine and clip
+    # the dot product into the valid range to avoid numerical issues.
+    vect1_norm = vect1/np.linalg.norm(vect1)
+    vect2_norm = vect2/np.linalg.norm(vect2)
+
+    # Numerical precision can push the dot product slightly outside the range,
+    # so clamp it to the closed interval [-1, 1].
+    dot_prod = np.clip(np.dot(vect1_norm, vect2_norm), -1.0, 1.0)
+
+    return np.abs(np.arccos(dot_prod))
 
 
 
@@ -294,6 +306,60 @@ def pointInsideConvexPolygonSphere(points, vertices):
 
     # Call the new function to check if the points are inside the polygon
     return sphericalPolygonCheck(vertices, points)
+
+
+def sphericalPolygonArea(points):
+    """ Computes the area of a spherical polygon given its vertices.
+
+    This method uses a formula based on the surveyor's formula (or shoelace
+    formula) adapted for a sphere. It is more robust than implementations
+    of Girard's theorem for polygons that cross the RA=0/360 meridian.
+    It requires unwrapped longitude (RA) coordinates.
+
+    Arguments:
+        points: [list of tuples or Nx2 numpy array] A list of (RA, Dec) 
+            points in degrees for the polygon vertices. RA coordinates must be
+            "unwrapped" (i.e., continuous and not confined to 0-360).
+
+    Return:
+        [float] The area of the polygon in square degrees.
+
+    """
+
+    # A polygon must have at least 3 vertices.
+    if len(points) < 3:
+        return 0.0
+
+    # Convert points to radians
+    points_rad = np.radians(points)
+    
+    # Extract unwrapped RA and Dec from the input points
+    ra_rad = points_rad[:, 0]
+    dec_rad = points_rad[:, 1]
+    
+    # We use the spherical adaptation of the surveyor's formula.
+    # It calculates the signed area by summing the areas of trapezoids 
+    # formed by each polygon segment and lines of longitude.
+    # Area = sum[ (ra_{i+1} - ra_i)*(sin(dec_{i+1}) + sin(dec_i))/2 ]
+    
+    # To ensure the polygon is closed, we calculate the sum over the segments
+    # by pairing each vertex with the next, wrapping around at the end.
+    i = np.arange(len(ra_rad))
+    i_next = (i + 1) % len(ra_rad)
+
+    # Calculate the difference in RA for each segment
+    delta_ra = ra_rad[i_next] - ra_rad[i]
+
+    # Sum of sines of declination for each segment
+    sum_sin_dec = np.sin(dec_rad[i_next]) + np.sin(dec_rad[i])
+
+    # Sum the signed areas of the trapezoids
+    total_area_rad = np.sum(delta_ra*sum_sin_dec)/2.0
+
+    # The result is in steradians. Take the absolute value and convert to square degrees.
+    area_sq_deg = np.abs(total_area_rad*np.degrees(1)**2)
+
+    return area_sq_deg
 
 
 ##############################################################################################################

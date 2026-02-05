@@ -2,39 +2,38 @@
 
 from __future__ import print_function, division, absolute_import
 
+import logging
 import sys
 import os
 import ctypes
 import multiprocessing
 import time
-import datetime
-import logging
-
-import binascii
 import paramiko
 
+from RMS.Logger import LoggingManager, getLogger
+
 # Suppress Paramiko internal errors before they appear in logs
-logging.getLogger("paramiko.transport").setLevel(logging.CRITICAL)
-logging.getLogger("paramiko.auth_handler").setLevel(logging.CRITICAL)
+getLogger("paramiko.transport").setLevel(logging.CRITICAL)
+getLogger("paramiko.auth_handler").setLevel(logging.CRITICAL)
 
 from multiprocessing import Manager
 
-try:
+if sys.version_info >= (3, 3):
     from queue import Empty  # Python 3
-except ImportError:
+else:
     from Queue import Empty  # Python 2
 
 QueueEmpty = Empty
 
 
-from RMS.Misc import mkdirP, RmsDateTime
+from RMS.Misc import mkdirP, UTCFromTimestamp
 
 # Map FileNotFoundError to IOError in Python 2 as it does not exist
 if sys.version_info[0] < 3:
     FileNotFoundError = IOError
 
 # Get the logger from the main module
-log = logging.getLogger("logger")
+log = logging.getLogger("rmslogger")
 
 
 def existsRemoteDirectory(sftp,path):
@@ -145,8 +144,8 @@ def getSSHClient(hostname,
     Handles key-based authentication first, then falls back to the SSH agent.
     Returns an SSH client or None.
     """
-    log.info("Paramiko version: {}".format(paramiko.__version__))
-    log.info("Establishing SSH connection to: {}:{}...".format(hostname, port))
+    log.debug("Paramiko version: {}".format(paramiko.__version__))
+    log.debug("Establishing SSH connection to: {}:{}...".format(hostname, port))
 
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -164,12 +163,12 @@ def getSSHClient(hostname,
                 auth_timeout=auth_timeout,
                 look_for_keys=False
             )
-            log.info("SSHClient connected successfully (key file).")
+            log.debug("SSHClient connected successfully (key file).")
 
             transport = ssh.get_transport()
             if transport and keepalive_interval > 0:
                 transport.set_keepalive(keepalive_interval)
-                log.info("Keepalive set to {} seconds".format(keepalive_interval))
+                log.debug("Keepalive set to {} seconds".format(keepalive_interval))
 
             return ssh
 
@@ -195,7 +194,7 @@ def getSSHClient(hostname,
             banner_timeout=banner_timeout,
             auth_timeout=auth_timeout
         )
-        log.info("SSHClient connected via agent fallback.")
+        log.debug("SSHClient connected via agent fallback.")
         return ssh
 
     except paramiko.AuthenticationException:
@@ -226,7 +225,7 @@ def getSFTPClient(ssh):
         # sftp = await asyncio.wait_for(open_sftp_async(ssh), timeout=30)
 
         sftp = ssh.open_sftp()
-        log.info("SFTP connection established.")
+        log.debug("SFTP connection established.")
         return sftp
 
     except Exception as e:
@@ -313,7 +312,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
 
         # Optionally ensure remote directory exists
         if allow_dir_creation:
-            log.info("Checking/creating remote dir '{}'".format(dir_remote))
+            log.debug("Checking/creating remote dir '{}'".format(dir_remote))
             if not existsRemoteDirectory(sftp, dir_remote):
                 createRemoteDirectory(sftp, dir_remote)
 
@@ -342,7 +341,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                 
                 # If the remote and the local file are of the same size, skip it
                 if local_file_size == remote_info.st_size:
-                    log.info("The file '{}' already exists on the server and is the same size. Skipping.".format(remote_file))
+                    log.debug("The file '{}' already exists on the server and is the same size. Skipping.".format(remote_file))
                     continue
             
             except IOError as e:
@@ -400,7 +399,8 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                                     formatSize(tracker.uploaded_bytes),
                                     formatSize(tracker.total_bytes),
                                     transfer_rate_str,
-                                    time_str
+                                    time_str,
+                                    end=''
                                 ))
                             else:
                                 # At 100%, show "complete" instead of remaining time
@@ -417,7 +417,8 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                                         os.path.basename(local_file),
                                         formatSize(tracker.uploaded_bytes),
                                         formatSize(tracker.total_bytes),
-                                        transfer_rate_str
+                                        transfer_rate_str,
+                                        end=''
                                     ))
                         
                         else:
@@ -425,7 +426,8 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                                 percent_complete,
                                 os.path.basename(local_file),
                                 formatSize(tracker.uploaded_bytes),
-                                formatSize(tracker.total_bytes)
+                                formatSize(tracker.total_bytes), 
+                                end=''
                             ))
                         
                         tracker.last_percent = percent_complete
@@ -434,7 +436,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
             log.info('Starting upload of ' \
                      + local_file + ' ({}) to '.format(formatSize(local_file_size)) + remote_file)
             sftp.put(local_file, remote_file, callback=progressCallback)
-            log.info("Upload completed, verifying...")
+            log.debug("Upload completed, verifying...")
 
             # Check that the size of the remote file is correct, indicating a successful upload
             remote_info = sftp.lstat(remote_file)
@@ -445,7 +447,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                     formatSize(local_file_size), formatSize(remote_info.st_size)))
                 return False
 
-            log.info("File upload verified: {:s}".format(remote_file))
+            log.debug("File upload verified: {:s}".format(remote_file))
             
         return True
 
@@ -456,10 +458,10 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
     finally:
         # Close SFTP and SSH if open
         if sftp is not None:
-            log.info("Closing SFTP channel")
+            log.debug("Closing SFTP channel")
             sftp.close()
         if ssh is not None:
-            log.info("Closing SSH client connection")
+            log.debug("Closing SSH client connection")
             ssh.close()
 
 # Helper function to format file sizes in human-readable format
@@ -497,12 +499,25 @@ class UploadManager(multiprocessing.Process):
         self.exit = multiprocessing.Event()
         self.upload_in_progress = multiprocessing.Value(ctypes.c_bool, False)
 
+        # These timing variables must be shared between processes using multiprocessing.Value() because
+        # 
+        # - When upload_manager.start() is called, it creates a NEW process with its own memory space
+        # - The parent process (StartCapture) and child process (UploadManager) have separate instances
+        # - Parent calls addFiles() and delayNextUpload() to control timing
+        # - Child runs the upload loop and checks these timing variables
+        # - Without shared memory, parent's timing changes are invisible to child process
+        # - This caused upload delays to be ignored and coordination issues during shutdown
+        #
+        # Using multiprocessing.Value() creates shared memory that both processes can access
+        # Value format: 'd' = double precision float (for timestamp storage)
+        # Convention: 0.0 = None/not set, >0.0 = unix timestamp
+        
         # Time when the upload was run last
-        self.last_runtime = None
+        self.last_runtime = multiprocessing.Value('d', 0.0)
         self.last_runtime_lock = multiprocessing.Lock()
 
         # Time when the next upload should be run (used for delaying the upload)
-        self.next_runtime = None
+        self.next_runtime = multiprocessing.Value('d', 0.0)
         self.next_runtime_lock = multiprocessing.Lock() 
 
         
@@ -542,6 +557,9 @@ class UploadManager(multiprocessing.Process):
         else:
             log.info("UploadManager terminated (after forced terminate).")
 
+        # Always join to reap zombie (returns instantly if already dead)
+        self.join()
+
 
 
     def addFiles(self, file_list):
@@ -567,7 +585,7 @@ class UploadManager(multiprocessing.Process):
 
             # Make sure the data gets uploaded right away
             with self.last_runtime_lock:
-                self.last_runtime = None
+                self.last_runtime.value = 0.0
 
 
     def getFileList(self):
@@ -695,7 +713,7 @@ class UploadManager(multiprocessing.Process):
             failed files to disk. 
 
         Keyword arguments:
-            retries: [int] Number of tried to upload a file before giving up.
+            retries: [int] Number of tried to upload a file before giving up. Default is 5.
         """
 
         # Skip uploading if the upload is already in progress
@@ -706,58 +724,65 @@ class UploadManager(multiprocessing.Process):
         # Set flag that the upload as in progress
         self.upload_in_progress.value = True
 
-        # Read the file list from disk
-        self.loadQueue()
+        try:
+            # Read the file list from disk
+            self.loadQueue()
 
-        tries = 0
+            tries = 0
 
-        # Go through every file and upload it to server
-        while True:
+            # Go through every file and upload it to server
+            while True:
 
-            # Get a file from the queue
-            with self.file_queue_lock:
-                try:
-                    file_name = self.file_queue.get(timeout=1)
-                except QueueEmpty:
-                    break  # nothing left to do
-
-            if not os.path.isfile(file_name):
-                log.warning("Local file not found: {:s}".format(file_name))
-                log.warning("Skipping it...")
-                continue
-
-            # Separate the path to the file and the file name
-            data_path, f_name = os.path.split(file_name)
-
-            # Upload the file via SFTP (use the lowercase version of the station ID as the username)
-            upload_status = uploadSFTP(self.config.hostname, self.config.stationID.lower(), data_path, \
-                self.config.remote_dir, [f_name], rsa_private_key=self.config.rsa_private_key, 
-                port=self.config.host_port)
-
-            # If the upload was successful, rewrite the holding file, which will remove the uploaded file
-            if upload_status:
-                log.info('Upload successful!')
-                self.saveQueue(overwrite=True)
-                tries = 0
-
-            # If the upload failed, put the file back on the list and wait a bit
-            else:
-
-                log.warning('Uploading failed! Retry {:d} of {:d}'.format(tries + 1, retries))
-
-                tries += 1 
+                # Get a file from the queue
                 with self.file_queue_lock:
-                    self.file_queue.put(file_name)
+                    try:
+                        file_name = self.file_queue.get(timeout=1)
+                    except QueueEmpty:
+                        break  # nothing left to do
 
-                # Given the network a moment to recover between attempts
-                time.sleep(10)
+                if not os.path.isfile(file_name):
+                    log.warning("Local file not found: {:s}".format(file_name))
+                    log.warning("Skipping it...")
+                    continue
 
-            # Check if the upload was tried too many times
-            if tries >= retries:
-                break
+                # Separate the path to the file and the file name
+                data_path, f_name = os.path.split(file_name)
 
-        # Set the flag that the upload is done
-        self.upload_in_progress.value = False
+                # Upload the file via SFTP (use the lowercase version of the station ID as the username)
+                upload_status = uploadSFTP(self.config.hostname, self.config.stationID.lower(), data_path, \
+                    self.config.remote_dir, [f_name], rsa_private_key=self.config.rsa_private_key, 
+                    port=self.config.host_port)
+
+                # If the upload was successful, rewrite the holding file, which will remove the uploaded file
+                if upload_status:
+                    log.info('Upload successful!')
+                    self.saveQueue(overwrite=True)
+                    tries = 0
+
+                # If the upload failed, put the file back on the list and wait a bit
+                else:
+
+                    log.warning('Uploading failed! Retry {:d} of {:d}'.format(tries + 1, retries))
+
+                    tries += 1 
+                    with self.file_queue_lock:
+                        self.file_queue.put(file_name)
+
+                    # Progressive retry delay: 15s * 2^(attempt-1), capped at 8 minutes
+                    delay = min(15*(2**(tries - 1)), 480)
+                    if delay < 60:
+                        log.info("Waiting %.0f s before next retry...", delay)
+                    else:
+                        log.info("Waiting %.1f min before next retry...", delay/60)
+                    time.sleep(delay)
+
+                # Check if the upload was tried too many times
+                if tries >= retries:
+                    break
+
+        finally:
+            # Set the flag that the upload is done
+            self.upload_in_progress.value = False
 
 
     def delayNextUpload(self, delay=0):
@@ -765,14 +790,15 @@ class UploadManager(multiprocessing.Process):
 
         # Set the next run time using a delay
         with self.next_runtime_lock:
-            self.next_runtime = RmsDateTime.utcnow() + datetime.timedelta(seconds=delay)
+            self.next_runtime.value = time.time() + delay
 
             if delay > 0:
                 # Log the delay
-                log.info("Upload delayed for {:.1f} min until {:s}".format(delay/60, str(self.next_runtime)))
+                next_time_str = UTCFromTimestamp.utcfromtimestamp(self.next_runtime.value).strftime('%Y-%m-%d %H:%M:%S')
+                log.info("Upload delayed for {:.1f} min until {:s} UTC".format(delay/60, next_time_str))
             else:
                 # Log that the upload will run immediately
-                log.info("Upload will run immediately at {:s}".format(str(self.next_runtime)))
+                log.info("Upload will run immediately")
 
 
 
@@ -783,28 +809,28 @@ class UploadManager(multiprocessing.Process):
         self.loadQueue()
 
         with self.last_runtime_lock:
-            self.last_runtime = None
+            self.last_runtime.value = 0.0
 
         while not self.exit.is_set():
 
             with self.last_runtime_lock:
 
                 # Check if the upload should be run (if 15 minutes are up)
-                if self.last_runtime is not None:
-                    if (RmsDateTime.utcnow() - self.last_runtime).total_seconds() < 15*60:
+                if self.last_runtime.value > 0:
+                    if (time.time() - self.last_runtime.value) < 15*60:
                         time.sleep(1)
                         continue
 
             with self.next_runtime_lock:
 
                 # Check if the upload delay is up
-                if self.next_runtime is not None:
-                    if (RmsDateTime.utcnow() - self.next_runtime).total_seconds() < 0:
+                if self.next_runtime.value > 0:
+                    if time.time() < self.next_runtime.value:
                         time.sleep(1)
                         continue
 
             with self.last_runtime_lock:
-                self.last_runtime = RmsDateTime.utcnow()
+                self.last_runtime.value = time.time()
 
             # Run the upload procedure
             self.uploadData()
@@ -815,8 +841,6 @@ class UploadManager(multiprocessing.Process):
 
 
 if __name__ == "__main__":
-
-    from RMS.Logger import initLogging
 
     # Set up a fake config file
     class FakeConf(object):
@@ -866,7 +890,8 @@ if __name__ == "__main__":
     ### Test the upload manager ###
 
     # Init the logger
-    initLogging(config)
+    log_manager = LoggingManager()
+    log_manager.initLogging(config)
 
     up = UploadManager(config)
     up.start()

@@ -706,7 +706,6 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
     # Calculate magnitudes
     magnitude_data = calculateMagnitudes(level_data, radius_arr, platepar.mag_lev, platepar.vignetting_coeff)
 
-
     # Extinction correction
     if extinction_correction:
         magnitude_data = extinctionCorrectionApparentToTrue(magnitude_data, X_data, Y_data, JD_data[0], \
@@ -743,16 +742,21 @@ def raDecToXYPP(RA_data, dec_data, jd, platepar):
 
 
 
-def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=False):
+def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=False, exp_mag_corr=0.0):
     """ Given the meteor centroids and a platepar file, compute meteor astrometry and photometry (RA/Dec,
         alt/az, mag).
+    
     Arguments:
         ff_name: [str] Name of the FF file with the meteor.
         fps: [float] Frames per second of the video.
         meteor_meas: [list] A list of [calib_status, frame_n, x, y, ra, dec, azim, elev, inten, mag].
         platepar: [Platepar instance] Platepar which will be used for astrometry and photometry.
+
     Keyword arguments:
         add_calstatus: [bool] Add a column with calibration status at the beginning. False by default.
+        exp_mag_corr: [float] Magnitude correction to apply to the computed magnitudes (e.g. for exposure
+            time correction). 0.0 by default.
+
     Return:
         meteor_picks: [ndarray] A numpy 2D array of: [frames, X_data, Y_data, RA_data, dec_data, az_data,
         alt_data, level_data, magnitudes]
@@ -795,7 +799,10 @@ def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=
     # Convert image coordinates to RA and Dec, and do the photometry
     JD_data, RA_data, dec_data, magnitudes = xyToRaDecPP(np.array(time_data), X_data, Y_data, \
         level_data, platepar, measurement=True)
+    
 
+    # Apply exposure time magnitude correction
+    magnitudes += exp_mag_corr
 
     # Compute azimuth and altitude of centroids
     az_data = np.zeros_like(RA_data)
@@ -831,7 +838,7 @@ def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=
     return meteor_picks
 
 
-def applyPlateparToRaDecCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=False):
+def applyPlateparToRaDecCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=False, exp_mag_corr=0.0):
     """ Given the meteor centroids in RA and Dec, compute X,Y image coordiantes and Alt/Az, as well as the
         photometry. 
 
@@ -843,6 +850,8 @@ def applyPlateparToRaDecCentroids(ff_name, fps, meteor_meas, platepar, add_calst
 
     Keyword arguments:
         add_calstatus: [bool] Add a column with calibration status at the beginning. False by default.
+        exp_mag_corr: [float] Magnitude correction to apply to the computed magnitudes (e.g. for exposure
+            time correction). 0.0 by default.
 
     Return:
         meteor_picks: [ndarray] A numpy 2D array of: [frames, X_data, Y_data, RA_data, dec_data, az_data,
@@ -897,7 +906,9 @@ def applyPlateparToRaDecCentroids(ff_name, fps, meteor_meas, platepar, add_calst
     # Do the photometry
     JD_data, _, _, magnitudes = xyToRaDecPP(np.array(time_data), X_data, Y_data, \
                                             level_data, platepar, measurement=True)
-
+    
+    # Apply exposure time magnitude correction
+    magnitudes += exp_mag_corr
 
     # Compute azimuth and altitude of centroids
     az_data = np.zeros_like(RA_data)
@@ -1216,7 +1227,7 @@ def geoHt2XYInsideFOV(platepar, lat_arr, lon_arr, h_att, side_sample=10):
 
 
 def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, 
-                                 UT_corr=0, platepar=None, radec_input=False):
+                                 UT_corr=0, platepar=None, radec_input=False, exp_mag_corr=0.0):
     """ Use the given platepar to calculate the celestial coordinates of detected meteors from a FTPdetectinfo
         file and save the updates values.
 
@@ -1232,6 +1243,9 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file,
         radec_input: [bool] If True, the FTPdetectinfo file is expected to contain RA and Dec coordinates 
             which will be used to compute image coordinates and the photometry. If False, the FTPdetectinfo 
             file is expected to contain X and Y coordinates which will be used as input.
+        exp_mag_corr: [float] Magnitude correction to be applied to the computed magnitudes (e.g. for
+            exposure time correction between stars on long exposure images and meteors on short segments). 
+            0.0 by default.
 
     Return:
         None
@@ -1273,11 +1287,13 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file,
         if radec_input:
 
             # If RA/Dec are given, convert them to X,Y, alt/az, and compute the photometry
-            meteor_picks = applyPlateparToRaDecCentroids(ff_name, fps, meteor_meas, platepar)
+            meteor_picks = applyPlateparToRaDecCentroids(ff_name, fps, meteor_meas, platepar, 
+                                                         exp_mag_corr=exp_mag_corr)
 
         else:
             # Use X, Y coordinates as input to compute spherical coordinates and photometry
-            meteor_picks = applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar)
+            meteor_picks = applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, 
+                                                    exp_mag_corr=exp_mag_corr)
 
         # Add the calculated values to the final list
         meteor_list.append([ff_name, meteor_No, rho, phi, meteor_picks])

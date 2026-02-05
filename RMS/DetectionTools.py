@@ -36,7 +36,7 @@ import RMS.Routines.MorphCy as morph
 
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
@@ -71,7 +71,7 @@ def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
     if mask_path:
         mask = MaskImage.loadMask(mask_path)
 
-        log.info('Loaded mask: {:s}'.format(mask_path))
+        log.debug('Loaded mask: {:s}'.format(mask_path))
 
         # If the mask is all white, set it to None
         if (mask is not None) and np.all(mask.img == 255):

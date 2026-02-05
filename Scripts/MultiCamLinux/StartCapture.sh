@@ -53,29 +53,63 @@ else
 	sleep $2
 fi
 
-source ~/vRMS/bin/activate
-cd ~/source/RMS
+source "$HOME/vRMS/bin/activate"
+cd "$HOME/source/RMS"
 
-# Init log file
-LOGPATH=~/RMS_data/logs/
-LOGDATE=$(date +"%Y%m%d_%H%M%S")
-LOGSUFFIX="_log.txt"
-LOGFILE=$LOGPATH$LOGDATE$LOGSUFFIX
+configpath="/home/$(whoami)/source/Stations/$1/.config"
+echo "Using config from $configpath"
 
-mkdir -p $LOGPATH
+# ----- decide how we were launched ---------------------------------
+# real TTY (manual or .desktop launch)
+if [[ -t 1 ]]; then
+    # TTY mode: output goes to screen (no additional logging, RMS logs internally)
 
-# Log the output to a file (warning: this breaks Ctrl+C passing to StartCapture)
-#python -m RMS.StartCapture 2>&1 | tee $LOGFILE
+    python -u -m RMS.StartCapture -c "$configpath" &
+    child=$!
 
-configpath=/home/$(whoami)/source/Stations/$1/.config
-echo Using config from $configpath
-echo $configpath
+    # Handle signals: SIGINT (user Ctrl-C) shows message, SIGTERM (GRMSUpdater) doesn't
+    handle_signal() {
+        local sig=$1
+        
+        # Always forward SIGINT to Python (it handles this better than SIGTERM)
+        if [[ "$sig" == "TERM" ]]; then
+            kill -INT "$child" 2>/dev/null  # Forward SIGINT instead of SIGTERM
+        else
+            kill -"$sig" "$child" 2>/dev/null
+        fi
+        
+        wait "$child"
+        status=$?
+        
+        # Only show message for SIGINT (user Ctrl-C), not SIGTERM (automated)
+        if [[ "$sig" == "INT" ]]; then
+            read -n1 -r -p "Capture ended (exit $status) - press any key to close..."
+        fi
+        exit "$status"
+    }
+    
+    trap 'handle_signal INT' INT
+    trap 'handle_signal TERM' TERM
+    wait "$child"
+    status=$?
 
+    # keep the window open for inspection only when user-started (GRMS_AUTO is unset)
+    if [[ -z "${GRMS_AUTO:-}" ]]; then
+        read -n1 -r -p "Capture ended (exit $status) - press any key to close..."
+    fi
 
+    exit "$status"
 
+else
+    # no TTY (cron / GRMSUpdater / nohup etc.)
+    # Run Python as a child process so bash stays alive with the station ID
+    # in its command line - this allows GRMSUpdater to find and signal the process.
+    # Use job control to ensure proper signal handling and output inheritance.
+    set -m  # Enable job control
+    python -u -m RMS.StartCapture -c "$configpath" &
+    child=$!
 
-python -m RMS.StartCapture -c $configpath
-
-read -p "Press any key to continue... "
-
-$SHELL
+    # Forward SIGTERM as SIGINT to Python for graceful shutdown
+    trap 'kill -INT "$child" 2>/dev/null; wait "$child"; exit $?' TERM INT
+    wait "$child"
+fi

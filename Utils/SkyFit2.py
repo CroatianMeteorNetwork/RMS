@@ -10,21 +10,41 @@ import json
 import datetime
 import collections
 import glob
+import sys
+import traceback
+import random
+import copy
 
 import numpy as np
-import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-import scipy.optimize
-import pyqtgraph as pg
-import random
+try:
+    import pyqtgraph as pg
+except Exception as exc:
+    message = [
+        "SkyFit requires PyQtGraph/PyQt5 for its GUI components, but the import failed.",
+        "The most common causes are missing GUI dependencies or Windows being unable to allocate enough",
+        "virtual memory (e.g. the paging file is too small).",
+        f"Original import error: {exc}",
+        "Fix the underlying issue and re-run SkyFit."
+    ]
+
+    # Provide an actionable tip if Windows reports an undersized paging file.
+    if isinstance(exc, ImportError) and "paging file" in str(exc).lower():
+        message.append(
+            "Windows reported that the paging file is too small. Increase the paging file size or free RAM and try again."
+        )
+
+    print("\n".join(message))
+    sys.exit(1)
+
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
     extinctionCorrectionTrueToApparent, applyAstrometryFTPdetectinfo, getFOVSelectionRadius
 from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
-from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, raDec2AltAz, \
+from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, \
     apparentAltAz2TrueRADec, J2000_JD, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
 from RMS.Astrometry.AstrometryNet import astrometryNetSolve
 from RMS.Astrometry.FFTalign import alignPlatepar
@@ -37,20 +57,1003 @@ from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFil
 from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
 from RMS.Formats import StarCatalog
 from RMS.Pickling import loadPickle, savePickle
-from RMS.Math import angularSeparation, RMSD, vectNorm, cartesianToPolar, isAngleBetween
+from RMS.Math import angularSeparation, RMSD, vectNorm
 from RMS.Misc import decimalDegreesToSexHours
 from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
 from RMS.Routines.CustomPyqtgraphClasses import *
-from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle, greatCirclePhase
+from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle
 from RMS.Routines.Image import signalToNoise, applyDark, applyFlat
 from RMS.Routines.MaskImage import getMaskFile
 from RMS.Routines import RollingShutterCorrection
-from RMS.Routines.MaskImage import loadMask, MaskStructure, getMaskFile
+from RMS.Routines.MaskImage import getMaskFile
 from RMS.Misc import maxDistBetweenPoints, getRmsRootDir
+from Utils.KalmanFilter import KalmanFilter
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
+from RMS.Routines.SatellitePositions import SatellitePredictor, loadTLEs, loadRobustTLEs, findClosestTLEFile, SKYFIELD_AVAILABLE
+from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
+from RMS.Astrometry.Conversions import datetime2JD
+
+# Load the ASTRA module
+try:
+    import html, re
+
+    from PyQt5.QtWidgets import (
+        QDialog, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit, QGroupBox, QComboBox, QFileDialog,
+        QProgressBar, QWidget, QGridLayout
+    )
+    from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject
+    from PyQt5 import QtCore
+    from PyQt5.QtGui import QFont
+
+    from Utils.Astra import ASTRA, PYSWARMS_AVAILABLE
+
+    if not PYSWARMS_AVAILABLE:
+        raise ImportError("pyswarms not installed in Utils.Astra")
+
+    ASTRA_IMPORTED = True
+
+except Exception as e:
+    ASTRA_IMPORTED = False
+    print("ASTRA is an automated tool for picking positions of meteors.")
+    print("If you don't plan to use it, you can ignore this error message.")
+    print(f'ASTRA import error: {e}')
+
+
+
+##############################################################################################################
+# ASTRA GUI Code
+
+# Only initialize if ASTRA has been loaded
+if ASTRA_IMPORTED:
+    class AstraConfigDialog(QDialog):
+        """
+        A dialog window for configuring and running ASTRA (Astrometric Streak Tracking and Refinement Algorithm).
+        
+        This dialog provides a GUI for:
+        - Loading pick data from ECSV/TXT files
+        - Configuring PSO (Particle Swarm Optimization) parameters
+        - Setting ASTRA algorithm parameters
+        - Configuring Kalman filter settings
+        - Running ASTRA and Kalman filter processing
+        - Monitoring progress and status
+        
+        Args:
+            run_load_callback: Callback function for loading pick data
+            run_astra_callback: Callback function for running ASTRA
+            run_kalman_callback: Callback function for running Kalman filter
+            skyfit_instance: Instance of the main SkyFit application
+            parent: Parent widget
+        """
+
+        def __init__(self, run_load_callback=None, run_astra_callback=None, run_kalman_callback=None, 
+                    skyfit_instance=None, parent=None, on_close_callback=None):
+
+            super().__init__(parent)
+
+            # Allow ASTRA to be minimized
+            self.setWindowFlag(QtCore.Qt.Window, True)
+            self.setWindowFlag(QtCore.Qt.WindowSystemMenuHint, True)
+            self.setWindowFlag(QtCore.Qt.WindowMinimizeButtonHint, True)
+            self.setWindowFlag(QtCore.Qt.WindowMaximizeButtonHint, True)
+            self.setWindowFlag(QtCore.Qt.WindowCloseButtonHint, True)
+            self.setWindowFlags(
+                QtCore.Qt.Window
+                | QtCore.Qt.WindowSystemMenuHint
+                | QtCore.Qt.WindowMinimizeButtonHint
+                | QtCore.Qt.WindowMaximizeButtonHint
+                | QtCore.Qt.WindowCloseButtonHint
+            )
+            self.setWindowModality(QtCore.Qt.NonModal)
+
+            # Make ASTRAGUI close gracefully
+            self.on_close_callback = on_close_callback
+            self.thread = None
+            self.worker = None
+            self.kalman_worker = None
+
+            self.setWindowTitle("ASTRA Configuration")
+            self.setMinimumWidth(900)
+            self.config = {}
+            self.run_astra_callback = run_astra_callback
+            self.run_kalman_callback = run_kalman_callback
+            self.load_picks_callback = run_load_callback
+            self.skyfit_instance = skyfit_instance
+
+            main_layout = QVBoxLayout()
+
+            # === Kick-start method selection ===
+            pick_method_group = QGroupBox("INFO AND PICK LOADING")
+            pick_layout = QVBoxLayout()
+
+            intro_label = QLabel(
+                "<b>ASTRA: Astrometric Streak Tracking and Refinement Algorithm</b> <br> ASTRA is an algoritm for automating manual EMCCD picking/photometry, and can also be used to refine manual picks/photometry."
+            )
+            intro_label.setWordWrap(True)
+            intro_label.setAlignment(Qt.AlignCenter)
+            pick_layout.addWidget(intro_label)
+
+            info_label = QLabel(
+                "<b>ASTRA requires (at least) 3 frame-adjacent leading-edge picks at a good-SNR section AND 2 leading edge picks at the frames marking the start/end of the event. These can be loaded through ECSV/txt files, or done manually.</b> <br> Hover over parameters and READY/NOT READY icons for info."
+            )
+            info_label.setWordWrap(True)
+            info_label.setAlignment(Qt.AlignCenter)
+            pick_layout.addWidget(info_label)
+
+            # Create two rows: first for file picker, second for revert button
+            file_picker_layout = QHBoxLayout()
+            self.file_picker_button = QPushButton("SELECT ECSV/TXT FILE")
+            self.file_picker_button.clicked.connect(self.selectFile)
+            file_picker_layout.addWidget(self.file_picker_button)
+            pick_layout.addLayout(file_picker_layout)
+
+            self.selected_file_label = QLabel("No file selected")
+            pick_layout.addWidget(self.selected_file_label)
+
+            pick_method_group.setLayout(pick_layout)
+            main_layout.addWidget(pick_method_group)
+
+            # === LATEX CONVERSIONS ===
+            _GREEK = {
+            "alpha":"α","beta":"β","gamma":"γ","delta":"δ","epsilon":"ε","zeta":"ζ","eta":"η",
+            "theta":"θ","iota":"ι","kappa":"κ","lambda":"λ","mu":"μ","nu":"ν","xi":"ξ",
+            "pi":"π","rho":"ρ","sigma":"σ","tau":"τ","upsilon":"υ","phi":"φ","chi":"χ",
+            "psi":"ψ","omega":"ω",
+            }
+            
+            def toHTMLMath(s: str) -> str:
+                t = html.escape(s)
+
+                # 1) underscores → HTML subscript tags
+                def _subber(m):
+                    base = m.group(1)
+                    subs = m.group(2)
+                    for part in subs.split('_'):
+                        base += f'<sub>{part}</sub>'
+                    return base
+                t = re.sub(r'([A-Za-zΑ-Ωα-ω]+)_([A-Za-z0-9_]+)', _subber, t)
+
+                # 2) greek conversion inside and outside subscripts
+                for name, sym in _GREEK.items():
+                    # Replace in normal text
+                    t = re.sub(rf'\b{re.escape(name)}\b', sym, t)
+                    # Replace inside <sub>...</sub>
+                    t = re.sub(rf'(<sub>){re.escape(name)}(</sub>)', rf'\1{sym}\2', t)
+
+                # 3) superscripts
+                t = re.sub(r'\^([0-9]+)', r'<sup>\1</sup>', t)
+
+                # 4) cosmetic replace for (0-1)
+                t = t.replace('(0-1)', '[0, 1]')
+
+                return t
+
+            def addGridFields(field_dict, defaults, title, tooltips=None, on_change=False):
+                group = QGroupBox(title)
+                layout = QGridLayout()
+                tts = tooltips or {}
+
+                def _is_bool_like(val: str) -> bool:
+                    return isinstance(val, str) and val.strip().lower() in ("true", "false")
+
+                # helper to connect widget change -> on_change() if provided
+                def _wire_change(widget, kind="auto"):
+                    if not callable(on_change):
+                        return
+                    try:
+                        if isinstance(widget, QLineEdit):
+                            widget.textChanged.connect(lambda *_: on_change())
+                        elif isinstance(widget, QComboBox):
+                            # use currentTextChanged so we react to programmatic + user changes
+                            widget.currentTextChanged.connect(lambda *_: on_change())
+                        else:
+                            # fallback: try generic signals if needed
+                            if hasattr(widget, "editingFinished"):
+                                widget.editingFinished.connect(lambda *_: on_change())
+                    except Exception:
+                        pass
+
+                row = 0
+                col = 0
+
+                for key, default in defaults.items():
+                    key_html = toHTMLMath(key)
+                    label = QLabel(key_html.replace('</span></body></html>', ':</span></body></html>'))
+
+                    # tooltip
+                    tt_raw = tts.get(key, "")
+                    tt_html = toHTMLMath(tt_raw) if tt_raw else ""
+                    if tt_html:
+                        label.setToolTip(tt_html)
+
+                    # --- Special handling for pick_offset ---
+                    if key == "pick_offset":
+                        # Dropdown: center, leading-edge, custom
+                        combo = QComboBox()
+                        combo.addItems(["center", "leading-edge", "custom"])
+
+                        def _is_floatlike(s):
+                            try:
+                                float(str(s))
+                                return True
+                            except Exception:
+                                return False
+
+                        custom_edit = QLineEdit()
+                        custom_edit.setPlaceholderText("e.g. 0.25")
+
+                        if str(default) in ("center", "leading-edge"):
+                            combo.setCurrentText(str(default))
+                            custom_edit.setEnabled(False)
+                            custom_edit.setText("")
+                        elif _is_floatlike(default):
+                            combo.setCurrentText("custom")
+                            custom_edit.setEnabled(True)
+                            custom_edit.setText(str(default))
+                        else:
+                            combo.setCurrentText("leading-edge")
+                            custom_edit.setEnabled(False)
+                            custom_edit.setText("")
+
+                        if tt_html:
+                            combo.setToolTip(tt_html)
+                            custom_edit.setToolTip(tt_html)
+
+                        # Toggle custom field
+                        def _on_pick_offset_changed(text):
+                            custom_edit.setEnabled(text == "custom")
+                            # also notify about change
+                            if callable(on_change):
+                                on_change()
+
+                        combo.currentTextChanged.connect(_on_pick_offset_changed)
+
+                        # Place widgets
+                        layout.addWidget(label, row, col)
+                        h = QHBoxLayout()
+                        h.addWidget(combo, 1)
+                        h.addWidget(custom_edit, 1)
+                        container = QWidget()       
+                        container.setLayout(h)      
+                        layout.addWidget(container, row, col + 1)
+
+                        # Store references (two entries for later resolution)
+                        field_dict["pick_offset_mode"] = combo
+                        field_dict["pick_offset_custom"] = custom_edit
+
+                        # Wire change notifications
+                        _wire_change(combo)
+                        _wire_change(custom_edit)
+
+                    else:
+                        # --- default behavior for everything else ---
+                        if _is_bool_like(default):
+                            field = QComboBox()
+                            field.addItems(["True", "False"])
+                            field.setCurrentText("True" if str(default).strip().lower() == "true" else "False")
+                        else:
+                            field = QLineEdit(default)
+
+                        if tt_html:
+                            field.setToolTip(tt_html)
+
+                        layout.addWidget(label, row, col)
+                        layout.addWidget(field, row, col + 1)
+                        field_dict[key] = field
+
+                        # Wire change notifications
+                        _wire_change(field)
+
+                    # advance grid position (2 columns per row)
+                    if col == 0:
+                        col = 2
+                    else:
+                        col = 0
+                        row += 1
+
+                group.setLayout(layout)
+                return group  # Return the group widget directly
+
+            # === PSO Settings ===
+            self.pso_fields = {}
+            pso_defaults = {
+                "w (0-1)": "0.9", "c_1 (0-1)": "0.4", "c_2 (0-1)": "0.3",
+                "max itter": "100", "n_particles": "100", "V_c (0-1)": "0.3",
+                "ftol": "1e-4", "ftol_itter": "25", "expl_c": "3", "P_sigma": "3"
+            }
+
+            # === ASTRA General Settings ===
+            self.astra_fields = {}
+            astra_defaults = {
+                "star_thresh": "3", "min SNR": "5",
+                "P_crop": "1.5", "sigma_init (px)": "2", "sigma_max": "1.2",
+                "L_max": "1.5", "Verbose": "False", "photom_thresh" : "0.01", 
+                "Save Animation": "False", "pick_offset" : "leading-edge"
+            }
+
+            # === Kalman Filter Settings ===
+            self.kalman_fields = {}
+            kalman_defaults = {
+                "Monotonicity": "True", "sigma_xy (px)": "0.5", "sigma_vxy (%)": "100", "save results" : "False"
+            }
+
+            # === PARAMETER GUIDE ===
+            PSO_TT = {
+                "w (0-1)": "PSO particle inertia. Higher = more exploration.",
+                "c_1 (0-1)": "Cognitive weight (pull to particle's best).",
+                "c_2 (0-1)": "Social weight (pull to global best).",
+                "max itter": "Maximum PSO iterations.",
+                "n_particles": "Number of PSO particles.",
+                "V_c (0-1)": "Max velocity as fraction of parameter range.",
+                "ftol": "Stop when objective change % < ftol.",
+                "ftol_itter": "Minimum consecutive iters below ftol to stop.",
+                "expl_c": "Initial seeding spread coefficient. Higher = more exploration.",
+                "P_sigma": "Second-pass bound looseness for local fitting. Higher = looser bounds"
+            }
+
+            ASTRA_TT = {
+                "star_thresh": "Background mask threshold (σ above mean).",
+                "min SNR": "Minimum SNR to keep a pick.",
+                "P_crop": "Crop padding coefficient.",
+                "sigma_init (px)": "Initial Gaussian σ guess (px).",
+                "sigma_max": "Max σ multiplier (upper bound).",
+                "L_max": "Max length multiplier (upper bound).",
+                "photom_thresh": "Luminosity threshold for photometry pixels (fraction of peak).",
+                "Verbose": "Verbose console logging (True/False).",
+                "Save Animation" : "Save animation showing fit, crop, and residuals for each frame.",
+                "pick_offset" : "Pick position relative to the Gaussian center along the streak axis. Options: 'center', 'leading-edge', or a custom float (multiples of length STD)."
+            }   
+
+            KALMAN_TT = {
+                "Monotonicity": "Enforce monotonic motion along dominant axis (True/False).",
+                "sigma_xy (px)": "STD of position estimate errors (px).",
+                "sigma_vxy (%)": "STD of velocity estimate errors (in percent).",
+                "save results" : "Save the uncertainties from the kalman filter into a .csv file"
+            }
+
+            main_layout.addWidget(
+                addGridFields(self.pso_fields, pso_defaults, "PSO PARAMETER SETTINGS", PSO_TT, on_change=self.storeConfig)
+            )
+            main_layout.addWidget(
+                addGridFields(self.astra_fields, astra_defaults, "ASTRA PARAMETER SETTINGS", ASTRA_TT, on_change=self.storeConfig)
+            )
+            main_layout.addWidget(
+                addGridFields(self.kalman_fields, kalman_defaults, "KALMAN FILTER SETTINGS", KALMAN_TT, on_change=self.storeConfig)
+            )
+
+            # === Progress Bar ===
+            self.progress_bar = QProgressBar()
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(0)
+            # Progress label and ASTRA status indicator
+            progress_status_layout = QHBoxLayout()
+            progress_label = QLabel("Progress:")
+            progress_status_layout.addWidget(progress_label)
+
+            # ASTRA status label and dot
+            self.astra_status_label = QLabel("ASTRA:")
+            self.astra_status_dot = QLabel()
+
+            # Kalman status label and dot
+            self.kalman_status_label = QLabel("KALMAN:")
+            self.kalman_status_dot = QLabel()
+
+            # Place ASTRA and KALMAN status beside each other, right-aligned
+            progress_status_layout.addStretch()
+            progress_status_layout.addWidget(self.astra_status_label)
+            progress_status_layout.addWidget(self.astra_status_dot)
+            progress_status_layout.addSpacing(16)  # Optional: add space between ASTRA and KALMAN
+            progress_status_layout.addWidget(self.kalman_status_label)
+            progress_status_layout.addWidget(self.kalman_status_dot)
+
+            main_layout.addLayout(progress_status_layout)
+            main_layout.addWidget(self.progress_bar)
+
+            # === Control Buttons ===
+            btn_layout = QHBoxLayout()
+            self.run_astra_btn = QPushButton("RUN ASTRA")
+            self.run_kalman_btn = QPushButton("RUN KALMAN")
+            self.run_astra_btn.clicked.connect(self.startASTRAThread)
+            self.run_kalman_btn.clicked.connect(self.startKalmanThread)
+            btn_layout.addWidget(self.run_astra_btn)
+            btn_layout.addWidget(self.run_kalman_btn)
+            main_layout.addLayout(btn_layout)
+
+            # Move REVERT button below RUN ASTRA/KALMAN buttons as one row
+            revert_layout = QHBoxLayout()
+            self.set_prev_picks_button = QPushButton("REVERT ASTRA/KALMAN PICKS")
+            self.set_prev_picks_button.clicked.connect(self.setPreviousPicks)
+            revert_layout.addWidget(self.set_prev_picks_button)
+            main_layout.addLayout(revert_layout)
+
+            # Now that buttons exist, set initial status
+            self.setASTRAStatus(False)  # Default to not ready (red)
+            self.setKalmanStatus(False)  # Default to not ready (red)
+            self.setRevertStatus(False)  # Default to not ready (disabled)
+
+            self.setLayout(main_layout)
+
+        def setConfig(self, config):
+            """
+            Updates the configuration and sets all UI elements to match the new config values.
+            
+            Args:
+                config (dict): Configuration dictionary with pso, astra, and kalman settings
+            """
+            self.config = config
+            
+            # Update file path if provided
+            if "file_path" in config and config["file_path"]:
+                self.selected_file_label.setText(config["file_path"])
+            
+            # Update PSO fields
+            if "pso" in config:
+                for key, value in config["pso"].items():
+                    if key in self.pso_fields:
+                        if hasattr(self.pso_fields[key], "setCurrentText"):
+                            self.pso_fields[key].setCurrentText(str(value))
+                        else:
+                            self.pso_fields[key].setText(str(value))
+            
+            # Update ASTRA fields, handling pick_offset specially
+            if "astra" in config:
+                for key, value in config["astra"].items():
+                    # Skip special pick_offset handling for now
+                    if key == "pick_offset":
+                        continue
+                    
+                    if key in self.astra_fields:
+                        if hasattr(self.astra_fields[key], "setCurrentText"):
+                            self.astra_fields[key].setCurrentText(str(value))
+                        else:
+                            self.astra_fields[key].setText(str(value))
+                
+                # Special handling for pick_offset
+                if "pick_offset" in config["astra"]:
+                    pick_offset = config["astra"]["pick_offset"]
+                    
+                    # Check if we have the mode + custom fields
+                    if "pick_offset_mode" in self.astra_fields and "pick_offset_custom" in self.astra_fields:
+                        # If pick_offset is "center" or "leading-edge", set mode and clear custom
+                        if pick_offset in ["center", "leading-edge"]:
+                            self.astra_fields["pick_offset_mode"].setCurrentText(pick_offset)
+                            self.astra_fields["pick_offset_custom"].setText("")
+                            self.astra_fields["pick_offset_custom"].setEnabled(False)
+                        # Otherwise it's a custom value
+                        else:
+                            self.astra_fields["pick_offset_mode"].setCurrentText("custom")
+                            self.astra_fields["pick_offset_custom"].setText(str(pick_offset))
+                            self.astra_fields["pick_offset_custom"].setEnabled(True)
+                    # Fallback for backward compatibility
+                    elif "pick_offset" in self.astra_fields:
+                        if hasattr(self.astra_fields["pick_offset"], "setCurrentText"):
+                            self.astra_fields["pick_offset"].setCurrentText(str(pick_offset))
+                        else:
+                            self.astra_fields["pick_offset"].setText(str(pick_offset))
+            
+            # Update Kalman fields
+            if "kalman" in config:
+                for key, value in config["kalman"].items():
+                    if key in self.kalman_fields:
+                        if hasattr(self.kalman_fields[key], "setCurrentText"):
+                            self.kalman_fields[key].setCurrentText(str(value))
+                        else:
+                            self.kalman_fields[key].setText(str(value))
+            
+            # Refresh readiness indicators
+            if hasattr(self.skyfit_instance, "checkASTRACanRun"):
+                self.skyfit_instance.checkASTRACanRun()
+            if hasattr(self.skyfit_instance, "checkKalmanCanRun"):
+                self.skyfit_instance.checkKalmanCanRun()
+
+        def selectFile(self):
+            """Opens dialog to select ECSV/txt file"""
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Select the ECSV or TXT file",
+                "",
+                "ECSV or TXT files (*.ecsv *.txt);;All files (*)"
+            )
+            if file_path:
+                self.selected_file_label.setText(file_path)
+                self.storeConfig()
+                if self.load_picks_callback:
+                    self.load_picks_callback(self.config)
+
+        def _stopAstraWorker(self, hard_kill_timeout_ms=3000):
+            """Try to stop Astra worker gracefully; escalate if needed."""
+            if hasattr(self, "thread") and self.thread and self.thread.isRunning():
+                try:
+                    if hasattr(self, "worker") and self.worker:
+                        # cooperative stop request
+                        if hasattr(self.worker, "stop"):
+                            self.worker.stop()
+                    # ask the thread to finish its event loop
+                    self.thread.requestInterruption()
+                    self.thread.quit()
+                    if not self.thread.wait(hard_kill_timeout_ms):
+                        # last resort (unsafe): terminate
+                        self.thread.terminate()
+                        self.thread.wait(1000)
+                except Exception:
+                    pass  # don't block close on errors
+
+        def _stopKalmanWorker(self, hard_kill_timeout_ms=3000):
+            if hasattr(self, "kalman_worker") and self.kalman_worker and self.kalman_worker.isRunning():
+                try:
+                    # cooperative stop
+                    if hasattr(self.kalman_worker, "stop"):
+                        self.kalman_worker.stop()
+                    self.kalman_worker.requestInterruption()
+                    self.kalman_worker.quit()
+                    self.kalman_worker.wait(hard_kill_timeout_ms)
+                except Exception:
+                    pass
+
+        def _handleClose(self):
+            # Stop background work
+            self._stopKalmanWorker()
+            self._stopAstraWorker()
+
+            # Fire optional close callback
+            if callable(self.on_close_callback):
+                try:
+                    self.on_close_callback()
+                except Exception:
+                    pass
+
+        def closeEvent(self, event):
+            self._is_closing = True
+            # if you clear the handle on the parent, do it before finished signals run:
+            if self.skyfit_instance is not None and getattr(self.skyfit_instance, "astra_dialog", None) is self:
+                self.skyfit_instance.astra_dialog = None
+
+            print("Closed ASTRA GUI - Aborting all threaded processes")
+            # stop workers (your existing stop logic here)
+            self._stopKalmanWorker()
+            self._stopAstraWorker()
+            super().closeEvent(event)
+
+        def reject(self):
+            # Triggered by ESC/window manager close as well
+            self._handleClose()
+            super().reject()
+
+        def setRevertStatus(self, ready):
+            """
+            Sets the revert status button state.
+            """
+            self.set_prev_picks_button.setEnabled(ready)
+
+        def setASTRAStatus(self, ready, hover_text=""):
+            """
+            Sets the ASTRA status dot color: green if ready, red if not.
+            If ready == "WARN", sets color to yellow and text to READY.
+            Optionally sets a tooltip (hover text) to inform the user.
+            Disables the ASTRA button if not ready.
+            """
+            if ready == "WARN":
+                status_text = "READY"
+                color = "#FFC107"  # Yellow
+                enable_btn = True
+            elif ready == "PROCESSING":
+                status_text = "RUNNING"
+                color = "#2196F3"  # Blue
+                enable_btn = False
+            else:
+                status_text = "READY" if ready else "NOT READY"
+                color = "#4CAF50" if ready else "#F44336"  # Green or Red
+                enable_btn = bool(ready)
+            self.astra_status_dot.setText(status_text)
+            self.astra_status_dot.setAlignment(Qt.AlignCenter)
+            self.astra_status_dot.setStyleSheet(
+                f"background-color: {color}; color: white; border-radius: 6px; min-width: 80px; min-height: 20px;"
+                "max-height: 40px; font-weight: bold;"
+            )
+            self.astra_status_dot.setToolTip(hover_text or "")
+            self.run_astra_btn.setEnabled(enable_btn)
+
+        def setKalmanStatus(self, ready, hover_text=""):
+            """
+            Sets the Kalman status dot color: green if ready, red if not.
+            Optionally sets a tooltip (hover text) to inform the user.
+            Disables the KALMAN button if not ready.
+            """
+
+            if ready == "WARN":
+                status_text = "READY"
+                color = "#FFC107"  # Yellow
+                enable_btn = True
+            elif ready == "PROCESSING":
+                status_text = "RUNNING"
+                color = "#2196F3"  # Blue
+                enable_btn = False
+            else:
+                status_text = "READY" if ready else "NOT READY"
+                color = "#4CAF50" if ready else "#F44336"  # Green or Red
+                enable_btn = bool(ready)
+            self.kalman_status_dot.setText(status_text)
+            self.kalman_status_dot.setAlignment(Qt.AlignCenter)
+            self.kalman_status_dot.setStyleSheet(
+                f"background-color: {color}; color: white; border-radius: 6px; min-width: 80px; min-height: 20px;" 
+                "max-height: 40px; font-weight: bold;"
+            )
+            self.kalman_status_dot.setToolTip(hover_text or "")
+            self.run_kalman_btn.setEnabled(enable_btn)
+
+        def updateProgress(self, value):
+            """Sets the progress bar to a given value
+            args:
+                - value (int): The value to set the progress bar to (0-100).
+            """
+            self.progress_bar.setValue(value)
+        
+        def storeConfig(self):
+            """
+            Stores the current configuration from the UI elements.
+            """
+            def _value_of(w):
+                # QComboBox has currentText(); QLineEdit has text()
+                return w.currentText() if hasattr(w, "currentText") else w.text()
+
+            # PSO and Kalman straight-through
+            pso = {k: _value_of(v) for k, v in self.pso_fields.items()}
+            kalman = {k: _value_of(v) for k, v in self.kalman_fields.items()}
+
+            # ASTRA: handle pick_offset specially
+            astra = {}
+            for k, v in self.astra_fields.items():
+                if k not in ("pick_offset_mode", "pick_offset_custom"):
+                    astra[k] = _value_of(v)
+
+            # Resolve pick_offset final value
+            if "pick_offset_mode" in self.astra_fields and "pick_offset_custom" in self.astra_fields:
+                mode = self.astra_fields["pick_offset_mode"].currentText()
+                if mode == "custom":
+                    custom_val = self.astra_fields["pick_offset_custom"].text().strip()
+                    # Store the FLOAT STRING itself, NOT the word 'custom'
+                    astra["pick_offset"] = custom_val
+                else:
+                    astra["pick_offset"] = mode
+            else:
+                # Backward-compat fallback
+                astra["pick_offset"] = _value_of(self.astra_fields.get("pick_offset", QLineEdit("leading-edge")))
+
+            self.config = {
+                "file_path": self.selected_file_label.text(),
+                "pso":   pso,
+                "astra": astra,
+                "kalman": kalman,
+            }
+
+            # Store config in parent in case of close
+            self.skyfit_instance.astra_config_params = self.config
+
+
+        def getConfig(self):
+            """Returns the ASTRA config object."""
+            self.storeConfig()
+            return self.config
+        
+        def startASTRAThread(self):
+            """Creates and runs an ASTRA process on a seperate worker thread"""
+
+            self.storeConfig()
+            errors = self.checkConfig()
+            if errors != {}:
+                self.skyfit_instance.setMessageBox(title="ASTRA Configuration Error",
+                                                message="\n".join(errors.values()),
+                                                type='error')
+                return
+
+            config = self.getConfig()
+
+            self.thread = QThread()
+            self.worker = AstraWorker(config, self.skyfit_instance)
+            print('ASTRA Object Created! Processing beginning (30-80 seconds)...')
+            self.worker.moveToThread(self.thread)
+
+            self.run_astra_btn.setEnabled(False)
+            self.run_kalman_btn.setEnabled(False)
+            self.file_picker_button.setEnabled(False)
+            self.set_prev_picks_button.setEnabled(False)
+            self.setASTRAStatus("PROCESSING", "ASTRA is running...")
+
+            self.worker.progress.connect(self.updateProgress)
+
+            self.thread.started.connect(self.worker.run)
+
+            self.worker.results_ready.connect(
+                self.skyfit_instance.integrateASTRAResults, 
+                QtCore.Qt.QueuedConnection
+            )
+
+            # Clean up and re-enable UI
+            self.worker.finished.connect(self.thread.quit)
+            self.worker.finished.connect(self.worker.deleteLater)
+            self.thread.finished.connect(self.thread.deleteLater)
+            
+
+            # Restore interactivity
+            self.worker.finished.connect(lambda: (not getattr(self, "_is_closing", False)) and self.file_picker_button.setEnabled(True))
+
+            # Only call parent checks if THIS dialog is still the active one
+            self.worker.finished.connect(lambda:
+                (self.skyfit_instance is not None)
+                and (getattr(self.skyfit_instance, "astra_dialog", None) is self)
+                and self.skyfit_instance.checkASTRACanRun()
+            )
+            self.worker.finished.connect(lambda:
+                (self.skyfit_instance is not None)
+                and (getattr(self.skyfit_instance, "astra_dialog", None) is self)
+                and self.skyfit_instance.checkKalmanCanRun()
+            )
+            self.worker.finished.connect(lambda:
+                (self.skyfit_instance is not None)
+                and (getattr(self.skyfit_instance, "astra_dialog", None) is self)
+                and self.skyfit_instance.checkPickRevertCanRun()
+            )
+
+            self.thread.start()
+
+        def setPreviousPicks(self):
+            """Hits parent instance to revert picks to previous state"""
+            self.skyfit_instance.reverseASTRAPicks()
+        
+        def checkFloat(self, value):
+            """Checks if a value is castable to float"""
+            try:
+                float(value)
+                return True
+            except (ValueError, TypeError):
+                return False
+
+        def checkConfig(self):
+            """Checks the config only has valid values"""
+            config = self.getConfig()
+
+            pso_ranges_and_types = {
+                "w (0-1)": (0.0, 1.0, float),
+                "c_1 (0-1)": (0.0, 1.0, float),
+                "c_2 (0-1)": (0.0, 1.0, float),
+                "max itter": (1, None, int),
+                "n_particles": (1, None, int),
+                "V_c (0-1)": (0.0, 1.0, float),
+                "ftol": (0.0, 100.0, float),
+                "ftol_itter": (1, None, int),
+                "expl_c": (1.0, None, float),
+                "P_sigma": (0.0, None, float)
+            }
+
+            astra_ranges_and_types = {
+                "star_thresh": (0, None, float), "min SNR": (0, None, float),
+                "P_crop": (0, None, float), "sigma_init (px)": (0.1, None, float), "sigma_max": (1, None, float),
+                "L_max": (1, None, float), "Verbose": (True, False, bool), "photom_thresh": (0, 1, float),
+                "Save Animation": (True, False, bool),
+                # NOTE: only 'center' and 'leading-edge' are valid literals; 'custom' is resolved to a float string at store time
+                "pick_offset": (["center", "leading-edge"], None, str)
+            }
+            kalman_ranges_and_types = {
+                "Monotonicity": (True, False, bool), "sigma_xy (px)": (0, None, float), 
+                "sigma_vxy (%)": (0, None, float), "save results": (True, False, bool)
+            }
+
+            errors = {}
+
+            # Check PSO parameters
+            for param, (min_val, max_val, param_type) in pso_ranges_and_types.items():
+                value_str = config["pso"].get(param, "")
+                try:
+                    if param_type == bool:
+                        value = value_str.strip().lower() == "true"
+                        if value not in [True, False]:
+                            errors[f"pso.{param}"] = f"{param} must be True or False, got {value_str}"
+                    else:
+                        value = param_type(value_str)
+                        if min_val is not None and value < min_val:
+                            errors[f"pso.{param}"] = f"{param} must be >= {min_val}, got {value}"
+                        elif max_val is not None and value > max_val:
+                            errors[f"pso.{param}"] = f"{param} must be <= {max_val}, got {value}"
+                except (ValueError, TypeError):
+                    errors[f"pso.{param}"] = f"{param} must be {param_type.__name__}, got {value_str}"
+
+            # Check ASTRA parameters
+            for param, (min_val, max_val, param_type) in astra_ranges_and_types.items():
+                value_str = config["astra"].get(param, "")
+                try:
+                    if param == "pick_offset":
+                        value = value_str.strip()
+                        # Allow literals or a float
+                        if value not in ["center", "leading-edge"] and self.checkFloat(value) is False:
+                            errors[f"astra.{param}"] = (
+                                f"{param} must be 'center', 'leading-edge', or a float; got {value_str}"
+                            )
+                    elif param_type == bool:
+                        value = value_str.strip().lower() == "true"
+                        if value not in [True, False]:
+                            errors[f"astra.{param}"] = f"{param} must be True or False, got {value_str}"
+                    else:
+                        value = param_type(value_str)
+                        if min_val is not None and value < min_val:
+                            errors[f"astra.{param}"] = f"{param} must be >= {min_val}, got {value}"
+                        elif max_val is not None and value > max_val:
+                            errors[f"astra.{param}"] = f"{param} must be <= {max_val}, got {value}"
+                except (ValueError, TypeError):
+                    errors[f"astra.{param}"] = f"{param} must be {param_type.__name__}, got {value_str}"
+
+            # Check Kalman parameters
+            for param, (min_val, max_val, param_type) in kalman_ranges_and_types.items():
+                value_str = config["kalman"].get(param, "")
+                try:
+                    if param_type == bool:
+                        value = value_str.strip().lower() == "true"
+                        if value not in [True, False]:
+                            errors[f"kalman.{param}"] = f"{param} must be True or False, got {value_str}"
+                    else:
+                        value = param_type(value_str)
+                        if min_val is not None and value < min_val:
+                            errors[f"kalman.{param}"] = f"{param} must be >= {min_val}, got {value}"
+                        elif max_val is not None and value > max_val:
+                            errors[f"kalman.{param}"] = f"{param} must be <= {max_val}, got {value}"
+                except (ValueError, TypeError):
+                    errors[f"kalman.{param}"] = f"{param} must be {param_type.__name__}, got {value_str}"
+
+            return errors
+
+
+        def startKalmanThread(self):
+            """Creates and runs a Kalman process on a separate worker thread"""
+
+            self.storeConfig()
+            errors = self.checkConfig()
+            if errors != {}:
+                self.skyfit_instance.setMessageBox(title="ASTRA Configuration Error",
+                                                message="\n".join(errors.values()),
+                                                type='error')
+                return
+            self.config = self.getConfig()
+
+            self.run_kalman_btn.setEnabled(False)
+            self.run_astra_btn.setEnabled(False)
+            self.file_picker_button.setEnabled(False)
+            self.set_prev_picks_button.setEnabled(False)
+            self.setASTRAStatus("PROCESSING", "ASTRA is running...")
+
+            self.kalman_worker = KalmanWorker(self.skyfit_instance, self.config)
+            self.kalman_worker.progress.connect(self.updateProgress)
+            self.kalman_worker.results_ready.connect(
+                self.skyfit_instance.applyKalmanResults,
+                QtCore.Qt.QueuedConnection
+            )
+
+            # Restore interactivity
+            self.kalman_worker.finished.connect(lambda: (not getattr(self, "_is_closing", False)) and self.file_picker_button.setEnabled(True))
+
+            self.kalman_worker.finished.connect(lambda:
+                (self.skyfit_instance is not None)
+                and (getattr(self.skyfit_instance, "astra_dialog", None) is self)
+                and self.skyfit_instance.checkASTRACanRun()
+            )
+            self.kalman_worker.finished.connect(lambda:
+                (self.skyfit_instance is not None)
+                and (getattr(self.skyfit_instance, "astra_dialog", None) is self)
+                and self.skyfit_instance.checkKalmanCanRun()
+            )
+            self.kalman_worker.finished.connect(lambda:
+                (self.skyfit_instance is not None)
+                and (getattr(self.skyfit_instance, "astra_dialog", None) is self)
+                and self.skyfit_instance.checkPickRevertCanRun()
+            )
+
+            self.kalman_worker.finished.connect(lambda: (not getattr(self, "_is_closing", False)) and self.updateProgress(100))
+
+            self.kalman_worker.start()  
+
+    class KalmanWorker(QThread):
+        progress = pyqtSignal(int)
+        finished = pyqtSignal()
+        results_ready = pyqtSignal(object)
+
+        def __init__(self, skyfit_instance, config):
+            super().__init__()
+            self.skyfit_instance = skyfit_instance
+            self.config = config
+            self._stop = False
+
+        def stop(self):
+            self._stop = True
+
+        def _progress_guard(self, value):
+            if self._stop or self.isInterruptionRequested():
+                raise RuntimeError("Kalman aborted by user")
+            self.progress.emit(value)
+
+        def run(self):
+            try:
+
+                if self._stop or self.isInterruptionRequested():
+                    self.finished.emit()
+                    return
+                
+                result = self.skyfit_instance.runKalmanFromConfig(
+                    self.config, progress_callback=self._progress_guard
+                )
+
+                if result is not None:
+                    self.results_ready.emit(result)
+
+            except Exception as e:
+                print(f'Error running Kalman: {e}')
+
+            finally:
+                self.finished.emit()
+
+    class AstraWorker(QObject):
+        finished = pyqtSignal()
+        progress = pyqtSignal(int)
+        results_ready = pyqtSignal(object)
+
+        def __init__(self, config, skyfit_instance):
+            super().__init__()
+            self.config = config
+            self.skyfit_instance = skyfit_instance
+            self._stop = False
+
+        def stop(self):
+            self._stop = True
+
+        def _progress_guard(self, value):
+            # Called by ASTRA during processing
+            if self._stop:
+                raise RuntimeError("ASTRA aborted by user")
+            self.progress.emit(value)
+
+        def run(self):
+            # try:
+            # Optional early exit
+            if self._stop:
+                print('early exit')
+                self.finished.emit()
+                return
+
+            # Prepare data
+            data_dict = self.skyfit_instance.prepareASTRAData(self.config)
+            if data_dict is False or self._stop:
+                print('no data dict')
+                self.finished.emit()
+                return
+
+            # Run ASTRA; pass our guard so we can interrupt mid-flight
+            astra = ASTRA(**data_dict, progress_callback=self._progress_guard)
+            if self._stop:
+                print('interupted')
+                self.finished.emit()
+                return
+
+            astra.process()
+
+            if not self._stop:
+                self.results_ready.emit(astra)
+
+    def launchASTRAGUI(run_astra_callback=None,
+                        run_kalman_callback=None,
+                        run_load_callback=None,
+                        parent=None,
+                        skyfit_instance=None,
+                        on_close_callback=None):
+        dialog = AstraConfigDialog(
+            run_astra_callback=run_astra_callback,
+            run_kalman_callback=run_kalman_callback,
+            run_load_callback=run_load_callback,
+            parent=parent,
+            skyfit_instance=skyfit_instance,
+            on_close_callback=on_close_callback
+        )
+        dialog.show()
+        return dialog
+
 
 
 class QFOVinputDialog(QtWidgets.QDialog):
@@ -446,7 +1449,7 @@ class PairedStars(object):
 class PlateTool(QtWidgets.QMainWindow):
     def __init__(self, input_path, config, beginning_time=None, fps=None, gamma=None, use_fr_files=False,
         geo_points_input=None, startUI=True, mask=None, nobg=False, peribg=False, flipud=False,
-        flatbiassub=False):
+        flatbiassub=False, exposure_ratio=1.0, show_sattracks=False, tle_file=None):
         """ SkyFit interactive window.
 
         Arguments:
@@ -464,11 +1467,17 @@ class PlateTool(QtWidgets.QMainWindow):
             geo_points_input: [str] Path to a file with a list of geo coordinates which will be projected on
                 the image as seen from the perspective of the observer.
             startUI: [bool] Start the GUI. True by default.
+            mask: [str] Path to a mask file.
             nobg: [bool] Do not subtract the background for photometry. False by default.
-            peribg: [bool] Perform background subtraction using the average of the pixels adjuecent to the 
+            peribg: [bool] Perform background subtraction using the average of the pixels adjacent to the 
                 coloured mask instead of the avepixel. False by default.
             flipud: [bool] Flip the image upside down. False by default.
             flatbiassub: [bool] Subtract flat and bias frames. False by default.
+            exposure_ratio: [float] Exposure ratio between stars and meteors. Used for magnitude scaling of 
+                meteors observed on long exposure images with shutters. The correct exp. ratio is already 
+                automatically applied for DFN images. 1.0 by default.
+            show_sattracks: [bool] Show satellite tracks. False by default.
+            tle_file: [str] Path to a TLE file for satellite tracks.
         """
 
         super(PlateTool, self).__init__()
@@ -488,6 +1497,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.config = config
 
+        # Force the CV2 backend when SkyFit is being used
+        self.config.media_backend = 'cv2'
+
         # Store forced time of first frame
         self.beginning_time = beginning_time
 
@@ -502,6 +1514,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Store the flat and bias subtraction flag
         self.flatbiassub = flatbiassub
+
+        # Store the exposure ratio
+        self.exposure_ratio = exposure_ratio
 
         # Extract the directory path if a file was given
         if os.path.isfile(self.dir_path):
@@ -602,6 +1617,43 @@ class PlateTool(QtWidgets.QMainWindow):
         self.photom_fit_stddev = None
         self.photom_fit_resids = None
 
+        # Compute the saturation threshold
+        self.saturation_threshold = int(round(0.98*(2**self.config.bit_depth - 1)))
+
+        # ASTRA class variables
+        if ASTRA_IMPORTED:
+
+            # List of large pick changes (import, ASTRA, kalman) to support reversion
+            self.previous_picks = []
+
+            # Initialize the ASTRA dialog reference
+            self.astra_dialog = None
+            self.astra_config_params = None
+
+        
+        # Satellite tracks config
+        self.show_sattracks = show_sattracks
+        self.tle_file = tle_file
+        self.satellite_tracks = []
+        
+        # Cache for FOV polygon to avoid recomputation
+        self.fov_poly_cache = None
+        self.fov_poly_jd = None
+
+        self.sat_track_curves = []
+        self.sat_track_labels = []
+        self.sat_track_arrows = []
+        self.sat_markers = []
+
+        if self.show_sattracks:
+             if SKYFIELD_AVAILABLE:
+                print("Satellite tracks enabled.")
+             else:
+                print("WARNING: --sattracks requested but skyfield not installed.")
+                self.show_sattracks = False
+
+
+    
         ###################################################################################################
 
 
@@ -654,7 +1706,6 @@ class PlateTool(QtWidgets.QMainWindow):
         # Load distortion type index
         self.dist_type_index = self.platepar.distortion_type_list.index(self.platepar.distortion_type)
 
-
         ###################################################################################################
 
         print()
@@ -662,6 +1713,39 @@ class PlateTool(QtWidgets.QMainWindow):
         # INIT WINDOW
         if startUI:
             self.setupUI()
+
+
+        ###################################################################################################
+
+        # Automatically load the flat and bias in UWO data mode
+        if self.usingUWOData():
+            _, self.flat_struct = self.loadFlat()
+            _, self.dark = self.loadDark()
+
+                        
+            # Set focus back on the SkyFit window
+            self.activateWindow()
+
+            # Apply the dark to the flat if the flatbiassub flag is set
+            if self.flatbiassub and (self.flat_struct is not None):
+                
+                self.flat_struct.applyDark(self.dark)
+
+                self.img.flat_struct = self.flat_struct
+                self.img_zoom.flat_struct = self.flat_struct
+
+
+            self.img.dark = self.dark
+            self.img_zoom.dark = self.dark
+
+            self.img_zoom.flat_struct = self.flat_struct
+            self.img.flat_struct = self.flat_struct
+            self.img_zoom.reloadImage()
+            self.img.reloadImage()
+
+        # If the satellite tracks should be shown, load the TLE data and show the tracks
+        if show_sattracks:
+            self.loadSatelliteTracks()
 
 
     def setFPS(self):
@@ -706,8 +1790,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.save_reduction_action = QtWidgets.QAction('Save state and reduction')
         self.save_reduction_action.setShortcut('Ctrl+S')
         self.save_reduction_action.triggered.connect(lambda: [self.saveState(),
-                                                              self.saveFTPdetectinfo(),
-                                                              self.saveECSV()])
+                                                              self.saveFTPdetectinfo(ECSV_saved=self.saveECSV())])
 
         self.save_current_frame_action = QtWidgets.QAction('Save current frame')
         self.save_current_frame_action.setShortcut('Ctrl+W')
@@ -731,7 +1814,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.toggle_info_action.triggered.connect(self.toggleInfo)
         self.toggle_info_action.setShortcut('F1')
 
-        self.toggle_zoom_window = QtWidgets.QAction("Toggle zoom window")
         self.toggle_zoom_window = QtWidgets.QAction("Toggle zoom window")
         self.toggle_zoom_window.triggered.connect(self.toggleZoomWindow)
         self.toggle_zoom_window.setShortcut('shift+Z')
@@ -946,6 +2028,11 @@ class PlateTool(QtWidgets.QMainWindow):
         # calstar markers inner rings (bright green) - zoom window
         self.calstar_markers2 = pg.ScatterPlotItem()
         self.calstar_markers2.setPen(pg.mkPen((50, 255, 50, 255), width=1.1))
+
+        # Satellite tracks items
+        self.sat_track_curves = []
+        self.sat_track_labels = []
+
         self.calstar_markers2.setBrush((0, 0, 0, 0))
         self.calstar_markers2.setSize(20)
         self.calstar_markers2.setSymbol('o')
@@ -1103,6 +2190,11 @@ class PlateTool(QtWidgets.QMainWindow):
         self.region.setZValue(10)
         self.img_frame.addItem(self.region)
 
+        self.region_zoom = pg.ImageItem(lut=lut)
+        self.region_zoom.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)
+        self.region_zoom.setZValue(10)
+        self.zoom_window.addItem(self.region_zoom)
+
         self.tab = RightOptionsTab(self)
         self.tab.hist.setImageItem(self.img)
         self.tab.hist.setImages(self.img_zoom)
@@ -1153,6 +2245,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigInvertToggled.connect(self.toggleInvertColours)
         self.tab.settings.sigAutoPanToggled.connect(self.toggleAutoPan)
         self.tab.settings.sigSingleClickPhotometryToggled.connect(self.toggleSingleClickPhotometry)
+        self.tab.settings.sigSatTracksToggled.connect(self.toggleShowSatTracks)
+        self.tab.settings.sigLoadTLEPressed.connect(self.loadTLEFileDialog)
+        self.tab.settings.sigClearTLEPressed.connect(self.clearTLESelection)
+        self.tab.settings.sigRedrawSatTracksPressed.connect(self.redrawSatelliteTracks)
 
         layout.addWidget(self.tab, 0, 2)
 
@@ -1211,6 +2307,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.pick_marker2.hide()
             self.great_circle_line.hide()
             self.region.hide()
+            if hasattr(self, "region_zoom"):
+                self.region_zoom.hide()
             self.img_frame.setMouseEnabled(True, True)
             self.star_pick_mode = False
             self.cursor.hide()
@@ -1237,6 +2335,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.view_menu.addActions([self.toggle_info_action,
                                        self.toggle_zoom_window])
+
+            # Update TLE label
+            tle_text = "latest downloaded"
+            if self.tle_file:
+                tle_text = os.path.basename(self.tle_file)
+            self.tab.settings.updateTLELabel(tle_text)
 
             self.star_pick_info.setText(self.star_pick_info_text_str)
 
@@ -1282,6 +2386,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.pick_marker2.show()
             self.great_circle_line.show()
             self.region.show()
+            if hasattr(self, "region_zoom"):
+                self.region_zoom.show()
 
             # Update the great circle
             self.updateGreatCircle()
@@ -1450,7 +2556,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 status_str += ", Auto pan"
 
             if self.max_pixels_between_matched_stars != np.inf:
-                percentage_complete = min([100,100 * (len(self.paired_stars)+len(self.unsuitable_stars))/
+                percentage_complete = min([100,100*(len(self.paired_stars)+len(self.unsuitable_stars))/
                                                                 len(self.catalog_x_filtered)])
 
                 if self.max_pixels_between_matched_stars != 0:
@@ -1571,6 +2677,8 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'M - Toggle maxpixel/avepixel\n'
             text_str += 'H - Hide/show catalog stars\n'
             text_str += 'C - Hide/show detected stars\n'
+            if self.show_sattracks:
+                text_str += 'CTRL + T - Toggle satellite tracks\n'
             text_str += 'CTRL + I - Show/hide distortion\n'
             text_str += 'U/J - Img Gamma\n'
             text_str += 'I - Invert colors\n'
@@ -1613,17 +2721,21 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'CTRL + F - Load flat\n'
             text_str += 'CTRL + P - Load platepar\n'
             text_str += 'CTRL + W - Save current frame\n'
-            text_str += 'CTRL + S - Save FTPdetectinfo'
+            text_str += 'CTRL + S - Save FTPdetectinfo\n'
+            text_str += '\n'
+            text_str += 'CTRL + K - Open ASTRA GUI'
 
         self.label2.setText(text_str)
         self.label2.setPos(self.img_frame.width() - self.label2.boundingRect().width(), \
             self.img_frame.height() - self.label2.boundingRect().height())
 
 
-        # F1 info label which will be shown when labels 1 and 2 are hidden
         self.label_f1.setText("F1 - Show hotkeys")
         self.label_f1.setPos(self.img_frame.width() - self.label_f1.boundingRect().width(), \
             self.img_frame.height() - self.label_f1.boundingRect().height())
+
+        # Update satellite marker position
+        self.updateSatelliteMarker()
 
 
 
@@ -1739,9 +2851,18 @@ class PlateTool(QtWidgets.QMainWindow):
 
             cat_stars_xy, self.catalog_stars_filtered = [], []
             for star_xy, star_radec in zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked):
-                
-                # Check if the star is inside the mask
-                if self.mask.img[int(star_xy[1]), int(star_xy[0])] != 0:
+
+                # Make sure that the dimensions of the mask match the image dimensions
+                if (self.mask.img.shape[0] == self.img.data.shape[0]) or \
+                   (self.mask.img.shape[1] == self.img.data.shape[1]):
+
+                    # Check if the star is inside the mask
+                    if self.mask.img[int(star_xy[1]), int(star_xy[0])] != 0:
+                        cat_stars_xy.append(star_xy)
+                        self.catalog_stars_filtered.append(star_radec)
+
+                # If the mask dimensions don't match the image dimensions, ignore the mask
+                else:
                     cat_stars_xy.append(star_xy)
                     self.catalog_stars_filtered.append(star_radec)
 
@@ -1889,7 +3010,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.pick_marker2.addPoints(pos=data1, size=10, pen=pick_color)
         self.pick_marker2.addPoints(pos=data2, size=10, pen=gap_color)
 
-
     def updateFitResiduals(self):
         """ Draw fit residual lines. """
 
@@ -2036,7 +3156,6 @@ class PlateTool(QtWidgets.QMainWindow):
         snr_list = []
         saturation_list = []
 
-
         for paired_star in self.paired_stars.allCoords():
 
             img_star, catalog_star = paired_star
@@ -2064,6 +3183,15 @@ class PlateTool(QtWidgets.QMainWindow):
                                                 self.platepar.refraction)
             
             elevation_list.append(alt)
+
+
+        # Skip the photometry if there are no stars
+        if len(star_coords) == 0:
+            
+            self.photom_fit_stddev = None
+            self.photom_fit_resids = []
+
+            return
 
 
         self.residual_text.clear()
@@ -2557,9 +3685,15 @@ class PlateTool(QtWidgets.QMainWindow):
         for remove in to_remove:
             del dic[remove]
 
-        # if os.path.isdir(self.input_path):
-        #     real_input_path = os.path.join(self.input_path, img_name)
-        #     dic['input_path'] = real_input_path
+        # Explicitly remove pyqtgraph items that might not have been caught
+        if 'sat_track_curves' in dic:
+            del dic['sat_track_curves']
+        if 'sat_track_labels' in dic:
+            del dic['sat_track_labels']
+        if 'sat_track_arrows' in dic:
+            del dic['sat_track_arrows']
+        if 'sat_markers' in dic:
+            del dic['sat_markers']
 
         # Save the FF file name if the input type is FF
         if self.img_handle.input_type == 'ff':
@@ -2808,6 +3942,47 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update the possibly missing flag for subtracting the bias from the flat
         if not hasattr(self, "flatbiassub"):
             self.flatbiassub = False
+
+        # Update the possibly missing exposure ratio variable
+        if not hasattr(self, "exposure_ratio"):
+            self.exposure_ratio = 1.0
+
+
+        # Add the possibily missing variables for ASTRA
+        if not hasattr(self, "astra_dialog"):
+            self.astra_dialog = None
+
+        if not hasattr(self, "astra_config_params"):
+            self.astra_config_params = None
+
+        if not hasattr(self, "saturation_threshold"):
+            self.saturation_threshold = int(round(0.98*(2**self.config.bit_depth - 1)))
+
+        if not hasattr(self, "snr_centroid"):
+            self.snr_centroid = 1.0
+
+        if not hasattr(self, "saturated_centroid"):
+            self.saturated_centroid = False
+
+        # Add the missing satellite overlay variables
+        if not hasattr(self, "show_sattracks"):
+            self.show_sattracks = False
+        if not hasattr(self, "tle_file"):
+            self.tle_file = None
+        if not hasattr(self, "satellite_tracks"):
+            self.satellite_tracks = []
+        if not hasattr(self, "fov_poly_cache"):
+            self.fov_poly_cache = None
+        if not hasattr(self, "fov_poly_jd"):
+            self.fov_poly_jd = None
+        if not hasattr(self, "sat_track_curves"):
+            self.sat_track_curves = []
+        if not hasattr(self, "sat_track_labels"):
+            self.sat_track_labels = []
+        if not hasattr(self, "sat_track_arrows"):
+            self.sat_track_arrows = []
+        if not hasattr(self, "sat_markers"):
+            self.sat_markers = []
 
         # If the paired stars are a list (old version), reset it to a new version where it's an object
         if isinstance(self.paired_stars, list):
@@ -3160,7 +4335,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Load the dark
         elif event.key() == QtCore.Qt.Key_D and (modifiers == QtCore.Qt.ControlModifier):
             
-            _, self.dark = self.loadDark()
+            _, self.dark = self.loadDark(force_dialog=True)
 
             # Set focus back on the SkyFit window
             self.activateWindow()
@@ -3182,15 +4357,20 @@ class PlateTool(QtWidgets.QMainWindow):
         # Jump to the next star
         elif event.key() == QtCore.Qt.Key_Space and (modifiers == QtCore.Qt.ShiftModifier):
 
-            plate_tool.jumpNextStar(miss_this_one=True)
+            self.jumpNextStar(miss_this_one=True)
             self.updateBottomLabel()
+
+
+        # Toggle satellite tracks
+        elif event.key() == QtCore.Qt.Key_T and (modifiers == QtCore.Qt.ControlModifier):
+             self.toggleSatelliteTracks()
 
 
 
         # Load the flat
         elif event.key() == QtCore.Qt.Key_F and (modifiers == QtCore.Qt.ControlModifier):
             
-            _, self.flat_struct = self.loadFlat()
+            _, self.flat_struct = self.loadFlat(force_dialog=True)
 
             # Set focus back on the SkyFit window
             self.activateWindow()
@@ -3913,6 +5093,700 @@ class PlateTool(QtWidgets.QMainWindow):
                     print('Current line: {}'.format(self.img.img_handle.current_line))
                     self.img.nextLine()
 
+            # Launch ASTRA GUI
+            elif (event.key() == QtCore.Qt.Key_K) and (modifiers == QtCore.Qt.ControlModifier):
+                
+                if ASTRA_IMPORTED:
+                    
+                    # If the ASTRA dialog does not exist, create it
+                    if not hasattr(self, "astra_dialog") or self.astra_dialog is None:
+                        
+                        self.openAstraGUI()
+                        self.astra_dialog.finished.connect(self.clearAstraDialogReference)
+                        
+                        if self.astra_config_params is not None:
+                            self.astra_dialog.setConfig(self.astra_config_params)
+                    
+                    # If the dialog already exists, close it
+                    else:
+                        self.astra_config_params = self.astra_dialog.getConfig()
+                        self.astra_dialog.close()
+                        self.clearAstraDialogReference()
+
+                else:
+                    qmessagebox(title="ASTRA is not available",
+                    message='ASTRA was not correctly imported, check pyswarms is installed.' '' \
+                    'Aborted open ASTRA GUI process.',
+                    message_type='error')
+
+    def clearAstraDialogReference(self):
+        """Clears the reference to the ASTRA GUI"""
+
+        self.astra_dialog = None
+
+    def clearAllPicks(self):
+        """Clears the pick_list, and updates the GUI."""
+
+        # Clear all picks
+        self.pick_list = {}
+
+        # Update GUI to remove drawn picks
+        self.updatePicks()
+
+    def openAstraGUI(self):
+        """Opens the ASTRA dialog box on another thread to ensure SkyFit2 responsiveness."""
+
+        # Launch the ASTRA Dialog on a seperate thread, with callbacks for buttons
+        self.astra_dialog = launchASTRAGUI(
+            run_astra_callback=None,
+            run_kalman_callback=self.runKalmanFromConfig,
+            run_load_callback=self.loadPicksFromFile,
+            skyfit_instance=self
+        )
+
+        if self.astra_config_params is not None:
+            self.astra_dialog.setConfig(self.astra_config_params)
+
+        self.checkASTRACanRun()
+        self.checkPickRevertCanRun()
+        self.checkKalmanCanRun()
+    
+    def loadPicksFromFile(self, config):
+        """Loads picks and associated values from either ECSV or DetApp txt file.
+        args: 
+            config (dict) : Config returned from the ASTRA GUI
+        """
+
+        # Unpack file path
+        file_path = config["file_path"]
+
+        # Check if the file path exists
+        if not os.path.exists(file_path):
+            print(f'ERROR: No Valid ECSV or .txt file selected')
+            return
+        
+        # DetApp picks in a ev*.txt files
+        if os.path.basename(file_path).startswith('ev') and os.path.basename(file_path).endswith('.txt'):
+            
+            # Create a temp pick_list
+            pick_list = {}
+
+            # Load all picks and indices from loadEvTxt
+            pick_list = self.loadEvTxt(file_path)
+
+        # Open ECSV file (even if it doesn't have an .ecsv extension)
+        else:
+
+            # Create a temp pick_list
+            pick_list = {}
+
+            # Load the picks and indices from loadECSV
+            try:
+                pick_list = self.loadECSV(file_path)
+
+            except Exception as e:
+                
+                print(f'ERROR: Failed to load ECSV file {file_path}: {e}')
+                qmessagebox(
+                    title='ECSV Load Error',
+                    message=f'Failed to load ECSV file {file_path}: {e}',
+                    message_type="error"
+                )
+                return
+
+
+        # Check if the returned values from load are None
+        if pick_list is None:
+            return # Warning was raised in loadEvTxt/loadECSV
+
+        # Check if the pick list is empty
+        if pick_list == {}:
+            qmessagebox(
+                title='Pick Load Error',
+                message=f'No picks loaded from {file_path}',
+                message_type="error"
+            )
+            return
+
+        # Add previous picks to list, if the pick is non-empty
+        if np.array(
+            sorted(
+            k for k in self.pick_list.keys()
+            if (
+                self.pick_list[k].get('x_centroid') is not None
+                or self.pick_list[k].get('y_centroid') is not None
+            )
+            ),
+            dtype=int
+        ).size > 0:
+            # Deep copy to avoid storing references to mutable objects
+            self.previous_picks.append(copy.deepcopy(self.pick_list))
+
+        # Update the main pick list & GUI
+        self.clearAllPicks()
+        self.pick_list = pick_list
+        self.updateGreatCircle()
+
+        # Print out added centroids
+        for k in pick_list.keys():
+            print(f'Added centroid at ({pick_list[k]["x_centroid"]},'
+                  f' {pick_list[k]["y_centroid"]}) on frame {k}')
+
+        # Finally update the GUI picks
+        self.updatePicks()
+
+        # Update Kalman/ASTRA Ready status if instance exists
+        if hasattr(self, 'astra_dialog') and self.astra_dialog is not None:
+            self.checkASTRACanRun()
+            self.checkKalmanCanRun()
+            self.checkPickRevertCanRun()
+
+        # Send console and GUI updates
+        print(f'Loaded {len(pick_list.keys())} picks from {file_path}!')
+
+    def checkKalmanCanRun(self):
+        """Checks if kalman filter can be run, updates astra GUI"""
+        
+        # Unpack picks with non-None values
+        keys = np.array(
+            sorted(
+            k for k in self.pick_list.keys()
+            if (
+                self.pick_list[k].get('x_centroid') is not None
+                or self.pick_list[k].get('y_centroid') is not None
+            )
+            ),
+            dtype=int
+        )
+
+        # Enough points for a good run
+        if keys.size >= 5:  
+            tt = 'Ready to run.'
+            self.astra_dialog.setKalmanStatus(True, tt)
+
+        # Minimum amount of points to run
+        elif keys.size >= 3:
+            tt = 'Ready to run. WARNING: Kalman should be generally run with at least 5 points.'
+            self.astra_dialog.setKalmanStatus("WARN", tt)
+
+        # Not enough points to run
+        else:
+            tt = 'Not ready. Kalman requires at least 3 points (generally >= 5 points).'
+            self.astra_dialog.setKalmanStatus(False, tt)
+
+    def reverseASTRAPicks(self):
+        """Reverts the ASTRA picks to the previous state of picks."""
+        
+        # Only revert if picks are non-empty
+        if not self.previous_picks == []:
+
+            # Pop newest pick off stack
+            old_picks = self.previous_picks.pop()
+
+            # Clear old picks
+            self.clearAllPicks()
+
+            # Restore old picks
+            for frame_num in old_picks.keys():
+                self.pick_list[frame_num] = old_picks[frame_num]
+
+            # Update picks in GUI
+            self.updateGreatCircle()
+            self.updatePicks()
+
+            # Print out reverted picks confirmation
+            print(f'Reverted picks to previous state with {len(old_picks.keys())} picks.')
+        
+        # Update if picks can be reverted again
+        self.checkASTRACanRun()
+        self.checkKalmanCanRun()
+        self.checkPickRevertCanRun()
+            
+    def checkPickRevertCanRun(self):
+        """Checks if reverseASTRAPicks() can be run, connected to ASTRA GUI"""
+
+        if self.previous_picks == []:
+            # If previous picks are empty, set revert status to False
+            self.astra_dialog.setRevertStatus(False)
+        else:
+            # If previous picks are not empty, set revert status to True
+            self.astra_dialog.setRevertStatus(True)
+
+    def checkASTRACanRun(self):
+        """Checks if ASTRA can be run, updates astra GUI"""
+
+        # Instantiate boolean vars
+        middle_points_bool = False
+        ending_points_bool = False
+        middle_includes_ends_bool = False
+        middle_includes_both_ends_bool = False
+
+        # Only include keys where x_centroid or y_centroid is not None
+        keys = np.array(
+            sorted(
+            k for k in self.pick_list.keys()
+            if (
+                self.pick_list[k].get('x_centroid') is not None
+                or self.pick_list[k].get('y_centroid') is not None
+            )
+            ),
+            dtype=int
+        )
+
+        if keys.size >= 3:
+
+            # True where [k[i], k[i+1], k[i+2]] are consecutive integers
+            triples = (keys[:-2] + 1 == keys[1:-1]) & (keys[:-2] + 2 == keys[2:])
+
+            # indices i that start a consecutive triple
+            i_triples = np.where(triples)[0]
+
+            # exclude triples that touch the first or last key in the whole list
+            # i == 0 uses the very first key; i+2 == len(keys)-1 uses the very last
+            inner = i_triples[(i_triples > 0) & (i_triples + 2 < len(keys) - 1)]
+
+            middle_points_bool = inner.size > 0
+
+            middle_includes_ends_bool = i_triples.size > 0
+
+            if keys.size == 3 and middle_includes_ends_bool:
+                middle_includes_both_ends_bool = True
+
+        else:
+            middle_points_bool = False
+            middle_includes_ends_bool = False
+
+        # True if there are ending points which are not part of any sequence of picks (distinct)
+        ending_points_bool = True if (len(keys) >= 2 and keys[0] + 1 != keys[-1]) else False
+
+        # If there are only three points
+        if middle_includes_both_ends_bool:
+            tt = "Ready to run. WARNING: Three middle picks includes both endpoints, " \
+            "ASTRA will only process the three points"
+            self.astra_dialog.setASTRAStatus('WARN', tt)
+
+        # If there are not enough consecutive points
+        elif middle_points_bool:
+            # Picks include three in middle, and two endpoints
+            tt = "Ready to run, there are at least three consecutive points and two endpoints"
+            self.astra_dialog.setASTRAStatus(True, tt)
+        
+        # If the three middle points includes one, but not both endpoints
+        elif middle_includes_ends_bool:
+            # Picks include three in the middle, which are part of the endpoints
+            tt = "Ready to run. WARNING: Three consecutive middle points includes end-points - " \
+            "ASTRA will stop at either beginning/end of middle points."
+            self.astra_dialog.setASTRAStatus('WARN', tt)
+        
+        else:
+            # If there are only distinct ending points selected, and no consequitive middle points
+            if ending_points_bool:
+                tt = "Not ready. End points selected, please pick three consecutive frames at high-SNR."
+                self.astra_dialog.setASTRAStatus(False, tt)
+            # If there are no picks, or no messages triggered (not ready)
+            else:
+                tt = "Not ready. Select three consecutive frames at high SNR, " \
+                "and the start/end frames of the streak"
+                self.astra_dialog.setASTRAStatus(False, tt)
+
+    def prepareASTRAData(self, astra_config):
+        """Prepares data from SkyFit2 class vars for ASTRA"""
+
+        print("Running ASTRA with:", astra_config)
+
+        # Sort pick list according to keys
+        self.pick_list = dict(sorted(self.pick_list.items()))
+
+        # Load the keys for picks which are not empty (not just photometry picks)
+        pick_frame_indices = np.array(
+            [key for key in self.pick_list.keys()
+             if self.pick_list[key]['x_centroid'] is not None 
+             and self.pick_list[key]['y_centroid'] is not None],
+            dtype=int
+        )
+
+        # Prepare pick_dict (keys -> frame indexes, values include x,y centroid)
+
+        pick_dict = {i : {
+            "x_centroid" : self.pick_list[i]['x_centroid'],
+            "y_centroid" : self.pick_list[i]['y_centroid']
+                } for i in pick_frame_indices}
+
+
+        # Prepare the flat to be passed to ASTRA
+        flat = None
+        if self.flat_struct is not None:
+            flat = copy.deepcopy(self.flat_struct)
+            flat.flat_img = flat.flat_img.T
+
+        # Prepare the dark to be passed to ASTRA
+        dark = None
+        if self.dark is not None:
+            dark = copy.deepcopy(self.dark)
+            dark = dark.T
+
+        # Package data for ASTRA - import later using dict comprehension
+        data_dict = {
+            "img_obj" : self.img_handle,
+            "pick_dict" : pick_dict,
+            "astra_config" : astra_config,
+            "data_path" : self.dir_path,
+            "config" : self.config,
+            "dark" : dark,
+            "flat" : flat
+        }
+
+        return data_dict
+
+
+    def integrateASTRAResults(self, astra):
+        """Integrates ASTRA results into the SkyFit2 instance."""
+
+        # Add previous picks to list
+        if np.array(
+            sorted(
+            k for k in self.pick_list.keys()
+            if (
+                self.pick_list[k].get('x_centroid') is not None
+                or self.pick_list[k].get('y_centroid') is not None
+            )
+            ),
+            dtype=int
+        ).size > 0:
+            # Deep copy to avoid storing references to mutable objects
+            self.previous_picks.append(copy.deepcopy(self.pick_list))
+
+        # Add ASTRA picks to the pick list
+        self.clearAllPicks()  # Clear previous picks
+
+        # Get and set pick_list from ASTRA
+        self.pick_list = astra.getResults(skyfit_format=True)
+
+        # Print added message
+        for pick_frame, pick in self.pick_list.items():
+            print(f'Added centroid at ({pick["x_centroid"]}, {pick["y_centroid"]}) '
+                  f'on frame {pick_frame}')
+
+        # Update picks on GUI and update greatCircle
+        self.updateGreatCircle()
+        self.updatePicks()
+
+        # Update Kalman/ASTRA Ready status if instance exists
+        if hasattr(self, 'astra_dialog') and self.astra_dialog is not None:
+            self.checkASTRACanRun()
+            self.checkKalmanCanRun()
+            self.checkPickRevertCanRun()
+
+        # Print message telling ASTRA has been run
+        print(f'Loaded {astra.getTotalPicks()} Picks from ASTRA! '
+              f'Minimum SNR of {astra.getMinSnr()}')
+
+    def setMessageBox(self, title, message, type):
+        """Target function for ASTRA_GUI to set message boxes."""
+        qmessagebox(title=title, message=message, message_type=type)
+
+    def runKalmanFromConfig(self, astra_config, progress_callback=None):
+        """Runs the Kalman filter with the given ASTRA configuration."""
+
+        print("Running Kalman with:", astra_config)
+
+        if progress_callback is not None:
+            progress_callback(0)
+
+        # Take only keys of non-empty picks (not just photometry), maintaining order
+        ordered_keys = [key for key, _ in sorted(self.pick_list.items())]
+        pick_frame_indices = [
+            key for key in ordered_keys
+            if self.pick_list[key]['x_centroid'] is not None
+            and self.pick_list[key]['y_centroid'] is not None
+        ]
+
+        # Prepare measurements and times for Kalman filter
+        measurements = [
+            (self.pick_list[key]['x_centroid'], self.pick_list[key]['y_centroid'])
+            for key in pick_frame_indices
+        ]
+        times = [self.img_handle.currentFrameTime(key, dt_obj=True) for key in pick_frame_indices]
+
+        # Extract kalman settings from astra_config
+        sigma_xy = astra_config['kalman']['sigma_xy (px)']
+        perc_sigma_vxy = astra_config['kalman']['sigma_vxy (%)']
+        monotonicity = astra_config['kalman']['Monotonicity']
+        save_stats_results = astra_config['kalman']['save results']
+
+        # Run Kalman on the ASTRA instance, extract new picks
+        kalman = KalmanFilter(
+            sigma_xy=sigma_xy,
+            perc_sigma_vxy=perc_sigma_vxy,
+            measurements=measurements,
+            times=times,
+            monotonicity=monotonicity,
+            save_stats_results=save_stats_results,
+            save_path=self.dir_path
+        )
+
+        xypicks = kalman.getPicks()
+
+        if progress_callback is not None:
+            progress_callback(100)
+
+        return {
+            'frame_indices': pick_frame_indices,
+            'xypicks': xypicks.tolist(),
+            'save_results': save_stats_results,
+        }
+
+    def applyKalmanResults(self, kalman_result):
+        """Integrates Kalman smoothing results into the SkyFit2 instance."""
+
+        if not kalman_result:
+            return
+
+        frame_indices = kalman_result.get('frame_indices', [])
+        xypicks = kalman_result.get('xypicks', [])
+        save_results = kalman_result.get('save_results', 'false')
+
+        # Add previous picks to list
+        if np.array(
+            sorted(
+                k for k in self.pick_list.keys()
+                if (
+                    self.pick_list[k].get('x_centroid') is not None
+                    or self.pick_list[k].get('y_centroid') is not None
+                )
+            ),
+            dtype=int
+        ).size > 0:
+            # Deep copy to avoid storing references to mutable objects
+            self.previous_picks.append(copy.deepcopy(self.pick_list))
+
+        # Print message to show Kalman has been applied
+        print(f'Kalman filter applied to {len(xypicks)} picks!')
+
+        # Adjust all picks positions
+        for frame_number, pick in zip(frame_indices, xypicks):
+            frame_number = int(frame_number)
+            if frame_number in self.pick_list:
+                self.pick_list[frame_number]["x_centroid"] = pick[0]
+                self.pick_list[frame_number]["y_centroid"] = pick[1]
+
+                # Print adjustment message
+                print(f'Adjusted centroid at ({pick[0]}, {pick[1]}) on frame {frame_number}')
+
+        # Update picks on GUI and greatCircle
+        self.updateGreatCircle()
+        self.updatePicks()
+
+        # Update kalman/astra readiness if instance exists
+        if hasattr(self, 'astra_dialog') and self.astra_dialog is not None:
+            self.checkASTRACanRun()
+            self.checkKalmanCanRun()
+            self.checkPickRevertCanRun()
+
+        # Print message showing kalman finished
+        if str(save_results).lower() == 'true':
+            print(f'Saved to CSV & Loaded {len(frame_indices)} Picks from Kalman Smoothing.')
+        else:
+            print(f'Loaded {len(frame_indices)} Picks from Kalman Smoothing!')
+
+    def loadEvTxt(self, txt_file_path):
+        """
+        Loads the Ev*.txt file and adds the relevant info to pick_list
+        Args:
+            txt_file_path (str): Path to the Ev*.txt file to load
+        Returns:
+            picks (dict): (N : [8]) dict following same format as self.pick_list 
+        """
+
+        picks = [] # (N, x, y) array of picks
+        pick_frame_indices = [] # (N,) array of frame indices
+
+        # Temp bool to extract header line
+        first_bool = False
+
+        # Wrap in try except for uncaught errors
+        try:
+            # Opens and parses pick file
+            with open(txt_file_path, 'r') as file:
+                for i, line in enumerate(file):
+                    if line.strip() and not line.startswith('#'):
+
+                        # Clean the line
+                        line = [part.strip() for part in line.split() if part]
+
+                        # Unpack the header
+                        if first_bool == False:
+                            first_bool = True
+
+                            # Unpack header info
+                            column_names = [part.strip() for part in temp_line.split()[1:] if part]
+
+                            # Extract indices
+                            frame_number_idx = column_names.index('fr') if 'fr' in column_names else None
+                            x_centroid_idx = column_names.index('cx') if 'cx' in column_names else None
+                            y_centroid_idx = column_names.index('cy') if 'cy' in column_names else None
+
+                            # Raise error if not found in txt file
+                            if frame_number_idx is None or x_centroid_idx is None or y_centroid_idx is None:
+                                qmessagebox(title="TXT File Format Error", 
+                                            message="TXT file must contain 'fr', 'cx', and 'cy' columns.",
+                                            message_type="error")
+                                return None
+                        
+                        else:
+                            # Unpack the pick
+                            frame_number = int(line[frame_number_idx])
+                            cx, cy = float(line[x_centroid_idx]), float(line[y_centroid_idx])
+
+                            picks.append({
+                                'x_centroid': cx,
+                                'y_centroid': cy,
+                                'mode' : 1,
+                                'intensity_sum' : 1,
+                                'photometry_pixels' : None,
+                                'background_intensity' : 0,
+                                'snr' : 1,
+                                'saturated' : False,
+                            })
+                            pick_frame_indices.append(frame_number)
+
+                    # Store a temp line to hit previous for col names
+                    temp_line = line
+
+            # Pack picks in self.pick_list format
+            pick_list = {frame: pick for frame, pick in zip(pick_frame_indices, picks)}
+
+            return pick_list
+
+        # Raise error message
+        except Exception as e:
+            qmessagebox(title="File Read Error", 
+                        message=f"Unknown Error reading TXT file, check correct file loaded.: {str(e)}",
+                        message_type="error")
+            return None
+
+    def loadECSV(self, ECSV_file_path):
+        """
+        Loads the ECSV file and adds the relevant info to pick_list
+        Args:
+            ECSV_file_path (str): Path to the ECSV file to load
+        Returns:
+            picks (dict): (N : [8]) dict following same format as self.pick_list 
+        """
+
+        # Instantiate arrays to be populated
+        picks = []  # N x args_dict array for addCentroid
+        pick_frame_indices = []  # (N,) array of frame indices
+        pick_frame_times = []  # (N,) array of frame times
+
+        # wrap in try except to catch unknown errors
+        try:
+            # Opens and parses the ECSV file
+            with open(ECSV_file_path, 'r') as file:
+
+                # Read the file contents
+                contents = file.readlines()
+        
+                # Temp bool to get the column names
+                first_bool = False
+
+                # Process the contents
+                for line in contents:
+
+                    # Clean the line
+                    line = [part.strip() for part in line.split(',') if part]
+
+                    # Skip header lines
+                    if line[0].startswith('#'):
+                        continue
+
+                    if first_bool == False:
+                        # Set first bool to True so header is not unpacked twice
+                        first_bool = True
+
+                        # Unpack column names
+                        column_names = line
+
+                        # Map column names to their indices
+                        pick_frame_times_idx = column_names.index('datetime') if 'datetime' in column_names \
+                                                                                        else None
+                        x_ind = column_names.index('x_image') if 'x_image' in column_names \
+                                                                                        else None
+                        y_ind = column_names.index('y_image') if 'y_image' in column_names \
+                                                                                        else None
+                        background_ind = column_names.index('background_pixel_value') \
+                                                        if 'background_pixel_value' in column_names else None
+                        sat_ind = column_names.index('saturated_pixels') if 'saturated_pixels' in column_names \
+                                                                                        else None
+                        snr_ind = column_names.index('snr') if 'snr' in column_names else None
+
+                        # Ensure essential values are in the ECSV
+                        if x_ind is None or y_ind is None or pick_frame_times_idx is None:
+                            qmessagebox(title="ECSV File Format Error", 
+                                        message="ECSV file must contain 'x_image', 'y_image', "
+                                        "and 'datetime' columns.",
+                                        message_type="error")
+                            return None
+
+                        continue
+
+                    else:
+                        # Unpack line
+
+                        # Populate arrays
+                        cx, cy = float(line[x_ind]), float(line[y_ind])
+                        background = float(line[background_ind]) if background_ind is not None else 0
+                        saturated = bool(line[sat_ind]) if sat_ind is not None else False
+                        snr = float(line[snr_ind]) if snr_ind is not None else 1
+                        pick_frame_times.append(datetime.datetime.strptime(line[pick_frame_times_idx], 
+                                                                           '%Y-%m-%dT%H:%M:%S.%f'))
+
+                        # Load in pick parameters, use default for other values 
+                        picks.append({
+                            'x_centroid': cx,
+                            'y_centroid': cy,
+                            'mode': 1,
+                            'intensity_sum': 1,
+                            'photometry_pixels': None,
+                            'background_intensity': background,
+                            'snr': snr,
+                            'saturated': saturated,
+                        })
+
+            # Converts times into frame indices, accounting for floating-point errors
+            pick_frame_indices = []
+            frame_count = self.img_handle.total_frames
+            time_idx = 0
+            for i in range(frame_count):
+                frame_time = self.img_handle.currentFrameTime(frame_no=i, dt_obj=True)
+                time = pick_frame_times[time_idx]
+                if frame_time == time or \
+                    frame_time == time + datetime.timedelta(microseconds=1) or \
+                    frame_time == time - datetime.timedelta(microseconds=1):
+                    pick_frame_indices.append(i)
+                    time_idx += 1
+                if time_idx >= len(pick_frame_times):
+                    break
+
+            # if arrays are different dimensions raise error
+            if len(picks) != len(pick_frame_indices):
+                qmessagebox(title="Pick/Frame Index Mismatch",
+                            message="Mismatch between number of picks and frame indices. " \
+                            "Please check the ECSV file for frame-time mismatch errors.",
+                            message_type="error")
+                return None
+            pick_list = {frame: pick for frame, pick in zip(pick_frame_indices, picks)}
+
+            return pick_list
+        
+        # Raise error box
+        except Exception as e:
+            qmessagebox(title='File Read Error',
+                        message=f"Unknown Error reading ECSV file, check correct file loaded.: {str(e)}",
+                        message_type="error")
+            return None
+
+
     def keyReleaseEvent(self, event):
         
         try:
@@ -4126,6 +6000,22 @@ class PlateTool(QtWidgets.QMainWindow):
             self.calstar_markers.hide()
             self.calstar_markers2.hide()
 
+    def toggleSatelliteTracks(self):
+        """ Toggle whether to show satellite tracks """
+
+        if not SKYFIELD_AVAILABLE:
+            print("Skyfield not available - cannot show satellite tracks.")
+            return
+             
+        self.show_sattracks = not self.show_sattracks
+        print(f"Satellite tracks: {self.show_sattracks}")
+        
+        if self.show_sattracks:
+            self.loadSatelliteTracks()
+        else:
+            # Will clear if self.show_sattracks is False
+            self.drawSatelliteTracks()
+
     def toggleShowPicks(self):
         """ Toggle whether to show the picks for manualreduction """
 
@@ -4149,8 +6039,12 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Toggle whether to show the photometry region for manualreduction """
         if self.region.isVisible():
             self.region.hide()
+            if hasattr(self, "region_zoom"):
+                self.region_zoom.hide()
         else:
             self.region.show()
+            if hasattr(self, "region_zoom"):
+                self.region_zoom.show()
 
     def toggleDistortion(self):
         """ Toggle whether to show the distortion lines"""
@@ -4484,7 +6378,6 @@ class PlateTool(QtWidgets.QMainWindow):
             img_handle = detectInputTypeFile(self.input_path, self.config, beginning_time=beginning_time, 
                                              flipud=self.flipud)
 
-
         self.img_handle = img_handle
 
 
@@ -4571,7 +6464,7 @@ class PlateTool(QtWidgets.QMainWindow):
         return catalog_stars
 
 
-    def loadPlatepar(self, update=False, platepar_file = None):
+    def loadPlatepar(self, update=False, platepar_file=None):
         """
         Open a file dialog and ask user to open the platepar file, changing self.platepar and self.platepar_file
 
@@ -4591,7 +6484,7 @@ class PlateTool(QtWidgets.QMainWindow):
             initial_file = self.dir_path
 
         # Open the file dialog no 'platepar_file' parameter was specified
-        if platepar_file == None:
+        if platepar_file is None:
             platepar_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the platepar file", 
                                                                   initial_file,
                                                                   "Platepar files (*.cal);;All files (*)")[0]
@@ -4650,11 +6543,14 @@ class PlateTool(QtWidgets.QMainWindow):
 
         if update:
             self.updateStars()
+            self.drawPhotometryColoring()
+
             self.tab.param_manager.updatePlatepar()
             self.updateLeftLabels()
 
     def savePlatepar(self):
         """  Save platepar to a file """
+
         # If the platepar is new, save it to the working directory
         if (not self.platepar_file) or (not os.path.isfile(self.platepar_file)):
             self.platepar_file = os.path.join(self.dir_path, self.config.platepar_name)
@@ -4770,22 +6666,58 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateDistortion()
 
 
-    def loadFlat(self):
+    def usingUWOData(self):
+        """ Return True if using any UWO instrument data. """
+
+        if self.img_handle is None:
+            return False
+
+        if self.img_handle.input_type == 'images':
+            if self.img_handle.uwo_png_mode:
+                return True
+
+        elif self.img_handle.input_type == 'vid':
+                return True
+
+        return False
+
+
+    def loadFlat(self, force_dialog=False):
         """ Open a file dialog and ask user to load a flat field. """
 
-        # Check if flat exists in the folder, and set it as the default file name if it does
-        if self.config.flat_file in os.listdir(self.dir_path):
-            initial_file = os.path.join(self.dir_path, self.config.flat_file)
-        else:
-            initial_file = self.dir_path
+        file_names_to_check = [
+            self.config.flat_file
+            ]
+        
+        # If we're running in the UWO mode or using a .vid file, add the UWO flat file name
+        if self.usingUWOData():
+            file_names_to_check.append('flat.png')
 
-        flat_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the flat field file", initial_file,
-                                                      "Image files (*.png *.jpg *.bmp);;All files (*)")[0]
+        # Check if any of the flat files exist in the folder
+        initial_file = None
+        for file_name in file_names_to_check:
+            if file_name in os.listdir(self.dir_path):
+                initial_file = os.path.join(self.dir_path, file_name)
+                break
+
+
+        # If using UWO files, automatically load the flat file and skip the dialog
+        if not force_dialog and self.usingUWOData() and initial_file is not None:
+            flat_file = initial_file
+
+        else:
+
+            if initial_file is None:
+                initial_file = self.dir_path
+
+            # Open the file dialog to select the flat field file
+            flat_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the flat field file", initial_file,
+                                                    "Image files (*.png *.jpg *.bmp);;All files (*)")[0]
 
         if not flat_file:
             return False, None
 
-        print(flat_file)
+        print("Loading the flat file:", flat_file)
 
         try:
             # Load the flat, byteswap the flat if vid file is used or UWO png
@@ -4824,22 +6756,42 @@ class PlateTool(QtWidgets.QMainWindow):
         return flat_file, flat
 
 
-    def loadDark(self):
+    def loadDark(self, force_dialog=False):
         """ Open a file dialog and ask user to load a dark frame. """
 
-        # Check if dark exists in the folder, and set it as the default file name if it does
-        if self.config.dark_file in os.listdir(self.dir_path):
-            initial_file = os.path.join(self.dir_path, self.config.dark_file)
-        else:
-            initial_file = self.dir_path
+        file_names_to_check = [
+            self.config.dark_file
+            ]
 
-        dark_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the dark frame file", initial_file,
-                                                      "Image files (*.png *.jpg *.bmp *.nef *.cr2);;All files (*)")[0]
+        # If we're running in the UWO mode or using a .vid file, add the UWO dark file name
+        if self.usingUWOData():
+            file_names_to_check.append('bias.png')
+            file_names_to_check.append('dark.png')
+
+        # Locate the dark frame file in the folder
+        initial_file = None
+        for file_name in file_names_to_check:
+            if file_name in os.listdir(self.dir_path):
+                initial_file = os.path.join(self.dir_path, file_name)
+                break            
+
+        # If using UWO files, automatically load the dark file and skip the dialog
+        if not force_dialog and self.usingUWOData() and initial_file is not None:
+            dark_file = initial_file
+
+        else:
+            
+            if initial_file is None:
+                initial_file = self.dir_path
+
+            # Open the file dialog to select the dark frame file
+            dark_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the dark frame file", 
+                initial_file, "Image files (*.png *.jpg *.bmp *.nef *.cr2);;All files (*)")[0]
 
         if not dark_file:
             return False, None
 
-        print(dark_file)
+        print("Loading the dark frame file:", dark_file)
 
         try:
 
@@ -4923,6 +6875,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.updateGreatCircle()
 
+        # Update Kalman/ASTRA Ready status if instance exists
+        if hasattr(self, 'astra_dialog') and self.astra_dialog is not None:
+            self.checkASTRACanRun()
+            self.checkKalmanCanRun()
+
     def removeCentroid(self, frame):
         """
         Removes the pick from given frame if it is there
@@ -4942,6 +6899,12 @@ class PlateTool(QtWidgets.QMainWindow):
             self.pick_list[self.img.getFrame()]['mode'] = None
             self.tab.debruijn.removeRow(frame)
 
+        # Update Kalman/ASTRA Ready status if instance exists
+        if hasattr(self, 'astra_dialog') and self.astra_dialog is not None:
+            self.checkASTRACanRun()
+            self.checkKalmanCanRun()
+
+
     def centroid(self, prev_x_cent=None, prev_y_cent=None):
         """ Find the centroid of the star clicked on the image. """
 
@@ -4957,7 +6920,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Check if the mouse was pressed outside the FOV
         if mouse_x is None:
-            return None, None, None
+            return None, None, None, None, None, None
 
         ### Extract part of image around the mouse cursor ###
         ######################################################################################################
@@ -4983,7 +6946,8 @@ class PlateTool(QtWidgets.QMainWindow):
         img_crop_orig = self.img.data[x_min:x_max, y_min:y_max]
 
         # Perform gamma correction
-        img_crop = Image.gammaCorrectionImage(img_crop_orig, self.config.gamma)
+        img_crop = Image.gammaCorrectionImage(img_crop_orig, self.config.gamma, out_type=np.float32)
+
 
         ######################################################################################################
 
@@ -5026,14 +6990,11 @@ class PlateTool(QtWidgets.QMainWindow):
         ######################################################################################################
         # If 10 or more pixels are saturated (within 2% of the maximum value), mark the pick as saturated
 
-        # Compute the saturation threshold
-        saturation_threshold = int(round(0.98*(2**self.config.bit_depth - 1)))
-
         # Count the number of pixels above the saturation threshold (original non-gramma corrected image)
         # Apply the mask to only include the pixels within the star aperture radius
-        saturated_count = np.sum(img_crop_orig[aperture_mask == 1] > saturation_threshold)
+        saturated_count = np.sum(img_crop_orig[aperture_mask == 1] > self.saturation_threshold)
 
-        # print("Saturation threshold: {:.2f}, count: {:d}".format(saturation_threshold, saturated_count))
+        # print("Saturation threshold: {:.2f}, count: {:d}".format(self.saturation_threshold, saturated_count))
 
         # If 2 or more pixels are saturated, mark the pick as saturated
         min_saturated_px_count = 2
@@ -5089,8 +7050,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         for i in range(img_crop.shape[0]):
             for j in range(img_crop.shape[1]):
-                i_rel = i - img_crop.shape[0] / 2
-                j_rel = j - img_crop.shape[1] / 2
+                i_rel = i - img_crop.shape[0]/2
+                j_rel = j - img_crop.shape[1]/2
                 pix_dist = math.sqrt(i_rel**2 + j_rel**2)
 
                 if pix_dist <= self.star_aperture_radius:
@@ -5098,8 +7059,8 @@ class PlateTool(QtWidgets.QMainWindow):
                     if net_flux > 0:
                         dx = i - x_centroid_crop
                         dy = j - y_centroid_crop
-                        moment_x += net_flux * dx**2
-                        moment_y += net_flux * dy**2
+                        moment_x += net_flux*dx**2
+                        moment_y += net_flux*dy**2
                         total_flux += net_flux
 
         # Compute sigma and FWHM
@@ -5111,10 +7072,10 @@ class PlateTool(QtWidgets.QMainWindow):
             sigma_y = math.sqrt(moment_y/total_flux)
 
             # Compute the circular sigma
-            sigma = math.sqrt((moment_x + moment_y) / (2 * total_flux))
+            sigma = math.sqrt((moment_x + moment_y)/(2*total_flux))
 
             # Compute a circular FWHM
-            fwhm = 2.355 * sigma
+            fwhm = 2.355*sigma
 
         ######################################################################################################
 
@@ -5182,8 +7143,6 @@ class PlateTool(QtWidgets.QMainWindow):
         # plt.show()
 
         # ######################################################################################################
-
-
 
 
         # Compute the SNR using the "CCD equation" (Howell et al., 1989)
@@ -5777,35 +7736,67 @@ class PlateTool(QtWidgets.QMainWindow):
         fig_a.show()
 
 
-    def computeIntensitySum(self):
+    def computeIntensitySum(self, star_mask_coeff=3):
         """ Compute the background subtracted sum of intensity of colored pixels. The background is estimated
             as the median of near pixels that are not colored.
+            args:
+                star_mask_coeff (float): Mask out parts of the image with stars by masking out a region 
+                    where star_mask_coeff x stddev > average.
         """
 
         # Find the pick done on the current frame
         pick = self.getCurrentPick()
 
         if pick:
+            photom_pixels_raw = pick.get('photometry_pixels')
+
             # If there are no photometry pixels, set the intensity to 0
-            if not pick['photometry_pixels']:
-                # print("No photometry selected, setting intensity sum to 1")
+            if photom_pixels_raw is None:
                 pick['intensity_sum'] = 1
                 return None
 
-            x_arr, y_arr = np.array(pick['photometry_pixels']).T
+            if isinstance(photom_pixels_raw, np.ndarray):
+                has_pixels = photom_pixels_raw.size > 0
+            else:
+                try:
+                    has_pixels = len(photom_pixels_raw) > 0
+                except TypeError:
+                    has_pixels = bool(photom_pixels_raw)
+
+            if not has_pixels:
+                pick['intensity_sum'] = 1
+                return None
+
+            photom_pixels = np.asarray(photom_pixels_raw, dtype=np.int64)
+            if photom_pixels.size == 0:
+                pick['intensity_sum'] = 1
+                return None
+
+            if photom_pixels.ndim != 2 or photom_pixels.shape[1] != 2:
+                try:
+                    photom_pixels = np.reshape(photom_pixels, (-1, 2))
+                except ValueError:
+                    pick['intensity_sum'] = 1
+                    return None
+
+            if photom_pixels.shape[0] == 0:
+                pick['intensity_sum'] = 1
+                return None
+
+            x_arr_global, y_arr_global = photom_pixels.T
 
             # Compute the centre of the colored pixels
-            x_centre = np.mean(x_arr)
-            y_centre = np.mean(y_arr)
+            x_centre = np.mean(x_arr_global)
+            y_centre = np.mean(y_arr_global)
 
             # Take a window twice the size of the colored pixels
-            x_color_size = np.max(x_arr) - np.min(x_arr)
-            y_color_size = np.max(y_arr) - np.min(y_arr)
+            x_color_size = np.max(x_arr_global) - np.min(x_arr_global)
+            y_color_size = np.max(y_arr_global) - np.min(y_arr_global)
 
-            x_min = int(x_centre - x_color_size)
-            x_max = int(x_centre + x_color_size)
-            y_min = int(y_centre - y_color_size)
-            y_max = int(y_centre + y_color_size)
+            x_min = int(np.floor(x_centre - x_color_size))
+            x_max = int(np.ceil(x_centre + x_color_size)) + 1
+            y_min = int(np.floor(y_centre - y_color_size))
+            y_max = int(np.ceil(y_centre + y_color_size)) + 1
 
             # Limit the size to be within the bounds
             if x_min < 0: x_min = 0
@@ -5813,25 +7804,57 @@ class PlateTool(QtWidgets.QMainWindow):
             if y_min < 0: y_min = 0
             if y_max > self.img.data.shape[1]: y_max = self.img.data.shape[1]
 
+            if x_max <= x_min:
+                x_max = min(self.img.data.shape[0], x_min + 1)
+            if y_max <= y_min:
+                y_max = min(self.img.data.shape[1], y_min + 1)
+
+            x_arr = (x_arr_global - x_min).astype(np.int64, copy=False)
+            y_arr = (y_arr_global - y_min).astype(np.int64, copy=False)
+
+            valid_mask = (
+                (x_arr >= 0) & (x_arr < (x_max - x_min)) &
+                (y_arr >= 0) & (y_arr < (y_max - y_min))
+            )
+
+            if not np.all(valid_mask):
+                x_arr = x_arr[valid_mask]
+                y_arr = y_arr[valid_mask]
+                x_arr_global = x_arr_global[valid_mask]
+                y_arr_global = y_arr_global[valid_mask]
+                if x_arr.size == 0:
+                    pick['intensity_sum'] = 1
+                    return None
+
+            pick['photometry_pixels'] = list(map(tuple, np.stack([x_arr_global, y_arr_global], axis=-1)))
+
             # Take only the colored part
-            mask_img = np.ones_like(self.img.data)
-            mask_img[x_arr, y_arr] = 0
+            mask_img = np.ones(self.img.data.shape, dtype=bool)
+            mask_img[x_arr_global, y_arr_global] = False
             masked_img = np.ma.masked_array(self.img.data, mask_img)
             crop_img = masked_img[x_min:x_max, y_min:y_max]
 
             # Perform gamma correction on the colored part
-            crop_img = Image.gammaCorrectionImage(crop_img, self.config.gamma, bp=0, wp=(2**self.config.bit_depth - 1))
+            crop_img = Image.gammaCorrectionImage(
+                crop_img, self.config.gamma, 
+                bp=0, wp=(2**self.config.bit_depth - 1), 
+                out_type=np.float32
+                )
 
             # Mask out the colored in pixels
-            mask_img_bg = np.zeros_like(self.img.data)
-            mask_img_bg[x_arr, y_arr] = 1
+            mask_img_bg = np.zeros(self.img.data.shape, dtype=bool)
+            mask_img_bg[x_arr_global, y_arr_global] = True
 
             # Take the image where the colored part is masked out and crop the surroundings
             masked_img_bg = np.ma.masked_array(self.img.data, mask_img_bg)
             crop_bg = masked_img_bg[x_min:x_max, y_min:y_max]
 
             # Perform gamma correction on the background
-            crop_bg = Image.gammaCorrectionImage(crop_bg, self.config.gamma, bp=0, wp=(2**self.config.bit_depth - 1))
+            crop_bg = Image.gammaCorrectionImage(
+                crop_bg, self.config.gamma, 
+                bp=0, wp=(2**self.config.bit_depth - 1),
+                out_type=np.float32
+                )
 
             # Compute the median background
             background_lvl = np.ma.median(crop_bg)
@@ -5865,8 +7888,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 # pixels
                 # (do as a float to avoid artificially pumping up the magnitude)
                 crop_img_nobg = crop_img.astype(float) - background_lvl
-                crop_img_nobg = np.clip(crop_img_nobg, 0, None)
                 intensity_sum = np.ma.sum(crop_img_nobg)
+                intensity_sum = np.abs(intensity_sum)
 
             # Subtract the background using the avepixel
             else:
@@ -5880,37 +7903,82 @@ class PlateTool(QtWidgets.QMainWindow):
                     avepixel = applyFlat(avepixel, self.flat_struct)
 
                 
-                # Mask out the colored in pixels
-                avepixel_masked = np.ma.masked_array(avepixel, mask_img)
+                ### Create star mask to remove bright stars from affecting the centroid and photometry ###
+                
+                # Don't allow the star mask if the FR file is being used as the bright fireball track can
+                # affect the avepixel significantly
+                # Also don't allow on static images and they have the bright fireball track
+                if ((self.img_handle.input_type == "ff") and self.img_handle.use_fr_files) \
+                    or (self.img_handle.input_type == "dfn") or (self.img_handle.input_type == "images"):
+
+                    star_mask = np.zeros_like(avepixel.copy(), dtype=bool)
+                    crop_star_mask = np.zeros((x_max - x_min, y_max - y_min), dtype=bool)
+                
+                else:
+
+                    # Create the star mask and mask out bright stars from the avepixel
+                    star_mask = np.zeros_like(avepixel.copy(), dtype=int)
+                    star_mask[avepixel > (np.median(avepixel) + star_mask_coeff*np.std(avepixel))] = 1
+                    crop_star_mask = star_mask[x_min:x_max, y_min:y_max]
+
+                ### ###
+                
+                # Add the star mask & mask_img to the avepixel mask
+                avepixel_masked = np.ma.masked_array(avepixel, mask_img | star_mask)
                 avepixel_crop = avepixel_masked[x_min:x_max, y_min:y_max]
 
                 # Perform gamma correction on the avepixel crop
-                avepixel_crop = Image.gammaCorrectionImage(avepixel_crop, self.config.gamma, bp=0, wp=(2**self.config.bit_depth - 1))
+                avepixel_crop = Image.gammaCorrectionImage(
+                    avepixel_crop, self.config.gamma, 
+                    bp=0, wp=(2**self.config.bit_depth - 1),
+                    out_type=np.float32
+                    )
 
                 background_lvl = np.ma.median(avepixel_crop)
 
-                # Subtract the avepixel crop from the data crop, clip the negative values to 0 and
-                #  sum up the intensity
+                # Correct the crop_img with star_mask
+                crop_mask_img = mask_img[x_min:x_max, y_min:y_max]
+                crop_img = np.ma.masked_array(crop_img, crop_mask_img | crop_star_mask)
+
+                # Replace photometry pixels that are masked by a star with the median value of the photom. area
+                photom_star_masked_indices = np.where((crop_mask_img == 0) & (crop_star_mask == 1))
+
+                # Apply correction only if the streak intersects a star
+                if len(photom_star_masked_indices[0]) > 0:
+
+                    # Calulate masked median
+                    masked_stars_streak_median = np.ma.median(crop_img)
+
+                    # Unmask those areas
+                    crop_img.mask[photom_star_masked_indices] = False
+
+                    # Replace with median
+                    crop_img[photom_star_masked_indices] = masked_stars_streak_median
+
+                # Correct the crop_bg with star_mask
+                crop_mask_img_bg = mask_img_bg[x_min:x_max, y_min:y_max]
+                crop_bg = np.ma.masked_array(crop_bg, crop_mask_img_bg | crop_star_mask)
+
+                # Subtract the avepixel crop from the data crop
                 crop_img_nobg = crop_img.astype(float) - avepixel_crop
-                crop_img_nobg = np.clip(crop_img_nobg, 0, None)
                 intensity_sum = np.ma.sum(crop_img_nobg)
+                intensity_sum = np.abs(intensity_sum)
 
             # Check if the result is masked
             if np.ma.is_masked(intensity_sum):
+
                 # If the result is masked (i.e. error reading pixels), set the intensity sum to 1
                 intensity_sum = 1
-            else:
+
+            # If the intensity sum is a numpy object, set it to int
+            elif isinstance(intensity_sum, np.ndarray):
                 intensity_sum = intensity_sum.astype(int)
+
+            else:
+                intensity_sum = int(intensity_sum)
 
             # Set the intensity sum to the pick
             pick['intensity_sum'] = intensity_sum
-
-            # # Plot the background subtracted crop
-            # plt.figure()
-            # plt.imshow(crop_img_nobg, cmap='gray', origin='lower')
-            # plt.colorbar()
-            # plt.title("Background subtracted crop")
-            # plt.show()
 
             ### Measure the SNR of the pick ###
 
@@ -5930,13 +7998,29 @@ class PlateTool(QtWidgets.QMainWindow):
             print("SNR update: intensity sum = {:8d}, source px count = {:5d}, background lvl = {:8.2f}, background stddev = {:6.2f}, SNR = {:.2f}".format(
                 intensity_sum, source_px_count, background_lvl, background_stddev, snr))
 
+
+            # # Plot the image on which the intensity sum was computed: crop_img, avepixel_crop, and crop_img_nobg
+            # plt.figure("Intensity sum computation")
+            # plt.clf()
+            # plt.subplot(1, 3, 1)
+            # plt.imshow(crop_img, cmap='gray', origin='lower')
+            # plt.colorbar()
+            # plt.title("Crop used for intensity sum computation\nIntensity sum = {:d}, Background = {:.2f}, SNR = {:.2f}".format(
+            #     intensity_sum, background_lvl, snr))
+            # plt.subplot(1, 3, 2)
+            # plt.imshow(avepixel_crop, cmap='gray', origin='lower')
+            # plt.colorbar()
+            # plt.title("Average pixel crop")
+            # plt.subplot(1, 3, 3)
+            # plt.imshow(crop_img_nobg, cmap='gray', origin='lower')
+            # plt.colorbar()
+            # plt.title("Background subtracted crop")
+            # plt.show()
+
             ### Determine if there is any saturation in the measured photometric area
 
-            # Compute the saturation threshold
-            saturation_threshold = int(0.98*(2**self.config.bit_depth))
-
             # If at least 2 pixels are saturated in the photometric area, mark the pick as saturated
-            if np.sum(crop_img > saturation_threshold) >= 2:
+            if np.sum(crop_img > self.saturation_threshold) >= 2:
                 pick['saturated'] = True
             else:
                 pick['saturated'] = False
@@ -5954,6 +8038,15 @@ class PlateTool(QtWidgets.QMainWindow):
             # Make sure the intensity sum is never 0
             if pick['intensity_sum'] <= 0:
                 pick['intensity_sum'] = 1
+
+
+    def computeExposureRatioCorrection(self):
+        """ Compute the exposure ratio magnitude correction. """
+
+        if self.exposure_ratio <= 0:
+            return 0.0
+
+        return -2.5*np.log10(self.exposure_ratio)
 
 
     def showLightcurve(self):
@@ -6032,6 +8125,9 @@ class PlateTool(QtWidgets.QMainWindow):
             mag_err_random = 2.5*np.log10(1 + 1/snr)
             mag_err_total = np.sqrt(mag_err_random**2 + self.platepar.mag_lev_stddev**2)
 
+            # Apply exposure ratio correction
+            mag_data += self.computeExposureRatioCorrection()
+
             # Plot the magnitudes
             ax_p.errorbar(frames, mag_data, yerr=mag_err_total, capsize=5, color='k')
 
@@ -6046,7 +8142,16 @@ class PlateTool(QtWidgets.QMainWindow):
                 mag_str = 'GAIA G band'
 
             else:
-                mag_str = "{:.2f}B + {:.2f}V + {:.2f}R + {:.2f}I".format(*self.config.star_catalog_band_ratios)
+
+                # If there are only 4 band ratios, assume BVRI
+                if len(self.config.star_catalog_band_ratios) == 4:
+                    mag_str = "{:.2f}B + {:.2f}V + {:.2f}R + {:.2f}I".format(*self.config.star_catalog_band_ratios)
+
+                # If there are 7, assume BVRI + G + Bp + Rp. Only take non-zero coefficients
+                elif len(self.config.star_catalog_band_ratios) == 7:
+                    band_names = ['B', 'V', 'R', 'I', 'G', 'Bp', 'Rp']
+                    mag_str = " + ".join(["{:.2f}{}".format(ratio, band) for ratio, band in 
+                                          zip(self.config.star_catalog_band_ratios, band_names) if ratio > 0])
 
             ax_p.set_ylabel("Apparent magnitude ({:s})".format(mag_str))
 
@@ -6054,6 +8159,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Compute the instrumental magnitude
             inst_mag = -2.5*np.log10(intensities)
+
+            # Apply exposure ratio correction
+            inst_mag += self.computeExposureRatioCorrection()
 
             # Compute the SNR error
             mag_err_random = 2.5*np.log10(1 + 1/snr)
@@ -6184,21 +8292,64 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def drawPhotometryColoring(self):
         """ Updates image to have the colouring in the current frame """
+
+        def set_region_image(image):
+            self.region.setImage(image)
+            if hasattr(self, "region_zoom"):
+                self.region_zoom.setImage(image)
+
+        blank_mask = np.array([[0]], dtype=np.uint8)
         pick = self.getCurrentPick()
 
-        if pick and pick['photometry_pixels']:
-            # Create a coloring mask
-            x_mask, y_mask = np.array(pick['photometry_pixels']).T
+        if not pick:
+            set_region_image(blank_mask)
+            return
 
-            mask_img = np.zeros(self.img.data.shape)
-            mask_img[x_mask, y_mask] = 255
+        photom_pixels = pick.get('photometry_pixels')
+        if photom_pixels is None:
+            set_region_image(blank_mask)
+            return
 
-            self.region.setImage(mask_img)
-        else:
-            self.region.setImage(np.array([[0]]))
+        photom_pixels = np.asarray(photom_pixels)
+        if photom_pixels.size == 0:
+            set_region_image(blank_mask)
+            return
+
+        if photom_pixels.ndim != 2 or photom_pixels.shape[1] != 2:
+            try:
+                photom_pixels = np.reshape(photom_pixels, (-1, 2))
+            except ValueError:
+                set_region_image(blank_mask)
+                return
+
+        if photom_pixels.shape[0] == 0:
+            set_region_image(blank_mask)
+            return
+
+        photom_pixels = photom_pixels.astype(int, copy=False)
+
+        # Clip any out-of-bounds pixels to the image extent to avoid indexing errors when drawing
+        height, width = self.img.data.shape[:2]
+        valid_mask = (
+            (photom_pixels[:, 0] >= 0) & (photom_pixels[:, 0] < height) &
+            (photom_pixels[:, 1] >= 0) & (photom_pixels[:, 1] < width)
+        )
+
+        if not np.any(valid_mask):
+            set_region_image(blank_mask)
+            return
+
+        photom_pixels = photom_pixels[valid_mask]
+
+        # Create a coloring mask
+        mask_img = np.zeros(self.img.data.shape, dtype=np.uint8)
+        x_mask, y_mask = photom_pixels.T
+        mask_img[x_mask, y_mask] = 255
+
+        set_region_image(mask_img)
 
 
-    def saveFTPdetectinfo(self):
+    def saveFTPdetectinfo(self, ECSV_saved=True):
         """ Saves the picks to a FTPdetectinfo file in the same folder where the first given file is. """
 
         # Compute the intensity sum done on the previous frame
@@ -6256,11 +8407,25 @@ class PlateTool(QtWidgets.QMainWindow):
         # If there are no centroids, don't save anything
         if len(centroids) == 0:
             
-            qmessagebox(title='FTPdetectinfo saving error',
-                        message='No centroids to save!',
-                        message_type="info")
+            # If FTP not saved, ECSV was saved
+            if ECSV_saved:
+                qmessagebox(title='FTPdetectinfo saving error',
+                            message='No centroids to save! FTPdetectinfo saving aborted',
+                            message_type="info")
+                
+            # Neither saved
+            if not ECSV_saved:
+                qmessagebox(title='FTPdetectinfo/ECSV saving error',
+                            message='No centroids to save! ECSV & FTPdetectinfo saving aborted',
+                            message_type="info")
 
             return 1
+        
+        # FTP saved but ECSV not saved
+        elif not ECSV_saved:
+            qmessagebox(title='ECSV saving error',
+                        message='No centroids to save! ECSV saving aborted.',
+                        message_type="info")
 
         # Sort by frame number
         centroids = sorted(centroids, key=lambda x: x[0])
@@ -6291,15 +8456,480 @@ class PlateTool(QtWidgets.QMainWindow):
                 pp_tmp.switchToGroundPicks()
 
             applyAstrometryFTPdetectinfo(self.dir_path, ftpdetectinfo_name, '', \
-                                         UT_corr=pp_tmp.UT_corr, platepar=pp_tmp)
+                                         UT_corr=pp_tmp.UT_corr, platepar=pp_tmp, 
+                                         exp_mag_corr=self.computeExposureRatioCorrection())
 
             print('Platepar applied to manual picks!')
+
+
+    def loadSatelliteTracks(self):
+        """ Calculates satellite tracks for the current time and location. """
+        
+        if not self.show_sattracks or not SKYFIELD_AVAILABLE:
+            return
+
+        if self.platepar is None:
+            return
+
+        print("Loading satellite tracks...")
+        
+        # Get location from Platepar
+        lat = self.platepar.lat
+        lon = self.platepar.lon
+        elev = self.platepar.elev
+        
+        # Determine time range
+        t_start = None
+        t_end = None
+        
+        try:
+            # Use manually provided start time if available
+            if hasattr(self, 'beginning_time') and self.beginning_time is not None:
+                t_start = self.beginning_time
+                if t_start.tzinfo is None:
+                    t_start = t_start.replace(tzinfo=datetime.timezone.utc)
+                  
+                # Determine end time from total frames and FPS, or fallback
+                if hasattr(self, 'img_handle') and hasattr(self.img_handle, 'total_frames') and hasattr(self.img_handle, 'fps') and self.img_handle.fps > 0:
+                    duration = self.img_handle.total_frames/self.img_handle.fps
+                    t_end = t_start + datetime.timedelta(seconds=duration)
+                else:
+                    t_end = t_start + datetime.timedelta(seconds=60)
+
+            # Use current frame time as start
+            elif hasattr(self, 'img_handle'):
+                  
+                # Get the time of the first frame
+                t_start = self.img_handle.currentFrameTime(frame_no=0, dt_obj=True)
+                  
+                # Ensure timezone is UTC
+                if t_start.tzinfo is None:
+                    t_start = t_start.replace(tzinfo=datetime.timezone.utc)
+
+                # Determine end time from total frames and FPS
+                if hasattr(self.img_handle, 'total_frames') and hasattr(self.img_handle, 'fps') and self.img_handle.fps > 0:
+                    duration = self.img_handle.total_frames/self.img_handle.fps
+                    t_end = t_start + datetime.timedelta(seconds=duration)
+                else:
+                    # Fallback
+                    t_end = t_start + datetime.timedelta(seconds=60)
+
+            elif hasattr(self, 'current_time'):
+                t_start = self.current_time
+                if t_start.tzinfo is None:
+                    t_start = t_start.replace(tzinfo=datetime.timezone.utc)
+                t_end = t_start + datetime.timedelta(seconds=60)
+
+        except Exception as e:
+            print(f"Error determining time for satellites: {e}")
+
+        if t_start is None:
+            print("Could not determine start time for satellite tracks.")
+            return
+
+        if self.tle_file and os.path.exists(self.tle_file):
+             
+            tle_path_to_load = self.tle_file
+             
+            # If directory, find the best file
+            if os.path.isdir(self.tle_file):
+                tle_path_to_load = findClosestTLEFile(self.tle_file, t_start)
+             
+            if tle_path_to_load:
+                print(f"Loading TLEs from file: {tle_path_to_load}")
+                try:
+                    sats = loadRobustTLEs(tle_path_to_load)
+                except Exception as e:
+                    print(f"Error loading TLE file: {e}")
+                    return
+            else:
+                # If None returned or path was bad, fallback to standard download/cache
+                cache_dir = os.path.join(getRmsRootDir(), ".skyfield_cache")
+                sats = loadTLEs(cache_dir, max_age_hours=24)
+        else:
+            cache_dir = os.path.join(getRmsRootDir(), ".skyfield_cache")
+            sats = loadTLEs(cache_dir, max_age_hours=24)
+        
+        if not sats:
+            return
+             
+        predictor = SatellitePredictor(lat, lon, elev, t_start, t_end)
+        
+        jd = datetime2JD(t_start)
+        
+        # Generate FOV polygon by sampling edges
+        w = self.platepar.X_res
+        h = self.platepar.Y_res
+        
+        # Check if we can use cached FOV polygon
+        fov_poly = []
+        if self.fov_poly_cache is not None and self.fov_poly_jd == jd:
+            fov_poly = self.fov_poly_cache
+            # print("Using cached FOV polygon.")
+        else:
+            # print("Computing FOV polygon...")
+            # Define edges: (x1, y1) -> (x2, y2)
+            edges = [
+                ((0, 0), (w, 0)),   # Top
+                ((w, 0), (w, h)),   # Right
+                ((w, h), (0, h)),   # Bottom
+                ((0, h), (0, 0))    # Left
+            ]
+            
+            samples_per_side = 10
+            
+            try:
+                for (x_start, y_start), (x_end, y_end) in edges:
+                    xs = np.linspace(x_start, x_end, samples_per_side, endpoint=False)
+                    ys = np.linspace(y_start, y_end, samples_per_side, endpoint=False)
+                    
+                    # Prepare inputs
+                    n = len(xs)
+                    jd_arr = [jd]*n
+                    level_arr = [1]*n
+                    
+                    _, r_arr, d_arr, _ = xyToRaDecPP(jd_arr, xs, ys, level_arr, self.platepar, jd_time=True, extinction_correction=False)
+                    
+                    for r, d in zip(r_arr, d_arr):
+                        fov_poly.append((r, d))
+                        
+                # Update cache
+                self.fov_poly_cache = fov_poly
+                self.fov_poly_jd = jd
+                
+            except Exception as e:
+                print(f"Error computing FOV polygon: {e}")
+                return
+
+        try:
+            self.satellite_tracks = predictor.getSatelliteTracks(self.platepar, fov_poly, sats)
+            print(f"Computed {len(self.satellite_tracks)} satellite tracks.")
+            
+            # Print details to console (matching CLI output)
+            print("-"*60)
+            print(f"Time Start (SkyFit2): {t_start}")
+            print(f"Location: Lat={self.platepar.lat:.4f}, Lon={self.platepar.lon:.4f}, Elev={self.platepar.elev:.1f}m")
+            print("-"*60)
+            
+            for track in self.satellite_tracks:
+                name = track['name']
+                x = track['x']
+                y = track['y']
+                ra = track['ra']
+                dec = track['dec']
+                
+                if len(x) > 0:
+                    x1, x2 = x[0], x[-1]
+                    y1, y2 = y[0], y[-1]
+                    r1, r2 = ra[0], ra[-1]
+                    d1, d2 = dec[0], dec[-1]
+                    
+                    print(f"{name}")
+                    print(f"      {'begin':>10}, {'end':>10}")
+                    print(f"ra    = {r1:10.4f}, {r2:10.4f}")
+                    print(f"dec   = {d1:10.4f}, {d2:10.4f}")
+                    print(f"x     = {x1:10.2f}, {x2:10.2f}")
+                    print(f"y     = {y1:10.2f}, {y2:10.2f}")
+                    print("-"*60)
+
+            self.drawSatelliteTracks()
+            
+        except Exception as e:
+            print(f"Error computing satellite tracks: {e}")
+            traceback.print_exc()
+
+    def toggleShowSatTracks(self):
+        """ Toggle whether to show satellite tracks. """
+
+        self.show_sattracks = not self.show_sattracks
+        self.tab.settings.updateShowSatTracks()
+        
+        if self.show_sattracks and not self.satellite_tracks:
+            if SKYFIELD_AVAILABLE:
+                self.loadSatelliteTracks()
+            else:
+                print("Cannot load satellite tracks: Skyfield not available.")
+                self.show_sattracks = False
+                self.tab.settings.updateShowSatTracks()
+                return
+
+        self.drawSatelliteTracks()
+
+    def loadTLEFileDialog(self):
+        """ Opens a file dialog to choose a TLE file and loads it. """
+        
+        # Use directory of current TLE file if available, else CWD
+        init_dir = os.getcwd()
+        if self.tle_file:
+            init_dir = os.path.dirname(self.tle_file)
+
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Select TLE File",
+            init_dir,
+            "Text Files (*.txt);;TLE Files (*.tle);;All Files (*)"
+        )
+
+        if file_path:
+            self.tle_file = file_path
+            
+            # Update label
+            self.tab.settings.updateTLELabel(os.path.basename(self.tle_file))
+            
+            # Force enable tracks if they were off
+            if not self.show_sattracks:
+                self.show_sattracks = True
+                self.tab.settings.updateShowSatTracks()
+            
+            # Reload tracks
+            if SKYFIELD_AVAILABLE:
+                self.loadSatelliteTracks()
+                self.drawSatelliteTracks()
+            else:
+                print("Cannot load satellite tracks: Skyfield not available.")
+
+
+    def clearTLESelection(self):
+        """ Clears the custom TLE file and reloads from default/downloaded. """
+        self.tle_file = None
+        self.tab.settings.updateTLELabel("latest downloaded")
+        
+        # Ensure tracks are enabled
+        if not self.show_sattracks:
+            self.show_sattracks = True
+            self.tab.settings.updateShowSatTracks()
+             
+        if SKYFIELD_AVAILABLE:
+            self.loadSatelliteTracks()
+            self.drawSatelliteTracks()
+        else:
+            print("Cannot load satellite tracks: Skyfield not available.")
+
+    def redrawSatelliteTracks(self):
+        """ Manually re-computes satellite tracks (prediction + projection). """
+        if SKYFIELD_AVAILABLE:
+            print("Redrawing satellite tracks...")
+            self.loadSatelliteTracks()
+            self.drawSatelliteTracks()
+        else:
+            print("Cannot load satellite tracks: Skyfield not available.")
+
+    def drawSatelliteTracks(self):
+        """ Draws satellite tracks on the image. """
+        
+        # Clear existing
+        for curve in self.sat_track_curves:
+            self.img_frame.removeItem(curve)
+        for label in self.sat_track_labels:
+            self.img_frame.removeItem(label)
+        for arrow in self.sat_track_arrows:
+            self.img_frame.removeItem(arrow)
+        for marker in self.sat_markers:
+            self.img_frame.removeItem(marker)
+        self.sat_track_curves = []
+        self.sat_track_labels = []
+        self.sat_track_arrows = []
+        self.sat_markers = []
+
+        if not self.show_sattracks:
+            return
+
+        w = self.platepar.X_res
+        h = self.platepar.Y_res
+
+        # Margin to prevent label placement too close to edge
+        margin = 100 # pixels
+
+        # Define a list of high-contrast colors suitable for both dark and light backgrounds
+        # (R, G, B)
+        colors = [
+            (255, 0, 0),      # Red
+            (0, 255, 0),      # Green
+            (60, 100, 255),   # Lighter Blue
+            (255, 255, 0),    # Yellow
+            (255, 0, 255),    # Magenta
+            (0, 255, 255),    # Cyan
+            (255, 128, 0),    # Orange
+            (128, 0, 255),    # Purple
+        ]
+
+        for i, track in enumerate(self.satellite_tracks):
+            # Cycle through colors
+            color = colors[i % len(colors)]
+            
+            # Draw curve
+            # Thicker line (width=8), alpha=0.125 (32)
+            # Use color with alpha
+            pen_color = color + (32,)
+            pen = pg.mkPen(pen_color, width=8)
+            
+            curve = pg.PlotCurveItem(track['x'], track['y'], pen=pen, clickable=False)
+            self.img_frame.addItem(curve)
+            self.sat_track_curves.append(curve)
+
+            # Create marker for real-time satellite position
+            marker_pen = pg.mkPen(color + (90,), width=5)
+            marker = pg.ScatterPlotItem(size=30, pen=marker_pen, brush=None, symbol='o')
+
+            # Initialize with empty points to hide it
+            marker.setData([], [])
+            self.img_frame.addItem(marker)
+            self.sat_markers.append(marker)
+            
+            # Draw arrows at the beginning, middle, and end
+            if len(track['x']) >= 2:
+                
+                # Indices for arrows
+                arrow_indices = [0, len(track['x'])//2, -1]
+                
+                # Filter indices to ensure they are distinct?
+                # For very short tracks start/mid/end might overlap, but that's okay.
+                for idx in arrow_indices:
+                    
+                    # Normalize index
+                    if idx < 0:
+                        idx = len(track['x']) + idx
+
+                    # Calculate position
+                    x_pos = track['x'][idx]
+                    y_pos = track['y'][idx]
+                    
+                    # Calculate direction
+                    # If at end, look back to previous point
+                    if idx == len(track['x']) - 1:
+                        dx = track['x'][idx] - track['x'][idx-1]
+                        dy = track['y'][idx] - track['y'][idx-1]
+                    else:
+                        dx = track['x'][idx+1] - track['x'][idx]
+                        dy = track['y'][idx+1] - track['y'][idx]
+                        
+                    # Calculate angle
+                    angle_deg = np.degrees(np.arctan2(dy, dx)) + 180
+                    
+                    arrow = pg.ArrowItem(pos=(x_pos, y_pos), angle=angle_deg, headLen=40, tipAngle=40, tailLen=0, 
+                                         brush=pg.mkBrush(pen_color), pen=pg.mkPen(pen_color))
+                    
+                    self.img_frame.addItem(arrow)
+                    self.sat_track_arrows.append(arrow)
+
+            
+            # Smart label placement
+            if len(track['x']) > 0:
+                x = track['x']
+                y = track['y']
+                
+                # Default to middle point if no better point found
+                best_idx = len(x)//2
+                
+                # Try to find a point well inside the image 
+                # (margin from edges)
+                for test_pt in range(len(x)):
+                    xi, yi = x[test_pt], y[test_pt]
+                    if margin < xi < (w - margin) and margin < yi < (h - margin):
+                        best_idx = test_pt
+                        break
+                
+                label_x = x[best_idx]
+                label_y = y[best_idx]
+                
+                text = pg.TextItem(track['name'], color=color, anchor=(0, 1))
+                
+                # Increase text size by 50% and make it bold
+                font = QFont()
+                font.setBold(True)
+                
+                # Set the font size
+                base_size = 8
+                font.setPointSizeF(base_size)
+                
+                text.setFont(font)
+                
+                text.setPos(label_x, label_y)
+                # Store original position for restoring later
+                text.orig_pos = (label_x, label_y)
+                
+                self.img_frame.addItem(text)
+                self.sat_track_labels.append(text)
+                
+        # Update marker positions if in manual reduction mode
+        self.updateSatelliteMarker()
+
+
+    def updateSatelliteMarker(self):
+        """ Updates the satellite marker position based on the current frame time. """
+        
+        # Only show markers in manual reduction mode
+        if self.mode != 'manualreduction':
+            for marker in self.sat_markers:
+                marker.setData([], [])
+            return
+
+        # Get current frame JD
+        current_jd = date2JD(*self.img_handle.currentFrameTime())
+        
+        print("-" * 30)
+        print(f"Frame = {self.img.img_handle.current_frame}")
+
+        for i, track in enumerate(self.satellite_tracks):
+            if i >= len(self.sat_markers):
+                break
+                
+            marker = self.sat_markers[i]
+            
+            # Interpolate position
+            
+            # Try to read the time from the track
+            times = track.get('time')
+            if times is None or len(times) < 2:
+                marker.setData([], [])
+                continue
+                
+            # Interpolate the position of the satellite based on the time and position
+            # Make sure that the satellite is visible on the track segment we calculated
+            t_min = np.min(times)
+            t_max = np.max(times)
+            if t_min <= current_jd <= t_max:
+                
+                x = np.interp(current_jd, times, track['x'])
+                y = np.interp(current_jd, times, track['y'])
+                
+                marker.setData([x], [y])
+                print(f"{track['name']:<25}: X = {x:8.2f}, Y = {y:8.2f}")
+            else:
+                marker.setData([], [])
+
+            # Update label position so it follows the marker
+            if i < len(self.sat_track_labels):
+                label = self.sat_track_labels[i]
+                
+                # Check if marker is visible and inside the image
+                marker_visible = False
+                if t_min <= current_jd <= t_max:
+                    
+                    # Check if inside the image (with some margin?)
+                    # x, y are already computed above
+                    w = self.platepar.X_res
+                    h = self.platepar.Y_res
+                    
+                    if 0 <= x <= w and 0 <= y <= h:
+                        marker_visible = True
+                        
+                if marker_visible:
+                    # Move label to marker
+                    label.setPos(x, y)
+                else:
+                    # Restore original position
+                    if hasattr(label, 'orig_pos'):
+                        label.setPos(*label.orig_pos)
 
 
 
     def saveECSV(self):
         """ Save the picks into the GDEF ECSV standard. """
 
+        # If no picks, save nothing and send no-picks to FTPDetectionInfo save
+        if [key for key, val in self.pick_list.items() if (val['x_centroid'] is not None)] == []:
+            return False
 
         isodate_format_file = "%Y-%m-%dT%H_%M_%S"
         isodate_format_entry = "%Y-%m-%dT%H:%M:%S.%f"
@@ -6437,6 +9067,9 @@ class PlateTool(QtWidgets.QMainWindow):
             dec = dec_data[0]
             mag = mag_data[0]
 
+            # Apply exposure ratio correction
+            mag += self.computeExposureRatioCorrection()
+
             # Compute alt/az (topocentric, i.e. without refraction)
             azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, pp_tmp.lat, pp_tmp.lon, refraction=False)
 
@@ -6498,6 +9131,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         print("ESCV file saved to:", ecsv_file_path)
+
+        return True
 
 
 
@@ -6731,7 +9366,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
 
-
 if __name__ == '__main__':
     ### COMMAND LINE ARGUMENTS
 
@@ -6778,12 +9412,28 @@ if __name__ == '__main__':
     arg_parser.add_argument('--flipud', action="store_true", \
                             help="Flip the image upside down. Only applied to images and videos.")
 
+    arg_parser.add_argument('--sattracks', action="store_true", \
+                            help="Show satellite tracks overlaid on the image (requires internet to download TLEs).")
+
+    arg_parser.add_argument('--tle_file', type=str, default=None,
+                            help="Path to a specific TLE file to use for satellite tracks (skips download). "
+                            "Alternatively, a directory containing TLE files can be specified. The code will"
+                            " automatically select the TLE file closest to the beginning time of the video.")
+
+
+
 
     arg_parser.add_argument('-m', '--mask', metavar='MASK_PATH', type=str,
                             help="Path to a mask file which will be applied to the star catalog")
     
     arg_parser.add_argument('--flatbiassub', action="store_true", \
         help="Subtract the bias from the flat. False by default.")
+
+    arg_parser.add_argument('--expratio', metavar='EXPOSURE_RATIO', type=float, default=1.0,
+                            help="Exposure ratio between stars and meteor segments. Used for static images " 
+                            "where the stars are continuously exposed but the meteors/fireballs are chopped "
+                            "up by a shutter. For example, a 30 s exposure with meteor segments at 20 FPS "
+                            "results in a exposure ratio of 600.")
 
 
 
@@ -6847,6 +9497,15 @@ if __name__ == '__main__':
 
         plate_tool.loadState(dir_path, state_name, beginning_time=beginning_time, mask=mask)
 
+        # Initialize satellite track related attributes for loaded state
+        plate_tool.show_sattracks = cml_args.sattracks
+        plate_tool.tle_file = cml_args.tle_file
+        plate_tool.satellite_tracks = []
+        plate_tool.sat_track_curves = []
+        plate_tool.sat_track_labels = []
+        if plate_tool.show_sattracks:
+            plate_tool.loadSatelliteTracks()
+
     else:
 
         # Extract the data directory path
@@ -6883,9 +9542,11 @@ if __name__ == '__main__':
 
         # Init SkyFit
         plate_tool = PlateTool(input_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
-            gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints,
-            mask=mask, nobg=cml_args.nobg, peribg=cml_args.peribg, flipud=cml_args.flipud, 
-            flatbiassub=cml_args.flatbiassub)
+            gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints, \
+            mask=mask, nobg=cml_args.nobg, peribg=cml_args.peribg, flipud=cml_args.flipud, \
+            flatbiassub=cml_args.flatbiassub, exposure_ratio=cml_args.expratio, show_sattracks=cml_args.sattracks, \
+            tle_file=cml_args.tle_file)
+
 
 
     # Run the GUI app

@@ -17,29 +17,53 @@ import traceback
 import datetime
 import shutil
 
+# --- TensorFlow-Lite import cascade -----------------------------------------
+#
+# 1.  ai-edge-litert      <- new LiteRT wheels
+# 2.  tflite_runtime      <- legacy stand-alone wheels
+# 3.  tensorflow          <- TF proper, last-ditch fallback
+#
+# After the block you have:
+#   • Interpreter   – the class to instantiate
+#   • TFLITE_BACKEND – "litert" | "tflite_runtime" | "tf_full" | "none"
+#   • TFLITE_AVAILABLE – bool
+
+
 TFLITE_AVAILABLE = False
-USING_FULL_TF = False
+TFLITE_BACKEND   = "none"        # use for log messages or debugging
 
 try:
-    from tflite_runtime.interpreter import Interpreter
+    from ai_edge_litert.interpreter import Interpreter  # 1 preferred
     TFLITE_AVAILABLE = True
+    TFLITE_BACKEND   = "litert"
+
 except ImportError:
     try:
-        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-        from tensorflow.lite.python.interpreter import Interpreter
+        from tflite_runtime.interpreter import Interpreter  # 2 fallback
         TFLITE_AVAILABLE = True
-        USING_FULL_TF = True
+        TFLITE_BACKEND   = "tflite_runtime"
+
     except ImportError:
-        TFLITE_AVAILABLE = False
+        try:
+            os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # silence TF spam
+            from tensorflow.lite.python.interpreter import Interpreter  # 3 last resort
+            TFLITE_AVAILABLE = True
+            TFLITE_BACKEND   = "tf_full"
+
+        except ImportError:
+            Interpreter = None
+
+# ---------------------------------------------------------------------------
+
 
 
 from RMS.Formats import FFfile
 from RMS.Formats import FTPdetectinfo
-from RMS.Logger import initLogging, getLogger
+from RMS.Logger import LoggingManager, getLogger
 import RMS.ConfigReader as cr
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 # Suffix for unfiltered FTPdetectinfo files
@@ -122,8 +146,8 @@ def classifyPNGs(file_dir, model_path):
         # rescale values to (0;1)
         image = rescale_me1(image)
 
-        # normalize min and max values
-        image = normalize_me1(image)
+        # normalize min and max values not currently needed
+        #image = normalize_me1(image)
 
         #image = standardize_me1(image)
         
@@ -283,26 +307,28 @@ def crop_detections(detection_info, fits_dir):
 
         #add some space around the meteor detection so that its not touching the edges
         #leftover terms need to be set to 0 outside if statements otherwise they wont be set if there's nothing left over which will cause an error with the blackfill.blackfill() line
-        left_side = left_side - 20
+        PADDING = 10
+
+        left_side = left_side - PADDING
         leftover_left = 0
         if left_side < 0:
             #this will be used later to determine how to fill in the rest of the image to make it square but also have the meteor centered in the image
             leftover_left = 0 - left_side
             left_side = 0
 
-        right_side = right_side + 20
+        right_side = right_side + PADDING
         leftover_right = 0
         if right_side > col_size:
             leftover_right = right_side - col_size
             right_side = col_size
 
-        top_side = top_side - 20
+        top_side = top_side - PADDING
         leftover_top = 0
         if top_side < 0:
             leftover_top = 0 - top_side
             top_side = 0
 
-        bottom_side = bottom_side + 20
+        bottom_side = bottom_side + PADDING
         leftover_bottom = 0
         if bottom_side > row_size:
             leftover_bottom = bottom_side - row_size
@@ -383,7 +409,7 @@ def makePNGCrops(FTP_path, FF_dir_path):
 
 
 
-def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=False, clear_prev_run=False):
+def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.5, keep_pngs=False, clear_prev_run=False):
     """ Using machine learning, reject false positives and only keep real meteors. An updated FTPdetectinfo
         file will be saved.  
 
@@ -437,14 +463,9 @@ def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.85, keep_pngs=
 
     # Check if tflite is available
     if TFLITE_AVAILABLE:
-        log.info("TensorFlow Lite is available.")
-        if USING_FULL_TF:
-            log.info("Using TensorFlow Lite from full TensorFlow package.")
-        else:
-            log.info("Using standalone tflite_runtime package.")
+        log.info("TF-Lite backend: %s", TFLITE_BACKEND)
     else:
-        log.warning("The package tflite_runtime is not installed! This package is not available on Python 2.")
-        log.warning("ML filtering skipped...")
+        log.warning("interpreter unavailable - ML filtering skipped")
 
         # Return a full list of FF files
         return [meteor_entry[0] for meteor_entry in meteor_list]
@@ -585,7 +606,7 @@ if __name__ == "__main__":
         help='Path to the FTPDetectInfo file.')
 
     arg_parser.add_argument('--threshold', '-t', metavar='THRESHOLD', type=float,
-        help='threshold for meteor/non-meteor classification', default=0.85)
+        help='threshold for meteor/non-meteor classification', default=0.5)
 
     arg_parser.add_argument('--keep_pngs', '-p', action="store_true",
         help='Keep the temporary PNG crops on which the ML filter is run pngs. They will be deleted by default.')
@@ -610,8 +631,9 @@ if __name__ == "__main__":
     config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
     ### Init the logger
-    initLogging(config, 'reprocess_')
-    log = getLogger("logger")
+    log_manager = LoggingManager()
+    log_manager.initLogging(config, 'reprocess_')
+    log = getLogger("rmslogger")
 
     #########################
 
