@@ -11854,32 +11854,6 @@ class PlateTool(QtWidgets.QMainWindow):
         rmsd_angular = 60*RMSD([entry[4] for entry in residuals])
         rmsd_img = RMSD([entry[3] for entry in residuals])
 
-        # Compute reduced chi-squared: χ² = Σ(residual_i / σ_i)² / (N - DOF)
-        # Using Lindegren (1978) formula for centroid precision:
-        #   σ_i = FWHM_i / (2.355 * sqrt(intensity_i))
-        # where intensity is proportional to the number of detected photons.
-        # This avoids the problematic photometric SNR which uses a large aperture.
-        MIN_INTENSITY_FOR_CHI2 = 100.0  # Minimum intensity for meaningful precision
-        chi_squared_sum = 0.0
-        n_valid = 0
-        for entry in residuals:
-            distance_px = entry[3]  # pixel residual
-            fwhm = entry[5]
-            intensity = entry[7]
-            # Require minimum intensity for meaningful centroid precision estimate
-            if fwhm is not None and intensity is not None and fwhm > 0 and intensity >= MIN_INTENSITY_FOR_CHI2:
-                sigma = fwhm / (2.355 * np.sqrt(intensity))  # theoretical centroid precision
-                chi_squared_sum += (distance_px / sigma) ** 2
-                n_valid += 1
-
-        # Reduced chi-squared (DOF = 4 for pointing params: RA, Dec, rotation, scale)
-        # For distortion fitting, DOF is higher, but 4 is a reasonable approximation
-        dof = 4
-        if n_valid > dof:
-            reduced_chi_squared = chi_squared_sum / (n_valid - dof)
-        else:
-            reduced_chi_squared = None  # Not enough valid data for chi-squared
-
         # If the average angular error is larger than 60 arc minutes, report it in degrees
         if rmsd_angular > 60:
             rmsd_angular /= 60
@@ -11893,14 +11867,10 @@ class PlateTool(QtWidgets.QMainWindow):
             angular_error_label = 'arcsec'
 
 
-        if reduced_chi_squared is not None:
-            print('RMSD: {:.2f} px, {:.2f} {:s}, X2={:.2f}'.format(rmsd_img, rmsd_angular, angular_error_label,
-                                                                    reduced_chi_squared))
-        else:
-            print('RMSD: {:.2f} px, {:.2f} {:s}'.format(rmsd_img, rmsd_angular, angular_error_label))
+        print('RMSD: {:.2f} px, {:.2f} {:s}'.format(rmsd_img, rmsd_angular, angular_error_label))
 
         # Update RMSD display in the Fit Parameters tab
-        self.tab.param_manager.updateRMSD(rmsd_img, rmsd_angular, angular_error_label, reduced_chi_squared)
+        self.tab.param_manager.updateRMSD(rmsd_img, rmsd_angular, angular_error_label)
 
         # Update fit residuals in the station tab when geopoints are used
         if self.geo_points_obj is not None:
