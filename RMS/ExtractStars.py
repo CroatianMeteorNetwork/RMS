@@ -723,10 +723,47 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
         # plt.clf()
         # plt.close()
 
+    # Deduplicate detections that converged to the same position after PSF fitting.
+    # This happens when a bright star with a wide PSF produces multiple local maxima
+    # (spaced > neighborhood_size apart) whose PSF fits all converge to the same center.
+    if len(x_fitted) > 1:
+        x_arr_f = np.array(x_fitted)
+        y_arr_f = np.array(y_fitted)
+        intens_arr_f = np.array(intensity_fitted)
+        keep = np.ones(len(x_fitted), dtype=bool)
+
+        for i in range(len(x_fitted)):
+            if not keep[i]:
+                continue
+            for j in range(i + 1, len(x_fitted)):
+                if not keep[j]:
+                    continue
+                dist = np.sqrt((x_arr_f[i] - x_arr_f[j])**2 + (y_arr_f[i] - y_arr_f[j])**2)
+                if dist < segment_radius:
+                    # Keep the brighter detection
+                    if intens_arr_f[j] > intens_arr_f[i]:
+                        keep[i] = False
+                        break
+                    else:
+                        keep[j] = False
+
+        n_dupes = np.sum(~keep)
+        if n_dupes > 0:
+            indices = np.where(keep)[0]
+            x_fitted = [x_fitted[i] for i in indices]
+            y_fitted = [y_fitted[i] for i in indices]
+            amplitude_fitted = [amplitude_fitted[i] for i in indices]
+            intensity_fitted = [intensity_fitted[i] for i in indices]
+            sigma_y_fitted = [sigma_y_fitted[i] for i in indices]
+            sigma_x_fitted = [sigma_x_fitted[i] for i in indices]
+            background_fitted = [background_fitted[i] for i in indices]
+            snr_fitted = [snr_fitted[i] for i in indices]
+            saturated_count_fitted = [saturated_count_fitted[i] for i in indices]
+
     return (
-            x_fitted, y_fitted, 
-            amplitude_fitted, intensity_fitted, 
-            sigma_y_fitted, sigma_x_fitted, 
+            x_fitted, y_fitted,
+            amplitude_fitted, intensity_fitted,
+            sigma_y_fitted, sigma_x_fitted,
             background_fitted, snr_fitted, saturated_count_fitted
             )
 
