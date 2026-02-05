@@ -292,6 +292,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('--prefix', metavar='PREFIX', type=str, default='detection_', help="Prefix to add to log files.")
     arg_parser.add_argument('--suffix', metavar='SUFFIX', type=str, default='', help="Suffix to append to output files.")
     arg_parser.add_argument('--interval', type=float, help="Submission interval in seconds when ingesting multiple videos")
+    arg_parser.add_argument('--sync', action='store_true', help="If set, process videos synchronously (one at a time) rather than using multiple cores.")
+    arg_parser.add_argument('--skip', action='store_true', help="If set, skip processing of videos and just flag them as processed.")
+    arg_parser.add_argument('--continuous_wait_minutes', type=int, help="If specified, continuously monitor the video file directory for new video files to process, waiting this number of minutes between checks.")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -302,46 +305,117 @@ if __name__ == "__main__":
     if cml_args.interval is not None and cml_args.interval < 0:
         print ("--interval must be non-negative.")
         exit(1)
-
-    # Load the config file
-    config = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath('.'))
-
-    # Initialize the logger
-    log_manager = LoggingManager()
-    log_manager.initLogging(config, cml_args.prefix)
-
-    # Get the logger handle
-    log = getLogger("logger")
-
-    # Allocate and start the detector 
-    rtvd = RealtimeVideoDetector.createDetector(cml_args.night_dir, config, delay_start=0, cores=cml_args.cores, suffix=cml_args.suffix)
-    rtvd.start()
-
-    # Setup any required video submissioninterval tracking
-    interval_delta = None
-    if cml_args.interval is not None :
-        interval_delta = timedelta(seconds=cml_args.interval)
-        last_time = datetime.now() - interval_delta
-    
-    # Helper to provide a video to the realtime detector, either trivially or a time interval
-    def addVideoWithInterval(video_file):
-        global last_time
-        if interval_delta is not None:
-            sleep_time = (((last_time + interval_delta) - datetime.now()).total_seconds())
-            if sleep_time > 0:
-                log.info(f'Waiting {sleep_time:.3f} seconds before submitting next video file: {video_file}')
-                time.sleep(sleep_time)
-            last_time = datetime.now()
-        rtvd.addVideoFile(video_file)   
-
-    # Provide the requested files
-    if cml_args.video_file is not None:
-        addVideoWithInterval(cml_args.video_file)
     if cml_args.video_file_dir is not None:
-        for file in sorted(glob(os.path.join(cml_args.video_file_dir, "**","*_video.mkv"), recursive=True)):
-            addVideoWithInterval(file)
+        if not os.path.exists(cml_args.video_file_dir):
+            print(f"Video file directory does not exist: {cml_args.video_file_dir}")
+            exit(1)
+        if cml_args.sync and cml_args.skip:
+            print("--sync and --skip cannot both be set when processing a video file directory.")
+            exit(1)
+    else:
+        if cml_args.sync or cml_args.skip or cml_args.continuous_wait_minutes is not None:
+            print("--sync, --skip, and --continuous can only be set when processing a video file directory.")
+            exit(1)
 
-    # Stop the detector, it will cleanup processing before exiting
-    rtvd.stop()    
+    # Mainline procssing of files, either called once or in a Ctrl-C cancelled continuous loop
+    def ProcessFiles():
 
+        # Load the config file
+        config = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath('.'))
+
+        # Initialize the logger
+        log_manager = LoggingManager()
+        log_manager.initLogging(config, cml_args.prefix)
+
+        # Get the logger handle
+        log = getLogger("logger")
+
+        # Allocate and start the detector 
+        rtvd = RealtimeVideoDetector.createDetector(cml_args.night_dir, config, delay_start=0, cores=cml_args.cores, suffix=cml_args.suffix, synchronous=cml_args.sync)
+        rtvd.start()
+
+        # Setup any required video submissioninterval tracking
+        interval_delta = None
+        if cml_args.interval is not None :
+            interval_delta = timedelta(seconds=cml_args.interval)
+            last_time = datetime.now() - interval_delta
+
+        # Helper to sumbit a video for processing, either queued or not
+        def addVideo(video_file):
+            if cml_args.skip:
+                return
+            elif cml_args.sync:
+                rtvd.processVideo(video_file)
+            else:
+                rtvd.addVideoFile(video_file)
+        
+        # Helper to provide a video to the realtime detector, either trivially or a time interval
+        def addVideoWithInterval(video_file):
+            global last_time
+            if interval_delta is not None:
+                sleep_time = (((last_time + interval_delta) - datetime.now()).total_seconds())
+                if sleep_time > 0:
+                    log.info(f'Waiting {sleep_time:.3f} seconds before submitting next video file: {video_file}')
+                    time.sleep(sleep_time)
+                last_time = datetime.now()
+            addVideo(video_file)   
+
+        # A helper class to manage what videos have been processed, currently implemented as a simple
+        # last video file processes, where it is presumed the videos are processed in file name order.
+        # The last processed file name is written to a tracker file in the base directory of where viseos are foun.
+        class ProcessedVideoTracker():
+
+            tracker_file_name = os.path.join(cml_args.night_dir, 'last_processed_video.txt')
+
+            def __init__(self, directory):
+                self.directory = directory  
+                # Initialize the last processed video file name from the tracker file
+                if os.path.exists(self.tracker_file_name):
+                    with open(self.tracker_file_name, 'r') as tf:
+                        self.last_video_file = tf.read().strip()
+                else:   
+                    self.last_video_file = None
+
+            def isProcessed(self, video_file):
+                if self.last_video_file is None:
+                    return False
+                return (os.path.basename(video_file) <= self.last_video_file)
+
+            def markProcessed(self, video_file):
+                filename = os.path.basename(video_file)
+                self.last_video_file = filename
+                with open(self.tracker_file_name, 'w') as tf:
+                    tf.write(filename + '\n')
+
+        # Provide the requested file
+        if cml_args.video_file is not None:
+            addVideoWithInterval(cml_args.video_file)
+
+        # Process the requested directory
+        if cml_args.video_file_dir is not None:
+            # Initialize a new file tracker
+            processed_tracker = ProcessedVideoTracker(cml_args.video_file_dir)
+            # Filter files to ones not yet processed
+            files = sorted(glob(os.path.join(cml_args.video_file_dir, "**","*_video.mkv"), recursive=True))
+            files = [file for file in files if not processed_tracker.isProcessed(file)]
+            # Process each file 
+            for file in files:
+                addVideoWithInterval(file)
+                processed_tracker.markProcessed(file)
+
+        # Stop the detector, it will cleanup processing before exiting  
+        rtvd.stop()    
+
+    # The true mainline, either process the files once, of in a cntl-C cancelled loop
+    if cml_args.continuous_wait_minutes is None:
+        ProcessFiles()
+    else:
+        log.info('Starting continuous real-time video detection processing loop.  Press Ctrl-C to exit.')
+        try:
+            while True:
+                ProcessFiles()
+                log.info(f'Waiting {cml_args.continuous_wait_minutes} minutes before checking for new video files to process.')
+                time.sleep(cml_args.continuous_wait_minutes * 60)
+        except KeyboardInterrupt:
+            log.info('Exiting continuous real-time video detection processing loop on user request.')
 
