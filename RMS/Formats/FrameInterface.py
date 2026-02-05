@@ -1148,6 +1148,8 @@ class InputTypeUWOVid(InputType):
         self.vid_path = file_path
         self.dir_path, vid_file = os.path.split(file_path)
 
+        self.file_name = vid_file
+
         self.config = config
 
         self.detection = detection

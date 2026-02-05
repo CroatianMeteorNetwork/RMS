@@ -412,6 +412,8 @@ def extractStarsImgHandle(img_handle,
     # Go through all the chunks in the image handle
     for chunk_no in range(img_handle.total_fr_chunks):
 
+        print("Processing chunk {:d}/{:d}".format(chunk_no+1, img_handle.total_fr_chunks))
+
         # Load one video frame chunk
         ff_tmp = img_handle.loadChunk()
 
@@ -437,7 +439,8 @@ def extractStarsImgHandle(img_handle,
 
         # Check if the image is too bright and skip the image
         if img_median > max_global_intensity:
-            return error_return
+            print("    Image too bright, skipping chunk.")
+            continue
 
         # Get the image data from the average pixel image
         img = avepixel.astype(np.float32)
@@ -454,7 +457,7 @@ def extractStarsImgHandle(img_handle,
 
         # If the star extraction failed, return an empty list
         if status is False:
-            return error_return
+            continue
         
         # Unpack the star data
         x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count = status
