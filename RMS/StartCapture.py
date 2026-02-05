@@ -664,6 +664,14 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                     bc.startCapture()
 
                     log.info('WATCHDOG: BufferedCapture restarted successfully, capture continuing')
+
+                    # Recalculate remaining capture duration based on current time
+                    # This prevents the duration timer from resetting to the full night length
+                    # Only needed in standard mode - continuous mode uses daytime_mode switching instead
+                    if not config.continuous_capture:
+                        _, duration = captureDuration(config.latitude, config.longitude, config.elevation)
+                        log.info('WATCHDOG: Recalculated remaining capture duration: {:.2f} hours'.format(duration/3600))
+
                     continue
                 else:
                     break
