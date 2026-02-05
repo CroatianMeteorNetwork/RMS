@@ -475,7 +475,7 @@ def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
 
 
             # Try aligning the platepar using NN alignment
-            platepar_refined = alignPlatepar(config, platepar, calstars_time, calstars_coords)
+            platepar_refined, _ = alignPlatepar(config, platepar, calstars_time, calstars_coords)
 
 
             ### If there are still not enough stars matched, try NN again ###
@@ -497,7 +497,7 @@ def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
                 log.info("-------------------------------------------------------------------------------")
                 log.info('Doing a second NN pass as the number of matched stars was too small...')
                 log.info('')
-                platepar_refined = alignPlatepar(config, platepar_refined, calstars_time, calstars_coords)
+                platepar_refined, _ = alignPlatepar(config, platepar_refined, calstars_time, calstars_coords)
                 log.info('')
 
             ### ###

@@ -3739,8 +3739,8 @@ class PlateTool(QtWidgets.QMainWindow):
     def redetectStars(self):
         """ Re-detect stars on current image using override parameters. """
         print(f"Re-detecting stars with: threshold={self.override_intensity_threshold}, "
-              f"neighborhood={self.override_neighborhood_size}, max_stars={self.override_max_stars}, "
-              f"gamma={self.override_gamma:.3f}")
+              f"neighborhood={self.override_neighborhood_size}, segment_radius={self.override_segment_radius}, "
+              f"max_stars={self.override_max_stars}, gamma={self.override_gamma:.3f}")
 
         # Get current FF file name
         ff_name = self.img_handle.name()
@@ -4220,9 +4220,12 @@ class PlateTool(QtWidgets.QMainWindow):
             # Enable override mode
             self.tab.star_detection.use_override_checkbox.setChecked(True)
 
-            # Update override_max_stars to handle the expected number of detected stars
-            # Use 2x detected count, rounded up to nearest 100
-            self.override_max_stars = int(np.ceil(n_detected * 2 / 100) * 100)
+            # Update override_max_stars to handle the expected number of candidates.
+            # max_stars limits raw candidate count (local maxima before PSF fitting),
+            # which is typically 3-5x the final detection count. Use at least what
+            # tuning used to ensure the same candidates pass through.
+            tuning_max_stars = max(2000, original_max_stars)
+            self.override_max_stars = max(tuning_max_stars, int(np.ceil(n_detected * 5 / 100) * 100))
 
             # Update the GUI slider to reflect the new max_stars value
             # First ensure the slider range can accommodate the value
@@ -4343,11 +4346,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def _findOptimalThreshold(self, results):
         """
-        Find the optimal intensity threshold from sweep results using elbow detection.
+        Find the optimal intensity threshold from sweep results.
 
-        Strategy: Find the "elbow" where marginal cost (additional FP per additional TP)
-        explodes. This adapts to each image's noise characteristics rather than using
-        a fixed precision cutoff.
+        Strategy: Measure the baseline false-positive ratio from clean high-threshold
+        data, then accept lower thresholds as long as fp_ratio stays below a limit
+        derived from the baseline. This adapts to each image's noise characteristics.
 
         Arguments:
             results: List of (threshold, n_true_pos, n_false_pos, n_detected) tuples,
@@ -4364,58 +4367,38 @@ class PlateTool(QtWidgets.QMainWindow):
         if not valid:
             return 20
 
-        # Parameters for elbow detection
-        max_marginal_cost = 2.0  # Stop when gaining >2 FP per TP
-        min_precision = 0.80     # Safety floor - don't go below 80% precision
+        # Find the minimum fp_ratio across the entire sweep as the reference.
+        # Using the first N results as "baseline" is unreliable because high thresholds
+        # detect few stars, so a handful of fixed artifacts (hot pixels) inflate the ratio.
+        # The minimum represents the "clean zone" where the detector works optimally.
+        all_fp_ratios = [fp / det for t, tp, fp, det in valid if det > 0]
+        min_fp = min(all_fp_ratios) if all_fp_ratios else 0.02
 
-        # Results are sorted high threshold to low (40, 39, 38, ...)
-        # As threshold decreases, TP and FP both increase
-        # We want to find where marginal cost exceeds the limit
+        # Accept thresholds where fp_ratio < max(3x minimum, 10%)
+        # The 3x multiplier allows moderate degradation from the optimal zone;
+        # the 10% floor ensures we don't stop too early on very clean images
+        fp_limit = max(3 * min_fp, 0.10)
+
+        print(f"    -> Min fp_ratio: {min_fp:.3f}, limit: {fp_limit:.3f}")
 
         best_threshold = valid[0][0]
         best_tp = valid[0][1]
         best_fp = valid[0][2]
         best_det = valid[0][3]
-        elbow_reason = "first valid"
 
-        prev_tp = valid[0][1]
-        prev_fp = valid[0][2]
+        for threshold, tp, fp, det in valid:
+            fp_ratio = fp / det
 
-        for i in range(1, len(valid)):
-            threshold, tp, fp, det = valid[i]
-            precision = tp / det if det > 0 else 0
-
-            # Calculate marginal cost from previous threshold
-            delta_tp = tp - prev_tp
-            delta_fp = fp - prev_fp
-
-            if delta_tp > 0:
-                marginal_cost = delta_fp / delta_tp
-            else:
-                # No gain in TP, any FP increase is infinite cost
-                marginal_cost = float('inf') if delta_fp > 0 else 0
-
-            # Check stopping conditions
-            if marginal_cost > max_marginal_cost:
-                elbow_reason = f"marginal cost {marginal_cost:.1f} > {max_marginal_cost}"
-                print(f"    -> Elbow at threshold={threshold}: {elbow_reason} "
-                      f"(+{delta_tp} TP, +{delta_fp} FP)")
+            if fp_ratio > fp_limit:
+                print(f"    -> Stopping at threshold={threshold}: "
+                      f"fp_ratio={fp_ratio:.3f} > {fp_limit:.3f}")
                 break
 
-            if precision < min_precision:
-                elbow_reason = f"precision {precision:.0%} < {min_precision:.0%}"
-                print(f"    -> Elbow at threshold={threshold}: {elbow_reason}")
-                break
-
-            # This threshold is acceptable, update best
+            # This threshold is acceptable
             best_threshold = threshold
             best_tp = tp
             best_fp = fp
             best_det = det
-            elbow_reason = "last acceptable"
-
-            prev_tp = tp
-            prev_fp = fp
 
         # Print selection
         prec = best_tp / best_det if best_det > 0 else 0
@@ -9399,8 +9382,24 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Try alignPlatepar to refine pointing
         # Pass full CALSTARS data so alignPlatepar can infer catalog LM from intensities
+
+        # Callback to update display when catalog LM changes during balancing
+        def lm_callback(lim_mag, n_catalog, n_detected, ratio):
+            # Update catalog LM and reload catalog
+            self.cat_lim_mag = lim_mag
+            self.catalog_stars = self.loadCatalogStars(lim_mag)
+
+            # Update status bar
+            self.status_bar.showMessage("Balancing LM={:.1f}: {} catalog, {} detected, ratio={:.2f}".format(
+                lim_mag, n_catalog, n_detected, ratio))
+
+            # Redraw catalog stars
+            self.updateStars(only_update_catalog=True)
+            QtWidgets.QApplication.processEvents()
+
         try:
-            pp_aligned = alignPlatepar(self.config, self.platepar, calstars_time, detected_stars)
+            pp_aligned, inferred_lm = alignPlatepar(self.config, self.platepar, calstars_time,
+                                                     detected_stars, lm_callback=lm_callback)
         except Exception as e:
             print("  alignPlatepar failed: {} - falling back to astrometry.net".format(str(e)))
             return False
@@ -9414,6 +9413,12 @@ class PlateTool(QtWidgets.QMainWindow):
         print("  alignPlatepar succeeded: RA={:.2f} Dec={:.2f}".format(
             pp_aligned.RA_d, pp_aligned.dec_d))
         self.platepar = pp_aligned
+
+        # Use the inferred LM from calibrated photometry for subsequent fitting
+        if inferred_lm != self.cat_lim_mag:
+            print("  Using inferred catalog LM={:.1f} (was {:.1f})".format(inferred_lm, self.cat_lim_mag))
+            self.cat_lim_mag = inferred_lm
+            self.catalog_stars = self.loadCatalogStars(inferred_lm)
 
         # Update JD and hour angle
         self.platepar.JD = jd
@@ -9474,11 +9479,34 @@ class PlateTool(QtWidgets.QMainWindow):
             if getattr(self, 'catalog_lm_tuned', False) and hasattr(self, 'tuned_cat_lim_mag'):
                 tuned_catalog = self.loadCatalogStars(self.tuned_cat_lim_mag)
 
+            # Callback to update display at each RANSAC iteration (visual debugging)
+            def iteration_callback(iteration, pp_iter, outlier_mask, rmsd_arcmin):
+                # pp_iter is a complete deepcopy with correct distortion_type, poly coeffs,
+                # and pointing. Swap the entire platepar pointer instead of copying attributes
+                # piecemeal (which missed distortion_type, y_poly, poly_length — causing the
+                # display to use wrong-length coefficients with the wrong distortion model).
+                saved_pp = self.platepar
+                self.platepar = pp_iter
+
+                # Update status bar with LM and iteration info
+                n_outliers = np.sum(outlier_mask) if outlier_mask is not None else 0
+                self.status_bar.showMessage("LM={:.1f} | RANSAC iter {}: RMSD={:.1f}', {} outliers".format(
+                    self.cat_lim_mag, iteration, rmsd_arcmin, n_outliers))
+
+                # Redraw catalog stars and distortion center with updated platepar
+                self.updateStars(only_update_catalog=True)
+                self.updateDistortionCenterMarker()
+                QtWidgets.QApplication.processEvents()
+
+                # Restore original platepar so optimizer isn't corrupted
+                self.platepar = saved_pp
+
             ransac_result = self.platepar.fitAstrometry(
                 jd, img_stars_arr, catalog_stars_filtered,
                 first_platepar_fit=True,
                 use_nn_cost=True,
-                final_catalog_stars=tuned_catalog
+                final_catalog_stars=tuned_catalog,
+                iteration_callback=iteration_callback
             )
             print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
                 self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
@@ -9608,8 +9636,24 @@ class PlateTool(QtWidgets.QMainWindow):
         # Pass full CALSTARS data so alignPlatepar can infer catalog LM from intensities
         print("  Calling alignPlatepar()...", flush=True)
         sys.stdout.flush()
+
+        # Callback to update display when catalog LM changes during balancing
+        def lm_callback(lim_mag, n_catalog, n_detected, ratio):
+            # Update catalog LM and reload catalog
+            self.cat_lim_mag = lim_mag
+            self.catalog_stars = self.loadCatalogStars(lim_mag)
+
+            # Update status bar
+            self.status_bar.showMessage("Balancing LM={:.1f}: {} catalog, {} detected, ratio={:.2f}".format(
+                lim_mag, n_catalog, n_detected, ratio))
+
+            # Redraw catalog stars
+            self.updateStars(only_update_catalog=True)
+            QtWidgets.QApplication.processEvents()
+
         try:
-            pp_aligned = alignPlatepar(self.config, self.platepar, calstars_time, detected_stars)
+            pp_aligned, inferred_lm = alignPlatepar(self.config, self.platepar, calstars_time,
+                                                     detected_stars, lm_callback=lm_callback)
         except Exception as e:
             print("  alignPlatepar FAILED: {}".format(str(e)), flush=True)
             traceback.print_exc()
@@ -10283,12 +10327,34 @@ class PlateTool(QtWidgets.QMainWindow):
             if getattr(self, 'catalog_lm_tuned', False) and hasattr(self, 'tuned_cat_lim_mag'):
                 tuned_catalog = self.loadCatalogStars(self.tuned_cat_lim_mag)
 
+            # Callback to update display at each RANSAC iteration (visual debugging)
+            def iteration_callback(iteration, pp_iter, outlier_mask, rmsd_arcmin):
+                # pp_iter is a complete deepcopy with correct distortion_type, poly coeffs,
+                # and pointing. Swap the entire platepar pointer instead of copying attributes
+                # piecemeal (which missed distortion_type, y_poly, poly_length).
+                saved_pp = self.platepar
+                self.platepar = pp_iter
+
+                # Update status bar with LM and iteration info
+                n_outliers = np.sum(outlier_mask) if outlier_mask is not None else 0
+                self.status_bar.showMessage("LM={:.1f} | RANSAC iter {}: RMSD={:.1f}', {} outliers".format(
+                    self.cat_lim_mag, iteration, rmsd_arcmin, n_outliers))
+
+                # Redraw catalog stars and distortion center with updated platepar
+                self.updateStars(only_update_catalog=True)
+                self.updateDistortionCenterMarker()
+                QtWidgets.QApplication.processEvents()
+
+                # Restore original platepar so optimizer isn't corrupted
+                self.platepar = saved_pp
+
             try:
                 self.platepar.fitAstrometry(
                     jd, img_stars_arr, catalog_stars_extended,  # Extended catalog for edge stars
                     first_platepar_fit=True,
                     use_nn_cost=True,
-                    final_catalog_stars=tuned_catalog
+                    final_catalog_stars=tuned_catalog,
+                    iteration_callback=iteration_callback
                 )
                 print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
                     self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))

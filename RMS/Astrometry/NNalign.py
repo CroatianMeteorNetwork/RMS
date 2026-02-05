@@ -33,7 +33,8 @@ from RMS.Astrometry.CyFunctions import subsetCatalog
 log = getLogger('rmslogger')
 
 
-def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update=False, show_plot=False):
+def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update=False, show_plot=False,
+                  lm_callback=None):
     """ Align the platepar using nearest-neighbor optimization.
 
     This function fits the platepar pointing parameters (RA_d, dec_d, pos_angle_ref) by minimizing
@@ -52,9 +53,15 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
     Keyword arguments:
         scale_update: [bool] Update the platepar scale. False by default.
         show_plot: [bool] Unused, kept for backward compatibility.
+        lm_callback: [callable] Optional callback called when catalog LM changes during balancing.
+            Signature: callback(lim_mag, n_catalog, n_detected, ratio)
+            Used for visual debugging of the LM balancing process.
 
     Return:
-        platepar_aligned: [Platepar instance] The aligned platepar, or original if fit failed.
+        (platepar_aligned, catalog_mag_limit): [tuple]
+            platepar_aligned: [Platepar instance] The aligned platepar, or original if fit failed.
+            catalog_mag_limit: [float] The catalog LM used (inferred from photometry if calibrated,
+                               otherwise config value). Caller can use this for subsequent fitting.
     """
 
     # Create a copy of the config not to mess with the original config parameters
@@ -78,27 +85,31 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
         det_y = calstars_coords[:, 0]
         det_intens = calstars_coords[:, 2]
 
-        # Infer catalog LM from detected star magnitudes using platepar photometry
-        # Filter out invalid intensities
-        valid_intens = det_intens[det_intens > 0]
-        if len(valid_intens) > 0:
-            inst_mags = -2.5 * np.log10(valid_intens)
-            est_cat_mags = inst_mags + platepar.mag_lev
+        # Infer catalog LM from detected star magnitudes if photometry is calibrated
+        photometry_calibrated = (platepar.mag_lev != 1.0) and (platepar.mag_lev_stddev > 0)
 
-            # Use 95th percentile + margin to ensure catalog covers all detections
-            # Cap at reasonable max to avoid noise-driven values
-            inferred_lim_mag = min(np.percentile(est_cat_mags, 95) + 1.0, 12.0)
-            inferred_lim_mag = max(inferred_lim_mag, 4.0)  # Floor at 4.0
+        if photometry_calibrated:
+            valid_intens = det_intens[det_intens > 0]
+            if len(valid_intens) > 0:
+                inst_mags = -2.5 * np.log10(valid_intens)
+                est_cat_mags = inst_mags + platepar.mag_lev
 
-            log.info("alignPlatepar: Inferred catalog LM={:.1f} from {} detected stars (config={:.1f})".format(
-                inferred_lim_mag, len(valid_intens), config.catalog_mag_limit))
-            config.catalog_mag_limit = inferred_lim_mag
+                # Use 95th percentile + margin to ensure catalog covers all detections
+                inferred_lim_mag = min(np.percentile(est_cat_mags, 95) + 1.0, 12.0)
+                inferred_lim_mag = max(inferred_lim_mag, 4.0)  # Floor at 4.0
+
+                log.info("alignPlatepar: Inferred LM={:.1f} from {} detected stars (mag_lev={:.1f})".format(
+                    inferred_lim_mag, len(valid_intens), platepar.mag_lev))
+                config.catalog_mag_limit = inferred_lim_mag
+        else:
+            log.info("alignPlatepar: Photometry not calibrated (mag_lev={:.1f}), using config LM={:.1f}".format(
+                platepar.mag_lev, config.catalog_mag_limit))
 
         # Reformat to (x, y) for rest of function
         calstars_coords = np.column_stack([det_x, det_y])
     else:
         # Legacy (x, y) format - use config LM
-        log.info("alignPlatepar: Using config catalog LM={:.1f} (no intensity data)".format(
+        log.info("alignPlatepar: Using config LM={:.1f} (no intensity data)".format(
             config.catalog_mag_limit))
 
     # Load the catalog stars
@@ -127,9 +138,12 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
 
     catalog_stars_fov = catalog_stars[filtered_indices]
 
+    log.info("alignPlatepar: LM={:.1f}, {} catalog stars in FOV, {} detected stars".format(
+        config.catalog_mag_limit, len(catalog_stars_fov), len(calstars_coords)))
+
     if len(catalog_stars_fov) < 5:
         log.warning("alignPlatepar: Not enough catalog stars in FOV ({})".format(len(catalog_stars_fov)))
-        return platepar
+        return platepar, config.catalog_mag_limit
 
     # Convert calstars_coords to img_stars format (x, y, intensity)
     # Add dummy intensity column
@@ -137,7 +151,7 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
 
     if len(img_stars) < 5:
         log.warning("alignPlatepar: Not enough detected stars ({})".format(len(img_stars)))
-        return platepar
+        return platepar, config.catalog_mag_limit
 
     # Create aligned platepar copy
     platepar_aligned = copy.deepcopy(platepar)
@@ -162,9 +176,9 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
             log.info("    Scale: {:.4f} -> {:.4f}".format(platepar.F_scale, platepar_aligned.F_scale))
     else:
         log.warning("alignPlatepar: Fit did not converge, returning original platepar")
-        return platepar
+        return platepar, config.catalog_mag_limit
 
-    return platepar_aligned
+    return platepar_aligned, config.catalog_mag_limit
 
 
 if __name__ == "__main__":
@@ -248,7 +262,7 @@ if __name__ == "__main__":
     calstars_time = getMiddleTimeFF(max_len_ff, config.fps, ret_milliseconds=True, ff_frames=ff_frames)
 
     # Align the platepar with stars in CALSTARS
-    platepar_aligned = alignPlatepar(config, platepar, calstars_time, calstars_data, show_plot=False)
+    platepar_aligned, _ = alignPlatepar(config, platepar, calstars_time, calstars_data, show_plot=False)
 
     # Save the aligned platepar
     platepar_aligned.write(platepar_path)

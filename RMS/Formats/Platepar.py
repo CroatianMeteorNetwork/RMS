@@ -717,6 +717,7 @@ class Platepar(object):
         fixed_scale=False,
         use_nn_cost=False,
         final_catalog_stars=None,
+        iteration_callback=None,
     ):
         """Fit astrometric parameters to the list of star image and celestial catalog coordinates.
         At least 4 stars are needed to fit the rigid body parameters.
@@ -734,6 +735,9 @@ class Platepar(object):
             fixed_scale: [bool] Keep the scale fixed. False by default.
             final_catalog_stars: [list] Optional deeper catalog to use for final radial7 fitting.
                                  If provided, switches to this catalog after radial7 switch.
+            iteration_callback: [callable] Optional callback called after each RANSAC iteration.
+                                Signature: callback(iteration, platepar_copy, outlier_mask, rmsd_arcmin)
+                                Used for visual debugging of the fitting process.
 
         """
 
@@ -1402,6 +1406,21 @@ class Platepar(object):
                         print("      Iter {}: {} (w={}) fit on {}, {} outliers, RMSD={:.2f}', RA={:.2f} Dec={:.2f}".format(
                             iteration + 1, dist_label, weight, len(subset_indices),
                             np.sum(iteration_outliers), rmsd_arcmin, iter_ra, iter_dec))
+
+                        # Call iteration callback for visual debugging if provided
+                        if iteration_callback is not None:
+                            # Create a platepar copy with current iteration's parameters
+                            # Decode using same formulas as the NN cost function (line 932-938)
+                            pp_iter = copy.deepcopy(self)
+                            pp_iter.RA_d = iter_ra
+                            pp_iter.dec_d = iter_dec
+                            pp_iter.pos_angle_ref = (360 * res.x[2]) % 360
+                            pp_iter.F_scale = abs(res.x[3])
+                            if len(res.x) > 4:
+                                pp_iter.x_poly_fwd = np.array(res.x[4:])
+                                pp_iter.x_poly_rev = np.array(res.x[4:])
+                            pp_iter.updateRefAltAz()
+                            iteration_callback(iteration + 1, pp_iter, iteration_outliers, rmsd_arcmin)
 
                         # Early exit: if outlier mask unchanged for 2 consecutive iterations within phase
                         if prev_outlier_mask is not None and np.array_equal(iteration_outliers, prev_outlier_mask):
