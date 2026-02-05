@@ -652,8 +652,12 @@ def gatherCameraInformation(config, attempts=6, delay=10, sock_timeout=3):
         try:
             cam = dvr.DVRIPCam(ip, timeout=sock_timeout)
             if cam.login():
-                sensor = cam.get_upgrade_info()['Hardware']
+                sys_info = cam.get_system_info()
                 cam.close()
+                sensor = sys_info.get('HardWare', 'Unknown')
+                fw = sys_info.get('SoftWareVersion', '')
+                if fw:
+                    return "{} FW:{}".format(sensor, fw)
                 return sensor
         except (socket.timeout, OSError, ConnectionError):
             # Camera may still be rebooting - ignore and retry
