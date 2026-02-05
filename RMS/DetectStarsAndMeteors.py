@@ -32,21 +32,15 @@ from RMS.Formats.FFfile import validFFName, constructFFName
 from RMS.Formats.FrameInterface import detectInputType, detectInputTypeFile, checkIfVideoFile
 from RMS.ExtractStars import extractStarsFF
 from RMS.ExtractStarsFrameInterface import extractStarsFrameInterface
-from RMS.Detection import detectMeteors, VERBOSE_DEBUG
+from RMS.Detection import detectMeteors
 from RMS.DetectionTools import loadImageCalibration
 from RMS.QueuedPool import QueuedPool
 from RMS.Logger import LoggingManager, getLogger
-from RMS.Misc import RmsDateTime
+from RMS.Misc import RmsDateTime, mkdirP
 
 
 # Get the logger from the main module
 log = getLogger("logger")
-
-
-def setVerboseLogging(verbose):
-    """Perform verbose logging, primarily by setting VERBOSE_DEBUG to True in meteor detection module."""
-    global VERBOSE_DEBUG
-    VERBOSE_DEBUG = verbose
 
 
 def detectStarsAndMeteorsFrameInterface(
@@ -575,11 +569,11 @@ if __name__ == "__main__":
     ### Init the logger
     log_manager = LoggingManager()
     log_manager.initLogging(config, cml_args.prefix, safedir=cml_args.dir_path)
-
     log = getLogger("logger")
 
-    # Enable verbose logging if requested
-    setVerboseLogging(cml_args.debug)
+    # Ensure the output directory exists
+    if cml_args.out_dir is not None:
+        mkdirP(cml_args.out_dir)
 
     ######
 

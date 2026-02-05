@@ -5,7 +5,7 @@ import multiprocessing as mp
 import os
 import time
 import threading
-from RMS.DetectStarsAndMeteors import detectStarsAndMeteorsInVideoFile, setVerboseLogging
+from RMS.DetectStarsAndMeteors import detectStarsAndMeteorsInVideoFile
 from RMS.Astrometry.LiveRecalibration import LiveRecalibration
 from RMS.Formats.CALSTARS import readCALSTARS
 from RMS.Formats.FTPdetectinfo import readFTPdetectinfo
@@ -37,7 +37,7 @@ class RealtimeVideoDetector():
 
 
     @staticmethod           
-    def createDetector(night_data_dir, config, delay_start=0, cores=1, suffix='', debug=False):
+    def createDetector(night_data_dir, config, delay_start=0, cores=1, suffix=''):
         """ Static method to create the real-time video detector instance.
         
         Arguments:
@@ -55,7 +55,7 @@ class RealtimeVideoDetector():
                 config = config.realtime_video_detection_config
                 log.info(f'Using a separate configuration for real-time video detection: {config.config_file_name}')
             # Initialize the realtime video detector.  If a configuration override is provided, use it
-            RealtimeVideoDetector._instance = RealtimeVideoDetector(night_data_dir, config, delay_start=delay_start, cores=cores, suffix=suffix, debug=debug)
+            RealtimeVideoDetector._instance = RealtimeVideoDetector(night_data_dir, config, delay_start=delay_start, cores=cores, suffix=suffix)
             return RealtimeVideoDetector._instance
         else:
             return None
@@ -71,7 +71,7 @@ class RealtimeVideoDetector():
 
 
 
-    def __init__(self, night_data_dir, config, delay_start=0, cores=1, suffix='realtime', debug=False):
+    def __init__(self, night_data_dir, config, delay_start=0, cores=1, suffix='realtime'):
         """ Initialize the real-time video detector.  This is a Singleton class
 
         Arguments:
@@ -84,7 +84,6 @@ class RealtimeVideoDetector():
             delay_start: [float] Number of seconds to wait after init before the workers start workings.
             cores: [int] Number of CPU cores to use. 1 by default.
             suffix: [str] Suffix to append to output files. Default: "realtime"
-            debug: [bool] Enable debug logging, particularly in RMS meteor detection module.
 
         """
         # The working directory is the configured subdirectory name in the provided night data
@@ -93,7 +92,6 @@ class RealtimeVideoDetector():
         self.realtime_det_dir = os.path.join(night_data_dir, config.realtime_video_detection_night_subdir)
         self.cores = cores
         self.suffix = suffix
-        setVerboseLogging(debug)
 
         mkdirP(self.realtime_det_dir)
         log.info(f'Realtime video detection directory: {self.realtime_det_dir}')
@@ -293,7 +291,6 @@ if __name__ == "__main__":
     arg_parser.add_argument('--cores', metavar='CORES', type=int, default=1, help="Number of CPU cores to use.")
     arg_parser.add_argument('--prefix', metavar='PREFIX', type=str, default='detection_', help="Prefix to add to log files.")
     arg_parser.add_argument('--suffix', metavar='SUFFIX', type=str, default='', help="Suffix to append to output files.")
-    arg_parser.add_argument('--debug', action='store_true', help="Enable debug logging, particularly in RMS meteor detection module.")
     arg_parser.add_argument('--interval', type=float, help="Submission interval in seconds when ingesting multiple videos")
 
     # Parse the command line arguments
@@ -317,7 +314,7 @@ if __name__ == "__main__":
     log = getLogger("logger")
 
     # Allocate and start the detector 
-    rtvd = RealtimeVideoDetector.createDetector(cml_args.night_dir, config, delay_start=0, cores=cml_args.cores, suffix=cml_args.suffix, debug=cml_args.debug)
+    rtvd = RealtimeVideoDetector.createDetector(cml_args.night_dir, config, delay_start=0, cores=cml_args.cores, suffix=cml_args.suffix)
     rtvd.start()
 
     # Setup any required video submissioninterval tracking

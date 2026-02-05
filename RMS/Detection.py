@@ -67,8 +67,10 @@ log = getLogger("logger")
 def logDebug(*log_str):
     """ Log detection debug messages. """
 
-    log_str = map(str, log_str)
-    log.debug(" ".join(log_str))
+    # TBD temporary disable
+    pass
+    #log_str = map(str, log_str)
+    #log.debug(" ".join(log_str))
 
 
 
