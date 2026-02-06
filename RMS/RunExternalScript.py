@@ -167,7 +167,7 @@ def checkExternalProcesses(external_script_process_dict):
 
     return external_script_process_dict, external_script_stopped_process_dict
 
-def runningExternalScripts(external_script_process_dict):
+def runningExternalScripts(external_script_running_process_dict):
     """
     Given a dictionary of external processes, are any still running.
 
@@ -177,12 +177,12 @@ def runningExternalScripts(external_script_process_dict):
     Return:
         [bool]: True if any external scripts are still running.
     """
-    external_script_process_dict, external_script_stopped_process_dict = \
-        checkExternalProcesses(external_script_process_dict)
-    if external_script_process_dict is None:
+    external_script_running_process_dict, external_script_stopped_process_dict = \
+        checkExternalProcesses(external_script_running_process_dict)
+    if external_script_running_process_dict is None:
         return False
 
-    if len(external_script_stopped_process_dict):
+    if len(external_script_running_process_dict):
         return True
     else:
         return False
