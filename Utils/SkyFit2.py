@@ -4002,71 +4002,42 @@ class PlateTool(QtWidgets.QMainWindow):
                     title="Tuning Error", message_type="warning")
                 return
 
-            # Phase 1: Sweep segment radius with HIGH intensity threshold
-            # This focuses on bright stars first - they need adequate segment_radius
-            # to pass the max_feature_ratio filter (wide PSF needs larger segment)
-            high_intensity_threshold = 25  # Only detect bright stars
-            print(f"\n  Phase 1: Segment radius sweep (intensity_threshold={high_intensity_threshold}, bright stars only)")
-            segment_values = list(range(4, 21))
+            # Phase 1: Determine segment_radius from FWHM of bright stars
+            #
+            # The segment_radius must be large enough to contain the stellar PSF for
+            # the Gaussian fit. The critical filter in fitPSF is:
+            #   4 * sigma_x * sigma_y / segment_radius^2 < max_feature_ratio
+            # For a round star (sigma_x ≈ sigma_y):
+            #   segment_radius > 2 * sigma / sqrt(max_feature_ratio)
+            # Since FWHM = 2.355 * sigma:
+            #   segment_radius > 0.95 * FWHM  (for max_feature_ratio = 0.8)
+            #
+            # We detect bright stars with a generous segment_radius, measure their
+            # FWHMs, then set segment_radius to accommodate the widest stars.
+            print(f"\n  Phase 1: Determining segment_radius from bright star FWHMs")
+            self.status_bar.showMessage("Tuning... measuring star FWHMs")
+            QtWidgets.QApplication.processEvents()
 
-            # Collect results for all segment values
-            segment_results = []
-            for segment in segment_values:
-                self.status_bar.showMessage(f"Tuning... segment radius {segment}")
-                QtWidgets.QApplication.processEvents()
-
-                n_true_pos, n_false_pos, n_detected = self._countTrueFalsePositives(
-                    ff_name, high_intensity_threshold, segment, visible_cat_x, visible_cat_y)
-
-                if n_detected > 0:
-                    fp_ratio = n_false_pos / n_detected
-                    print(f"    segment={segment:2d}: detected={n_detected:3d}, "
-                          f"true_pos={n_true_pos:3d}, false_pos={n_false_pos:3d}, fp_ratio={fp_ratio:.2f}")
-                    segment_results.append((segment, n_true_pos, n_false_pos, fp_ratio))
-
-            # Find max true positives and select smallest segment achieving 98% of max
-            # Using 98% instead of 95% to prioritize capturing bright/wide stars
-            if segment_results:
-                max_true_pos = max(r[1] for r in segment_results)
-                threshold_98 = 0.98 * max_true_pos
-
-                # Find smallest segment with true_pos >= 98% of max
-                best_segment = segment_results[0][0]
-                best_true_pos_seg = segment_results[0][1]
-                best_fp_ratio_seg = segment_results[0][3]
-
-                for segment, n_true_pos, n_false_pos, fp_ratio in segment_results:
-                    if n_true_pos >= threshold_98:
-                        best_segment = segment
-                        best_true_pos_seg = n_true_pos
-                        best_fp_ratio_seg = fp_ratio
-                        break  # Take the first (smallest) segment meeting threshold
-
-                print(f"\n  Selected segment_radius: {best_segment} (>={threshold_98:.0f} true pos, 98% of max {max_true_pos})")
-            else:
-                best_segment = 4
-                best_true_pos_seg = 0
-                best_fp_ratio_seg = 1.0
-                print(f"\n  Selected segment_radius: {best_segment} (default, no results)")
+            best_segment, best_true_pos_seg, best_fp_ratio_seg = self._findSegmentRadiusFromFWHM(
+                ff_name, visible_cat_x, visible_cat_y)
 
             # Early bail-out check after Phase 1
             # With high intensity threshold (bright stars only), we expect good precision.
             # If false positive ratio > 80%, the calibration is likely wrong.
             if best_fp_ratio_seg > 0.80:
-                # Compute precision for the message
-                best_result = next((r for r in segment_results if r[0] == best_segment), None)
-                n_detected_seg = best_result[1] + best_result[2] if best_result else 0
+                n_detected_seg = int(best_true_pos_seg / max(1 - best_fp_ratio_seg, 0.01))
                 precision_seg = (1.0 - best_fp_ratio_seg) * 100
 
                 print(f"\n  *** TUNING ABORTED ***")
-                print(f"  Only {max_true_pos} true positive(s) found with {best_fp_ratio_seg:.0%} false positive ratio.")
+                print(f"  Only {best_true_pos_seg} true positive(s) with "
+                      f"{best_fp_ratio_seg:.0%} false positive ratio.")
                 print(f"  Precision: {precision_seg:.1f}% (expected >20% with bright stars)")
                 print(f"  This suggests the platepar calibration is incorrect or the image has issues.")
                 self.status_bar.showMessage("Tuning aborted: calibration appears invalid")
                 qmessagebox(
                     message="Tuning aborted: could not find enough matching stars.\n\n"
-                            f"Only {max_true_pos} star(s) matched catalog positions out of "
-                            f"~{n_detected_seg} detections ({precision_seg:.1f}% precision).\n\n"
+                            f"Only {best_true_pos_seg} star(s) matched catalog positions "
+                            f"({precision_seg:.1f}% precision).\n\n"
                             "With bright stars only (high threshold), precision should be >20%.\n\n"
                             "This usually means:\n"
                             "• The platepar calibration is incorrect\n"
@@ -4344,13 +4315,136 @@ class PlateTool(QtWidgets.QMainWindow):
             return 0, 0, 0
 
 
+    def _findSegmentRadiusFromFWHM(self, ff_name, visible_cat_x, visible_cat_y):
+        """
+        Determine the optimal segment_radius by measuring the FWHM of bright stars.
+
+        Detects bright stars with a generous segment_radius, measures their FWHMs,
+        then sets segment_radius to accommodate the widest PSFs. The relationship is:
+            segment_radius > 2 * sigma / sqrt(max_feature_ratio)
+        where sigma = FWHM / 2.355.
+
+        Uses a multiplier of 1.5x the 90th percentile FWHM to provide margin for
+        the Gaussian fit while keeping the segment compact.
+
+        Arguments:
+            ff_name: [str] Name of the FF file.
+            visible_cat_x: [ndarray] X coordinates of visible catalog stars.
+            visible_cat_y: [ndarray] Y coordinates of visible catalog stars.
+
+        Returns:
+            (best_segment, n_true_pos, fp_ratio): Tuple of optimal segment radius,
+                true positive count and false positive ratio from validation.
+        """
+        # Use a generous segment_radius (12) and high threshold to detect bright stars
+        # segment=12 is large enough for almost any stellar PSF
+        probe_segment = 12
+        high_threshold = 25
+
+        try:
+            # Save and set config
+            orig_intensity = self.config.intensity_threshold
+            orig_segment = self.config.segment_radius
+            self.config.intensity_threshold = high_threshold
+            self.config.segment_radius = probe_segment
+            self.config.max_feature_ratio = self.override_max_feature_ratio
+            self.config.roundness_threshold = self.override_roundness_threshold
+
+            star_list = extractStarsFF(
+                self.dir_path, ff_name, config=self.config,
+                flat_struct=self.flat_struct, dark=self.dark, mask=self.mask
+            )
+
+            self.config.intensity_threshold = orig_intensity
+            self.config.segment_radius = orig_segment
+
+            if not star_list or len(star_list[1]) == 0:
+                print(f"    No bright stars detected with threshold={high_threshold}, "
+                      f"segment={probe_segment}")
+                print(f"    Using default segment_radius=4")
+                return 4, 0, 1.0
+
+            _, x_arr, y_arr, amplitude, intensity, fwhm_arr, background, snr, saturated = star_list
+            n_detected = len(x_arr)
+
+            # Identify true positives (match to catalog)
+            match_radius = 3.0
+            matched_fwhms = []
+            n_true_pos = 0
+            for det_x, det_y, det_fwhm in zip(x_arr, y_arr, fwhm_arr):
+                effective_radius = max(match_radius, 1.5 * det_fwhm)
+                distances = np.sqrt((visible_cat_x - det_x)**2 + (visible_cat_y - det_y)**2)
+                if np.min(distances) <= effective_radius:
+                    n_true_pos += 1
+                    matched_fwhms.append(det_fwhm)
+
+            n_false_pos = n_detected - n_true_pos
+            fp_ratio = n_false_pos / n_detected if n_detected > 0 else 1.0
+
+            print(f"    Probe detection (threshold={high_threshold}, segment={probe_segment}): "
+                  f"{n_detected} detected, {n_true_pos} matched catalog")
+
+            if len(matched_fwhms) < 3:
+                # Too few matched stars for reliable FWHM statistics
+                # Use all detected stars' FWHMs as fallback
+                all_fwhms = np.array(fwhm_arr)
+                if len(all_fwhms) > 0:
+                    fwhm_90 = np.percentile(all_fwhms, 90)
+                    print(f"    Few catalog matches ({len(matched_fwhms)}), "
+                          f"using all {len(all_fwhms)} detections for FWHM")
+                else:
+                    print(f"    No FWHM data available, using default segment_radius=4")
+                    return 4, n_true_pos, fp_ratio
+            else:
+                all_fwhms = np.array(matched_fwhms)
+                fwhm_90 = np.percentile(all_fwhms, 90)
+
+            fwhm_median = np.median(all_fwhms)
+            fwhm_max = np.max(all_fwhms)
+
+            # Compute segment_radius from FWHM
+            # Need: segment_radius > 2 * sigma / sqrt(max_feature_ratio)
+            # sigma = FWHM / 2.355
+            # With 1.5x margin for robust fitting:
+            max_feature_ratio = getattr(self.config, 'max_feature_ratio', 0.8)
+            sigma_90 = fwhm_90 / 2.355
+            min_segment = 2 * sigma_90 / np.sqrt(max_feature_ratio)
+            best_segment = int(np.ceil(min_segment * 1.5))
+
+            # Clamp to valid range [4, 20]
+            best_segment = max(4, min(20, best_segment))
+
+            print(f"    FWHM stats ({len(all_fwhms)} stars): "
+                  f"median={fwhm_median:.1f}, 90th={fwhm_90:.1f}, max={fwhm_max:.1f} px")
+            print(f"    min segment for 90th FWHM: {min_segment:.1f} px "
+                  f"(with 1.5x margin: {min_segment * 1.5:.1f})")
+            print(f"\n  Selected segment_radius: {best_segment} "
+                  f"(from 1.5x FWHM-derived minimum)")
+
+            return best_segment, n_true_pos, fp_ratio
+
+        except Exception as e:
+            print(f"    FWHM measurement error: {e}")
+            import traceback
+            traceback.print_exc()
+            return 4, 0, 1.0
+
+
     def _findOptimalThreshold(self, results):
         """
-        Find the optimal intensity threshold from sweep results.
+        Find the optimal intensity threshold from sweep results using the Kneedle
+        algorithm to detect the "knee" in the false positive curve.
 
-        Strategy: Measure the baseline false-positive ratio from clean high-threshold
-        data, then accept lower thresholds as long as fp_ratio stays below a limit
-        derived from the baseline. This adapts to each image's noise characteristics.
+        The Kneedle algorithm finds the point of maximum curvature in the false
+        positive curve — where noise transitions from gradual to rapid increase.
+        This is the same inflection point a human would visually identify, without
+        requiring any tunable parameters.
+
+        Algorithm:
+        1. Plot false_pos vs index (decreasing threshold)
+        2. Normalize both axes to [0, 1]
+        3. Draw a line from the first point to the last point
+        4. Find the point with maximum perpendicular distance from that line
 
         Arguments:
             results: List of (threshold, n_true_pos, n_false_pos, n_detected) tuples,
@@ -4367,41 +4461,72 @@ class PlateTool(QtWidgets.QMainWindow):
         if not valid:
             return 20
 
-        # Find the minimum fp_ratio across the entire sweep as the reference.
-        # Using the first N results as "baseline" is unreliable because high thresholds
-        # detect few stars, so a handful of fixed artifacts (hot pixels) inflate the ratio.
-        # The minimum represents the "clean zone" where the detector works optimally.
-        all_fp_ratios = [fp / det for t, tp, fp, det in valid if det > 0]
-        min_fp = min(all_fp_ratios) if all_fp_ratios else 0.02
+        # Extract false positive counts
+        thresholds = [t for t, tp, fp, det in valid]
+        false_pos = [fp for t, tp, fp, det in valid]
+        true_pos = [tp for t, tp, fp, det in valid]
 
-        # Accept thresholds where fp_ratio < max(3x minimum, 10%)
-        # The 3x multiplier allows moderate degradation from the optimal zone;
-        # the 10% floor ensures we don't stop too early on very clean images
-        fp_limit = max(3 * min_fp, 0.10)
+        # If all false positives are 0, just pick the lowest threshold (most stars)
+        if max(false_pos) == 0:
+            best = valid[-1]
+            print(f"    -> No false positives detected, using lowest threshold")
+            print(f"    -> Selected: threshold={best[0]}, true_pos={best[1]}, "
+                  f"false_pos={best[2]}, precision=100%")
+            return best[0]
 
-        print(f"    -> Min fp_ratio: {min_fp:.3f}, limit: {fp_limit:.3f}")
+        # If the curve is too short for meaningful knee detection, use the last valid point
+        if len(valid) < 3:
+            best = valid[-1]
+            prec = best[1] / best[3] if best[3] > 0 else 0
+            print(f"    -> Too few data points, using threshold={best[0]}")
+            print(f"    -> Selected: threshold={best[0]}, true_pos={best[1]}, "
+                  f"false_pos={best[2]}, precision={prec:.0%}")
+            return best[0]
 
-        best_threshold = valid[0][0]
-        best_tp = valid[0][1]
-        best_fp = valid[0][2]
-        best_det = valid[0][3]
+        # Kneedle algorithm on the false positive curve
+        x = np.arange(len(valid), dtype=float)
+        y = np.array(false_pos, dtype=float)
 
-        for threshold, tp, fp, det in valid:
-            fp_ratio = fp / det
+        # Normalize to [0, 1]
+        x_range = x.max() - x.min()
+        y_range = y.max() - y.min()
 
-            if fp_ratio > fp_limit:
-                print(f"    -> Stopping at threshold={threshold}: "
-                      f"fp_ratio={fp_ratio:.3f} > {fp_limit:.3f}")
-                break
+        if x_range == 0 or y_range == 0:
+            # Degenerate case — constant false positives
+            best = valid[-1]
+            prec = best[1] / best[3] if best[3] > 0 else 0
+            print(f"    -> Constant false positives, using threshold={best[0]}")
+            print(f"    -> Selected: threshold={best[0]}, true_pos={best[1]}, "
+                  f"false_pos={best[2]}, precision={prec:.0%}")
+            return best[0]
 
-            # This threshold is acceptable
-            best_threshold = threshold
-            best_tp = tp
-            best_fp = fp
-            best_det = det
+        x_norm = (x - x.min()) / x_range
+        y_norm = (y - y.min()) / y_range
 
-        # Print selection
+        # Line from first point to last point
+        x0, y0 = x_norm[0], y_norm[0]
+        x1, y1 = x_norm[-1], y_norm[-1]
+
+        # Perpendicular distance from each point to the line
+        # Line equation: a*x + b*y + c = 0
+        a = y1 - y0
+        b = -(x1 - x0)
+        c = x1 * y0 - x0 * y1
+        denom = np.sqrt(a**2 + b**2)
+
+        distances = np.abs(a * x_norm + b * y_norm + c) / denom
+
+        # The knee is the point with maximum distance from the diagonal
+        knee_idx = np.argmax(distances)
+
+        best_threshold = thresholds[knee_idx]
+        best_tp = true_pos[knee_idx]
+        best_fp = false_pos[knee_idx]
+        best_det = valid[knee_idx][3]
+
         prec = best_tp / best_det if best_det > 0 else 0
+        print(f"    -> Kneedle: knee at index {knee_idx}/{len(valid)-1} "
+              f"(distance={distances[knee_idx]:.3f})")
         print(f"    -> Selected: threshold={best_threshold}, true_pos={best_tp}, "
               f"false_pos={best_fp}, precision={prec:.0%}")
 
