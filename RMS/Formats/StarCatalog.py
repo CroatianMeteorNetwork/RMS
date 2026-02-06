@@ -219,8 +219,8 @@ def loadGMNStarCatalog(file_path,
     # Step 1: Cache the catalog data to avoid repeated decompression
     if not hasattr(loadGMNStarCatalog, cache_name):
 
-        # Define the data structure for the catalog
-        data_types = [
+        # Define the data structure for the catalog (v1 - 18 columns, legacy format)
+        data_types_v1 = [
             ('designation', 'S30'),
             ('ra', 'f8'),
             ('dec', 'f8'),
@@ -241,6 +241,30 @@ def loadGMNStarCatalog(file_path,
             ('Simbad_OType', 'S30')
         ]
 
+        # Define the data structure for the catalog (v2 - 20 columns, with common_name and bayer_name)
+        data_types_v2 = [
+            ('designation', 'S30'),
+            ('ra', 'f8'),
+            ('dec', 'f8'),
+            ('pmra', 'f8'),
+            ('pmdec', 'f8'),
+            ('phot_g_mean_mag', 'f4'),
+            ('phot_bp_mean_mag', 'f4'),
+            ('phot_rp_mean_mag', 'f4'),
+            ('classprob_dsc_specmod_star', 'f4'),
+            ('classprob_dsc_specmod_binarystar', 'f4'),
+            ('spectraltype_esphs', 'S8'),
+            ('B', 'f4'),
+            ('V', 'f4'),
+            ('R', 'f4'),
+            ('Ic', 'f4'),
+            ('oid', 'i4'),
+            ('preferred_name', 'S30'),
+            ('common_name', 'S30'),
+            ('bayer_name', 'S30'),
+            ('Simbad_OType', 'S30')
+        ]
+
         with open(file_path, 'rb') as fid:
 
             # Read the catalog header
@@ -248,6 +272,12 @@ def loadGMNStarCatalog(file_path,
             num_rows = int(np.fromfile(fid, dtype=np.uint32, count=1)[0])
             num_columns = int(np.fromfile(fid, dtype=np.uint32, count=1)[0])
             fid.read(declared_header_size - 12)  # Skip column names
+
+            # Select data types based on number of columns (v1=18, v2=20)
+            if num_columns >= 20:
+                data_types = data_types_v2
+            else:
+                data_types = data_types_v1
 
             # Read and decompress the catalog data
             compressed_data = fid.read()
@@ -263,7 +293,15 @@ def loadGMNStarCatalog(file_path,
 
     # Step 2: Compute synthetic magnitudes if required
     if mag_band_ratios is not None:
-        
+
+        # Validate band_ratios length - GMN catalog expects 7 bands [B, V, R, I, G, BP, RP]
+        if len(mag_band_ratios) != 7:
+            # If wrong length, fall back to V band only
+            print("Warning: GMN catalog expects 7 band ratios (B,V,R,I,G,BP,RP), "
+                  "got {}. Using V band only.".format(len(mag_band_ratios)))
+            mag_band_ratios = None
+
+    if mag_band_ratios is not None:
         # Compute synthetic magnitudes if band ratios are provided
         total_ratio = sum(mag_band_ratios)
         rb, rv, rr, ri, rg, rbp, rrp = [x/total_ratio for x in mag_band_ratios]
@@ -328,14 +366,12 @@ def loadGMNStarCatalog(file_path,
         else:
             requested = list(additional_fields)
 
-        # Sanity-check
+        # Filter to only fields that exist in this catalog version (backward compatibility)
         valid = set(catalog_data.dtype.names)
-        unknown = [n for n in requested if n not in valid]
-        if unknown:
-            raise ValueError("Unknown field(s) in additional_fields:" + ', '.join(unknown))
+        available = [n for n in requested if n in valid]
 
-        # Populate dict
-        for name in requested:
+        # Populate dict with available fields only
+        for name in available:
             extras_dict[name] = catalog_data[name]
 
     # Stack core fields for legacy callers
@@ -363,10 +399,12 @@ def loadGMNStarCatalog(file_path,
         mag_band_string = mag_band_string.strip()
 
     # Step 8: Return the filtered data, magnitude band string, and band ratios
+    # GMN catalog uses 7 bands: B, V, R, I, G, BP, RP - default to V band only
+    default_gmn_ratios = [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     if additional_fields:
-        return core_data, mag_band_string, tuple(mag_band_ratios or [0.0, 1.0, 0.0, 0.0]), extras_dict
+        return core_data, mag_band_string, tuple(mag_band_ratios or default_gmn_ratios), extras_dict
     else:
-        return core_data, mag_band_string, tuple(mag_band_ratios or [0.0, 1.0, 0.0, 0.0])
+        return core_data, mag_band_string, tuple(mag_band_ratios or default_gmn_ratios)
 
 
 def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None,
