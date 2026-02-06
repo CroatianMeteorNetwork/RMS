@@ -176,6 +176,8 @@ def runningExternalScripts(external_script_process_dict):
     """
     external_script_process_dict, external_script_stopped_process_dict = \
         checkExternalProcesses(external_script_process_dict)
+    if external_script_process_dict is None:
+        return False
 
     if len(external_script_stopped_process_dict):
         return True
@@ -219,37 +221,39 @@ if __name__ == "__main__":
     running_external_process_dict =  runExternalScript(cml_args.captured_path[0], cml_args.archived_path[0], config)
     time.sleep(10)
 
-    while len(running_external_process_dict):
-        running_external_process_dict, stopped_external_process_dict = checkExternalProcesses(running_external_process_dict)
-        if len(running_external_process_dict) == 1:
-            log.info(f"{len(running_external_process_dict)} external script is still running")
-        else:
-            log.info(f"{len(running_external_process_dict)} external scripts are still running")
-        for running_pid in running_external_process_dict:
+    if running_external_process_dict is not None:
 
-            log.info(f"  Path       : {running_external_process_dict[running_pid]['external_script_path']}")
-            log.info(f"  Parent     : {running_external_process_dict[running_pid]['parent_pid']}")
-            start_time = running_external_process_dict[running_pid]['start_time'].strftime("%H:%M:%S")
-            run_duration = datetime.datetime.now() - running_external_process_dict[running_pid]['start_time']
-            log.info(f"  Started    : {start_time}")
-            log.info(f"  Duration   : {run_duration - datetime.timedelta(microseconds=run_duration.microseconds)}")
-            log.info("")
-
-        if len(stopped_external_process_dict):
-            if len(stopped_external_process_dict) == 1:
-                log.info(f"{len(stopped_external_process_dict)} external script stopped since the last check")
+        while len(running_external_process_dict):
+            running_external_process_dict, stopped_external_process_dict = checkExternalProcesses(running_external_process_dict)
+            if len(running_external_process_dict) == 1:
+                log.info(f"{len(running_external_process_dict)} external script is still running")
             else:
-                log.info(f"{len(stopped_external_process_dict)} external scripts stopped since the last check")
+                log.info(f"{len(running_external_process_dict)} external scripts are still running")
+            for running_pid in running_external_process_dict:
+
+                log.info(f"  Path       : {running_external_process_dict[running_pid]['external_script_path']}")
+                log.info(f"  Parent     : {running_external_process_dict[running_pid]['parent_pid']}")
+                start_time = running_external_process_dict[running_pid]['start_time'].strftime("%H:%M:%S")
+                run_duration = datetime.datetime.now() - running_external_process_dict[running_pid]['start_time']
+                log.info(f"  Started    : {start_time}")
+                log.info(f"  Duration   : {run_duration - datetime.timedelta(microseconds=run_duration.microseconds)}")
+                log.info("")
+
+            if len(stopped_external_process_dict):
+                if len(stopped_external_process_dict) == 1:
+                    log.info(f"{len(stopped_external_process_dict)} external script stopped since the last check")
+                else:
+                    log.info(f"{len(stopped_external_process_dict)} external scripts stopped since the last check")
 
 
-        for stopped_pid in stopped_external_process_dict:
-            log.info(f"  Path       : {stopped_external_process_dict[stopped_pid]['external_script_path']}")
-            log.info(f"  Parent     : {stopped_external_process_dict[stopped_pid]['parent_pid']}")
-            start_time = stopped_external_process_dict[stopped_pid]['start_time'].strftime("%H:%M:%S")
-            log.info(f"  Started    : {start_time}")
-            log.info("")
+            for stopped_pid in stopped_external_process_dict:
+                log.info(f"  Path       : {stopped_external_process_dict[stopped_pid]['external_script_path']}")
+                log.info(f"  Parent     : {stopped_external_process_dict[stopped_pid]['parent_pid']}")
+                start_time = stopped_external_process_dict[stopped_pid]['start_time'].strftime("%H:%M:%S")
+                log.info(f"  Started    : {start_time}")
+                log.info("")
 
-        # Before sleep, check if all the external running processes have completed; so we do not wait without reason
-        if not len(running_external_process_dict):
-            break
-        time.sleep(30)
+            # Before sleep, check if all the external running processes have completed; so we do not wait without reason
+            if not len(running_external_process_dict):
+                break
+            time.sleep(30)
