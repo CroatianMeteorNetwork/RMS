@@ -257,6 +257,6 @@ if __name__ == "__main__":
                 log.info("")
 
             # Before sleep, check if all the external running processes have completed; so we do not wait without reason
-            if not len(running_external_process_dict):
+            if not runningExternalScripts(running_external_process_dict):
                 break
             time.sleep(30)
