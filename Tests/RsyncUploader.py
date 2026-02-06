@@ -1,5 +1,5 @@
-# Skeleton external script for adaption
-# Copyright (C) 2025 David Rollinson, Kristen Felker
+# rsync based uploader
+# Copyright (C) 2026 David Rollinson
 #
 #
 # This program is free software: you can redistribute it and/or modify
@@ -81,21 +81,10 @@ def rmsExternal(captured_night_dir, archived_night_dir, config):
         archived_night_dir: [path] to the archived night directory folder
         config: [config] RMS config instance
 
-    This function logs a few entries to the log file, applies and removes the reboot lock
+    Upload files in priority order to a remote server using rsync
 
     """
-    captured_night_dir = os.path.expanduser(captured_night_dir)
-    archived_night_dir = os.path.expanduser(archived_night_dir)
-
-    log.info(f"Starting External Script at {datetime.datetime.now(datetime.timezone.utc)}")
     createLock(config, log)
-    log.warning(f"RMS External Script applied the reboot lock at {datetime.datetime.now(datetime.timezone.utc)}")
-    log.info(f"The reboot lock file is at {config.reboot_lock_file}")
-    log.info("The parameters passed to this script were :")
-    log.info(f"                                             Captured Night Dir    {captured_night_dir}")
-    log.info(f"                                             Archived Night Dir    {archived_night_dir}")
-
-
 
     station_id = config.stationID
     station_id_lower = station_id.lower()
@@ -124,22 +113,15 @@ def rmsExternal(captured_night_dir, archived_night_dir, config):
         log.info(f"Sending {local_path_modified}")
         # build rsync command
         command_string = f"rsync --progress -av -e 'ssh -i {key_path}'  {local_path_modified} {user_host}{remote_path}"
-        print(command_string)
-
         subprocess.run(command_string, shell=True)
 
     # Now send the frame_dir
 
     local_path = os.path.join(config.data_dir, config.frame_dir, "*.tar")
     command_string = f"rsync --progress -av -e 'ssh -i {key_path}' {local_path} {user_host}{remote_path}"
-    print(command_string)
     subprocess.run(command_string, shell=True)
-
-    log.info(f"All the work is done, remove the lock")
     removeLock(config, log)
 
-    log.info(f"External Script removed the reboot lock at {datetime.datetime.now(datetime.timezone.utc)}")
-    log.info("External Script terminating")
 
 if __name__ == '__main__':
     # test launch

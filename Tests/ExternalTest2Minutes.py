@@ -74,11 +74,11 @@ def rmsExternal(captured_night_dir, archived_night_dir, config):
     """ Function for launch from main RMS process
 
     Arguments:
-        captured_night_dir: [path] to the captured night directory folder
-        archived_night_dir: [path] to the archived night directory folder
-        config: [config] RMS config instance
+        captured_night_dir: [path] to the captured night directory folder.
+        archived_night_dir: [path] to the archived night directory folder.
+        config: [config] RMS config instance.
 
-    This function logs a few entries to the log file, applies and removes the reboot lock
+    This function implements a delay.
 
     """
     captured_night_dir = os.path.expanduser(captured_night_dir)
