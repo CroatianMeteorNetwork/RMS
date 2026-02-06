@@ -25,9 +25,10 @@
 import os
 from RMS.Logger import getLogger
 import datetime
+import Utils.TrackStack
 
 import RMS.ConfigReader as cr
-
+from Utils.TrackStack import trackStack
 
 LOG_FILE_PREFIX = "EXTERNAL"
 
@@ -72,24 +73,7 @@ def removeLock(config, log):
         log.warning("No reboot lock file found at {}".format(lockfile))
 
 
-def countFiles(p1, p2):
-    """ Count the number of files in the directories at two paths p1, and p2
 
-    Arguments:
-        p1: Path to directory 1
-        p2: Path to directory 2
-
-    Return:
-        c1: Count of files in directory 1
-        c2: Count of files in directory 2
-    """
-
-    log.info("Counting files")
-
-    c1 = sum(1 for p in os.listdir(p1) if os.path.isfile(os.path.join(p1, p)))
-    c2 = sum(1 for p in os.listdir(p2) if os.path.isfile(os.path.join(p2, p)))
-
-    return c1, c2
 
 def rmsExternal(captured_night_dir, archived_night_dir, config):
     """ Function for launch from main RMS process
@@ -113,10 +97,26 @@ def rmsExternal(captured_night_dir, archived_night_dir, config):
     log.info(f"                                             Captured Night Dir    {captured_night_dir}")
     log.info(f"                                             Archived Night Dir    {archived_night_dir}")
 
-    captured_directory_count, archived_directory_count = countFiles(captured_night_dir, archived_night_dir)
+    # Assume the standard multi-cam file structure is in use
 
-    log.info(f"There were {captured_directory_count} files in the captured directory")
-    log.info(f"There were {archived_directory_count} files in the archived directory")
+    stations_dir = os.path.dirname(config.data_dir)
+    stations_list = os.listdir(stations_dir)
+
+    # Get newest CapturedFiles Directory
+
+    captured_files_directory_list = []
+    latest_directory_full_path_list = []
+    for station in stations_list:
+        test_path = os.path.join(stations_dir, station)
+        if os.path.isdir(test_path) and len(os.listdir(test_path)):
+            captured_files_directory_list.append(test_path)
+            latest_directory = sorted(os.listdir(os.path.expanduser(os.path.join(test_path, config.captured_dir))), reverse=True)
+            latest_directory_full_path_list.append(os.path.join(os.path.join(stations_dir, station, config.captured_dir, latest_directory[0])))
+
+    print(latest_directory_full_path_list)
+
+    log.info(f"Launching trackStack on {latest_directory_full_path_list}")
+    trackStack(latest_directory_full_path_list, config)
 
     log.info(f"All the work is done, remove the lock")
     removeLock(config, log)
@@ -130,10 +130,6 @@ if __name__ == '__main__':
 
     # Find the latest CapturedFiles and ArchivedFiles directory
     captured_dirs = sorted(os.listdir(os.path.expanduser(os.path.join(config.data_dir, config.captured_dir))), reverse=True)
-    archived_dirs = sorted(os.listdir(os.path.expanduser(os.path.join(config.data_dir, config.archived_dir))), reverse=True)
 
-    if captured_dirs and archived_dirs:
-        latest_captured_dir = os.path.join(config.data_dir, config.captured_dir, captured_dirs[0])
-        latest_archived_dir = os.path.join(config.data_dir, config.archived_dir, archived_dirs[0])
+    rmsExternal(captured_dirs[0], captured_dirs[0], config)
 
-        rmsExternal(latest_captured_dir, latest_archived_dir, config)

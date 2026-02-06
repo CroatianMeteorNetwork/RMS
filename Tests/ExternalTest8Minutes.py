@@ -1,5 +1,5 @@
-# Skeleton external script for adaption
-# Copyright (C) 2025 David Rollinson, Kristen Felker
+# External test script, implements a 20 seconc delay only
+# Copyright (C) 2026 David Rollinson, Kristen Felker
 #
 #
 # This program is free software: you can redistribute it and/or modify
@@ -25,7 +25,7 @@
 import os
 from RMS.Logger import getLogger
 import datetime
-
+import time
 import RMS.ConfigReader as cr
 
 
@@ -33,6 +33,7 @@ LOG_FILE_PREFIX = "EXTERNAL"
 
 log = getLogger("rmslogger", stdout=False)
 
+SLEEP_TIME = 8 * 60
 
 def createLock(config, log):
     """ If no file config.reboot_lock_file exists in config.data_dir, create one
@@ -68,28 +69,6 @@ def removeLock(config, log):
     lockfile = os.path.join(os.path.expanduser(config.data_dir), config.reboot_lock_file)
     if os.path.exists(lockfile):
         os.remove(lockfile)
-    else:
-        log.warning("No reboot lock file found at {}".format(lockfile))
-
-
-def countFiles(p1, p2):
-    """ Count the number of files in the directories at two paths p1, and p2
-
-    Arguments:
-        p1: Path to directory 1
-        p2: Path to directory 2
-
-    Return:
-        c1: Count of files in directory 1
-        c2: Count of files in directory 2
-    """
-
-    log.info("Counting files")
-
-    c1 = sum(1 for p in os.listdir(p1) if os.path.isfile(os.path.join(p1, p)))
-    c2 = sum(1 for p in os.listdir(p2) if os.path.isfile(os.path.join(p2, p)))
-
-    return c1, c2
 
 def rmsExternal(captured_night_dir, archived_night_dir, config):
     """ Function for launch from main RMS process
@@ -113,12 +92,10 @@ def rmsExternal(captured_night_dir, archived_night_dir, config):
     log.info(f"                                             Captured Night Dir    {captured_night_dir}")
     log.info(f"                                             Archived Night Dir    {archived_night_dir}")
 
-    captured_directory_count, archived_directory_count = countFiles(captured_night_dir, archived_night_dir)
+    log.info(f"Sleeping for {SLEEP_TIME} seconds")
+    time.sleep(SLEEP_TIME)
+    log.info(f"Sleep of {SLEEP_TIME} completed")
 
-    log.info(f"There were {captured_directory_count} files in the captured directory")
-    log.info(f"There were {archived_directory_count} files in the archived directory")
-
-    log.info(f"All the work is done, remove the lock")
     removeLock(config, log)
 
     log.info(f"External Script removed the reboot lock at {datetime.datetime.now(datetime.timezone.utc)}")

@@ -23,6 +23,7 @@
 
 
 import os
+import subprocess
 from RMS.Logger import getLogger
 import datetime
 
@@ -113,10 +114,45 @@ def rmsExternal(captured_night_dir, archived_night_dir, config):
     log.info(f"                                             Captured Night Dir    {captured_night_dir}")
     log.info(f"                                             Archived Night Dir    {archived_night_dir}")
 
-    captured_directory_count, archived_directory_count = countFiles(captured_night_dir, archived_night_dir)
 
-    log.info(f"There were {captured_directory_count} files in the captured directory")
-    log.info(f"There were {archived_directory_count} files in the archived directory")
+
+    station_id = config.stationID
+    station_id_lower = station_id.lower()
+    key_path = os.path.expanduser(config.rsa_private_key)
+
+    remote_path = os.path.join("/", "home",station_id_lower,"files","incoming")
+    local_path = os.path.join(config.data_dir, config.archived_dir)
+    with open(os.path.expanduser(os.path.join(config.data_dir, "rsync_remote_host.txt"))) as f:
+        rsync_remote_host = f.readline()
+        user_host = f"{station_id_lower}@{rsync_remote_host}:".replace("\n","")
+
+    log.info(f"Using key from {key_path}")
+    log.info(f"To copy files from {local_path} to {user_host}{remote_path}")
+
+    local_path_modifier_list = ["*_metadata.tar.bz2",
+                                "*_detected.tar.bz2",
+                                "*_imgdata.tar.bz2",
+                                "*.tar.bz2"]
+
+
+    for local_path_modifier in local_path_modifier_list:
+
+
+        # modify the local path to send files in the right order
+        local_path_modified = os.path.join(local_path, local_path_modifier)
+        log.info(f"Sending {local_path_modified}")
+        # build rsync command
+        command_string = f"rsync --progress -av -e 'ssh -i {key_path}'  {local_path_modified} {user_host}{remote_path}"
+        print(command_string)
+
+        subprocess.run(command_string, shell=True)
+
+    # Now send the frame_dir
+
+    local_path = os.path.join(config.data_dir, config.frame_dir, "*.tar")
+    command_string = f"rsync --progress -av -e 'ssh -i {key_path}' {local_path} {user_host}{remote_path}"
+    print(command_string)
+    subprocess.run(command_string, shell=True)
 
     log.info(f"All the work is done, remove the lock")
     removeLock(config, log)
@@ -130,10 +166,5 @@ if __name__ == '__main__':
 
     # Find the latest CapturedFiles and ArchivedFiles directory
     captured_dirs = sorted(os.listdir(os.path.expanduser(os.path.join(config.data_dir, config.captured_dir))), reverse=True)
-    archived_dirs = sorted(os.listdir(os.path.expanduser(os.path.join(config.data_dir, config.archived_dir))), reverse=True)
 
-    if captured_dirs and archived_dirs:
-        latest_captured_dir = os.path.join(config.data_dir, config.captured_dir, captured_dirs[0])
-        latest_archived_dir = os.path.join(config.data_dir, config.archived_dir, archived_dirs[0])
-
-        rmsExternal(latest_captured_dir, latest_archived_dir, config)
+    rmsExternal(captured_dirs[0], captured_dirs[0], config)
