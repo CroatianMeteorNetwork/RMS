@@ -73,25 +73,6 @@ def removeLock(config, log):
         log.warning("No reboot lock file found at {}".format(lockfile))
 
 
-def countFiles(p1, p2):
-    """ Count the number of files in the directories at two paths p1, and p2
-
-    Arguments:
-        p1: Path to directory 1
-        p2: Path to directory 2
-
-    Return:
-        c1: Count of files in directory 1
-        c2: Count of files in directory 2
-    """
-
-    log.info("Counting files")
-
-    c1 = sum(1 for p in os.listdir(p1) if os.path.isfile(os.path.join(p1, p)))
-    c2 = sum(1 for p in os.listdir(p2) if os.path.isfile(os.path.join(p2, p)))
-
-    return c1, c2
-
 def rmsExternal(captured_night_dir, archived_night_dir, config):
     """ Function for launch from main RMS process
 
