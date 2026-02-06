@@ -84,7 +84,7 @@ def runExternalScript(captured_night_dir, archived_night_dir, config):
         if not os.path.isfile(external_script_path):
             log.error('The script {:s} does not exist!'.format(external_script_path))
             continue
-        time.sleep(1)
+
 
         try:
 
