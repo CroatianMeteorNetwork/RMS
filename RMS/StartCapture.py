@@ -49,7 +49,7 @@ from RMS.Formats.FFfile import validFFName
 from RMS.Misc import mkdirP, RmsDateTime, UTCFromTimestamp
 from RMS.QueuedPool import QueuedPool
 from RMS.Reprocess import getPlatepar, processNight, processFramesFiles
-from RMS.RunExternalScript import runExternalScript
+from RMS.RunExternalScript import runExternalScript, checkExternalProcesses
 from RMS.UploadManager import UploadManager
 from RMS.EventMonitor import EventMonitor
 from RMS.DownloadMask import downloadNewMask
@@ -869,7 +869,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
             # Run the external script
-            runExternalScript(night_data_dir, night_archive_dir, config)
+            process_dict = runExternalScript(night_data_dir, night_archive_dir, config)
 
 
         # If capture is terminated manually, or the disk is full, exit program
@@ -990,7 +990,7 @@ def processIncompleteCaptures(config, upload_manager):
 
             # Run the external script if running after autoreprocess is enabled
             if config.external_script_run and config.auto_reprocess_external_script_run:
-                runExternalScript(captured_dir_path, night_archive_dir, config)
+                process_dict = runExternalScript(captured_dir_path, night_archive_dir, config)
 
             log.info("Folder {:s} reprocessed with success!".format(captured_dir_path))
 
@@ -1195,6 +1195,8 @@ if __name__ == "__main__":
     # Automatic running and stopping the capture at sunrise and sunset
     ran_once = False
     slideshow_view = None
+    running_external_process_dict = None
+
     while True:
 
         if config.continuous_capture:
@@ -1236,6 +1238,10 @@ if __name__ == "__main__":
                     log.info("Reboot delayed for 1 minute because the lock file exists: {:s}".format(reboot_lock_file_path))
                     reboot_go = False
 
+                # Check to see if any external scripts are still running
+                if checkExternalProcesses(running_external_process_dict):
+                    log.info("Reboot delayed for 1 minute because external scripts are still running.")
+                    reboot_go = False
 
                 # Reboot the computer
                 if reboot_go:
