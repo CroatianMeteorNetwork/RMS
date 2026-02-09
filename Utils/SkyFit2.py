@@ -2429,6 +2429,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.sigFindBestFramePressed.connect(self.findBestFrame)
         self.tab.param_manager.sigNextStarPressed.connect(self.jumpNextStar)
         self.tab.param_manager.sigPhotometryPressed.connect(lambda: self.photometry(show_plot=True))
+        self.tab.param_manager.sigFitBandRatioPressed.connect(self.fitBandRatio)
         self.tab.param_manager.sigAstrometryPressed.connect(self.showAstrometryFitPlots)
         self.tab.param_manager.sigResetDistortionPressed.connect(self.resetDistortion)
 
@@ -5975,6 +5976,311 @@ class PlateTool(QtWidgets.QMainWindow):
 
             fig_p.tight_layout()
             fig_p.show()
+
+
+    def fitBandRatio(self):
+        """Fit the optimal BP:RP band ratio that minimizes the photometric residuals.
+
+        Sweeps alpha in [0, 1] where BP_ratio = alpha, RP_ratio = 1 - alpha,
+        runs photometryFit for each, and reports the ratio with the lowest stddev.
+        The result is printed as a config-ready string the user can copy.
+        """
+
+        # Check that we have individual BP/RP magnitudes
+        if self.catalog_stars_bp is None or self.catalog_stars_rp is None:
+            print("BP:RP fitting requires the GMN Star Catalog with BP/RP columns.")
+            return
+
+        # Check that we have enough paired stars
+        if len(self.paired_stars) < 3:
+            print("Need at least 3 paired stars for BP:RP fitting.")
+            return
+
+        # Highly variable star types to exclude (same as photometry())
+        EXCLUDE_FROM_PHOTOMETRY = {
+            'Mira', 'Mira_Candidate', 'RCrBV*', 'RCrBV*_Candidate',
+            'CataclyV*', 'CataclyV*_Candidate', 'Nova', 'Nova_Candidate',
+            'IrregularV*',
+        }
+
+        # Collect paired star data - same as photometry() but look up individual BP/RP
+        radius_list = []
+        px_intens_list = []
+        catalog_ra = []
+        catalog_dec = []
+        bp_mags = []
+        rp_mags = []
+        snr_list = []
+        saturation_list = []
+        variable_star_list = []
+
+        for paired_star in self.paired_stars.allCoords():
+
+            img_star, catalog_star = paired_star
+            star_x, star_y, fwhm, px_intens, snr, saturated = img_star
+            star_ra, star_dec, star_mag = catalog_star
+
+            # Skip invalid intensities
+            lsp = np.log10(px_intens)
+            if np.isnan(lsp) or np.isinf(lsp):
+                continue
+
+            # Look up the closest catalog star to get individual BP/RP
+            ra_diff = np.abs(self.catalog_stars[:, 0] - star_ra)
+            dec_diff = np.abs(self.catalog_stars[:, 1] - star_dec)
+            dist = np.sqrt(ra_diff**2 + dec_diff**2)
+            closest_idx = np.argmin(dist)
+
+            if dist[closest_idx] > 0.01:  # Within ~36 arcsec
+                continue
+
+            bp_val = self.catalog_stars_bp[closest_idx]
+            rp_val = self.catalog_stars_rp[closest_idx]
+
+            # Skip stars with missing BP or RP (NaN or zero sentinel)
+            if np.isnan(bp_val) or np.isnan(rp_val) or bp_val == 0 or rp_val == 0:
+                continue
+
+            # Skip stars with unreliable Gaia BP/RP photometry.
+            # For very bright stars (G < ~3), Gaia detectors saturate and BP/RP
+            # values can be wildly wrong (e.g. BP = -2.87 for a G = 0.57 star).
+            # Filter on BP-RP color: physical range is about [-0.5, 5.0].
+            bp_rp = bp_val - rp_val
+            if bp_rp < -0.5 or bp_rp > 5.0:
+                continue
+
+            radius_list.append(np.hypot(star_x - self.platepar.X_res/2,
+                                        star_y - self.platepar.Y_res/2))
+            px_intens_list.append(px_intens)
+            catalog_ra.append(star_ra)
+            catalog_dec.append(star_dec)
+            bp_mags.append(bp_val)
+            rp_mags.append(rp_val)
+            snr_list.append(snr)
+            saturation_list.append(saturated)
+
+            # Check variable star exclusion
+            is_variable = False
+            if hasattr(self, 'catalog_stars_simbad_otypes') and self.catalog_stars_simbad_otypes is not None:
+                otype = self.catalog_stars_simbad_otypes[closest_idx].strip()
+                if otype in EXCLUDE_FROM_PHOTOMETRY:
+                    is_variable = True
+            variable_star_list.append(is_variable)
+
+        if len(px_intens_list) < 3:
+            print("Not enough paired stars with valid BP/RP for fitting ({:d} found).".format(
+                len(px_intens_list)))
+            return
+
+        bp_mags = np.array(bp_mags)
+        rp_mags = np.array(rp_mags)
+
+        # Determine fixed vignetting (same logic as photometry())
+        fixed_vignetting = None
+        if self.flat_struct is not None:
+            fixed_vignetting = 0.0
+        elif self.platepar.vignetting_fixed:
+            fixed_vignetting = self.platepar.vignetting_coeff
+
+        weights = np.clip(snr_list, 0, 10) / 10.0
+        exclude_list = [sat or var for sat, var in zip(saturation_list, variable_star_list)]
+
+        jd = date2JD(*self.img_handle.currentTime())
+
+        # Sweep alpha from 0 (pure RP) to 1 (pure BP)
+        alphas = np.linspace(0, 1, 101)
+        stddevs = np.full_like(alphas, np.inf)
+
+        for i, alpha in enumerate(alphas):
+            # Compute synthetic magnitude by combining fluxes (not magnitudes)
+            total_flux = alpha * np.power(10, -0.4 * bp_mags) \
+                       + (1 - alpha) * np.power(10, -0.4 * rp_mags)
+            test_mags = -2.5 * np.log10(total_flux)
+
+            # Apply extinction correction
+            test_mags_ext = extinctionCorrectionTrueToApparent(
+                test_mags.tolist(), list(catalog_ra), list(catalog_dec),
+                jd, self.platepar)
+
+            try:
+                _, stddev, _ = photometryFit(
+                    px_intens_list, radius_list, test_mags_ext,
+                    fixed_vignetting=fixed_vignetting,
+                    weights=weights, exclude_list=exclude_list)
+                stddevs[i] = stddev
+            except Exception:
+                pass
+
+        # Find the best alpha
+        best_idx = np.argmin(stddevs)
+        best_alpha = alphas[best_idx]
+        best_stddev = stddevs[best_idx]
+
+        # Compute the full photometry fit with the best BP:RP ratio (flux-weighted)
+        best_flux = best_alpha * np.power(10, -0.4 * bp_mags) \
+                  + (1 - best_alpha) * np.power(10, -0.4 * rp_mags)
+        best_mags = -2.5 * np.log10(best_flux)
+        best_mags_ext = extinctionCorrectionTrueToApparent(
+            best_mags.tolist(), list(catalog_ra), list(catalog_dec), jd, self.platepar)
+        best_params, _, best_resids = photometryFit(
+            px_intens_list, radius_list, best_mags_ext,
+            fixed_vignetting=fixed_vignetting,
+            weights=weights, exclude_list=exclude_list)
+
+        # Also compute the full photometry fit with current band ratios for comparison
+        current_mags = np.array([self.catalog_stars[
+            np.argmin(np.sqrt((self.catalog_stars[:, 0] - ra)**2 +
+                              (self.catalog_stars[:, 1] - dec)**2)), 2]
+            for ra, dec in zip(catalog_ra, catalog_dec)])
+        current_mags_ext = extinctionCorrectionTrueToApparent(
+            current_mags.tolist(), list(catalog_ra), list(catalog_dec), jd, self.platepar)
+        try:
+            current_params, current_stddev, current_resids = photometryFit(
+                px_intens_list, radius_list, current_mags_ext,
+                fixed_vignetting=fixed_vignetting,
+                weights=weights, exclude_list=exclude_list)
+        except Exception:
+            current_stddev = np.inf
+            current_resids = np.zeros(len(px_intens_list))
+            current_params = (0, 0)
+
+        # Format the config string
+        config_str = "0.00,0.00,0.00,0.00,0.00,{:.2f},{:.2f}".format(
+            best_alpha, 1 - best_alpha)
+
+        # Print results
+        print()
+        print("=" * 60)
+        print("BP:RP BAND RATIO FIT")
+        print("=" * 60)
+        print("  Stars used: {:d}".format(
+            sum(1 for e in exclude_list if not e)))
+        print("  Best ratio: {:.2f} BP + {:.2f} RP".format(
+            best_alpha, 1 - best_alpha))
+        print("  Fit stddev: {:.3f} mag".format(best_stddev))
+        print("  Current:    {:.3f} mag ({:s})".format(
+            current_stddev, self.mag_band_string))
+        print()
+        print("  Config line:")
+        print("  star_catalog_band_ratios: {:s}".format(config_str))
+        print()
+
+        # Diagnostic: show stars with largest G vs BP:RP magnitude difference
+        mag_diff = np.abs(best_mags - current_mags)
+        sort_idx = np.argsort(mag_diff)[::-1]
+        n_excluded = sum(exclude_list)
+        print("  Excluded: {:d} (saturated/variable)".format(n_excluded))
+        print()
+        print("  Top 10 stars by |G - BP:RP| magnitude difference:")
+        print("  {:>6s}  {:>6s}  {:>6s}  {:>6s}  {:>7s}  {:>5s}".format(
+            "G", "BP", "RP", "BP:RP", "diff", "excl"))
+        for i in sort_idx[:10]:
+            excl_str = "  *" if exclude_list[i] else ""
+            print("  {:6.2f}  {:6.2f}  {:6.2f}  {:6.2f}  {:+7.3f}{:s}".format(
+                current_mags[i], bp_mags[i], rp_mags[i], best_mags[i],
+                best_mags[i] - current_mags[i], excl_str))
+
+        print("=" * 60)
+        print()
+
+        ### Comparison plot ###
+        exclude_arr = np.array(exclude_list, dtype=bool)
+        px_arr = np.array(px_intens_list)
+        radius_arr = np.array(radius_list)
+        lsp_raw = np.log10(px_arr)
+
+        # Compute vignetting-corrected LSP using the best-fit vignetting from each fit
+        current_vig = current_params[1]
+        best_vig = best_params[1]
+        lsp_corr_current = np.log10(correctVignetting(px_arr, radius_arr, current_vig))
+        lsp_corr_best = np.log10(correctVignetting(px_arr, radius_arr, best_vig))
+
+        current_mags_ext_arr = np.array(current_mags_ext)
+        best_mags_ext_arr = np.array(best_mags_ext)
+
+        fig = plt.figure(figsize=(14, 5))
+        gs = gridspec.GridSpec(1, 3, width_ratios=[1, 1, 1])
+
+        # --- Left panel: stddev vs alpha curve ---
+        ax_curve = fig.add_subplot(gs[0])
+        ax_curve.plot(alphas, stddevs, 'b-', linewidth=1.5)
+        ax_curve.axvline(best_alpha, color='r', linestyle='--', alpha=0.7,
+                         label="Best: {:.2f} BP + {:.2f} RP ({:.3f})".format(
+                             best_alpha, 1 - best_alpha, best_stddev))
+        ax_curve.axhline(current_stddev, color='gray', linestyle=':', alpha=0.7,
+                         label="Current ({:s}): {:.3f}".format(self.mag_band_string, current_stddev))
+        ax_curve.scatter([best_alpha], [best_stddev], color='r', s=60, zorder=5)
+        ax_curve.set_xlabel("BP fraction (alpha)")
+        ax_curve.set_ylabel("Photometry stddev (mag)")
+        ax_curve.set_title("BP:RP Ratio Sweep")
+        ax_curve.legend(fontsize=8)
+        ax_curve.grid(True, alpha=0.3)
+
+        # Compute shared axis limits for both photometry panels
+        # X-axis: vignetting-corrected uncalibrated magnitude (same instrument data)
+        x_cur = -2.5 * lsp_corr_current
+        x_best = -2.5 * lsp_corr_best
+        x_min = min(np.min(x_cur), np.min(x_best)) - 1
+        x_max = max(np.max(x_cur), np.max(x_best)) + 1
+        # Y-axis: catalog magnitudes from both fits
+        y_min = min(np.min(current_mags_ext_arr), np.min(best_mags_ext_arr)) - 1
+        y_max = max(np.max(current_mags_ext_arr), np.max(best_mags_ext_arr)) + 1
+
+        # Fit line x range
+        x_line = np.linspace(x_min, x_max, 10)
+
+        # Helper to plot a photometry panel (matching the style of the main photometry plot)
+        def plot_photom_panel(ax, cat_mags, lsp_raw, lsp_corr, fit_params, title, ylabel):
+            incl = ~exclude_arr
+
+            # Raw points (red)
+            ax.scatter(-2.5*lsp_raw[incl], cat_mags[incl],
+                       s=5, c='r', alpha=0.5, zorder=3, label="Raw")
+
+            # Vignetting-corrected points (blue)
+            ax.scatter(-2.5*lsp_corr[incl], cat_mags[incl],
+                       s=5, c='b', alpha=0.5, zorder=3, label="Vig. corrected")
+
+            # Excluded stars
+            if np.any(exclude_arr):
+                ax.scatter(-2.5*lsp_corr[exclude_arr], cat_mags[exclude_arr],
+                           s=20, zorder=2, edgecolor='r', facecolor='none')
+
+            # Fit line (at radius=0, i.e. no vignetting)
+            photom_offset, vig_coeff = fit_params
+            fit_info = "{:+.1f}*LSP + {:.2f}".format(-2.5, photom_offset) \
+                     + "\nVig = {:.5f} rad/px".format(vig_coeff)
+            ax.plot(x_line,
+                    photomLine((10**(x_line/(-2.5)), np.zeros_like(x_line)), *fit_params),
+                    'k--', alpha=0.5, label=fit_info)
+
+            ax.legend(fontsize=7, loc='upper left')
+            ax.set_xlabel("Uncalibrated magnitude")
+            ax.set_ylabel(ylabel)
+            ax.set_title(title)
+            ax.set_xlim(x_min, x_max)
+            ax.set_ylim(y_min, y_max)
+            ax.invert_xaxis()
+            ax.invert_yaxis()
+            ax.grid(True, alpha=0.3)
+
+        # --- Center panel: current band ratios ---
+        ax_cur = fig.add_subplot(gs[1])
+        plot_photom_panel(ax_cur, current_mags_ext_arr, lsp_raw, lsp_corr_current,
+                          current_params,
+                          "Current: $\\sigma$ = {:.3f} mag".format(current_stddev),
+                          "Catalog mag ({:s})".format(self.mag_band_string))
+
+        # --- Right panel: best BP:RP ---
+        ax_best = fig.add_subplot(gs[2])
+        plot_photom_panel(ax_best, best_mags_ext_arr, lsp_raw, lsp_corr_best,
+                          best_params,
+                          "Best BP:RP: $\\sigma$ = {:.3f} mag".format(best_stddev),
+                          "Catalog mag ({:.2f} BP + {:.2f} RP)".format(best_alpha, 1 - best_alpha))
+
+        fig.suptitle("star_catalog_band_ratios: {:s}".format(config_str), fontsize=10, fontweight='bold')
+        fig.tight_layout()
+        fig.show()
 
 
     def filterPhotometricOutliers(self, sigma_threshold=2.5):
@@ -10767,7 +11073,8 @@ class PlateTool(QtWidgets.QMainWindow):
             years_from_J2000=years_from_J2000,
             lim_mag=lim_mag,
             mag_band_ratios=self.config.star_catalog_band_ratios,
-            additional_fields=['spectraltype_esphs', 'preferred_name', 'common_name', 'bayer_name', 'Simbad_OType'])
+            additional_fields=['spectraltype_esphs', 'preferred_name', 'common_name', 'bayer_name', 'Simbad_OType',
+                              'phot_bp_mean_mag', 'phot_rp_mean_mag'])
 
         if len(catalog_results) == 4:
             self.catalog_stars, self.mag_band_string, self.config.star_catalog_band_ratios, extras = catalog_results
@@ -10823,6 +11130,16 @@ class PlateTool(QtWidgets.QMainWindow):
             self.catalog_stars_simbad_otypes = np.array([x.decode('utf-8') for x in extras['Simbad_OType']])
         else:
             self.catalog_stars_simbad_otypes = None
+
+        # Extract individual BP/RP magnitudes (for band ratio fitting)
+        if 'phot_bp_mean_mag' in extras:
+            self.catalog_stars_bp = extras['phot_bp_mean_mag'].astype(np.float64)
+        else:
+            self.catalog_stars_bp = None
+        if 'phot_rp_mean_mag' in extras:
+            self.catalog_stars_rp = extras['phot_rp_mean_mag'].astype(np.float64)
+        else:
+            self.catalog_stars_rp = None
 
         # Precompute HTML strings for star labels (spectral type + name)
         # This avoids building HTML strings on every updateStars() call
