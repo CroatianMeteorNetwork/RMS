@@ -3591,9 +3591,10 @@ class SettingsWidget(QtWidgets.QWidget):
         else:
             self.gui.config.star_catalog_file = catalog_name
 
-        # Reset band ratios to None so the catalog uses its own defaults
-        # Different catalogs have different band requirements
-        self.gui.config.star_catalog_band_ratios = None
+        # Restore the config's original band ratios so the magnitude filter
+        # uses the same bands as on startup. Both GMN (.bin) and Sky2000 (.npy)
+        # catalogs handle these ratios correctly internally.
+        self.gui.config.star_catalog_band_ratios = self.gui._original_band_ratios
 
         # Reload catalog stars with new catalog
         self.gui.catalog_stars = self.gui.loadCatalogStars(self.gui.cat_lim_mag)

@@ -1454,8 +1454,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.config = config
 
-        # Store original catalog file for "Config Default" option
+        # Store original catalog file and band ratios for "Config Default" option
         self._original_catalog_file = self.config.star_catalog_file
+        self._original_band_ratios = self.config.star_catalog_band_ratios
 
         # Force the CV2 backend when SkyFit is being used
         self.config.media_backend = 'cv2'
@@ -2650,8 +2651,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.dir_path = dir_path
         self.config = cr.loadConfigFromDirectory('.', self.dir_path)
 
-        # Update original catalog file for the new station
+        # Update original catalog file and band ratios for the new station
         self._original_catalog_file = self.config.star_catalog_file
+        self._original_band_ratios = self.config.star_catalog_band_ratios
 
         self.initMaskFromFile()
         self.detectInputType()
