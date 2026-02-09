@@ -437,8 +437,26 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Initialize the detector
     detector = None
 
+    # Initialize the live_view
+    live_view = None
+
+    if config.live_maxpixel_enable and live_view is None:
+
+        # Enable showing the live JPG
+        config.live_jpg = True
+
+        live_jpg_path = os.path.join(config.data_dir, 'live.jpg')
+
+        live_view = LiveViewer(live_jpg_path, config=config, image=True, slideshow=False, banner_text="Live")
+        live_view.start()
+
+    else:
+        live_view = None
+
     # Loop to handle both continuous and standard capture modes
     while True:
+
+        # Initialize the live image viewer
 
         # Continuous mode only: Setup new directories for a new night capture
         if config.continuous_capture and (not daytime_mode.value) and ran_once:
@@ -593,14 +611,14 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
             # Initialize the live image viewer
-            if config.live_maxpixel_enable:
+            if config.live_maxpixel_enable and live_view is None:
 
                 # Enable showing the live JPG
                 config.live_jpg = True
 
                 live_jpg_path = os.path.join(config.data_dir, 'live.jpg')
 
-                live_view = LiveViewer(live_jpg_path, image=True, slideshow=False, banner_text="Live")
+                live_view = LiveViewer(live_jpg_path, config=config, image=True, slideshow=False, banner_text="Live")
                 live_view.start()
 
             else:
@@ -1357,7 +1375,7 @@ if __name__ == "__main__":
                         log.info("Starting a slideshow of {:d} detections from the previous night.".format(len(ffs_latest_night_archive)))
 
                         # Start the slide show
-                        slideshow_view = LiveViewer(latest_night_archive_dir, slideshow=True, \
+                        slideshow_view = LiveViewer(latest_night_archive_dir, config=config, slideshow=True, \
                             banner_text="Last night's detections")
                         slideshow_view.start()
 
@@ -1461,7 +1479,6 @@ if __name__ == "__main__":
 
             log.error('No more disk space can be freed up! Stopping capture...')
             break
-
 
         if config.continuous_capture:
             

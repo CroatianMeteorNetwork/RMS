@@ -185,46 +185,44 @@ class LiveViewer(multiprocessing.Process):
             # Uncomment for testing, makes image changes easier to spot
             # dt_now = dt_now - datetime.timedelta(hours = 12, minutes = random.randint(0,60))
             dt_midnight = dt_now.replace(hour=0, minute=0, second=0, microsecond=0)
-            seconds_since_midnight = (dt_now - dt_midnight).total_seconds()
+            seconds_since_midnight = (dt_now - dt_midnight).total_seconds() - 120
             seconds_at_time_interval = seconds_since_midnight - (
-                                            seconds_since_midnight % frame_interval) - (
-                                                frame_interval * delay_count)
+                                            seconds_since_midnight % frame_interval)
             _dt = dt_midnight + datetime.timedelta(seconds=seconds_at_time_interval)
-            print(f"Time of last frames file {_dt.isoformat()}")
-
             frame_dir_root = os.path.join(self.config.data_dir, self.config.frame_dir)
             l1_dir = str(_dt.year)
             l2_dir = str(_dt.strftime("%Y%m%d-%j"))
             l3_dir = str(_dt.strftime("%Y%m%d-%j_%H"))
-            f_nm = f"{self.config.stationID}_{_dt.strftime('%Y%m%d_%H%M%S')}*.{self.config.frame_file_type}"
-            target_wildcard = os.path.join(frame_dir_root, l1_dir, l2_dir, l3_dir, f_nm)
-            latest_file_list = glob.glob(target_wildcard)
+            target_dir = os.path.join(frame_dir_root, l1_dir, l2_dir, l3_dir)
+            latest_file_list = sorted(os.listdir(target_dir))
+            time_deviation_list = []
+            for file_name in latest_file_list:
+                file_date, file_time = file_name.split("_")[1], file_name.split("_")[2]
+                file_time_object = datetime.datetime.strptime(f"{file_date}_{file_time}","%Y%m%d_%H%M%S").replace(tzinfo=datetime.timezone.utc)
+                time_deviation_list.append(abs((file_time_object - _dt).total_seconds()))
+            min_deviation = min(time_deviation_list)
+            min_deviation_index = time_deviation_list.index(min_deviation)
+            file_to_show = os.path.join(target_dir, latest_file_list[min_deviation_index])
 
-            while not len(latest_file_list):
-                time.sleep(frame_interval)
-                latest_file_list = glob.glob(target_wildcard)
-                print("Increasing delay count")
-                delay_count += 1
-            latest_file = latest_file_list[0]
-            self.banner_text = latest_file
-            if os.path.exists(latest_file):
-                if os.path.isfile(latest_file):
+            self.banner_text = file_to_show
+            if os.path.exists(file_to_show):
+                if os.path.isfile(file_to_show):
                     # Check file is not still being written
                     _size = None
-                    size = os.path.getsize(latest_file)
+                    size = os.path.getsize(file_to_show)
                     while _size != size:
                         _size = size
                         time.sleep(1)
-                        size = os.path.getsize(latest_file)
+                        size = os.path.getsize(file_to_show)
                     if previous_file is None:
-                        if latest_file != previous_file:
-                            img = np.array(Image.open(latest_file))
+                        if file_to_show != previous_file:
+                            img = np.array(Image.open(file_to_show))
                             self.updateImage(img, self.banner_text, self.slideshow_pause)
-                    elif previous_file != latest_file:
-                        img = np.array(Image.open(latest_file))
+                    elif previous_file != file_to_show:
+                        img = np.array(Image.open(file_to_show))
                         self.updateImage(img, self.banner_text, self.slideshow_pause)
-                    previous_file = latest_file
-
+                    previous_file = file_to_show
+            time.sleep(frame_interval / 2)
     def monitorDir(self):
         """ Monitor the given directory and show new FF files on the screen. """
 
