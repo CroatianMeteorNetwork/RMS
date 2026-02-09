@@ -181,14 +181,17 @@ class LiveViewer(multiprocessing.Process):
         previous_file = None
         while not self.exit.is_set():
             dt_now = datetime.datetime.now(tz=datetime.timezone.utc)
-            # Uncomment for testing, makes time changes easier to spot
+            # Uncomment for testing, makes image changes easier to spot
             # dt_now = dt_now - datetime.timedelta(hours = 12, minutes = random.randint(0,60))
             dt_midnight = dt_now.replace(hour=0, minute=0, second=0, microsecond=0)
             seconds_since_midnight = (dt_now - dt_midnight).total_seconds()
             seconds_at_time_interval = seconds_since_midnight - (seconds_since_midnight % frame_interval)
             _dt = dt_midnight + datetime.timedelta(seconds=seconds_at_time_interval)
             print(f"Time of last frames file {_dt.isoformat()}")
-            time.sleep(frame_interval / 5)
+
+            # Calculate the time to sleep so that it is at least 2 seconds since the last frame time
+            sleep_time = min(0,dt_now - (_dt + 2))
+            time.sleep(sleep_time)
             frame_dir_root = os.path.join(self.config.data_dir, self.config.frame_dir)
             l1_dir = str(_dt.year)
             l2_dir = str(_dt.strftime("%Y%m%d-%j"))
