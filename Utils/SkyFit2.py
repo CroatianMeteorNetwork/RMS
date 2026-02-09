@@ -1454,7 +1454,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.config = config
 
-        # Store original catalog file and band ratios for "Config Default" option
+        # Store original catalog file and band ratios for "Config Default" option.
+        # When the user switches catalogs via the dropdown, onCatalogChanged()
+        # restores these so the magnitude filter uses the same bands as on startup
+        # (rather than falling back to V-band only).
         self._original_catalog_file = self.config.star_catalog_file
         self._original_band_ratios = self.config.star_catalog_band_ratios
 
