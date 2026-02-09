@@ -179,30 +179,33 @@ class LiveViewer(multiprocessing.Process):
         frame_interval = self.config.frame_save_aligned_interval
 
         previous_file = None
+        delay_count = 3
         while not self.exit.is_set():
             dt_now = datetime.datetime.now(tz=datetime.timezone.utc)
             # Uncomment for testing, makes image changes easier to spot
             # dt_now = dt_now - datetime.timedelta(hours = 12, minutes = random.randint(0,60))
             dt_midnight = dt_now.replace(hour=0, minute=0, second=0, microsecond=0)
             seconds_since_midnight = (dt_now - dt_midnight).total_seconds()
-            seconds_at_time_interval = seconds_since_midnight - (seconds_since_midnight % frame_interval)
+            seconds_at_time_interval = seconds_since_midnight - (
+                                            seconds_since_midnight % frame_interval) - (
+                                                frame_interval * delay_count)
             _dt = dt_midnight + datetime.timedelta(seconds=seconds_at_time_interval)
             print(f"Time of last frames file {_dt.isoformat()}")
 
-            # Calculate the time to sleep so that it is at least 2 seconds since the last frame time
-            sleep_time = min(0,dt_now - (_dt + 2))
-            time.sleep(sleep_time)
             frame_dir_root = os.path.join(self.config.data_dir, self.config.frame_dir)
             l1_dir = str(_dt.year)
             l2_dir = str(_dt.strftime("%Y%m%d-%j"))
             l3_dir = str(_dt.strftime("%Y%m%d-%j_%H"))
             f_nm = f"{self.config.stationID}_{_dt.strftime('%Y%m%d_%H%M%S')}*.{self.config.frame_file_type}"
+            target_wildcard = os.path.join(frame_dir_root, l1_dir, l2_dir, l3_dir, f_nm)
+            latest_file_list = glob.glob(target_wildcard)
 
-            latest_file_list = glob.glob(os.path.join(frame_dir_root, l1_dir, l2_dir, l3_dir, f_nm))
-            if not len(latest_file_list):
-                continue
-            else:
-                latest_file = latest_file_list[-1]
+            while not len(latest_file_list):
+                time.sleep(frame_interval)
+                latest_file_list = glob.glob(target_wildcard)
+                print("Increasing delay count")
+                delay_count += 1
+            latest_file = latest_file_list[0]
             self.banner_text = latest_file
             if os.path.exists(latest_file):
                 if os.path.isfile(latest_file):
@@ -215,11 +218,9 @@ class LiveViewer(multiprocessing.Process):
                         size = os.path.getsize(latest_file)
                     if previous_file is None:
                         if latest_file != previous_file:
-                            print(f"Converting {latest_file}")
                             img = np.array(Image.open(latest_file))
                             self.updateImage(img, self.banner_text, self.slideshow_pause)
                     elif previous_file != latest_file:
-                        print(f"Converting {latest_file}")
                         img = np.array(Image.open(latest_file))
                         self.updateImage(img, self.banner_text, self.slideshow_pause)
                     previous_file = latest_file
