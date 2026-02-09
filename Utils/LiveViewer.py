@@ -204,7 +204,7 @@ class LiveViewer(multiprocessing.Process):
             min_deviation_index = time_deviation_list.index(min_deviation)
             file_to_show = os.path.join(target_dir, latest_file_list[min_deviation_index])
 
-            self.banner_text = file_to_show
+
             if os.path.exists(file_to_show):
                 if os.path.isfile(file_to_show):
                     # Check file is not still being written
@@ -217,10 +217,10 @@ class LiveViewer(multiprocessing.Process):
                     if previous_file is None:
                         if file_to_show != previous_file:
                             img = np.array(Image.open(file_to_show))
-                            self.updateImage(img, self.banner_text, self.slideshow_pause)
+                            self.updateImage(img, file_to_show, self.slideshow_pause, self.banner_text)
                     elif previous_file != file_to_show:
                         img = np.array(Image.open(file_to_show))
-                        self.updateImage(img, self.banner_text, self.slideshow_pause)
+                        self.updateImage(img, file_to_show, self.slideshow_pause, self.banner_text)
                     previous_file = file_to_show
             time.sleep(frame_interval / 2)
     def monitorDir(self):
