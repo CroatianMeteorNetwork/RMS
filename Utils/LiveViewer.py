@@ -11,6 +11,7 @@ import platform
 import multiprocessing
 
 import cv2
+import dateutil
 import numpy as np
 from PIL import Image
 from PIL import ImageFont
@@ -25,6 +26,10 @@ from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName
 from RMS.Routines.Image import loadImage
 
+import datetime
+import RMS.ConfigReader as cr
+import glob
+import random
 
 # Load the default font
 PIL_FONT = ImageFont.load_default()
@@ -58,7 +63,7 @@ def drawText(img_arr, img_text):
 
 
 class LiveViewer(multiprocessing.Process):
-    def __init__(self, dir_path, image=False, slideshow=False, slideshow_pause=2.0, banner_text="", \
+    def __init__(self, dir_path, config=None, image=False, slideshow=False, slideshow_pause=2.0, banner_text="", \
         update_interval=5.0):
         """ Monitors a given directory for FF files, and shows them on the screen as new ones get created. It can
             also do slideshows. 
@@ -68,6 +73,7 @@ class LiveViewer(multiprocessing.Process):
             
         Keyword arguments:
             image: [bool] Monitor a single image file and show on the screen as it updates.
+            config: [config] If this is passed, and continuous_capture is True, monitor and display frames files
             slideshow: [bool] Start a slide show instead of monitoring the folder for new files.
             slideshow_pause: [float] Number of seconds between slideshow updated. 2 by default.
             banner_text: [str] Banner text that will be shown on the screen.
@@ -87,7 +93,7 @@ class LiveViewer(multiprocessing.Process):
         self.exit = multiprocessing.Event()
 
         self.first_image = True
-
+        self.config = config
 
 
     def updateImage(self, img, text, pause_time, banner_text=""):
@@ -165,7 +171,55 @@ class LiveViewer(multiprocessing.Process):
 
                 first_run = False
 
+    def monitorFramesDir(self):
+        """ Monitor the given directory and show latest jpg files on the screen. """
 
+        # Create the time point of the most recent expected frames file
+
+        frame_interval = self.config.frame_save_aligned_interval
+
+        previous_file = None
+        while not self.exit.is_set():
+            dt_now = datetime.datetime.now(tz=datetime.timezone.utc)
+            # Uncomment for testing, makes time changes easier to spot
+            # dt_now = dt_now - datetime.timedelta(hours = 12, minutes = random.randint(0,60))
+            dt_midnight = dt_now.replace(hour=0, minute=0, second=0, microsecond=0)
+            seconds_since_midnight = (dt_now - dt_midnight).total_seconds()
+            seconds_at_time_interval = seconds_since_midnight - (seconds_since_midnight % frame_interval)
+            _dt = dt_midnight + datetime.timedelta(seconds=seconds_at_time_interval)
+            print(f"Time of last frames file {_dt.isoformat()}")
+            time.sleep(frame_interval / 5)
+            frame_dir_root = os.path.join(self.config.data_dir, self.config.frame_dir)
+            l1_dir = str(_dt.year)
+            l2_dir = str(_dt.strftime("%Y%m%d-%j"))
+            l3_dir = str(_dt.strftime("%Y%m%d-%j_%H"))
+            f_nm = f"{self.config.stationID}_{_dt.strftime('%Y%m%d_%H%M%S')}*.{self.config.frame_file_type}"
+
+            latest_file_list = glob.glob(os.path.join(frame_dir_root, l1_dir, l2_dir, l3_dir, f_nm))
+            if not len(latest_file_list):
+                continue
+            else:
+                latest_file = latest_file_list[-1]
+            self.banner_text = latest_file
+            if os.path.exists(latest_file):
+                if os.path.isfile(latest_file):
+                    # Check file is not still being written
+                    _size = None
+                    size = os.path.getsize(latest_file)
+                    while _size != size:
+                        _size = size
+                        time.sleep(1)
+                        size = os.path.getsize(latest_file)
+                    if previous_file is None:
+                        if latest_file != previous_file:
+                            print(f"Converting {latest_file}")
+                            img = np.array(Image.open(latest_file))
+                            self.updateImage(img, self.banner_text, self.slideshow_pause)
+                    elif previous_file != latest_file:
+                        print(f"Converting {latest_file}")
+                        img = np.array(Image.open(latest_file))
+                        self.updateImage(img, self.banner_text, self.slideshow_pause)
+                    previous_file = latest_file
 
     def monitorDir(self):
         """ Monitor the given directory and show new FF files on the screen. """
@@ -272,22 +326,29 @@ class LiveViewer(multiprocessing.Process):
         except Exception as e:
             print('Setting niceness failed with message:\n' + repr(e))
 
+        frames_dir_full_path = os.path.join(self.config.data_dir, self.config.frame_dir)
 
-        # Show image if a file is given
-        if os.path.isfile(self.dir_path) or self.image:
-            self.showImage()
-
-        elif os.path.isdir(self.dir_path):
-
-            if self.slideshow:
-                self.startSlideshow()
-
-            else:
-                self.monitorDir()
+        if self.config.continuous_capture and os.path.isdir(frames_dir_full_path):
+            # Work with frames directory
+            self.monitorFramesDir()
 
         else:
-            self.exit.set()
-            return None
+
+            # Show image if a file is given
+            if os.path.isfile(self.dir_path) or self.image:
+                self.showImage()
+
+            elif os.path.isdir(self.dir_path):
+
+                if self.slideshow:
+                    self.startSlideshow()
+
+                else:
+                    self.monitorDir()
+
+            else:
+                self.exit.set()
+                return None
 
 
 
@@ -307,6 +368,9 @@ if __name__ == "__main__":
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Monitor the given folder for new FF files and show them on the screen.")
 
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+        help="Path to a config file which will be used instead of the default one.")
+
     arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str, \
         help="Directory to monitor for FF files.")
 
@@ -322,11 +386,18 @@ if __name__ == "__main__":
     arg_parser.add_argument('-u', '--update', metavar='UPDATE_INTERVAL', default=5, type=float, \
         help="Time between image refreshes. 5 seconds by default.")
 
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
-    #########################
+    # Load the config file
+    if cml_args.config is None:
+        config = None
+    else:
+        config = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath('.'))
 
-    lv = LiveViewer(cml_args.dir_path, image=cml_args.image, slideshow=cml_args.slideshow, \
+
+    lv = LiveViewer(cml_args.dir_path, config=config, image=cml_args.image, slideshow=cml_args.slideshow, \
         slideshow_pause=cml_args.pause, update_interval=cml_args.update)
     lv.start()
+
