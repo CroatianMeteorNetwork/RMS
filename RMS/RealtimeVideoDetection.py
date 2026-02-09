@@ -1,6 +1,4 @@
-
 import logging
-from logging import config
 import multiprocessing as mp
 import os
 import time
@@ -12,6 +10,7 @@ from RMS.Formats.FTPdetectinfo import readFTPdetectinfo
 from RMS.Formats.Platepar import findBestPlatepar
 from RMS.Misc import mkdirP
 from RMS.QueuedPool import QueuedPool
+from RMS.ProcessedFilesTracker import ProcessedFilesTracker
 
 
 # Get the logger from the main module
@@ -287,7 +286,8 @@ if __name__ == "__main__":
     arg_parser.add_argument('--video_file', metavar='VIDEO_FILE', type=str, help="Path to a video file to be used as a video source")
     arg_parser.add_argument('--video_file_dir', metavar='VIDEO_FILE_DIR', type=str, help="Path to a directory containing video files to be used asvideo sources"
                             " instead of a camera.")
-    arg_parser.add_argument('--night_dir', metavar='NIGHT_DIR', type=str, help="Path to a directory where results should be stored.")
+    arg_parser.add_argument('--night_dir', metavar='NIGHT_DIR', type=str, help="Path to a directory where results should be stored.  If it ends in +, the night start time is")
+    arg_parser.add_argument('--night_start_time', metavar='NIGHT_START_TIME', type=str, help="The night start time in HH:MM:SS format used in naming the night directory.")
     arg_parser.add_argument('--cores', metavar='CORES', type=int, default=1, help="Number of CPU cores to use.")
     arg_parser.add_argument('--prefix', metavar='PREFIX', type=str, default='detection_', help="Prefix to add to log files.")
     arg_parser.add_argument('--suffix', metavar='SUFFIX', type=str, default='', help="Suffix to append to output files.")
@@ -298,6 +298,22 @@ if __name__ == "__main__":
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
+
+    # The night directory must be specified.  If it ends with +, the start of night time must be specified
+    if cml_args.night_dir is None:
+        print ("--night_dir must be provided.")
+        exit(1)
+    if cml_args.night_dir.endswith('+') and cml_args.night_start_time is None:
+        print ("--night_start_time must be provided when --night_dir ends with +.")
+        exit(1)
+    # If specified the start of night time must be in "HH", "HH:MM", or "HH:MM:SS" format
+    if cml_args.night_start_time is not None:
+        try:
+            time.strptime(cml_args.night_start_time, '%H:%M:%S')
+        except ValueError:
+            print ("--night_start_time must be in HH:MM:SS format.")
+            exit(1)
+
     # A video file source must be provided
     if cml_args.video_file_dir is None and cml_args.video_file is None:
         print ("Either --video_file or --video_file_dir must be provided.")
@@ -317,105 +333,137 @@ if __name__ == "__main__":
             print("--sync, --skip, and --continuous can only be set when processing a video file directory.")
             exit(1)
 
-    # Mainline procssing of files, either called once or in a Ctrl-C cancelled continuous loop
-    def ProcessFiles():
+    # Load the config file
+    config = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath('.'))
 
-        # Load the config file
-        config = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath('.'))
+    # Initialize the logger
+    log_manager = LoggingManager()
+    log_manager.initLogging(config, cml_args.prefix)
 
-        # Initialize the logger
-        log_manager = LoggingManager()
-        log_manager.initLogging(config, cml_args.prefix)
+    # Get the logger handle
+    log = getLogger("logger")
 
-        # Get the logger handle
-        log = getLogger("logger")
+    # Initialize a file tracker
+    processed_tracker = ProcessedFilesTracker(directory=cml_args.video_file_dir, tracker_file_name="last_processed_video.txt", log_func=log.info) 
+  
+    # We have no current realtime video detector
+    rtvd = None
+    rtvd_datetime = None
+    # A helper to close the current detector
+    def closeDetector():
+        global rtvd
+        if rtvd is not None:
+            rtvd.stop()
+            del rtvd
+            rtvd = None
 
-        # Allocate and start the detector 
-        rtvd = RealtimeVideoDetector.createDetector(cml_args.night_dir, config, delay_start=0, cores=cml_args.cores, suffix=cml_args.suffix, synchronous=cml_args.sync)
-        rtvd.start()
+ 
+    # Helper to process a file.  If the file causes a date rollover, we will allocate a whole new detector
+    def processFile(video_file):
 
-        # Setup any required video submissioninterval tracking
-        interval_delta = None
-        if cml_args.interval is not None :
-            interval_delta = timedelta(seconds=cml_args.interval)
-            last_time = datetime.now() - interval_delta
-
-        # Helper to sumbit a video for processing, either queued or not
-        def addVideo(video_file):
-            if cml_args.skip:
-                return
-            elif cml_args.sync:
-                rtvd.processVideo(video_file)
-            else:
-                rtvd.addVideoFile(video_file)
+        # A new file may result in a new day bringing new logs and a new detector
+        global rtvd, rtvd_datetime,log
         
-        # Helper to provide a video to the realtime detector, either trivially or a time interval
-        def addVideoWithInterval(video_file):
-            global last_time
-            if interval_delta is not None:
+        # The video file is presumed to be in <camera>_YYYYMMDD_HHMMSS_FFFFFF_video.mkv format, so we can parse the start time from the file name to determine if we have rolled over to a new night
+        video_file_name = os.path.basename(video_file)
+        if video_file_name.endswith('_video.mkv'):
+            video_file_name = video_file_name[:-10]
+        else:
+            log.warning(f'Unexpected video file name format (expected <camera>_YYYYMMDD_HHMMSS_FFFFFF_video.mkv): {video_file_name}')
+            return
+        try:
+            _, date_str, time_str, ff_str = video_file_name.split('_')
+            video_start_time = datetime.strptime(date_str + '_' + time_str + '_' + ff_str, '%Y%m%d_%H%M%S_%f')
+        except Exception as e:
+            log.warning(f'Unexpected video file name format (expected <camera>_YYYYMMDD_HHMMSS_FFFFFF_video.mkv): {video_file_name}')
+            return  
+
+        # Assume we are not just skipping files
+        if not cml_args.skip:
+
+            # If this is a new day re-initialize logs
+            if rtvd is not None and video_start_time >= rtvd_datetime + timedelta(days=1):
+                # Initialize the logger
+                log_manager = LoggingManager()
+                log_manager.initLogging(config, cml_args.prefix)
+                # Get the logger handle
+                log = getLogger("logger")
+
+            # If we have no detector or the video start time is on a different day than the current detector, allocate a new detector
+            # Days are deemed to start at the provide night start time
+            if rtvd is None or video_start_time >= rtvd_datetime + timedelta(days=1):
+                if rtvd is not None:
+                    closeDetector()
+    
+                # Provide a night directory name, possibly constructing it from the provided start of night time
+                if cml_args.night_dir.endswith('+'):
+                    # Get the datetime of the prvious night starting time
+                    night_start_time = datetime.strptime(cml_args.night_start_time, '%H:%M:%S')
+                    # Get today' date and the current time separately
+                    video_date = video_start_time.date()
+                    video_time = video_start_time.time()
+                    night_start_datetime = datetime.combine(video_date, night_start_time.time())
+                    if video_time < night_start_time.time():
+                        night_start_datetime = night_start_datetime - timedelta(days=1)
+                    night_dir = cml_args.night_dir.replace('+', config.stationID + '_' + night_start_datetime.strftime('%Y%m%d_%H%M%S')+'_000000')
+                    rtvd_datetime = night_start_datetime
+                else:
+                    night_dir = cml_args.night_dir
+            
+                # Allocate and start the detector 
+                rtvd = RealtimeVideoDetector.createDetector(night_dir, config, delay_start=0, cores=cml_args.cores, suffix=cml_args.suffix)
+                rtvd.start()        
+
+            # Setup any required video submission interval tracking
+            interval_delta = None
+            if cml_args.interval is not None :
+                interval_delta = timedelta(seconds=cml_args.interval)
+                last_time = datetime.now() - interval_delta
                 sleep_time = (((last_time + interval_delta) - datetime.now()).total_seconds())
                 if sleep_time > 0:
                     log.info(f'Waiting {sleep_time:.3f} seconds before submitting next video file: {video_file}')
                     time.sleep(sleep_time)
                 last_time = datetime.now()
-            addVideo(video_file)   
+            
+            # Submit the file either synchonousy are multithreaded 
+            if cml_args.sync:
+                rtvd.processVideo(video_file)
+            else:
+                rtvd.addVideoFile(video_file)
 
-        # A helper class to manage what videos have been processed, currently implemented as a simple
-        # last video file processes, where it is presumed the videos are processed in file name order.
-        # The last processed file name is written to a tracker file in the base directory of where viseos are foun.
-        class ProcessedVideoTracker():
+        # Flag the file as processed
+        processed_tracker.markProcessed(video_file)
 
-            tracker_file_name = os.path.join(cml_args.night_dir, 'last_processed_video.txt')
 
-            def __init__(self, directory):
-                self.directory = directory  
-                # Initialize the last processed video file name from the tracker file
-                if os.path.exists(self.tracker_file_name):
-                    with open(self.tracker_file_name, 'r') as tf:
-                        self.last_video_file = tf.read().strip()
-                else:   
-                    self.last_video_file = None
+    # Process a single file
+    if cml_args.video_file is not None:
+        processFile(cml_args.video_file)
 
-            def isProcessed(self, video_file):
-                if self.last_video_file is None:
-                    return False
-                return (os.path.basename(video_file) <= self.last_video_file)
-
-            def markProcessed(self, video_file):
-                filename = os.path.basename(video_file)
-                self.last_video_file = filename
-                with open(self.tracker_file_name, 'w') as tf:
-                    tf.write(filename + '\n')
-
-        # Provide the requested file
-        if cml_args.video_file is not None:
-            addVideoWithInterval(cml_args.video_file)
-
-        # Process the requested directory
-        if cml_args.video_file_dir is not None:
-            # Initialize a new file tracker
-            processed_tracker = ProcessedVideoTracker(cml_args.video_file_dir)
+    # Process a directory of files, either once or continuously
+    if cml_args.video_file_dir is not None:
+        def ProcessFiles():
             # Filter files to ones not yet processed
             files = sorted(glob(os.path.join(cml_args.video_file_dir, "**","*_video.mkv"), recursive=True))
             files = [file for file in files if not processed_tracker.isProcessed(file)]
+            log.info(f'Found {len(files)} video files to process in directory: {cml_args.video_file_dir}')
             # Process each file 
             for file in files:
-                addVideoWithInterval(file)
-                processed_tracker.markProcessed(file)
+                processFile(file)
+            # Close the current detector
+            closeDetector()
 
-        # Stop the detector, it will cleanup processing before exiting  
-        rtvd.stop()    
+        # Either process the files once, of in a cntl-C cancelled loop
+        if cml_args.continuous_wait_minutes is None:
+            ProcessFiles()
+        else:
+            log.info('Starting continuous real-time video detection processing loop.  Press Ctrl-C to exit.')
+            try:
+                while True:
+                    ProcessFiles()
+                    log.info(f'Waiting {cml_args.continuous_wait_minutes} minutes before checking for new video files to process.')
+                    time.sleep(cml_args.continuous_wait_minutes * 60)
+            except KeyboardInterrupt:
+                log.info('Exiting continuous real-time video detection processing loop on user request.')
 
-    # The true mainline, either process the files once, of in a cntl-C cancelled loop
-    if cml_args.continuous_wait_minutes is None:
-        ProcessFiles()
-    else:
-        log.info('Starting continuous real-time video detection processing loop.  Press Ctrl-C to exit.')
-        try:
-            while True:
-                ProcessFiles()
-                log.info(f'Waiting {cml_args.continuous_wait_minutes} minutes before checking for new video files to process.')
-                time.sleep(cml_args.continuous_wait_minutes * 60)
-        except KeyboardInterrupt:
-            log.info('Exiting continuous real-time video detection processing loop on user request.')
-
+    # Close any outstanding detector
+    closeDetector()
