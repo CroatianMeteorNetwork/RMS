@@ -386,7 +386,6 @@ if __name__ == "__main__":
     arg_parser.add_argument('-u', '--update', metavar='UPDATE_INTERVAL', default=5, type=float, \
         help="Time between image refreshes. 5 seconds by default.")
 
-
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
