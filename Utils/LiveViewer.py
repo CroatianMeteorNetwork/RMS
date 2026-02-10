@@ -184,7 +184,7 @@ class LiveViewer(multiprocessing.Process):
         cv2.namedWindow(cc_w_handle)
         cv2.namedWindow(ss_w_handle)
 
-        previous_file = None
+        _cc_file_to_show = None
 
         slideshow_index = 0
 
@@ -216,7 +216,6 @@ class LiveViewer(multiprocessing.Process):
             cc_file_to_show = os.path.join(target_dir, latest_file_list[min_deviation_index])
 
             # Build a new slideshow only after iterating through all the previous slides, or on first iteration
-
             if slideshow_index == 0:
                 ff_file_list = []
                 for root, dirs, files in os.walk(os.path.join(self.config.data_dir, self.config.archived_dir)):
@@ -232,9 +231,11 @@ class LiveViewer(multiprocessing.Process):
             if slideshow_index < len(ff_file_list):
                 ff_file_to_show = ff_file_list[slideshow_index]
                 slideshow_index += 1
+
+                # Now plot the detection.maxpixel
                 img = readFF(os.path.dirname(ff_file_to_show), os.path.basename(ff_file_to_show), verbose=False).maxpixel
                 img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
-                self.updateImage(img, ff_file_to_show, frame_interval, ss_w_handle)
+                self.updateImage(img, ff_file_to_show, 0, ss_w_handle)
             else:
                 # This will trigger rebuilding the slideshow on the next iteration
                 slideshow_index = 0
@@ -242,6 +243,7 @@ class LiveViewer(multiprocessing.Process):
 
             if os.path.exists(cc_file_to_show):
                 if os.path.isfile(cc_file_to_show):
+
                     # Check file is not still being written
                     _size = None
                     size = os.path.getsize(cc_file_to_show)
@@ -249,16 +251,20 @@ class LiveViewer(multiprocessing.Process):
                         _size = size
                         time.sleep(1)
                         size = os.path.getsize(cc_file_to_show)
-                    if previous_file is None:
-                        if cc_file_to_show != previous_file:
+
+                    # Show the file if it is the first iteration
+                    if _cc_file_to_show is None:
+                        if cc_file_to_show != _cc_file_to_show:
                             img = np.array(Image.open(cc_file_to_show))
                             img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
                             self.updateImage(img, cc_file_to_show, frame_interval, cc_w_handle)
-                    elif previous_file != cc_file_to_show:
+
+                    # Or if it is different from the last iteration
+                    elif _cc_file_to_show != cc_file_to_show:
                         img = np.array(Image.open(cc_file_to_show))
                         img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
                         self.updateImage(img, cc_file_to_show, frame_interval, cc_w_handle)
-                    previous_file = cc_file_to_show
+                    _cc_file_to_show = cc_file_to_show
 
 
     def monitorDir(self):
