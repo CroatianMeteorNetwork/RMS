@@ -104,6 +104,8 @@ def recalibrateFF(
     lim_mag=None,
     ignore_distance_threshold=False,
     ignore_max_stars=False,
+    debug=False,
+    ff_name=None,
 ):
     """Given the platepar and a list of stars on one image, try to recalibrate the platepar to achieve
         the best match by brute force star matching.
@@ -121,6 +123,9 @@ def recalibrateFF(
         ignore_distance_threshold: [bool] Don't consider the recalib as failed if the median distance
             is larger than the threshold.
         ignore_max_stars: [bool] Ignore the maximum number of image stars for recalibration.
+        debug: [bool] If True, show a debug plot after each successful fit iteration showing catalog
+            stars, calstars, and matched stars.
+        ff_name: [str] Name of the FF file being processed. Used for debug plot labels. None by default.
 
     Return:
         result: [?] A Platepar instance if refinement is successful, None if it failed.
@@ -320,6 +325,11 @@ def recalibrateFF(
                 n_matched, len(star_dict_ff[jd]), dist, match_radius
             ))
 
+            # Debug plot: show catalog stars, calstars, and matched stars
+            if debug:
+                _plotRecalibDebug(config, working_platepar, jd, star_dict_ff, catalog_stars,
+                                  matched_stars, match_radius, lim_mag=lim_mag, ff_name=ff_name)
+
     # Choose which radius will be chosen for the goodness of fit check
     if max_match_radius is None:
         goodness_check_radius = match_radius
@@ -404,6 +414,121 @@ def recalibrateFF(
     return result, min_match_radius
 
 
+def _plotRecalibDebug(config, platepar, jd, star_dict_ff, catalog_stars, matched_stars, match_radius,
+                     lim_mag=None, ff_name=None):
+    """ Show a debug plot with catalog stars, calstars, and matched stars.
+
+    Arguments:
+        config: [Config instance]
+        platepar: [Platepar instance] Current (fitted) platepar.
+        jd: [float] Julian date.
+        star_dict_ff: [dict] {jd: list of star entries} for the current FF.
+        catalog_stars: [ndarray] Full catalog stars array (ra, dec, mag).
+        matched_stars: [dict] Output from matchStarsResiduals, keyed by jd.
+        match_radius: [float] Current match radius in pixels.
+
+    Keyword arguments:
+        lim_mag: [float] Limiting magnitude. None uses config default.
+        ff_name: [str] Name of the FF file being processed. None by default.
+    """
+    from RMS.Astrometry.ApplyAstrometry import raDecToXYPP, getFOVSelectionRadius, xyToRaDecPP
+    from RMS.Astrometry.Conversions import jd2Date
+    from RMS.Astrometry.CyFunctions import subsetCatalog
+
+    if lim_mag is None:
+        lim_mag = config.catalog_mag_limit
+
+    # Convert JD to a human-readable timestamp
+    dt_tuple = jd2Date(jd)
+    timestamp_str = '{:04d}-{:02d}-{:02d} {:02d}:{:02d}:{:05.2f} UTC'.format(
+        int(dt_tuple[0]), int(dt_tuple[1]), int(dt_tuple[2]),
+        int(dt_tuple[3]), int(dt_tuple[4]), dt_tuple[5]
+    )
+
+    # Get the FOV radius for catalog subset extraction
+    fov_radius = getFOVSelectionRadius(platepar)
+
+    # Get RA/Dec of the FOV centre
+    _, RA_c, dec_c, _ = xyToRaDecPP([jd2Date(jd)], [platepar.X_res/2], [platepar.Y_res/2], [1],
+                                     platepar, extinction_correction=False, precompute_pointing_corr=True)
+    RA_c = RA_c[0]
+    dec_c = dec_c[0]
+
+    # Get catalog stars in the FOV
+    _, extracted_catalog = subsetCatalog(catalog_stars, RA_c, dec_c, jd, platepar.lat, platepar.lon,
+                                         fov_radius, lim_mag)
+    ra_cat, dec_cat, mag_cat = extracted_catalog.T
+
+    # Project catalog stars to image coordinates
+    cat_x, cat_y = raDecToXYPP(ra_cat, dec_cat, jd, platepar)
+
+    # Filter to those within the image
+    in_fov = (cat_x >= 0) & (cat_x < platepar.X_res) & (cat_y >= 0) & (cat_y < platepar.Y_res)
+    cat_x_fov = cat_x[in_fov]
+    cat_y_fov = cat_y[in_fov]
+    mag_cat_fov = mag_cat[in_fov]
+
+    # Extract calstars (detected stars on this image)
+    stars_list = np.array(star_dict_ff[jd])
+    # stars_list columns: (Y, X, bg_level, level, ...)
+    calstars_y = stars_list[:, 0]
+    calstars_x = stars_list[:, 1]
+
+    # Extract matched stars
+    if jd in matched_stars:
+        matched_img_stars, matched_cat_stars, dist_list = matched_stars[jd]
+        matched_img_y = matched_img_stars[:, 0]
+        matched_img_x = matched_img_stars[:, 1]
+        # Project matched catalog stars to image coordinates
+        matched_cat_x, matched_cat_y = raDecToXYPP(matched_cat_stars[:, 0], matched_cat_stars[:, 1],
+                                                    jd, platepar)
+    else:
+        matched_img_x = matched_img_y = np.array([])
+        matched_cat_x = matched_cat_y = np.array([])
+
+    # Create the plot
+    fig, ax = plt.subplots(figsize=(12, 8))
+    ax.set_facecolor('black')
+
+    # Plot catalog stars (blue crosses, size scaled by magnitude)
+    mag_sizes = np.clip(20*(lim_mag - mag_cat_fov + 1), 5, 200)
+    ax.scatter(cat_x_fov, cat_y_fov, s=mag_sizes, marker='+', c='dodgerblue', linewidths=0.8,
+              alpha=0.6, label='Catalog stars ({:d})'.format(len(cat_x_fov)))
+
+    # Plot calstars (green circles)
+    ax.scatter(calstars_x, calstars_y, s=30, facecolors='none', edgecolors='lime', linewidths=1.0,
+              label='Detected stars ({:d})'.format(len(calstars_x)))
+
+    # Plot matched stars: draw lines connecting matched pairs
+    n_matched = len(matched_img_x)
+    for mx, my, cx, cy in zip(matched_img_x, matched_img_y, matched_cat_x, matched_cat_y):
+        ax.plot([mx, cx], [my, cy], 'r-', linewidth=0.5, alpha=0.7)
+
+    # Plot matched image stars (red filled dots)
+    ax.scatter(matched_img_x, matched_img_y, s=15, c='red', zorder=5,
+              label='Matched ({:d})'.format(n_matched))
+
+    ax.set_xlim(0, platepar.X_res)
+    ax.set_ylim(platepar.Y_res, 0)
+    ax.set_aspect('equal')
+    ax.set_xlabel('X (px)')
+    ax.set_ylabel('Y (px)')
+
+    # Title with timestamp used for star position computation
+    ax.set_title('Recalibration debug | {} | Radius={:.1f}px | Matched={:d}/{:d}'.format(
+        timestamp_str, match_radius, n_matched, len(calstars_x)))
+
+    # Add FF name below the image as figure text
+    if ff_name is not None:
+        fig.text(0.5, 0.01, ff_name, ha='center', va='bottom', fontsize=10, color='gray',
+                 fontstyle='italic')
+
+    ax.legend(loc='upper right', fontsize=9)
+    plt.tight_layout()
+    fig.subplots_adjust(bottom=0.07)  # Make room for the FF name text
+    plt.show()
+
+
 def recalibratePlateparsForFF(
     prev_platepar,
     ff_file_names,
@@ -413,7 +538,8 @@ def recalibratePlateparsForFF(
     lim_mag=None,
     ignore_distance_threshold=False,
     ignore_max_stars=False,
-    ff_frames=256
+    ff_frames=256,
+    debug=False,
 ):
     """
     Recalibrate platepars corresponding to ff files based on the stars.
@@ -432,6 +558,7 @@ def recalibratePlateparsForFF(
             is larger than the threshold.
         ignore_max_stars: [bool] Ignore the maximum number of image stars for recalibration.
         ff_frames: [int] Number of frames in the FF file or frame chunk. Default is 256.
+        debug: [bool] If True, show debug plots for each fit iteration.
 
     Returns:
         recalibrated_platepars: [dict] A dictionary where one key is ff file name and the value is
@@ -482,6 +609,8 @@ def recalibratePlateparsForFF(
                 lim_mag=lim_mag,
                 ignore_distance_threshold=ignore_distance_threshold,
                 ignore_max_stars=ignore_max_stars,
+                debug=debug,
+                ff_name=ff_name,
             )
 
             # If the recalibration failed, try using FFT alignment
@@ -499,7 +628,7 @@ def recalibratePlateparsForFF(
                 # Try to recalibrate after FFT alignment
                 result, _ = recalibrateFF(
                     config, test_platepar, jd, star_dict_ff, catalog_stars, lim_mag=lim_mag, 
-                    ignore_distance_threshold=True
+                    ignore_distance_threshold=True, debug=debug, ff_name=ff_name
                 )
 
                 # If the FFT alignment failed, align the previous platepar using the smallest radius that 
@@ -519,7 +648,9 @@ def recalibratePlateparsForFF(
                         max_match_radius=min_match_radius,
                         force_platepar_save=True,
                         lim_mag=lim_mag,
-                        ignore_distance_threshold=True
+                        ignore_distance_threshold=True,
+                        debug=debug,
+                        ff_name=ff_name,
                     )
 
                     if result is not None:
@@ -543,7 +674,9 @@ def recalibratePlateparsForFF(
                     star_dict_ff,
                     catalog_stars,
                     lim_mag=lim_mag,
-                    ignore_distance_threshold=True
+                    ignore_distance_threshold=True,
+                    debug=debug,
+                    ff_name=ff_name,
                 )
 
                 # If the recalibration succeeded, use the result
@@ -679,7 +812,7 @@ def recalibrateSelectedFF(dir_path, ff_file_names, calstars_data, config, lim_ma
 
 def recalibrateIndividualFFsAndApplyAstrometry(
     dir_path, ftpdetectinfo_path, calstars_data, config, platepar, 
-    generate_plot=True, load_all=False
+    generate_plot=True, load_all=False, debug=False
 ):
     """Recalibrate FF files with detections and apply the recalibrated platepar to those detections.
     
@@ -695,6 +828,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
     Keyword arguments:
         generate_plot: [bool] Generate the calibration variation plot. True by default.
         load_all: [bool] Load all FTPdetectinfo files in the directory and recalibrate them. False by default.
+        debug: [bool] If True, show debug plots for each fit iteration.
 
     Return:
         (recalibrated_platepars, ftpdetectinfo_file_list): 
@@ -861,7 +995,8 @@ def recalibrateIndividualFFsAndApplyAstrometry(
 
         # Go through all FF files with detections, recalibrate and apply astrometry
         recalibrated_platepars = recalibratePlateparsForFF(
-            prev_platepar, ff_processing_list, calstars, catalog_stars, config, ff_frames=calstars_ff_frames
+            prev_platepar, ff_processing_list, calstars, catalog_stars, config, ff_frames=calstars_ff_frames,
+            debug=debug
         )
         
 
@@ -1150,7 +1285,8 @@ def recalibrateIndividualFFsAndApplyAstrometry(
     return recalibrated_platepars_all, ftpdetectinfo_file_list
 
 
-def applyRecalibrate(ftpdetectinfo_path, config, generate_plot=True, load_all=False, generate_ufoorbit=True):
+def applyRecalibrate(ftpdetectinfo_path, config, generate_plot=True, load_all=False, generate_ufoorbit=True,
+                     debug=False):
     """Recalibrate FF files with detections and apply the recalibrated platepar to those detections.
     Arguments:
         ftpdetectinfo_path: [str] Path to an FTPdetectinfo file.
@@ -1160,6 +1296,7 @@ def applyRecalibrate(ftpdetectinfo_path, config, generate_plot=True, load_all=Fa
         generate_plot: [bool] Generate the calibration variation plot. True by default.
         load_all: [bool] Load all FTPdetectinfo files in the directory and recalibrate them.
         generate_ufoorbit: [bool] Generate the UFOOrbit file. True by default.
+        debug: [bool] If True, show debug plots for each fit iteration.
 
     Return:
         recalibrated_platepars: [dict] A dictionary where the keys are FF file names and values are
@@ -1216,7 +1353,7 @@ def applyRecalibrate(ftpdetectinfo_path, config, generate_plot=True, load_all=Fa
     # Recalibrate and apply astrometry on every FF file with detections individually
     recalibrated_platepars, ftpdetectinfo_file_list = recalibrateIndividualFFsAndApplyAstrometry(
         dir_path, ftpdetectinfo_path, calstars_data, config, platepar, 
-        generate_plot=generate_plot, load_all=load_all
+        generate_plot=generate_plot, load_all=load_all, debug=debug
 
     )
 
@@ -1262,6 +1399,10 @@ if __name__ == "__main__":
         help="""Skip the generation of the UFOOrbit file."""
     )
 
+    arg_parser.add_argument('-d', '--debug', action="store_true", 
+        help="""Show debug plots for each fit iteration, displaying catalog stars, calstars, and matched stars."""
+    )
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -1295,7 +1436,7 @@ if __name__ == "__main__":
     log = getLogger("logger", level="INFO")
 
     # Run the recalibration and recomputation
-    applyRecalibrate(ftpdetectinfo_path, config, load_all=cml_args.all, generate_ufoorbit=(not cml_args.skipuforbit))
+    applyRecalibrate(ftpdetectinfo_path, config, load_all=cml_args.all, generate_ufoorbit=(not cml_args.skipuforbit), debug=cml_args.debug)
 
     # Show the calibration report
     if cml_args.report:

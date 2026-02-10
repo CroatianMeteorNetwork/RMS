@@ -452,7 +452,7 @@ def extractStarsImgHandle(img_handle,
             max_star_candidates=config.max_stars, border=border,
             neighborhood_size=neighborhood_size, intensity_threshold=intensity_threshold, 
             segment_radius=segment_radius, roundness_threshold=roundness_threshold, 
-            max_feature_ratio=max_feature_ratio
+            max_feature_ratio=max_feature_ratio, bit_depth=config.bit_depth
         )
 
         # If the star extraction failed, return an empty list
