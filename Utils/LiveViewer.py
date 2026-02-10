@@ -381,7 +381,7 @@ class LiveViewer(multiprocessing.Process):
 
         frames_dir_full_path = os.path.join(self.config.data_dir, self.config.frame_dir)
 
-        if self.config.continuous_capture and os.path.isdir(frames_dir_full_path):
+        if self.config.continuous_capture and os.path.isdir(frames_dir_full_path) and self.config.live_maxpixel_enable:
             # Work with frames directory
             self.monitorFramesDirAndSlideshow()
 
