@@ -236,7 +236,7 @@ class LiveViewer(multiprocessing.Process):
                 # Now plot the detection.maxpixel
                 img = readFF(os.path.dirname(ff_file_to_show), os.path.basename(ff_file_to_show), verbose=False).maxpixel
                 img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
-                self.updateImage(img, ff_file_to_show, 0, ss_w_handle)
+                self.updateImage(img, ff_file_to_show, 1, ss_w_handle)
             else:
                 # This will trigger rebuilding the slideshow on the next iteration
                 slideshow_index = 0
@@ -258,13 +258,13 @@ class LiveViewer(multiprocessing.Process):
                         if cc_file_to_show != _cc_file_to_show:
                             img = np.array(Image.open(cc_file_to_show))
                             img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
-                            self.updateImage(img, cc_file_to_show, frame_interval, cc_w_handle)
+                            self.updateImage(img, cc_file_to_show, max(frame_interval - 1 , 1), cc_w_handle)
 
                     # Or if it is different from the last iteration
                     elif _cc_file_to_show != cc_file_to_show:
                         img = np.array(Image.open(cc_file_to_show))
                         img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
-                        self.updateImage(img, cc_file_to_show, frame_interval, cc_w_handle)
+                        self.updateImage(img, cc_file_to_show, max(frame_interval - 1, 1) , cc_w_handle)
                     _cc_file_to_show = cc_file_to_show
 
 
