@@ -1436,7 +1436,7 @@ if __name__ == "__main__":
     log = getLogger("logger", level="INFO")
 
     # Run the recalibration and recomputation
-    applyRecalibrate(ftpdetectinfo_path, config, load_all=cml_args.all, generate_ufoorbit=(not cml_args.skipuforbit), debug=cml_args.debug)
+    applyRecalibrate(ftpdetectinfo_path, config, load_all=cml_args.all, generate_ufoorbit=(not cml_args.skipuforbit and not cml_args.all), debug=cml_args.debug)
 
     # Show the calibration report
     if cml_args.report:
