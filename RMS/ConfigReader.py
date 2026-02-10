@@ -607,6 +607,16 @@ class Config:
         self.line_distance_const_det = 4 # constant that determines the influence of average point distance on the line quality
         self.max_time_det = 10 # maximum time in seconds for which line finding algorithm can run
 
+        # Line finder algorithm: 'kht' or 'ransac'
+        self.line_finder_algorithm = 'kht'
+
+        # Sequential RANSAC parameters
+        self.ransac_max_lines = 10
+        self.ransac_min_pixels = 10
+        self.ransac_distance_thresh = 2.0
+        self.ransac_min_line_length = 20.0
+        self.ransac_max_gap = 20.0
+
         # 3D line merging parameters
         self.vect_angle_thresh = 20 # angle similarity between 2 lines in a stripe to be merged
         self.frame_extension = 3 # how many frames to check during centroiding before and after the initially determined frame range
@@ -1642,6 +1652,24 @@ def parseMeteorDetection(config, parser):
 
     if parser.has_option(section, "max_time_det"):
         config.max_time_det = parser.getint(section, "max_time_det")
+
+    if parser.has_option(section, "line_finder_algorithm"):
+        config.line_finder_algorithm = parser.get(section, "line_finder_algorithm")
+
+    if parser.has_option(section, "ransac_max_lines"):
+        config.ransac_max_lines = parser.getint(section, "ransac_max_lines")
+
+    if parser.has_option(section, "ransac_min_pixels"):
+        config.ransac_min_pixels = parser.getint(section, "ransac_min_pixels")
+
+    if parser.has_option(section, "ransac_distance_thresh"):
+        config.ransac_distance_thresh = parser.getfloat(section, "ransac_distance_thresh")
+
+    if parser.has_option(section, "ransac_min_line_length"):
+        config.ransac_min_line_length = parser.getfloat(section, "ransac_min_line_length")
+
+    if parser.has_option(section, "ransac_max_gap"):
+        config.ransac_max_gap = parser.getfloat(section, "ransac_max_gap")
 
     if parser.has_option(section, "stripe_width"):
         config.stripe_width = parser.getint(section, "stripe_width")

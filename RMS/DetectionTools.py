@@ -225,15 +225,15 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
     # 1. Create a grid of (y, x) coordinates
     # Corresponds to the -hh to hh and -hw to hw ranges in the original coordinate system
     y_grid, x_grid = np.indices((img_h, img_w))
-    y_centered = y_grid - (img_h / 2.0)
-    x_centered = x_grid - (img_w / 2.0)
+    y_centered = y_grid - (img_h/2.0)
+    x_centered = x_grid - (img_w/2.0)
 
     # 2. Calculate perpendicular distance of every pixel from the line
     # Line equation in HT: x*cos(theta) + y*sin(theta) = rho
     dist = np.abs(x_centered * cos_th + y_centered * sin_th - rho)
 
     # 3. Select pixels within the stripe width
-    mask = dist <= (stripe_width / 2.0)
+    mask = dist <= (stripe_width/2.0)
     
     # 4. Get indices of the mask
     indicesy, indicesx = np.nonzero(mask)
@@ -374,7 +374,8 @@ else:
 
 
 def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, mask, flat_struct, \
-    dark, stripe_width_factor=1.0, centroiding=False, point1=None, point2=None, debug=False):
+    dark, stripe_width_factor=1.0, centroiding=False, point1=None, point2=None, debug=False, \
+    line_start=None, line_end=None):
     """ Threshold the image and get a list of pixel positions and frames of threshold passers. 
         This function handles all input types of data.
 
@@ -397,6 +398,8 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
         point1: [list] (x, y, frame) Of the first reference point of the detection.
         point2: [list] (x, y, frame) Of the second reference point of the detection.
         debug: [bool] If True, extra debug messages and plots will be shown.
+        line_start: [tuple] (x, y) Start point of the line segment.
+        line_end: [tuple] (x, y) End point of the line segment.
     
     Return:
         xs, ys, zs: [tuple of lists] Indices of (x, y, frame) of threshold passers for every frame.
@@ -410,6 +413,37 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
     # Get indices of stripe pixels around the line of the meteor (this is quite fast)
     stripe_indices = getStripeIndices(rho, theta, stripe_width_factor*config.stripe_width, img_h, img_w)
     
+    # Filter indices by line extent if provided
+    if (line_start is not None) and (line_end is not None):
+        inds_y, inds_x = stripe_indices
+        
+        # Vector of the line segment
+        p1 = np.array(line_start)
+        p2 = np.array(line_end)
+        line_vec = p2 - p1
+        line_len_sq = np.dot(line_vec, line_vec)
+        
+        if line_len_sq > 0:
+            # Vector from start point to all stripe points
+            # Stack x and y coordinates
+            # inds_x and inds_y are 1D arrays
+            points = np.column_stack((inds_x, inds_y))
+            points_vec = points - p1
+            
+            # Project points onto the line vector
+            # t = (p - p1) . (p2 - p1)/|p2 - p1|^2
+            t = np.dot(points_vec, line_vec)/line_len_sq
+            
+            # Filter points within [0, 1] with some margin (e.g., half the stripe width in relative terms? or just px)
+            # Use pixel margin for safety
+            margin_px = config.stripe_width  # Allow 1 stripe width margin at ends
+            margin_rel = margin_px/np.sqrt(line_len_sq)
+            
+            mask_extent = (t >= -margin_rel) & (t <= 1.0 + margin_rel)
+            
+            # Apply mask
+            stripe_indices = (inds_y[mask_extent], inds_x[mask_extent])
+
     if debug: 
         strip_indices_time = time() - t_stripe
         print('  - Stripe indices time: {:.4f} s'.format(strip_indices_time))

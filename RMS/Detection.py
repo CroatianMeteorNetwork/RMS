@@ -58,6 +58,7 @@ import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 import RMS.Routines.MorphCy as morph
 from RMS.Routines.BinImageCy import binImage
+from RMS.Routines import SequentialRANSAC
 
 # Get the logger from the main module
 log = getLogger("logger")
@@ -383,7 +384,9 @@ def checkWhiteRatio(img_thres, ff, max_white_ratio):
 
 def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_white_ratio, kht_lib_path, \
     mask=None, flat_struct=None, dark=None, debug=False, kht_cluster_min_size=9, kht_cluster_min_deviation=2, \
-    kht_delta=0.1, kht_kernel_min_height=0.004, kht_n_sigmas=1, kht_morph_ops=[1, 2, 3, 4, 1]):
+    kht_delta=0.1, kht_kernel_min_height=0.004, kht_n_sigmas=1, kht_morph_ops=[1, 2, 3, 4, 1], \
+    line_finder_algorithm='kht', ransac_max_lines=10, ransac_min_pixels=10, ransac_distance_thresh=2.0, \
+    ransac_min_line_length=20.0, ransac_max_gap=20.0):
     """ Get (rho, phi) pairs for each meteor present on the image using KHT.
         
     Arguments:
@@ -398,12 +401,26 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
 
     Keyword arguments:
         mask: [MaskStruct] Mask structure.
-        flat_struct: [FlatStruct]  Flat frame structure.
+        flat_struct: [FlatStruct] Flat frame structure.
         dark: [ndarray] Dark frame.
         debug: [bool] If True, print debug information and show debug images.
-    
+        kht_cluster_min_size: [int] Minimum cluster size for KHT.
+        kht_cluster_min_deviation: [float] Minimum cluster deviation for KHT.
+        kht_delta: [float] Delta parameter for KHT.
+        kht_kernel_min_height: [float] Minimum kernel height for KHT.
+        kht_n_sigmas: [float] Number of sigmas for KHT.
+        kht_morph_ops: [list] List of morphological operations to apply before line detection.
+        line_finder_algorithm: [str] Algorithm to use for line finding: 'kht' or 'ransac'.
+        ransac_max_lines: [int] Maximum number of lines to find with RANSAC.
+        ransac_min_pixels: [int] Minimum number of inlier pixels per line for RANSAC.
+        ransac_distance_thresh: [float] Maximum perpendicular distance (px) from the line for RANSAC
+            inlier classification.
+        ransac_min_line_length: [float] Minimum length of a line segment in pixels for RANSAC.
+        ransac_max_gap: [float] Maximum gap (px) allowed within a line segment for RANSAC.
+
     Return:
-        [list] a list of all found lines
+        [list] A list of all found lines. Each entry is [rho, theta, frame_min, frame_max] for KHT,
+            or [rho, theta, frame_min, frame_max, x_start, y_start, x_end, y_end] for RANSAC.
     """
 
     # Load the KHT library
@@ -544,25 +561,42 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         kht_kernel_min_height = float(kht_kernel_min_height)
         kht_n_sigmas = float(kht_n_sigmas)
 
-        # Call the KHT line finding
-        # Parameters: cluster_min_size (px), cluster_min_deviation, delta, kernel_min_height, n_sigmas
-        length = kht.kht_wrapper(lines, img_flatten, w, h, max_lines, kht_cluster_min_size, kht_cluster_min_deviation, kht_delta, kht_kernel_min_height, kht_n_sigmas)
-        
-        # Cut the line array to the number of found lines
-        lines = lines[:length]
+        # Use line segment RANSAC instead of Kernel-based Hough Transform
+        if line_finder_algorithm == 'ransac':
+            
+            # Run Sequential RANSAC
+            ransac_lines = SequentialRANSAC.findLines(img_morph, ransac_max_lines, ransac_min_pixels, \
+                ransac_distance_thresh, ransac_min_line_length, ransac_max_gap, debug=debug)
+            
+            lines = np.array(ransac_lines)
+
+        else:
+
+            # Call the KHT line finding
+            # Parameters: cluster_min_size (px), cluster_min_deviation, delta, kernel_min_height, n_sigmas
+            length = kht.kht_wrapper(lines, img_flatten, w, h, max_lines, kht_cluster_min_size, kht_cluster_min_deviation, kht_delta, kht_kernel_min_height, kht_n_sigmas)
+            
+            # Cut the line array to the number of found lines
+            lines = lines[:length]
 
 
         # Skip further operations if there are no lines
         frame_lines = []
         if lines.any():
-            for rho, theta in lines:
-                line_results.append([rho, theta, frame_min, frame_max])
-                frame_lines.append([rho, theta, frame_min, frame_max])
-
-
-        # if debug:
-        #     if frame_lines:
-        #         plotLines(img_handle.ff, frame_lines)
+            for line in lines:
+                
+                # Check if line contains extent info (only for RANSAC)
+                if len(line) == 6:
+                     rho, theta, x1, y1, x2, y2 = line
+                     line_entry = [rho, theta, frame_min, frame_max, x1, y1, x2, y2]
+                else:
+                    # KHT returns 2 values (rho, theta)
+                    rho = line[0]
+                    theta = line[1]
+                    line_entry = [rho, theta, frame_min, frame_max]
+                
+                line_results.append(line_entry)
+                frame_lines.append(line_entry)
 
 
         if debug:
@@ -571,19 +605,39 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             # b) Thresholded stack, 
             # c) Morphological operations result, 
             # d) KHT lines
-            img_summary = np.zeros((img_handle.ff.nrows*2, img_handle.ff.ncols*2), dtype=np.uint8)
-
             # Merge the lines on the frame for plotting purposes
-            frame_lines = mergeLines(frame_lines, config.line_min_dist, img_handle.ff.ncols, img_handle.ff.nrows)
+            plot_lines_list = frame_lines
+            if line_finder_algorithm != 'ransac':
+                 plot_lines_list = mergeLines(frame_lines, config.line_min_dist, img_handle.ff.ncols, img_handle.ff.nrows)
 
             # Fill in the summary image (2x2 grid)
-            img_summary[:img_handle.ff.nrows, 0:img_handle.ff.ncols] = maxpixel_autolevel
-            img_summary[:img_handle.ff.nrows, img_handle.ff.ncols:img_handle.ff.ncols*2] = \
-                img_thresh.astype(maxpix_img.dtype)*(2**(maxpix_img.itemsize*8) - 1)
-            img_summary[img_handle.ff.nrows:img_handle.ff.nrows*2, 0:img_handle.ff.ncols] = \
-                img_morph.astype(np.uint8)*255
+            # Initialize as 3-channel BGR
+            img_summary = np.zeros((img_handle.ff.nrows*2, img_handle.ff.ncols*2, 3), dtype=np.uint8)
+
+            # Top-Left: Maxpixel (Auto-leveled)
+            # Convert to BGR if grayscale
+            mp_bgr = maxpixel_autolevel
+            if len(mp_bgr.shape) == 2:
+                mp_bgr = cv2.cvtColor(mp_bgr, cv2.COLOR_GRAY2BGR)
+            img_summary[:img_handle.ff.nrows, 0:img_handle.ff.ncols] = mp_bgr
+
+            # Top-Right: Thresholded
+            # Convert to BGR
+            thresh_bgr = img_thresh.astype(maxpix_img.dtype)*(2**(maxpix_img.itemsize*8) - 1)
+            if len(thresh_bgr.shape) == 2:
+                thresh_bgr = cv2.cvtColor(thresh_bgr, cv2.COLOR_GRAY2BGR)
+            img_summary[:img_handle.ff.nrows, img_handle.ff.ncols:img_handle.ff.ncols*2] = thresh_bgr
+
+            # Bottom-Left: Morph
+            # Convert to BGR
+            morph_bgr = img_morph.astype(np.uint8)*255
+            if len(morph_bgr.shape) == 2:
+                morph_bgr = cv2.cvtColor(morph_bgr, cv2.COLOR_GRAY2BGR)
+            img_summary[img_handle.ff.nrows:img_handle.ff.nrows*2, 0:img_handle.ff.ncols] = morph_bgr
+
+            # Bottom-Right: KHT/RANSAC Lines (Already BGR from plotLines)
             img_summary[img_handle.ff.nrows:img_handle.ff.nrows*2, img_handle.ff.ncols:img_handle.ff.ncols*2] = \
-                plotLines(img_handle.ff, frame_lines, show_image=False)
+                plotLines(img_handle.ff, plot_lines_list, show_image=False)
 
             showImage(str(frame_min) + "-" + str(frame_max), img_summary)
 
@@ -982,34 +1036,70 @@ def plotLines(ff, line_list, show_image=True):
 
     img = np.copy(ff.maxpixel)
 
-
     # Auto adjust levels
     min_lvl = np.percentile(img[2:], 1)
     max_lvl = np.percentile(img[2:], 99.0)
 
-    # Adjust levels
-    img = Image.adjustLevels(img, min_lvl, 1.0, max_lvl)
+    # If the image is 8, bit
+    if img.dtype == np.uint8:
+
+        # Adjust levels
+        img = Image.adjustLevels(img, min_lvl, 1.0, max_lvl)
+
+    else:
+        # Squish into 8-bit (clip bright values)
+        img = np.clip(img, min_lvl, max_lvl)
+        img = (img - min_lvl)/(max_lvl - min_lvl)*255
+        img = img.astype(np.uint8)
+
+
 
     hh = img.shape[0]/2.0
     hw = img.shape[1]/2.0
 
-    # Compute the maximum level value
-    max_lvl = 2**(img.itemsize*8) - 1
+    # Convert to color to support colored markers
+    if len(img.shape) == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
 
-    for rho, theta, frame_min, frame_max in line_list:
-        theta = np.deg2rad(theta)
-        
-        a = np.cos(theta)
-        b = np.sin(theta)
-        x0 = a*rho
-        y0 = b*rho
+    # Compute max level for color scaling (assuming 8-bit or 16-bit)
+    # If 16-bit, colors might need scaling or we just use max_lvl
+    # cv2.line expects color to match depth.
+    # If image is 16-bit, max_lvl is 65535.
+    
+    # Create overlay for transparency
+    overlay = img.copy()
 
-        x1 = int(x0 + 1000*(-b) + hw)
-        y1 = int(y0 + 1000*(a) + hh)
-        x2 = int(x0 - 1000*(-b) + hw)
-        y2 = int(y0 - 1000*(a) + hh)
+    for line in line_list:
         
-        cv2.line(img, (x1, y1), (x2, y2), (max_lvl, 0, max_lvl), 1)
+        if len(line) >= 8:
+            # RANSAC line with extent
+            # [rho, theta, frame_min, frame_max, x1, y1, x2, y2]
+            rho, theta, _, _, x1, y1, x2, y2 = line[:8]
+            
+            # Draw segment (thick, semi-transparent)
+            # Yellow color in BGR: (0, max_lvl, max_lvl)
+            cv2.line(overlay, (int(x1), int(y1)), (int(x2), int(y2)), (0, max_lvl, max_lvl), 5)
+            
+        else:
+            # Standard infinite line (Magenta)
+            rho, theta, frame_min, frame_max = line[:4]
+            theta = np.deg2rad(theta)
+            
+            a = np.cos(theta)
+            b = np.sin(theta)
+            x0 = a*rho
+            y0 = b*rho
+
+            x1 = int(x0 + 1000*(-b) + hw)
+            y1 = int(y0 + 1000*(a) + hh)
+            x2 = int(x0 - 1000*(-b) + hw)
+            y2 = int(y0 - 1000*(a) + hh)
+            
+            cv2.line(img, (x1, y1), (x2, y2), (max_lvl, 0, max_lvl), 1)
+            
+    # Apply transparency
+    alpha = 0.5
+    cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0, img)
     
     if show_image:
         showImage("KHT", img)
@@ -1202,13 +1292,15 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
 
     # Get lines on the image
-    # Get lines on the image
     line_list = getLines(img_handle, config.k1_det, config.j1_det, config.time_slide, config.time_window_size, 
         config.max_lines_det, config.max_white_ratio, config.kht_lib_path, mask=mask, \
         flat_struct=flat_struct, dark=dark, debug=debug, kht_cluster_min_size=config.kht_cluster_min_size, \
         kht_cluster_min_deviation=config.kht_cluster_min_deviation, kht_delta=config.kht_delta, \
         kht_kernel_min_height=config.kht_kernel_min_height, kht_n_sigmas=config.kht_n_sigmas, \
-        kht_morph_ops=config.kht_morph_ops)
+        kht_morph_ops=config.kht_morph_ops, line_finder_algorithm=config.line_finder_algorithm, \
+        ransac_max_lines=config.ransac_max_lines, ransac_min_pixels=config.ransac_min_pixels, \
+        ransac_distance_thresh=config.ransac_distance_thresh, ransac_min_line_length=config.ransac_min_line_length, \
+        ransac_max_gap=config.ransac_max_gap)
 
     # logDebug('List of lines:', line_list)
 
@@ -1217,14 +1309,16 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
     meteor_detections = []
 
     # Only if there are some lines in the image
+    # Only if there are some lines in the image
     if len(line_list):
 
-        # Join similar lines
-        line_list = mergeLines(line_list, config.line_min_dist, img_handle.ff.ncols, img_handle.ff.nrows)
+        # Join similar lines (only if not RANSAC)
+        if config.line_finder_algorithm != 'ransac':
+            line_list = mergeLines(line_list, config.line_min_dist, img_handle.ff.ncols, img_handle.ff.nrows)
 
         logDebug('Time for finding lines:', time() - t1)
 
-        logDebug('Number of KHT lines: ', len(line_list))
+        logDebug('Number of lines: ', len(line_list))
 
         # # Plot lines
         # plotLines(img_handle.ff, line_list)
@@ -1236,7 +1330,15 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
         # This step makes sure that there is a linear propagation of the detections in time
         for line in line_list:
 
-            rho, theta, frame_min, frame_max = line
+            line_start = None
+            line_end = None
+            
+            if len(line) >= 8:
+                rho, theta, frame_min, frame_max, x1, y1, x2, y2 = line[:8]
+                line_start = (x1, y1)
+                line_end = (x2, y2)
+            else:
+                rho, theta, frame_min, frame_max = line[:4]
 
             logDebug('\n--------------------------------')
             logDebug('    rho,  theta, frame_min, frame_max')
@@ -1278,7 +1380,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             # Extract (x, y, frame) of thresholded frames, i.e. pixel and frame locations of threshold passers
             t1 = time()
             xs, ys, zs = getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, \
-                mask, flat_struct, dark, debug=True)
+                mask, flat_struct, dark, debug=True, line_start=line_start, line_end=line_end)
             
             logDebug('Time for thresholding and stripe extraction: {:.3f}'.format(time() - t1))
 
