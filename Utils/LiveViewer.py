@@ -176,17 +176,18 @@ class LiveViewer(multiprocessing.Process):
     def monitorFramesDirAndSlideshow(self):
         """ Monitor the given directory and show latest jpg files on the screen. """
 
-        # Create the time point of the most recent expected frames file
+
 
         frame_interval = self.config.frame_save_aligned_interval
+
+
+        # Initialise two windows
         cc_w_handle = "Continuous Capture"
         ss_w_handle = "Slideshow of detections from past 48 hours"
         cv2.namedWindow(cc_w_handle)
         cv2.namedWindow(ss_w_handle)
 
-        _cc_file_to_show = None
-
-        slideshow_index = 0
+        _cc_file_to_show, slideshow_index = None, 0
 
         ff_file_list = []
         while not self.exit.is_set():
