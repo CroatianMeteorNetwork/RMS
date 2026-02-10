@@ -5982,21 +5982,24 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def fitBandRatio(self):
-        """Fit the optimal BP:RP band ratio that minimizes the photometric residuals.
+        """Fit the optimal G:BP:RP band ratio that minimizes photometric residuals.
 
-        Sweeps alpha in [0, 1] where BP_ratio = alpha, RP_ratio = 1 - alpha,
-        runs photometryFit for each, and reports the ratio with the lowest stddev.
-        The result is printed as a config-ready string the user can copy.
+        Performs a 2D grid search over G, BP, RP flux fractions (rG + rBP + rRP = 1),
+        runs photometryFit for each combination, and reports the ratio with the
+        lowest stddev. The result is printed as a config-ready string.
         """
 
-        # Check that we have individual BP/RP magnitudes
+        # Check that we have individual G/BP/RP magnitudes
         if self.catalog_stars_bp is None or self.catalog_stars_rp is None:
-            print("BP:RP fitting requires the GMN Star Catalog with BP/RP columns.")
+            print("Band ratio fitting requires the GMN Star Catalog with BP/RP columns.")
+            return
+        if self.catalog_stars_g is None:
+            print("Band ratio fitting requires the GMN Star Catalog with G column.")
             return
 
         # Check that we have enough paired stars
         if len(self.paired_stars) < 3:
-            print("Need at least 3 paired stars for BP:RP fitting.")
+            print("Need at least 3 paired stars for band ratio fitting.")
             return
 
         # Highly variable star types to exclude (same as photometry())
@@ -6006,11 +6009,12 @@ class PlateTool(QtWidgets.QMainWindow):
             'IrregularV*',
         }
 
-        # Collect paired star data - same as photometry() but look up individual BP/RP
+        # Collect paired star data with individual G/BP/RP magnitudes
         radius_list = []
         px_intens_list = []
         catalog_ra = []
         catalog_dec = []
+        g_mags = []
         bp_mags = []
         rp_mags = []
         snr_list = []
@@ -6028,7 +6032,7 @@ class PlateTool(QtWidgets.QMainWindow):
             if np.isnan(lsp) or np.isinf(lsp):
                 continue
 
-            # Look up the closest catalog star to get individual BP/RP
+            # Look up the closest catalog star to get individual G/BP/RP
             ra_diff = np.abs(self.catalog_stars[:, 0] - star_ra)
             dec_diff = np.abs(self.catalog_stars[:, 1] - star_dec)
             dist = np.sqrt(ra_diff**2 + dec_diff**2)
@@ -6037,11 +6041,12 @@ class PlateTool(QtWidgets.QMainWindow):
             if dist[closest_idx] > 0.01:  # Within ~36 arcsec
                 continue
 
+            g_val = self.catalog_stars_g[closest_idx]
             bp_val = self.catalog_stars_bp[closest_idx]
             rp_val = self.catalog_stars_rp[closest_idx]
 
-            # Skip stars with missing BP or RP (NaN or zero sentinel)
-            if np.isnan(bp_val) or np.isnan(rp_val) or bp_val == 0 or rp_val == 0:
+            # Skip stars with missing G, BP or RP (NaN or zero sentinel)
+            if any(np.isnan(v) or v == 0 for v in [g_val, bp_val, rp_val]):
                 continue
 
             # Skip stars with unreliable Gaia BP/RP photometry.
@@ -6057,6 +6062,7 @@ class PlateTool(QtWidgets.QMainWindow):
             px_intens_list.append(px_intens)
             catalog_ra.append(star_ra)
             catalog_dec.append(star_dec)
+            g_mags.append(g_val)
             bp_mags.append(bp_val)
             rp_mags.append(rp_val)
             snr_list.append(snr)
@@ -6071,12 +6077,18 @@ class PlateTool(QtWidgets.QMainWindow):
             variable_star_list.append(is_variable)
 
         if len(px_intens_list) < 3:
-            print("Not enough paired stars with valid BP/RP for fitting ({:d} found).".format(
+            print("Not enough paired stars with valid G/BP/RP for fitting ({:d} found).".format(
                 len(px_intens_list)))
             return
 
+        g_mags = np.array(g_mags)
         bp_mags = np.array(bp_mags)
         rp_mags = np.array(rp_mags)
+
+        # Precompute fluxes
+        g_flux = np.power(10, -0.4 * g_mags)
+        bp_flux = np.power(10, -0.4 * bp_mags)
+        rp_flux = np.power(10, -0.4 * rp_mags)
 
         # Determine fixed vignetting (same logic as photometry())
         fixed_vignetting = None
@@ -6090,39 +6102,50 @@ class PlateTool(QtWidgets.QMainWindow):
 
         jd = date2JD(*self.img_handle.currentTime())
 
-        # Sweep alpha from 0 (pure RP) to 1 (pure BP)
-        alphas = np.linspace(0, 1, 101)
-        stddevs = np.full_like(alphas, np.inf)
+        # 2D grid search over (rG, rBP) with rRP = 1 - rG - rBP
+        # Step size of 0.05 gives ~210 valid grid points
+        step = 0.05
+        grid_vals = np.arange(0, 1 + step/2, step)
+        best_stddev = np.inf
+        best_rg, best_rbp, best_rrp = 0, 0, 1
 
-        for i, alpha in enumerate(alphas):
-            # Compute synthetic magnitude by combining fluxes (not magnitudes)
-            total_flux = alpha * np.power(10, -0.4 * bp_mags) \
-                       + (1 - alpha) * np.power(10, -0.4 * rp_mags)
-            test_mags = -2.5 * np.log10(total_flux)
+        # Store results for heatmap
+        grid_results = {}
 
-            # Apply extinction correction
-            test_mags_ext = extinctionCorrectionTrueToApparent(
-                test_mags.tolist(), list(catalog_ra), list(catalog_dec),
-                jd, self.platepar)
+        for rg in grid_vals:
+            for rbp in grid_vals:
+                rrp = 1.0 - rg - rbp
+                if rrp < -0.001:  # Allow tiny float error
+                    continue
+                rrp = max(rrp, 0.0)
 
-            try:
-                _, stddev, _ = photometryFit(
-                    px_intens_list, radius_list, test_mags_ext,
-                    fixed_vignetting=fixed_vignetting,
-                    weights=weights, exclude_list=exclude_list)
-                stddevs[i] = stddev
-            except Exception:
-                pass
+                # Compute synthetic magnitude by combining fluxes
+                total_flux = rg * g_flux + rbp * bp_flux + rrp * rp_flux
+                total_flux = np.maximum(total_flux, 1e-30)
+                test_mags = -2.5 * np.log10(total_flux)
 
-        # Find the best alpha
-        best_idx = np.argmin(stddevs)
-        best_alpha = alphas[best_idx]
-        best_stddev = stddevs[best_idx]
+                # Apply extinction correction
+                test_mags_ext = extinctionCorrectionTrueToApparent(
+                    test_mags.tolist(), list(catalog_ra), list(catalog_dec),
+                    jd, self.platepar)
 
-        # Compute the full photometry fit with the best BP:RP ratio (flux-weighted)
-        best_flux = best_alpha * np.power(10, -0.4 * bp_mags) \
-                  + (1 - best_alpha) * np.power(10, -0.4 * rp_mags)
-        best_mags = -2.5 * np.log10(best_flux)
+                try:
+                    _, stddev, _ = photometryFit(
+                        px_intens_list, radius_list, test_mags_ext,
+                        fixed_vignetting=fixed_vignetting,
+                        weights=weights, exclude_list=exclude_list)
+
+                    grid_results[(rg, rbp)] = stddev
+
+                    if stddev < best_stddev:
+                        best_stddev = stddev
+                        best_rg, best_rbp, best_rrp = rg, rbp, rrp
+                except Exception:
+                    pass
+
+        # Compute the full photometry fit with the best ratio
+        best_total_flux = best_rg * g_flux + best_rbp * bp_flux + best_rrp * rp_flux
+        best_mags = -2.5 * np.log10(np.maximum(best_total_flux, 1e-30))
         best_mags_ext = extinctionCorrectionTrueToApparent(
             best_mags.tolist(), list(catalog_ra), list(catalog_dec), jd, self.platepar)
         best_params, _, best_resids = photometryFit(
@@ -6148,18 +6171,18 @@ class PlateTool(QtWidgets.QMainWindow):
             current_params = (0, 0)
 
         # Format the config string
-        config_str = "0.00,0.00,0.00,0.00,0.00,{:.2f},{:.2f}".format(
-            best_alpha, 1 - best_alpha)
+        config_str = "0.00,0.00,0.00,0.00,{:.2f},{:.2f},{:.2f}".format(
+            best_rg, best_rbp, best_rrp)
 
         # Print results
         print()
         print("=" * 60)
-        print("BP:RP BAND RATIO FIT")
+        print("G:BP:RP BAND RATIO FIT")
         print("=" * 60)
         print("  Stars used: {:d}".format(
             sum(1 for e in exclude_list if not e)))
-        print("  Best ratio: {:.2f} BP + {:.2f} RP".format(
-            best_alpha, 1 - best_alpha))
+        print("  Best ratio: {:.2f} G + {:.2f} BP + {:.2f} RP".format(
+            best_rg, best_rbp, best_rrp))
         print("  Fit stddev: {:.3f} mag".format(best_stddev))
         print("  Current:    {:.3f} mag ({:s})".format(
             current_stddev, self.mag_band_string))
@@ -6168,23 +6191,86 @@ class PlateTool(QtWidgets.QMainWindow):
         print("  star_catalog_band_ratios: {:s}".format(config_str))
         print()
 
-        # Diagnostic: show stars with largest G vs BP:RP magnitude difference
+        # Diagnostic: show stars with largest magnitude difference
         mag_diff = np.abs(best_mags - current_mags)
         sort_idx = np.argsort(mag_diff)[::-1]
         n_excluded = sum(exclude_list)
         print("  Excluded: {:d} (saturated/variable)".format(n_excluded))
         print()
-        print("  Top 10 stars by |G - BP:RP| magnitude difference:")
-        print("  {:>6s}  {:>6s}  {:>6s}  {:>6s}  {:>7s}  {:>5s}".format(
-            "G", "BP", "RP", "BP:RP", "diff", "excl"))
+        print("  Top 10 stars by |current - best| magnitude difference:")
+        print("  {:>6s}  {:>6s}  {:>6s}  {:>6s}  {:>6s}  {:>7s}  {:>5s}".format(
+            "curr", "G", "BP", "RP", "best", "diff", "excl"))
         for i in sort_idx[:10]:
             excl_str = "  *" if exclude_list[i] else ""
-            print("  {:6.2f}  {:6.2f}  {:6.2f}  {:6.2f}  {:+7.3f}{:s}".format(
-                current_mags[i], bp_mags[i], rp_mags[i], best_mags[i],
+            print("  {:6.2f}  {:6.2f}  {:6.2f}  {:6.2f}  {:6.2f}  {:+7.3f}{:s}".format(
+                current_mags[i], g_mags[i], bp_mags[i], rp_mags[i], best_mags[i],
                 best_mags[i] - current_mags[i], excl_str))
 
         print("=" * 60)
         print()
+
+        # Vignetting vs extinction interaction: 2D sweep to show how the optimal
+        # extinction scale changes as a function of fixed vignetting coefficient.
+        # This reveals the degeneracy between the two corrections.
+        current_ext_scale = self.platepar.extinction_scale
+        if abs(current_ext_scale) > 0.001:
+            # Extract scale-independent per-star extinction delta
+            ext_delta_arr = np.array(best_mags_ext) - best_mags
+            raw_ext_delta = ext_delta_arr / current_ext_scale
+
+            # Determine vignetting range: 0 to the free-fit value
+            vig_max = best_params[1]  # vignetting from the free fit
+            if vig_max < 0.0001:
+                vig_max = 0.001  # minimum range if free fit gives ~0
+            vig_steps = np.linspace(0, vig_max * 1.2, 15)
+            ext_scales = np.arange(0, 2.05, 0.05)
+
+            print("VIGNETTING vs EXTINCTION INTERACTION")
+            print("=" * 60)
+            print("  Extinction range: {:.2f} - {:.2f} mag".format(
+                np.min(raw_ext_delta), np.max(raw_ext_delta)))
+            print()
+            print("  {:>10s}  {:>10s}  {:>10s}".format(
+                "vig", "best_ext", "stddev"))
+            print("  " + "-" * 34)
+
+            best_overall_stddev = np.inf
+            best_overall_vig = 0
+            best_overall_ext = 0
+
+            for vig_val in vig_steps:
+                best_ext_stddev = np.inf
+                best_ext_scale = 0
+
+                for test_scale in ext_scales:
+                    test_mags_local = (best_mags + test_scale * raw_ext_delta).tolist()
+                    try:
+                        _, stddev, _ = photometryFit(
+                            px_intens_list, radius_list, test_mags_local,
+                            fixed_vignetting=vig_val,
+                            weights=weights, exclude_list=exclude_list)
+                        if stddev < best_ext_stddev:
+                            best_ext_stddev = stddev
+                            best_ext_scale = test_scale
+                    except Exception:
+                        pass
+
+                marker = ""
+                if best_ext_stddev < best_overall_stddev:
+                    best_overall_stddev = best_ext_stddev
+                    best_overall_vig = vig_val
+                    best_overall_ext = best_ext_scale
+
+                print("  {:10.6f}  {:10.2f}  {:10.4f}".format(
+                    vig_val, best_ext_scale, best_ext_stddev))
+
+            print("  " + "-" * 34)
+            print("  Best: vig={:.6f}, ext={:.2f}, stddev={:.4f}".format(
+                best_overall_vig, best_overall_ext, best_overall_stddev))
+            print("  Free fit:  vig={:.6f}, ext={:.2f}, stddev={:.4f}".format(
+                best_params[1], current_ext_scale, best_stddev))
+            print("=" * 60)
+            print()
 
         ### Comparison plot ###
         exclude_arr = np.array(exclude_list, dtype=bool)
@@ -6202,30 +6288,34 @@ class PlateTool(QtWidgets.QMainWindow):
         best_mags_ext_arr = np.array(best_mags_ext)
 
         fig = plt.figure(figsize=(14, 5))
-        gs = gridspec.GridSpec(1, 3, width_ratios=[1, 1, 1])
+        gs_plot = gridspec.GridSpec(1, 3, width_ratios=[1, 1, 1])
 
-        # --- Left panel: stddev vs alpha curve ---
-        ax_curve = fig.add_subplot(gs[0])
-        ax_curve.plot(alphas, stddevs, 'b-', linewidth=1.5)
-        ax_curve.axvline(best_alpha, color='r', linestyle='--', alpha=0.7,
-                         label="Best: {:.2f} BP + {:.2f} RP ({:.3f})".format(
-                             best_alpha, 1 - best_alpha, best_stddev))
-        ax_curve.axhline(current_stddev, color='gray', linestyle=':', alpha=0.7,
-                         label="Current ({:s}): {:.3f}".format(self.mag_band_string, current_stddev))
-        ax_curve.scatter([best_alpha], [best_stddev], color='r', s=60, zorder=5)
-        ax_curve.set_xlabel("BP fraction (alpha)")
-        ax_curve.set_ylabel("Photometry stddev (mag)")
-        ax_curve.set_title("BP:RP Ratio Sweep")
-        ax_curve.legend(fontsize=8)
-        ax_curve.grid(True, alpha=0.3)
+        # --- Left panel: ternary heatmap as 2D G vs BP (RP = 1-G-BP) ---
+        ax_heat = fig.add_subplot(gs_plot[0])
+        n_grid = len(grid_vals)
+        heatmap = np.full((n_grid, n_grid), np.nan)
+        for (rg, rbp), stddev in grid_results.items():
+            ig = int(round(rg / step))
+            ibp = int(round(rbp / step))
+            if 0 <= ig < n_grid and 0 <= ibp < n_grid:
+                heatmap[ibp, ig] = stddev
+
+        im = ax_heat.imshow(heatmap, origin='lower', aspect='auto',
+                            extent=[0, 1, 0, 1], cmap='viridis_r')
+        ax_heat.plot(best_rg, best_rbp, 'r*', markersize=15, zorder=5,
+                     label="Best: {:.2f}G+{:.2f}BP+{:.2f}RP\n$\\sigma$={:.3f}".format(
+                         best_rg, best_rbp, best_rrp, best_stddev))
+        ax_heat.set_xlabel("G fraction")
+        ax_heat.set_ylabel("BP fraction")
+        ax_heat.set_title("G:BP:RP Stddev Map (RP = 1-G-BP)")
+        ax_heat.legend(fontsize=7, loc='upper right')
+        fig.colorbar(im, ax=ax_heat, label='stddev (mag)', shrink=0.8)
 
         # Compute shared axis limits for both photometry panels
-        # X-axis: vignetting-corrected uncalibrated magnitude (same instrument data)
         x_cur = -2.5 * lsp_corr_current
         x_best = -2.5 * lsp_corr_best
         x_min = min(np.min(x_cur), np.min(x_best)) - 1
         x_max = max(np.max(x_cur), np.max(x_best)) + 1
-        # Y-axis: catalog magnitudes from both fits
         y_min = min(np.min(current_mags_ext_arr), np.min(best_mags_ext_arr)) - 1
         y_max = max(np.max(current_mags_ext_arr), np.max(best_mags_ext_arr)) + 1
 
@@ -6268,18 +6358,19 @@ class PlateTool(QtWidgets.QMainWindow):
             ax.grid(True, alpha=0.3)
 
         # --- Center panel: current band ratios ---
-        ax_cur = fig.add_subplot(gs[1])
+        ax_cur = fig.add_subplot(gs_plot[1])
         plot_photom_panel(ax_cur, current_mags_ext_arr, lsp_raw, lsp_corr_current,
                           current_params,
                           "Current: $\\sigma$ = {:.3f} mag".format(current_stddev),
                           "Catalog mag ({:s})".format(self.mag_band_string))
 
-        # --- Right panel: best BP:RP ---
-        ax_best = fig.add_subplot(gs[2])
+        # --- Right panel: best G:BP:RP ---
+        ax_best = fig.add_subplot(gs_plot[2])
         plot_photom_panel(ax_best, best_mags_ext_arr, lsp_raw, lsp_corr_best,
                           best_params,
-                          "Best BP:RP: $\\sigma$ = {:.3f} mag".format(best_stddev),
-                          "Catalog mag ({:.2f} BP + {:.2f} RP)".format(best_alpha, 1 - best_alpha))
+                          "Best: $\\sigma$ = {:.3f} mag".format(best_stddev),
+                          "Catalog mag ({:.0f}G+{:.0f}BP+{:.0f}RP)".format(
+                              best_rg*100, best_rbp*100, best_rrp*100))
 
         fig.suptitle("star_catalog_band_ratios: {:s}".format(config_str), fontsize=10, fontweight='bold')
         fig.tight_layout()
@@ -11077,7 +11168,7 @@ class PlateTool(QtWidgets.QMainWindow):
             lim_mag=lim_mag,
             mag_band_ratios=self.config.star_catalog_band_ratios,
             additional_fields=['spectraltype_esphs', 'preferred_name', 'common_name', 'bayer_name', 'Simbad_OType',
-                              'phot_bp_mean_mag', 'phot_rp_mean_mag'])
+                              'phot_g_mean_mag', 'phot_bp_mean_mag', 'phot_rp_mean_mag'])
 
         if len(catalog_results) == 4:
             self.catalog_stars, self.mag_band_string, self.config.star_catalog_band_ratios, extras = catalog_results
@@ -11134,7 +11225,11 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             self.catalog_stars_simbad_otypes = None
 
-        # Extract individual BP/RP magnitudes (for band ratio fitting)
+        # Extract individual G/BP/RP magnitudes (for band ratio fitting)
+        if 'phot_g_mean_mag' in extras:
+            self.catalog_stars_g = extras['phot_g_mean_mag'].astype(np.float64)
+        else:
+            self.catalog_stars_g = None
         if 'phot_bp_mean_mag' in extras:
             self.catalog_stars_bp = extras['phot_bp_mean_mag'].astype(np.float64)
         else:
