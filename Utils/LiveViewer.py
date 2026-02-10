@@ -4,7 +4,7 @@
 
 from __future__ import print_function, division, absolute_import
 
-
+import fnmatch
 import os
 import time
 import platform
@@ -171,21 +171,28 @@ class LiveViewer(multiprocessing.Process):
 
                 first_run = False
 
-    def monitorFramesDir(self):
+    def monitorFramesDirAndSlideshow(self):
         """ Monitor the given directory and show latest jpg files on the screen. """
 
         # Create the time point of the most recent expected frames file
 
         frame_interval = self.config.frame_save_aligned_interval
+        cc_w_handle = "Continuous Capture"
+        ss_w_handle = "Slideshow"
+        cv2.namedWindow(cc_w_handle)
+        cv2.namedWindow(ss_w_handle)
 
         previous_file = None
-        delay_count = 3
+
+        slideshow_index = 0
+
+        ff_file_list = []
         while not self.exit.is_set():
+
+            # Get the appropriate continuous capture file
             dt_now = datetime.datetime.now(tz=datetime.timezone.utc)
-            # Uncomment for testing, makes image changes easier to spot
-            # dt_now = dt_now - datetime.timedelta(hours = 12, minutes = random.randint(0,60))
             dt_midnight = dt_now.replace(hour=0, minute=0, second=0, microsecond=0)
-            seconds_since_midnight = (dt_now - dt_midnight).total_seconds() - 120
+            seconds_since_midnight = (dt_now - dt_midnight).total_seconds() - 240
             seconds_at_time_interval = seconds_since_midnight - (
                                             seconds_since_midnight % frame_interval)
             _dt = dt_midnight + datetime.timedelta(seconds=seconds_at_time_interval)
@@ -202,27 +209,48 @@ class LiveViewer(multiprocessing.Process):
                 time_deviation_list.append(abs((file_time_object - _dt).total_seconds()))
             min_deviation = min(time_deviation_list)
             min_deviation_index = time_deviation_list.index(min_deviation)
-            file_to_show = os.path.join(target_dir, latest_file_list[min_deviation_index])
+            cc_file_to_show = os.path.join(target_dir, latest_file_list[min_deviation_index])
+
+            # Get a captured file
+
+            if slideshow_index == 0:
+                ff_file_list = []
+                for root, dirs, files in os.walk(os.path.join(self.config.data_dir, self.config.archived_dir)):
+                    for ff_file in fnmatch.filter(files, f"FF_{self.config.stationID.upper()}_*_*_*_*.fits"):
+                        file_date, file_time = ff_file.split("_")[2], ff_file.split("_")[3]
+                        file_time_object = datetime.datetime.strptime(f"{file_date}_{file_time}", "%Y%m%d_%H%M%S").replace(
+                            tzinfo=datetime.timezone.utc)
+                        if (dt_now - file_time_object).total_seconds() < 48 * 60 * 60:
+                            ff_file_list.append(os.path.join(root, ff_file))
+
+            ff_file_list.sort()
+            if slideshow_index < len(ff_file_list):
+                ff_file_to_show = ff_file_list[slideshow_index]
+                slideshow_index += 1
+                img = readFF(os.path.dirname(ff_file_to_show), os.path.basename(ff_file_to_show), verbose=False).maxpixel
+                self.updateImage(img, ff_file_to_show, frame_interval, ss_w_handle)
+            else:
+                slideshow_index = 0
 
 
-            if os.path.exists(file_to_show):
-                if os.path.isfile(file_to_show):
+            if os.path.exists(cc_file_to_show):
+                if os.path.isfile(cc_file_to_show):
                     # Check file is not still being written
                     _size = None
-                    size = os.path.getsize(file_to_show)
+                    size = os.path.getsize(cc_file_to_show)
                     while _size != size:
                         _size = size
                         time.sleep(1)
-                        size = os.path.getsize(file_to_show)
+                        size = os.path.getsize(cc_file_to_show)
                     if previous_file is None:
-                        if file_to_show != previous_file:
-                            img = np.array(Image.open(file_to_show))
-                            self.updateImage(img, file_to_show, self.slideshow_pause, self.banner_text)
-                    elif previous_file != file_to_show:
-                        img = np.array(Image.open(file_to_show))
-                        self.updateImage(img, file_to_show, self.slideshow_pause, self.banner_text)
-                    previous_file = file_to_show
-            time.sleep(frame_interval / 2)
+                        if cc_file_to_show != previous_file:
+                            img = np.array(Image.open(cc_file_to_show))
+                            self.updateImage(img, cc_file_to_show, frame_interval, cc_w_handle)
+                    elif previous_file != cc_file_to_show:
+                        img = np.array(Image.open(cc_file_to_show))
+                        self.updateImage(img, cc_file_to_show, frame_interval, cc_w_handle)
+                    previous_file = cc_file_to_show
+
 
     def monitorDir(self):
         """ Monitor the given directory and show new FF files on the screen. """
@@ -333,7 +361,7 @@ class LiveViewer(multiprocessing.Process):
 
         if self.config.continuous_capture and os.path.isdir(frames_dir_full_path):
             # Work with frames directory
-            self.monitorFramesDir()
+            self.monitorFramesDirAndSlideshow()
 
         else:
 
