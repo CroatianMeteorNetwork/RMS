@@ -174,7 +174,7 @@ class LiveViewer(multiprocessing.Process):
                 first_run = False
 
     def monitorFramesDirAndSlideshow(self):
-        """ Monitor the given directory and show latest jpg files on the screen. """
+        """ Show the latest frames files, and display a slideshow last 48 hours of detections. """
 
 
 
