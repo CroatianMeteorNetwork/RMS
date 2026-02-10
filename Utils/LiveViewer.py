@@ -228,6 +228,7 @@ class LiveViewer(multiprocessing.Process):
                 ff_file_to_show = ff_file_list[slideshow_index]
                 slideshow_index += 1
                 img = readFF(os.path.dirname(ff_file_to_show), os.path.basename(ff_file_to_show), verbose=False).maxpixel
+                img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
                 self.updateImage(img, ff_file_to_show, frame_interval, ss_w_handle)
             else:
                 slideshow_index = 0
@@ -245,9 +246,11 @@ class LiveViewer(multiprocessing.Process):
                     if previous_file is None:
                         if cc_file_to_show != previous_file:
                             img = np.array(Image.open(cc_file_to_show))
+                            img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
                             self.updateImage(img, cc_file_to_show, frame_interval, cc_w_handle)
                     elif previous_file != cc_file_to_show:
                         img = np.array(Image.open(cc_file_to_show))
+                        img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
                         self.updateImage(img, cc_file_to_show, frame_interval, cc_w_handle)
                     previous_file = cc_file_to_show
 
