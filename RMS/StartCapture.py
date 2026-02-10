@@ -1340,10 +1340,12 @@ if __name__ == "__main__":
                 # This may happen if the system crashed during processing.
                 processIncompleteCaptures(config, upload_manager)
 
+        log.info(f"About to enter code for slideshow, start_time is {start_time}")
 
         # Wait to start capturing and initialize last night's slideshow
         if not isinstance(start_time, bool):
 
+            log.info("Starting slideshow in day mode")
             # Initialize the slideshow of last night's detections
             if config.slideshow_enable:
 
