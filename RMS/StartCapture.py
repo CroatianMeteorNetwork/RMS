@@ -1212,7 +1212,11 @@ if __name__ == "__main__":
 
     # Automatic running and stopping the capture at sunrise and sunset
     ran_once = False
+
+    # Init slideshow_view
     slideshow_view = None
+
+    log.info("Entering main loop")
     while True:
 
         if config.continuous_capture:
@@ -1341,48 +1345,52 @@ if __name__ == "__main__":
                 processIncompleteCaptures(config, upload_manager)
 
         log.info(f"About to enter code for slideshow, start_time is {start_time}")
+        log.info(f"About to enter code for slideshow, continuous_capture is {config.continuous_capture}")
+        log.info(f"slideshow_enable is {config.slideshow_enable}")
+
+        # Initialize the slideshow of last night's detections
+        if config.slideshow_enable:
+
+            # Make a list of all archived directories previously generated
+            archive_dir_list = []
+            for archive_dir_name in sorted(os.listdir(os.path.join(config.data_dir,
+                                                                   config.archived_dir))):
+
+                if archive_dir_name.startswith(config.stationID):
+                    if os.path.isdir(os.path.join(config.data_dir, config.archived_dir,
+                                                  archive_dir_name)):
+                        archive_dir_list.append(archive_dir_name)
+
+            # If there are any archived dirs, choose the last one
+            if archive_dir_list:
+
+                latest_night_archive_dir = os.path.join(config.data_dir, config.archived_dir,
+                                                        archive_dir_list[-1])
+
+                # Make sure that there are any FF files in the chosen archived dir
+                ffs_latest_night_archive = [ff_name for ff_name \
+                                            in os.listdir(latest_night_archive_dir) if validFFName(ff_name)]
+
+                if len(ffs_latest_night_archive):
+
+                    log.info("Starting a slideshow of {:d} detections from the previous night.".format(
+                        len(ffs_latest_night_archive)))
+
+                    # Start the slide show
+                    slideshow_view = LiveViewer(latest_night_archive_dir, config=config, slideshow=True, \
+                                                banner_text="Last night's detections")
+                    slideshow_view.start()
+
+                else:
+                    log.info("No detections from the previous night to show as a slideshow!")
 
         # Wait to start capturing and initialize last night's slideshow
+
+
+
         if not isinstance(start_time, bool):
+            # Start time will always be true in continuous_capture mode - this branch will not execute
 
-            log.info("Starting slideshow in day mode")
-            # Initialize the slideshow of last night's detections
-            if config.slideshow_enable:
-
-                # Make a list of all archived directories previously generated
-                archive_dir_list = []
-                for archive_dir_name in sorted(os.listdir(os.path.join(config.data_dir,
-                    config.archived_dir))):
-
-                    if archive_dir_name.startswith(config.stationID):
-                        if os.path.isdir(os.path.join(config.data_dir, config.archived_dir, \
-                            archive_dir_name)):
-
-                            archive_dir_list.append(archive_dir_name)
-
-
-
-                # If there are any archived dirs, choose the last one
-                if archive_dir_list:
-
-                    latest_night_archive_dir = os.path.join(config.data_dir, config.archived_dir, \
-                        archive_dir_list[-1])
-
-                    # Make sure that there are any FF files in the chosen archived dir
-                    ffs_latest_night_archive = [ff_name for ff_name \
-                        in os.listdir(latest_night_archive_dir) if validFFName(ff_name)]
-
-                    if len(ffs_latest_night_archive):
-
-                        log.info("Starting a slideshow of {:d} detections from the previous night.".format(len(ffs_latest_night_archive)))
-
-                        # Start the slide show
-                        slideshow_view = LiveViewer(latest_night_archive_dir, config=config, slideshow=True, \
-                            banner_text="Last night's detections")
-                        slideshow_view.start()
-
-                    else:
-                        log.info("No detections from the previous night to show as a slideshow!")
 
 
 

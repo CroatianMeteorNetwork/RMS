@@ -194,7 +194,7 @@ class LiveViewer(multiprocessing.Process):
             # Get the time now
             dt_now = datetime.datetime.now(tz=datetime.timezone.utc)
 
-            #### slideshow work start
+            #### Slideshow work start
 
             # Build a new slideshow only after iterating through all the previous slides, or on first iteration
             if slideshow_index == 0:
@@ -221,9 +221,9 @@ class LiveViewer(multiprocessing.Process):
                 # This will trigger rebuilding the slideshow on the next iteration
                 slideshow_index = 0
 
-            #### slideshow work end
+            #### Slideshow work end
 
-            #### continuous capture live image work start
+            #### Continuous capture live image work start
 
             # Compute target_dt, which is the datetime object of the target image
             # Pushing time back 240 seconds to cope with the delay in continuous capture
@@ -272,7 +272,7 @@ class LiveViewer(multiprocessing.Process):
                         self.updateImage(img, cc_file_to_show, max(frame_interval - 1, 1) , cc_w_handle)
                     _cc_file_to_show = cc_file_to_show
 
-            #### continuous capture live image work ene
+            #### Continuous capture live image work end
 
     def monitorDir(self):
         """ Monitor the given directory and show new FF files on the screen. """
