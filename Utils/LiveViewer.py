@@ -16,6 +16,8 @@ import numpy as np
 from PIL import Image
 from PIL import ImageFont
 from PIL import ImageDraw
+from requests.packages import target
+
 # tkinter import that works on both Python 2 and 3
 try:
     import tkinter
@@ -189,29 +191,31 @@ class LiveViewer(multiprocessing.Process):
         ff_file_list = []
         while not self.exit.is_set():
 
-            # Get the appropriate continuous capture file
+            # Get the time now
             dt_now = datetime.datetime.now(tz=datetime.timezone.utc)
-            dt_midnight = dt_now.replace(hour=0, minute=0, second=0, microsecond=0)
-            seconds_since_midnight = (dt_now - dt_midnight).total_seconds() - 240
-            seconds_at_time_interval = seconds_since_midnight - (
-                                            seconds_since_midnight % frame_interval)
-            _dt = dt_midnight + datetime.timedelta(seconds=seconds_at_time_interval)
+
+            # Compute target_dt, which is the datetime object of the target image
+            target_dt = dt_now - datetime.timedelta(seconds=240)
+
+            # Handle all the file paths
             frame_dir_root = os.path.join(self.config.data_dir, self.config.frame_dir)
-            l1_dir = str(_dt.year)
-            l2_dir = str(_dt.strftime("%Y%m%d-%j"))
-            l3_dir = str(_dt.strftime("%Y%m%d-%j_%H"))
+            l1_dir = str(target_dt.year)
+            l2_dir = str(target_dt.strftime("%Y%m%d-%j"))
+            l3_dir = str(target_dt.strftime("%Y%m%d-%j_%H"))
             target_dir = os.path.join(frame_dir_root, l1_dir, l2_dir, l3_dir)
             latest_file_list = sorted(os.listdir(target_dir))
+
+            # Find the image which is closest to the target time
             time_deviation_list = []
             for file_name in latest_file_list:
                 file_date, file_time = file_name.split("_")[1], file_name.split("_")[2]
                 file_time_object = datetime.datetime.strptime(f"{file_date}_{file_time}","%Y%m%d_%H%M%S").replace(tzinfo=datetime.timezone.utc)
-                time_deviation_list.append(abs((file_time_object - _dt).total_seconds()))
+                time_deviation_list.append(abs((file_time_object - target_dt).total_seconds()))
             min_deviation = min(time_deviation_list)
             min_deviation_index = time_deviation_list.index(min_deviation)
             cc_file_to_show = os.path.join(target_dir, latest_file_list[min_deviation_index])
 
-            # Build a new slideshow only after iterating through all the previous slides
+            # Build a new slideshow only after iterating through all the previous slides, or on first iteration
 
             if slideshow_index == 0:
                 ff_file_list = []
