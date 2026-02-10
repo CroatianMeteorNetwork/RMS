@@ -223,6 +223,7 @@ class LiveViewer(multiprocessing.Process):
                         self.updateImage(img, file_to_show, self.slideshow_pause, self.banner_text)
                     previous_file = file_to_show
             time.sleep(frame_interval / 2)
+
     def monitorDir(self):
         """ Monitor the given directory and show new FF files on the screen. """
 
