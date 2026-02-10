@@ -575,6 +575,29 @@ class Config:
         self.kht_binary_name = 'kht_module'
         self.kht_binary_extension = 'so'
 
+        # KHT Line finding parameters
+        # Minimum number of pixels required to form a valid cluster
+        self.kht_cluster_min_size = 9
+        
+        # Minimum width (spread) of the Gaussian kernel perpendicular to the line
+        self.kht_cluster_min_deviation = 2
+
+        # Discretization step size for the parameter space (angle)
+        self.kht_delta = 0.1
+
+        # Minimum peak height for a Gaussian kernel to be cast into the accumulator
+        self.kht_kernel_min_height = 0.004
+
+        # Number of standard deviations (sigma) used to define the extent of the Gaussian kernel
+        self.kht_n_sigmas = 1
+
+        # Morphological operations to prepare the image for KHT
+        # 1 - clean (Remove lonely pixels)
+        # 2 - bridge (Connect close pixels)
+        # 3 - close (Close surrounded pixels)
+        # 4 - thin (Thin all lines to 1px width)
+        self.kht_morph_ops = [1, 2, 3, 4, 1]
+
         # 3D line finding for meteor detection
         self.max_points_det = 600 # maximum number of points during 3D line search in faint meteor detection (used to minimize runtime)
         self.distance_threshold_det = 50**2 # maximum distance between the line and the point to be takes as a part of the same line
@@ -1555,6 +1578,25 @@ def parseMeteorDetection(config, parser):
 
     if parser.has_option(section, "line_min_dist"):
         config.line_min_dist = parser.getint(section, "line_min_dist")
+
+    if parser.has_option(section, "kht_cluster_min_size"):
+        config.kht_cluster_min_size = parser.getfloat(section, "kht_cluster_min_size")
+
+    if parser.has_option(section, "kht_cluster_min_deviation"):
+        config.kht_cluster_min_deviation = parser.getfloat(section, "kht_cluster_min_deviation")
+
+    if parser.has_option(section, "kht_delta"):
+        config.kht_delta = parser.getfloat(section, "kht_delta")
+
+    if parser.has_option(section, "kht_kernel_min_height"):
+        config.kht_kernel_min_height = parser.getfloat(section, "kht_kernel_min_height")
+
+    if parser.has_option(section, "kht_n_sigmas"):
+        config.kht_n_sigmas = parser.getfloat(section, "kht_n_sigmas")
+
+    if parser.has_option(section, "kht_morph_ops"):
+        ops_str = parser.get(section, "kht_morph_ops")
+        config.kht_morph_ops = [int(x.strip()) for x in ops_str.split(',')]
 
 
     # Parse the distance threshold

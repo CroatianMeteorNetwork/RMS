@@ -382,7 +382,8 @@ def checkWhiteRatio(img_thres, ff, max_white_ratio):
 
 
 def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_white_ratio, kht_lib_path, \
-    mask=None, flat_struct=None, dark=None, debug=False):
+    mask=None, flat_struct=None, dark=None, debug=False, kht_cluster_min_size=9, kht_cluster_min_deviation=2, \
+    kht_delta=0.1, kht_kernel_min_height=0.004, kht_n_sigmas=1, kht_morph_ops=[1, 2, 3, 4, 1]):
     """ Get (rho, phi) pairs for each meteor present on the image using KHT.
         
     Arguments:
@@ -518,8 +519,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             # 2 - bridge (Connect close pixels)
             # 3 - close (Close surrounded pixels)
             # 4 - thin (Thin all lines to 1px width)
-            # 1 - Remove lonely pixels
-        img_morph = morph.morphApply(img_thresh, [1, 2, 3, 4, 1])
+        img_morph = morph.morphApply(img_thresh, kht_morph_ops)
 
 
         # if debug:
@@ -536,9 +536,17 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         # Predefine the line output
         lines = np.empty((max_lines, 2), np.double)
         
+        # Parameter checking to ensure types are correct
+        # ctypes needs specific types
+        kht_cluster_min_size = int(kht_cluster_min_size)
+        kht_cluster_min_deviation = float(kht_cluster_min_deviation)
+        kht_delta = float(kht_delta)
+        kht_kernel_min_height = float(kht_kernel_min_height)
+        kht_n_sigmas = float(kht_n_sigmas)
+
         # Call the KHT line finding
         # Parameters: cluster_min_size (px), cluster_min_deviation, delta, kernel_min_height, n_sigmas
-        length = kht.kht_wrapper(lines, img_flatten, w, h, max_lines, 9, 2, 0.1, 0.004, 1)
+        length = kht.kht_wrapper(lines, img_flatten, w, h, max_lines, kht_cluster_min_size, kht_cluster_min_deviation, kht_delta, kht_kernel_min_height, kht_n_sigmas)
         
         # Cut the line array to the number of found lines
         lines = lines[:length]
@@ -1194,9 +1202,13 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
 
     # Get lines on the image
+    # Get lines on the image
     line_list = getLines(img_handle, config.k1_det, config.j1_det, config.time_slide, config.time_window_size, 
         config.max_lines_det, config.max_white_ratio, config.kht_lib_path, mask=mask, \
-        flat_struct=flat_struct, dark=dark, debug=debug)
+        flat_struct=flat_struct, dark=dark, debug=debug, kht_cluster_min_size=config.kht_cluster_min_size, \
+        kht_cluster_min_deviation=config.kht_cluster_min_deviation, kht_delta=config.kht_delta, \
+        kht_kernel_min_height=config.kht_kernel_min_height, kht_n_sigmas=config.kht_n_sigmas, \
+        kht_morph_ops=config.kht_morph_ops)
 
     # logDebug('List of lines:', line_list)
 
