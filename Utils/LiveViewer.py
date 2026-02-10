@@ -16,7 +16,6 @@ import numpy as np
 from PIL import Image
 from PIL import ImageFont
 from PIL import ImageDraw
-from requests.packages import target
 
 # tkinter import that works on both Python 2 and 3
 try:
@@ -195,26 +194,7 @@ class LiveViewer(multiprocessing.Process):
             # Get the time now
             dt_now = datetime.datetime.now(tz=datetime.timezone.utc)
 
-            # Compute target_dt, which is the datetime object of the target image
-            target_dt = dt_now - datetime.timedelta(seconds=240)
-
-            # Handle all the file paths
-            frame_dir_root = os.path.join(self.config.data_dir, self.config.frame_dir)
-            l1_dir = str(target_dt.year)
-            l2_dir = str(target_dt.strftime("%Y%m%d-%j"))
-            l3_dir = str(target_dt.strftime("%Y%m%d-%j_%H"))
-            target_dir = os.path.join(frame_dir_root, l1_dir, l2_dir, l3_dir)
-            latest_file_list = sorted(os.listdir(target_dir))
-
-            # Find the image which is closest to the target time
-            time_deviation_list = []
-            for file_name in latest_file_list:
-                file_date, file_time = file_name.split("_")[1], file_name.split("_")[2]
-                file_time_object = datetime.datetime.strptime(f"{file_date}_{file_time}","%Y%m%d_%H%M%S").replace(tzinfo=datetime.timezone.utc)
-                time_deviation_list.append(abs((file_time_object - target_dt).total_seconds()))
-            min_deviation = min(time_deviation_list)
-            min_deviation_index = time_deviation_list.index(min_deviation)
-            cc_file_to_show = os.path.join(target_dir, latest_file_list[min_deviation_index])
+            #### slideshow work start
 
             # Build a new slideshow only after iterating through all the previous slides, or on first iteration
             if slideshow_index == 0:
@@ -241,6 +221,31 @@ class LiveViewer(multiprocessing.Process):
                 # This will trigger rebuilding the slideshow on the next iteration
                 slideshow_index = 0
 
+            #### slideshow work end
+
+            #### continuous capture live image work start
+
+            # Compute target_dt, which is the datetime object of the target image
+            # Pushing time back 240 seconds to cope with the delay in continuous capture
+            target_dt = dt_now - datetime.timedelta(seconds=240)
+
+            # Handle all the file paths
+            frame_dir_root = os.path.join(self.config.data_dir, self.config.frame_dir)
+            l1_dir = str(target_dt.year)
+            l2_dir = str(target_dt.strftime("%Y%m%d-%j"))
+            l3_dir = str(target_dt.strftime("%Y%m%d-%j_%H"))
+            target_dir = os.path.join(frame_dir_root, l1_dir, l2_dir, l3_dir)
+            latest_file_list = sorted(os.listdir(target_dir))
+
+            # Find the image which is closest to the target time
+            time_deviation_list = []
+            for file_name in latest_file_list:
+                file_date, file_time = file_name.split("_")[1], file_name.split("_")[2]
+                file_time_object = datetime.datetime.strptime(f"{file_date}_{file_time}","%Y%m%d_%H%M%S").replace(tzinfo=datetime.timezone.utc)
+                time_deviation_list.append(abs((file_time_object - target_dt).total_seconds()))
+            min_deviation = min(time_deviation_list)
+            min_deviation_index = time_deviation_list.index(min_deviation)
+            cc_file_to_show = os.path.join(target_dir, latest_file_list[min_deviation_index])
 
             if os.path.exists(cc_file_to_show):
                 if os.path.isfile(cc_file_to_show):
@@ -267,6 +272,7 @@ class LiveViewer(multiprocessing.Process):
                         self.updateImage(img, cc_file_to_show, max(frame_interval - 1, 1) , cc_w_handle)
                     _cc_file_to_show = cc_file_to_show
 
+            #### continuous capture live image work ene
 
     def monitorDir(self):
         """ Monitor the given directory and show new FF files on the screen. """
