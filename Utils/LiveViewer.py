@@ -178,7 +178,7 @@ class LiveViewer(multiprocessing.Process):
 
         frame_interval = self.config.frame_save_aligned_interval
         cc_w_handle = "Continuous Capture"
-        ss_w_handle = "Slideshow"
+        ss_w_handle = "Slideshow of detections from past 48 hours"
         cv2.namedWindow(cc_w_handle)
         cv2.namedWindow(ss_w_handle)
 
@@ -211,7 +211,7 @@ class LiveViewer(multiprocessing.Process):
             min_deviation_index = time_deviation_list.index(min_deviation)
             cc_file_to_show = os.path.join(target_dir, latest_file_list[min_deviation_index])
 
-            # Get a captured file
+            # Build a new slideshow only after iterating through all the previous slides
 
             if slideshow_index == 0:
                 ff_file_list = []
@@ -222,8 +222,9 @@ class LiveViewer(multiprocessing.Process):
                             tzinfo=datetime.timezone.utc)
                         if (dt_now - file_time_object).total_seconds() < 48 * 60 * 60:
                             ff_file_list.append(os.path.join(root, ff_file))
+                ff_file_list.sort()
 
-            ff_file_list.sort()
+            # This will guard against iterating over an empty list
             if slideshow_index < len(ff_file_list):
                 ff_file_to_show = ff_file_list[slideshow_index]
                 slideshow_index += 1
@@ -231,6 +232,7 @@ class LiveViewer(multiprocessing.Process):
                 img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
                 self.updateImage(img, ff_file_to_show, frame_interval, ss_w_handle)
             else:
+                # This will trigger rebuilding the slideshow on the next iteration
                 slideshow_index = 0
 
 
