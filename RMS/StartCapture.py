@@ -222,7 +222,7 @@ def handleSlideshow(config, slideshow_view):
     # restart slideshow if it is required
     log.info(f"About to enter code for slideshow, start_time is {start_time}")
     log.info(f"continuous_capture is {config.continuous_capture}")
-    log.info(f"live_maxpixel_enable is {config.continuous_capture}")
+    log.info(f"live_maxpixel_enable is {config.live_maxpixel_enable}")
     log.info(f"slideshow_enable is {config.slideshow_enable}")
     # Initialize the slideshow of last night's detections
     if config.slideshow_enable or config.live_maxpixel_enable:
