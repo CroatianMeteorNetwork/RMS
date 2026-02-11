@@ -224,7 +224,7 @@ class LiveViewer(multiprocessing.Process):
                     ff_file_to_show = ff_file_list[slideshow_index]
                     slideshow_index += 1
                     image_annotation = f"{os.path.basename(ff_file_to_show)} {slideshow_index}/{len(ff_file_list)}"
-                    print(ff_file_to_show)
+
                     # Now plot the detection.maxpixel
                     img = readFF(os.path.dirname(ff_file_to_show),
                                  os.path.basename(ff_file_to_show),
