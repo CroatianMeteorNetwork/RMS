@@ -4,17 +4,19 @@
 
 from __future__ import print_function, division, absolute_import
 
-
+import fnmatch
 import os
 import time
 import platform
 import multiprocessing
 
 import cv2
+import dateutil
 import numpy as np
 from PIL import Image
 from PIL import ImageFont
 from PIL import ImageDraw
+
 # tkinter import that works on both Python 2 and 3
 try:
     import tkinter
@@ -25,6 +27,10 @@ from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName
 from RMS.Routines.Image import loadImage
 
+import datetime
+import RMS.ConfigReader as cr
+import glob
+import random
 
 # Load the default font
 PIL_FONT = ImageFont.load_default()
@@ -58,7 +64,7 @@ def drawText(img_arr, img_text):
 
 
 class LiveViewer(multiprocessing.Process):
-    def __init__(self, dir_path, image=False, slideshow=False, slideshow_pause=2.0, banner_text="", \
+    def __init__(self, dir_path=None, config=None, image=False, capturing=False, slideshow_pause=2.0, banner_text="", \
         update_interval=5.0):
         """ Monitors a given directory for FF files, and shows them on the screen as new ones get created. It can
             also do slideshows. 
@@ -68,6 +74,7 @@ class LiveViewer(multiprocessing.Process):
             
         Keyword arguments:
             image: [bool] Monitor a single image file and show on the screen as it updates.
+            config: [config] If this is passed, and continuous_capture is True, monitor and display frames files
             slideshow: [bool] Start a slide show instead of monitoring the folder for new files.
             slideshow_pause: [float] Number of seconds between slideshow updated. 2 by default.
             banner_text: [str] Banner text that will be shown on the screen.
@@ -79,7 +86,6 @@ class LiveViewer(multiprocessing.Process):
         self.dir_path = dir_path
 
         self.image = image
-        self.slideshow = slideshow
         self.slideshow_pause = slideshow_pause
         self.banner_text = banner_text
         self.update_interval = update_interval
@@ -87,6 +93,8 @@ class LiveViewer(multiprocessing.Process):
         self.exit = multiprocessing.Event()
 
         self.first_image = True
+        self.config = config
+        self.capturing = capturing
 
 
 
@@ -165,15 +173,126 @@ class LiveViewer(multiprocessing.Process):
 
                 first_run = False
 
+    def monitorFramesDirAndSlideshow(self):
+        """ Show the latest frames files, and display a slideshow last 48 hours of detections. """
 
+        frame_interval = self.config.frame_save_aligned_interval
+
+
+        # Initialise two windows
+
+
+        if self.config.live_maxpixel_enable:
+            cc_w_handle = "Continuous Capture"
+            cv2.namedWindow(cc_w_handle)
+        if self.config.slideshow_enable:
+            ss_w_handle = "Slideshow of detections from past 48 hours"
+            cv2.namedWindow(ss_w_handle)
+
+        _cc_file_to_show, slideshow_index = None, 0
+
+        ff_file_list = []
+        while not self.exit.is_set():
+
+            # Get the time now
+            dt_now = datetime.datetime.now(tz=datetime.timezone.utc)
+
+            if self.config.slideshow_enable:
+                #### Slideshow work start
+
+                # Build a new slideshow only after iterating through all the previous slides, or on first iteration
+                if slideshow_index == 0:
+                    ff_file_list = []
+                    for root, dirs, files in os.walk(os.path.join(self.config.data_dir, self.config.archived_dir)):
+                        for ff_file in fnmatch.filter(files, f"FF_{self.config.stationID.upper()}_*_*_*_*.fits"):
+                            file_date, file_time = ff_file.split("_")[2], ff_file.split("_")[3]
+                            file_time_object = datetime.datetime.strptime(f"{file_date}_{file_time}", "%Y%m%d_%H%M%S").replace(
+                                tzinfo=datetime.timezone.utc)
+                            if (dt_now - file_time_object).total_seconds() < 48 * 60 * 60:
+                                ff_file_list.append(os.path.join(root, ff_file))
+                    ff_file_list.sort()
+
+                # This will guard against iterating over an empty list
+                if slideshow_index < len(ff_file_list):
+                    ff_file_to_show = ff_file_list[slideshow_index]
+                    slideshow_index += 1
+
+                    # Now plot the detection.maxpixel
+                    img = readFF(os.path.dirname(ff_file_to_show), os.path.basename(ff_file_to_show), verbose=False).maxpixel
+                    if self.config.live_maxpixel_enable:
+                        img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
+                    self.updateImage(img, ff_file_to_show, 1, ss_w_handle)
+                else:
+                    # This will trigger rebuilding the slideshow on the next iteration
+                    slideshow_index = 0
+
+                #### Slideshow work end
+
+            if self.config.live_maxpixel_enable:
+
+                #### Continuous capture live image work start
+
+                # Compute target_dt, which is the datetime object of the target image
+                # Pushing time back 240 seconds to cope with the delay in continuous capture
+                target_dt = dt_now - datetime.timedelta(seconds=240)
+
+                # Handle all the file paths
+                frame_dir_root = os.path.join(self.config.data_dir, self.config.frame_dir)
+                l1_dir = str(target_dt.year)
+                l2_dir = str(target_dt.strftime("%Y%m%d-%j"))
+                l3_dir = str(target_dt.strftime("%Y%m%d-%j_%H"))
+                target_dir = os.path.join(frame_dir_root, l1_dir, l2_dir, l3_dir)
+
+                if not os.path.exists(target_dir):
+                    time.sleep(5)
+                    continue
+
+                latest_file_list = sorted(os.listdir(target_dir))
+
+                # Find the image which is closest to the target time
+                time_deviation_list = []
+                for file_name in latest_file_list:
+                    file_date, file_time = file_name.split("_")[1], file_name.split("_")[2]
+                    file_time_object = datetime.datetime.strptime(f"{file_date}_{file_time}","%Y%m%d_%H%M%S").replace(tzinfo=datetime.timezone.utc)
+                    time_deviation_list.append(abs((file_time_object - target_dt).total_seconds()))
+                min_deviation = min(time_deviation_list)
+                min_deviation_index = time_deviation_list.index(min_deviation)
+                cc_file_to_show = os.path.join(target_dir, latest_file_list[min_deviation_index])
+
+                if os.path.exists(cc_file_to_show):
+                    if os.path.isfile(cc_file_to_show):
+
+                        # Check file is not still being written
+                        _size = None
+                        size = os.path.getsize(cc_file_to_show)
+                        while _size != size:
+                            _size = size
+                            time.sleep(1)
+                            size = os.path.getsize(cc_file_to_show)
+
+                        # Show the file if it is the first iteration
+                        if _cc_file_to_show is None:
+                            if cc_file_to_show != _cc_file_to_show:
+                                img = np.array(Image.open(cc_file_to_show))
+                                if self.config.slideshow_enable:
+                                    img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
+                                self.updateImage(img, cc_file_to_show, max(frame_interval - 1 , 1), cc_w_handle)
+
+                        # Or if it is different from the last iteration
+                        elif _cc_file_to_show != cc_file_to_show:
+                            img = np.array(Image.open(cc_file_to_show))
+                            if self.config.slideshow_enable:
+                                img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
+                            self.updateImage(img, cc_file_to_show, max(frame_interval - 1, 1) , cc_w_handle)
+                        _cc_file_to_show = cc_file_to_show
+
+                #### Continuous capture live image work end
 
     def monitorDir(self):
         """ Monitor the given directory and show new FF files on the screen. """
 
         # Create a list of FF files in the given directory
         ff_list = []
-
-
         showing_empty = False
 
         # Repeat until the process is killed from the outside
@@ -273,21 +392,42 @@ class LiveViewer(multiprocessing.Process):
             print('Setting niceness failed with message:\n' + repr(e))
 
 
-        # Show image if a file is given
-        if os.path.isfile(self.dir_path) or self.image:
-            self.showImage()
 
-        elif os.path.isdir(self.dir_path):
+        if self.config.continuous_capture:
+            # Work with frames directory
 
-            if self.slideshow:
-                self.startSlideshow()
-
-            else:
-                self.monitorDir()
+            self.monitorFramesDirAndSlideshow()
 
         else:
-            self.exit.set()
-            return None
+
+            if self.capturing and self.config.live_maxpixel_enable:
+                captured_dir_path = os.path.join(self.config.data_dir, self.config.captured_dir)
+                if os.path.exists(captured_dir_path):
+                    if os.path.isdir(captured_dir_path):
+                        captured_dir_list = os.listdir(captured_dir_path)
+                        if len(captured_dir_list):
+                            latest_captured_dir = sorted(fnmatch.filter(captured_dir_list, f"{self.config.stationID.upper()}_*_*_*"))[-1]
+                            self.dir_path = os.path.join(captured_dir_path, latest_captured_dir)
+                            if os.path.exists(self.dir_path):
+                                if os.path.isdir(self.dir_path):
+                                    self.monitorDir()
+
+
+            elif not self.capturing and self.config.slideshow_enable:
+                archived_dir_path = os.path.join(self.config.data_dir, self.config.archived_dir)
+                if os.path.exists(archived_dir_path):
+                    if os.path.isdir(archived_dir_path):
+                        archived_dir_list = [d for d in os.listdir(archived_dir_path) if os.path.isdir(os.path.join(archived_dir_path,d))]
+                        if len(archived_dir_list):
+                            latest_archive_dir = sorted(fnmatch.filter(archived_dir_list, f"{self.config.stationID.upper()}_*_*_*"))[-1]
+                            self.dir_path = os.path.join(archived_dir_path, latest_archive_dir)
+                            if os.path.exists(self.dir_path):
+                                if os.path.isdir(self.dir_path):
+                                    self.startSlideshow()
+
+            else:
+                self.exit.set()
+                return None
 
 
 
@@ -307,6 +447,9 @@ if __name__ == "__main__":
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Monitor the given folder for new FF files and show them on the screen.")
 
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+        help="Path to a config file which will be used instead of the default one.")
+
     arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str, \
         help="Directory to monitor for FF files.")
 
@@ -325,8 +468,14 @@ if __name__ == "__main__":
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
-    #########################
+    # Load the config file
+    if cml_args.config is None:
+        config = None
+    else:
+        config = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath('.'))
 
-    lv = LiveViewer(cml_args.dir_path, image=cml_args.image, slideshow=cml_args.slideshow, \
+
+    lv = LiveViewer(cml_args.dir_path, config=config, image=cml_args.image, slideshow=cml_args.slideshow, \
         slideshow_pause=cml_args.pause, update_interval=cml_args.update)
     lv.start()
+
