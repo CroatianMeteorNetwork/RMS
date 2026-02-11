@@ -490,7 +490,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             img_handle = preprocessFF(img_handle, mask, flat_struct, dark)
 
             # Threshold the frame chunk
-            img_thresh = thresholdFF(img_handle.ff, k1, j1, mask=mask)
+            img_thresh = thresholdFF(img_handle.ff, k1, j1, mask=mask, mask_ave_bright=True)
 
             # Check if there are too many threshold passers, if so report that no lines were found
             if not checkWhiteRatio(img_thresh, img_handle.ff, max_white_ratio):
@@ -1191,11 +1191,11 @@ def preprocessFF(img_handle, mask, flat_struct, dark):
 
 
 
-def thresholdAndCorrectGammaFF(img_handle, config, mask):
+def thresholdAndCorrectGammaFF(img_handle, config, mask, mask_ave_bright=True):
     """ Prepare the FF for centroid extraction by performing gamma correction. """
 
     # Threshold the FF
-    img_thres = thresholdFF(img_handle.ff, config.k1_det, config.j1_det)
+    img_thres = thresholdFF(img_handle.ff, config.k1_det, config.j1_det, mask=mask, mask_ave_bright=mask_ave_bright)
 
 
     # Gamma correct image files
@@ -1505,7 +1505,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 img_handle = preprocessFF(img_handle, mask, flat_struct, dark)
 
                 img_thres, max_avg_corrected, flattened_weights, \
-                    min_patch_intensity = thresholdAndCorrectGammaFF(img_handle, config, mask)
+                    min_patch_intensity = thresholdAndCorrectGammaFF(img_handle, config, mask, mask_ave_bright=True)
 
                 logDebug('Centroiding frames {:d} - {:d} and time:'.format(frame_min, frame_max, img_handle.name()))
                 

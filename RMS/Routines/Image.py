@@ -310,7 +310,7 @@ def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False, mask=None, mask_ave_
     Keyword arguments:
         ff: [bool] If true, it indicated that the FF file is being thresholded.
         mask: [ndarray] Mask image. None by default.
-        mask_ave_bright: [bool] Mask out regions that are 5 sigma brighter in avepixel than the mean.
+        mask_ave_bright: [bool] Mask out regions that are 5 sigma brighter in avepixel than the median.
             This gets rid of very bright stars, saturating regions, static bright parts, etc.
     
     Return:
@@ -328,18 +328,17 @@ def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False, mask=None, mask_ave_
     # Compute the thresholded image
     img_thresh = applyImgThreshold(img_avg_sub, stdpixel, k1, j1)
 
-    # Mask out regions that are very bright in avepixel
+    # Mask out regions that are very bright in stdpixel
     if mask_ave_bright:
 
-        # Compute the average saturation mask and mask out everything that's saturating in avepixel
-        ave_saturation_mask = avepixel >= np.min([np.mean(avepixel) + 5*np.std(avepixel), \
-            np.iinfo(avepixel.dtype).max])
+        # Create a mask for stars (regions that are 3 sigma brighter in stdpixel than the median)
+        star_mask = stdpixel >= np.min([np.median(stdpixel) + 3*np.std(stdpixel), np.iinfo(stdpixel.dtype).max])
 
-        # Dilate the mask 2 times
-        input_type = ave_saturation_mask.dtype
-        ave_saturation_mask = morph.morphApply(ave_saturation_mask.astype(np.uint8), [5, 5]).astype(input_type)
+        # Dilate the star mask
+        input_type = star_mask.dtype
+        star_mask = morph.morphApply(star_mask.astype(np.uint8), [5]).astype(input_type)
 
-        img_thresh = img_thresh & ~ave_saturation_mask
+        img_thresh = img_thresh & ~star_mask
 
 
     # If the mask was given, set all areas of the thresholded image covered by the mask to false

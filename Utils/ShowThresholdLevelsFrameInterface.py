@@ -10,6 +10,7 @@ import sys
 
 import numpy as np
 import matplotlib.pyplot as plt
+import scipy.ndimage
 
 import RMS.ConfigReader as cr
 from RMS.Formats.FrameInterface import detectInputType
@@ -141,28 +142,38 @@ if __name__ == "__main__":
 
 
     # Compute the threshold value
+
     # stdpixel can be 0, avoid division by zero
     stdpixel = ff.stdpixel.astype(np.float64)
     stdpixel[stdpixel == 0] = 1.0 # Avoid division by zero
 
+
+    # Mask out stars by removing all pixels from consideration where stdpixel is 5 sigma above the median stdpixel
+    star_mask = stdpixel > (np.median(stdpixel) + 5*np.std(stdpixel))
+
+    # Dilate the mask by 2 pixels
+    star_mask = scipy.ndimage.binary_dilation(star_mask, iterations=2)
+
+    # Compute the stddev values
     k1_vals = (ff.maxpixel.astype(np.float64) - ff.avepixel.astype(np.float64) \
         - j1)/stdpixel
+
+    # Apply the star mask to the k1 values
+    k1_vals[star_mask] = 0
 
 
     # Calculate max-ave
     max_ave = ff.maxpixel.astype(np.float64) - ff.avepixel.astype(np.float64)
 
     # Calculate figure size based on image dimensions
-    # We want to display a 2x2 grid
+    # We want to display a 2x3 grid
     img_height, img_width = k1_vals.shape
     aspect_ratio = img_width / img_height
     
-    # Base width on a reasonable screen size (e.g., 12 inches for 2 cols)
-    fig_width = 12
-    # Calculate height for 2 rows. 
-    # Total width = 2 * img_width. Total height = 2 * img_height.
-    # Aspect Ratio of the whole figure (excluding UI elements) should be AspectRatio
-    fig_height = fig_width / aspect_ratio
+    # Base width on a reasonable screen size (18 inches for 3 cols)
+    fig_width = 18
+    # Calculate height for 2 rows
+    fig_height = fig_width / aspect_ratio * 2.0 / 3.0
 
     # Limit the height to something reasonable to avoid ultra-tall windows
     if fig_height > 15:
@@ -170,14 +181,19 @@ if __name__ == "__main__":
         fig_width *= scale
         fig_height *= scale
 
-    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(nrows=2, ncols=2, sharex=True, sharey=True, figsize=(fig_width, fig_height))
+    fig, ((ax0, ax1, ax2), (ax3, ax4, ax5)) = plt.subplots(nrows=2, ncols=3, sharex=True, sharey=True, figsize=(fig_width, fig_height))
 
-    # Plot max - ave (Signal)
+    # Top-left: Maxpixel
+    im0 = ax0.imshow(ff.maxpixel, cmap='gray', aspect='equal', vmin=0, vmax=np.percentile(ff.maxpixel, 99.5))
+    ax0.set_title("Maxpixel")
+    plt.colorbar(im0, ax=ax0, fraction=0.046, pad=0.04)
+
+    # Top-center: Max - Ave (Signal)
     im1 = ax1.imshow(max_ave, cmap='gray', aspect='equal', vmin=0, vmax=np.percentile(max_ave, 99.5))
     ax1.set_title("Max - Ave (Signal)")
     plt.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
 
-    # Plot k1 vals
+    # Top-right: k1 values
     k1map = ax2.imshow(k1_vals, cmap='inferno', vmin=1, vmax=6,  aspect='equal')
     ax2.set_title("k1 values (Signal/Noise - j1)")
     
@@ -186,17 +202,25 @@ if __name__ == "__main__":
     else:
         plt.colorbar(k1map, ax=ax2, label='k1_det', fraction=0.046, pad=0.04)
 
-    # Plot stdpixel (Noise)
-    im3 = ax3.imshow(stdpixel, cmap='gray', aspect='equal', vmin=0, vmax=np.percentile(stdpixel, 99.5))
-    ax3.set_title("Stdpixel (Noise)")
+    # Bottom-left: Avepixel
+    im3 = ax3.imshow(ff.avepixel, cmap='gray', aspect='equal', vmin=0, vmax=np.percentile(ff.avepixel, 99.5))
+    ax3.set_title("Avepixel")
     plt.colorbar(im3, ax=ax3, fraction=0.046, pad=0.04)
 
+    # Bottom-center: Stdpixel (Noise)
+    im4 = ax4.imshow(stdpixel, cmap='gray', aspect='equal', vmin=0, vmax=np.percentile(stdpixel, 99.5))
+    ax4.set_title("Stdpixel (Noise)")
+    plt.colorbar(im4, ax=ax4, fraction=0.046, pad=0.04)
 
-    # Plot thresholded image
-    threshld = ff.maxpixel > ff.avepixel + k1*ff.stdpixel + j1
-    ax4.imshow(threshld, cmap='gray', aspect='equal')
-    ax4.set_title("Thresholded")
-    ax4.text(0, 0, "k1 = {:.2f}, j1 = {:.2f}".format(k1, j1), color='red', verticalalignment='top',
+    # Bottom-right: Thresholded image
+    threshold_img = ff.maxpixel > ff.avepixel + k1*ff.stdpixel + j1
+
+    # Apply the star mask to the thresholded image
+    threshold_img[star_mask] = 0
+
+    ax5.imshow(threshold_img, cmap='gray', aspect='equal')
+    ax5.set_title("Thresholded")
+    ax5.text(0, 0, "k1 = {:.2f}, j1 = {:.2f}".format(k1, j1), color='red', verticalalignment='top',
         weight='bold')
 
     # Main title
