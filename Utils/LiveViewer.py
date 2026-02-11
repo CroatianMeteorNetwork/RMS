@@ -398,15 +398,16 @@ class LiveViewer(multiprocessing.Process):
 
         else:
 
-            if self.capturing:
+            if self.capturing and self.config.live_maxpixel_enable:
                 captured_dir_path = os.path.join(self.config.data_dir, self.config.captured_dir)
                 captured_dir_list = os.listdir(captured_dir_path)
-                self.dir_path = sorted(fnmatch.filter(captured_dir_list, f"{self.config.stationID.upper()}_*_*_*"))[-1]
+                latest_captured_dir = sorted(fnmatch.filter(captured_dir_list, f"{self.config.stationID.upper()}_*_*_*"))[-1]
+                self.dir_path = os.path.join(captured_dir_path, latest_captured_dir)
                 print(f'Captured directory path: {self.dir_path}')
                 self.monitorDir()
 
 
-            elif not self.capturing:
+            elif not self.capturing and self.config.slideshow_enable:
                 archived_dir_path = os.path.join(self.config.data_dir, self.config.archived_dir)
                 archived_dir_list = os.listdir(archived_dir_path)
                 latest_archive_dir = sorted(fnmatch.filter(archived_dir_list, f"{self.config.stationID.upper()}_*_*_*"))[-1]
