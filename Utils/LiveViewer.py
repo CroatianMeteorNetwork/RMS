@@ -80,7 +80,10 @@ class LiveViewer(multiprocessing.Process):
 
         super(LiveViewer, self).__init__()
 
-        self.dir_path = os.path.expanduser(dir_path)
+        if dir_path is None:
+            self.dir_path = dir_path
+        else:
+            self.dir_path = os.path.expanduser(dir_path)
 
         self.image = image
         self.slideshow = slideshow
