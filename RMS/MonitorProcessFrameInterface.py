@@ -258,7 +258,7 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames)
 
 
 def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_dir, nproc=2,
-                     chunk_frames=128, poll_interval=2):
+                     chunk_frames=128, poll_interval=2, force=False):
     """ Monitor a directory for new files of the given type and process them.
 
     Arguments:
@@ -272,6 +272,7 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
         nproc: [int] Number of parallel worker processes. Default is 2.
         chunk_frames: [int] Frames per chunk for star extraction. Default is 128.
         poll_interval: [float] Seconds between directory scans. Default is 2.
+        force: [bool] If True, re-process files even if done.flag exists. Default is False.
     """
 
     log.info("Monitoring directory: {}".format(input_dir))
@@ -282,8 +283,23 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
     # Track files that have been processed or are being processed
     processed_files = set()
 
+    # Scan the output directory for previously completed results (done.flag)
+    if not force:
+        for root, dirs, files in os.walk(output_dir):
+            if 'done.flag' in files:
+                # The parent dir name is the file base name
+                completed_base = os.path.basename(root)
+                processed_files.add(completed_base)
+
+        if processed_files:
+            log.info("Found {:d} previously processed file(s), skipping.".format(
+                len(processed_files)))
+
     # Active worker processes: {file_name: Process}
     active_workers = {}
+
+    # Flag to avoid repeating the "waiting for data" message
+    waiting_for_data = False
 
     try:
         while True:
@@ -313,8 +329,9 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
 
             for file_name in all_files:
 
-                # Skip already processed or in-progress files
-                if file_name in processed_files:
+                # Skip already processed or in-progress files (match by base name)
+                file_base = os.path.splitext(file_name)[0]
+                if file_name in processed_files or file_base in processed_files:
                     continue
 
                 # Check if the file matches the requested type
@@ -348,6 +365,13 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                 )
                 proc.start()
                 active_workers[file_name] = proc
+
+            # If no workers are active and no new files were queued, we're idle
+            if not active_workers and not waiting_for_data:
+                log.info("Waiting for more data...")
+                waiting_for_data = True
+            elif active_workers:
+                waiting_for_data = False
 
             time.sleep(poll_interval)
 
@@ -480,6 +504,10 @@ Examples:
         help="Number of frames per chunk for star extraction. Default: 128."
     )
 
+    arg_parser.add_argument('--force', '-f', action='store_true', default=False,
+        help="Re-process files even if they have already been processed (done.flag exists)."
+    )
+
     # Parse
     cml_args = arg_parser.parse_args()
 
@@ -518,5 +546,6 @@ Examples:
         platepar_path,
         output_dir,
         nproc=cml_args.nproc,
-        chunk_frames=cml_args.chunk_frames
+        chunk_frames=cml_args.chunk_frames,
+        force=cml_args.force
     )
