@@ -431,13 +431,12 @@ class LiveViewer(multiprocessing.Process):
         except Exception as e:
             print('Setting niceness failed with message:\n' + repr(e))
 
-        if os.path.exists(self.dir_path):
-
-            if self.slideshow or os.path.isdir(self.dir_path):
-                self.startSlideshow()
-            elif self.image or os.path.isfile(self.dir_path):
-                self.showImage()
-
+        if self.dir_path is not None:
+            if os.path.exists(self.dir_path):
+                if self.slideshow or os.path.isdir(self.dir_path):
+                    self.startSlideshow()
+                elif self.image or os.path.isfile(self.dir_path):
+                    self.showImage()
 
         if self.config.continuous_capture:
             # Work with frames directory
