@@ -1638,6 +1638,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Display options
         self.show_spectral_type = False
         self.show_star_names = False
+        self.apparent_mag_corr_enabled = False
         self.label_mag_limit = 5.0
         self.show_constellations = False
         self.selected_stars_visible = True
@@ -2059,6 +2060,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.catalog_stars_visible = True
         self.show_spectral_type = False
         self.show_star_names = False
+        self.apparent_mag_corr_enabled = False
         self.label_mag_limit = 5.0
         self.show_constellations = False
         self.selected_stars_visible = True
@@ -2469,6 +2471,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigCatStarsToggled.connect(self.toggleShowCatStars)
         self.tab.settings.sigSpectralTypeToggled.connect(self.toggleShowSpectralType)
         self.tab.settings.sigStarNamesToggled.connect(self.toggleShowStarNames)
+        self.tab.settings.sigApparentMagCorrToggled.connect(self.toggleApparentMagCorr)
         self.tab.settings.sigLabelMagLimitChanged.connect(self.onLabelMagLimitChanged)
         self.tab.settings.sigConstellationToggled.connect(self.toggleShowConstellations)
         self.tab.settings.sigCalStarsToggled.connect(self.toggleShowCalStars)
@@ -2734,10 +2737,14 @@ class PlateTool(QtWidgets.QMainWindow):
     def onExtinctionChanged(self):
         self.photometry()
         self.updateLeftLabels()
+        if self.apparent_mag_corr_enabled:
+            self.updateStars()
 
     def onVignettingChanged(self):
         self.photometry()
         self.updateLeftLabels()
+        if self.apparent_mag_corr_enabled:
+            self.updateStars()
 
     def onAzAltChanged(self):
         self.platepar.updateRefRADec(preserve_rotation=True)
@@ -3099,6 +3106,25 @@ class PlateTool(QtWidgets.QMainWindow):
         self.catalog_x, self.catalog_y, catalog_mag = getCatalogStarsImagePositions(self.catalog_stars, \
                                                                                     ff_jd, self.platepar)
 
+        # Apply apparent magnitude correction if enabled
+        if self.apparent_mag_corr_enabled:
+            # Extinction: makes stars near horizon dimmer
+            ra_catalog = self.catalog_stars[:, 0]
+            dec_catalog = self.catalog_stars[:, 1]
+            catalog_mag = extinctionCorrectionTrueToApparent(
+                catalog_mag, ra_catalog, dec_catalog, ff_jd, self.platepar
+            )
+
+            # Vignetting: makes stars near image edges dimmer
+            vignetting_coeff = self.platepar.vignetting_coeff
+            if vignetting_coeff is not None and vignetting_coeff != 0.0:
+                radius = np.hypot(
+                    self.catalog_x - self.platepar.X_res / 2.0,
+                    self.catalog_y - self.platepar.Y_res / 2.0
+                )
+                cos_vr = np.clip(np.cos(vignetting_coeff * radius), 1e-6, 1.0)
+                catalog_mag = catalog_mag - 10.0 * np.log10(cos_vr)
+
         cat_stars_xy = np.c_[self.catalog_x, self.catalog_y, catalog_mag]
 
         ### Take only those stars inside the FOV  and image ###
@@ -3114,6 +3140,9 @@ class PlateTool(QtWidgets.QMainWindow):
                                                 & (cat_stars_xy[:, 1] > 0) \
                                                 & (cat_stars_xy[:, 1] < self.platepar.Y_res)
 
+        # Filter by corrected apparent magnitude if correction is enabled
+        if self.apparent_mag_corr_enabled:
+            filtered_indices_all = filtered_indices_all & (cat_stars_xy[:, 2] <= self.cat_lim_mag)
 
         # Filter out catalog image stars
         cat_stars_xy_unmasked = cat_stars_xy[filtered_indices_all]
@@ -9161,6 +9190,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Update the checkbox
         self.tab.settings.updateShowStarNames()
+
+    def toggleApparentMagCorr(self):
+        """ Toggle apparent magnitude correction for catalog star display. """
+        self.apparent_mag_corr_enabled = not self.apparent_mag_corr_enabled
+        self.updateStars()
+        self.tab.settings.updateApparentMagCorr()
 
     def onLabelMagLimitChanged(self, value):
         """ Handle change in label magnitude limit setting. """

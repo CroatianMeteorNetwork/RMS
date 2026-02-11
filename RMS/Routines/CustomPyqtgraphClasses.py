@@ -3228,6 +3228,7 @@ class SettingsWidget(QtWidgets.QWidget):
     sigCatStarsToggled = QtCore.pyqtSignal()
     sigSpectralTypeToggled = QtCore.pyqtSignal()
     sigStarNamesToggled = QtCore.pyqtSignal()
+    sigApparentMagCorrToggled = QtCore.pyqtSignal()
     sigLabelMagLimitChanged = QtCore.pyqtSignal(float)
     sigConstellationToggled = QtCore.pyqtSignal()
     sigCalStarsToggled = QtCore.pyqtSignal()
@@ -3430,6 +3431,15 @@ class SettingsWidget(QtWidgets.QWidget):
         self.lim_mag_label = QtWidgets.QLabel('Lim Mag')
         form.addRow(self.lim_mag_label, self.lim_mag)
 
+        self.apparent_mag_corr = QtWidgets.QCheckBox('Correct Mag for Ext./Vign.')
+        self.apparent_mag_corr.setToolTip(
+            'Correct catalog magnitudes for atmospheric extinction and\n'
+            'lens vignetting before applying the Lim Mag filter'
+        )
+        self.apparent_mag_corr.setChecked(False)
+        self.apparent_mag_corr.released.connect(self.sigApparentMagCorrToggled.emit)
+        form.addRow(self.apparent_mag_corr)
+
         self.std = DoubleSpinBox()
         self.std.setSingleStep(0.1)
         self.std.setMinimum(0)
@@ -3517,6 +3527,9 @@ class SettingsWidget(QtWidgets.QWidget):
         # Sync with Star Detection panel (if it exists - may not during init)
         if hasattr(self.gui, 'tab') and hasattr(self.gui.tab, 'star_detection'):
             self.gui.tab.star_detection.setCatalogLM(self.gui.cat_lim_mag)
+
+    def updateApparentMagCorr(self):
+        self.apparent_mag_corr.setChecked(self.gui.apparent_mag_corr_enabled)
 
     def onGammaChanged(self):
         gamma_value = self.img_gamma.value()
@@ -3621,6 +3634,7 @@ class SettingsWidget(QtWidgets.QWidget):
     def onSkyFit(self):
         self.lim_mag.show()
         self.lim_mag_label.show()
+        self.apparent_mag_corr.show()
         self.std.show()
         self.std_label.show()
         self.detected_stars.show()
@@ -3650,6 +3664,7 @@ class SettingsWidget(QtWidgets.QWidget):
     def onManualReduction(self):
         self.lim_mag.hide()
         self.lim_mag_label.hide()
+        self.apparent_mag_corr.hide()
         self.std.hide()
         self.std_label.hide()
         self.detected_stars.hide()
