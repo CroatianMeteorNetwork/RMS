@@ -494,19 +494,6 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Initialize the live_view
     live_view = None
 
-    if config.live_maxpixel_enable and live_view is None:
-
-        # Enable showing the live JPG
-        config.live_jpg = True
-
-        live_jpg_path = os.path.join(config.data_dir, 'live.jpg')
-
-        live_view = LiveViewer(live_jpg_path, config=config, image=True, slideshow=False, banner_text="Live")
-        live_view.start()
-
-    else:
-        live_view = None
-
     # Loop to handle both continuous and standard capture modes
     while True:
 
@@ -662,22 +649,6 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                     except:
                         log.error("There was an error during removing the capture resume flag file: " \
                             + capture_resume_file_path)
-
-
-            # Initialize the live image viewer
-            if config.live_maxpixel_enable and live_view is None:
-
-                # Enable showing the live JPG
-                config.live_jpg = True
-
-                live_jpg_path = os.path.join(config.data_dir, 'live.jpg')
-
-                live_view = LiveViewer(live_jpg_path, config=config, image=True, slideshow=False, banner_text="Live")
-                live_view.start()
-
-            else:
-                live_view = None
-
 
             # Initialize compression
             compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, start_time2, config,
