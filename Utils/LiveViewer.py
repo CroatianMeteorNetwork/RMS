@@ -393,6 +393,7 @@ class LiveViewer(multiprocessing.Process):
 
         if os.path.isdir(frames_dir_full_path) and self.config.continuous_capture:
             # Work with frames directory
+            print("calling self.monitorFramesDirAndSlideshow()")
             self.monitorFramesDirAndSlideshow()
 
         else:
@@ -405,9 +406,11 @@ class LiveViewer(multiprocessing.Process):
             elif os.path.isdir(self.dir_path):
 
                 if self.slideshow and self.config.slideshow_enable and not self.capturing:
+                    print("calling self.startSlideshow()")
                     self.startSlideshow()
 
                 else:
+                    print("calling self.monitorDir()")
                     self.monitorDir()
 
             else:
