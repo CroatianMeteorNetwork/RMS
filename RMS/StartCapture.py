@@ -225,7 +225,7 @@ def handleSlideshow(config, slideshow_view):
     log.info(f"live_maxpixel_enable is {config.continuous_capture}")
     log.info(f"slideshow_enable is {config.slideshow_enable}")
     # Initialize the slideshow of last night's detections
-    if config.slideshow_enable:
+    if config.slideshow_enable or config.live_maxpixel_enable:
 
         # Make a list of all archived directories previously generated
         archive_dir_list = []
