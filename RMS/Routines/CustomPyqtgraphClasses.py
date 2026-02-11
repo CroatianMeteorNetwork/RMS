@@ -1844,14 +1844,14 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.photometry_button = QtWidgets.QPushButton('Photometry')
         self.photometry_button.clicked.connect(self.sigPhotometryPressed.emit)
         hbox.addWidget(self.photometry_button)
+        box.addLayout(hbox)
 
-        self.fit_band_ratio_button = QtWidgets.QPushButton('Fit BP:RP')
+        self.fit_band_ratio_button = QtWidgets.QPushButton('Fit Spectral Bands')
         self.fit_band_ratio_button.setToolTip(
-            "Fit the optimal BP:RP band ratio for this camera.\n"
+            "Fit the optimal G:BP:RP band ratio for this camera.\n"
             "Results are printed to the console as a config-ready string.")
         self.fit_band_ratio_button.clicked.connect(self.sigFitBandRatioPressed.emit)
-        hbox.addWidget(self.fit_band_ratio_button)
-        box.addLayout(hbox)
+        box.addWidget(self.fit_band_ratio_button)
 
         self.updatePairedStars()
         group = QtWidgets.QGroupBox("Calibration")
