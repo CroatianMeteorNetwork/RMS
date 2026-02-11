@@ -208,8 +208,9 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
                 return "normal"
 
 def handleSlideshow(config, slideshow_view):
-
-
+    """
+    Show a slideshow of previous detections, and a live view
+    """
 
     # Stop the slideshow if it was on
     if slideshow_view is not None:

@@ -194,85 +194,89 @@ class LiveViewer(multiprocessing.Process):
             # Get the time now
             dt_now = datetime.datetime.now(tz=datetime.timezone.utc)
 
-            #### Slideshow work start
 
-            # Build a new slideshow only after iterating through all the previous slides, or on first iteration
-            if slideshow_index == 0:
-                ff_file_list = []
-                for root, dirs, files in os.walk(os.path.join(self.config.data_dir, self.config.archived_dir)):
-                    for ff_file in fnmatch.filter(files, f"FF_{self.config.stationID.upper()}_*_*_*_*.fits"):
-                        file_date, file_time = ff_file.split("_")[2], ff_file.split("_")[3]
-                        file_time_object = datetime.datetime.strptime(f"{file_date}_{file_time}", "%Y%m%d_%H%M%S").replace(
-                            tzinfo=datetime.timezone.utc)
-                        if (dt_now - file_time_object).total_seconds() < 48 * 60 * 60:
-                            ff_file_list.append(os.path.join(root, ff_file))
-                ff_file_list.sort()
+            if self.config.slideshow_enable:
+                #### Slideshow work start
 
-            # This will guard against iterating over an empty list
-            if slideshow_index < len(ff_file_list):
-                ff_file_to_show = ff_file_list[slideshow_index]
-                slideshow_index += 1
+                # Build a new slideshow only after iterating through all the previous slides, or on first iteration
+                if slideshow_index == 0:
+                    ff_file_list = []
+                    for root, dirs, files in os.walk(os.path.join(self.config.data_dir, self.config.archived_dir)):
+                        for ff_file in fnmatch.filter(files, f"FF_{self.config.stationID.upper()}_*_*_*_*.fits"):
+                            file_date, file_time = ff_file.split("_")[2], ff_file.split("_")[3]
+                            file_time_object = datetime.datetime.strptime(f"{file_date}_{file_time}", "%Y%m%d_%H%M%S").replace(
+                                tzinfo=datetime.timezone.utc)
+                            if (dt_now - file_time_object).total_seconds() < 48 * 60 * 60:
+                                ff_file_list.append(os.path.join(root, ff_file))
+                    ff_file_list.sort()
 
-                # Now plot the detection.maxpixel
-                img = readFF(os.path.dirname(ff_file_to_show), os.path.basename(ff_file_to_show), verbose=False).maxpixel
-                img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
-                self.updateImage(img, ff_file_to_show, 1, ss_w_handle)
-            else:
-                # This will trigger rebuilding the slideshow on the next iteration
-                slideshow_index = 0
+                # This will guard against iterating over an empty list
+                if slideshow_index < len(ff_file_list):
+                    ff_file_to_show = ff_file_list[slideshow_index]
+                    slideshow_index += 1
 
-            #### Slideshow work end
+                    # Now plot the detection.maxpixel
+                    img = readFF(os.path.dirname(ff_file_to_show), os.path.basename(ff_file_to_show), verbose=False).maxpixel
+                    img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
+                    self.updateImage(img, ff_file_to_show, 1, ss_w_handle)
+                else:
+                    # This will trigger rebuilding the slideshow on the next iteration
+                    slideshow_index = 0
 
-            #### Continuous capture live image work start
+                #### Slideshow work end
 
-            # Compute target_dt, which is the datetime object of the target image
-            # Pushing time back 240 seconds to cope with the delay in continuous capture
-            target_dt = dt_now - datetime.timedelta(seconds=240)
+            if self.config.live_maxpixel_enable:
 
-            # Handle all the file paths
-            frame_dir_root = os.path.join(self.config.data_dir, self.config.frame_dir)
-            l1_dir = str(target_dt.year)
-            l2_dir = str(target_dt.strftime("%Y%m%d-%j"))
-            l3_dir = str(target_dt.strftime("%Y%m%d-%j_%H"))
-            target_dir = os.path.join(frame_dir_root, l1_dir, l2_dir, l3_dir)
-            latest_file_list = sorted(os.listdir(target_dir))
+                #### Continuous capture live image work start
 
-            # Find the image which is closest to the target time
-            time_deviation_list = []
-            for file_name in latest_file_list:
-                file_date, file_time = file_name.split("_")[1], file_name.split("_")[2]
-                file_time_object = datetime.datetime.strptime(f"{file_date}_{file_time}","%Y%m%d_%H%M%S").replace(tzinfo=datetime.timezone.utc)
-                time_deviation_list.append(abs((file_time_object - target_dt).total_seconds()))
-            min_deviation = min(time_deviation_list)
-            min_deviation_index = time_deviation_list.index(min_deviation)
-            cc_file_to_show = os.path.join(target_dir, latest_file_list[min_deviation_index])
+                # Compute target_dt, which is the datetime object of the target image
+                # Pushing time back 240 seconds to cope with the delay in continuous capture
+                target_dt = dt_now - datetime.timedelta(seconds=240)
 
-            if os.path.exists(cc_file_to_show):
-                if os.path.isfile(cc_file_to_show):
+                # Handle all the file paths
+                frame_dir_root = os.path.join(self.config.data_dir, self.config.frame_dir)
+                l1_dir = str(target_dt.year)
+                l2_dir = str(target_dt.strftime("%Y%m%d-%j"))
+                l3_dir = str(target_dt.strftime("%Y%m%d-%j_%H"))
+                target_dir = os.path.join(frame_dir_root, l1_dir, l2_dir, l3_dir)
+                latest_file_list = sorted(os.listdir(target_dir))
 
-                    # Check file is not still being written
-                    _size = None
-                    size = os.path.getsize(cc_file_to_show)
-                    while _size != size:
-                        _size = size
-                        time.sleep(1)
+                # Find the image which is closest to the target time
+                time_deviation_list = []
+                for file_name in latest_file_list:
+                    file_date, file_time = file_name.split("_")[1], file_name.split("_")[2]
+                    file_time_object = datetime.datetime.strptime(f"{file_date}_{file_time}","%Y%m%d_%H%M%S").replace(tzinfo=datetime.timezone.utc)
+                    time_deviation_list.append(abs((file_time_object - target_dt).total_seconds()))
+                min_deviation = min(time_deviation_list)
+                min_deviation_index = time_deviation_list.index(min_deviation)
+                cc_file_to_show = os.path.join(target_dir, latest_file_list[min_deviation_index])
+
+                if os.path.exists(cc_file_to_show):
+                    if os.path.isfile(cc_file_to_show):
+
+                        # Check file is not still being written
+                        _size = None
                         size = os.path.getsize(cc_file_to_show)
+                        while _size != size:
+                            _size = size
+                            time.sleep(1)
+                            size = os.path.getsize(cc_file_to_show)
 
-                    # Show the file if it is the first iteration
-                    if _cc_file_to_show is None:
-                        if cc_file_to_show != _cc_file_to_show:
+                        # Show the file if it is the first iteration
+                        if _cc_file_to_show is None:
+                            if cc_file_to_show != _cc_file_to_show:
+                                img = np.array(Image.open(cc_file_to_show))
+                                img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
+                                self.updateImage(img, cc_file_to_show, max(frame_interval - 1 , 1), cc_w_handle)
+
+                        # Or if it is different from the last iteration
+                        elif _cc_file_to_show != cc_file_to_show:
                             img = np.array(Image.open(cc_file_to_show))
                             img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
-                            self.updateImage(img, cc_file_to_show, max(frame_interval - 1 , 1), cc_w_handle)
+                            self.updateImage(img, cc_file_to_show, max(frame_interval - 1, 1) , cc_w_handle)
+                        _cc_file_to_show = cc_file_to_show
 
-                    # Or if it is different from the last iteration
-                    elif _cc_file_to_show != cc_file_to_show:
-                        img = np.array(Image.open(cc_file_to_show))
-                        img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
-                        self.updateImage(img, cc_file_to_show, max(frame_interval - 1, 1) , cc_w_handle)
-                    _cc_file_to_show = cc_file_to_show
-
-            #### Continuous capture live image work end
+                #### Continuous capture live image work end
 
     def monitorDir(self):
         """ Monitor the given directory and show new FF files on the screen. """
