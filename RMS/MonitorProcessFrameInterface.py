@@ -151,21 +151,38 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames)
     file_name = os.path.basename(file_path)
     file_base = os.path.splitext(file_name)[0]
 
-    # Create a results directory for this file
-    results_dir = os.path.join(output_dir, file_base)
-    os.makedirs(results_dir, exist_ok=True)
-
     # Load the config file
     config = cr.parse(config_path)
 
-    # Initialize the logger for this process
-    log_manager = LoggingManager()
-    log_manager.initLogging(config, 'monitor_', safedir=results_dir)
-    proc_log = getLogger("logger")
-
-    proc_log.info("Processing file: {}".format(file_path))
-
     try:
+
+        # Open the file as an image handle first to get the timestamp
+        img_handle = detectInputTypeFile(
+            file_path, config, detection=True, preload_video=True, chunk_frames=chunk_frames
+        )
+
+        if img_handle is None:
+            print("ERROR: Could not open file: {}".format(file_path))
+            return False
+
+        # Get the first frame time to build the date-sorted directory structure
+        dt = img_handle.beginning_datetime
+        date_path = os.path.join(
+            "{:04d}".format(dt.year),
+            "{:04d}{:02d}".format(dt.year, dt.month),
+            "{:04d}{:02d}{:02d}".format(dt.year, dt.month, dt.day),
+        )
+
+        # Create a results directory: output_dir/YYYY/YYYYMM/YYYYMMDD/<file_base>/
+        results_dir = os.path.join(output_dir, date_path, file_base)
+        os.makedirs(results_dir, exist_ok=True)
+
+        # Initialize the logger for this process
+        log_manager = LoggingManager()
+        log_manager.initLogging(config, 'monitor_', safedir=results_dir)
+        proc_log = getLogger("logger")
+
+        proc_log.info("Processing file: {}".format(file_path))
 
         # Copy the platepar into the results directory so ApplyRecalibrate can find it
         results_platepar_path = os.path.join(results_dir, config.platepar_name)
@@ -176,15 +193,6 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames)
         results_config_path = os.path.join(results_dir, os.path.basename(config_path))
         if not os.path.exists(results_config_path):
             shutil.copy2(config_path, results_config_path)
-
-        # Open the file as an image handle
-        img_handle = detectInputTypeFile(
-            file_path, config, detection=True, preload_video=True, chunk_frames=chunk_frames
-        )
-
-        if img_handle is None:
-            proc_log.error("Could not open file: {}".format(file_path))
-            return False
 
         # Load calibration files (mask, dark, flat) from the input directory
         mask, dark, flat_struct = loadImageCalibration(
