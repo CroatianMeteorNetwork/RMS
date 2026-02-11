@@ -408,7 +408,7 @@ class LiveViewer(multiprocessing.Process):
 
             elif not self.capturing and self.config.slideshow_enable:
                 archived_dir_path = os.path.join(self.config.data_dir, self.config.archived_dir)
-                archived_dir_list = [d for d in os.listdir(archived_dir_path) if os.path.isdir(os.path.join(path,d))]
+                archived_dir_list = [d for d in os.listdir(archived_dir_path) if os.path.isdir(os.path.join(archived_dir_path,d))]
                 latest_archive_dir = sorted(fnmatch.filter(archived_dir_list, f"{self.config.stationID.upper()}_*_*_*"))[-1]
                 self.dir_path = os.path.join(archived_dir_path, latest_archive_dir)
 
