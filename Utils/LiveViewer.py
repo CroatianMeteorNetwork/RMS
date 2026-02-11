@@ -243,6 +243,15 @@ class LiveViewer(multiprocessing.Process):
                 l2_dir = str(target_dt.strftime("%Y%m%d-%j"))
                 l3_dir = str(target_dt.strftime("%Y%m%d-%j_%H"))
                 target_dir = os.path.join(frame_dir_root, l1_dir, l2_dir, l3_dir)
+                print(f"Target dir {target_dir}")
+                if not os.path.exists(target_dir):
+                    time.sleep(5)
+                    continue
+
+                if not os.path.exists(target_dir):
+                    time.sleep(5)
+                    continue
+
                 latest_file_list = sorted(os.listdir(target_dir))
 
                 # Find the image which is closest to the target time
