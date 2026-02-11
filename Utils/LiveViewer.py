@@ -224,8 +224,12 @@ class LiveViewer(multiprocessing.Process):
                     ff_file_to_show = ff_file_list[slideshow_index]
                     slideshow_index += 1
                     image_annotation = f"{os.path.basename(ff_file_to_show)} {slideshow_index}/{len(ff_file_list)}"
+                    print(ff_file_to_show)
                     # Now plot the detection.maxpixel
-                    img = readFF(os.path.dirname(ff_file_to_show), ff_file_to_show, verbose=False).maxpixel
+                    img = readFF(os.path.dirname(ff_file_to_show),
+                                 os.path.basename(ff_file_to_show),
+                                 verbose=False).maxpixel
+
                     if self.config.live_maxpixel_enable:
                         img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
                     self.updateImage(img, image_annotation, 1, ss_w_handle)
