@@ -290,7 +290,7 @@ class LiveViewer(multiprocessing.Process):
         # Create a list of FF files in the given directory
         ff_list = []
 
-
+        print(f"in monitor dir {self.dir_path}")
         showing_empty = False
 
         # Repeat until the process is killed from the outside
