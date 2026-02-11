@@ -1506,7 +1506,7 @@ if __name__ == "__main__":
             camera_mode_switch_trigger = None
             log.info('Starting capture for {:.2f} hours'.format(duration/60/60))
             log.info(f"Starting slideshow continuous_capture is {config.continuous_capture} during night")
-            slideshow_view = handleSlideshow(config, slideshow_view, capturing=False)
+            slideshow_view = handleSlideshow(config, slideshow_view, capturing=True, slideshow=False)
 
         # Run capture and compression
         night_archive_dir = runCapture(config, duration=duration, nodetect=cml_args.nodetect, \
