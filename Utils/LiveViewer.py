@@ -405,7 +405,7 @@ class LiveViewer(multiprocessing.Process):
 
             elif os.path.isdir(self.dir_path):
 
-                if self.slideshow and self.config.slideshow_enable and not self.capturing:
+                if self.slideshow and self.config.slideshow_enable:
                     print("calling self.startSlideshow()")
                     self.startSlideshow()
 
