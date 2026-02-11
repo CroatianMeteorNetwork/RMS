@@ -134,7 +134,8 @@ def isFileStable(file_path, stable_time=5, poll_interval=1, max_age=30):
     return True
 
 
-def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames):
+def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
+                flat_path=None, dark_path=None):
     """ Process a single file through the detection and recalibration pipeline.
 
     Arguments:
@@ -143,6 +144,10 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames)
         platepar_path: [str] Path to the platepar file.
         output_dir: [str] Path to the output directory.
         chunk_frames: [int] Number of frames per chunk for star extraction.
+
+    Keyword arguments:
+        flat_path: [str] Path to a flat field file. None by default.
+        dark_path: [str] Path to a dark frame file. None by default.
 
     Return:
         [bool] True if processing succeeded, False otherwise.
@@ -153,6 +158,14 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames)
 
     # Load the config file
     config = cr.parse(config_path)
+
+    # Override dark/flat paths in config if explicitly given
+    if dark_path is not None:
+        config.dark_file = os.path.abspath(dark_path)
+        config.use_dark = True
+    if flat_path is not None:
+        config.flat_file = os.path.abspath(flat_path)
+        config.use_flat = True
 
     try:
 
@@ -258,7 +271,8 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames)
 
 
 def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_dir, nproc=2,
-                     chunk_frames=128, poll_interval=2, force=False):
+                     chunk_frames=128, poll_interval=2, force=False, flat_path=None,
+                     dark_path=None):
     """ Monitor a directory for new files of the given type and process them.
 
     Arguments:
@@ -273,6 +287,8 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
         chunk_frames: [int] Frames per chunk for star extraction. Default is 128.
         poll_interval: [float] Seconds between directory scans. Default is 2.
         force: [bool] If True, re-process files even if done.flag exists. Default is False.
+        flat_path: [str] Path to a flat field file. None by default.
+        dark_path: [str] Path to a dark frame file. None by default.
     """
 
     log.info("Monitoring directory: {}".format(input_dir))
@@ -361,7 +377,8 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
 
                 proc = multiprocessing.Process(
                     target=processFile,
-                    args=(file_path, config_path, platepar_path, output_dir, chunk_frames)
+                    args=(file_path, config_path, platepar_path, output_dir, chunk_frames),
+                    kwargs={'flat_path': flat_path, 'dark_path': dark_path}
                 )
                 proc.start()
                 active_workers[file_name] = proc
@@ -508,6 +525,14 @@ Examples:
         help="Re-process files even if they have already been processed (done.flag exists)."
     )
 
+    arg_parser.add_argument('--flat', type=str, default=None,
+        help="Path to a flat field image file."
+    )
+
+    arg_parser.add_argument('--dark', type=str, default=None,
+        help="Path to a dark frame image file."
+    )
+
     # Parse
     cml_args = arg_parser.parse_args()
 
@@ -547,5 +572,7 @@ Examples:
         output_dir,
         nproc=cml_args.nproc,
         chunk_frames=cml_args.chunk_frames,
-        force=cml_args.force
+        force=cml_args.force,
+        flat_path=cml_args.flat,
+        dark_path=cml_args.dark
     )

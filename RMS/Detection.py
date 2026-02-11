@@ -1166,17 +1166,18 @@ def preprocessFF(img_handle, mask, flat_struct, dark):
 
     if not img_handle.ff.calibrated:
 
-        # Apply the dark frame to maxpixel and avepixel    
+        # Apply the dark frame to maxpixel and avepixel (don't apply to stdpixel as it doesn't include the DC component anyway)
         if dark is not None:
             img_handle.ff.maxpixel = Image.applyDark(img_handle.ff.maxpixel, dark)
             img_handle.ff.avepixel = Image.applyDark(img_handle.ff.avepixel, dark)
 
 
-        # Apply the flat to maxpixel and avepixel
+        # Apply the flat to maxpixel, avepixel and stdpixel
         if flat_struct is not None:
 
             img_handle.ff.maxpixel = Image.applyFlat(img_handle.ff.maxpixel, flat_struct)
             img_handle.ff.avepixel = Image.applyFlat(img_handle.ff.avepixel, flat_struct)
+            img_handle.ff.stdpixel = Image.applyFlat(img_handle.ff.stdpixel, flat_struct)
 
 
         # Mask the FF file

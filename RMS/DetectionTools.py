@@ -79,7 +79,7 @@ def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
             mask = None
 
     else:
-        log.info('No mask file has been found.')
+        log.info('No mask file has been found: {:s}'.format(config.mask_file))
         
 
     # Try loading the dark frame
@@ -102,8 +102,10 @@ def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
             dark = Image.loadDark(*os.path.split(dark_path), dtype=dtype, byteswap=byteswap)
 
         if dark is not None:
-            print('Loaded dark:', dark_path)
             log.info('Loaded dark: {:s}'.format(dark_path))
+
+        else:
+            log.info('No dark file has been found: {:s}'.format(config.dark_file))
 
 
 
@@ -128,8 +130,10 @@ def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
 
 
         if flat_struct is not None:
-            print('Loaded flat:', flat_path)
             log.info('Loaded flat: {:s}'.format(flat_path))
+
+        else:
+            log.info('No flat file has been found: {:s}'.format(config.flat_file))
 
 
 

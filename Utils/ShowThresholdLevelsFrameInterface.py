@@ -13,6 +13,8 @@ import matplotlib.pyplot as plt
 
 import RMS.ConfigReader as cr
 from RMS.Formats.FrameInterface import detectInputType
+from RMS.DetectionTools import loadImageCalibration
+from RMS.Routines.Image import applyFlat, loadFlat, loadDark
 
 
 if __name__ == "__main__":
@@ -37,6 +39,12 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
         help="Path to a config file which will be used instead of the default one.")
+
+    arg_parser.add_argument('--flat', type=str, default=None,
+        help="Path to a flat field image file. If not given, loaded from the data directory if enabled in config.")
+
+    arg_parser.add_argument('--dark', type=str, default=None,
+        help="Path to a dark frame image file. If not given, loaded from the data directory if enabled in config.")
 
     #############################
 
@@ -90,6 +98,41 @@ if __name__ == "__main__":
     if ff is None or ff.nframes == 0:
         print("No frames loaded.")
         sys.exit(1)
+
+    # Load calibration files (mask, dark, flat) from the data directory
+    mask, dark, flat_struct = loadImageCalibration(
+        img_handle.dir_path, config, dtype=ff.dtype, byteswap=img_handle.byteswap
+    )
+
+    # Override dark/flat with explicit CLI paths if given
+    if cml_args.dark is not None:
+        dark = loadDark(*os.path.split(os.path.abspath(cml_args.dark)), dtype=ff.dtype,
+                        byteswap=img_handle.byteswap)
+        if dark is not None:
+            print('Loaded dark: {}'.format(cml_args.dark))
+
+    if cml_args.flat is not None:
+        flat_struct = loadFlat(*os.path.split(os.path.abspath(cml_args.flat)), dtype=ff.dtype,
+                               byteswap=img_handle.byteswap)
+        if flat_struct is not None:
+            print('Loaded flat: {}'.format(cml_args.flat))
+
+    # Apply dark frame subtraction
+    if dark is not None:
+        print('Applying dark frame...')
+        ff.avepixel = ff.avepixel.astype(np.float64) - dark.astype(np.float64)
+        ff.avepixel = np.clip(ff.avepixel, 0, None).astype(ff.dtype)
+        ff.maxpixel = ff.maxpixel.astype(np.float64) - dark.astype(np.float64)
+        ff.maxpixel = np.clip(ff.maxpixel, 0, None).astype(ff.dtype)
+
+    # Apply flat field correction
+    if flat_struct is not None:
+        print('Applying flat field...')
+        ff.avepixel = applyFlat(ff.avepixel, flat_struct)
+        ff.maxpixel = applyFlat(ff.maxpixel, flat_struct)
+
+        # Also apply flat to stdpixel
+        ff.stdpixel = applyFlat(ff.stdpixel, flat_struct)
     
     # Check if we have enough statistical data
     if not hasattr(ff, 'stdpixel') or ff.stdpixel is None:

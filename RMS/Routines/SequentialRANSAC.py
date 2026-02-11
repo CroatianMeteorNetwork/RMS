@@ -361,22 +361,32 @@ def findLines(img, max_lines, min_pixels, distance_thresh, min_line_length, max_
 
             found_lines.append((rho, theta_deg, x_start, y_start, x_end, y_end))
             
-            # Remove inliers from points
-            # Re-calculate distances for all points to the found line to 
-            # remove everything within a larger radius (cleanup)
+            # Remove inliers from points — only within the line SEGMENT extent
+            # Re-calculate distances for all points to the found line, but only
+            # remove points that project within (or near) the segment's t range.
             
-            # Use 1.5x the distance threshold as requested
+            # Use 1.5x the distance threshold for perpendicular removal
             removal_thresh = 1.5*distance_thresh
             
             # Center points
             pts_centered_x = points[:, 0] - x0
             pts_centered_y = points[:, 1] - y0
             
-            # Distances
+            # Perpendicular distances to the infinite line
             dists = np.abs(pts_centered_x*np.cos(theta_rad) + pts_centered_y*np.sin(theta_rad) - np.abs(rho))
             
-            # Keep points outside the removal threshold
-            keep_mask = dists > removal_thresh
+            # Project all points onto the line direction (t parameter)
+            t_all = -pts_centered_x*np.sin(theta_rad) + pts_centered_y*np.cos(theta_rad)
+            
+            # Only remove points that are both:
+            # 1. Close to the line (perpendicular distance < removal_thresh)
+            # 2. Within the segment extent (t_min to t_max), with a small buffer
+            t_buffer = removal_thresh  # allow a small buffer beyond segment ends
+            close_to_line = dists <= removal_thresh
+            within_segment = (t_all >= t_min - t_buffer) & (t_all <= t_max + t_buffer)
+            
+            # Keep points that are NOT (close to line AND within segment)
+            keep_mask = ~(close_to_line & within_segment)
             points = points[keep_mask]
             
             if debug:
