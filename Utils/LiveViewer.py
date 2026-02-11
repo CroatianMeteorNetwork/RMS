@@ -389,7 +389,7 @@ class LiveViewer(multiprocessing.Process):
         except Exception as e:
             print('Setting niceness failed with message:\n' + repr(e))
 
-        frames_dir_full_path = os.path.join(self.config.data_dir, self.config.frame_dir)
+
 
         if self.config.continuous_capture:
             # Work with frames directory
