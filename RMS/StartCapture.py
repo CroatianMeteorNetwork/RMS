@@ -1409,10 +1409,13 @@ if __name__ == "__main__":
                 # Change the Ctrl+C action to the special handle
                 setSIGINT()
 
+        # Start slideshow
+        slideshow_view = handleSlideshow(slideshow_view, config, capturing=True)
 
         # Break the loop if capturing was stopped
         if STOP_CAPTURE:
             break
+
 
         # Determine how long to wait before the capture starts (include randomization if set)
         capture_wait_time = config.capture_wait_seconds
