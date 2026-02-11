@@ -227,7 +227,7 @@ def handleSlideshow(slideshow_view, config, capturing=False):
     # Initialize the slideshow of last night's detections
 
     if config.live_maxpixel_enable or config.slideshow_enable:
-        slideshow_view = LiveViewer(config,capturing=capturing)
+        slideshow_view = LiveViewer(config=config,capturing=capturing)
         slideshow_view.start()
 
 
