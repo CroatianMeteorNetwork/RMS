@@ -251,9 +251,8 @@ def handleSlideshow(config, slideshow_view, capturing=False):
 
                 log.info("Starting a slideshow of {:d} detections from the previous night.".format(
                     len(ffs_latest_night_archive)))
+
                 log.info(f"Capturing is {capturing}")
-
-
                 # Start the slide show
                 slideshow_view = LiveViewer(latest_night_archive_dir, config=config, slideshow=not capturing, capturing=capturing)
                 slideshow_view.start()
