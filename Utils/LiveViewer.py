@@ -296,7 +296,7 @@ class LiveViewer(multiprocessing.Process):
                             img = np.array(Image.open(cc_file_to_show))
                             if self.config.slideshow_enable:
                                 img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
-                            self.updateImage(img, cc_file_to_show, max(frame_interval - 1, 1) , cc_w_handle)
+                            self.updateImage(img, os.path.basename(cc_file_to_show), max(frame_interval - 1, 1) , cc_w_handle)
                         _cc_file_to_show = cc_file_to_show
 
                 #### Continuous capture live image work end
