@@ -399,6 +399,7 @@ class LiveViewer(multiprocessing.Process):
         else:
 
             # Show image if a file is given
+            print(f"passed {self.dir_path}")
             if os.path.isfile(self.dir_path) or self.image:
                 self.showImage()
 
