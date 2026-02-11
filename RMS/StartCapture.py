@@ -1364,6 +1364,9 @@ if __name__ == "__main__":
             # Check if waiting is needed to start capture
             if not isinstance(start_time, bool):
 
+                log.info("Start slideshow in the night time only capture mode, waiting for capture")
+                slideshow_view = handleSlideshow(slideshow_view, config, capturing=False)
+
                 # Calculate how many seconds to wait until capture starts, and with for that time
                 time_now = RmsDateTime.utcnow()
                 waiting_time = start_time - time_now
@@ -1371,8 +1374,7 @@ if __name__ == "__main__":
                 log.info('Waiting {:s} to start recording for {:.3f} hrs'.format(str(waiting_time), \
                     duration/60/60))
 
-                log.info("Start slideshow in the night time only capture mode, waiting for capture")
-                slideshow_view = handleSlideshow(slideshow_view, config, capturing=False)
+
 
                 try:
 

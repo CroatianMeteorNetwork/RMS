@@ -403,7 +403,6 @@ class LiveViewer(multiprocessing.Process):
                 captured_dir_list = os.listdir(captured_dir_path)
                 latest_captured_dir = sorted(fnmatch.filter(captured_dir_list, f"{self.config.stationID.upper()}_*_*_*"))[-1]
                 self.dir_path = os.path.join(captured_dir_path, latest_captured_dir)
-                print(f'Captured directory path: {self.dir_path}')
                 self.monitorDir()
 
 
