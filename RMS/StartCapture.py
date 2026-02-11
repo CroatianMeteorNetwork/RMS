@@ -207,7 +207,7 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
             if buffered_capture.exit.is_set():
                 return "normal"
 
-def handleSlideshow(config, slideshow_view, slideshow=False, capturing=False):
+def handleSlideshow(slideshow_view, config, capturing=False):
     """
     Show a slideshow of previous detections, and a live view
     """
@@ -219,46 +219,16 @@ def handleSlideshow(config, slideshow_view, slideshow=False, capturing=False):
         slideshow_view.join()
         del slideshow_view
         slideshow_view = None
-    # restart slideshow if it is required
+
     log.info(f"About to enter code for slideshow, start_time is {start_time}")
     log.info(f"continuous_capture is {config.continuous_capture}")
     log.info(f"live_maxpixel_enable is {config.live_maxpixel_enable}")
     log.info(f"slideshow_enable is {config.slideshow_enable}")
     # Initialize the slideshow of last night's detections
-    if config.slideshow_enable or config.live_maxpixel_enable:
 
-        # Make a list of all archived directories previously generated
-        archive_dir_list = []
-        for archive_dir_name in sorted(os.listdir(os.path.join(config.data_dir,
-                                                               config.archived_dir))):
+    if config.live_maxpixel_enable or config.slideshow_enable:
+        slideshow_view = LiveViewer(config,capturing=capturing)
 
-            if archive_dir_name.startswith(config.stationID):
-                if os.path.isdir(os.path.join(config.data_dir, config.archived_dir,
-                                              archive_dir_name)):
-                    archive_dir_list.append(archive_dir_name)
-
-        # If there are any archived dirs, choose the last one
-        if archive_dir_list:
-
-            latest_night_archive_dir = os.path.join(config.data_dir, config.archived_dir,
-                                                    archive_dir_list[-1])
-
-            # Make sure that there are any FF files in the chosen archived dir
-            ffs_latest_night_archive = [ff_name for ff_name \
-                                        in os.listdir(latest_night_archive_dir) if validFFName(ff_name)]
-
-            if len(ffs_latest_night_archive):
-
-                log.info("Starting a slideshow of {:d} detections from the previous night.".format(
-                    len(ffs_latest_night_archive)))
-
-                log.info(f"Capturing is {capturing}")
-                # Start the slide show
-                slideshow_view = LiveViewer(latest_night_archive_dir, config=config, slideshow=True)
-                slideshow_view.start()
-
-            else:
-                log.info("No detections from the previous night to show as a slideshow!")
 
     return slideshow_view
 
@@ -495,10 +465,14 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Initialize the live_view
     live_view = None
 
+    # If not running continuous capture, but want live_maxpixel display force writing a live_jpg
+    if not config.continuous_capture and config.live_maxpixel_enable:
+        config.live_jpg = True
+
+    slideshow_view = None
+
     # Loop to handle both continuous and standard capture modes
     while True:
-
-        # Initialize the live image viewer
 
         # Continuous mode only: Setup new directories for a new night capture
         if config.continuous_capture and (not daytime_mode.value) and ran_once:
@@ -512,7 +486,6 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
             # Make a directory for the next capture
             mkdirP(night_data_dir)
-
             log.info('New data directory: {}'.format(night_data_dir))
 
             # Copy the used config file to the capture directory
@@ -540,7 +513,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             # Capture until Ctrl+C is pressed / camera switches modes
             daytime_mode_prev = daytime_mode.value
 
-            # Wait loop with watchdog restart capability
+                        # Wait loop with watchdog restart capability
             watchdog_restart_count = 0
             while True:
                 wait_result = wait(duration, None, bc, video_file, daytime_mode)
@@ -650,6 +623,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                     except:
                         log.error("There was an error during removing the capture resume flag file: " \
                             + capture_resume_file_path)
+
+
 
             # Initialize compression
             compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, start_time2, config,
@@ -1250,6 +1225,9 @@ if __name__ == "__main__":
             start_time = True
             duration = None
             log.info('Starting continuous capture now...')
+            if config.live_maxpixel_enable or config.slideshow_enable:
+                log.info("Starting live viewer in the continuous capture path.")
+                slideshow_view = handleSlideshow(slideshow_view, config, capturing=True)
         
         else:
 
@@ -1392,8 +1370,8 @@ if __name__ == "__main__":
                 log.info('Waiting {:s} to start recording for {:.3f} hrs'.format(str(waiting_time), \
                     duration/60/60))
 
-                log.info(f"Starting slideshow continuous_capture is {config.continuous_capture} during daytime")
-                slideshow_view = handleSlideshow(config, slideshow_view, capturing=False)
+                log.info("Start slideshow in the night time only capture mode, waiting for capture")
+                slideshow_view = handleSlideshow(slideshow_view, config, capturing=False)
 
                 try:
 
@@ -1457,10 +1435,6 @@ if __name__ == "__main__":
             log.info("Waiting {:d} seconds{:s} before capture start...".format(int(capture_wait_time), rand_str))
             time.sleep(capture_wait_time)
 
-        log.info(f"Starting slideshow continuous_capture is {config.continuous_capture} during capture.")
-        slideshow_view = handleSlideshow(config, slideshow_view, capturing=True)
-
-
         log.info('Freeing up disk space...')
 
         # Free up disk space by deleting old files, if necessary
@@ -1471,10 +1445,6 @@ if __name__ == "__main__":
             break
 
         if config.continuous_capture:
-
-            log.info(f"Starting slideshow continuous_capture {config.continuous_capture}")
-            slideshow_view = handleSlideshow(config, slideshow_view, capturing=True)
-
 
             # Setup shared value to communicate day/night switch between processes.
             daytime_mode = multiprocessing.Value(ctypes.c_bool, False)
@@ -1505,8 +1475,9 @@ if __name__ == "__main__":
             daytime_mode = None
             camera_mode_switch_trigger = None
             log.info('Starting capture for {:.2f} hours'.format(duration/60/60))
-            log.info(f"Starting slideshow continuous_capture is {config.continuous_capture} during night")
-            slideshow_view = handleSlideshow(config, slideshow_view, capturing=True, slideshow=False)
+
+            log.info(f"Starting live viewer in the night time only capture path, capturing is True")
+            slideshow_view = handleSlideshow(slideshow_view, config, capturing=True)
 
         # Run capture and compression
         night_archive_dir = runCapture(config, duration=duration, nodetect=cml_args.nodetect, \

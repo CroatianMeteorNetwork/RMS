@@ -64,7 +64,7 @@ def drawText(img_arr, img_text):
 
 
 class LiveViewer(multiprocessing.Process):
-    def __init__(self, dir_path, config=None, image=False, slideshow=False, slideshow_pause=2.0, banner_text="", \
+    def __init__(self, dir_path=None, config=None, image=False, capturing=False, slideshow_pause=2.0, banner_text="", \
         update_interval=5.0):
         """ Monitors a given directory for FF files, and shows them on the screen as new ones get created. It can
             also do slideshows. 
@@ -86,7 +86,6 @@ class LiveViewer(multiprocessing.Process):
         self.dir_path = dir_path
 
         self.image = image
-        self.slideshow = slideshow
         self.slideshow_pause = slideshow_pause
         self.banner_text = banner_text
         self.update_interval = update_interval
@@ -95,6 +94,9 @@ class LiveViewer(multiprocessing.Process):
 
         self.first_image = True
         self.config = config
+        self.capturing = capturing
+
+
 
     def updateImage(self, img, text, pause_time, banner_text=""):
         """ Update the image on the screen. 
@@ -174,8 +176,6 @@ class LiveViewer(multiprocessing.Process):
 
     def monitorFramesDirAndSlideshow(self):
         """ Show the latest frames files, and display a slideshow last 48 hours of detections. """
-
-
 
         frame_interval = self.config.frame_save_aligned_interval
 
@@ -391,27 +391,23 @@ class LiveViewer(multiprocessing.Process):
 
         frames_dir_full_path = os.path.join(self.config.data_dir, self.config.frame_dir)
 
-        if os.path.isdir(frames_dir_full_path) and self.config.continuous_capture:
+        if self.config.continuous_capture:
             # Work with frames directory
             print("calling self.monitorFramesDirAndSlideshow()")
             self.monitorFramesDirAndSlideshow()
 
         else:
 
-            # Show image if a file is given
-            print(f"passed {self.dir_path}")
-            if os.path.isfile(self.dir_path) or self.image:
-                self.showImage()
+            if self.capturing:
+                self.monitorDir()
 
-            elif os.path.isdir(self.dir_path):
 
-                if self.slideshow and self.config.slideshow_enable:
-                    print("calling self.startSlideshow()")
-                    self.startSlideshow()
+            elif not self.capturing:
+                archived_dir_path = os.path.join(self.config.data_dir, self.config.archived_dir)
+                archived_dir_list = os.listdir(archived_dir_path)
+                self.dir_path = sorted(fnmatch.filter(archived_dir_list, f"{self.config.stationID.upper()}_*_*_*"))[-1]
 
-                else:
-                    print("calling self.monitorDir()")
-                    self.monitorDir()
+                self.startSlideshow()
 
             else:
                 self.exit.set()
