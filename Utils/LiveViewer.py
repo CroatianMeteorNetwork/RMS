@@ -70,12 +70,12 @@ class LiveViewer(multiprocessing.Process):
             also do slideshows. 
 
         Arguments:
-            dir_path: [str] Directory to monitor for new FF files.
+
             
         Keyword arguments:
-            image: [bool] Monitor a single image file and show on the screen as it updates.
-            config: [config] If this is passed, and continuous_capture is True, monitor and display frames files
-            slideshow: [bool] Start a slide show instead of monitoring the folder for new files.
+            dir_path: [str] Directory to monitor for new FF files, optional, default None.
+            config: [config] RMS config instance, optional, default None.
+            image: [bool] Monitor a single image file and show on the screen as it updates, default False.
             slideshow_pause: [float] Number of seconds between slideshow updated. 2 by default.
             banner_text: [str] Banner text that will be shown on the screen.
             update_interval: [float] Number of seconds for checking the given directory for new files.
@@ -104,6 +104,13 @@ class LiveViewer(multiprocessing.Process):
         Arguments:
             img: [2D ndarray] Image to show on the screen as a numpy array.
             text: [str] Text that will be printed on the image.
+            pause_time: [float] Time to wait on the image - seconds
+
+        Keyword Arguments:
+            banner_text: [str] Banner text that will be shown at the top of the window, optional default ""
+
+        Return:
+            Nothing
         """
 
         img = drawText(img, text)

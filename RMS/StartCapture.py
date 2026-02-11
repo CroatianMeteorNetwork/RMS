@@ -216,7 +216,7 @@ def handleSlideshow(slideshow_view, config, capturing=False):
         config: [config instance] system configuration instance
 
     Keyword Arguments:
-        capturing: [bool] Optional, defaulf false, true if capture is in progress
+        capturing: [bool] Optional, default false, pass true if capture is in progress
 
     Return:
         slideshow_view: [process] Reference to the slideshow view process
