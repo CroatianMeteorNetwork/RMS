@@ -7,11 +7,9 @@ from __future__ import print_function, division, absolute_import
 import fnmatch
 import os
 import time
-import platform
 import multiprocessing
 
 import cv2
-import dateutil
 import numpy as np
 from PIL import Image
 from PIL import ImageFont
@@ -29,8 +27,6 @@ from RMS.Routines.Image import loadImage
 
 import datetime
 import RMS.ConfigReader as cr
-import glob
-import random
 
 # Load the default font
 PIL_FONT = ImageFont.load_default()
@@ -64,10 +60,11 @@ def drawText(img_arr, img_text):
 
 
 class LiveViewer(multiprocessing.Process):
-    def __init__(self, dir_path=None, config=None, image=False, capturing=False, slideshow_pause=2.0, banner_text="", \
-        update_interval=5.0):
+    def __init__(self, dir_path=None, config=None, image=False, capturing=False, slideshow=False,
+                 slideshow_pause=2.0, banner_text="", update_interval=5.0):
         """ Monitors a given directory for FF files, and shows them on the screen as new ones get created. It can
             also do slideshows. 
+
 
         Arguments:
 
@@ -83,9 +80,10 @@ class LiveViewer(multiprocessing.Process):
 
         super(LiveViewer, self).__init__()
 
-        self.dir_path = dir_path
+        self.dir_path = os.path.expanduser(dir_path)
 
         self.image = image
+        self.slideshow = slideshow
         self.slideshow_pause = slideshow_pause
         self.banner_text = banner_text
         self.update_interval = update_interval
@@ -137,7 +135,12 @@ class LiveViewer(multiprocessing.Process):
         """
 
         # Make a list of FF files in the given directory
-        ff_list = [file_name for file_name in sorted(os.listdir(self.dir_path)) if validFFName(file_name)]
+        if os.path.isdir(self.dir_path):
+            ff_list = [file_name for file_name in sorted(os.listdir(self.dir_path)) if validFFName(file_name)]
+        elif os.path.isfile(self.dir_path):
+            ff_list = [self.dir_path]
+        else:
+            self.exit.set()
 
         # Exit if no FF files were found
         if not ff_list:
@@ -204,6 +207,15 @@ class LiveViewer(multiprocessing.Process):
             # Get the time now
             dt_now = datetime.datetime.now(tz=datetime.timezone.utc)
 
+            # When both are enabled, split the pause time between the two images
+            if self.config.slideshow_enable and self.config.live_maxpixel_enable:
+                pause = self.slideshow_pause * 0.5
+
+            # If they are different, then only one must be enabled, so give both the full pause time
+            elif self.config.slideshow_enable != self.config.live_maxpixel_enable:
+                pause = self.slideshow_pause
+
+
             if self.config.slideshow_enable:
                 #### Slideshow work start
 
@@ -219,6 +231,10 @@ class LiveViewer(multiprocessing.Process):
                                 ff_file_list.append(os.path.join(root, ff_file))
                     ff_file_list.sort()
 
+                if not len(ff_file_list):
+                    print("No FF files found in the previous 48 hours, waiting one hour")
+                    time.sleep(3600)
+
                 # This will guard against iterating over an empty list
                 if slideshow_index < len(ff_file_list):
                     ff_file_to_show = ff_file_list[slideshow_index]
@@ -226,13 +242,21 @@ class LiveViewer(multiprocessing.Process):
                     image_annotation = f"{os.path.basename(ff_file_to_show)} {slideshow_index}/{len(ff_file_list)}"
 
                     # Now plot the detection.maxpixel
-                    img = readFF(os.path.dirname(ff_file_to_show),
+                    ff_data = readFF(os.path.dirname(ff_file_to_show),
                                  os.path.basename(ff_file_to_show),
-                                 verbose=False).maxpixel
+                                 verbose=False)
+
+                    if ff_data is None or not hasattr(ff_data, "maxpixel"):
+                        # Remove path to invalid file from list
+                        ff_file_list.pop(slideshow_index)
+                        continue
+                    else:
+                        # Extract the maxpixel
+                        img = ff_data.maxpixel
 
                     if self.config.live_maxpixel_enable:
                         img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
-                    self.updateImage(img, image_annotation, 1, ss_w_handle)
+                    self.updateImage(img, image_annotation, pause, ss_w_handle)
                 else:
                     # This will trigger rebuilding the slideshow on the next iteration
                     slideshow_index = 0
@@ -289,14 +313,14 @@ class LiveViewer(multiprocessing.Process):
                                 img = np.array(Image.open(cc_file_to_show))
                                 if self.config.slideshow_enable:
                                     img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
-                                self.updateImage(img, os.path.basename(cc_file_to_show), max(frame_interval - 1 , 1), cc_w_handle)
+                                self.updateImage(img, os.path.basename(cc_file_to_show), pause, cc_w_handle)
 
                         # Or if it is different from the last iteration
                         elif _cc_file_to_show != cc_file_to_show:
                             img = np.array(Image.open(cc_file_to_show))
                             if self.config.slideshow_enable:
                                 img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
-                            self.updateImage(img, os.path.basename(cc_file_to_show), max(frame_interval - 1, 1) , cc_w_handle)
+                            self.updateImage(img, os.path.basename(cc_file_to_show), pause , cc_w_handle)
                         _cc_file_to_show = cc_file_to_show
 
                 #### Continuous capture live image work end
@@ -404,6 +428,12 @@ class LiveViewer(multiprocessing.Process):
         except Exception as e:
             print('Setting niceness failed with message:\n' + repr(e))
 
+        if os.path.exists(self.dir_path):
+
+            if self.slideshow or os.path.isdir(self.dir_path):
+                self.startSlideshow()
+            elif self.image or os.path.isfile(self.dir_path):
+                self.showImage()
 
 
         if self.config.continuous_capture:
