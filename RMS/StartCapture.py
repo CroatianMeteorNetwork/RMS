@@ -1397,13 +1397,13 @@ if __name__ == "__main__":
                 # This may happen if the system crashed during processing.
                 processIncompleteCaptures(config, upload_manager)
 
+        log.info("Calling handle slideshow")
+        slideshow_view = handleSlideshow(config, slideshow_view)
 
         # Wait to start capturing and initialize last night's slideshow
 
-
-
         if not isinstance(start_time, bool):
-            # Start time will always be true in continuous_capture mode - this branch will not execute
+            # In continuous_capture mode this branch will not execute
 
             # Update start time and duration
             start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation)
@@ -1464,8 +1464,6 @@ if __name__ == "__main__":
         # Break the loop if capturing was stopped
         if STOP_CAPTURE:
             break
-
-        slideshow_view = handleSlideshow(config, slideshow_view)
 
         # Determine how long to wait before the capture starts (include randomization if set)
         capture_wait_time = config.capture_wait_seconds
