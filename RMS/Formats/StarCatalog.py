@@ -302,18 +302,32 @@ def loadGMNStarCatalog(file_path,
             mag_band_ratios = None
 
     if mag_band_ratios is not None:
-        # Compute synthetic magnitudes if band ratios are provided
+        # Compute synthetic magnitudes by combining fluxes (not magnitudes).
+        # The camera integrates photon flux across its bandpass, so the correct
+        # combination is: m = -2.5*log10(sum(r_i * 10^(-0.4*m_i)))
         total_ratio = sum(mag_band_ratios)
         rb, rv, rr, ri, rg, rbp, rrp = [x/total_ratio for x in mag_band_ratios]
-        synthetic_mag = (
-            rb*catalog_data['B'] +
-            rv*catalog_data['V'] +
-            rr*catalog_data['R'] +
-            ri*catalog_data['Ic'] +
-            rg*catalog_data['phot_g_mean_mag'] +
-            rbp*catalog_data['phot_bp_mean_mag'] +
-            rrp*catalog_data['phot_rp_mean_mag']
-        )
+
+        band_mags = [
+            (rb,  catalog_data['B']),
+            (rv,  catalog_data['V']),
+            (rr,  catalog_data['R']),
+            (ri,  catalog_data['Ic']),
+            (rg,  catalog_data['phot_g_mean_mag']),
+            (rbp, catalog_data['phot_bp_mean_mag']),
+            (rrp, catalog_data['phot_rp_mean_mag']),
+        ]
+
+        # Sum weighted fluxes from all bands with nonzero ratios
+        total_flux = np.zeros(len(catalog_data), dtype=np.float64)
+        for ratio, mags in band_mags:
+            if ratio > 0:
+                total_flux += ratio * np.power(10, -0.4 * mags)
+
+        # Convert combined flux back to magnitude
+        # Guard against zero/negative flux (shouldn't happen with valid data)
+        total_flux = np.maximum(total_flux, 1e-30)
+        synthetic_mag = -2.5 * np.log10(total_flux)
         mag_mask = synthetic_mag <= lim_mag
 
     else:
@@ -578,8 +592,12 @@ def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None,
                     rr /= ratio_sum
                     ri /= ratio_sum
 
-                    # Calculate the camera-band magnitude
-                    mag_spectrum = rb*mag_b + rv*mag_v + rr*mag_r + ri*mag_i
+                    # Calculate the camera-band magnitude by combining fluxes
+                    total_flux = 0
+                    for ratio, mag in [(rb, mag_b), (rv, mag_v), (rr, mag_r), (ri, mag_i)]:
+                        if ratio > 0:
+                            total_flux += ratio * 10**(-0.4 * mag)
+                    mag_spectrum = -2.5 * np.log10(max(total_flux, 1e-30))
 
 
                 else:
