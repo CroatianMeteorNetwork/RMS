@@ -392,7 +392,7 @@ class LiveViewer(multiprocessing.Process):
 
         frames_dir_full_path = os.path.join(self.config.data_dir, self.config.frame_dir)
 
-        if os.path.isdir(frames_dir_full_path):
+        if os.path.isdir(frames_dir_full_path) and self.config.continuous_capture:
             # Work with frames directory
             self.monitorFramesDirAndSlideshow()
 
