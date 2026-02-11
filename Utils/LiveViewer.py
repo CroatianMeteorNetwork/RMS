@@ -65,7 +65,7 @@ def drawText(img_arr, img_text):
 
 class LiveViewer(multiprocessing.Process):
     def __init__(self, dir_path, config=None, image=False, slideshow=False, slideshow_pause=2.0, banner_text="", \
-        update_interval=5.0):
+        update_interval=5.0, capturing=False):
         """ Monitors a given directory for FF files, and shows them on the screen as new ones get created. It can
             also do slideshows. 
 
@@ -95,7 +95,7 @@ class LiveViewer(multiprocessing.Process):
 
         self.first_image = True
         self.config = config
-
+        self.capturing = capturing
 
     def updateImage(self, img, text, pause_time, banner_text=""):
         """ Update the image on the screen. 
@@ -404,7 +404,7 @@ class LiveViewer(multiprocessing.Process):
 
             elif os.path.isdir(self.dir_path):
 
-                if self.slideshow and self.config.slideshow_enable:
+                if self.slideshow and self.config.slideshow_enable and not self.capturing:
                     self.startSlideshow()
 
                 else:

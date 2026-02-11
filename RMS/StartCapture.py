@@ -207,7 +207,7 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
             if buffered_capture.exit.is_set():
                 return "normal"
 
-def handleSlideshow(config, slideshow_view):
+def handleSlideshow(config, slideshow_view, capturing=False):
     """
     Show a slideshow of previous detections, and a live view
     """
@@ -254,7 +254,7 @@ def handleSlideshow(config, slideshow_view):
 
                 # Start the slide show
                 slideshow_view = LiveViewer(latest_night_archive_dir, config=config, slideshow=True, \
-                                            banner_text="Last night's detections")
+                                            banner_text="Last night's detections", capturing=capturing)
                 slideshow_view.start()
 
             else:
@@ -1369,11 +1369,12 @@ if __name__ == "__main__":
                 # This may happen if the system crashed during processing.
                 processIncompleteCaptures(config, upload_manager)
 
-        if config.continuous_capture or isinstance(start_time, bool):
-            slideshow_view = handleSlideshow(config, slideshow_view)
+
 
 
         # Wait to start capturing and initialize last night's slideshow
+
+
 
         if not isinstance(start_time, bool):
             # In continuous_capture mode this branch will not execute
@@ -1390,6 +1391,9 @@ if __name__ == "__main__":
 
                 log.info('Waiting {:s} to start recording for {:.3f} hrs'.format(str(waiting_time), \
                     duration/60/60))
+
+                log.info(f"Starting slideshow continuous_capture is {config.continuous_capture} during daytime")
+                slideshow_view = handleSlideshow(config, slideshow_view, capturing=False)
 
                 try:
 
@@ -1453,6 +1457,8 @@ if __name__ == "__main__":
             log.info("Waiting {:d} seconds{:s} before capture start...".format(int(capture_wait_time), rand_str))
             time.sleep(capture_wait_time)
 
+        log.info(f"Starting slideshow continuous_capture is {config.continuous_capture} during capture.")
+        slideshow_view = handleSlideshow(config, slideshow_view, capturing=True)
 
 
         log.info('Freeing up disk space...')
@@ -1465,7 +1471,11 @@ if __name__ == "__main__":
             break
 
         if config.continuous_capture:
-            
+
+            log.info(f"Starting slideshow continuous_capture {config.continuous_capture}")
+            slideshow_view = handleSlideshow(config, slideshow_view, capturing=True)
+
+
             # Setup shared value to communicate day/night switch between processes.
             daytime_mode = multiprocessing.Value(ctypes.c_bool, False)
             camera_mode_switch_trigger = multiprocessing.Value(ctypes.c_bool, True)
