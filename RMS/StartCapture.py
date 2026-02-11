@@ -207,7 +207,7 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
             if buffered_capture.exit.is_set():
                 return "normal"
 
-def handleSlideshow(config, slideshow_view, capturing=False):
+def handleSlideshow(config, slideshow_view, slideshow=False, capturing=False):
     """
     Show a slideshow of previous detections, and a live view
     """
@@ -254,7 +254,7 @@ def handleSlideshow(config, slideshow_view, capturing=False):
 
                 log.info(f"Capturing is {capturing}")
                 # Start the slide show
-                slideshow_view = LiveViewer(latest_night_archive_dir, config=config, slideshow=not capturing, capturing=capturing)
+                slideshow_view = LiveViewer(latest_night_archive_dir, config=config, slideshow=slideshow, capturing=capturing)
                 slideshow_view.start()
 
             else:

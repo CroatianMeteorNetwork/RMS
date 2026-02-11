@@ -198,7 +198,6 @@ class LiveViewer(multiprocessing.Process):
             # Get the time now
             dt_now = datetime.datetime.now(tz=datetime.timezone.utc)
 
-
             if self.config.slideshow_enable:
                 #### Slideshow work start
 
