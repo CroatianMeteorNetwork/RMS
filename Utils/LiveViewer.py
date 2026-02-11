@@ -181,10 +181,14 @@ class LiveViewer(multiprocessing.Process):
 
 
         # Initialise two windows
-        cc_w_handle = "Continuous Capture"
-        ss_w_handle = "Slideshow of detections from past 48 hours"
-        cv2.namedWindow(cc_w_handle)
-        cv2.namedWindow(ss_w_handle)
+
+
+        if self.config.live_maxpixel_enable:
+            cc_w_handle = "Continuous Capture"
+            cv2.namedWindow(cc_w_handle)
+        if self.config.slideshow_enable:
+            ss_w_handle = "Slideshow of detections from past 48 hours"
+            cv2.namedWindow(ss_w_handle)
 
         _cc_file_to_show, slideshow_index = None, 0
 
