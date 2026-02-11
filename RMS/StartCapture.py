@@ -228,6 +228,7 @@ def handleSlideshow(slideshow_view, config, capturing=False):
 
     if config.live_maxpixel_enable or config.slideshow_enable:
         slideshow_view = LiveViewer(config,capturing=capturing)
+        slideshow_view.start()
 
 
     return slideshow_view
