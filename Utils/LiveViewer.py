@@ -129,7 +129,7 @@ class LiveViewer(multiprocessing.Process):
         """ Start a slideshow. 
         """
 
-        print("entered startSlideshow")
+        print(f"entered startSlideshow dir path {self.dir_path}")
         # Make a list of FF files in the given directory
         ff_list = [file_name for file_name in sorted(os.listdir(self.dir_path)) if validFFName(file_name)]
 
