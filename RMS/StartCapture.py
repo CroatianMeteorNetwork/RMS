@@ -1369,8 +1369,9 @@ if __name__ == "__main__":
                 # This may happen if the system crashed during processing.
                 processIncompleteCaptures(config, upload_manager)
 
-        log.info("Calling handle slideshow")
-        slideshow_view = handleSlideshow(config, slideshow_view)
+        if config.continuous_capture or isinstance(start_time, bool):
+            slideshow_view = handleSlideshow(config, slideshow_view)
+
 
         # Wait to start capturing and initialize last night's slideshow
 
