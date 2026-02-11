@@ -399,6 +399,9 @@ class LiveViewer(multiprocessing.Process):
         else:
 
             if self.capturing:
+                captured_dir_path = os.path.join(self.config.data_dir, self.config.captured_dir)
+                captured_dir_list = os.listdir(captured_dir_path)
+                self.dir_path = sorted(fnmatch.filter(captured_dir_list, f"{self.config.stationID.upper()}_*_*_*"))[-1]
                 self.monitorDir()
 
 
