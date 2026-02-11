@@ -255,7 +255,7 @@ def handleSlideshow(config, slideshow_view, capturing=False):
 
 
                 # Start the slide show
-                slideshow_view = LiveViewer(latest_night_archive_dir, config=config, slideshow=capturing, capturing=capturing)
+                slideshow_view = LiveViewer(latest_night_archive_dir, config=config, slideshow=not capturing, capturing=capturing)
                 slideshow_view.start()
 
             else:
