@@ -252,7 +252,6 @@ class LiveViewer(multiprocessing.Process):
                     dir_list.sort()
 
                     for dir in dir_list:
-                        print(f"Found and working on {dir}")
                         for root, dirs, files in os.walk(os.path.join(dir)):
                             for ff_file in fnmatch.filter(files, f"FF_{self.config.stationID.upper()}_*_*_*_*.fits"):
                                 file_date, file_time = ff_file.split("_")[2], ff_file.split("_")[3]
