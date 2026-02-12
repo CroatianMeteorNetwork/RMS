@@ -224,7 +224,24 @@ class LiveViewer(multiprocessing.Process):
 
                 # Build a new slideshow only after iterating through all the previous slides, or on first iteration
                 if slideshow_index == 0:
-                    ff_file_list = []
+                    ff_file_list, dir_list = [], []
+                    archived_dir_path = os.path.join(self.config.data_dir, self.config.archived_dir)
+                    archived_dir_contents = sorted(os.listdir(archived_dir_path), reverse=True)
+
+                    # Iterate through in reverse order, adding before checking, so that we always get one extra dir to work with
+                    for archived_dir in fnmatch.filter(archived_dir_contents, f"{self.config.stationID.upper()}_*_*_*"):
+                        full_path_to_matched_dir = os.path.join(archived_dir_path, archived_dir)
+                        if not os.path.isdir(full_path_to_matched_dir):
+                            continue
+                        print(f"Found and working on {archived_dir}")
+                        dir_date, dir_time = archived_dir.split("_")[1], ff_file.split("_")[2]
+                        dir_time_object = datetime.datetime.strptime(f"{dir_date}_{dir_time}",
+                                                                      "%Y%m%d_%H%M%S").replace(tzinfo=datetime.timezone.utc)
+                        if (dt_now - dir_time_object).total_seconds() < 48 * 60 * 60:
+                            dir_list.append(full_path_to_matched_dir)
+
+
+
                     for root, dirs, files in os.walk(os.path.join(self.config.data_dir, self.config.archived_dir)):
                         for ff_file in fnmatch.filter(files, f"FF_{self.config.stationID.upper()}_*_*_*_*.fits"):
                             file_date, file_time = ff_file.split("_")[2], ff_file.split("_")[3]
