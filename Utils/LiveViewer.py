@@ -561,7 +561,7 @@ if __name__ == "__main__":
 
     # Load the config file
     if cml_args.config is None:
-        config = cr.loadConfigFromDirectory([os.getcwd()], os.path.abspath('.'))
+        config = cr.loadConfigFromDirectory([os.path.join(os.getcwd(),".config")], os.path.abspath('.'))
     else:
         config = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath('.'))
 
