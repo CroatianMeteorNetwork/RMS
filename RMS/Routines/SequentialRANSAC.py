@@ -7,25 +7,34 @@ import numpy as np
 import math
 import random
 
-def getPolarLine(x1, y1, x2, y2, img_w=None, img_h=None):
+def getPolarLine(x1, y1, x2, y2, img_w, img_h):
     """ 
     Calculate polar line coordinates (rho, theta) given 2 points.
-    Uses standard image coordinates (0,0 at top-left).
+    Coordinates are CENTER-BASED (origin at image center), consistent with
+    getStripeIndices, plotLines, and the rest of the RMS pipeline.
     
     Arguments:
-        x1, y1, x2, y2: Point coordinates.
-        img_w, img_h: (Unused) Kept for API compatibility.
+        x1, y1, x2, y2: Point coordinates in image (top-left origin) coords.
+        img_w, img_h: Image dimensions, used to compute the center.
         
     Return:
-        rho: Perpendicular distance from origin to line.
+        rho: Perpendicular distance from image center to line.
         theta_deg: Angle of the normal vector in degrees.
     """
     if abs(x1 - x2) < 1e-9 and abs(y1 - y2) < 1e-9:
         return 0.0, 0.0
 
+    # Center the coordinates
+    cx = img_w/2.0
+    cy = img_h/2.0
+    x1c = x1 - cx
+    y1c = y1 - cy
+    x2c = x2 - cx
+    y2c = y2 - cy
+
     # Line direction vector
-    dx = x2 - x1
-    dy = y2 - y1
+    dx = x2c - x1c
+    dy = y2c - y1c
     
     # Normal vector (-dy, dx) gives the direction of rho
     nx = -dy
@@ -37,8 +46,8 @@ def getPolarLine(x1, y1, x2, y2, img_w=None, img_h=None):
     nx /= norm
     ny /= norm
     
-    # Rho is the dot product of any point on the line with the normal
-    rho = x1 * nx + y1 * ny
+    # Rho is the dot product of any centered point on the line with the normal
+    rho = x1c*nx + y1c*ny
     theta = np.arctan2(ny, nx)
 
     # Standardize rho >= 0
@@ -49,19 +58,25 @@ def getPolarLine(x1, y1, x2, y2, img_w=None, img_h=None):
     return rho, np.degrees(theta)
 
 
-def fitLine(x, y, img_w=None, img_h=None, weights=None):
+def fitLine(x, y, img_w, img_h, weights=None):
     """ 
     Fit a line to a set of points using Weighted PCA (Total Least Squares).
+    Coordinates are CENTER-BASED (origin at image center).
     
     Arguments:
-        x, y: [ndarray] Coordinates.
-        img_w, img_h: (Unused) Kept for API compatibility.
+        x, y: [ndarray] Coordinates in image (top-left origin) coords.
+        img_w, img_h: Image dimensions, used to compute the center.
         weights: [ndarray] Optional weights for each point.
         
     Return:
-        (rho, theta_deg): Fitted line parameters.
+        (rho, theta_deg): Fitted line parameters in center-based coords.
     """
-    pts = np.column_stack((x, y))
+    # Center the coordinates
+    cx = img_w/2.0
+    cy = img_h/2.0
+    x_centered = x - cx
+    y_centered = y - cy
+    pts = np.column_stack((x_centered, y_centered))
     
     if len(pts) < 2:
         return 0.0, 0.0
@@ -81,16 +96,13 @@ def fitLine(x, y, img_w=None, img_h=None, weights=None):
         centered = pts - mean
         
         # Weighted covariance
-        # Multiply each row by its weight
-        weighted_centered = centered * weights[:, np.newaxis]
+        weighted_centered = centered*weights[:, np.newaxis]
         cov = np.dot(weighted_centered.T, centered)
 
     # Eigen decomposition to find the normal vector (smallest eigenvalue)
-    # eigh is faster and more stable for symmetric matrices than eig
     vals, vecs = np.linalg.eigh(cov)
     
     # The normal is the eigenvector corresponding to the smallest eigenvalue
-    # eigh sorts eigenvalues in ascending order, so index 0 is smallest
     nx, ny = vecs[:, 0]
     
     rho = mean[0]*nx + mean[1]*ny
@@ -122,8 +134,10 @@ def findLines(img, max_lines, min_pixels, distance_thresh, min_line_length, max_
     """
     
     h, w = img.shape
+    cx = w/2.0
+    cy = h/2.0
     
-    # Extract points
+    # Extract points (image coordinates, top-left origin)
     y_idxs, x_idxs = np.nonzero(img)
     points = np.column_stack((x_idxs, y_idxs)).astype(np.float32)
 
@@ -167,15 +181,16 @@ def findLines(img, max_lines, min_pixels, distance_thresh, min_line_length, max_
                     
             if not valid_pair: continue
 
-            # 2. Model
-            rho, theta_deg = getPolarLine(p1[0], p1[1], p2[0], p2[1])
+            # 2. Model (center-based coordinates)
+            rho, theta_deg = getPolarLine(p1[0], p1[1], p2[0], p2[1], w, h)
             theta_rad = np.radians(theta_deg)
             ct, st = np.cos(theta_rad), np.sin(theta_rad)
 
-            # 3. Distance Check (Vectorized)
-            # dist = |x*cos + y*sin - rho|
-            # Note: We use the standard coordinates directly.
-            dists = np.abs(points[:, 0] * ct + points[:, 1] * st - rho)
+            # 3. Distance Check (Vectorized) — center points first
+            # dist = |x_c*cos + y_c*sin - rho|
+            pts_cx = points[:, 0] - cx
+            pts_cy = points[:, 1] - cy
+            dists = np.abs(pts_cx*ct + pts_cy*st - rho)
             
             # Fast filter: check total inlier count first
             inlier_mask = dists < distance_thresh
@@ -183,9 +198,11 @@ def findLines(img, max_lines, min_pixels, distance_thresh, min_line_length, max_
                 continue
 
             # 4. Connectivity Check (Segments)
-            # Project inliers onto the line: t = -x*sin + y*cos
+            # Project inliers onto the line: t = -x_c*sin + y_c*cos
             inlier_pts = points[inlier_mask]
-            t_vals = -inlier_pts[:, 0] * st + inlier_pts[:, 1] * ct
+            inlier_cx = inlier_pts[:, 0] - cx
+            inlier_cy = inlier_pts[:, 1] - cy
+            t_vals = -inlier_cx*st + inlier_cy*ct
             
             # Sort t_vals to find gaps
             sort_idx = np.argsort(t_vals)
@@ -246,33 +263,43 @@ def findLines(img, max_lines, min_pixels, distance_thresh, min_line_length, max_
             # Refine the model using Weighted PCA on the best segment
             segment_pts = points[best_segment_mask]
             
-            # Calculate weights based on distance to the initial model
+            # Calculate weights based on distance to the initial model (center-based)
             rho_init, theta_init_deg = best_model
             theta_rad = np.radians(theta_init_deg)
-            dists = np.abs(segment_pts[:,0]*np.cos(theta_rad) + segment_pts[:,1]*np.sin(theta_rad) - rho_init)
+            seg_cx = segment_pts[:,0] - cx
+            seg_cy = segment_pts[:,1] - cy
+            dists = np.abs(seg_cx*np.cos(theta_rad) + seg_cy*np.sin(theta_rad) - rho_init)
             
             # Linear weight decay
-            weights = np.maximum(0, 1.0 - (dists / distance_thresh))
+            weights = np.maximum(0, 1.0 - (dists/distance_thresh))
             
-            # Refit
-            rho_ref, theta_ref_deg = fitLine(segment_pts[:, 0], segment_pts[:, 1], weights=weights)
+            # Refit (center-based)
+            rho_ref, theta_ref_deg = fitLine(segment_pts[:, 0], segment_pts[:, 1], w, h, weights=weights)
             theta_ref_rad = np.radians(theta_ref_deg)
             
-            # Recalculate extent on refined model
-            t_vals = -segment_pts[:, 0] * np.sin(theta_ref_rad) + segment_pts[:, 1] * np.cos(theta_ref_rad)
+            # Recalculate extent on refined model (center-based)
+            seg_cx = segment_pts[:, 0] - cx
+            seg_cy = segment_pts[:, 1] - cy
+            t_vals = -seg_cx*np.sin(theta_ref_rad) + seg_cy*np.cos(theta_ref_rad)
             t_min, t_max = np.min(t_vals), np.max(t_vals)
             
-            # Calculate endpoints
-            # x = x0 + t*ux, y = y0 + t*uy
-            # Normal is (cos, sin). Direction is (-sin, cos)
-            # Projection center point closest to origin is (rho*cos, rho*sin)
-            xc = rho_ref * np.cos(theta_ref_rad)
-            yc = rho_ref * np.sin(theta_ref_rad)
+            # Calculate endpoints in center-based coords, then convert to image coords
+            # Point on line closest to center: (rho*cos, rho*sin)
+            # Direction along line: (-sin, cos)
+            xc_line = rho_ref*np.cos(theta_ref_rad)
+            yc_line = rho_ref*np.sin(theta_ref_rad)
             
-            x_start = xc - t_min * np.sin(theta_ref_rad)
-            y_start = yc + t_min * np.cos(theta_ref_rad)
-            x_end = xc - t_max * np.sin(theta_ref_rad)
-            y_end = yc + t_max * np.cos(theta_ref_rad)
+            # Endpoints in center-based coords
+            x_start_c = xc_line - t_min*np.sin(theta_ref_rad)
+            y_start_c = yc_line + t_min*np.cos(theta_ref_rad)
+            x_end_c = xc_line - t_max*np.sin(theta_ref_rad)
+            y_end_c = yc_line + t_max*np.cos(theta_ref_rad)
+            
+            # Convert to image (top-left) coords for output
+            x_start = x_start_c + cx
+            y_start = y_start_c + cy
+            x_end = x_end_c + cx
+            y_end = y_end_c + cy
             
             found_lines.append((rho_ref, theta_ref_deg, x_start, y_start, x_end, y_end))
             
@@ -283,17 +310,19 @@ def findLines(img, max_lines, min_pixels, distance_thresh, min_line_length, max_
             # Remove points that are "covered" by this segment.
             # Criteria: Close to infinite line AND within the t-range of the segment.
             
-            # 1. Distance to refined line
-            all_dists = np.abs(points[:, 0]*np.cos(theta_ref_rad) + points[:, 1]*np.sin(theta_ref_rad) - rho_ref)
+            # 1. Distance to refined line (center-based)
+            all_cx = points[:, 0] - cx
+            all_cy = points[:, 1] - cy
+            all_dists = np.abs(all_cx*np.cos(theta_ref_rad) + all_cy*np.sin(theta_ref_rad) - rho_ref)
             
-            # 2. Projection onto refined line
-            all_t = -points[:, 0] * np.sin(theta_ref_rad) + points[:, 1] * np.cos(theta_ref_rad)
+            # 2. Projection onto refined line (center-based)
+            all_t = -all_cx*np.sin(theta_ref_rad) + all_cy*np.cos(theta_ref_rad)
             
             # 3. Buffer logic
-            t_buffer = max_gap * 0.5 
+            t_buffer = max_gap*0.5 
             
             # Mask of points to remove
-            to_remove = (all_dists < distance_thresh * 1.5) & \
+            to_remove = (all_dists < distance_thresh*1.5) & \
                         (all_t >= t_min - t_buffer) & \
                         (all_t <= t_max + t_buffer)
             
@@ -363,12 +392,12 @@ def mergeSegments(lines, distance_thresh, angle_thresh=10.0, overlap_fraction=0.
                 
             # 2. Distance Check (Point-to-Line)
             # Check if L2's midpoint is close to L1's infinite line
-            mid2 = (L2['p1'] + L2['p2']) / 2
+            mid2 = (L2['p1'] + L2['p2'])/2
             # Perpendicular distance: |det(v1, mid2-p1)|
             v_rel = mid2 - L1['p1']
             perp_dist = abs(v1[0]*v_rel[1] - v1[1]*v_rel[0])
             
-            if perp_dist > distance_thresh * 4.0: # Generous merge threshold
+            if perp_dist > distance_thresh*4.0: # Generous merge threshold
                 continue
                 
             # 3. Longitudinal Overlap Check
@@ -392,14 +421,14 @@ def mergeSegments(lines, distance_thresh, angle_thresh=10.0, overlap_fraction=0.
             else: gap = 0
             
             # Merge if overlapping OR gap is small (bridging)
-            if overlap_len > 0 or gap < distance_thresh * 8.0:
+            if overlap_len > 0 or gap < distance_thresh*8.0:
                 # MERGE: Extend L1
                 new_t_min = min(t1_a, min2)
                 new_t_max = max(t1_b, max2)
                 
                 # Update L1
-                L1['p1'] = L1['p1'] + v1 * new_t_min # Note: this shifts origin, but v1 stays valid
-                L1['p2'] = L1['p1'] + v1 * (new_t_max - new_t_min)
+                L1['p1'] = L1['p1'] + v1*new_t_min # Note: this shifts origin, but v1 stays valid
+                L1['p2'] = L1['p1'] + v1*(new_t_max - new_t_min)
                 L1['length'] = new_t_max - new_t_min
                 
                 # Update params tuple (keep rho/theta, update endpoints)

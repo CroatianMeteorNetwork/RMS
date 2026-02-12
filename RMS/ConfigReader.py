@@ -627,6 +627,7 @@ class Config:
         # Centroid filtering parameters
         self.centroids_max_deviation = 2 # maximum deviation of a centroid point from a LSQ fitted line (if above max, it will be rejected)
         self.centroids_max_distance =  30 # maximum distance in pixels between centroids (used for filtering spurious centroids)
+        self.centroids_filter_frame_gaps = True # filter out centroids with large frame gaps at the edges
 
         # Angular velocity filtering parameter - detections slower or faster than these angular velocities
         # will be rejected (deg/s)
@@ -1709,6 +1710,9 @@ def parseMeteorDetection(config, parser):
 
     if parser.has_option(section, "centroids_max_distance"):
         config.centroids_max_distance = parser.getint(section, "centroids_max_distance")
+
+    if parser.has_option(section, "centroids_filter_frame_gaps"):
+        config.centroids_filter_frame_gaps = parser.getboolean(section, "centroids_filter_frame_gaps")
 
 
     if parser.has_option(section, "ang_vel_min"):

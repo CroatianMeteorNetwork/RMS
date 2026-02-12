@@ -331,12 +331,21 @@ def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False, mask=None, mask_ave_
     # Mask out regions that are very bright in stdpixel
     if mask_ave_bright:
 
-        # Create a mask for stars (regions that are 3 sigma brighter in stdpixel than the median)
-        star_mask = stdpixel >= np.min([np.median(stdpixel) + 3*np.std(stdpixel), np.iinfo(stdpixel.dtype).max])
+        # Use cached star mask if the same stdpixel array is being used
+        if (thresholdImg._star_mask_cache is not None 
+                and thresholdImg._star_mask_cache_id == id(stdpixel)):
+            star_mask = thresholdImg._star_mask_cache
+        else:
+            # Create a mask for stars (regions that are 3 sigma brighter in stdpixel than the median)
+            star_mask = stdpixel >= np.min([np.median(stdpixel) + 3*np.std(stdpixel), np.iinfo(stdpixel.dtype).max])
 
-        # Dilate the star mask
-        input_type = star_mask.dtype
-        star_mask = morph.morphApply(star_mask.astype(np.uint8), [5]).astype(input_type)
+            # Dilate the star mask
+            input_type = star_mask.dtype
+            star_mask = morph.morphApply(star_mask.astype(np.uint8), [5]).astype(input_type)
+
+            # Cache (only keep one to avoid memory accumulation)
+            thresholdImg._star_mask_cache = star_mask
+            thresholdImg._star_mask_cache_id = id(stdpixel)
 
         img_thresh = img_thresh & ~star_mask
 
@@ -349,7 +358,9 @@ def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False, mask=None, mask_ave_
     # The thresholded image is always 8 bit
     return img_thresh.astype(np.uint8)
 
-
+# Initialize star mask cache on the function object
+thresholdImg._star_mask_cache = None
+thresholdImg._star_mask_cache_id = None
 # This decorator caches the thresholded images based on their input parameters
 # In addition to the normal parameters, the first argument should be the key which is used a cache key
 # To reset the cache, call thresholdImgMemoCache.clearCache()
