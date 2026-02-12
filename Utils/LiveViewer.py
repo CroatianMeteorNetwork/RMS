@@ -469,7 +469,7 @@ class LiveViewer(multiprocessing.Process):
         if self.dir_path is not None:
             if os.path.exists(self.dir_path):
                 print(f"{self.config.frame_dir} {self.dir_path}")
-                if self.dir_path.endswith(os.path.expanduser(self.config.frame_dir)):
+                if self.dir_path == (os.path.expanduser(self.config.frame_dir)):
                     self.monitorFramesDirAndSlideshow()
                 if self.slideshow or os.path.isdir(self.dir_path):
                     self.startSlideshow()
