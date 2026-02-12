@@ -470,17 +470,17 @@ class LiveViewer(multiprocessing.Process):
 
         self.monitorFramesDirOnly = False
         if self.dir_path is not None:
-            if os.path.exists(self.dir_path):
-                print("Path exists")
 
-                print(os.path.expanduser(os.path.join(self.config.data_dir, self.config.frame_dir)))
+            if os.path.exists(self.dir_path):
+                # Check to see if we have been passed the path to the frames dir, if yes, the monitor it
                 if os.path.normpath(os.path.expanduser(self.dir_path)) == os.path.normpath(
                         (os.path.expanduser(os.path.join(self.config.data_dir, self.config.frame_dir)))):
-
                     self.monitorFramesDirOnly = True
                     self.monitorFramesDirAndSlideshow()
+                # If we are just looking at an FF dir, then run a slideshow
                 if self.slideshow or os.path.isdir(self.dir_path):
                     self.startSlideshow()
+                # If we are just looking at an image, monitor it
                 elif self.image or os.path.isfile(self.dir_path):
                     self.showImage()
 
@@ -561,7 +561,7 @@ if __name__ == "__main__":
 
     # Load the config file
     if cml_args.config is None:
-        config = None
+        config = cr.loadConfigFromDirectory([os.getcwd()], os.path.abspath('.'))
     else:
         config = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath('.'))
 
