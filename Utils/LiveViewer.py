@@ -250,7 +250,7 @@ class LiveViewer(multiprocessing.Process):
                             dir_list.append(full_path_to_matched_dir)
 
                     dir_list.sort()
-                    print(dir_list)
+
                     for dir in dir_list:
                         print(f"Found and working on {dir}")
                         for root, dirs, files in os.walk(os.path.join(dir)):
@@ -344,7 +344,7 @@ class LiveViewer(multiprocessing.Process):
                             color = (0,0,0)
                         else:
                             color = (255,255,255)
-                        print(last_char, color)
+
                         # Show the file if it is the first iteration
                         if _cc_file_to_show is None:
                             if cc_file_to_show != _cc_file_to_show:
