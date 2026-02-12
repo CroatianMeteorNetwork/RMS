@@ -542,7 +542,7 @@ if __name__ == "__main__":
         help="Path to a config file which will be used instead of the default one.")
 
     arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str, \
-        help="Directory to monitor for FF files.")
+        help="Directory to monitor for FF files, if FramesFiles is passed, then opens a delayed view.")
 
     arg_parser.add_argument('-i', '--image', action="store_true", \
         help="Monitor an image file and show on the screen.")
