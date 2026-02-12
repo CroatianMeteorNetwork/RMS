@@ -2161,7 +2161,7 @@ class BufferedCapture(Process):
                         current_daytime = self.daytime_mode.value if self.daytime_mode is not None else False
                         if self.last_daytime_mode is not None and self.last_daytime_mode != current_daytime:
                             # Transition detected (either day→night or night→day)
-                            transition_type = "Day→Night" if not current_daytime else "Night→Day"
+                            transition_type = "Day->Night" if not current_daytime else "Night->Day"
                             log.info(f"{transition_type} transition detected, resetting counters and media backend")
 
                             # Update last_daytime_mode BEFORE breaking to prevent detecting same transition again
