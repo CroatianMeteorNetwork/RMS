@@ -84,6 +84,7 @@ class LiveViewer(multiprocessing.Process):
             self.dir_path = dir_path
         else:
             self.dir_path = os.path.expanduser(dir_path)
+            print(f"Dir path {self.dir_path}")
 
         self.image = image
         self.slideshow = slideshow
@@ -471,7 +472,7 @@ class LiveViewer(multiprocessing.Process):
         self.monitorFramesDirOnly = False
         if self.dir_path is not None:
             if os.path.exists(self.dir_path):
-
+                print("Path exists")
                 if os.path.expanduser(self.dir_path) == (os.path.expanduser(os.path.join(self.config.data_dir, self.config.frame_dir))):
                     self.monitorFramesDirOnly = True
                     self.monitorFramesDirAndSlideshow()
