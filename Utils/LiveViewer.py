@@ -212,6 +212,7 @@ class LiveViewer(multiprocessing.Process):
         _cc_file_to_show, slideshow_index = None, 0
 
         ff_file_list = []
+        print(f"monitor frames dir only {self.monitorFramesDirOnly}")
         while not self.exit.is_set():
 
             # Get the time now
