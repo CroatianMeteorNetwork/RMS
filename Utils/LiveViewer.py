@@ -205,7 +205,7 @@ class LiveViewer(multiprocessing.Process):
             cc_w_handle = "Continuous Capture"
             cv2.namedWindow(cc_w_handle)
 
-        if self.config.slideshow_enable:
+        if self.config.slideshow_enable and not self.monitorFramesDirOnly:
             ss_w_handle = "Slideshow of detections from past 48 hours"
             cv2.namedWindow(ss_w_handle)
 
@@ -218,7 +218,7 @@ class LiveViewer(multiprocessing.Process):
             dt_now = datetime.datetime.now(tz=datetime.timezone.utc)
 
             # When both are enabled, split the pause time between the two images
-            if self.config.slideshow_enable and self.config.live_maxpixel_enable:
+            if self.config.slideshow_enable and (self.config.live_maxpixel_enable and not self.monitorFramesDirOnly):
                 pause = self.slideshow_pause * 0.5
                 cv2.moveWindow(cc_w_handle, int(width * 0.05), int(height * 0.25))
                 cv2.moveWindow(ss_w_handle, int(width * 0.55), int(height * 0.25))
@@ -226,9 +226,11 @@ class LiveViewer(multiprocessing.Process):
             # If they are different, then only one must be enabled, so give both the full pause time
             elif self.config.slideshow_enable != self.config.live_maxpixel_enable:
                 pause = self.slideshow_pause
+            # Otherwise
+            else:
+                pause = self.slideshow_pause
 
-
-            if self.config.slideshow_enable:
+            if self.config.slideshow_enable and not self.monitorFramesDirOnly:
                 #### Slideshow work start
 
                 # Build a new slideshow only after iterating through all the previous slides, or on first iteration
@@ -465,12 +467,12 @@ class LiveViewer(multiprocessing.Process):
         except Exception as e:
             print('Setting niceness failed with message:\n' + repr(e))
 
-        print(self.dir_path)
+        self.monitorFramesDirOnly = False
         if self.dir_path is not None:
             if os.path.exists(self.dir_path):
-                print(os.path.expanduser(self.dir_path) , (os.path.expanduser(os.path.join(self.config.data_dir, self.config.frame_dir))))
-                if os.path.expanduser(self.dir_path) == (os.path.expanduser(os.path.join(self.config.data_dir, self.config.frame_dir))):
 
+                if os.path.expanduser(self.dir_path) == (os.path.expanduser(os.path.join(self.config.data_dir, self.config.frame_dir))):
+                    self.monitorFramesDirOnly = True
                     self.monitorFramesDirAndSlideshow()
                 if self.slideshow or os.path.isdir(self.dir_path):
                     self.startSlideshow()
